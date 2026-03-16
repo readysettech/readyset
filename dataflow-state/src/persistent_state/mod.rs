@@ -1123,6 +1123,65 @@ impl State for PersistentStateHandle {
     }
 }
 
+/// Reports secondary-index build progress via the table-status channel and
+/// periodic log messages with an ETA.
+#[allow(clippy::too_many_arguments)]
+fn index_progress(
+    name: &SqlIdentifier,
+    table: &Option<Relation>,
+    table_status_tx: &Option<UnboundedSender<(Relation, TableStatus)>>,
+    started: Instant,
+    last_log: &mut Instant,
+    last_status: &mut Instant,
+    rows: usize,
+    estimated: usize,
+) {
+    fn progress(rows: usize, estimated: usize) -> f64 {
+        ((rows as f64) / (estimated.max(1) as f64)).clamp(0.0, 0.9999)
+    }
+
+    if let (Some(table), Some(table_status_tx)) = (table, table_status_tx) {
+        if last_status.elapsed() >= TABLE_STATUS_REPORT_INTERVAL {
+            let progress = progress(rows, estimated) * 100.0;
+            if let Err(err) =
+                table_status_tx.send((table.clone(), TableStatus::CreatingIndex(Some(progress))))
+            {
+                debug!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of indexing progress",
+                );
+            }
+            *last_status = Instant::now();
+        }
+    }
+    const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+    if last_log.elapsed() < PROGRESS_INTERVAL {
+        return;
+    }
+    *last_log += PROGRESS_INTERVAL;
+
+    let progress = progress(rows, estimated);
+    let running = started.elapsed().as_secs_f64();
+    let total = running / progress;
+    let left = (total - running) as u64;
+    let hours = left / 60 / 60;
+    let mins = left / 60 % 60;
+    let secs = left % 60;
+
+    let progress = format!("{:.2}%", progress * 100.0);
+    let left = format!("{hours:02}:{mins:02}:{secs:02}");
+
+    info!(
+        base = %name,
+        estimated_rows = %estimated,
+        indexed = %rows,
+        %progress,
+        estimated_remaining_time = %left,
+        "Secondary index progress"
+    );
+}
+
 fn build_key(row: &[DfValue], columns: &[usize]) -> PointKey {
     PointKey::from(columns.iter().map(|i| row[*i].clone()))
 }
@@ -1596,6 +1655,13 @@ enum SecondaryIndexMessage {
     Done,
 }
 
+#[derive(Copy, Clone, Debug)]
+enum AutoCompact {
+    #[allow(dead_code)]
+    Enable,
+    Disable,
+}
+
 impl PersistentState {
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
         mut name: String,
@@ -1858,61 +1924,6 @@ impl PersistentState {
         // The cloning here clones an inner Arc reference not the database
         self.db.clone()
     }
-
-    fn index_progress(
-        &self,
-        started: Instant,
-        last_log: &mut Instant,
-        last_status: &mut Instant,
-        rows: usize,
-        estimated: usize,
-    ) {
-        fn progress(rows: usize, estimated: usize) -> f64 {
-            ((rows as f64) / (estimated.max(1) as f64)).clamp(0.0, 0.9999)
-        }
-
-        if let (Some(table), Some(table_status_tx)) = (&self.table, &self.table_status_tx) {
-            if last_status.elapsed() >= TABLE_STATUS_REPORT_INTERVAL {
-                let progress = progress(rows, estimated) * 100.0;
-                if let Err(err) = table_status_tx
-                    .send((table.clone(), TableStatus::CreatingIndex(Some(progress))))
-                {
-                    debug!(
-                        error = %err,
-                        table = %table.display_unquoted(),
-                        "Failed to notify controller of indexing progress",
-                    );
-                }
-                *last_status = Instant::now();
-            }
-        }
-        const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
-        if last_log.elapsed() < PROGRESS_INTERVAL {
-            return;
-        }
-        *last_log += PROGRESS_INTERVAL;
-
-        let progress = progress(rows, estimated);
-        let running = started.elapsed().as_secs_f64();
-        let total = running / progress;
-        let left = (total - running) as u64;
-        let hours = left / 60 / 60;
-        let mins = left / 60 % 60;
-        let secs = left % 60;
-
-        let progress = format!("{:.2}%", progress * 100.0);
-        let left = format!("{hours:02}:{mins:02}:{secs:02}");
-
-        info!(
-            base = %self.name,
-            estimated_rows = %estimated,
-            indexed = %rows,
-            %progress,
-            estimated_remaining_time = %left,
-            "Secondary index progress"
-        );
-    }
-
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&self, columns: &[usize], is_unique: bool) -> Result<()> {
         // Phase 1: Update metadata under write lock
@@ -1995,15 +2006,6 @@ impl PersistentState {
         persistent_indices
     }
 
-    fn open_secondary_cf(db: &DB, new: &PersistentIndex) {
-        let cf = db.cf_handle(&new.column_family).unwrap();
-
-        // Prevent autocompactions while we reindex the table
-        if let Err(err) = db.set_options_cf(&cf, &[("disable_auto_compactions", "true")]) {
-            error!(%err, "Error setting cf options");
-        }
-    }
-
     fn make_channels(
         num: usize,
     ) -> Vec<(
@@ -2018,17 +2020,30 @@ impl PersistentState {
         channels
     }
 
+    /// Writes secondary index entries from a channel to a RocksDB column family.
+    ///
+    /// `write_db` is the DB handle used for writing (may be a sidekick for OIB).
+    /// `auto_compact` is the desired auto-compaction state on the index's CF
+    /// within the primary rocksdb instance.o
     fn write_secondary(
-        db: &DB,
+        write_db: &DB,
         index: &Index,
         is_unique: bool,
         new: &PersistentIndex,
         mut rx: impl Consumer<Item = SecondaryIndexMessage>,
+        auto_compact: AutoCompact,
     ) {
-        Self::open_secondary_cf(db, new);
-        let cf = db.cf_handle(&new.column_family).unwrap();
+        let cf = write_db.cf_handle(&new.column_family).unwrap();
+        if matches!(auto_compact, AutoCompact::Disable) {
+            // Prevent autocompactions while we reindex the table
+            if let Err(err) = write_db.set_options_cf(&cf, &[("disable_auto_compactions", "true")])
+            {
+                error!(%err, "Error setting cf options");
+            }
+        }
 
         let mut opts = rocksdb::WriteOptions::default();
+        opts.set_sync(false);
         opts.disable_wal(true);
         let backoff = Duration::from_micros(5);
 
@@ -2047,7 +2062,7 @@ impl PersistentState {
                 // Check for Done sentinel indicating producer is done
                 match msg {
                     SecondaryIndexMessage::Done => {
-                        db.write_opt(batch, &opts).unwrap();
+                        write_db.write_opt(batch, &opts).unwrap();
                         break 'outer;
                     }
                     SecondaryIndexMessage::Data(kv) => {
@@ -2063,11 +2078,113 @@ impl PersistentState {
                 }
             }
 
-            db.write_opt(batch, &opts).unwrap();
+            write_db.write_opt(batch, &opts).unwrap();
         }
 
         // Flush just in case
-        db.flush_cf(&cf).unwrap();
+        write_db.flush_cf(&cf).unwrap();
+    }
+
+    /// Scans a primary CF iterator and fans out rows to consumer threads that
+    /// write secondary index entries. This is the shared core of both
+    /// [`add_secondary`] (live DB iterator) and online-index-build
+    /// (snapshot iterator writing to a sidekick DB).
+    ///
+    /// * `write_db` -- RocksDB handle used by consumer threads to write batches.
+    ///   For the blocking path this is the primary DB; for OIB this is the sidekick.
+    /// * `iter` -- a raw iterator over the primary CF (will be seeked to first).
+    /// * `new_indices` -- the [`PersistentIndex`]es being populated.
+    /// * `name` -- base table name, used for progress logging.
+    /// * `table` / `table_status_tx` -- optional channel for status updates.
+    /// * `estimated_rows` -- estimated total row count for progress reporting.
+    /// * `auto_compact` -- desired auto-compaction state on the indices' CFs
+    ///   within the primary rocksdb instance.
+    #[allow(clippy::too_many_arguments)]
+    fn populate_secondary_from_iter(
+        write_db: &DB,
+        iter: rocksdb::DBRawIteratorWithThreadMode<'_, DB>,
+        new_indices: &[PersistentIndex],
+        name: &SqlIdentifier,
+        table: &Option<Relation>,
+        table_status_tx: &Option<UnboundedSender<(Relation, TableStatus)>>,
+        estimated_rows: usize,
+        auto_compact: AutoCompact,
+        shutdown: Option<&std::sync::atomic::AtomicBool>,
+    ) -> ReadySetResult<()> {
+        let channels = Self::make_channels(new_indices.len());
+        let (mut txs, rxs): (Vec<_>, Vec<_>) = channels.into_iter().unzip();
+
+        // Macro to push to all consumers, with backoff when the buffer is full
+        macro_rules! send_message {
+            ($txs:expr, $msg:expr) => {{
+                let backoff = Duration::from_micros(5);
+                for tx in $txs {
+                    while tx.try_push($msg.clone()).is_err() {
+                        thread::sleep(backoff);
+                    }
+                }
+            }};
+        }
+
+        let mut iter = iter;
+        iter.seek_to_first();
+
+        let result: ReadySetResult<()> = thread::scope(|scope| {
+            for (pi, rx) in new_indices.iter().zip(rxs) {
+                scope.spawn(|| {
+                    Self::write_secondary(write_db, &pi.index, pi.is_unique, pi, rx, auto_compact)
+                });
+            }
+
+            let started = Instant::now();
+            let mut last_log = started;
+            let mut last_status = started;
+            let mut indexed: usize = 0;
+
+            while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
+                if let Some(flag) = shutdown {
+                    if flag.load(std::sync::atomic::Ordering::Acquire) {
+                        // Send Done so consumer threads exit cleanly
+                        send_message!(&mut txs, SecondaryIndexMessage::Done);
+                        drop(txs);
+                        return Err(internal_err!(
+                            "Index build cancelled due to shutdown request"
+                        ));
+                    }
+                }
+
+                let row = deserialize_row(value);
+                let msg =
+                    SecondaryIndexMessage::Data(Arc::new(IndexKeyValue::new(pk.to_vec(), row)));
+                send_message!(&mut txs, msg);
+
+                indexed += 1;
+                index_progress(
+                    name,
+                    table,
+                    table_status_tx,
+                    started,
+                    &mut last_log,
+                    &mut last_status,
+                    indexed,
+                    estimated_rows,
+                );
+                iter.next();
+            }
+
+            // Send Done sentinel to signal completion to all consumers,
+            // even if there was an error in iterating
+            send_message!(&mut txs, SecondaryIndexMessage::Done);
+
+            if let Err(err) = iter.status() {
+                return Err(internal_err!("Error creating index: {err}"));
+            }
+
+            drop(txs);
+            Ok(())
+        });
+
+        result
     }
 
     /// Adds new secondary indices.  Secondary indices point to the primary index
@@ -2086,69 +2203,27 @@ impl PersistentState {
         }
         let new = self.create_secondary(indices, is_unique);
         let db = self.db.db();
-        let channels = Self::make_channels(new.len());
-        let (mut txs, rxs): (Vec<_>, Vec<_>) = channels.into_iter().unzip();
 
-        // Macro to push to all consumers, with backoff when the buffer is full
-        macro_rules! send_message {
-            ($txs:expr, $msg:expr) => {{
-                let backoff = Duration::from_micros(5);
-                for tx in $txs {
-                    while tx.try_push($msg.clone()).is_err() {
-                        thread::sleep(backoff);
-                    }
-                }
-            }};
+        let opts = bulk_scan_read_opts();
+        let pk_cf = db
+            .cf_handle(PK_CF)
+            .expect("Primary key column family not found");
+        let iter = db.raw_iterator_cf_opt(&pk_cf, opts);
+
+        if let Err(err) = Self::populate_secondary_from_iter(
+            db,
+            iter,
+            &new,
+            &self.name,
+            &self.table,
+            &self.table_status_tx,
+            self.row_count(),
+            AutoCompact::Disable,
+            None, // no shutdown flag for blocking path
+        ) {
+            // FIXME can't return error from here
+            error!(%err, "Error creating index");
         }
-
-        thread::scope(|scope| {
-            for (index, is_unique, new, rx) in itertools::izip!(indices, is_unique, &new, rxs) {
-                scope.spawn(|| Self::write_secondary(db, index, *is_unique, new, rx));
-            }
-
-            let mut opts = rocksdb::ReadOptions::default();
-            opts.set_total_order_seek(true); // because not doing a prefix seek
-
-            // Don't pollute block cache - avoid evicting hot data used by concurrent queries
-            opts.fill_cache(false);
-            // Large readahead for sequential scan - amortizes I/O latency, especially on remote volumes
-            opts.set_readahead_size(4 * 1024 * 1024);
-            // Async I/O via io_uring - overlaps prefetch with CPU work
-            opts.set_async_io(true);
-
-            let pk_cf = db.cf_handle(PK_CF).unwrap();
-            let mut iter = db.raw_iterator_cf_opt(&pk_cf, opts);
-            iter.seek_to_first();
-
-            let started = Instant::now();
-            let estimated = self.row_count();
-            let mut last_log = started;
-            let mut last_status = started;
-            let mut indexed = 0;
-
-            while let (Some(pk), Some(value)) = (iter.key(), iter.value()) {
-                let row: Vec<DfValue> = deserialize_row(value);
-                // TODO: only pass data that will be used by any index.
-                let msg =
-                    SecondaryIndexMessage::Data(Arc::new(IndexKeyValue::new(pk.to_vec(), row)));
-                send_message!(&mut txs, msg);
-
-                indexed += 1;
-                self.index_progress(started, &mut last_log, &mut last_status, indexed, estimated);
-                iter.next();
-            }
-
-            // Send Done sentinel to signal completion to all consumers,
-            //even if there was an error in iterating
-            send_message!(&mut txs, SecondaryIndexMessage::Done);
-
-            if let Err(err) = iter.status() {
-                // FIXME can't return error from here
-                error!(%err, "Error creating index");
-            }
-
-            drop(txs);
-        });
 
         // Compact the newly created column families in the background
         if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
@@ -2592,6 +2667,21 @@ impl PersistentState {
         }
         Ok(())
     }
+}
+
+/// Helper function to get the custom config for performing large bulk
+/// read operations, like during an index build.
+fn bulk_scan_read_opts() -> rocksdb::ReadOptions {
+    let mut opts = rocksdb::ReadOptions::default();
+    opts.set_total_order_seek(true); // because not doing a prefix seek
+
+    // Don't pollute block cache - avoid evicting hot data used by concurrent queries
+    opts.fill_cache(false);
+    // Large readahead for sequential scan - amortizes I/O latency, especially on remote volumes
+    opts.set_readahead_size(4 * 1024 * 1024);
+    // Async I/O via io_uring - overlaps prefetch with CPU work
+    opts.set_async_io(true);
+    opts
 }
 
 /// Checks if the given index is unique for this base table.
