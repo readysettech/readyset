@@ -4,11 +4,11 @@
 //! `ConstraintRegistry` holds the library of registered patterns.
 
 use readyset_sql::Dialect;
-use readyset_sql::ast::SqlType;
 
-use crate::constraint::TypeClass;
+use crate::compat::{
+    CompatibilityRule, SelectionFilter, check_rules, default_rules, readyset_compat_rules,
+};
 use crate::entropy::Entropy;
-use crate::incompat::{IncompatibilityRule, SelectionFilter, check_rules, default_rules};
 use crate::pattern::Pattern;
 use crate::resolver::{self, DdlStep, ResolverOutput};
 use crate::state::{ColumnMeta, GenerationState, GeneratorConfig, TableSchema};
@@ -24,6 +24,8 @@ pub enum GenerateError {
     MaxRetriesExceeded { retries: usize },
     #[error("no existing schema available for Mode 3")]
     NoExistingSchema,
+    #[error("table {name} disappeared between pick_random_table and table_mut lookup")]
+    TableLookupFailed { name: String },
 }
 
 /// The output of a successful query generation.
@@ -35,6 +37,8 @@ pub struct QueryOutput {
     pub ddl: Vec<resolver::DdlStep>,
     /// Parameter metadata for data generation.
     pub params: Vec<resolver::ParamMeta>,
+    /// Name of the pattern that generated this query.
+    pub pattern_name: String,
 }
 
 /// The output of a Mode 2 DDL-only generation.
@@ -46,12 +50,13 @@ pub struct DdlOutput {
     pub query: Option<QueryOutput>,
 }
 
-impl From<ResolverOutput> for QueryOutput {
-    fn from(ro: ResolverOutput) -> Self {
+impl QueryOutput {
+    fn from_resolver(ro: ResolverOutput, pattern_name: String) -> Self {
         Self {
             query: ro.query,
             ddl: ro.ddl,
             params: ro.params,
+            pattern_name,
         }
     }
 }
@@ -60,7 +65,7 @@ impl From<ResolverOutput> for QueryOutput {
 #[derive(Debug)]
 pub struct ConstraintRegistry {
     patterns: Vec<Pattern>,
-    rules: Vec<IncompatibilityRule>,
+    rules: Vec<CompatibilityRule>,
 }
 
 impl Default for ConstraintRegistry {
@@ -83,8 +88,8 @@ impl ConstraintRegistry {
         self.patterns.push(pattern);
     }
 
-    /// Add an incompatibility rule.
-    pub fn add_rule(&mut self, rule: IncompatibilityRule) {
+    /// Add a compatibility rule.
+    pub fn add_rule(&mut self, rule: CompatibilityRule) {
         self.rules.push(rule);
     }
 
@@ -98,12 +103,17 @@ impl ConstraintRegistry {
         self.patterns.is_empty()
     }
 
-    /// Returns the incompatibility rules.
-    pub fn rules(&self) -> &[IncompatibilityRule] {
+    /// Returns all registered pattern names.
+    pub fn pattern_names(&self) -> Vec<String> {
+        self.patterns.iter().map(|p| p.name.to_string()).collect()
+    }
+
+    /// Returns the compatibility rules.
+    pub fn rules(&self) -> &[CompatibilityRule] {
         &self.rules
     }
 
-    /// Pick a random pattern matching the given filter.
+    /// Pick a random pattern matching the given filter and dialect.
     ///
     /// Returns `None` if no pattern matches the filter or if all matching
     /// patterns have weight 0.
@@ -111,26 +121,56 @@ impl ConstraintRegistry {
         &'a self,
         entropy: &mut Entropy<'_>,
         filter: &SelectionFilter,
+        dialect: Dialect,
     ) -> Option<&'a Pattern> {
-        let candidates: Vec<&Pattern> = self
+        self.pick_random_excluding(entropy, filter, dialect, &[])
+            .map(|(_, p)| p)
+    }
+
+    /// Pick a random pattern matching the filter and dialect, excluding
+    /// patterns at the given registry indices. Returns the chosen pattern's
+    /// registry index and a reference to the pattern, or `None` if no
+    /// candidates remain or if all matching patterns have weight 0.
+    pub fn pick_random_excluding<'a>(
+        &'a self,
+        entropy: &mut Entropy<'_>,
+        filter: &SelectionFilter,
+        dialect: Dialect,
+        excluded_indices: &[usize],
+    ) -> Option<(usize, &'a Pattern)> {
+        // Build a HashSet so the exclusion check is O(1) per pattern. The
+        // caller re-invokes this in an O(target) retry loop, so an O(patterns
+        // × excluded) inner check compounds badly under heavy composition.
+        let excluded: std::collections::HashSet<usize> = excluded_indices.iter().copied().collect();
+
+        // Single linear scan: build the candidate list, sum weights, then
+        // sample. Avoids the redundant second Vec the original allocated for
+        // `(i, weight)` tuples, and threads `Pattern::weight: u32` directly
+        // (no `as u32` narrowing).
+        let candidates: Vec<(usize, &Pattern)> = self
             .patterns
             .iter()
-            .filter(|p| filter.matches(&p.tags, p.min_depth))
+            .enumerate()
+            .filter(|(i, p)| {
+                !excluded.contains(i)
+                    && filter.matches(&p.tags, p.min_depth)
+                    && p.dialect_support.supports(dialect)
+            })
             .collect();
 
         if candidates.is_empty() {
             return None;
         }
 
-        let total: u32 = candidates.iter().map(|p| p.weight).sum();
+        let total: u32 = candidates.iter().map(|(_, p)| p.weight).sum();
         if total == 0 {
             return None;
         }
 
         let mut pick = entropy.range(0..total);
-        for p in &candidates {
+        for (i, p) in &candidates {
             if pick < p.weight {
-                return Some(*p);
+                return Some((*i, *p));
             }
             pick -= p.weight;
         }
@@ -156,6 +196,14 @@ impl ConstraintRegistry {
         reg.register(aggregates::count_distinct());
         reg.register(aggregates::aggregate_with_group_by());
         reg.register(aggregates::having_clause());
+        // group_concat() and array_agg() yield non-deterministic per-group
+        // ordering without an inner `ORDER BY`. AggregateFn doesn't carry an
+        // inner ORDER BY today, so the harness gets false-positive mismatches
+        // on every output. Unregistered until the constraint model gains
+        // `AggregateFn::GroupConcat { order_by: Option<_> }`.
+        reg.register(aggregates::array_agg());
+        reg.register(aggregates::multi_aggregate());
+        reg.register(aggregates::in_list_aggregate());
 
         // Filter patterns
         reg.register(filters::between());
@@ -173,7 +221,7 @@ impl ConstraintRegistry {
         // Ordering patterns
         reg.register(ordering::topk());
         reg.register(ordering::order_by());
-        reg.register(ordering::limit_offset());
+        reg.register(ordering::paginate());
 
         // Subquery patterns
         reg.register(subqueries::exists_subquery());
@@ -190,7 +238,18 @@ impl ConstraintRegistry {
         reg.register(advanced::distinct());
         reg.register(advanced::multi_join());
 
-        // Default incompatibility rules
+        // Scalar function patterns
+        reg.register(functions::coalesce());
+        reg.register(functions::ifnull());
+        reg.register(functions::concat());
+        reg.register(functions::substring());
+        reg.register(functions::round());
+        reg.register(functions::length());
+        reg.register(functions::month());
+        reg.register(functions::dayofweek());
+        reg.register(functions::greatest());
+
+        // Default compatibility rules
         for rule in default_rules() {
             reg.add_rule(rule);
         }
@@ -212,9 +271,15 @@ pub struct Generator {
 impl Generator {
     /// Create a new generator with the default registry.
     pub fn new(dialect: Dialect, config: GeneratorConfig) -> Self {
+        let mut registry = ConstraintRegistry::default_registry();
+        if config.readyset_compatible {
+            for rule in readyset_compat_rules() {
+                registry.add_rule(rule);
+            }
+        }
         Self {
             state: GenerationState::new(dialect, config),
-            registry: ConstraintRegistry::default_registry(),
+            registry,
         }
     }
 
@@ -277,7 +342,8 @@ impl Generator {
 
         for _ in 0..MAX_RETRIES {
             // Pick a pattern
-            let pattern = match self.registry.pick_random(entropy, &filter) {
+            let dialect = self.state.dialect();
+            let pattern = match self.registry.pick_random(entropy, &filter, dialect) {
                 Some(p) => p,
                 None => {
                     return Err(GenerateError::NoCompatiblePattern { attempted });
@@ -286,7 +352,7 @@ impl Generator {
 
             let pattern_name = pattern.name.to_string();
 
-            // Check incompatibility rules
+            // Check compatibility rules
             if let Some(reason) =
                 check_rules(&self.registry.rules, &pattern.constraints, &pattern.tags)
             {
@@ -294,12 +360,30 @@ impl Generator {
                 continue;
             }
 
-            // Convert to recipe and try to resolve
-            let recipe = pattern.to_recipe(0);
+            // Convert to recipe and compose with other patterns.
+            let mut recipe = pattern.to_recipe(0);
+            let mut composed_names = vec![pattern_name.clone()];
+
+            // Always attempt composition if the pattern has variables to
+            // compose with. The target depth is drawn from a geometric
+            // distribution (no artificial ceiling). Bare queries only happen
+            // when the target is 0 or all partners fail compatibility.
+            if !pattern.vars.is_empty() {
+                let partners = self.pick_composition_partners(entropy, pattern);
+                for partner in &partners {
+                    recipe = recipe.compose(partner);
+                    composed_names.push(partner.name.to_string());
+                }
+            }
+
+            let full_name = composed_names.join("+");
+
             match resolver::try_resolve(&recipe, &mut self.state, entropy) {
-                Ok(output) => return Ok(output.into()),
+                Ok(output) => {
+                    return Ok(QueryOutput::from_resolver(output, full_name));
+                }
                 Err(e) => {
-                    attempted.push(format!("{pattern_name}: {e}"));
+                    attempted.push(format!("{full_name}: {e}"));
                     continue;
                 }
             }
@@ -320,7 +404,7 @@ impl Generator {
         entropy: &mut Entropy<'_>,
         with_query: bool,
     ) -> Result<DdlOutput, GenerateError> {
-        let ddl = self.generate_ddl_step(entropy);
+        let ddl = self.generate_ddl_step(entropy)?;
 
         let query = if with_query {
             Some(self.generate_with_ddl(entropy)?)
@@ -332,7 +416,10 @@ impl Generator {
     }
 
     /// Generate a single DDL step (create table or add column).
-    fn generate_ddl_step(&mut self, entropy: &mut Entropy<'_>) -> Vec<DdlStep> {
+    fn generate_ddl_step(
+        &mut self,
+        entropy: &mut Entropy<'_>,
+    ) -> Result<Vec<DdlStep>, GenerateError> {
         let mut steps = Vec::new();
 
         // If no tables exist, always create one
@@ -346,7 +433,7 @@ impl Generator {
             let num_cols = entropy.range(3..9usize);
             for _ in 0..num_cols {
                 let col_name = schema.fresh_column_name();
-                let sql_type = random_sql_type(entropy);
+                let sql_type = crate::resolver::schema::pick_random_type(entropy);
                 let meta = ColumnMeta {
                     sql_type,
                     gen_spec: self.state.config().default_gen_spec.clone(),
@@ -377,13 +464,17 @@ impl Generator {
             let table = self
                 .state
                 .pick_random_table(entropy)
-                .expect("tables non-empty checked above");
+                .ok_or(GenerateError::NoExistingSchema)?;
             let table_name = table.name.clone();
             let default_gen_spec = self.state.config().default_gen_spec.clone();
 
-            let table_schema = self.state.table_mut(&table_name).expect("table exists");
+            let table_schema = self.state.table_mut(&table_name).ok_or_else(|| {
+                GenerateError::TableLookupFailed {
+                    name: table_name.to_string(),
+                }
+            })?;
             let col_name = table_schema.fresh_column_name();
-            let sql_type = random_sql_type(entropy);
+            let sql_type = crate::resolver::schema::pick_random_type(entropy);
             let meta = ColumnMeta {
                 sql_type,
                 gen_spec: default_gen_spec,
@@ -397,7 +488,7 @@ impl Generator {
             });
         }
 
-        steps
+        Ok(steps)
     }
 
     /// Mode 3: Generate a query using only existing schema (no new DDL).
@@ -425,7 +516,8 @@ impl Generator {
         let mut attempted = Vec::new();
 
         for _ in 0..MAX_RETRIES {
-            let pattern = match self.registry.pick_random(entropy, &filter) {
+            let dialect = self.state.dialect();
+            let pattern = match self.registry.pick_random(entropy, &filter, dialect) {
                 Some(p) => p,
                 None => {
                     return Err(GenerateError::NoCompatiblePattern { attempted });
@@ -434,7 +526,7 @@ impl Generator {
 
             let pattern_name = pattern.name.to_string();
 
-            // Check incompatibility rules
+            // Check compatibility rules
             if let Some(reason) =
                 check_rules(&self.registry.rules, &pattern.constraints, &pattern.tags)
             {
@@ -456,7 +548,7 @@ impl Generator {
             ) {
                 Ok(output) => {
                     if output.ddl.is_empty() {
-                        return Ok(output.into());
+                        return Ok(QueryOutput::from_resolver(output, pattern_name));
                     }
                     // Resolution produced DDL -- pattern needs new tables/columns.
                     // Roll back state since Mode 3 shouldn't modify schema.
@@ -479,38 +571,80 @@ impl Generator {
             retries: MAX_RETRIES,
         })
     }
-}
 
-/// Pick a random SQL type from a reasonable distribution.
-fn random_sql_type(entropy: &mut Entropy<'_>) -> SqlType {
-    let type_class = entropy.choose(&[
-        TypeClass::Integer,
-        TypeClass::Numeric,
-        TypeClass::String,
-        TypeClass::DateTime,
-        TypeClass::Any,
-    ]);
-
-    match type_class {
-        TypeClass::Integer => SqlType::Int(None),
-        TypeClass::Numeric => SqlType::Double,
-        TypeClass::String => SqlType::VarChar(Some(255)),
-        TypeClass::DateTime => SqlType::Timestamp,
-        TypeClass::Exact(t) => t.clone(),
-        TypeClass::Any => {
-            // Pick from all types
-            entropy
-                .choose(&[
-                    SqlType::Int(None),
-                    SqlType::BigInt(None),
-                    SqlType::Double,
-                    SqlType::VarChar(Some(255)),
-                    SqlType::Text,
-                    SqlType::Bool,
-                    SqlType::Timestamp,
-                ])
-                .clone()
+    /// Pick composition partners for a base pattern.
+    ///
+    /// Draws a random target number of partners from a geometric distribution
+    /// (p=0.5, so mean ~1, but unbounded — can reach 5, 10, or more). Then
+    /// keeps trying to add different compatible partners until the target is
+    /// reached or all candidate patterns have been tried.
+    ///
+    /// Compatibility is checked via `CompatibilityRules` on the merged
+    /// constraint set. VarIds are offset before merging so that rules
+    /// (especially the aggregate+non-grouped-column check) see distinct
+    /// VarId namespaces per pattern, matching what `Recipe::compose` does.
+    fn pick_composition_partners<'a>(
+        &'a self,
+        entropy: &mut Entropy<'_>,
+        base: &Pattern,
+    ) -> Vec<&'a Pattern> {
+        // Geometric distribution: keep flipping until we get tails.
+        // p=0.8 gives ~20% bare, ~16% depth-2, ~13% depth-3, and ~33%
+        // depth-5+. Higher targets naturally saturate when the registry
+        // runs out of compatible partners.
+        let mut target = 0usize;
+        while target < 20 && entropy.probability(0.8) {
+            target += 1;
         }
+
+        if target == 0 {
+            return Vec::new();
+        }
+
+        let dialect = self.state.dialect();
+        let mut partners = Vec::new();
+
+        // Accumulate tags and constraints for incremental compatibility checking.
+        let mut combined_tags: Vec<&str> = base.tags.to_vec();
+        let mut combined_constraints = base.constraints.clone();
+        let mut total_vars = base.num_vars();
+
+        // Track indices of patterns we've already tried (compatible or not)
+        // to avoid re-picking the same pattern.
+        let mut tried_indices: Vec<usize> = Vec::new();
+
+        while partners.len() < target {
+            let filter = SelectionFilter::default();
+            let candidate =
+                self.registry
+                    .pick_random_excluding(entropy, &filter, dialect, &tried_indices);
+
+            let Some((idx, partner)) = candidate else {
+                // No more candidates available
+                break;
+            };
+
+            tried_indices.push(idx);
+
+            // Check compatibility of the trial combination.
+            let mut trial_tags = combined_tags.clone();
+            trial_tags.extend_from_slice(&partner.tags);
+
+            let offset_recipe = partner.to_recipe(total_vars);
+            let mut trial_constraints = combined_constraints.clone();
+            trial_constraints.extend(offset_recipe.constraints.iter().cloned());
+
+            if check_rules(&self.registry.rules, &trial_constraints, &trial_tags).is_some() {
+                continue;
+            }
+
+            partners.push(partner);
+            combined_tags.extend_from_slice(&partner.tags);
+            combined_constraints = trial_constraints;
+            total_vars += partner.num_vars();
+        }
+
+        partners
     }
 }
 
@@ -518,6 +652,7 @@ fn random_sql_type(entropy: &mut Entropy<'_>) -> SqlType {
 mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
+    use readyset_sql::ast::SqlType;
     use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
@@ -558,7 +693,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut entropy = Entropy::new(&mut rng);
         assert!(
-            reg.pick_random(&mut entropy, &SelectionFilter::default())
+            reg.pick_random(&mut entropy, &SelectionFilter::default(), Dialect::MySQL)
                 .is_none()
         );
     }
@@ -569,7 +704,7 @@ mod tests {
         reg.register(crate::registry::basic::single_table());
         let mut rng = SmallRng::seed_from_u64(42);
         let mut entropy = Entropy::new(&mut rng);
-        let p = reg.pick_random(&mut entropy, &SelectionFilter::default());
+        let p = reg.pick_random(&mut entropy, &SelectionFilter::default(), Dialect::MySQL);
         assert!(p.is_some());
         assert_eq!(p.expect("should have pattern").name, "single_table");
     }
@@ -588,12 +723,46 @@ mod tests {
 
         for _ in 0..20 {
             let p = reg
-                .pick_random(&mut entropy, &filter)
+                .pick_random(&mut entropy, &filter, Dialect::MySQL)
                 .expect("should find aggregate pattern");
             assert!(
                 p.tags.contains(&"aggregate"),
                 "expected aggregate tag, got {:?}",
                 p.tags
+            );
+        }
+    }
+
+    #[test]
+    fn pick_random_excludes_wrong_dialect() {
+        let reg = ConstraintRegistry::default_registry();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["aggregate"],
+            ..Default::default()
+        };
+
+        // MySQL should never pick array_agg (PostgresOnly)
+        for _ in 0..100 {
+            let p = reg
+                .pick_random(&mut entropy, &filter, Dialect::MySQL)
+                .expect("should find aggregate pattern");
+            assert_ne!(
+                p.name, "array_agg",
+                "MySQL should not pick PostgresOnly pattern"
+            );
+        }
+
+        // PostgreSQL should never pick group_concat (MySqlOnly)
+        for _ in 0..100 {
+            let p = reg
+                .pick_random(&mut entropy, &filter, Dialect::PostgreSQL)
+                .expect("should find aggregate pattern");
+            assert_ne!(
+                p.name, "group_concat",
+                "PostgreSQL should not pick MySqlOnly pattern"
             );
         }
     }
@@ -611,7 +780,7 @@ mod tests {
 
         for _ in 0..20 {
             let p = reg
-                .pick_random(&mut entropy, &filter)
+                .pick_random(&mut entropy, &filter, Dialect::MySQL)
                 .expect("should find pattern");
             assert!(
                 !p.tags.contains(&"subquery"),
@@ -1208,6 +1377,274 @@ mod tests {
     }
 
     #[test]
+    fn composed_query_adds_filter_or_ordering() {
+        // Generate many queries and verify that some have composed pattern names
+        // (indicated by "+" in the pattern_name).
+        let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut saw_composed = false;
+        for _ in 0..50 {
+            let result = generator.generate_with_ddl(&mut entropy);
+            if let Ok(output) = result
+                && output.pattern_name.contains('+')
+            {
+                saw_composed = true;
+                let sql = output.query.display(Dialect::MySQL).to_string();
+                assert!(sql.contains("SELECT"), "composed sql: {sql}");
+            }
+        }
+        assert!(
+            saw_composed,
+            "expected at least one composed query in 50 generations"
+        );
+    }
+
+    #[test]
+    fn composition_depth_distribution() {
+        // The generator should produce a rich distribution of composition depths.
+        // With 200 queries, we expect:
+        // - Depth 1 (bare): less than 35% of queries (CTE-primary patterns
+        //   compose without unifying — partners cross-join — so a few extra
+        //   recipes fail resolution and fall back to bare, vs ~25% before
+        //   CTEs landed in the registry)
+        // - Depth 3+: at least 30% of queries
+        // - Depth 4+: at least some queries
+        let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut depth_counts = [0usize; 10]; // depths 1..=10
+        let mut total = 0;
+
+        for _ in 0..200 {
+            if let Ok(output) = generator.generate_with_ddl(&mut entropy) {
+                let depth = output.pattern_name.split('+').count();
+                if depth <= 10 {
+                    depth_counts[depth - 1] += 1;
+                }
+                total += 1;
+            }
+        }
+
+        let depth1_pct = depth_counts[0] as f64 / total as f64 * 100.0;
+        let depth3_plus: usize = depth_counts[2..].iter().sum();
+        let depth3_plus_pct = depth3_plus as f64 / total as f64 * 100.0;
+        let depth4_plus: usize = depth_counts[3..].iter().sum();
+
+        eprintln!(
+            "Depth distribution ({total} queries): {:?}",
+            &depth_counts[..6]
+        );
+        eprintln!("  depth-1: {depth1_pct:.1}%");
+        eprintln!("  depth-3+: {depth3_plus_pct:.1}%");
+        eprintln!("  depth-4+ count: {depth4_plus}");
+
+        assert!(
+            depth1_pct < 35.0,
+            "too many bare queries: {depth1_pct:.1}% (expected <35%)"
+        );
+        assert!(
+            depth3_plus_pct > 30.0,
+            "too few complex queries: {depth3_plus_pct:.1}% at depth 3+ (expected >30%)"
+        );
+        assert!(
+            depth4_plus > 0,
+            "expected at least some depth-4+ queries, got 0"
+        );
+    }
+
+    #[test]
+    fn composition_tries_different_partners_on_failure() {
+        // When composition tries a partner and it fails compatibility,
+        // it should try a different partner rather than giving up on that slot.
+        // We verify this indirectly: with enough queries, we should see
+        // patterns composed that come from different categories (joins+aggregates,
+        // subqueries+filters, etc.), which requires the retry mechanism.
+        let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(2024);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut saw_cross_category = false;
+        let categories = [
+            &[
+                "count",
+                "sum",
+                "avg",
+                "min_max",
+                "count_distinct",
+                "multi_aggregate",
+            ][..],
+            &["inner_join", "left_join", "multi_join"],
+            &[
+                "exists_subquery",
+                "in_subquery",
+                "scalar_subquery",
+                "join_subquery",
+            ],
+            &["between", "in_list", "like", "is_null", "compound_where"],
+        ];
+
+        for _ in 0..200 {
+            if let Ok(output) = generator.generate_with_ddl(&mut entropy) {
+                let parts: Vec<&str> = output.pattern_name.split('+').collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let mut cats_hit = [false; 4];
+                for part in &parts {
+                    for (i, cat) in categories.iter().enumerate() {
+                        if cat.contains(part) {
+                            cats_hit[i] = true;
+                        }
+                    }
+                }
+                if cats_hit.iter().filter(|&&x| x).count() >= 2 {
+                    saw_cross_category = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(
+            saw_cross_category,
+            "expected at least one query combining patterns from different categories"
+        );
+    }
+
+    #[test]
+    fn pattern_names_returns_all_registered() {
+        let reg = ConstraintRegistry::default_registry();
+        let names = reg.pattern_names();
+        assert!(
+            names.len() >= 30,
+            "expected >= 30 patterns, got {}",
+            names.len()
+        );
+        assert!(names.contains(&"single_table".to_string()));
+        assert!(names.contains(&"between".to_string()));
+        assert!(names.contains(&"inner_join".to_string()));
+    }
+
+    #[test]
+    fn distinct_can_be_composed() {
+        // With symmetric composition, DISTINCT can be composed with other
+        // patterns because compose keeps all projections — ORDER BY columns
+        // will be in the SELECT list, avoiding MySQL error 3065.
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["distinct"],
+            ..Default::default()
+        };
+
+        let mut any_composed = false;
+        for _ in 0..50 {
+            let result = generator.generate_with_ddl_filtered(&mut entropy, &filter);
+            if let Ok(output) = result
+                && output.pattern_name.contains('+')
+            {
+                any_composed = true;
+            }
+        }
+        // It's not guaranteed to compose every time (50% chance of target=0),
+        // but over 50 iterations we should see at least one composition.
+        assert!(
+            any_composed,
+            "distinct should be composable with other patterns"
+        );
+    }
+
+    #[test]
+    fn composition_includes_previously_blocked_patterns() {
+        // Verify that patterns which were previously blocked from composition
+        // (aggregates, joins, subqueries) can now be composed.
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(2024);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut saw_agg_composed = false;
+        let mut saw_join_composed = false;
+        let mut saw_function_composed = false;
+
+        for _ in 0..200 {
+            let result = generator.generate_with_ddl(&mut entropy);
+            if let Ok(output) = result
+                && output.pattern_name.contains('+')
+            {
+                let parts: Vec<&str> = output.pattern_name.split('+').collect();
+                for part in &parts {
+                    if [
+                        "count",
+                        "sum",
+                        "avg",
+                        "min_max",
+                        "count_distinct",
+                        "aggregate_with_group_by",
+                        "having_clause",
+                        "multi_aggregate",
+                        "in_list_aggregate",
+                    ]
+                    .contains(part)
+                    {
+                        saw_agg_composed = true;
+                    }
+                    if [
+                        "inner_join",
+                        "left_join",
+                        "self_join",
+                        "cross_join",
+                        "multi_join",
+                    ]
+                    .contains(part)
+                    {
+                        saw_join_composed = true;
+                    }
+                    if [
+                        "coalesce",
+                        "concat",
+                        "substring",
+                        "round",
+                        "length",
+                        "month",
+                        "dayofweek",
+                        "greatest",
+                        "ifnull",
+                    ]
+                    .contains(part)
+                    {
+                        saw_function_composed = true;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            saw_agg_composed,
+            "expected at least one aggregate pattern composed in 200 queries"
+        );
+        assert!(
+            saw_join_composed,
+            "expected at least one join pattern composed in 200 queries"
+        );
+        assert!(
+            saw_function_composed,
+            "expected at least one function pattern composed in 200 queries"
+        );
+    }
+
+    #[test]
     fn self_join_generates_via_default_registry() {
         let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
         let mut rng = SmallRng::seed_from_u64(42);
@@ -1225,5 +1662,240 @@ mod tests {
         let sql = output.query.display(Dialect::MySQL).to_string();
         assert!(sql.contains(" AS "), "self-join should use aliases: {sql}");
         assert!(sql.contains("JOIN"), "self-join should contain JOIN: {sql}");
+    }
+
+    #[test]
+    fn function_patterns_generate_through_pipeline() {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["function"],
+            ..Default::default()
+        };
+
+        // Generate 20 queries, all should succeed
+        let mut generated_names = Vec::new();
+        for _ in 0..20 {
+            let result = generator.generate_with_ddl_filtered(&mut entropy, &filter);
+            assert!(
+                result.is_ok(),
+                "function pattern generation failed: {result:?}"
+            );
+            generated_names.push(result.expect("checked").pattern_name);
+        }
+
+        // Should have generated a variety of function patterns
+        assert!(
+            generated_names.iter().any(|n| n.contains("concat")
+                || n.contains("coalesce")
+                || n.contains("round")
+                || n.contains("length")
+                || n.contains("substring")
+                || n.contains("ifnull")
+                || n.contains("month")
+                || n.contains("dayofweek")
+                || n.contains("greatest")),
+            "expected function patterns, got: {generated_names:?}"
+        );
+    }
+
+    #[test]
+    fn multi_aggregate_generates_through_pipeline() {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["multi_aggregate"],
+            ..Default::default()
+        };
+
+        let result = generator.generate_with_ddl_filtered(&mut entropy, &filter);
+        assert!(
+            result.is_ok(),
+            "multi_aggregate generation failed: {result:?}"
+        );
+        let output = result.expect("checked");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+        let sql_upper = sql.to_uppercase();
+        assert!(sql_upper.contains("COUNT("), "expected COUNT in: {sql}");
+        assert!(sql_upper.contains("SUM("), "expected SUM in: {sql}");
+        assert!(
+            sql_upper.contains("GROUP BY"),
+            "expected GROUP BY in: {sql}"
+        );
+    }
+
+    #[test]
+    fn readyset_compatible_excludes_self_join() {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            readyset_compatible: true,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["self_join"],
+            ..Default::default()
+        };
+
+        // self_join should always fail due to readyset compat rules
+        for _ in 0..5 {
+            let result = generator.generate_with_ddl_filtered(&mut entropy, &filter);
+            assert!(
+                result.is_err(),
+                "self_join should be rejected with readyset_compatible=true"
+            );
+        }
+    }
+
+    #[test]
+    fn readyset_compatible_allows_regular_patterns() {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            readyset_compatible: true,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // Regular patterns should still work
+        for _ in 0..20 {
+            let result = generator.generate_with_ddl(&mut entropy);
+            assert!(result.is_ok(), "generation failed: {result:?}");
+        }
+    }
+
+    #[test]
+    fn paginate_generates_through_pipeline() {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let filter = SelectionFilter {
+            required_tags: vec!["paginate"],
+            ..Default::default()
+        };
+
+        let result = generator.generate_with_ddl_filtered(&mut entropy, &filter);
+        assert!(result.is_ok(), "paginate generation failed: {result:?}");
+        let output = result.expect("checked");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+        assert!(sql.contains("ORDER BY"), "expected ORDER BY in: {sql}");
+        assert!(sql.contains("LIMIT"), "expected LIMIT in: {sql}");
+        assert!(sql.contains("OFFSET"), "expected OFFSET in: {sql}");
+    }
+
+    #[test]
+    fn subquery_patterns_generate_valid_sql() {
+        // Verify all four subquery patterns resolve to valid SQL.
+        let patterns: Vec<(&str, crate::pattern::Pattern)> = vec![
+            (
+                "exists_subquery",
+                crate::registry::subqueries::exists_subquery(),
+            ),
+            ("in_subquery", crate::registry::subqueries::in_subquery()),
+            (
+                "scalar_subquery",
+                crate::registry::subqueries::scalar_subquery(),
+            ),
+            (
+                "join_subquery",
+                crate::registry::subqueries::join_subquery(),
+            ),
+        ];
+
+        for (name, pattern) in &patterns {
+            let config = GeneratorConfig {
+                reuse_preference: 0.0,
+                ..Default::default()
+            };
+            let mut state = crate::state::GenerationState::new(Dialect::MySQL, config);
+            let recipe = pattern.to_recipe(0);
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut entropy = Entropy::new(&mut rng);
+            let output = crate::resolver::try_resolve(&recipe, &mut state, &mut entropy)
+                .unwrap_or_else(|e| panic!("{name} failed to resolve: {e}"));
+            let sql = output.query.display(Dialect::MySQL).to_string();
+            assert!(sql.contains("SELECT"), "{name}: {sql}");
+        }
+    }
+
+    #[test]
+    fn composed_recipe_resolves_to_combined_sql() {
+        let between = crate::registry::filters::between();
+        let count = crate::registry::aggregates::count();
+        let recipe_base = between.to_recipe(0);
+        let composed = recipe_base.compose(&count);
+
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let output = resolver::resolve(
+            &composed.constraints,
+            &composed.var_kinds,
+            &mut state,
+            &mut entropy,
+        )
+        .expect("composed recipe should resolve");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+        assert!(
+            sql.to_uppercase().contains("BETWEEN"),
+            "expected BETWEEN in: {sql}"
+        );
+        assert!(
+            sql.to_uppercase().contains("COUNT("),
+            "expected COUNT in: {sql}"
+        );
+    }
+
+    #[test]
+    fn generated_columns_never_use_timestamp_type() {
+        // SqlType::Timestamp causes timezone conversion bugs in Readyset
+        // (backend.rs calls to_local() which shifts by system timezone).
+        // The generator should only create SqlType::DateTime columns.
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut generator = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        for i in 0..50 {
+            let _ = generator.generate_with_ddl(&mut entropy);
+            for (table_name, table) in generator.state().tables() {
+                for (col_name, col) in &table.columns {
+                    assert!(
+                        !matches!(col.sql_type, SqlType::Timestamp),
+                        "iteration {i}: table {table_name} column {col_name} \
+                         uses SqlType::Timestamp which triggers timezone bugs; \
+                         use SqlType::DateTime(None) instead"
+                    );
+                }
+            }
+        }
     }
 }

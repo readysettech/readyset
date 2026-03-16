@@ -26,7 +26,10 @@ pub(crate) enum Binding {
     Column {
         name: SqlIdentifier,
         sql_type: SqlType,
-        table: SqlIdentifier,
+        /// The table VarId that owns this column. Resolved lazily through
+        /// the table's Binding to get the current effective name (which may
+        /// change if the table is later aliased by an Or fallback).
+        table_var: VarId,
     },
 }
 
@@ -88,8 +91,8 @@ impl Env {
     }
 
     /// Get the binding for a variable, following the union-find representative.
-    pub(crate) fn get(&mut self, v: VarId) -> Option<&Binding> {
-        let rep = self.union_find.find(v.0);
+    pub(crate) fn get(&self, v: VarId) -> Option<&Binding> {
+        let rep = self.union_find.find_readonly(v.0);
         self.bindings[rep].as_ref()
     }
 
@@ -100,9 +103,23 @@ impl Env {
     }
 
     /// Check if a variable is bound.
-    pub(crate) fn is_bound(&mut self, v: VarId) -> bool {
-        let rep = self.union_find.find(v.0);
+    pub(crate) fn is_bound(&self, v: VarId) -> bool {
+        let rep = self.union_find.find_readonly(v.0);
         self.bindings[rep].is_some()
+    }
+
+    /// Returns true if any already-bound relation var holds the given
+    /// physical table name. Used by `resolve_table_exists` to detect
+    /// duplicate physical references that need to be disambiguated with a
+    /// fresh SQL alias — replaces the N×M `Or(NotEq, AliasOf)` cross-pair
+    /// constraints that compose used to emit.
+    pub(crate) fn relation_with_name_exists(&self, name: &SqlIdentifier) -> bool {
+        self.bindings.iter().any(|b| {
+            matches!(
+                b,
+                Some(Binding::Table { name: n, .. }) if n == name
+            )
+        })
     }
 
     /// Get the DDL steps produced during resolution.
@@ -122,9 +139,6 @@ impl Env {
         state: &GenerationState,
     ) -> Result<Vec<DdlStep>, ResolveError> {
         let mut steps = Vec::new();
-        // Collect the set of (table, column) pairs already covered by CreateTable.
-        let mut created_columns: std::collections::HashSet<(SqlIdentifier, SqlIdentifier)> =
-            std::collections::HashSet::new();
         // Emit CreateTable steps with the final (populated) schema.
         for table_name in &self.new_tables {
             if let Some(schema) = state.table(table_name) {
@@ -133,25 +147,17 @@ impl Env {
                         table: table_name.clone(),
                     });
                 }
-                for col_name in schema.columns.keys() {
-                    created_columns.insert((table_name.clone(), col_name.clone()));
-                }
                 steps.push(DdlStep::CreateTable {
                     name: table_name.clone(),
                     schema: schema.clone(),
                 });
             }
         }
-        // Emit AddColumn steps, skipping any that are already covered by a
-        // CreateTable (this can happen when outer and inner subquery scopes
-        // both resolve the same table/column independently).
+        // Emit AddColumn steps, skipping any for newly created tables
+        // (those columns are already included in the CreateTable DDL).
         for step in self.ddl_steps {
             match &step {
-                DdlStep::AddColumn {
-                    table, column_name, ..
-                } if created_columns.contains(&(table.clone(), column_name.clone())) => {
-                    // Skip — column is already part of the CreateTable.
-                }
+                DdlStep::AddColumn { table, .. } if self.new_tables.contains(table) => {}
                 _ => steps.push(step),
             }
         }
@@ -159,7 +165,6 @@ impl Env {
     }
 
     /// Capture a checkpoint of the current environment for backtracking.
-    #[cfg(test)]
     pub(crate) fn checkpoint(&self) -> EnvCheckpoint {
         EnvCheckpoint {
             bindings: self.bindings.clone(),
@@ -170,7 +175,6 @@ impl Env {
     }
 
     /// Restore environment from a previously captured checkpoint.
-    #[cfg(test)]
     pub(crate) fn restore(&mut self, cp: EnvCheckpoint) {
         self.bindings = cp.bindings;
         self.union_find = cp.union_find;
@@ -180,7 +184,6 @@ impl Env {
 }
 
 /// A snapshot of Env state for checkpoint/restore (backtracking).
-#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) struct EnvCheckpoint {
     bindings: Vec<Option<Binding>>,
@@ -202,8 +205,14 @@ pub enum ResolveError {
     UnifyError(#[from] crate::var::UnifyError),
     #[error("limit/offset {value} exceeds i64::MAX; cannot emit as SQL integer literal")]
     LimitOverflow { value: u64 },
-    #[error("constraint variant `{0}` is not yet supported by the resolver")]
-    Unsupported(&'static str),
+    /// A constraint variant reached a handler that doesn't yet support it.
+    /// Used to be `_ => {}` arms that silently dropped the constraint and
+    /// produced SQL that could spuriously match upstream by coincidence.
+    #[error("unsupported constraint variant {variant} in {location}")]
+    Unsupported {
+        variant: &'static str,
+        location: &'static str,
+    },
     #[error(
         "inner subquery references {referenced} variables but the outer recipe declares only {declared} kinds"
     )]
@@ -230,9 +239,9 @@ pub fn resolve(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
 ) -> Result<ResolverOutput, ResolveError> {
-    let mut env = resolve_schema(constraints, var_kinds, state, entropy)?;
+    let (mut env, expanded) = resolve_schema(constraints, var_kinds, state, entropy)?;
     let (query, params) =
-        ast_builder::build_select(&mut env, constraints, var_kinds, state, entropy)?;
+        ast_builder::build_select(&mut env, &expanded, var_kinds, state, entropy)?;
     let ddl = env.into_ddl_steps(state)?;
     Ok(ResolverOutput { query, ddl, params })
 }
@@ -281,27 +290,7 @@ mod tests {
         (state, rng)
     }
 
-    fn make_single_table_pattern() -> Pattern {
-        use crate::pattern::PatternBuilder;
-        let mut b = PatternBuilder::new("single_table");
-        let t = b.table();
-        let c = b.column(t);
-        b.from(t);
-        b.project_column(c, t);
-        b.build()
-    }
-
-    fn make_param_pattern() -> Pattern {
-        use crate::pattern::PatternBuilder;
-        let mut b = PatternBuilder::new("param");
-        let t = b.table();
-        let c1 = b.column(t);
-        let c2 = b.column(t);
-        b.from(t);
-        b.project_column(c1, t);
-        b.where_param(c2, t, BinaryOperator::Equal);
-        b.build()
-    }
+    // -- Env checkpoint tests --
 
     #[test]
     fn env_checkpoint_restore_round_trips() {
@@ -318,7 +307,7 @@ mod tests {
             Binding::Column {
                 name: SqlIdentifier::from("c0"),
                 sql_type: SqlType::Int(None),
-                table: SqlIdentifier::from("t0"),
+                table_var: VarId(0),
             },
         );
 
@@ -357,12 +346,13 @@ mod tests {
         let cp = env.checkpoint();
 
         // Unify vars 0 and 1
-        let mut alloc = crate::var::VarAllocator::new();
-        alloc.alloc(VarKind::Relation);
-        alloc.alloc(VarKind::Relation);
-        alloc.alloc(VarKind::Relation);
-        alloc.alloc(VarKind::Relation);
-        env.union_find.union(0, 1, alloc.kinds()).unwrap();
+        let kinds = vec![
+            VarKind::Relation,
+            VarKind::Relation,
+            VarKind::Relation,
+            VarKind::Relation,
+        ];
+        env.union_find.union(0, 1, &kinds).unwrap();
         assert!(env.union_find.same_set(0, 1));
 
         // Restore
@@ -370,6 +360,30 @@ mod tests {
 
         // After restore, 0 and 1 should no longer be in the same set
         assert!(!env.union_find.same_set(0, 1));
+    }
+
+    // -- Incremental resolution / try_resolve tests --
+
+    fn make_single_table_pattern() -> Pattern {
+        use crate::pattern::PatternBuilder;
+        let mut b = PatternBuilder::new("single_table");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.build()
+    }
+
+    fn make_param_pattern() -> Pattern {
+        use crate::pattern::PatternBuilder;
+        let mut b = PatternBuilder::new("param");
+        let t = b.table();
+        let c1 = b.column(t);
+        let c2 = b.column(t);
+        b.from(t);
+        b.project_column(c1, t);
+        b.where_param(c2, t, BinaryOperator::Equal);
+        b.build()
     }
 
     #[test]

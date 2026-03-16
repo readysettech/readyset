@@ -34,9 +34,11 @@ pub fn cte_with_join() -> Pattern {
     sq.project_column(c_cte, t_inner);
     let cte_alias = sq.commit_as_cte();
 
-    // Outer: join CTE with another table
+    // Outer: join CTE with another table. The CTE body's inner table is
+    // hidden behind the alias here, so we don't need a cross-scope NotEq
+    // to keep them distinct — a self-join through `cte0` is semantically
+    // fine even when the CTE happens to wrap the same base table.
     let t_join = b.table();
-    b.not_eq(t_inner, t_join);
     let c_join = b.column(t_join);
     let c_join_key = b.column(t_join);
 

@@ -1,8 +1,9 @@
-//! Aggregate patterns: count, sum, avg, min/max, count_distinct, group_by.
+//! Aggregate patterns: count, sum, avg, min/max, count_distinct, group_by,
+//! and dialect-specific aggregates (group_concat, array_agg).
 
 use readyset_sql::ast::BinaryOperator;
 
-use crate::constraint::{AggregateFn, TypeClass};
+use crate::constraint::{AggregateFn, DialectSupport, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// SELECT COUNT(t.c) FROM t
@@ -96,12 +97,73 @@ pub fn having_clause() -> Pattern {
     b.build()
 }
 
+/// SELECT GROUP_CONCAT(t.c) FROM t (MySQL only)
+pub fn group_concat() -> Pattern {
+    let mut b = PatternBuilder::new("group_concat");
+    let t = b.table();
+    let c = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::GroupConcat, c, t);
+    b.set_dialect_support(DialectSupport::MySqlOnly);
+    b.tags(&["aggregate", "mysql_only", "group_concat"]);
+    b.build()
+}
+
+/// SELECT t.c3, COUNT(t.c1), SUM(t.c2) FROM t GROUP BY t.c3
+///
+/// Multiple aggregates in one query trigger JoinAggregates dataflow nodes.
+pub fn multi_aggregate() -> Pattern {
+    let mut b = PatternBuilder::new("multi_aggregate");
+    let t = b.table();
+    let c_count = b.column(t);
+    let c_sum = b.column(t);
+    let c_group = b.column(t);
+    b.column_type_class(c_sum, TypeClass::Numeric);
+    b.from(t);
+    b.project_column(c_group, t);
+    b.project_aggregate(AggregateFn::Count { distinct: false }, c_count, t);
+    b.project_aggregate(AggregateFn::Sum { distinct: false }, c_sum, t);
+    b.group_by(c_group, t);
+    b.tags(&["aggregate", "group_by", "multi_aggregate"]);
+    b.build()
+}
+
+/// SELECT SUM(t.c1) FROM t WHERE t.c2 IN (?, ?, ?)
+///
+/// Combining an aggregate with WHERE IN triggers post-lookup aggregation
+/// in Readyset, where partial results from multiple point lookups are
+/// re-aggregated after the cache read.
+pub fn in_list_aggregate() -> Pattern {
+    let mut b = PatternBuilder::new("in_list_aggregate");
+    let t = b.table();
+    let c_agg = b.column(t);
+    let c_filter = b.column(t);
+    b.column_type_class(c_agg, TypeClass::Numeric);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Sum { distinct: false }, c_agg, t);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["aggregate", "filter", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT ARRAY_AGG(t.c) FROM t (PostgreSQL only)
+pub fn array_agg() -> Pattern {
+    let mut b = PatternBuilder::new("array_agg");
+    let t = b.table();
+    let c = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::ArrayAgg, c, t);
+    b.set_dialect_support(DialectSupport::PostgresOnly);
+    b.tags(&["aggregate", "postgres_only"]);
+    b.build()
+}
+
 #[cfg(test)]
 mod tests {
     use readyset_sql::Dialect;
 
     use super::*;
-    use crate::constraint::Constraint;
+    use crate::constraint::{Constraint, DialectSupport};
     use crate::test_util::resolve_pattern;
 
     #[test]
@@ -195,5 +257,112 @@ mod tests {
             sql.contains("COUNT(") || sql.contains("count("),
             "sql: {sql}"
         );
+    }
+
+    #[test]
+    fn group_concat_builds() {
+        let p = group_concat();
+        assert_eq!(p.name, "group_concat");
+        assert!(p.tags.contains(&"mysql_only"));
+        assert_eq!(p.dialect_support, DialectSupport::MySqlOnly);
+    }
+
+    #[test]
+    fn group_concat_resolves() {
+        let p = group_concat();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(
+            sql.contains("GROUP_CONCAT("),
+            "expected GROUP_CONCAT in sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn array_agg_builds() {
+        let p = array_agg();
+        assert_eq!(p.name, "array_agg");
+        assert!(p.tags.contains(&"postgres_only"));
+        assert_eq!(p.dialect_support, DialectSupport::PostgresOnly);
+    }
+
+    #[test]
+    fn array_agg_resolves() {
+        let p = array_agg();
+        let sql = resolve_pattern(&p, Dialect::PostgreSQL);
+        assert!(
+            sql.contains("ARRAY_AGG("),
+            "expected ARRAY_AGG in sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn multi_aggregate_builds() {
+        let p = multi_aggregate();
+        assert_eq!(p.name, "multi_aggregate");
+        assert!(p.tags.contains(&"aggregate"));
+        assert!(p.tags.contains(&"group_by"));
+
+        // Should have exactly 2 ProjectAggregate constraints
+        let agg_count = p
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::ProjectAggregate { .. }))
+            .count();
+        assert_eq!(agg_count, 2, "expected 2 ProjectAggregate constraints");
+
+        // Should have a GroupBy constraint
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::GroupBy { .. }))
+        );
+    }
+
+    #[test]
+    fn multi_aggregate_resolves() {
+        let p = multi_aggregate();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(
+            sql.contains("COUNT(") || sql.contains("count("),
+            "expected COUNT in sql: {sql}"
+        );
+        assert!(
+            sql.contains("SUM(") || sql.contains("sum("),
+            "expected SUM in sql: {sql}"
+        );
+        assert!(sql.contains("GROUP BY"), "expected GROUP BY in sql: {sql}");
+    }
+
+    #[test]
+    fn in_list_aggregate_builds() {
+        let p = in_list_aggregate();
+        assert_eq!(p.name, "in_list_aggregate");
+        assert!(p.tags.contains(&"aggregate"));
+        assert!(p.tags.contains(&"filter"));
+
+        // Should have a ProjectAggregate constraint
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::ProjectAggregate { .. }))
+        );
+
+        // Should have a WhereInParam constraint
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::WhereInParam { num_values: 3, .. }))
+        );
+    }
+
+    #[test]
+    fn in_list_aggregate_resolves() {
+        let p = in_list_aggregate();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(
+            sql.contains("SUM(") || sql.contains("sum("),
+            "expected SUM in sql: {sql}"
+        );
+        assert!(sql.contains("IN"), "expected IN in sql: {sql}");
     }
 }

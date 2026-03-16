@@ -70,14 +70,27 @@ pub struct GeneratorConfig {
     pub max_subquery_depth: usize,
     /// Default ColumnGenerationSpec for new non-PK columns
     pub default_gen_spec: ColumnGenerationSpec,
+    /// Prefix for generated table names (e.g. "i0_" produces "i0_t0", "i0_t1", ...).
+    /// Empty string means no prefix (default).
+    pub table_prefix: String,
+    /// When true, add extra compatibility rules that reject patterns Readyset
+    /// cannot deep-cache. This maximizes dataflow/reader-map coverage by avoiding
+    /// queries that would fall back to shallow caching or upstream proxying.
+    pub readyset_compatible: bool,
+    /// Maximum number of tables to retain in state. When exceeded, the oldest
+    /// tables are evicted on insertion. 0 means unlimited (default).
+    pub max_tables: usize,
 }
 
 impl Default for GeneratorConfig {
     fn default() -> Self {
         Self {
-            reuse_preference: 0.5,
+            reuse_preference: 0.9,
             max_subquery_depth: 2,
             default_gen_spec: ColumnGenerationSpec::Random,
+            table_prefix: String::new(),
+            readyset_compatible: false,
+            max_tables: 0,
         }
     }
 }
@@ -128,8 +141,17 @@ impl GenerationState {
         &self.config
     }
 
-    /// Add a table schema to the state.
+    /// Add a table schema to the state. If `max_tables` is set and the limit
+    /// would be exceeded, the oldest table is evicted first. Replacing an
+    /// existing entry by name does not count as an addition, so it does not
+    /// trigger eviction (silent schema corruption when reuse_preference is
+    /// high).
     pub fn add_table(&mut self, schema: TableSchema) {
+        let max = self.config.max_tables;
+        let already_present = self.tables.contains_key(&schema.name);
+        if max > 0 && !already_present && self.tables.len() >= max {
+            self.tables.shift_remove_index(0);
+        }
         self.tables.insert(schema.name.clone(), schema);
     }
 
@@ -171,9 +193,12 @@ impl GenerationState {
         table.columns.get_index(idx)
     }
 
-    /// Generate a fresh table name (t0, t1, ...).
+    /// Generate a fresh table name (t0, t1, ...) with optional prefix.
     pub fn fresh_table_name(&mut self) -> SqlIdentifier {
-        let name = SqlIdentifier::from(format!("t{}", self.table_counter));
+        let name = SqlIdentifier::from(format!(
+            "{}t{}",
+            self.config.table_prefix, self.table_counter
+        ));
         self.table_counter += 1;
         name
     }
@@ -383,7 +408,44 @@ mod tests {
     #[test]
     fn generator_config_defaults() {
         let config = GeneratorConfig::default();
-        assert!((config.reuse_preference - 0.5).abs() < f64::EPSILON);
+        assert!((config.reuse_preference - 0.9).abs() < f64::EPSILON);
         assert_eq!(config.max_subquery_depth, 2);
+        assert_eq!(config.max_tables, 0);
+    }
+
+    #[test]
+    fn max_tables_evicts_oldest() {
+        let config = GeneratorConfig {
+            max_tables: 3,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+
+        state.add_table(make_table("t0"));
+        state.add_table(make_table("t1"));
+        state.add_table(make_table("t2"));
+        assert_eq!(state.tables().len(), 3);
+
+        // Adding a 4th should evict the oldest (t0)
+        state.add_table(make_table("t3"));
+        assert_eq!(state.tables().len(), 3);
+        assert!(state.table(&SqlIdentifier::from("t0")).is_none());
+        assert!(state.table(&SqlIdentifier::from("t1")).is_some());
+        assert!(state.table(&SqlIdentifier::from("t2")).is_some());
+        assert!(state.table(&SqlIdentifier::from("t3")).is_some());
+    }
+
+    #[test]
+    fn max_tables_zero_means_unlimited() {
+        let config = GeneratorConfig {
+            max_tables: 0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+
+        for i in 0..50 {
+            state.add_table(make_table(&format!("t{i}")));
+        }
+        assert_eq!(state.tables().len(), 50);
     }
 }

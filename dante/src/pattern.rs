@@ -29,6 +29,8 @@ pub struct Pattern {
     pub weight: u32,
     /// Dialect support
     pub dialect_support: DialectSupport,
+    /// The primary table variable used for composition unification.
+    pub primary_table: VarId,
 }
 
 impl Pattern {
@@ -37,12 +39,11 @@ impl Pattern {
         self.vars.len()
     }
 
-    /// Convert this pattern to a Recipe, optionally renumbering variables
+    ////// Convert this pattern to a Recipe, optionally renumbering variables
     /// by `var_offset` to avoid conflicts when composing multiple patterns.
     /// The offset is applied transiently to constraints; the resulting
-    /// Recipe stores `var_kinds` indexed by the post-offset VarId so that
-    /// `var_kinds[v.0]` always works for any var that appears in
-    /// `constraints`.
+    /// Recipe stores `var_kinds` padded so that `var_kinds[v.0]` is
+    /// well-defined for any var that appears in `constraints`.
     ///
     /// # Padding invariant
     ///
@@ -62,13 +63,13 @@ impl Pattern {
         } else {
             self.constraints
                 .iter()
-                .map(|c| offset_constraint(c, var_offset))
+                .map(|c| c.map_var_ids(&|v| VarId(v.0 + var_offset)))
                 .collect()
         };
 
         // Padding kept as Relation purely to satisfy `var_kinds[v.0]`
         // indexing. See the doc comment for the invariant that keeps this
-        // sound. We also enforce it dynamically in debug builds.
+        // sound; the debug_assert below enforces it dynamically.
         let mut var_kinds = vec![VarKind::Relation; var_offset];
         var_kinds.extend(self.vars.iter().cloned());
 
@@ -85,6 +86,7 @@ impl Pattern {
             constraints,
             num_vars: self.vars.len(),
             var_kinds,
+            primary_table: VarId(self.primary_table.0 + var_offset),
         }
     }
 }
@@ -101,6 +103,115 @@ pub struct Recipe {
     pub num_vars: usize,
     /// Variable kinds, indexed by absolute VarId
     pub var_kinds: Vec<VarKind>,
+    /// Primary outer relation for this recipe — preserved across composes
+    /// so that subsequent partner patterns unify against the actual base
+    /// table rather than a hardcoded `VarId(0)`. The previous compose path
+    /// assumed `VarId(0)` was always the primary, which broke for any
+    /// pattern that allocates a non-table var first or never declares an
+    /// outer `BaseTable`.
+    pub primary_table: VarId,
+}
+
+impl Recipe {
+    /// Compose this recipe with another pattern by merging all constraints.
+    ///
+    /// Both patterns contribute all their constraints (projections, filters,
+    /// joins, etc.). The other pattern's variables are offset to avoid
+    /// overlap and its primary table is unified with this recipe's primary
+    /// table via an `Eq` constraint.
+    ///
+    /// Only structurally redundant constraints are deduplicated:
+    /// - `From` for the unified table (would create a duplicate FROM entry)
+    /// - `BaseTable` for the unified table (already declared by base)
+    /// - `Limit` (SQL allows only one; the base recipe's limit is kept)
+    /// - `Distinct` (redundant duplicate)
+    pub fn compose(&self, other: &Pattern) -> Recipe {
+        let offset = self.num_vars;
+        let other_recipe = other.to_recipe(offset);
+        let other_primary = other_recipe.primary_table;
+        let base_primary = self.primary_table;
+
+        let mut constraints = self.constraints.clone();
+
+        // If `other` self-joins on its primary (i.e. has a Join whose right
+        // is `Table(other_primary)`), unifying with Eq would make base's
+        // FROM and other's JOIN render the same physical table+alias —
+        // MySQL rejects that with "Not unique table/alias" (1066). Use
+        // AliasOf instead so the JOIN target gets a distinct SQL alias of
+        // the same underlying table.
+        let other_primary_is_join_target = other_recipe.constraints.iter().any(|c| {
+            matches!(
+                c,
+                Constraint::Join {
+                    right: JoinRight::Table(t),
+                    ..
+                } if *t == other_primary
+            )
+        });
+        if other_primary_is_join_target {
+            constraints.push(Constraint::AliasOf {
+                alias: other_primary,
+                original: base_primary,
+            });
+        } else {
+            constraints.push(Constraint::Eq(base_primary, other_primary));
+        }
+
+        let (mut base_has_limit, mut base_has_distinct, mut base_has_having, mut base_has_order_by) =
+            (false, false, false, false);
+        for c in &self.constraints {
+            match c {
+                Constraint::Limit { .. } => base_has_limit = true,
+                Constraint::Distinct => base_has_distinct = true,
+                Constraint::Having { .. } => base_has_having = true,
+                Constraint::OrderBy { .. } => base_has_order_by = true,
+                _ => {}
+            }
+        }
+
+        for c in &other_recipe.constraints {
+            let skip = match c {
+                // Deduplicate From for the unified table
+                Constraint::From(t) if *t == other_primary => true,
+                // Deduplicate BaseTable for the unified table
+                Constraint::BaseTable(t) if *t == other_primary => true,
+                // Keep only one Limit
+                Constraint::Limit { .. } if base_has_limit => true,
+                // Deduplicate Distinct
+                Constraint::Distinct if base_has_distinct => true,
+                // Keep only one Having
+                Constraint::Having { .. } if base_has_having => true,
+                // Keep only one OrderBy
+                Constraint::OrderBy { .. } if base_has_order_by => true,
+                _ => false,
+            };
+
+            if !skip {
+                constraints.push(c.clone());
+            }
+        }
+
+        // Cross-pattern relation references that happen to resolve to the
+        // same physical table get auto-aliased by the resolver
+        // (`resolve_table_exists`), so compose no longer emits the
+        // N×M `Or(NotEq, AliasOf)` cross-pair soup it used to.
+
+        // self.var_kinds is indexed 0..self.num_vars (no padding because
+        // self came from to_recipe(0) at the entry point). other_recipe's
+        // var_kinds starts with `offset` placeholder slots (the padding
+        // added by to_recipe(offset)) followed by other.num_vars real
+        // entries — extend past the padding so the merged var_kinds
+        // remains indexed by absolute VarId without gaps.
+        let mut var_kinds = self.var_kinds.clone();
+        var_kinds.extend(other_recipe.var_kinds.into_iter().skip(offset));
+
+        Recipe {
+            constraints,
+            num_vars: self.num_vars + other_recipe.num_vars,
+            var_kinds,
+            primary_table: base_primary,
+        }
+    }
 }
 
 /// Builder for constructing patterns ergonomically.
@@ -117,6 +228,7 @@ pub struct PatternBuilder {
     tags: Vec<&'static str>,
     weight: u32,
     dialect_support: DialectSupport,
+    primary_table: Option<VarId>,
 }
 
 impl PatternBuilder {
@@ -126,6 +238,7 @@ impl PatternBuilder {
             name,
             allocator: VarAllocator::new(),
             constraints: Vec::new(),
+            primary_table: None,
             tags: Vec::new(),
             weight: 1,
             dialect_support: DialectSupport::Both,
@@ -143,6 +256,9 @@ impl PatternBuilder {
     pub fn table(&mut self) -> VarId {
         let v = self.allocator.alloc(VarKind::Relation);
         self.constraints.push(Constraint::BaseTable(v));
+        if self.primary_table.is_none() {
+            self.primary_table = Some(v);
+        }
         v
     }
 
@@ -158,7 +274,7 @@ impl PatternBuilder {
     /// kind mismatch.
     pub fn alias_of(&mut self, original: VarId) -> VarId {
         debug_assert!(
-            matches!(self.allocator.kind(original), VarKind::Relation),
+            matches!(self.allocator.kind(original), Some(VarKind::Relation)),
             "alias_of requires a Relation var, got {:?}",
             self.allocator.kind(original)
         );
@@ -398,8 +514,29 @@ impl PatternBuilder {
     }
 
     /// Build the pattern, deriving `min_depth` and `num_vars` automatically.
+    ///
+    /// Panics if no primary outer relation can be located. The previous
+    /// behavior of silently defaulting to `VarId(0)` produced
+    /// `Unbound(VarId(0))` failures during composition for patterns that
+    /// allocate a non-table var first or never declare an outer `BaseTable`.
     pub fn build(self) -> Pattern {
         let min_depth = compute_min_depth(&self.constraints);
+        let primary_table = self.primary_table.unwrap_or_else(|| {
+            let outer_base = self.constraints.iter().find_map(|c| match c {
+                Constraint::BaseTable(v) => Some(*v),
+                _ => None,
+            });
+            if let Some(v) = outer_base {
+                return v;
+            }
+            panic!(
+                "PatternBuilder::build() for pattern `{name}`: no primary table set. \
+                 Call `.table()` (or otherwise declare an outer BaseTable / CTE / \
+                 FROM-subquery) before `.build()` — otherwise composition unifies \
+                 against an unallocated variable and the resolver fails with Unbound.",
+                name = self.name,
+            )
+        });
         Pattern {
             name: self.name,
             constraints: self.constraints,
@@ -408,24 +545,17 @@ impl PatternBuilder {
             min_depth,
             weight: self.weight,
             dialect_support: self.dialect_support,
+            primary_table,
         }
     }
 }
 
-/// A constraint collector for subquery/CTE inner constraints.
+/// A constraint collector for subquery/CTE inner scopes.
 ///
-/// Variables are allocated on the parent [`PatternBuilder`] (flat model).
-/// The SubqueryBuilder tracks the scope boundary to determine which
-/// variables are inner vs. cross-scope (shared).
-/// A constraint collector for subquery / CTE inner scopes.
-///
-/// Borrows the parent [`PatternBuilder`] so that variable allocation
-/// stays in a single shared allocator while constraints emitted from the
-/// subquery scope (BaseTable, ColumnExists, From, ProjectColumn, joins,
-/// filters, …) accumulate in the subquery's own constraint list and do
-/// not leak into the outer pattern's constraints. Commit the collected
-/// scope back into the outer pattern via one of `commit_as_where`,
-/// `commit_as_join`, or `commit_as_cte`.
+/// Variables are allocated against the parent [`PatternBuilder`] so the
+/// allocator stays shared, but emitted constraints accumulate in
+/// `self.constraints` and don't leak into the outer pattern. Commit via
+/// `commit_as_where`, `commit_as_join`, or `commit_as_cte`.
 #[derive(Debug)]
 pub struct SubqueryBuilder<'a> {
     /// Mutable borrow of the enclosing pattern. Allocations are made
@@ -473,7 +603,7 @@ impl<'a> SubqueryBuilder<'a> {
     /// Panics in debug builds if `original` is not a `Relation` variable.
     pub fn alias_of(&mut self, original: VarId) -> VarId {
         debug_assert!(
-            matches!(self.outer.allocator.kind(original), VarKind::Relation),
+            matches!(self.outer.allocator.kind(original), Some(VarKind::Relation)),
             "alias_of requires a Relation var, got {:?}",
             self.outer.allocator.kind(original)
         );
@@ -540,7 +670,7 @@ impl<'a> SubqueryBuilder<'a> {
         let mut shared = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for c in &self.constraints {
-            for var_id in constraint_var_ids(c) {
+            for var_id in c.var_ids() {
                 if var_id.0 < self.scope_start && seen.insert(var_id) {
                     shared.push(var_id);
                 }
@@ -597,6 +727,13 @@ impl<'a> SubqueryBuilder<'a> {
             constraints,
             shared_vars,
         });
+        // CTE-only outer scopes have no `BaseTable`; the alias *is* the
+        // primary outer relation, so adopt it as the primary table when one
+        // hasn't been set explicitly. Without this, `PatternBuilder::build`
+        // would panic for patterns like `simple_cte`.
+        if outer.primary_table.is_none() {
+            outer.primary_table = Some(alias);
+        }
         alias
     }
 }
@@ -694,211 +831,11 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             }
             ids
         }
-    }
-}
-
-/// Offset all VarIds in a constraint by the given amount.
-fn offset_constraint(c: &Constraint, offset: usize) -> Constraint {
-    let off = |v: VarId| VarId(v.0 + offset);
-
-    match c {
-        Constraint::BaseTable(v) => Constraint::BaseTable(off(*v)),
-        Constraint::AliasOf { alias, original } => Constraint::AliasOf {
-            alias: off(*alias),
-            original: off(*original),
-        },
-        Constraint::ColumnExists { col, table } => Constraint::ColumnExists {
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::ColumnTypeClass { col, type_class } => Constraint::ColumnTypeClass {
-            col: off(*col),
-            type_class: type_class.clone(),
-        },
-        Constraint::TypeCompatible(a, b) => Constraint::TypeCompatible(off(*a), off(*b)),
-        Constraint::Eq(a, b) => Constraint::Eq(off(*a), off(*b)),
-        Constraint::NotEq(a, b) => Constraint::NotEq(off(*a), off(*b)),
-        Constraint::From(v) => Constraint::From(off(*v)),
-        Constraint::Join {
-            operator,
-            right,
-            left_col,
-            right_col,
-        } => Constraint::Join {
-            operator: *operator,
-            right: match right {
-                JoinRight::Table(t) => JoinRight::Table(off(*t)),
-                JoinRight::Subquery {
-                    constraints,
-                    shared_vars,
-                } => JoinRight::Subquery {
-                    constraints: constraints
-                        .iter()
-                        .map(|c| offset_constraint(c, offset))
-                        .collect(),
-                    shared_vars: shared_vars.iter().copied().map(&off).collect(),
-                },
-                JoinRight::Cte {
-                    alias,
-                    constraints,
-                    shared_vars,
-                } => JoinRight::Cte {
-                    alias: off(*alias),
-                    constraints: constraints
-                        .iter()
-                        .map(|c| offset_constraint(c, offset))
-                        .collect(),
-                    shared_vars: shared_vars.iter().copied().map(&off).collect(),
-                },
-            },
-            left_col: off(*left_col),
-            right_col: off(*right_col),
-        },
-        Constraint::ProjectColumn { col, table } => Constraint::ProjectColumn {
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::ProjectAggregate {
-            function,
-            col,
-            table,
-        } => Constraint::ProjectAggregate {
-            function: function.clone(),
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::ProjectFunction { function, args } => Constraint::ProjectFunction {
-            function: function.clone(),
-            args: args.iter().map(|(c, t)| (off(*c), off(*t))).collect(),
-        },
-        Constraint::ProjectLiteral { literal } => Constraint::ProjectLiteral {
-            literal: literal.clone(),
-        },
-        Constraint::GroupBy { col, table } => Constraint::GroupBy {
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::Having {
-            function,
-            col,
-            table,
-            op,
-        } => Constraint::Having {
-            function: function.clone(),
-            col: off(*col),
-            table: off(*table),
-            op: *op,
-        },
-        Constraint::WhereParam { col, table, op } => Constraint::WhereParam {
-            col: off(*col),
-            table: off(*table),
-            op: *op,
-        },
-        Constraint::WhereInParam {
-            col,
-            table,
-            num_values,
-        } => Constraint::WhereInParam {
-            col: off(*col),
-            table: off(*table),
-            num_values: *num_values,
-        },
-        Constraint::WhereRangeParam { col, table } => Constraint::WhereRangeParam {
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::WhereLike {
-            col,
-            table,
-            negated,
-        } => Constraint::WhereLike {
-            col: off(*col),
-            table: off(*table),
-            negated: *negated,
-        },
-        Constraint::WhereIsNull {
-            col,
-            table,
-            negated,
-        } => Constraint::WhereIsNull {
-            col: off(*col),
-            table: off(*table),
-            negated: *negated,
-        },
-        Constraint::WhereBetweenParam { col, table } => Constraint::WhereBetweenParam {
-            col: off(*col),
-            table: off(*table),
-        },
-        Constraint::WhereColumnCompare {
-            left_col,
-            left_table,
-            op,
-            right_col,
-            right_table,
-        } => Constraint::WhereColumnCompare {
-            left_col: off(*left_col),
-            left_table: off(*left_table),
-            op: *op,
-            right_col: off(*right_col),
-            right_table: off(*right_table),
-        },
-        Constraint::WhereOr { conditions } => Constraint::WhereOr {
-            conditions: conditions
-                .iter()
-                .map(|c| offset_constraint(c, offset))
-                .collect(),
-        },
-        Constraint::OrderBy {
-            col,
-            table,
-            direction,
-            null_order,
-        } => Constraint::OrderBy {
-            col: off(*col),
-            table: off(*table),
-            direction: *direction,
-            null_order: *null_order,
-        },
-        Constraint::Limit { limit, offset: o } => Constraint::Limit {
-            limit: *limit,
-            offset: *o,
-        },
-        Constraint::Distinct => Constraint::Distinct,
-        Constraint::Subquery {
-            position,
-            constraints,
-            shared_vars,
-        } => Constraint::Subquery {
-            position: position.clone(),
-            constraints: constraints
-                .iter()
-                .map(|c| offset_constraint(c, offset))
-                .collect(),
-            shared_vars: shared_vars.iter().copied().map(&off).collect(),
-        },
-        Constraint::Cte {
-            alias,
-            constraints,
-            shared_vars,
-        } => Constraint::Cte {
-            alias: off(*alias),
-            constraints: constraints
-                .iter()
-                .map(|c| offset_constraint(c, offset))
-                .collect(),
-            shared_vars: shared_vars.iter().copied().map(&off).collect(),
-        },
-        Constraint::WindowFunction {
-            function,
-            partition_col,
-            order_col,
-            order_type,
-        } => Constraint::WindowFunction {
-            function: function.clone(),
-            partition_col: partition_col.map(|(c, t)| (off(c), off(t))),
-            order_col: order_col.map(|(c, t)| (off(c), off(t))),
-            order_type: *order_type,
-        },
+        Constraint::Or(preferred, fallback) => {
+            let mut ids: Vec<VarId> = preferred.iter().flat_map(constraint_var_ids).collect();
+            ids.extend(fallback.iter().flat_map(constraint_var_ids));
+            ids
+        }
     }
 }
 
@@ -1220,6 +1157,482 @@ mod tests {
                 .constraints
                 .iter()
                 .any(|c| matches!(c, Constraint::WindowFunction { .. }))
+        );
+    }
+
+    // --- Tests for Recipe::compose (symmetric composition) ---
+
+    /// Helper: build a simple "filter" pattern with a WHERE BETWEEN.
+    fn make_between_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("between");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.where_between_param(c, t);
+        b.tags(&["filter"]);
+        b.build()
+    }
+
+    /// Helper: build a simple aggregate pattern (COUNT with GROUP BY).
+    fn make_aggregate_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("count_grouped");
+        let t = b.table();
+        let agg_col = b.column(t);
+        let group_col = b.column(t);
+        b.column_type_class(agg_col, TypeClass::Numeric);
+        b.from(t);
+        b.project_aggregate(AggregateFn::Count { distinct: false }, agg_col, t);
+        b.project_column(group_col, t);
+        b.group_by(group_col, t);
+        b.tags(&["aggregate", "group_by"]);
+        b.build()
+    }
+
+    /// Helper: build a simple single_table pattern.
+    fn make_single_table_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("single_table");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.tags(&["base"]);
+        b.build()
+    }
+
+    /// Helper: build an inner_join pattern.
+    fn make_inner_join_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("inner_join");
+        let t1 = b.table();
+        let c1 = b.column(t1);
+        let t2 = b.table();
+        let c2 = b.column(t2);
+        b.type_compatible(c1, c2);
+        b.from(t1);
+        b.join_table(JoinOperator::InnerJoin, t2, c1, c2);
+        b.project_column(c1, t1);
+        b.project_column(c2, t2);
+        b.tags(&["join", "two_table"]);
+        b.build()
+    }
+
+    /// Helper: build a topk pattern (ORDER BY + LIMIT).
+    fn make_topk_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("topk");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.order_by(c, t, OrderType::OrderDescending, None);
+        b.limit(10, None);
+        b.tags(&["ordering", "limit"]);
+        b.build()
+    }
+
+    #[test]
+    fn compose_merges_all_constraints() {
+        // Compose single_table + between. Both patterns' constraints should
+        // be present in the result (modulo dedup of From/BaseTable for the
+        // unified table).
+        let base = make_single_table_pattern();
+        let addon = make_between_pattern();
+
+        let recipe = base.to_recipe(0).compose(&addon);
+
+        // base has 2 vars, addon has 2 vars → 4 total
+        assert_eq!(recipe.num_vars, 4);
+
+        // Should have WhereBetweenParam from addon
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::WhereBetweenParam { .. })),
+            "compose should keep WHERE from second pattern"
+        );
+
+        // Should have ProjectColumn from BOTH patterns
+        let project_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::ProjectColumn { .. }))
+            .count();
+        assert_eq!(
+            project_count, 2,
+            "compose should keep projections from both patterns"
+        );
+
+        // Should have Eq unifying the two primary tables
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Eq(VarId(0), VarId(2)))),
+            "compose should unify primary tables"
+        );
+    }
+
+    #[test]
+    fn compose_deduplicates_from_for_unified_table() {
+        let base = make_single_table_pattern();
+        let addon = make_between_pattern();
+
+        let recipe = base.to_recipe(0).compose(&addon);
+
+        // Only ONE From constraint for the unified primary table.
+        let from_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::From(_)))
+            .count();
+        assert_eq!(
+            from_count, 1,
+            "should have exactly one From for unified table, got {from_count}"
+        );
+    }
+
+    #[test]
+    fn compose_keeps_non_unified_from() {
+        // Compose single_table + inner_join. The join's second table should
+        // keep its From (via the Join constraint — inner_join only has From
+        // for the left table, but it has a Join for the right table).
+        let base = make_single_table_pattern();
+        let join = make_inner_join_pattern();
+
+        let recipe = base.to_recipe(0).compose(&join);
+
+        // base has 2 vars, join has 4 vars → 6 total
+        assert_eq!(recipe.num_vars, 6);
+
+        // Should have Join constraint from the join pattern
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Join { .. })),
+            "compose should keep Join from second pattern"
+        );
+
+        // The join pattern's primary table From is deduplicated, but the
+        // Join constraint (which handles the right table) is kept.
+        let from_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::From(_)))
+            .count();
+        assert_eq!(
+            from_count, 1,
+            "should have one From (join's second table comes via Join, not From)"
+        );
+    }
+
+    #[test]
+    fn compose_keeps_both_projections_aggregate_plus_filter() {
+        // Compose aggregate + between. The old compose_addon would drop
+        // between's ProjectColumn. The new compose should keep it.
+        let agg = make_aggregate_pattern();
+        let filter = make_between_pattern();
+
+        let recipe = agg.to_recipe(0).compose(&filter);
+
+        // Should have ProjectAggregate from aggregate pattern
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::ProjectAggregate { .. })),
+            "compose should keep aggregate projection"
+        );
+
+        // Should have ProjectColumn from BOTH patterns (group_col from agg
+        // + projected col from filter)
+        let project_col_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::ProjectColumn { .. }))
+            .count();
+        assert_eq!(
+            project_col_count, 2,
+            "compose should keep ProjectColumn from both patterns"
+        );
+
+        // Should have WhereBetweenParam
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::WhereBetweenParam { .. })),
+            "compose should keep WHERE from filter pattern"
+        );
+
+        // Should have GroupBy from aggregate
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::GroupBy { .. })),
+            "compose should keep GroupBy from aggregate pattern"
+        );
+    }
+
+    #[test]
+    fn compose_handles_limit_conflict() {
+        // Compose topk (has LIMIT 10) with another pattern that also has LIMIT.
+        let topk = make_topk_pattern();
+        // Build a pattern with a different limit
+        let mut b = PatternBuilder::new("limited");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.limit(5, Some(10));
+        let limited = b.build();
+
+        let recipe = topk.to_recipe(0).compose(&limited);
+
+        // Should have exactly one Limit constraint (from the base)
+        let limit_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::Limit { .. }))
+            .count();
+        assert_eq!(
+            limit_count, 1,
+            "compose should keep only one Limit, got {limit_count}"
+        );
+
+        // The kept limit should be the base's (limit=10, no offset)
+        assert!(
+            recipe.constraints.iter().any(|c| matches!(
+                c,
+                Constraint::Limit {
+                    limit: 10,
+                    offset: None
+                }
+            )),
+            "compose should keep base pattern's Limit"
+        );
+    }
+
+    #[test]
+    fn compose_deduplicates_distinct() {
+        let mut b1 = PatternBuilder::new("distinct1");
+        let t = b1.table();
+        let c = b1.column(t);
+        b1.from(t);
+        b1.project_column(c, t);
+        b1.distinct();
+        let p1 = b1.build();
+
+        let mut b2 = PatternBuilder::new("distinct2");
+        let t2 = b2.table();
+        let c2 = b2.column(t2);
+        b2.from(t2);
+        b2.project_column(c2, t2);
+        b2.distinct();
+        let p2 = b2.build();
+
+        let recipe = p1.to_recipe(0).compose(&p2);
+
+        let distinct_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::Distinct))
+            .count();
+        assert_eq!(
+            distinct_count, 1,
+            "compose should deduplicate Distinct, got {distinct_count}"
+        );
+    }
+
+    #[test]
+    fn compose_deduplicates_base_table_for_unified() {
+        let base = make_single_table_pattern();
+        let addon = make_between_pattern();
+
+        let recipe = base.to_recipe(0).compose(&addon);
+
+        // Should have only one BaseTable for VarId(0) — the second pattern's
+        // BaseTable for its primary table (which maps to VarId(2) after offset)
+        // should be dropped since it's unified.
+        let base_table_for_primary = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::BaseTable(VarId(0))))
+            .count();
+        assert_eq!(
+            base_table_for_primary, 1,
+            "base's primary table BaseTable should appear exactly once"
+        );
+
+        // VarId(2) (addon's primary table after offset) should NOT have BaseTable
+        let base_table_for_addon_primary = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::BaseTable(VarId(2))))
+            .count();
+        assert_eq!(
+            base_table_for_addon_primary, 0,
+            "addon's primary table BaseTable should be dropped (unified with base)"
+        );
+    }
+
+    #[test]
+    fn compose_deduplicates_having() {
+        use crate::constraint::AggregateFn;
+        use readyset_sql::ast::BinaryOperator;
+
+        let mut b1 = PatternBuilder::new("having1");
+        let t = b1.table();
+        let c_group = b1.column(t);
+        let c_agg = b1.column(t);
+        b1.from(t);
+        b1.project_column(c_group, t);
+        b1.project_aggregate(AggregateFn::Count { distinct: false }, c_agg, t);
+        b1.group_by(c_group, t);
+        b1.having(
+            AggregateFn::Count { distinct: false },
+            c_agg,
+            t,
+            BinaryOperator::Greater,
+        );
+        let p1 = b1.build();
+
+        let mut b2 = PatternBuilder::new("having2");
+        let t2 = b2.table();
+        let c2_group = b2.column(t2);
+        let c2_agg = b2.column(t2);
+        b2.from(t2);
+        b2.project_column(c2_group, t2);
+        b2.project_aggregate(AggregateFn::Count { distinct: false }, c2_agg, t2);
+        b2.group_by(c2_group, t2);
+        b2.having(
+            AggregateFn::Count { distinct: false },
+            c2_agg,
+            t2,
+            BinaryOperator::Greater,
+        );
+        let p2 = b2.build();
+
+        let recipe = p1.to_recipe(0).compose(&p2);
+
+        let having_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::Having { .. }))
+            .count();
+        assert_eq!(
+            having_count, 1,
+            "compose should deduplicate Having, got {having_count}"
+        );
+    }
+
+    #[test]
+    fn compose_deduplicates_order_by() {
+        let topk = make_topk_pattern();
+        // Build a pattern with a different ORDER BY
+        let mut b = PatternBuilder::new("ordered");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.order_by(c, t, OrderType::OrderAscending, None);
+        let ordered = b.build();
+
+        let recipe = topk.to_recipe(0).compose(&ordered);
+
+        let order_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::OrderBy { .. }))
+            .count();
+        assert_eq!(
+            order_count, 1,
+            "compose should keep only one OrderBy, got {order_count}"
+        );
+    }
+
+    #[test]
+    fn primary_table_is_first_table() {
+        let mut b = PatternBuilder::new("test");
+        let t = b.table();
+        let _c = b.column(t);
+        let _t2 = b.table();
+        let p = b.build();
+        assert_eq!(p.primary_table, VarId(0));
+    }
+
+    #[test]
+    fn compose_aliases_when_other_primary_is_join_target() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+        use readyset_sql::{Dialect, DialectDisplay};
+
+        use crate::entropy::Entropy;
+        use crate::resolver::resolve;
+        use crate::state::{GenerationState, GeneratorConfig};
+
+        // A pattern whose `primary_table` is the JOIN target rather than its
+        // FROM relation. Real patterns with this shape (e.g. cte_with_join)
+        // arrive later in the stack, but the bug lives entirely in compose
+        // and a hand-built minimal pattern is enough to drive it.
+        let other = {
+            let mut b = PatternBuilder::new("synth_join_target_primary");
+            let t_join = b.table(); // VarId(0) — auto-set as primary
+            let t_from = b.table(); // VarId(1)
+            let c_left = b.column(t_from);
+            let c_right = b.column(t_join);
+            b.column_type_class(c_left, TypeClass::Integer);
+            b.column_type_class(c_right, TypeClass::Integer);
+            b.from(t_from);
+            b.project_column(c_left, t_from);
+            b.join_table(JoinOperator::InnerJoin, t_join, c_left, c_right);
+            b.build()
+        };
+        assert_eq!(
+            other.primary_table,
+            VarId(0),
+            "sanity: primary is the join target"
+        );
+
+        let composed = make_single_table_pattern().to_recipe(0).compose(&other);
+
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let output = resolve(
+            &composed.constraints,
+            &composed.var_kinds,
+            &mut state,
+            &mut entropy,
+        )
+        .expect("composed recipe should resolve");
+
+        // Without the AliasOf-on-self-join fix, base's From and other's Join
+        // both render as the same `tN` with no AS clause, and MySQL rejects
+        // with 1066 "Not unique table/alias". The fix forces an alias on the
+        // join target — assert the rendered SQL JOIN target carries " AS ".
+        let sql = output.query.display(Dialect::MySQL).to_string();
+        let join_idx = sql
+            .find("INNER JOIN ")
+            .expect("synth pattern must produce an INNER JOIN");
+        let join_tail = &sql[join_idx + "INNER JOIN ".len()..];
+        let join_chunk = join_tail.split(" ON ").next().unwrap_or(join_tail);
+        assert!(
+            join_chunk.contains(" AS "),
+            "INNER JOIN target must be aliased to avoid duplicate-table SQL: \
+             chunk={join_chunk:?}\nsql={sql}"
+        );
+        // The cross-pattern Or fallback aliases the FROM-side reference too,
+        // so the rendered SQL has at least two " AS " clauses (one for base's
+        // From, one for other's Join target).
+        assert!(
+            sql.matches(" AS `").count() >= 2,
+            "expected aliased self-join with two `AS` clauses: {sql}"
         );
     }
 }

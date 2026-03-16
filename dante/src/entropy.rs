@@ -13,73 +13,115 @@ use rand::prelude::*;
 /// This type is not generic -- it uses dynamic dispatch for the inner RNG. This
 /// enables trait objects to remain dyn-compatible. The cost of dynamic dispatch
 /// is negligible compared to database operations.
+///
+/// Supports checkpoint / restore so that constraint resolvers can backtrack
+/// over speculative branches without leaking RNG state across the rollback
+/// boundary. While a checkpoint is outstanding, every `next_u64` is recorded on
+/// a tape; on restore the read head is rewound and subsequent reads replay
+/// from the tape until exhausted, then resume drawing from the inner RNG.
 pub struct Entropy<'a> {
     rng: &'a mut dyn rand::Rng,
+    /// u64s consumed since the last [`Self::release`]; replayed on restore.
+    tape: Vec<u64>,
+    /// Index into `tape`. Reads with `head < tape.len()` replay from the tape;
+    /// reads with `head == tape.len()` draw from `rng` and append.
+    head: usize,
+}
+
+/// Opaque snapshot of an [`Entropy`] read position; pass back to
+/// [`Entropy::restore`] to rewind the RNG to that point.
+#[derive(Debug, Clone, Copy)]
+pub struct EntropyCheckpoint {
+    head: usize,
 }
 
 impl fmt::Debug for Entropy<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Entropy").finish_non_exhaustive()
+        f.debug_struct("Entropy")
+            .field("tape_len", &self.tape.len())
+            .field("head", &self.head)
+            .finish_non_exhaustive()
     }
 }
 
 impl<'a> Entropy<'a> {
     /// Wrap a mutable reference to any `rand::Rng` implementation.
     pub fn new(rng: &'a mut dyn rand::Rng) -> Self {
-        Self { rng }
+        Self {
+            rng,
+            tape: Vec::new(),
+            head: 0,
+        }
     }
 
-    /// Reborrow as a new `Entropy` with a shorter lifetime.
-    pub fn reborrow(&mut self) -> Entropy<'_> {
-        Entropy { rng: self.rng }
+    /// Capture the current RNG read position so callers can rewind to it on
+    /// rollback. Cheap; does not allocate.
+    pub fn checkpoint(&self) -> EntropyCheckpoint {
+        EntropyCheckpoint { head: self.head }
     }
 
-    /// Pick a random element from a non-empty slice.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the slice is empty.
-    pub fn choose<'b, T>(&mut self, items: &'b [T]) -> &'b T {
-        assert!(
-            !items.is_empty(),
-            "Entropy::choose called with empty slice: caller precondition violated"
+    /// Rewind the RNG read head to a previous checkpoint. Subsequent reads
+    /// replay tape entries until the head catches up to the recorded length,
+    /// then resume drawing from the inner RNG.
+    pub fn restore(&mut self, cp: EntropyCheckpoint) {
+        debug_assert!(
+            cp.head <= self.tape.len(),
+            "checkpoint head {} exceeds tape length {}",
+            cp.head,
+            self.tape.len()
         );
-        let idx = self.range(0..items.len());
-        &items[idx]
+        self.head = cp.head;
     }
 
-    /// Pick a random element from a non-empty slice, returning a clone.
+    /// Discard the recorded tape if all bytes have been consumed. Call once
+    /// the resolver has committed to a branch and no further restore can
+    /// happen against earlier checkpoints. No-op if a restore is still
+    /// pending (head < tape.len()).
+    pub fn release(&mut self) {
+        if self.head == self.tape.len() {
+            self.tape.clear();
+            self.head = 0;
+        }
+    }
+
+    /// Pick a random element from a slice.
     ///
-    /// # Panics
+    /// Returns `None` if the slice is empty.
+    pub fn choose<'b, T>(&mut self, items: &'b [T]) -> Option<&'b T> {
+        if items.is_empty() {
+            return None;
+        }
+        let idx = self.range(0..items.len());
+        Some(&items[idx])
+    }
+
+    /// Pick a random element from a slice, returning a clone.
     ///
-    /// Panics if the slice is empty.
-    pub fn choose_cloned<T: Clone>(&mut self, items: &[T]) -> T {
-        self.choose(items).clone()
+    /// Returns `None` if the slice is empty.
+    pub fn choose_cloned<T: Clone>(&mut self, items: &[T]) -> Option<T> {
+        self.choose(items).cloned()
     }
 
     /// Weighted random selection. Each item is paired with a non-negative weight.
     ///
-    /// # Panics
-    ///
-    /// Panics if `items` is empty or all weights are zero.
-    pub fn choose_weighted<'b, T>(&mut self, items: &'b [(T, u32)]) -> &'b T {
-        assert!(
-            !items.is_empty(),
-            "Entropy::choose_weighted called with empty items: caller precondition violated"
-        );
+    /// Returns `None` if `items` is empty or all weights are zero.
+    pub fn choose_weighted<'b, T>(&mut self, items: &'b [(T, u32)]) -> Option<&'b T> {
+        if items.is_empty() {
+            return None;
+        }
         let total: u32 = items.iter().map(|(_, w)| *w).sum();
-        assert!(
-            total > 0,
-            "Entropy::choose_weighted: total weight must be positive"
-        );
+        if total == 0 {
+            return None;
+        }
         let mut pick = self.range(0..total);
         for (item, weight) in items {
             if pick < *weight {
-                return item;
+                return Some(item);
             }
             pick -= *weight;
         }
-        &items.last().expect("non-empty items").0
+        // Unreachable if total > 0, but safe fallback
+        Some(&items.last()?.0)
     }
 
     /// Generate a random value in the given range.
@@ -114,16 +156,32 @@ impl<'a> Entropy<'a> {
 impl rand::rand_core::TryRng for Entropy<'_> {
     type Error = std::convert::Infallible;
 
-    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
-        Ok(self.rng.next_u32())
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let v = if self.head < self.tape.len() {
+            let v = self.tape[self.head];
+            self.head += 1;
+            v
+        } else {
+            let v = self.rng.next_u64();
+            self.tape.push(v);
+            self.head += 1;
+            v
+        };
+        Ok(v)
     }
 
-    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
-        Ok(self.rng.next_u64())
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        // Truncate the recorded u64 so that backtracking over a u32 read
+        // replays a deterministic value. Rate-limited callers (range, etc.)
+        // saturate well below the u32 ceiling so the truncation is harmless.
+        Ok(self.try_next_u64()? as u32)
     }
 
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
-        self.rng.fill_bytes(dest);
+        for chunk in dest.chunks_mut(8) {
+            let bytes = self.try_next_u64()?.to_le_bytes();
+            chunk.copy_from_slice(&bytes[..chunk.len()]);
+        }
         Ok(())
     }
 }
@@ -151,7 +209,7 @@ mod tests {
         let mut e = Entropy::new(&mut rng);
         let items = [10, 20, 30, 40, 50];
         for _ in 0..100 {
-            let picked = e.choose(&items);
+            let picked = e.choose(&items).unwrap();
             assert!(items.contains(picked));
         }
     }
@@ -162,7 +220,7 @@ mod tests {
         let mut e = Entropy::new(&mut rng);
         let items = [("always", 1000u32), ("never", 0u32)];
         for _ in 0..100 {
-            let picked = e.choose_weighted(&items);
+            let picked = e.choose_weighted(&items).unwrap();
             assert_eq!(*picked, "always");
         }
     }
@@ -180,40 +238,89 @@ mod tests {
     }
 
     #[test]
-    fn reborrow_continues_sequence() {
-        // Reborrowing must consume bytes from the parent RNG, so the
-        // sequence observed through a reborrow is a contiguous slice of
-        // the parent's stream. Compare two parallel runs that draw the
-        // same number of values with and without a reborrow in the middle:
-        // the values must match exactly.
-        let mut rng_a = SmallRng::seed_from_u64(99);
-        let mut e_a = Entropy::new(&mut rng_a);
-        let with_reborrow: Vec<u32> = {
-            let v1 = e_a.range(0..1000u32);
-            let v2 = {
-                let mut e2 = e_a.reborrow();
-                e2.range(0..1000u32)
-            };
-            let v3 = e_a.range(0..1000u32);
-            vec![v1, v2, v3]
-        };
-
-        let mut rng_b = SmallRng::seed_from_u64(99);
-        let mut e_b = Entropy::new(&mut rng_b);
-        let no_reborrow: Vec<u32> = (0..3).map(|_| e_b.range(0..1000u32)).collect();
-
-        assert_eq!(
-            with_reborrow, no_reborrow,
-            "reborrow should consume bits from the parent stream"
-        );
-    }
-
-    #[test]
     fn coin_flip_returns_both_values() {
         let mut rng = SmallRng::seed_from_u64(1);
         let mut e = Entropy::new(&mut rng);
         let results: Vec<bool> = (0..100).map(|_| e.coin_flip()).collect();
         assert!(results.contains(&true));
         assert!(results.contains(&false));
+    }
+
+    #[test]
+    fn choose_empty_returns_none() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let mut e = Entropy::new(&mut rng);
+        let items: &[i32] = &[];
+        assert!(e.choose(items).is_none());
+    }
+
+    #[test]
+    fn choose_weighted_empty_returns_none() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let mut e = Entropy::new(&mut rng);
+        let items: &[(i32, u32)] = &[];
+        assert!(e.choose_weighted(items).is_none());
+    }
+
+    #[test]
+    fn choose_weighted_zero_total_returns_none() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let mut e = Entropy::new(&mut rng);
+        let items = [(1, 0u32), (2, 0u32)];
+        assert!(e.choose_weighted(&items).is_none());
+    }
+
+    #[test]
+    fn checkpoint_restore_replays_recorded_values() {
+        // Reads after a restore must replay the values consumed since the
+        // checkpoint. This is the foundational property for Or-branch
+        // backtracking: branch_b sees the RNG in the same state branch_a
+        // saw it in.
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut e = Entropy::new(&mut rng);
+        let cp = e.checkpoint();
+        let a1 = e.next_u64();
+        let a2 = e.next_u64();
+        e.restore(cp);
+        let b1 = e.next_u64();
+        let b2 = e.next_u64();
+        assert_eq!(a1, b1);
+        assert_eq!(a2, b2);
+    }
+
+    #[test]
+    fn checkpoint_restore_branch_independence() {
+        // Reads after a checkpoint+consume+restore are equivalent to fresh
+        // reads from the same seed (i.e., the speculative reads do not
+        // leak into the post-restore stream).
+        let mut rng_a = SmallRng::seed_from_u64(7);
+        let mut e_a = Entropy::new(&mut rng_a);
+        let cp = e_a.checkpoint();
+        let _ = e_a.next_u64();
+        let _ = e_a.next_u64();
+        e_a.restore(cp);
+        let v_after_restore = e_a.next_u64();
+
+        let mut rng_b = SmallRng::seed_from_u64(7);
+        let mut e_b = Entropy::new(&mut rng_b);
+        let v_fresh = e_b.next_u64();
+
+        assert_eq!(v_after_restore, v_fresh);
+    }
+
+    #[test]
+    fn release_clears_tape_when_fully_consumed() {
+        let mut rng = SmallRng::seed_from_u64(1);
+        let mut e = Entropy::new(&mut rng);
+        let cp = e.checkpoint();
+        let _ = e.next_u64();
+        let _ = e.next_u64();
+        e.release();
+        // After release with head == tape.len(), tape should reset so that
+        // the next checkpoint starts fresh.
+        let cp2 = e.checkpoint();
+        assert_eq!(cp2.head, 0);
+        // Underlying stream continues — no replay of the prior reads.
+        let _ = cp; // silences unused warning across the older checkpoint
     }
 }

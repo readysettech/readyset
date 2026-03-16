@@ -54,6 +54,13 @@ pub enum ScalarFn {
     Trim,
     Substring,
     Concat,
+    ConcatWs,
+    Round,
+    Length,
+    Month,
+    DayOfWeek,
+    Greatest,
+    Least,
 }
 
 /// Window function specifier for `WindowFunction` constraints.
@@ -77,8 +84,6 @@ pub enum LiteralKind {
 /// Where a subquery appears in the outer query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubqueryPosition {
-    /// Subquery as a join target (e.g., `JOIN (SELECT ...) sub ON ...`)
-    JoinSubquery(JoinOperator),
     /// Uncorrelated `EXISTS (SELECT ...)`
     ExistsUncorrelated,
     /// Correlated `EXISTS (SELECT ... WHERE inner.col = outer.col)`
@@ -115,6 +120,17 @@ pub enum DialectSupport {
     Both,
     MySqlOnly,
     PostgresOnly,
+}
+
+impl DialectSupport {
+    /// Returns true if this pattern supports the given dialect.
+    pub fn supports(&self, dialect: readyset_sql::Dialect) -> bool {
+        match self {
+            DialectSupport::Both => true,
+            DialectSupport::MySqlOnly => dialect == readyset_sql::Dialect::MySQL,
+            DialectSupport::PostgresOnly => dialect == readyset_sql::Dialect::PostgreSQL,
+        }
+    }
 }
 
 /// A single declarative assertion about the query being generated.
@@ -244,6 +260,15 @@ pub enum Constraint {
         shared_vars: Vec<VarId>,
     },
 
+    // --- Disjunctive ---
+    /// Disjunctive constraint: if all constraints in the first branch are
+    /// satisfied, nothing happens. If any constraint in the first branch
+    /// fails, the second branch is applied instead.
+    ///
+    /// Used during pattern composition to express invariants like "these two
+    /// table variables must be different tables, or one must be aliased."
+    Or(Vec<Constraint>, Vec<Constraint>),
+
     // --- Window functions ---
     /// A window function in the SELECT list.
     WindowFunction {
@@ -254,77 +279,279 @@ pub enum Constraint {
     },
 }
 
+impl Constraint {
+    /// Collect all directly referenced VarIds (non-recursive into subqueries/CTEs).
+    pub fn var_ids(&self) -> Vec<VarId> {
+        match self {
+            Constraint::BaseTable(v) => vec![*v],
+            Constraint::AliasOf { alias, original } => vec![*alias, *original],
+            Constraint::ColumnExists { col, table } => vec![*col, *table],
+            Constraint::ColumnTypeClass { col, .. } => vec![*col],
+            Constraint::TypeCompatible(a, b) | Constraint::Eq(a, b) | Constraint::NotEq(a, b) => {
+                vec![*a, *b]
+            }
+            Constraint::From(v) => vec![*v],
+            Constraint::Join {
+                right,
+                left_col,
+                right_col,
+                ..
+            } => {
+                let mut ids = vec![*left_col, *right_col];
+                if let JoinRight::Table(t) = right {
+                    ids.push(*t);
+                }
+                ids
+            }
+            Constraint::ProjectColumn { col, table }
+            | Constraint::GroupBy { col, table }
+            | Constraint::WhereRangeParam { col, table }
+            | Constraint::WhereBetweenParam { col, table } => vec![*col, *table],
+            Constraint::ProjectAggregate { col, table, .. }
+            | Constraint::Having { col, table, .. }
+            | Constraint::WhereParam { col, table, .. }
+            | Constraint::WhereInParam { col, table, .. }
+            | Constraint::WhereLike { col, table, .. }
+            | Constraint::WhereIsNull { col, table, .. } => vec![*col, *table],
+            Constraint::ProjectFunction { args, .. } => {
+                args.iter().flat_map(|(c, t)| [*c, *t]).collect()
+            }
+            Constraint::ProjectLiteral { .. } | Constraint::Limit { .. } | Constraint::Distinct => {
+                vec![]
+            }
+            Constraint::WhereColumnCompare {
+                left_col,
+                left_table,
+                right_col,
+                right_table,
+                ..
+            } => vec![*left_col, *left_table, *right_col, *right_table],
+            Constraint::WhereOr { conditions } => {
+                conditions.iter().flat_map(|c| c.var_ids()).collect()
+            }
+            Constraint::OrderBy { col, table, .. } => vec![*col, *table],
+            Constraint::Subquery { .. } | Constraint::Cte { .. } => vec![],
+            Constraint::Or(preferred, fallback) => {
+                let mut ids: Vec<VarId> = preferred.iter().flat_map(|c| c.var_ids()).collect();
+                ids.extend(fallback.iter().flat_map(|c| c.var_ids()));
+                ids
+            }
+            Constraint::WindowFunction {
+                partition_col,
+                order_col,
+                ..
+            } => {
+                let mut ids = Vec::new();
+                if let Some((c, t)) = partition_col {
+                    ids.push(*c);
+                    ids.push(*t);
+                }
+                if let Some((c, t)) = order_col {
+                    ids.push(*c);
+                    ids.push(*t);
+                }
+                ids
+            }
+        }
+    }
+
+    /// Apply a mapping function to every VarId, returning a new Constraint.
+    /// Recurses into nested constraint vecs (subqueries, CTEs, Or, WhereOr).
+    pub fn map_var_ids(&self, f: &impl Fn(VarId) -> VarId) -> Constraint {
+        match self {
+            Constraint::BaseTable(v) => Constraint::BaseTable(f(*v)),
+            Constraint::AliasOf { alias, original } => Constraint::AliasOf {
+                alias: f(*alias),
+                original: f(*original),
+            },
+            Constraint::ColumnExists { col, table } => Constraint::ColumnExists {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::ColumnTypeClass { col, type_class } => Constraint::ColumnTypeClass {
+                col: f(*col),
+                type_class: type_class.clone(),
+            },
+            Constraint::TypeCompatible(a, b) => Constraint::TypeCompatible(f(*a), f(*b)),
+            Constraint::Eq(a, b) => Constraint::Eq(f(*a), f(*b)),
+            Constraint::NotEq(a, b) => Constraint::NotEq(f(*a), f(*b)),
+            Constraint::From(v) => Constraint::From(f(*v)),
+            Constraint::Join {
+                operator,
+                right,
+                left_col,
+                right_col,
+            } => Constraint::Join {
+                operator: *operator,
+                right: match right {
+                    JoinRight::Table(t) => JoinRight::Table(f(*t)),
+                    JoinRight::Subquery {
+                        constraints,
+                        shared_vars,
+                    } => JoinRight::Subquery {
+                        constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
+                        shared_vars: shared_vars.iter().copied().map(&f).collect(),
+                    },
+                    JoinRight::Cte {
+                        alias,
+                        constraints,
+                        shared_vars,
+                    } => JoinRight::Cte {
+                        alias: f(*alias),
+                        constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
+                        shared_vars: shared_vars.iter().copied().map(&f).collect(),
+                    },
+                },
+                left_col: f(*left_col),
+                right_col: f(*right_col),
+            },
+            Constraint::ProjectColumn { col, table } => Constraint::ProjectColumn {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::ProjectAggregate {
+                function,
+                col,
+                table,
+            } => Constraint::ProjectAggregate {
+                function: function.clone(),
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::ProjectFunction { function, args } => Constraint::ProjectFunction {
+                function: function.clone(),
+                args: args.iter().map(|(c, t)| (f(*c), f(*t))).collect(),
+            },
+            Constraint::ProjectLiteral { literal } => Constraint::ProjectLiteral {
+                literal: literal.clone(),
+            },
+            Constraint::GroupBy { col, table } => Constraint::GroupBy {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::Having {
+                function,
+                col,
+                table,
+                op,
+            } => Constraint::Having {
+                function: function.clone(),
+                col: f(*col),
+                table: f(*table),
+                op: *op,
+            },
+            Constraint::WhereParam { col, table, op } => Constraint::WhereParam {
+                col: f(*col),
+                table: f(*table),
+                op: *op,
+            },
+            Constraint::WhereInParam {
+                col,
+                table,
+                num_values,
+            } => Constraint::WhereInParam {
+                col: f(*col),
+                table: f(*table),
+                num_values: *num_values,
+            },
+            Constraint::WhereRangeParam { col, table } => Constraint::WhereRangeParam {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::WhereLike {
+                col,
+                table,
+                negated,
+            } => Constraint::WhereLike {
+                col: f(*col),
+                table: f(*table),
+                negated: *negated,
+            },
+            Constraint::WhereIsNull {
+                col,
+                table,
+                negated,
+            } => Constraint::WhereIsNull {
+                col: f(*col),
+                table: f(*table),
+                negated: *negated,
+            },
+            Constraint::WhereBetweenParam { col, table } => Constraint::WhereBetweenParam {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::WhereColumnCompare {
+                left_col,
+                left_table,
+                op,
+                right_col,
+                right_table,
+            } => Constraint::WhereColumnCompare {
+                left_col: f(*left_col),
+                left_table: f(*left_table),
+                op: *op,
+                right_col: f(*right_col),
+                right_table: f(*right_table),
+            },
+            Constraint::WhereOr { conditions } => Constraint::WhereOr {
+                conditions: conditions.iter().map(|c| c.map_var_ids(f)).collect(),
+            },
+            Constraint::OrderBy {
+                col,
+                table,
+                direction,
+                null_order,
+            } => Constraint::OrderBy {
+                col: f(*col),
+                table: f(*table),
+                direction: *direction,
+                null_order: *null_order,
+            },
+            Constraint::Limit { limit, offset } => Constraint::Limit {
+                limit: *limit,
+                offset: *offset,
+            },
+            Constraint::Distinct => Constraint::Distinct,
+            Constraint::Subquery {
+                position,
+                constraints,
+                shared_vars,
+            } => Constraint::Subquery {
+                position: position.clone(),
+                constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
+                shared_vars: shared_vars.iter().copied().map(&f).collect(),
+            },
+            Constraint::Cte {
+                alias,
+                constraints,
+                shared_vars,
+            } => Constraint::Cte {
+                alias: f(*alias),
+                constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
+                shared_vars: shared_vars.iter().copied().map(&f).collect(),
+            },
+            Constraint::Or(preferred, fallback) => Constraint::Or(
+                preferred.iter().map(|c| c.map_var_ids(f)).collect(),
+                fallback.iter().map(|c| c.map_var_ids(f)).collect(),
+            ),
+            Constraint::WindowFunction {
+                function,
+                partition_col,
+                order_col,
+                order_type,
+            } => Constraint::WindowFunction {
+                function: function.clone(),
+                partition_col: partition_col.map(|(c, t)| (f(c), f(t))),
+                order_col: order_col.map(|(c, t)| (f(c), f(t))),
+                order_type: *order_type,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn type_class_variants_constructible() {
-        let _ = TypeClass::Any;
-        let _ = TypeClass::Integer;
-        let _ = TypeClass::Numeric;
-        let _ = TypeClass::String;
-        let _ = TypeClass::DateTime;
-        let _ = TypeClass::Exact(SqlType::Int(None));
-    }
-
-    #[test]
-    fn aggregate_fn_variants_constructible() {
-        let _ = AggregateFn::Count { distinct: false };
-        let _ = AggregateFn::Count { distinct: true };
-        let _ = AggregateFn::Sum { distinct: false };
-        let _ = AggregateFn::Avg { distinct: true };
-        let _ = AggregateFn::Min;
-        let _ = AggregateFn::Max;
-        let _ = AggregateFn::GroupConcat;
-        let _ = AggregateFn::JsonObjectAgg;
-        let _ = AggregateFn::ArrayAgg;
-    }
-
-    #[test]
-    fn scalar_fn_variants_constructible() {
-        let _ = ScalarFn::Coalesce;
-        let _ = ScalarFn::IfNull;
-        let _ = ScalarFn::NullIf;
-        let _ = ScalarFn::Cast;
-        let _ = ScalarFn::Upper;
-        let _ = ScalarFn::Lower;
-        let _ = ScalarFn::Trim;
-        let _ = ScalarFn::Substring;
-        let _ = ScalarFn::Concat;
-    }
-
-    #[test]
-    fn window_fn_variants_constructible() {
-        let _ = WindowFn::RowNumber;
-        let _ = WindowFn::Rank;
-        let _ = WindowFn::DenseRank;
-    }
-
-    #[test]
-    fn literal_kind_variants_constructible() {
-        let _ = LiteralKind::Integer;
-        let _ = LiteralKind::Float;
-        let _ = LiteralKind::String;
-        let _ = LiteralKind::Null;
-        let _ = LiteralKind::Boolean;
-    }
-
-    #[test]
-    fn subquery_position_variants_constructible() {
-        let _ = SubqueryPosition::JoinSubquery(JoinOperator::InnerJoin);
-        let _ = SubqueryPosition::ExistsUncorrelated;
-        let _ = SubqueryPosition::ExistsCorrelated;
-        let _ = SubqueryPosition::InSubquery;
-        let _ = SubqueryPosition::ScalarSubquery;
-    }
-
-    #[test]
-    fn dialect_support_variants_constructible() {
-        let _ = DialectSupport::Both;
-        let _ = DialectSupport::MySqlOnly;
-        let _ = DialectSupport::PostgresOnly;
-    }
 
     #[test]
     fn constraint_schema_variants() {

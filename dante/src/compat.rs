@@ -1,27 +1,30 @@
-//! Incompatibility detection: tag-based rules and custom predicates.
+//! Compatibility rules: tag-based rules and custom predicates.
 //!
-//! The incompatibility system prevents conflicting patterns from being
+//! The compatibility system prevents conflicting patterns from being
 //! combined in the same query.
 
 use crate::constraint::Constraint;
+use crate::var::VarId;
 
 /// A rule that declares when constraint sets are incompatible.
 #[derive(Debug, Clone)]
-pub struct IncompatibilityRule {
+pub struct CompatibilityRule {
     /// Stable identifier for the rule. Use this to look the rule up in
     /// tests instead of relying on its position in `default_rules()`.
     pub name: &'static str,
     /// The condition that triggers incompatibility.
-    pub condition: IncompatCondition,
+    pub condition: CompatCondition,
     /// Human-readable reason for the incompatibility.
     pub reason: &'static str,
 }
 
 /// What condition makes a constraint set incompatible.
 #[derive(Debug, Clone)]
-pub enum IncompatCondition {
+pub enum CompatCondition {
     /// Two tags cannot coexist in the same recipe.
     TagConflict(&'static str, &'static str),
+    /// A specific tag must not be present.
+    TagPresent(&'static str),
     /// A tag can appear at most N times in a recipe.
     MaxOccurrences(&'static str, usize),
     /// Custom predicate over the full constraint set.
@@ -62,17 +65,18 @@ impl SelectionFilter {
     }
 }
 
-impl IncompatibilityRule {
+impl CompatibilityRule {
     /// Check if the given constraint set violates this rule.
     /// Returns true if incompatible (i.e., the set should be rejected).
     pub fn is_violated(&self, constraints: &[Constraint], tags: &[&str]) -> bool {
         match &self.condition {
-            IncompatCondition::TagConflict(a, b) => tags.contains(a) && tags.contains(b),
-            IncompatCondition::MaxOccurrences(tag, max) => {
+            CompatCondition::TagConflict(a, b) => tags.contains(a) && tags.contains(b),
+            CompatCondition::TagPresent(tag) => tags.contains(tag),
+            CompatCondition::MaxOccurrences(tag, max) => {
                 let count = tags.iter().filter(|t| *t == tag).count();
                 count > *max
             }
-            IncompatCondition::Custom(pred) => pred(constraints),
+            CompatCondition::Custom(pred) => pred(constraints),
         }
     }
 }
@@ -92,7 +96,7 @@ pub fn any_nested_contains(constraints: &[Constraint], pred: fn(&Constraint) -> 
             }
             | Constraint::Cte {
                 constraints: inner, ..
-            } if (inner.iter().any(pred) || any_nested_contains(inner, pred)) => {
+            } if inner.iter().any(pred) || any_nested_contains(inner, pred) => {
                 return true;
             }
             Constraint::Join {
@@ -108,7 +112,7 @@ pub fn any_nested_contains(constraints: &[Constraint], pred: fn(&Constraint) -> 
                         constraints: inner, ..
                     },
                 ..
-            } if (inner.iter().any(pred) || any_nested_contains(inner, pred)) => {
+            } if inner.iter().any(pred) || any_nested_contains(inner, pred) => {
                 return true;
             }
             _ => {}
@@ -163,26 +167,138 @@ pub fn count_constraints(constraints: &[Constraint], pred: fn(&Constraint) -> bo
 // --- Default incompatibility rules ---
 
 /// Returns the default set of incompatibility rules.
-pub fn default_rules() -> Vec<IncompatibilityRule> {
+pub fn default_rules() -> Vec<CompatibilityRule> {
     vec![
-        IncompatibilityRule {
+        CompatibilityRule {
             name: "distinct_with_bare_aggregate",
-            condition: IncompatCondition::TagConflict("distinct", "aggregate_without_group_by"),
+            condition: CompatCondition::TagConflict("distinct", "aggregate_without_group_by"),
             reason: "DISTINCT with bare aggregate (no GROUP BY) is semantically dubious",
         },
-        IncompatibilityRule {
+        CompatibilityRule {
             name: "max_subquery_nesting",
-            condition: IncompatCondition::MaxOccurrences("subquery", 2),
+            condition: CompatCondition::MaxOccurrences("subquery", 2),
             reason: "limit subquery nesting depth to 2",
         },
-        IncompatibilityRule {
+        CompatibilityRule {
             name: "window_in_subquery",
-            condition: IncompatCondition::Custom(|constraints| {
+            condition: CompatCondition::Custom(|constraints| {
                 has_subquery_containing(constraints, |inner| {
                     has_constraint(inner, |c| matches!(c, Constraint::WindowFunction { .. }))
                 })
             }),
             reason: "window functions not supported inside subqueries",
+        },
+        // Composition safety rules
+        CompatibilityRule {
+            name: "multiple_limits",
+            condition: CompatCondition::Custom(|constraints| {
+                count_constraints(constraints, |c| matches!(c, Constraint::Limit { .. })) > 1
+            }),
+            reason: "multiple LIMIT clauses",
+        },
+        CompatibilityRule {
+            name: "aggregate_with_ungrouped_projection",
+            condition: CompatCondition::Custom(|constraints| {
+                // Reject if there are aggregate projections AND non-grouped
+                // plain column projections. This catches composed queries like
+                // SELECT COUNT(c1), c2 FROM t (without GROUP BY c2) which
+                // are non-deterministic in MySQL and errors in Postgres.
+                let has_aggregate = has_constraint(constraints, |c| {
+                    matches!(c, Constraint::ProjectAggregate { .. })
+                });
+                if !has_aggregate {
+                    return false;
+                }
+                // Collect grouped column VarIds
+                let grouped: std::collections::HashSet<VarId> = constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::GroupBy { col, .. } => Some(*col),
+                        _ => None,
+                    })
+                    .collect();
+                // Check if any non-aggregate projection references ungrouped columns
+                constraints.iter().any(|c| match c {
+                    Constraint::ProjectColumn { col, .. } => !grouped.contains(col),
+                    Constraint::ProjectFunction { args, .. } => {
+                        args.iter().any(|(col, _)| !grouped.contains(col))
+                    }
+                    _ => false,
+                })
+            }),
+            reason: "aggregate with non-grouped projected column",
+        },
+        CompatibilityRule {
+            name: "max_cte_nesting",
+            condition: CompatCondition::MaxOccurrences("cte", 2),
+            reason: "limit CTE nesting depth to 2",
+        },
+        // MySQL error 3065: ORDER BY columns must be in the SELECT list
+        // when DISTINCT is used.
+        CompatibilityRule {
+            name: "distinct_with_unprojected_order_by",
+            condition: CompatCondition::Custom(|constraints| {
+                let has_distinct =
+                    has_constraint(constraints, |c| matches!(c, Constraint::Distinct));
+                if !has_distinct {
+                    return false;
+                }
+                // Collect all projected column VarIds
+                let projected: std::collections::HashSet<VarId> = constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::ProjectColumn { col, .. } => Some(*col),
+                        _ => None,
+                    })
+                    .collect();
+                // Check if any ORDER BY column is not projected
+                constraints.iter().any(|c| match c {
+                    Constraint::OrderBy { col, .. } => !projected.contains(col),
+                    _ => false,
+                })
+            }),
+            reason: "DISTINCT with ORDER BY on unprojected column (MySQL error 3065)",
+        },
+    ]
+}
+
+/// Returns incompatibility rules for Readyset deep-cache compatibility.
+///
+/// These rules reject query patterns that Readyset cannot deep-cache (i.e.,
+/// queries that would fall back to shallow caching or upstream proxying).
+/// Enable these when the goal is to maximize dataflow/reader-map coverage.
+///
+/// Known unsupported features for deep caching:
+/// - Self-joins with same-column conditions (ENG-411)
+/// - CROSS JOIN (no join condition for dataflow)
+/// - DISTINCT combined with parameterized IN lists
+/// - Window functions inside subqueries (already in default_rules)
+pub fn readyset_compat_rules() -> Vec<CompatibilityRule> {
+    vec![
+        // Self-joins trigger problematic self-join detection (ENG-411).
+        CompatibilityRule {
+            name: "readyset_no_self_join",
+            condition: CompatCondition::TagPresent("self_join"),
+            reason: "Readyset: self-join not supported for deep caching",
+        },
+        // CROSS JOIN has no join condition, can't be represented in dataflow.
+        CompatibilityRule {
+            name: "readyset_no_cross_join",
+            condition: CompatCondition::TagPresent("cross_join"),
+            reason: "Readyset: cross join not supported for deep caching",
+        },
+        // DISTINCT + parameterized IN list triggers adapter rewrite error.
+        CompatibilityRule {
+            name: "readyset_no_distinct_in_param",
+            condition: CompatCondition::Custom(|constraints| {
+                let has_distinct =
+                    has_constraint(constraints, |c| matches!(c, Constraint::Distinct));
+                let has_in_param = has_constraint(constraints, |c| {
+                    matches!(c, Constraint::WhereInParam { .. })
+                });
+                has_distinct && has_in_param
+            }),
+            reason: "Readyset: DISTINCT with parameterized IN list not supported",
         },
     ]
 }
@@ -190,7 +306,7 @@ pub fn default_rules() -> Vec<IncompatibilityRule> {
 /// Check a constraint set against all provided rules.
 /// Returns the first violated rule's reason, or None if all pass.
 pub fn check_rules(
-    rules: &[IncompatibilityRule],
+    rules: &[CompatibilityRule],
     constraints: &[Constraint],
     tags: &[&str],
 ) -> Option<&'static str> {
@@ -209,9 +325,9 @@ mod tests {
 
     #[test]
     fn tag_conflict_rejects_conflicting_tags() {
-        let rule = IncompatibilityRule {
+        let rule = CompatibilityRule {
             name: "test_tag_conflict",
-            condition: IncompatCondition::TagConflict("foo", "bar"),
+            condition: CompatCondition::TagConflict("foo", "bar"),
             reason: "test conflict",
         };
 
@@ -224,9 +340,9 @@ mod tests {
 
     #[test]
     fn max_occurrences_limits_tag_count() {
-        let rule = IncompatibilityRule {
+        let rule = CompatibilityRule {
             name: "test_max_occurrences",
-            condition: IncompatCondition::MaxOccurrences("subquery", 2),
+            condition: CompatCondition::MaxOccurrences("subquery", 2),
             reason: "too many subqueries",
         };
 
@@ -238,9 +354,9 @@ mod tests {
 
     #[test]
     fn custom_predicate_inspects_constraints() {
-        let rule = IncompatibilityRule {
+        let rule = CompatibilityRule {
             name: "test_custom",
-            condition: IncompatCondition::Custom(|constraints| {
+            condition: CompatCondition::Custom(|constraints| {
                 has_constraint(constraints, |c| matches!(c, Constraint::Distinct))
             }),
             reason: "no distinct",
@@ -408,6 +524,60 @@ mod tests {
     }
 
     #[test]
+    fn distinct_with_unprojected_order_by_rejected() {
+        use readyset_sql::ast::OrderType;
+
+        let rules = default_rules();
+
+        // ORDER BY col (VarId(2)) is NOT in the projection — should be rejected
+        let constraints = vec![
+            Constraint::ProjectColumn {
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::OrderBy {
+                col: VarId(2),
+                table: VarId(0),
+                direction: OrderType::OrderDescending,
+                null_order: None,
+            },
+            Constraint::Distinct,
+        ];
+        let result = check_rules(&rules, &constraints, &["distinct", "ordering"]);
+        assert!(
+            result.is_some(),
+            "DISTINCT + ORDER BY with unprojected column should be rejected"
+        );
+    }
+
+    #[test]
+    fn distinct_with_projected_order_by_allowed() {
+        use readyset_sql::ast::OrderType;
+
+        let rules = default_rules();
+
+        // ORDER BY col (VarId(1)) IS in the projection — should be allowed
+        let constraints = vec![
+            Constraint::ProjectColumn {
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::OrderBy {
+                col: VarId(1),
+                table: VarId(0),
+                direction: OrderType::OrderDescending,
+                null_order: None,
+            },
+            Constraint::Distinct,
+        ];
+        let result = check_rules(&rules, &constraints, &["distinct", "ordering"]);
+        assert!(
+            result.is_none(),
+            "DISTINCT + ORDER BY with projected column should be allowed"
+        );
+    }
+
+    #[test]
     fn count_constraints_works() {
         let constraints = vec![
             Constraint::Distinct,
@@ -429,6 +599,107 @@ mod tests {
         assert_eq!(
             count_constraints(&constraints, |c| matches!(c, Constraint::BaseTable(_))),
             0
+        );
+    }
+
+    // --- Readyset compatibility rules ---
+
+    #[test]
+    fn readyset_compat_rejects_self_join() {
+        let rules = readyset_compat_rules();
+        // self_join tag should be rejected
+        let result = check_rules(&rules, &[], &["join", "self_join"]);
+        assert!(result.is_some());
+        assert!(
+            result.expect("should have violation").contains("self-join"),
+            "reason should mention self-join"
+        );
+    }
+
+    #[test]
+    fn readyset_compat_allows_regular_join() {
+        let rules = readyset_compat_rules();
+        let result = check_rules(&rules, &[], &["join", "two_table"]);
+        assert!(result.is_none(), "regular joins should be allowed");
+    }
+
+    #[test]
+    fn readyset_compat_rejects_cross_join() {
+        let rules = readyset_compat_rules();
+        let result = check_rules(&rules, &[], &["join", "cross_join"]);
+        assert!(result.is_some());
+        assert!(
+            result
+                .expect("should have violation")
+                .contains("cross join"),
+            "reason should mention cross join"
+        );
+    }
+
+    #[test]
+    fn readyset_compat_rejects_distinct_with_in_param() {
+        use crate::constraint::Constraint;
+        let rules = readyset_compat_rules();
+        let constraints = vec![
+            Constraint::Distinct,
+            Constraint::WhereInParam {
+                col: VarId(1),
+                table: VarId(0),
+                num_values: 3,
+            },
+        ];
+        let result = check_rules(&rules, &constraints, &["distinct"]);
+        assert!(result.is_some());
+        assert!(
+            result.expect("should have violation").contains("DISTINCT"),
+            "reason should mention DISTINCT"
+        );
+    }
+
+    #[test]
+    fn readyset_compat_allows_distinct_without_in_param() {
+        let rules = readyset_compat_rules();
+        let constraints = vec![Constraint::Distinct];
+        let result = check_rules(&rules, &constraints, &["distinct"]);
+        assert!(result.is_none(), "DISTINCT alone should be fine");
+    }
+
+    #[test]
+    fn readyset_compat_combined_with_default_rules() {
+        // When both default + readyset rules are active, both should apply
+        let mut rules = default_rules();
+        rules.extend(readyset_compat_rules());
+
+        // Default rule: DISTINCT + aggregate_without_group_by
+        let result = check_rules(&rules, &[], &["distinct", "aggregate_without_group_by"]);
+        assert!(result.is_some());
+
+        // Readyset rule: self_join
+        let result = check_rules(&rules, &[], &["self_join"]);
+        assert!(result.is_some());
+
+        // Neither: basic filter
+        let result = check_rules(&rules, &[], &["filter"]);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn readyset_compat_allows_subquery() {
+        let rules = readyset_compat_rules();
+        let result = check_rules(&rules, &[], &["subquery"]);
+        assert!(
+            result.is_none(),
+            "subqueries should be allowed in readyset compat mode"
+        );
+    }
+
+    #[test]
+    fn readyset_compat_allows_group_concat() {
+        let rules = readyset_compat_rules();
+        let result = check_rules(&rules, &[], &["aggregate", "group_concat"]);
+        assert!(
+            result.is_none(),
+            "GROUP_CONCAT should be allowed now that truncation is implemented"
         );
     }
 }

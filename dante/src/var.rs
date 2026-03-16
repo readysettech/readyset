@@ -56,13 +56,9 @@ impl VarAllocator {
         id
     }
 
-    /// Returns the kind of the given variable.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the VarId is out of range.
-    pub fn kind(&self, v: VarId) -> &VarKind {
-        &self.kinds[v.0]
+    /// Returns the kind of the given variable, or `None` if out of range.
+    pub fn kind(&self, v: VarId) -> Option<&VarKind> {
+        self.kinds.get(v.0)
     }
 
     /// Returns the number of variables allocated.
@@ -71,11 +67,13 @@ impl VarAllocator {
     }
 
     /// Returns true if no variables have been allocated.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.kinds.is_empty()
     }
 
     /// Returns all variable kinds as a slice, indexed by VarId.
+    #[cfg(test)]
     pub fn kinds(&self) -> &[VarKind] {
         &self.kinds
     }
@@ -94,6 +92,8 @@ pub enum UnifyError {
         left_kind: &'static str,
         right_kind: &'static str,
     },
+    #[error("variable {0:?} is out of range")]
+    OutOfRange(VarId),
 }
 
 /// Union-find (disjoint set) data structure with path compression and
@@ -132,6 +132,14 @@ impl UnionFind {
         root
     }
 
+    /// Finds the representative without path compression (read-only).
+    pub fn find_readonly(&self, mut x: usize) -> usize {
+        while self.parent[x] != x {
+            x = self.parent[x];
+        }
+        x
+    }
+
     /// Unifies the sets containing `x` and `y`. Uses union by rank.
     ///
     /// `kinds` is indexed by VarId so that representatives can be kind-checked.
@@ -144,8 +152,8 @@ impl UnionFind {
             return Ok(());
         }
 
-        let kx = &kinds[rx];
-        let ky = &kinds[ry];
+        let kx = kinds.get(rx).ok_or(UnifyError::OutOfRange(VarId(rx)))?;
+        let ky = kinds.get(ry).ok_or(UnifyError::OutOfRange(VarId(ry)))?;
         if !kx.same_discriminant(ky) {
             return Err(UnifyError::KindMismatch {
                 left_kind: kx.discriminant_name(),
@@ -167,6 +175,7 @@ impl UnionFind {
     }
 
     /// Returns true if `x` and `y` are in the same set.
+    #[cfg(test)]
     pub fn same_set(&mut self, x: usize, y: usize) -> bool {
         self.find(x) == self.find(y)
     }
@@ -196,8 +205,8 @@ mod tests {
         let t = alloc.alloc(VarKind::Relation);
         let c = alloc.alloc(VarKind::Column { table: t });
 
-        assert_eq!(*alloc.kind(t), VarKind::Relation);
-        assert_eq!(*alloc.kind(c), VarKind::Column { table: t });
+        assert_eq!(alloc.kind(t), Some(&VarKind::Relation));
+        assert_eq!(alloc.kind(c), Some(&VarKind::Column { table: t }));
     }
 
     #[test]

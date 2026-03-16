@@ -4,15 +4,15 @@
 //! and resolving them against a mutable schema state. The main entry point
 //! is [`generator::Generator`].
 
+pub mod compat;
 pub mod constraint;
 pub mod entropy;
 pub mod generator;
-pub mod incompat;
 pub mod pattern;
 pub mod registry;
 pub mod resolver;
 pub mod state;
-pub mod var;
+pub(crate) mod var;
 
 // Re-export primary API types for convenience.
 pub use generator::{ConstraintRegistry, DdlOutput, GenerateError, Generator, QueryOutput};

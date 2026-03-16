@@ -11,15 +11,35 @@ use crate::var::{VarId, VarKind};
 ///
 /// This implements Phases 1 and 2 of the 4-phase resolver algorithm:
 /// classification/ordering and variable binding.
+///
+/// Returns the resolved environment and the "expanded" constraint list —
+/// the original constraints with each `Or` replaced by the winning branch's
+/// constraints, so that `build_select` sees the structural output.
 pub(crate) fn resolve_schema(
     constraints: &[Constraint],
     var_kinds: &[VarKind],
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
-) -> Result<Env, ResolveError> {
+) -> Result<(Env, Vec<Constraint>), ResolveError> {
     let num_vars = var_kinds.len();
     let mut env = Env::new(num_vars);
+    let expanded = resolve_constraint_set(&mut env, constraints, var_kinds, state, entropy)?;
+    Ok((env, expanded))
+}
 
+/// Resolve a set of constraints against an existing environment.
+///
+/// This is the core phased resolution engine, usable both for top-level
+/// resolution and recursively within Or branches.  Returns the "expanded"
+/// constraint list: the input with Or constraints replaced by whichever
+/// branch was selected.
+fn resolve_constraint_set(
+    env: &mut Env,
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+) -> Result<Vec<Constraint>, ResolveError> {
     // Phase 1: Classify and order constraints
     let mut table_exists = Vec::new();
     let mut alias_of = Vec::new();
@@ -27,6 +47,8 @@ pub(crate) fn resolve_schema(
     let mut column_exists = Vec::new();
     let mut type_constraints = Vec::new();
     let mut not_eq_constraints = Vec::new();
+    let mut or_constraints = Vec::new();
+    let mut structural = Vec::new();
 
     for c in constraints {
         match c {
@@ -38,9 +60,10 @@ pub(crate) fn resolve_schema(
                 type_constraints.push(c)
             }
             Constraint::NotEq(_, _) => not_eq_constraints.push(c),
-            // Structural constraints (From, ProjectColumn, Join, …) are handled
-            // by ast_builder, not the schema phase.
-            _ => {}
+            Constraint::Or(_, _) => or_constraints.push(c),
+            // Structural constraints (From, ProjectColumn, Join, …) are
+            // handled by ast_builder, not the schema phase.
+            _ => structural.push(c),
         }
     }
 
@@ -49,21 +72,21 @@ pub(crate) fn resolve_schema(
     // 2a: Process Eq constraints first (unification)
     for c in &eq_constraints {
         if let Constraint::Eq(a, b) = c {
-            resolve_eq(&mut env, *a, *b, var_kinds)?;
+            resolve_eq(env, *a, *b, var_kinds)?;
         }
     }
 
     // 2b: Resolve BaseTable
     for c in &table_exists {
         if let Constraint::BaseTable(t) = c {
-            resolve_table_exists(&mut env, *t, state, entropy)?;
+            resolve_table_exists(env, *t, state, entropy)?;
         }
     }
 
     // 2b2: Resolve AliasOf (after BaseTable so original is bound)
     for c in &alias_of {
         if let Constraint::AliasOf { alias, original } = c {
-            resolve_alias_of(&mut env, *alias, *original, state)?;
+            resolve_alias_of(env, *alias, *original, state)?;
         }
     }
 
@@ -71,7 +94,7 @@ pub(crate) fn resolve_schema(
     for c in &column_exists {
         if let Constraint::ColumnExists { col, table } = c {
             resolve_column_exists(
-                &mut env,
+                env,
                 *col,
                 *table,
                 &type_constraints,
@@ -86,10 +109,10 @@ pub(crate) fn resolve_schema(
     for c in &type_constraints {
         match c {
             Constraint::ColumnTypeClass { col, type_class } => {
-                resolve_type_class(&mut env, *col, type_class)?;
+                resolve_type_class(env, *col, type_class)?;
             }
             Constraint::TypeCompatible(a, b) => {
-                resolve_type_compatible(&mut env, *a, *b)?;
+                resolve_type_compatible(env, *a, *b)?;
             }
             _ => {}
         }
@@ -98,11 +121,36 @@ pub(crate) fn resolve_schema(
     // 2e: Process NotEq constraints (verify)
     for c in &not_eq_constraints {
         if let Constraint::NotEq(a, b) = c {
-            resolve_not_eq(&mut env, *a, *b)?;
+            resolve_not_eq(env, *a, *b)?;
         }
     }
 
-    Ok(env)
+    // 2f: Process Or constraints via backtracking. Try branch_a; on failure,
+    // restore env/state and try branch_b. The winning branch replaces the Or.
+    let mut expanded: Vec<Constraint> = constraints
+        .iter()
+        .filter(|c| !matches!(c, Constraint::Or(..)))
+        .cloned()
+        .collect();
+    for c in &or_constraints {
+        if let Constraint::Or(branch_a, branch_b) = c {
+            let env_cp = env.checkpoint();
+            let state_cp = state.checkpoint();
+            let entropy_cp = entropy.checkpoint();
+            let branch = match resolve_constraint_set(env, branch_a, var_kinds, state, entropy) {
+                Ok(b) => b,
+                Err(_) => {
+                    env.restore(env_cp);
+                    state.restore(state_cp);
+                    entropy.restore(entropy_cp);
+                    resolve_constraint_set(env, branch_b, var_kinds, state, entropy)?
+                }
+            };
+            entropy.release();
+            expanded.extend(branch);
+        }
+    }
+    Ok(expanded)
 }
 
 /// Process an Eq constraint: unify the two vars in the union-find and
@@ -126,10 +174,10 @@ fn resolve_eq(
     let a_bound = env.bindings[rep_a].is_some();
     let b_bound = env.bindings[rep_b].is_some();
 
-    if a_bound && b_bound {
+    if let (Some(binding_a), Some(binding_b)) =
+        (env.bindings[rep_a].as_ref(), env.bindings[rep_b].as_ref())
+    {
         // Both bound -- verify compatibility
-        let binding_a = env.bindings[rep_a].as_ref().expect("checked");
-        let binding_b = env.bindings[rep_b].as_ref().expect("checked");
         match (binding_a, binding_b) {
             (Binding::Table { name: na, .. }, Binding::Table { name: nb, .. }) if na != nb => {
                 return Err(ResolveError::TypeMismatch {
@@ -169,12 +217,12 @@ fn resolve_table_exists(
     let reuse = state.config().reuse_preference;
     let should_reuse = !state.tables().is_empty() && entropy.probability(reuse);
 
-    if should_reuse {
-        let table = state
+    let name = if should_reuse {
+        state
             .pick_random_table(entropy)
-            .expect("tables non-empty checked above");
-        let name = table.name.clone();
-        env.bind(t, Binding::Table { name, alias: None });
+            .ok_or(ResolveError::Unbound(t))?
+            .name
+            .clone()
     } else {
         // Synthesize a new table. Don't emit CreateTable DDL yet — columns
         // will be added during ColumnExists resolution. The final schema is
@@ -195,8 +243,21 @@ fn resolve_table_exists(
         schema.primary_key = Some(pk_name);
         state.add_table(schema);
         env.new_tables.push(name.clone());
-        env.bind(t, Binding::Table { name, alias: None });
-    }
+        name
+    };
+
+    // Auto-alias on collision: if any already-bound relation var is using
+    // this physical name without an alias, the new binding gets a fresh
+    // alias so MySQL's "Not unique table/alias" (1066) can't fire. This
+    // replaces the N×M `Or(NotEq, AliasOf)` soup that `compose` used to
+    // emit for cross-pattern relation pairs — single pass, no
+    // backtracking.
+    let alias = if env.relation_with_name_exists(&name) {
+        Some(state.fresh_alias())
+    } else {
+        None
+    };
+    env.bind(t, Binding::Table { name, alias });
 
     Ok(())
 }
@@ -332,12 +393,9 @@ fn resolve_column_exists(
         return Ok(());
     }
 
-    // Get the physical table name (for schema lookups) and effective name
-    // (for SQL column references — alias if present, otherwise physical).
-    let (table_name, effective_name) = match env.get(table) {
-        Some(Binding::Table { name, alias }) => {
-            (name.clone(), alias.clone().unwrap_or(name.clone()))
-        }
+    // Get the physical table name for schema lookups.
+    let table_name = match env.get(table) {
+        Some(Binding::Table { name, .. }) => name.clone(),
         _ => return Err(ResolveError::Unbound(table)),
     };
 
@@ -389,7 +447,7 @@ fn resolve_column_exists(
             Binding::Column {
                 name: col_name,
                 sql_type,
-                table: effective_name,
+                table_var: table,
             },
         );
     } else {
@@ -401,20 +459,17 @@ fn resolve_column_exists(
         let role = column_role(col, all_constraints);
         let gen_spec = gen_spec_for_role(role, &sql_type, &state.config().default_gen_spec);
 
-        let col_name = state
+        let table_schema = state
             .table_mut(&table_name)
-            .expect("table should exist")
-            .fresh_column_name();
+            .ok_or(ResolveError::Unbound(table))?;
+        let col_name = table_schema.fresh_column_name();
 
         let meta = ColumnMeta {
             sql_type: sql_type.clone(),
             gen_spec: gen_spec.clone(),
         };
 
-        state
-            .table_mut(&table_name)
-            .expect("table should exist")
-            .add_column(col_name.clone(), meta.clone());
+        table_schema.add_column(col_name.clone(), meta.clone());
 
         // Only emit AddColumn DDL for pre-existing tables. Columns on newly
         // created tables are included in the CreateTable DDL via into_ddl_steps.
@@ -431,7 +486,7 @@ fn resolve_column_exists(
             Binding::Column {
                 name: col_name,
                 sql_type,
-                table: effective_name,
+                table_var: table,
             },
         );
     }
@@ -493,14 +548,19 @@ fn resolve_not_eq(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError>
         return Err(ResolveError::NotEqViolation(binding_desc));
     }
 
-    // Also check if both are bound to the same concrete name (e.g., two
-    // table variables that both reused the same physical table).
+    // Also check if both are bound to the same effective SQL identifier
+    // (e.g., two table variables that both reused the same physical table
+    // *and* neither got aliased). When auto-aliasing kicks in, two
+    // relations with the same physical name but distinct aliases are
+    // SQL-distinct and pass.
     if let (Some(binding_a), Some(binding_b)) = (&env.bindings[rep_a], &env.bindings[rep_b]) {
         let name_a = match binding_a {
-            Binding::Table { name: n, .. } | Binding::Column { name: n, .. } => n,
+            Binding::Table { name, alias } => alias.as_ref().unwrap_or(name),
+            Binding::Column { name, .. } => name,
         };
         let name_b = match binding_b {
-            Binding::Table { name: n, .. } | Binding::Column { name: n, .. } => n,
+            Binding::Table { name, alias } => alias.as_ref().unwrap_or(name),
+            Binding::Column { name, .. } => name,
         };
         if name_a == name_b {
             return Err(ResolveError::NotEqViolation(name_a.to_string()));
@@ -588,7 +648,8 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>) -> SqlType {
         TypeClass::Any => pick_random_type(entropy),
         TypeClass::Integer => entropy
             .choose(&[SqlType::Int(None), SqlType::BigInt(None)])
-            .clone(),
+            .cloned()
+            .expect("integer type slice is non-empty"),
         TypeClass::Numeric => entropy
             .choose(&[
                 SqlType::Int(None),
@@ -596,13 +657,16 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>) -> SqlType {
                 SqlType::Double,
                 SqlType::Float,
             ])
-            .clone(),
+            .cloned()
+            .expect("numeric type slice is non-empty"),
         TypeClass::String => entropy
             .choose(&[SqlType::VarChar(Some(255)), SqlType::Text])
-            .clone(),
+            .cloned()
+            .expect("string type slice is non-empty"),
         TypeClass::DateTime => entropy
-            .choose(&[SqlType::DateTime(None), SqlType::Timestamp, SqlType::Date])
-            .clone(),
+            .choose(&[SqlType::DateTime(None), SqlType::Date])
+            .cloned()
+            .expect("datetime type slice is non-empty"),
         TypeClass::Exact(t) => t.clone(),
     }
 }
@@ -621,23 +685,27 @@ pub(crate) fn pick_random_type(entropy: &mut Entropy<'_>) -> SqlType {
             SqlType::Text,
             SqlType::Double,
             SqlType::DateTime(None),
-            SqlType::Timestamp,
             SqlType::Date,
             SqlType::Bool,
         ])
-        .clone()
+        .cloned()
+        .expect("random type slice is non-empty")
 }
 
 #[cfg(test)]
 mod tests {
+    use data_generator::ColumnGenerationSpec;
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use readyset_sql::Dialect;
     use readyset_sql::ast::{SqlIdentifier, SqlType};
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
-    use crate::state::GeneratorConfig;
-    use crate::var::VarKind;
+    use crate::constraint::{Constraint, TypeClass};
+    use crate::entropy::Entropy;
+    use crate::resolver::{Binding, DdlStep};
+    use crate::state::{ColumnMeta, GeneratorConfig, TableSchema};
+    use crate::var::{VarId, VarKind};
 
     fn test_env(dialect: Dialect) -> (GenerationState, SmallRng) {
         let config = GeneratorConfig {
@@ -657,7 +725,7 @@ mod tests {
         let constraints = vec![Constraint::BaseTable(VarId(0))];
         let var_kinds = vec![VarKind::Relation];
 
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Variable should be bound to a table
@@ -699,7 +767,7 @@ mod tests {
         let constraints = vec![Constraint::BaseTable(VarId(0))];
         let var_kinds = vec![VarKind::Relation];
 
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Should reuse existing table
@@ -740,7 +808,7 @@ mod tests {
         let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
 
         // reuse_preference = 0 means we'll synthesize, so the column will be new
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Column should be bound
@@ -765,7 +833,7 @@ mod tests {
         ];
         let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
 
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Column should be bound with an integer type
@@ -794,7 +862,7 @@ mod tests {
         ];
         let var_kinds = vec![VarKind::Relation, VarKind::Relation];
 
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Both should be bound to the same table
@@ -824,7 +892,7 @@ mod tests {
         ];
         let var_kinds = vec![VarKind::Relation, VarKind::Relation];
 
-        let env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // NotEq should succeed because both are different synthesized tables
@@ -888,7 +956,7 @@ mod tests {
             VarKind::Column { table: t },
         ];
 
-        let mut env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // All three variables should be bound
@@ -954,6 +1022,8 @@ mod tests {
         assert!(!types_compatible(&SqlType::Int(None), &SqlType::Text));
     }
 
+    // --- Distribution selection tests ---
+
     #[test]
     fn synthesized_join_column_gets_uniform_spec() {
         let (mut state, mut rng) = test_env(Dialect::MySQL);
@@ -995,7 +1065,7 @@ mod tests {
             VarKind::Column { table: t1 },
         ];
 
-        let env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Join key columns should have been synthesized with Uniform gen_spec
@@ -1058,7 +1128,7 @@ mod tests {
             VarKind::Column { table: t },
         ];
 
-        let env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Filter column should have Zipfian gen_spec
@@ -1093,7 +1163,7 @@ mod tests {
         ];
         let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
 
-        let env = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
             .expect("should resolve");
 
         // Projection-only column should get default gen_spec (Random)
@@ -1111,6 +1181,38 @@ mod tests {
             has_random,
             "expected general column with Random spec, got: {ddl:?}",
         );
+    }
+
+    #[test]
+    fn column_role_detects_join_key() {
+        let t0 = VarId(0);
+        let t1 = VarId(1);
+        let c0 = VarId(2);
+        let c1 = VarId(3);
+        let constraints = vec![Constraint::Join {
+            operator: readyset_sql::ast::JoinOperator::InnerJoin,
+            right: crate::constraint::JoinRight::Table(t1),
+            left_col: c0,
+            right_col: c1,
+        }];
+
+        assert_eq!(column_role(c0, &constraints), ColumnRole::JoinKey);
+        assert_eq!(column_role(c1, &constraints), ColumnRole::JoinKey);
+        assert_eq!(column_role(t0, &constraints), ColumnRole::General);
+    }
+
+    #[test]
+    fn column_role_detects_filter_key() {
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![Constraint::WhereParam {
+            col: c,
+            table: t,
+            op: readyset_sql::ast::BinaryOperator::Equal,
+        }];
+
+        assert_eq!(column_role(c, &constraints), ColumnRole::FilterKey);
+        assert_eq!(column_role(t, &constraints), ColumnRole::General);
     }
 
     #[test]
@@ -1162,38 +1264,6 @@ mod tests {
             has_smallint,
             "pick_random_type should sometimes return SmallInt"
         );
-    }
-
-    #[test]
-    fn column_role_detects_join_key() {
-        let t0 = VarId(0);
-        let t1 = VarId(1);
-        let c0 = VarId(2);
-        let c1 = VarId(3);
-        let constraints = vec![Constraint::Join {
-            operator: readyset_sql::ast::JoinOperator::InnerJoin,
-            right: crate::constraint::JoinRight::Table(t1),
-            left_col: c0,
-            right_col: c1,
-        }];
-
-        assert_eq!(column_role(c0, &constraints), ColumnRole::JoinKey);
-        assert_eq!(column_role(c1, &constraints), ColumnRole::JoinKey);
-        assert_eq!(column_role(t0, &constraints), ColumnRole::General);
-    }
-
-    #[test]
-    fn column_role_detects_filter_key() {
-        let t = VarId(0);
-        let c = VarId(1);
-        let constraints = vec![Constraint::WhereParam {
-            col: c,
-            table: t,
-            op: readyset_sql::ast::BinaryOperator::Equal,
-        }];
-
-        assert_eq!(column_role(c, &constraints), ColumnRole::FilterKey);
-        assert_eq!(column_role(t, &constraints), ColumnRole::General);
     }
 
     #[test]
@@ -1250,6 +1320,399 @@ mod tests {
         assert!(
             matches!(spec, ColumnGenerationSpec::Random),
             "expected Random spec for DateTime join key, got: {spec:?}"
+        );
+    }
+
+    #[test]
+    fn composed_joins_to_same_table_get_aliases() {
+        // When two join patterns are composed and both join targets resolve to
+        // the same table, the SQL must use aliases to avoid MySQL error 1066.
+        let t_from = VarId(0);
+        let t_join1 = VarId(1);
+        let t_join2 = VarId(2);
+        let c_proj = VarId(3);
+        let c_jk1_l = VarId(4);
+        let c_jk1_r = VarId(5);
+        let c_jk2_l = VarId(6);
+        let c_jk2_r = VarId(7);
+
+        let constraints = vec![
+            Constraint::BaseTable(t_from),
+            Constraint::BaseTable(t_join1),
+            Constraint::BaseTable(t_join2),
+            Constraint::NotEq(t_from, t_join1),
+            Constraint::NotEq(t_from, t_join2),
+            Constraint::Or(
+                vec![Constraint::NotEq(t_join1, t_join2)],
+                vec![Constraint::AliasOf {
+                    alias: t_join2,
+                    original: t_join1,
+                }],
+            ),
+            Constraint::ColumnExists {
+                col: c_proj,
+                table: t_from,
+            },
+            Constraint::ColumnExists {
+                col: c_jk1_l,
+                table: t_from,
+            },
+            Constraint::ColumnExists {
+                col: c_jk1_r,
+                table: t_join1,
+            },
+            Constraint::ColumnExists {
+                col: c_jk2_l,
+                table: t_from,
+            },
+            Constraint::ColumnExists {
+                col: c_jk2_r,
+                table: t_join2,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_jk1_l,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_jk1_r,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_jk2_l,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_jk2_r,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::TypeCompatible(c_jk1_l, c_jk1_r),
+            Constraint::TypeCompatible(c_jk2_l, c_jk2_r),
+            Constraint::From(t_from),
+            Constraint::Join {
+                operator: readyset_sql::ast::JoinOperator::InnerJoin,
+                right: crate::constraint::JoinRight::Table(t_join1),
+                left_col: c_jk1_l,
+                right_col: c_jk1_r,
+            },
+            Constraint::Join {
+                operator: readyset_sql::ast::JoinOperator::LeftJoin,
+                right: crate::constraint::JoinRight::Table(t_join2),
+                left_col: c_jk2_l,
+                right_col: c_jk2_r,
+            },
+            Constraint::ProjectColumn {
+                col: c_proj,
+                table: t_from,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Relation,
+            VarKind::Relation,
+            VarKind::Column { table: t_from },
+            VarKind::Column { table: t_from },
+            VarKind::Column { table: t_join1 },
+            VarKind::Column { table: t_from },
+            VarKind::Column { table: t_join2 },
+        ];
+
+        let config = GeneratorConfig {
+            reuse_preference: 1.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        for name in ["t0", "t1"] {
+            let mut schema = crate::state::TableSchema::new(SqlIdentifier::from(name));
+            for i in 0..8 {
+                schema.add_column(
+                    SqlIdentifier::from(format!("c{i}")),
+                    crate::state::ColumnMeta {
+                        sql_type: SqlType::Int(None),
+                        gen_spec: data_generator::ColumnGenerationSpec::Unique,
+                    },
+                );
+            }
+            schema.primary_key = Some(SqlIdentifier::from("c0"));
+            state.add_table(schema);
+        }
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let output = crate::resolver::resolve(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve with Or constraint handling duplicate join targets");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+
+        assert!(sql.contains("SELECT"), "should produce valid SQL: {sql}");
+        assert!(
+            sql.contains(" AS "),
+            "duplicate join target must be aliased, but got: {sql}"
+        );
+    }
+
+    /// When two relation vars resolve to the same physical table, the
+    /// resolver should auto-alias the second one — no `Or` constraint
+    /// needed. This is the new behavior that lets `compose` skip the
+    /// N×M `Or(NotEq, AliasOf)` soup.
+    #[test]
+    fn auto_aliases_duplicate_table_without_or_constraint() {
+        let t1 = VarId(0);
+        let t2 = VarId(1);
+        let c1 = VarId(2);
+        let c2 = VarId(3);
+        let c1_jk = VarId(4);
+        let c2_jk = VarId(5);
+
+        // No Or, no AliasOf, no NotEq — just two BaseTables and a JOIN.
+        // With reuse_preference=1.0 and a single registered table `t0`,
+        // both relations must reuse `t0` — the resolver is responsible
+        // for aliasing the second one.
+        let constraints = vec![
+            Constraint::BaseTable(t1),
+            Constraint::BaseTable(t2),
+            Constraint::ColumnExists { col: c1, table: t1 },
+            Constraint::ColumnExists { col: c2, table: t2 },
+            Constraint::ColumnExists {
+                col: c1_jk,
+                table: t1,
+            },
+            Constraint::ColumnExists {
+                col: c2_jk,
+                table: t2,
+            },
+            Constraint::ColumnTypeClass {
+                col: c1_jk,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::ColumnTypeClass {
+                col: c2_jk,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::TypeCompatible(c1_jk, c2_jk),
+            Constraint::From(t1),
+            Constraint::Join {
+                operator: readyset_sql::ast::JoinOperator::InnerJoin,
+                right: crate::constraint::JoinRight::Table(t2),
+                left_col: c1_jk,
+                right_col: c2_jk,
+            },
+            Constraint::ProjectColumn { col: c1, table: t1 },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Relation,
+            VarKind::Column { table: t1 },
+            VarKind::Column { table: t2 },
+            VarKind::Column { table: t1 },
+            VarKind::Column { table: t2 },
+        ];
+
+        let config = GeneratorConfig {
+            reuse_preference: 1.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut schema = crate::state::TableSchema::new(SqlIdentifier::from("t0"));
+        for i in 0..8 {
+            schema.add_column(
+                SqlIdentifier::from(format!("c{i}")),
+                crate::state::ColumnMeta {
+                    sql_type: SqlType::Int(None),
+                    gen_spec: data_generator::ColumnGenerationSpec::Unique,
+                },
+            );
+        }
+        schema.primary_key = Some(SqlIdentifier::from("c0"));
+        state.add_table(schema);
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let output = crate::resolver::resolve(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("resolver should auto-alias without an Or constraint");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+
+        assert!(sql.contains("SELECT"), "should produce valid SQL: {sql}");
+        // Both relations resolved to `t0`; the second occurrence must be
+        // aliased — otherwise MySQL rejects with "Not unique table/alias"
+        // (1066).
+        assert!(
+            sql.contains(" AS "),
+            "duplicate base table must be auto-aliased, but got: {sql}"
+        );
+    }
+
+    #[test]
+    fn or_with_type_constraint_selects_branch() {
+        let t = VarId(0);
+        let c_proj = VarId(1);
+        let c_or = VarId(2);
+
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::From(t),
+            Constraint::ColumnExists {
+                col: c_proj,
+                table: t,
+            },
+            Constraint::ColumnExists {
+                col: c_or,
+                table: t,
+            },
+            Constraint::ProjectColumn {
+                col: c_proj,
+                table: t,
+            },
+            Constraint::Or(
+                vec![
+                    Constraint::ColumnTypeClass {
+                        col: c_or,
+                        type_class: TypeClass::String,
+                    },
+                    Constraint::WhereLike {
+                        col: c_or,
+                        table: t,
+                        negated: false,
+                    },
+                ],
+                vec![
+                    Constraint::ColumnTypeClass {
+                        col: c_or,
+                        type_class: TypeClass::Integer,
+                    },
+                    Constraint::WhereParam {
+                        col: c_or,
+                        table: t,
+                        op: readyset_sql::ast::BinaryOperator::Equal,
+                    },
+                ],
+            ),
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+
+        let config = GeneratorConfig::default();
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut schema = crate::state::TableSchema::new(SqlIdentifier::from("t0"));
+        schema.add_column(
+            SqlIdentifier::from("id"),
+            crate::state::ColumnMeta {
+                sql_type: SqlType::Int(None),
+                gen_spec: data_generator::ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.add_column(
+            SqlIdentifier::from("name"),
+            crate::state::ColumnMeta {
+                sql_type: SqlType::VarChar(Some(255)),
+                gen_spec: data_generator::ColumnGenerationSpec::Random,
+            },
+        );
+        schema.primary_key = Some(SqlIdentifier::from("id"));
+        state.add_table(schema);
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let output = crate::resolver::resolve(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve with general Or constraint");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+
+        assert!(
+            sql.contains("LIKE"),
+            "Or should select string branch with LIKE, but got: {sql}"
+        );
+    }
+
+    #[test]
+    fn or_falls_back_when_first_branch_fails() {
+        let t = VarId(0);
+        let c_proj = VarId(1);
+        let c_or = VarId(2);
+
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::From(t),
+            Constraint::ColumnExists {
+                col: c_proj,
+                table: t,
+            },
+            Constraint::ColumnExists {
+                col: c_or,
+                table: t,
+            },
+            Constraint::ProjectColumn {
+                col: c_proj,
+                table: t,
+            },
+            Constraint::Or(
+                vec![
+                    Constraint::ColumnTypeClass {
+                        col: c_or,
+                        type_class: TypeClass::String,
+                    },
+                    Constraint::WhereLike {
+                        col: c_or,
+                        table: t,
+                        negated: false,
+                    },
+                ],
+                vec![
+                    Constraint::ColumnTypeClass {
+                        col: c_or,
+                        type_class: TypeClass::Integer,
+                    },
+                    Constraint::WhereParam {
+                        col: c_or,
+                        table: t,
+                        op: readyset_sql::ast::BinaryOperator::Equal,
+                    },
+                ],
+            ),
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+
+        let config = GeneratorConfig::default();
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut schema = crate::state::TableSchema::new(SqlIdentifier::from("t0"));
+        schema.add_column(
+            SqlIdentifier::from("id"),
+            crate::state::ColumnMeta {
+                sql_type: SqlType::Int(None),
+                gen_spec: data_generator::ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.add_column(
+            SqlIdentifier::from("score"),
+            crate::state::ColumnMeta {
+                sql_type: SqlType::Int(None),
+                gen_spec: data_generator::ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.primary_key = Some(SqlIdentifier::from("id"));
+        state.add_table(schema);
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let output = crate::resolver::resolve(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve with fallback branch");
+        let sql = output.query.display(Dialect::MySQL).to_string();
+
+        assert!(
+            !sql.contains("LIKE"),
+            "should NOT contain LIKE (no string columns), but got: {sql}"
+        );
+        assert!(
+            sql.contains("= ?") || sql.contains("= $"),
+            "should contain WHERE = ? from fallback branch, but got: {sql}"
         );
     }
 }

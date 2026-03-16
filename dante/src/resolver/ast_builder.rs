@@ -8,7 +8,9 @@ use readyset_sql::ast::{
 };
 
 use super::{Binding, DdlStep, Env, ParamMeta, ResolveError};
-use crate::constraint::{AggregateFn, Constraint, LiteralKind, SubqueryPosition, WindowFn};
+use crate::constraint::{
+    AggregateFn, Constraint, LiteralKind, ScalarFn, SubqueryPosition, WindowFn,
+};
 use crate::entropy::Entropy;
 use crate::state::GenerationState;
 use crate::var::{VarId, VarKind};
@@ -113,6 +115,20 @@ fn build_select_inner(
                 };
                 fields.push(FieldDefinitionExpr::Expr {
                     expr: Expr::Literal(lit),
+                    alias: None,
+                });
+            }
+            Constraint::ProjectFunction { function, args } => {
+                let mut col_exprs = Vec::with_capacity(args.len());
+                let mut col_types = Vec::with_capacity(args.len());
+                for (col, table) in args {
+                    let (cn, tn) = get_col_table(env, *col, *table)?;
+                    col_exprs.push(make_column_expr(&cn, &tn));
+                    col_types.push(get_col_type(env, *col)?);
+                }
+                let func_expr = make_scalar_fn_expr(function, col_exprs, &col_types, dialect);
+                fields.push(FieldDefinitionExpr::Expr {
+                    expr: func_expr,
                     alias: None,
                 });
             }
@@ -256,6 +272,66 @@ fn build_select_inner(
                     rhs: Box::new(make_column_expr(&r_name, &r_table)),
                 });
             }
+            Constraint::WhereOr { conditions } => {
+                let mut or_parts = Vec::new();
+                for cond in conditions {
+                    match cond {
+                        Constraint::WhereParam { col, table, op } => {
+                            let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                            let col_type = get_col_type(env, *col)?;
+                            let placeholder = make_placeholder(dialect, placeholder_idx);
+                            or_parts.push(Expr::BinaryOp {
+                                lhs: Box::new(make_column_expr(&col_name, &table_name)),
+                                op: *op,
+                                rhs: Box::new(Expr::Literal(Literal::Placeholder(placeholder))),
+                            });
+                            params.push(ParamMeta {
+                                sql_type: col_type,
+                                gen_spec: ColumnGenerationSpec::Random,
+                                count: 1,
+                            });
+                        }
+                        Constraint::WhereIsNull {
+                            col,
+                            table,
+                            negated,
+                        } => {
+                            let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                            let op = if *negated {
+                                BinaryOperator::IsNot
+                            } else {
+                                BinaryOperator::Is
+                            };
+                            or_parts.push(Expr::BinaryOp {
+                                lhs: Box::new(make_column_expr(&col_name, &table_name)),
+                                op,
+                                rhs: Box::new(Expr::Literal(Literal::Null)),
+                            });
+                        }
+                        // Silently dropping unsupported conditions inside
+                        // WhereOr produced SQL that could spuriously match
+                        // upstream — fail loudly instead so generators can
+                        // be fixed (or extended) deliberately.
+                        _ => {
+                            return Err(ResolveError::Unsupported {
+                                variant: "non-WhereParam/WhereIsNull condition",
+                                location: "WhereOr",
+                            });
+                        }
+                    }
+                }
+                if !or_parts.is_empty() {
+                    let mut combined = or_parts.remove(0);
+                    for part in or_parts {
+                        combined = Expr::BinaryOp {
+                            lhs: Box::new(combined),
+                            op: BinaryOperator::Or,
+                            rhs: Box::new(part),
+                        };
+                    }
+                    where_clauses.push(combined);
+                }
+            }
             Constraint::Join {
                 operator,
                 right,
@@ -264,14 +340,12 @@ fn build_select_inner(
             } => {
                 let (lc_name, lt_name) = get_col_and_table_for_join(env, *left_col)?;
 
-                // The ON clause's right column / right table varies by
-                // the kind of right-hand side. For a plain table join we
-                // resolve them up front; for a subquery or CTE we defer
-                // to the inner resolution, which both produces the right
-                // SQL for the join target and (via column-binding
-                // propagation in `resolve_inner_subquery`) makes inner
-                // column VarIds visible to the outer scope so the ON
-                // clause can name them.
+                // For plain table joins we resolve the right column up
+                // front; for subquery / CTE joins we defer to the inner
+                // resolution because the right column's owning relation
+                // is the subquery alias / CTE alias, and inner column
+                // bindings are propagated to the outer env by
+                // `resolve_inner_subquery`.
                 let rc_name;
                 let effective_rt_name;
 
@@ -307,9 +381,6 @@ fn build_select_inner(
                         params.extend(inner_params);
                         env.ddl_steps.extend(inner_ddl);
                         effective_rt_name = alias.clone();
-                        // The ON clause must reference the column that the
-                        // subquery actually projects, not the outer env's
-                        // independent resolution of the same VarId.
                         rc_name = first_projected_column(&inner_query).ok_or_else(|| {
                             ResolveError::TypeMismatch {
                                 expected: "join subquery to project at least one column".into(),
@@ -335,11 +406,12 @@ fn build_select_inner(
                                 alias: None,
                             },
                         );
-                        let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
+                        let (inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
                             inner_constraints,
                             env,
                             var_kinds,
                             shared_vars,
+                            *alias_var,
                             state,
                             entropy,
                             placeholder_idx,
@@ -466,9 +538,12 @@ fn build_select_inner(
                                     actual: "empty shared_vars".to_string(),
                                 })?;
                         match env.get(outer_var).cloned() {
-                            Some(Binding::Column { name, table, .. }) => {
+                            Some(Binding::Column {
+                                name, table_var, ..
+                            }) => {
+                                let table_name = get_table_name(env, table_var)?;
                                 where_clauses.push(Expr::In {
-                                    lhs: Box::new(make_column_expr(&name, &table)),
+                                    lhs: Box::new(make_column_expr(&name, &table_name)),
                                     rhs: InValue::Subquery(Box::new(inner_query)),
                                     negated: false,
                                 });
@@ -481,9 +556,6 @@ fn build_select_inner(
                             expr: Expr::NestedSelect(Box::new(inner_query)),
                             alias: None,
                         });
-                    }
-                    SubqueryPosition::JoinSubquery(_) => {
-                        // Join subqueries are handled via JoinRight::Subquery in Constraint::Join
                     }
                 }
             }
@@ -500,11 +572,12 @@ fn build_select_inner(
                         alias: None,
                     },
                 );
-                let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
+                let (inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
                     inner_constraints,
                     env,
                     var_kinds,
                     shared_vars,
+                    *alias_var,
                     state,
                     entropy,
                     placeholder_idx,
@@ -565,15 +638,12 @@ fn build_select_inner(
             | Constraint::TypeCompatible(_, _)
             | Constraint::Eq(_, _)
             | Constraint::NotEq(_, _) => {}
-            // Variants that the public `PatternBuilder` API can emit but
-            // the resolver does not yet implement. Reject loudly so the
-            // generator's retry loop discards the pattern instead of
-            // shipping SQL that silently omits the construct.
-            Constraint::ProjectFunction { .. } => {
-                return Err(ResolveError::Unsupported("ProjectFunction"));
-            }
-            Constraint::WhereOr { .. } => {
-                return Err(ResolveError::Unsupported("WhereOr"));
+            // Or constraints should have been expanded by
+            // `resolve_constraint_set` before reaching build_select. Hard
+            // panic in release too — the old `debug_assert!(false)` was a
+            // no-op outside debug builds and produced silently-corrupt SQL.
+            Constraint::Or(_, _) => {
+                unreachable!("Or constraint should have been expanded before build_select")
             }
         }
     }
@@ -700,15 +770,21 @@ fn get_col_type(env: &mut Env, col: VarId) -> Result<SqlType, ResolveError> {
     }
 }
 
-/// Get (col_name, table_name) from a Column binding (where table is embedded in the binding).
+/// Get (col_name, table_name) from a Column binding, resolving the table
+/// name lazily from the Table binding so that aliases applied after column
+/// binding are reflected.
 fn get_col_and_table_for_join(
     env: &mut Env,
     col: VarId,
 ) -> Result<(SqlIdentifier, SqlIdentifier), ResolveError> {
-    match env.get(col) {
-        Some(Binding::Column { name, table, .. }) => Ok((name.clone(), table.clone())),
-        _ => Err(ResolveError::Unbound(col)),
-    }
+    let (col_name, table_var) = match env.get(col) {
+        Some(Binding::Column {
+            name, table_var, ..
+        }) => (name.clone(), *table_var),
+        _ => return Err(ResolveError::Unbound(col)),
+    };
+    let table_name = get_table_name(env, table_var)?;
+    Ok((col_name, table_name))
 }
 
 /// Extract the column name from the first projected field of a SELECT.
@@ -766,7 +842,7 @@ fn resolve_inner_subquery(
     // Collect all VarIds referenced in inner constraints to size num_vars.
     let max_var = inner_constraints
         .iter()
-        .flat_map(crate::pattern::constraint_var_ids)
+        .flat_map(|c| c.var_ids())
         .map(|v| v.0)
         .max()
         .unwrap_or(0);
@@ -786,7 +862,7 @@ fn resolve_inner_subquery(
     let var_kinds: &[VarKind] = &outer_var_kinds[..num_vars];
 
     // Resolve schema constraints for the inner scope
-    let mut inner_env =
+    let (mut inner_env, expanded) =
         super::schema::resolve_schema(inner_constraints, var_kinds, state, entropy)?;
 
     // The inner env needs to know about tables created in the outer scope
@@ -812,37 +888,109 @@ fn resolve_inner_subquery(
         }
     }
 
+    // Use `expanded` (Or constraints replaced by their winning branch)
+    // and the shared placeholder counter so PostgreSQL `$N` numbering
+    // stays globally unique across the prepared statement.
     let (query, params) = build_select_inner(
         &mut inner_env,
-        inner_constraints,
+        &expanded,
         var_kinds,
         state,
         entropy,
         placeholder_idx,
     )?;
 
-    // Expose inner-scope *column* bindings to the outer environment.
-    //
-    // CTE patterns rely on this: an inner-allocated column var `c` is
-    // referenced from the outer scope as `ProjectColumn(c, cte_alias)`,
-    // which calls `get_col_table(env, c, cte_alias)` and needs `c`'s
-    // binding in the outer env. Table bindings stay private so
-    // synthesized BaseTables don't leak into outer scope.
-    //
-    // Caller contract: the outer pattern must only reference inner
-    // column vars in contexts where the column genuinely lives — either
-    // via the CTE/subquery alias (CTE pattern) or via the original
-    // physical table when correlated. The resolver does not (and cannot
-    // cheaply) verify that the `(col, table)` pair the outer emits is
-    // self-consistent. Pattern authors own that invariant.
+    let ddl = inner_env.into_ddl_steps(state)?;
+    Ok((query, params, ddl))
+}
+
+/// Resolve a CTE's inner subquery and additionally expose its
+/// projected column bindings to the outer environment, retargeting
+/// each propagated column's `table_var` to the CTE alias.
+///
+/// Outer references like `ProjectColumn(c, cte_alias)` and the
+/// `left_col` of an outer JOIN whose left side comes from the CTE
+/// must resolve to `<cte_alias>.<col_name>` rather than the
+/// underlying base table; without this retarget, a CTE whose body
+/// happens to reference a base table that the outer query also
+/// references would emit references to the base table for those
+/// vars instead of through the CTE alias.
+///
+/// Plain subqueries (EXISTS / IN / scalar) don't expose inner
+/// columns by VarId, and join-subquery / join-CTE right columns are
+/// resolved by the projected column name in the produced
+/// `SelectStatement`, so neither form needs this propagation.
+#[allow(clippy::too_many_arguments)]
+fn resolve_cte_inner_subquery(
+    inner_constraints: &[Constraint],
+    outer_env: &mut Env,
+    outer_var_kinds: &[VarKind],
+    shared_vars: &[VarId],
+    cte_alias_var: VarId,
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+    placeholder_idx: &mut u32,
+) -> Result<(SelectStatement, Vec<ParamMeta>, Vec<DdlStep>), ResolveError> {
+    let max_var = inner_constraints
+        .iter()
+        .flat_map(|c| c.var_ids())
+        .map(|v| v.0)
+        .max()
+        .unwrap_or(0);
+    let num_vars = max_var + 1;
+
+    if num_vars > outer_var_kinds.len() {
+        return Err(ResolveError::InnerVarKindsTruncated {
+            referenced: num_vars,
+            declared: outer_var_kinds.len(),
+        });
+    }
+
+    let var_kinds: &[VarKind] = &outer_var_kinds[..num_vars];
+
+    let (mut inner_env, expanded) =
+        super::schema::resolve_schema(inner_constraints, var_kinds, state, entropy)?;
+
+    for t in &outer_env.new_tables {
+        if !inner_env.new_tables.contains(t) {
+            inner_env.new_tables.push(t.clone());
+        }
+    }
+
+    for &v in shared_vars {
+        if v.0 < num_vars
+            && let Some(binding) = outer_env.get(v)
+        {
+            let binding = binding.clone();
+            if !inner_env.is_bound(v) {
+                inner_env.bind(v, binding);
+            }
+        }
+    }
+
+    let (query, params) = build_select_inner(
+        &mut inner_env,
+        &expanded,
+        var_kinds,
+        state,
+        entropy,
+        placeholder_idx,
+    )?;
+
     for v in 0..num_vars {
         let id = VarId(v);
-        if let Some(binding) = inner_env.get(id)
-            && matches!(binding, Binding::Column { .. })
-            && !outer_env.is_bound(id)
-        {
-            let b = binding.clone();
-            outer_env.bind(id, b);
+        if outer_env.is_bound(id) {
+            continue;
+        }
+        if let Some(Binding::Column { name, sql_type, .. }) = inner_env.get(id) {
+            outer_env.bind(
+                id,
+                Binding::Column {
+                    name: name.clone(),
+                    sql_type: sql_type.clone(),
+                    table_var: cte_alias_var,
+                },
+            );
         }
     }
 
@@ -850,7 +998,7 @@ fn resolve_inner_subquery(
     Ok((query, params, ddl))
 }
 
-/// Infer VarKinds from constraint usage.
+/// Convert an AggregateFn constraint to a FunctionExpr AST node.
 fn make_aggregate_expr(function: &AggregateFn, col_expr: Expr) -> FunctionExpr {
     match function {
         AggregateFn::Count { distinct } => FunctionExpr::Count {
@@ -867,19 +1015,200 @@ fn make_aggregate_expr(function: &AggregateFn, col_expr: Expr) -> FunctionExpr {
         },
         AggregateFn::Min => FunctionExpr::Min(Box::new(col_expr)),
         AggregateFn::Max => FunctionExpr::Max(Box::new(col_expr)),
-        AggregateFn::GroupConcat | AggregateFn::JsonObjectAgg | AggregateFn::ArrayAgg => {
-            // Use a generic UDF call for these
-            let name = match function {
-                AggregateFn::GroupConcat => "GROUP_CONCAT",
-                AggregateFn::JsonObjectAgg => "JSON_OBJECT_AGG",
-                AggregateFn::ArrayAgg => "ARRAY_AGG",
-                _ => unreachable!(),
+        AggregateFn::GroupConcat => FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("GROUP_CONCAT"),
+            arguments: vec![col_expr],
+        },
+        AggregateFn::JsonObjectAgg => FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("JSON_OBJECT_AGG"),
+            arguments: vec![col_expr],
+        },
+        AggregateFn::ArrayAgg => FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("ARRAY_AGG"),
+            arguments: vec![col_expr],
+        },
+    }
+}
+
+/// Default literal of the right shape for `ty`. Used when `Coalesce` /
+/// `IfNull` / `NullIf` need a fallback value to plug into the function
+/// call — `Integer(0)` works on integer columns but Postgres rejects it
+/// for text/date/time columns at parse time and MySQL silently coerces
+/// it, so the comparison oracle drifts.
+fn default_literal_for(ty: &SqlType) -> Literal {
+    use SqlType::*;
+    match ty {
+        Bool => Literal::Boolean(false),
+        Char(_) | VarChar(_) | Text | TinyText | MediumText | LongText | Citext | QuotedChar => {
+            Literal::String(String::new())
+        }
+        Int(_) | Signed | Unsigned | UnsignedInteger | SignedInteger | IntUnsigned(_)
+        | BigInt(_) | BigIntUnsigned(_) | TinyInt(_) | TinyIntUnsigned(_) | SmallInt(_)
+        | SmallIntUnsigned(_) | MediumInt(_) | MediumIntUnsigned(_) | Int2 | Int4 | Int8
+        | Serial | BigSerial => Literal::Integer(0),
+        Double | Float | Real => Literal::Number("0.0".into()),
+        Numeric(_) | Decimal(_, _) => Literal::Number("0".into()),
+        Date => Literal::String("2000-01-01".into()),
+        DateTime(_) | Timestamp => Literal::String("2000-01-01 00:00:00".into()),
+        TimestampTz => Literal::String("2000-01-01 00:00:00+00".into()),
+        Time => Literal::String("00:00:00".into()),
+        Json | Jsonb => Literal::String("{}".into()),
+        Blob | LongBlob | MediumBlob | TinyBlob | Binary(_) | VarBinary(_) | ByteArray => {
+            Literal::ByteArray(Vec::new())
+        }
+        // Bit-string literals can't be empty; NULL is well-defined for our
+        // COALESCE/IFNULL/NULLIF fallback uses.
+        Bit(_) | VarBit(_) => Literal::Null,
+        Enum(_)
+        | Interval { .. }
+        | Array(_)
+        | MacAddr
+        | Inet
+        | Uuid
+        | Tsvector
+        | Point
+        | PostgisPoint
+        | PostgisPolygon
+        | Other(_) => Literal::Null,
+    }
+}
+
+/// Build an `Expr` for a scalar function call from a `ScalarFn` specifier
+/// and resolved column arguments. `col_types[i]` corresponds to `args[i]`
+/// — used by `Coalesce`/`IfNull`/`NullIf` to inject a fallback literal of
+/// the right type instead of a hard-coded `Integer(0)`.
+fn make_scalar_fn_expr(
+    function: &ScalarFn,
+    args: Vec<Expr>,
+    col_types: &[SqlType],
+    dialect: Dialect,
+) -> Expr {
+    let primary_default = col_types
+        .first()
+        .map(default_literal_for)
+        .unwrap_or(Literal::Null);
+    // Most scalar functions map to a UDF call with the function name.
+    // Some need special handling for argument shape.
+    match function {
+        ScalarFn::Coalesce => {
+            // COALESCE(col, <default>) — fallback matches the column type.
+            let mut arguments = args;
+            arguments.push(Expr::Literal(primary_default));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("COALESCE"),
+                arguments,
+            })
+        }
+        ScalarFn::IfNull => {
+            let mut arguments = args;
+            arguments.push(Expr::Literal(primary_default));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("IFNULL"),
+                arguments,
+            })
+        }
+        ScalarFn::NullIf => {
+            let mut arguments = args;
+            arguments.push(Expr::Literal(primary_default));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("NULLIF"),
+                arguments,
+            })
+        }
+        ScalarFn::Cast => {
+            // CAST(col AS CHAR) — use the first column arg
+            let col_expr = args
+                .into_iter()
+                .next()
+                .unwrap_or(Expr::Literal(Literal::Null));
+            let target_type = if dialect == Dialect::MySQL {
+                SqlType::Char(Some(255))
+            } else {
+                SqlType::Text
             };
-            FunctionExpr::Udf {
+            Expr::Cast {
+                expr: Box::new(col_expr),
+                ty: target_type,
+                style: readyset_sql::ast::CastStyle::As,
+                array: false,
+            }
+        }
+        ScalarFn::Upper | ScalarFn::Lower | ScalarFn::Trim | ScalarFn::Length => {
+            let name = match function {
+                ScalarFn::Upper => "UPPER",
+                ScalarFn::Lower => "LOWER",
+                ScalarFn::Trim => "TRIM",
+                _ => "LENGTH",
+            };
+            Expr::Call(FunctionExpr::Udf {
                 schema: None,
                 name: SqlIdentifier::from(name),
-                arguments: vec![col_expr],
-            }
+                arguments: args,
+            })
+        }
+        ScalarFn::Substring => {
+            // SUBSTRING(col, 1, 10)
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::Integer(1)));
+            arguments.push(Expr::Literal(Literal::Integer(10)));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("SUBSTRING"),
+                arguments,
+            })
+        }
+        ScalarFn::Concat => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("CONCAT"),
+            arguments: args,
+        }),
+        ScalarFn::ConcatWs => {
+            // CONCAT_WS(',', col1, col2)
+            let mut arguments = vec![Expr::Literal(Literal::String(",".to_string()))];
+            arguments.extend(args);
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("CONCAT_WS"),
+                arguments,
+            })
+        }
+        ScalarFn::Round => {
+            // ROUND(col) or ROUND(col, 2)
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::Integer(2)));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("ROUND"),
+                arguments,
+            })
+        }
+        ScalarFn::Month | ScalarFn::DayOfWeek => {
+            let name = match function {
+                ScalarFn::Month => "MONTH",
+                _ => "DAYOFWEEK",
+            };
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from(name),
+                arguments: args,
+            })
+        }
+        ScalarFn::Greatest | ScalarFn::Least => {
+            let name = match function {
+                ScalarFn::Greatest => "GREATEST",
+                _ => "LEAST",
+            };
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from(name),
+                arguments: args,
+            })
         }
     }
 }
@@ -888,14 +1217,26 @@ fn make_aggregate_expr(function: &AggregateFn, col_expr: Expr) -> FunctionExpr {
 mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
+    use readyset_sql::ast::BinaryOperator;
     use readyset_sql::{Dialect, DialectDisplay};
 
-    use super::*;
-    use crate::constraint::TypeClass;
-    use crate::resolver::{ResolverOutput, resolve};
-    use crate::state::GeneratorConfig;
-    use crate::var::VarKind;
+    use crate::constraint::{AggregateFn, Constraint, SubqueryPosition, TypeClass};
+    use crate::entropy::Entropy;
+    use crate::resolver::{ResolveError, ResolverOutput, resolve};
+    use crate::state::{GenerationState, GeneratorConfig};
+    use crate::var::{VarId, VarKind};
 
+    fn test_env(dialect: Dialect) -> (GenerationState, SmallRng) {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0, // always synthesize
+            ..Default::default()
+        };
+        let state = GenerationState::new(dialect, config);
+        let rng = SmallRng::seed_from_u64(42);
+        (state, rng)
+    }
+
+    /// Helper: run full resolve pipeline on given constraints and return SQL string.
     fn resolve_to_sql(
         constraints: Vec<Constraint>,
         var_kinds: Vec<VarKind>,
@@ -1396,6 +1737,8 @@ mod tests {
         assert_eq!(output.params[0].count, 2);
     }
 
+    // -- Subquery / CTE resolution tests --
+
     #[test]
     fn ast_join_subquery() {
         use crate::pattern::PatternBuilder;
@@ -1507,5 +1850,97 @@ mod tests {
 
         assert!(sql.contains("WITH"), "sql: {sql}");
         assert!(sql.contains("SELECT"), "sql: {sql}");
+    }
+
+    #[test]
+    fn in_subquery_with_empty_shared_vars_returns_error() {
+        let t_outer = VarId(0);
+        let c_outer = VarId(1);
+        let t_inner = VarId(2);
+        let c_inner = VarId(3);
+
+        let constraints = vec![
+            Constraint::BaseTable(t_outer),
+            Constraint::BaseTable(t_inner),
+            Constraint::ColumnExists {
+                col: c_outer,
+                table: t_outer,
+            },
+            Constraint::ColumnExists {
+                col: c_inner,
+                table: t_inner,
+            },
+            Constraint::From(t_outer),
+            Constraint::ProjectColumn {
+                col: c_outer,
+                table: t_outer,
+            },
+            Constraint::Subquery {
+                position: SubqueryPosition::InSubquery,
+                constraints: vec![
+                    Constraint::BaseTable(t_inner),
+                    Constraint::ColumnExists {
+                        col: c_inner,
+                        table: t_inner,
+                    },
+                    Constraint::From(t_inner),
+                    Constraint::ProjectColumn {
+                        col: c_inner,
+                        table: t_inner,
+                    },
+                ],
+                shared_vars: vec![], // empty — should error, not silently degrade to EXISTS
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t_outer },
+            VarKind::Relation,
+            VarKind::Column { table: t_inner },
+        ];
+
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let result = resolve(&constraints, &var_kinds, &mut state, &mut entropy);
+        assert!(
+            result.is_err(),
+            "InSubquery with empty shared_vars should return an error, not silently degrade to EXISTS"
+        );
+    }
+
+    #[test]
+    fn ast_where_or() {
+        let t = VarId(0);
+        let c1 = VarId(1);
+        let c2 = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c1, table: t },
+            Constraint::ColumnExists { col: c2, table: t },
+            Constraint::From(t),
+            Constraint::ProjectColumn { col: c1, table: t },
+            Constraint::WhereOr {
+                conditions: vec![
+                    Constraint::WhereParam {
+                        col: c1,
+                        table: t,
+                        op: BinaryOperator::Equal,
+                    },
+                    Constraint::WhereParam {
+                        col: c2,
+                        table: t,
+                        op: BinaryOperator::Greater,
+                    },
+                ],
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+        let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
+        assert!(sql.contains("OR"), "expected OR in: {sql}");
     }
 }
