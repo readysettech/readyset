@@ -1,9 +1,6 @@
-use std::collections::BTreeMap;
 use std::fmt::{self, Debug};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use itertools::Either;
 use partial_map::InsertionOrder;
 use smallvec::SmallVec;
 use triomphe::Arc;
@@ -48,169 +45,10 @@ impl Metrics {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct BTreeValue<T, I> {
-    value: T,
-    order: I,
-}
-
-impl<T, I> BTreeValue<T, I> {
-    fn new(value: T, order: I) -> Self {
-        Self { value, order }
-    }
-}
-
-impl<T, I> Debug for BTreeValue<T, I>
-where
-    T: Debug,
-{
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> std::result::Result<(), fmt::Error> {
-        self.value.fmt(fmt)
-    }
-}
-
-impl<T, I> PartialEq for BTreeValue<T, I>
-where
-    T: PartialEq,
-    I: InsertionOrder<T>,
-{
-    fn eq(&self, other: &BTreeValue<T, I>) -> bool {
-        self.order.cmp(&self.value, &other.value) == std::cmp::Ordering::Equal
-    }
-}
-
-impl<T, I> Eq for BTreeValue<T, I>
-where
-    T: Eq,
-    I: InsertionOrder<T>,
-{
-}
-
-impl<T, I> PartialOrd for BTreeValue<T, I>
-where
-    T: PartialOrd,
-    I: InsertionOrder<T>,
-{
-    fn partial_cmp(&self, other: &BTreeValue<T, I>) -> Option<std::cmp::Ordering> {
-        Some(self.order.cmp(&self.value, &other.value))
-    }
-}
-
-impl<T, I> Ord for BTreeValue<T, I>
-where
-    T: Ord,
-    I: InsertionOrder<T>,
-{
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.order.cmp(&self.value, &other.value)
-    }
-}
-
-#[derive(Debug)]
-pub struct BTreeUnwrapIterator<'a, T, I> {
-    inner: std::collections::btree_map::Iter<'a, BTreeValue<T, I>, usize>,
-    current: Option<&'a T>,
-    count: usize,
-}
-
-impl<'a, T, I> BTreeUnwrapIterator<'a, T, I> {
-    fn new(inner: std::collections::btree_map::Iter<'a, BTreeValue<T, I>, usize>) -> Self {
-        Self {
-            inner,
-            current: None,
-            count: 0,
-        }
-    }
-}
-
-impl<'a, T, I> Iterator for BTreeUnwrapIterator<'a, T, I> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<<Self as Iterator>::Item> {
-        if self.count == 0 {
-            let (wrapped, count) = self.inner.next()?;
-            self.current = Some(&wrapped.value);
-            self.count = *count;
-            self.next()
-        } else {
-            self.count -= 1;
-            self.current
-        }
-    }
-}
-
-/// Values for a given key in the map.
-#[derive(Clone)]
-enum ValuesInner<T, I> {
-    // values have never been read
-    InitSmallVec {
-        v: Arc<SmallVec<[T; 1]>>,
-        // on first read, mark to switch to final (SmallVec) state on next write
-        read: OnceLock<()>,
-    },
-
-    // we have never been read, and we overflowed the threshold
-    BTreeMap {
-        map: BTreeMap<BTreeValue<T, I>, usize>, // value -> count of duplicates
-        len: usize,                             // including duplicates
-        // on first post-overflow read, we convert back so to_shared_smallvec will be fast
-        converted: OnceLock<Arc<SmallVec<[T; 1]>>>,
-    },
-
-    // on first write after read, we switch back if we were in btree mode and stay here
-    SmallVec(Arc<SmallVec<[T; 1]>>),
-}
-
-impl<T, I> Debug for ValuesInner<T, I>
-where
-    T: Debug,
-{
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ValuesInner::InitSmallVec { v, .. } | ValuesInner::SmallVec(v) => v.fmt(fmt),
-            ValuesInner::BTreeMap { map, .. } => map.fmt(fmt),
-        }
-    }
-}
-
-impl<T, I> ValuesInner<T, I> {
-    fn new_init() -> Self {
-        ValuesInner::InitSmallVec {
-            v: Arc::new(SmallVec::new()),
-            read: Default::default(),
-        }
-    }
-
-    fn new_btree() -> Self {
-        ValuesInner::BTreeMap {
-            map: Default::default(),
-            len: 0,
-            converted: Default::default(),
-        }
-    }
-
-    fn new_vec(v: Arc<SmallVec<[T; 1]>>) -> Self {
-        ValuesInner::SmallVec(v)
-    }
-
-    fn smallvec_iter(&self) -> std::slice::Iter<'_, T> {
-        match self {
-            ValuesInner::InitSmallVec { v, .. } => v.iter(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl<T, I> Default for ValuesInner<T, I> {
-    fn default() -> Self {
-        Self::new_init()
-    }
-}
-
 /// A sorted vector of values for a given key in the map with access metadata for eviction
 #[derive(Clone)]
 pub struct Values<T, I> {
-    values: ValuesInner<T, I>,
+    values: Arc<SmallVec<[T; 1]>>,
     order: I,
     eviction_meta: EvictionMeta,
     metrics: Metrics,
@@ -222,7 +60,7 @@ where
 {
     fn default() -> Self {
         Values {
-            values: ValuesInner::new_init(),
+            values: Arc::new(SmallVec::new()),
             order: Default::default(),
             eviction_meta: Default::default(),
             metrics: Default::default(),
@@ -236,7 +74,7 @@ where
 {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Values")
-            .field("values", &self.values)
+            .field("values", &*self.values)
             .field("eviction_meta", &self.eviction_meta)
             .finish_non_exhaustive()
     }
@@ -246,11 +84,9 @@ impl<T, I> Values<T, I>
 where
     I: InsertionOrder<T>,
 {
-    const VEC_MAX: usize = 10;
-
     pub(crate) fn new(eviction_meta: EvictionMeta, order: I) -> Self {
         Values {
-            values: ValuesInner::default(),
+            values: Default::default(),
             order,
             eviction_meta,
             metrics: Default::default(),
@@ -269,18 +105,12 @@ where
 
     /// Returns the number of values.
     pub fn len(&self) -> usize {
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => v.len(),
-            ValuesInner::BTreeMap { len, .. } => len,
-        }
+        self.values.len()
     }
 
     /// Returns true if holds no values.
     pub fn is_empty(&self) -> bool {
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => v.is_empty(),
-            ValuesInner::BTreeMap { ref map, .. } => map.is_empty(),
-        }
+        self.values.is_empty()
     }
 
     /// Assigns new InsertionOrder
@@ -288,16 +118,9 @@ where
         self.order = order;
     }
 
-    /// An iterator visiting all elements in arbitrary order.
-    pub fn iter(&self) -> Either<std::slice::Iter<'_, T>, BTreeUnwrapIterator<'_, T, I>> {
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => {
-                Either::Left(v.iter())
-            }
-            ValuesInner::BTreeMap { ref map, .. } => {
-                Either::Right(BTreeUnwrapIterator::new(map.iter()))
-            }
-        }
+    /// An iterator visiting all elements in sorted order.
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.values.iter()
     }
 
     fn find(
@@ -332,15 +155,7 @@ where
     where
         T: Clone + Ord + PartialEq,
     {
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, .. } | ValuesInner::SmallVec(ref v) => {
-                v.contains(value)
-            }
-            ValuesInner::BTreeMap { ref map, .. } => {
-                let v = BTreeValue::new(value.clone(), self.order.clone());
-                map.contains_key(&v)
-            }
-        }
+        self.values.contains(value)
     }
 
     /// Inserts an element at position index within the vector, shifting all elements after it
@@ -349,56 +164,8 @@ where
     where
         T: Ord + Clone,
     {
-        // Always insert values in sorted order, even if no ordering method is provided,
-        // otherwise it will require a linear scan to remove a value.
-        let Self { values, order, .. } = self;
-
-        match values {
-            ValuesInner::InitSmallVec { v, read } if read.get().is_some() => {
-                // On first post-read write, switch to final state.
-                *values = ValuesInner::new_vec(Arc::clone(v));
-                self.insert(value, index, timestamp);
-            }
-            ValuesInner::InitSmallVec { v, read: _ } if v.len() < Self::VEC_MAX => {
-                Self::find(v, order, &value, index, true);
-                Arc::make_mut(v).insert(index.unwrap(), value);
-            }
-            ValuesInner::InitSmallVec { .. } => {
-                // Switch to btree to limit the O(n^2) inserts to the sorted vector.
-                let mut vals = ValuesInner::new_btree();
-                std::mem::swap(&mut vals, values);
-
-                // Collect would drop duplicates.
-                for val in vals.smallvec_iter() {
-                    self.insert(val.clone(), index, timestamp);
-                }
-
-                self.insert(value, index, timestamp);
-            }
-            ValuesInner::BTreeMap { converted, .. } if converted.get().is_some() => {
-                // On first post-read write, switch to final state.
-                *values = ValuesInner::new_vec(converted.take().unwrap());
-                self.insert(value, index, timestamp);
-            }
-            ValuesInner::BTreeMap {
-                map,
-                len,
-                converted: _,
-            } => {
-                let new = BTreeValue::new(value, order.clone());
-                match map.get_mut(&new) {
-                    None => {
-                        map.insert(new, 1);
-                    }
-                    Some(count) => *count += 1,
-                }
-                *len += 1;
-            }
-            ValuesInner::SmallVec(v) => {
-                Self::find(v, order, &value, index, true);
-                Arc::make_mut(v).insert(index.unwrap(), value);
-            }
-        }
+        Self::find(&self.values, &self.order, &value, index, true);
+        Arc::make_mut(&mut self.values).insert(index.unwrap(), value);
         self.metrics.update(timestamp);
     }
 
@@ -408,50 +175,10 @@ where
     where
         T: Ord + Clone,
     {
-        let Self { values, order, .. } = self;
-
-        match values {
-            ValuesInner::InitSmallVec { v, read } if read.get().is_some() => {
-                // On first post-read write, switch to final state.
-                *values = ValuesInner::new_vec(Arc::clone(v));
-                self.remove(value, index, timestamp);
-            }
-            ValuesInner::InitSmallVec { v, read: _ } => {
-                Self::find(v, order, value, index, false);
-                if let Some(index) = *index {
-                    Arc::make_mut(v).remove(index);
-                }
-            }
-            ValuesInner::BTreeMap { converted, .. } if converted.get().is_some() => {
-                // On first post-read write, switch to final state.
-                *values = ValuesInner::new_vec(converted.take().unwrap());
-                self.remove(value, index, timestamp);
-            }
-            ValuesInner::BTreeMap {
-                map,
-                len,
-                converted: _,
-            } => {
-                let new = BTreeValue::new(value.clone(), order.clone());
-                match map.get_mut(&new) {
-                    None => (),
-                    Some(1) => {
-                        map.remove(&new);
-                        *len -= 1;
-                    }
-                    Some(count) => {
-                        *count -= 1;
-                        *len -= 1;
-                    }
-                }
-            }
-            ValuesInner::SmallVec(v) => {
-                Self::find(v, order, value, index, false);
-                if let Some(index) = *index {
-                    Arc::make_mut(v).remove(index);
-                }
-            }
-        };
+        Self::find(&self.values, &self.order, value, index, false);
+        if let Some(index) = *index {
+            Arc::make_mut(&mut self.values).remove(index);
+        }
         self.metrics.update(timestamp);
     }
 
@@ -459,43 +186,15 @@ where
     where
         T: Clone,
     {
-        // This function gets called on startup before we receive writes, so we must set the
-        // initial state instead of skipping it.
-        self.values = ValuesInner::new_init();
+        self.values = Default::default();
     }
 
-    fn convert_to_vec(map: &BTreeMap<BTreeValue<T, I>, usize>) -> Arc<SmallVec<[T; 1]>>
-    where
-        T: Clone,
-    {
-        Arc::new(
-            map.iter()
-                .flat_map(|(wrapped, count)| std::iter::repeat_n(wrapped.value.clone(), *count))
-                .collect(),
-        )
-    }
-
-    /// Returns the values as a SmallVec.  If the internal storage is a SmallVec, this merely
-    /// clones an Arc.  If not, the stored values are copied into a new SmallVec.
+    /// Returns the values as a shared Arc over the SmallVec.
     pub fn to_shared_smallvec(&self) -> Arc<SmallVec<[T; 1]>>
     where
         T: Clone,
     {
-        // We're in the read path.  Much hot, very speed needed in the common case.
-        match self.values {
-            ValuesInner::InitSmallVec { ref v, ref read } => {
-                // Since we're still small, we can just set a flag to say to change states.
-                // Ignore the race, as the shared ref means no write can be in progress.
-                let _ = read.set(());
-                Arc::clone(v)
-            }
-            ValuesInner::SmallVec(ref v) => Arc::clone(v),
-            ValuesInner::BTreeMap {
-                ref map,
-                ref converted,
-                ..
-            } => Arc::clone(converted.get_or_init(|| Self::convert_to_vec(map))),
-        }
+        Arc::clone(&self.values)
     }
 }
 
@@ -525,10 +224,7 @@ mod tests {
     #[test]
     fn sensible_default() {
         let v: Values<i32, DefaultInsertionOrder> = Values::default();
-        match v.values {
-            ValuesInner::InitSmallVec { ref v, .. } => assert_eq!(v.capacity(), 1),
-            _ => unreachable!(),
-        }
+        assert_eq!(v.values.capacity(), 1);
         assert_empty!(v);
     }
 
@@ -552,49 +248,18 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_values_btree() {
-        const ROWS: usize = 10 * TestValues::VEC_MAX;
+    fn duplicate_values() {
+        const ROWS: usize = 100;
 
         let mut v = TestValues::default();
-        assert!(matches!(v.values, ValuesInner::InitSmallVec { .. }));
-
         for _ in 0..ROWS {
             v.insert(1, &mut None, Instant::now());
         }
-        assert!(matches!(v.values, ValuesInner::BTreeMap { .. }));
-
-        // starts state change
+        assert_eq!(v.len(), ROWS);
         assert_eq!(v.to_shared_smallvec().len(), ROWS);
-        match &v.values {
-            ValuesInner::BTreeMap { converted, .. } => assert!(converted.get().is_some()),
-            _ => panic!("unexpected state"),
-        }
 
-        // finishes state change
         v.remove(&1, &mut None, Instant::now());
         assert_eq!(v.to_shared_smallvec().len(), ROWS - 1);
-        assert!(matches!(v.values, ValuesInner::SmallVec(_)));
-    }
-
-    #[test]
-    fn non_overflow_states() {
-        let mut v = TestValues::default();
-        assert!(matches!(v.values, ValuesInner::InitSmallVec { .. }));
-
-        v.insert(1, &mut None, Instant::now());
-        assert!(matches!(v.values, ValuesInner::InitSmallVec { .. }));
-
-        // starts state change
-        assert_eq!(v.to_shared_smallvec().len(), 1);
-        match &v.values {
-            ValuesInner::InitSmallVec { read, .. } => assert!(read.get().is_some()),
-            _ => panic!("unexpected state"),
-        }
-
-        // finishes state change
-        v.insert(1, &mut None, Instant::now());
-        assert!(matches!(v.values, ValuesInner::SmallVec(_)));
-        assert_eq!(v.to_shared_smallvec().len(), 2);
     }
 
     #[derive(Debug, Default, Clone)]
@@ -611,19 +276,15 @@ mod tests {
 
     #[test]
     fn backwards() {
-        const ROWS: usize = TestValues::VEC_MAX + 2;
-
         let mut v: Values<u64, Backwards> = Values::default();
-        for i in 0..ROWS {
-            v.insert(i as _, &mut None, Instant::now());
+        for i in 0..12 {
+            v.insert(i, &mut None, Instant::now());
         }
 
         let expect = vec![11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-        assert!(matches!(v.values, ValuesInner::BTreeMap { .. }));
         assert_eq!(v.iter().cloned().collect::<Vec<_>>(), expect);
 
         v.remove(&11, &mut None, Instant::now());
-        assert!(matches!(v.values, ValuesInner::BTreeMap { .. }));
         assert_eq!(v.iter().cloned().collect::<Vec<_>>(), &expect[1..]);
     }
 }
