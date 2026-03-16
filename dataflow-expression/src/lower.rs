@@ -1338,9 +1338,10 @@ impl Expr {
             if let Some(ty) = then_types_it.next() {
                 ty
             } else {
-                //  At this point we don't have any not NULL expressions neither in THEN(s) nor in
-                // ELSE.  We can't handle this case.
-                return DfType::Unknown;
+                // All THEN and ELSE expressions are unknown (e.g. PostgreSQL string literals).
+                // Per PostgreSQL type resolution rule 3: "If all inputs are of type unknown,
+                // resolve as type text."
+                return DfType::DEFAULT_TEXT;
             }
         } else {
             else_type
@@ -2325,11 +2326,6 @@ pub(crate) mod tests {
             Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context())
         }
 
-        const ERROR_EXPR: Expr = Expr::Literal {
-            val: DfValue::None,
-            ty: DfType::Unknown,
-        };
-
         // 1st THEN is NULL and ELSE is missing
         assert_eq!(
             get_case_result_type("case when 1=1 then NULL when 2=2 then 'BCD' end")
@@ -2369,12 +2365,13 @@ pub(crate) mod tests {
                 .ty(),
             &DfType::BigInt
         );
-        // Negative test: The single THEN is NULL and ELSE is missing
+        // All-unknown branches resolve to DEFAULT_TEXT (PostgreSQL rule 3:
+        // "If all inputs are of type unknown, resolve as type text")
         assert_eq!(
             get_case_result_type("case when 1=1 then NULL end")
-                .unwrap_or(ERROR_EXPR)
+                .unwrap()
                 .ty(),
-            &DfType::Unknown
+            &DfType::DEFAULT_TEXT
         );
         // Incompatible THEN expressions — falls back to DEFAULT_TEXT via
         // infer_case_result_type (dialect-unaware fallback, not from the literal)
@@ -2389,6 +2386,21 @@ pub(crate) mod tests {
             get_case_result_type("case when 1=1 then 2 else 'ABC' end")
                 .unwrap()
                 .ty(),
+            &DfType::DEFAULT_TEXT
+        );
+
+        // PostgreSQL: all-string-literal CASE branches resolve to text without
+        // requiring explicit ::text casts
+        fn get_case_result_type_pg(stmt: &str) -> ReadySetResult<Expr> {
+            let input = parse_expr(ParserDialect::PostgreSQL, stmt).unwrap();
+            Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context())
+        }
+        assert_eq!(
+            get_case_result_type_pg(
+                "case when 1=1 then '$0 - $15' when 2=2 then '$15 - $25' else '$50+' end"
+            )
+            .unwrap()
+            .ty(),
             &DfType::DEFAULT_TEXT
         );
     }

@@ -1,0 +1,180 @@
+# Tests that CASE expressions with all-string-literal branches infer type text
+# without requiring explicit ::text casts.
+#
+# PostgreSQL type resolution rule 3: "If all inputs are of type unknown, resolve
+# as type text."
+#
+# Previously, Readyset rejected these queries with:
+#   "Can not infer result type for CASE expression"
+# because PostgreSQL string literals are typed as Unknown during expression
+# lowering, and when all CASE branches were Unknown the type could not be
+# resolved.
+
+statement ok
+CREATE TABLE case_inf (id INT PRIMARY KEY, price FLOAT, category TEXT)
+
+statement ok
+INSERT INTO case_inf VALUES
+  (1, 5.0, 'A'),
+  (2, 20.0, 'B'),
+  (3, 40.0, 'A'),
+  (4, 60.0, 'B'),
+  (5, 10.0, 'A')
+
+# CASE with string literal branches (no ::text casts)
+query IT rowsort
+SELECT
+  id,
+  CASE
+    WHEN price < 15 THEN '$0 - $15'
+    WHEN price < 25 THEN '$15 - $25'
+    WHEN price < 50 THEN '$25 - $50'
+    ELSE '$50+'
+  END AS price_segment
+FROM case_inf
+----
+1
+$0 - $15
+2
+$15 - $25
+3
+$25 - $50
+4
+$50+
+5
+$0 - $15
+
+# Simple CASE form with string literals
+query IT rowsort
+SELECT id, CASE category WHEN 'A' THEN 'alpha' WHEN 'B' THEN 'beta' ELSE 'other' END
+FROM case_inf
+----
+1
+alpha
+2
+beta
+3
+alpha
+4
+beta
+5
+alpha
+
+# CASE with no ELSE (implicit NULL) and string branches
+query IT rowsort
+SELECT id, CASE WHEN price > 50 THEN 'expensive' END FROM case_inf
+----
+1
+NULL
+2
+NULL
+3
+NULL
+4
+expensive
+5
+NULL
+
+# CASE with string branches in a cached query with parameterized WHERE
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT
+  id,
+  CASE
+    WHEN price < 15 THEN 'low'
+    WHEN price < 50 THEN 'mid'
+    ELSE 'high'
+  END AS bucket
+FROM case_inf
+WHERE category = ?
+
+query IT rowsort
+SELECT
+  id,
+  CASE
+    WHEN price < 15 THEN 'low'
+    WHEN price < 50 THEN 'mid'
+    ELSE 'high'
+  END AS bucket
+FROM case_inf
+WHERE category = 'A'
+----
+1
+low
+3
+mid
+5
+low
+
+# Multiple CASE expressions in the same SELECT
+query ITT rowsort
+SELECT id,
+  CASE WHEN price < 25 THEN 'cheap' ELSE 'pricey' END,
+  CASE category WHEN 'A' THEN 'first' ELSE 'second' END
+FROM case_inf
+----
+1
+cheap
+first
+2
+cheap
+second
+3
+pricey
+first
+4
+pricey
+second
+5
+cheap
+first
+
+# CASE as a GROUP BY key (mirrors fintech q7 pattern)
+query TI rowsort
+SELECT
+  CASE category WHEN 'A' THEN 'group_a' ELSE 'group_b' END AS grp,
+  COUNT(*)
+FROM case_inf
+GROUP BY 1
+----
+group_a
+3
+group_b
+2
+
+# Mixed: one branch is a column reference, others are string literals.
+# The column provides a known Text type, so this should always work,
+# but good to pin.
+query IT rowsort
+SELECT id,
+  CASE WHEN price > 50 THEN category ELSE 'under fifty' END
+FROM case_inf
+----
+1
+under fifty
+2
+under fifty
+3
+under fifty
+4
+B
+5
+under fifty
+
+# CASE in ORDER BY with string literal branches
+query IT nosort
+SELECT id,
+  CASE WHEN price < 15 THEN 'a_low' ELSE 'b_high' END AS tier
+FROM case_inf
+ORDER BY CASE WHEN price < 15 THEN 'a_low' ELSE 'b_high' END, id
+----
+1
+a_low
+5
+a_low
+2
+b_high
+3
+b_high
+4
+b_high
