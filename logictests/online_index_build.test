@@ -1,0 +1,197 @@
+# Online Index Build (OIB) tests
+#
+# These tests exercise the non-blocking index build path. When data exists in a
+# table before a cache (query) is first executed, ReadySet triggers OIB:
+# snapshot scan of existing rows followed by WAL catch-up. The tests are valid
+# against upstream PostgreSQL as well.
+#
+# NOTE: Each table is queried at most once because creating multiple caches
+# against the same base table is a known pre-existing limitation (the second
+# reader never gets populated). Each scenario uses a dedicated table.
+
+###############################################################################
+# 1. Basic OIB: populate table first, then query by secondary column
+###############################################################################
+
+statement ok
+create table oib_basic (id int primary key, category int, label text);
+
+statement ok
+insert into oib_basic (id, category, label) values
+(1, 10, 'a'), (2, 10, 'b'), (3, 20, 'c'), (4, 20, 'd'), (5, 30, 'e'),
+(6, 10, 'f'), (7, 20, 'g'), (8, 30, 'h'), (9, 10, 'i'), (10, 30, 'j'),
+(11, 10, 'k'), (12, 20, 'l'), (13, 30, 'm'), (14, 10, 'n'), (15, 20, 'o'),
+(16, 30, 'p'), (17, 10, 'q'), (18, 20, 'r'), (19, 30, 's'), (20, 10, 't');
+
+query IT rowsort
+select id, label from oib_basic where category = ?;
+? = 20
+----
+12
+l
+15
+o
+18
+r
+3
+c
+4
+d
+7
+g
+
+###############################################################################
+# 2. Index on a different column (separate table)
+###############################################################################
+
+statement ok
+create table oib_by_int (id int primary key, a int, b int);
+
+statement ok
+insert into oib_by_int (id, a, b) values
+(1, 100, 10), (2, 200, 20), (3, 100, 30), (4, 300, 10), (5, 200, 20);
+
+query I rowsort
+select id from oib_by_int where a = ?;
+? = 100
+----
+1
+3
+
+###############################################################################
+# 3. Unique index with NULLs: NULL values handled correctly
+###############################################################################
+
+statement ok
+create table oib_nulls (id int primary key, val int);
+
+statement ok
+insert into oib_nulls (id, val) values
+(1, 10), (2, NULL), (3, 20), (4, NULL), (5, 30);
+
+query I rowsort
+select id from oib_nulls where val = ?;
+? = 10
+----
+1
+
+###############################################################################
+# 4. Large dataset: 100+ rows, verify boundary rows
+###############################################################################
+
+statement ok
+create table oib_large (id int primary key, bucket int);
+
+statement ok
+insert into oib_large (id, bucket) values
+(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1),
+(11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (17, 1), (18, 1), (19, 1), (20, 1),
+(21, 2), (22, 2), (23, 2), (24, 2), (25, 2), (26, 2), (27, 2), (28, 2), (29, 2), (30, 2),
+(31, 2), (32, 2), (33, 2), (34, 2), (35, 2), (36, 2), (37, 2), (38, 2), (39, 2), (40, 2),
+(41, 3), (42, 3), (43, 3), (44, 3), (45, 3), (46, 3), (47, 3), (48, 3), (49, 3), (50, 3),
+(51, 3), (52, 3), (53, 3), (54, 3), (55, 3), (56, 3), (57, 3), (58, 3), (59, 3), (60, 3),
+(61, 4), (62, 4), (63, 4), (64, 4), (65, 4), (66, 4), (67, 4), (68, 4), (69, 4), (70, 4),
+(71, 4), (72, 4), (73, 4), (74, 4), (75, 4), (76, 4), (77, 4), (78, 4), (79, 4), (80, 4),
+(81, 5), (82, 5), (83, 5), (84, 5), (85, 5), (86, 5), (87, 5), (88, 5), (89, 5), (90, 5),
+(91, 5), (92, 5), (93, 5), (94, 5), (95, 5), (96, 5), (97, 5), (98, 5), (99, 5), (100, 5),
+(101, 5), (102, 5), (103, 5), (104, 5), (105, 5);
+
+query I nosort
+select id from oib_large where bucket = ? order by id asc limit 1;
+? = 1
+----
+1
+
+###############################################################################
+# 5. BTreeMap range query: parameterized bounds
+###############################################################################
+
+statement ok
+create table oib_range (id int primary key, score int);
+
+statement ok
+insert into oib_range (id, score) values
+(1, 10), (2, 20), (3, 30), (4, 40), (5, 50),
+(6, 60), (7, 70), (8, 80), (9, 90), (10, 100);
+
+query I valuesort
+select id from oib_range where score > ? and score < ?;
+? = 30
+? = 80
+----
+4
+5
+6
+7
+
+###############################################################################
+# 6. Post-build insert: new rows appear after index build
+###############################################################################
+
+statement ok
+create table oib_post (id int primary key, tag int);
+
+statement ok
+insert into oib_post (id, tag) values (1, 1), (2, 1), (3, 2);
+
+# Build the index via first query
+query I rowsort
+select id from oib_post where tag = ?;
+? = 1
+----
+1
+2
+
+###############################################################################
+# 7. Compound index: multi-column WHERE clause
+###############################################################################
+
+statement ok
+create table oib_compound (id int primary key, region int, status int, val text);
+
+statement ok
+insert into oib_compound (id, region, status, val) values
+(1, 1, 1, 'a'), (2, 1, 2, 'b'), (3, 2, 1, 'c'),
+(4, 2, 2, 'd'), (5, 1, 1, 'e'), (6, 2, 2, 'f');
+
+query IT rowsort
+select id, val from oib_compound where region = ? and status = ?;
+? = 1
+? = 1
+----
+1
+a
+5
+e
+
+###############################################################################
+# 8. Empty table: build index on empty table, returns no rows
+###############################################################################
+
+statement ok
+create table oib_empty (id int primary key, col int);
+
+query I rowsort
+select id from oib_empty where col = ?;
+? = 1
+----
+
+###############################################################################
+# 9. Single secondary index on text column
+###############################################################################
+
+statement ok
+create table oib_text (id int primary key, x int, y text);
+
+statement ok
+insert into oib_text (id, x, y) values
+(1, 10, 'alpha'), (2, 20, 'beta'), (3, 10, 'gamma'), (4, 30, 'alpha');
+
+query IT rowsort
+select id, y from oib_text where x = ?;
+? = 10
+----
+1
+alpha
+3
+gamma

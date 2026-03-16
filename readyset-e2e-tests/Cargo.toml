@@ -48,6 +48,7 @@ utf8mb4_all_codepoints_test = []
 failure_injection = [
     "fail/failpoints",
     "readyset-adapter/failure_injection",
+    "readyset-server/failure_injection",
     "readyset-util/failure_injection",
     "schema-catalog/failure_injection",
 ]
