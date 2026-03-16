@@ -160,7 +160,7 @@ pub fn clean_working_dir(params: &PersistenceParameters) -> Result<()> {
 
 /// Load the metadata from the database, stored in the `DEFAULT_CF` column family under the
 /// `META_KEY`
-fn get_meta(db: &DB) -> Result<PersistentMeta<'static>> {
+pub(crate) fn get_meta(db: &DB) -> Result<PersistentMeta<'static>> {
     Ok(db
         .get_pinned(META_KEY)?
         .and_then(|data| {
@@ -426,7 +426,7 @@ struct PendingBuildMeta {
 
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct PersistentMeta<'a> {
+pub(crate) struct PersistentMeta<'a> {
     /// The version of serialization used to serialize data to this [`PersistentState`]. This is
     /// compared against [`DfValue::SERDE_VERSION`] at startup, and if it's unequal an error will
     /// be returned
@@ -3041,7 +3041,7 @@ mod tests {
         assert_eq!(old4, new4, "PointKey::Single with string");
     }
 
-    fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
+    pub(crate) fn insert<S: State>(state: &mut S, row: Vec<DfValue>) {
         let record: Record = row.into();
         state
             .process_records(&mut record.into(), None, None)
@@ -3054,7 +3054,7 @@ mod tests {
         (dir, path.to_string_lossy().into())
     }
 
-    fn setup_persistent<'a, K: IntoIterator<Item = &'a [usize]>>(
+    pub(crate) fn setup_persistent<'a, K: IntoIterator<Item = &'a [usize]>>(
         prefix: &str,
         unique_keys: K,
     ) -> PersistentState {

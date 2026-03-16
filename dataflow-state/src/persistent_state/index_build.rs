@@ -195,7 +195,7 @@ impl IndexBuildContext {
     ///
     /// Disk is written first so that a write failure doesn't leave in-memory
     /// state out of sync. The index metadata update and pending-build marker
-    /// deletion are written in a single [`WriteBatch`] for atomicity — if we
+    /// deletion are written in a single [`WriteBatch`] for atomicity -- if we
     /// crash between them, we'd either have active indices AND a stale pending
     /// marker (causing crash recovery to drop valid CFs) or neither.
     fn activate_pending_indices(
@@ -879,7 +879,7 @@ impl PersistentState {
         {
             return Ok(());
         }
-        // Already InProgress — another build is running.
+        // Already InProgress -- another build is running.
         Err(internal_err!(
             "Cannot start index build: another build is already in progress"
         ))
@@ -1061,7 +1061,7 @@ pub(super) struct WalOperationCollector {
     /// We cannot return an error from the `WriteBatchIteratorCf` callbacks
     /// (they return `()`), so we record the problem here and check it after
     /// `iterate_cf()` returns. A merge operation would mean the index build
-    /// cannot correctly replay the WAL — the caller must abort the build
+    /// cannot correctly replay the WAL -- the caller must abort the build
     /// rather than silently producing an incomplete index.
     pub(super) had_unexpected_op: bool,
 }
@@ -1484,4 +1484,2001 @@ fn cf_id(db: &rocksdb::DB, cf_name: &str) -> ReadySetResult<u32> {
     collector
         .0
         .ok_or_else(|| internal_err!("failed to determine CF ID for '{}'", cf_name))
+}
+
+// =============================================================================
+// Test helpers
+// =============================================================================
+
+#[cfg(test)]
+impl IndexBuildContext {
+    /// Performs setup + snapshot scan using a sidekick DB (same as production),
+    /// returning a [`PendingIndexBuild`] that tests can inspect and later pass
+    /// to [`catch_up_from_wal_for_test`] and [`activate_build`].
+    pub(super) fn scan_snapshot(
+        &self,
+        indices: &[(Index, bool)],
+    ) -> ReadySetResult<PendingIndexBuild> {
+        let (pending_indices, sequence_number) = self.prepare_pending_build(indices)?;
+
+        let db = self.db.db();
+        let db_path = db.path().to_path_buf();
+        let snapshot = db.snapshot();
+
+        let pk_cf = db
+            .cf_handle(PK_CF)
+            .expect("primary key column family must exist");
+        let iter = snapshot.raw_iterator_cf_opt(&pk_cf, bulk_scan_read_opts());
+
+        let estimated_rows = db
+            .property_int_value_cf(&pk_cf, "rocksdb.estimate-num-keys")
+            .unwrap()
+            .unwrap_or(0) as usize;
+
+        // Open a sidekick and scan into it -- same as production.
+        // This keeps the primary's WAL clean (no disable_wal gaps).
+        let sidekick = open_sidekick(&db_path, &pending_indices, &self.default_options)?;
+
+        PersistentState::populate_secondary_from_iter(
+            &sidekick.db,
+            iter,
+            &pending_indices,
+            &self.name,
+            &self.table,
+            &self.table_status_tx,
+            estimated_rows,
+            AutoCompact::Enable,
+            None, // no shutdown for test helper
+        )?;
+
+        // Keep the sidekick alive so it can be used for transfer during
+        // activate_build. The sidekick's data will be ingested into the
+        // primary at activation time, after WAL catch-up is complete.
+        Ok(PendingIndexBuild {
+            sequence_number,
+            pending_indices,
+            sidekick: Some(sidekick),
+        })
+    }
+
+    /// WAL catch-up wrapper that acquires its own snapshot and writes
+    /// directly to the primary DB (for test simplicity -- catch-up volume
+    /// is small in tests so no contention concern).
+    pub(super) fn catch_up_from_wal_for_test(
+        &self,
+        pending_build: &PendingIndexBuild,
+    ) -> ReadySetResult<WalCatchUpStats> {
+        let db = self.db.db();
+        let snapshot = db.snapshot();
+        let (stats, _last_seq) = self.catch_up_from_wal(
+            db,
+            db, // write_db = primary (no sidekick in tests)
+            Some(&snapshot),
+            pending_build.sequence_number,
+            &pending_build.pending_indices,
+            false, // disable_wal: false when writing to primary
+        )?;
+        Ok(stats)
+    }
+
+    /// Like [`catch_up_from_wal_for_test`] but also returns `last_seq` for
+    /// chaining with [`closure_drain_for_test`].
+    pub(super) fn catch_up_from_wal_for_test_with_seq(
+        &self,
+        pending_build: &PendingIndexBuild,
+    ) -> ReadySetResult<(WalCatchUpStats, u64)> {
+        let db = self.db.db();
+        let snapshot = db.snapshot();
+        self.catch_up_from_wal(
+            db,
+            db,
+            Some(&snapshot),
+            pending_build.sequence_number,
+            &pending_build.pending_indices,
+            false,
+        )
+    }
+
+    /// Closure drain: catches up WAL writes from `since_seq` to current,
+    /// writing directly to the primary DB CFs (which must already be active).
+    /// Used by tests to verify the transfer-gap catch-up.
+    pub(super) fn closure_drain_for_test(
+        &self,
+        since_seq: u64,
+        pending_indices: &[PersistentIndex],
+    ) -> ReadySetResult<WalCatchUpStats> {
+        let db = self.db.db();
+        let (stats, _) = self.catch_up_from_wal(
+            db,
+            db,   // primary is both source and dest
+            None, // no snapshot needed
+            since_seq,
+            pending_indices,
+            false, // WAL enabled for primary writes
+        )?;
+        Ok(stats)
+    }
+
+    /// Activates the indices from a [`PendingIndexBuild`].
+    ///
+    /// If the build holds a sidekick DB (from `scan_snapshot`), its data is
+    /// transferred to the primary via SST ingestion before activation.
+    pub(super) fn activate_build(&self, pending_build: PendingIndexBuild) -> ReadySetResult<()> {
+        let db = self.db.db();
+
+        // Transfer sidekick data to primary if present.
+        if let Some(sidekick) = &pending_build.sidekick {
+            self.transfer_sidekick_to_primary(
+                sidekick,
+                db,
+                &self.default_options,
+                &pending_build.pending_indices,
+            )?;
+        }
+        // Drop sidekick (closes DB, but we don't remove the dir here -- it's a temp dir)
+        if let Some(sidekick) = pending_build.sidekick {
+            let sidekick_path = sidekick.path.clone();
+            drop(sidekick);
+            let _ = fs::remove_dir_all(&sidekick_path);
+        }
+
+        let mut shared_state = self.db.shared_state_mut();
+        self.activate_pending_indices(&mut shared_state, pending_build.pending_indices)
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+/// Information about an in-progress index build, used by tests to inspect
+/// and drive each step independently.
+#[cfg(test)]
+pub(super) struct PendingIndexBuild {
+    /// The RocksDB sequence number at which the snapshot was taken.
+    pub(super) sequence_number: u64,
+    /// The indices being built (not yet in shared_state.indices).
+    pub(super) pending_indices: Vec<PersistentIndex>,
+    /// The sidekick DB holding scan data. Transfer to primary is deferred
+    /// until activation so that WAL catch-up can proceed without WAL
+    /// disruption from SST ingestion.
+    sidekick: Option<SidekickDb>,
+}
+
+#[cfg(test)]
+/// Reads the pending build marker from PENDING_BUILD_KEY, if present.
+fn get_pending_build(db: &rocksdb::DB) -> Option<PendingBuildMeta> {
+    db.get_pinned(PENDING_BUILD_KEY)
+        .ok()
+        .flatten()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+    use std::time::Instant;
+
+    use common::{IndexType, Record, Records};
+    use readyset_client::internal::Index;
+    use readyset_data::DfValue;
+
+    use super::get_pending_build;
+    use crate::persistent_state::tests::{insert, setup_persistent};
+    use crate::persistent_state::{
+        get_meta, DurabilityMode, PersistenceParameters, PersistenceType, PersistentState,
+    };
+    use crate::{LookupResult, PointKey, RecordResult, State};
+
+    // =========================================================================
+    // Test harness
+    // =========================================================================
+
+    /// A convenience wrapper that eliminates boilerplate setup in OIB tests.
+    struct TestHarness {
+        state: PersistentState,
+    }
+
+    impl TestHarness {
+        /// Create a new test harness with primary index and `row_count` rows
+        /// of `(pk, "value_{pk}")` data.
+        fn new(name: &str, row_count: usize) -> Self {
+            let mut state = setup_persistent(name, None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..row_count {
+                insert(
+                    &mut state,
+                    vec![(i as i32).into(), format!("value_{}", i).into()],
+                );
+            }
+            Self { state }
+        }
+
+        /// Create with custom unique keys.
+        fn with_unique_keys(name: &str, unique_keys: &[usize], row_count: usize) -> Self {
+            let mut state = setup_persistent(name, Some(unique_keys));
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..row_count {
+                insert(
+                    &mut state,
+                    vec![(i as i32).into(), format!("value_{}", i).into()],
+                );
+            }
+            Self { state }
+        }
+
+        /// Create with 3-column rows: (pk, "col1_{pk}", "col2_{pk}").
+        fn new_three_cols(name: &str, row_count: usize) -> Self {
+            let mut state = setup_persistent(name, None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..row_count {
+                insert(
+                    &mut state,
+                    vec![
+                        (i as i32).into(),
+                        format!("col1_{}", i).into(),
+                        format!("col2_{}", i).into(),
+                    ],
+                );
+            }
+            Self { state }
+        }
+
+        /// Insert a row.
+        fn insert(&mut self, row: Vec<DfValue>) {
+            insert(&mut self.state, row);
+        }
+
+        /// Insert N rows starting from `pk_start`: (pk, "{prefix}_{pk}").
+        fn insert_range(&mut self, pk_start: i32, count: i32, prefix: &str) {
+            for i in pk_start..(pk_start + count) {
+                insert(
+                    &mut self.state,
+                    vec![i.into(), format!("{}_{}", prefix, i).into()],
+                );
+            }
+        }
+
+        /// Insert N 3-column rows starting from `pk_start`.
+        fn insert_range_3col(&mut self, pk_start: i32, count: i32, prefix: &str) {
+            for i in pk_start..(pk_start + count) {
+                insert(
+                    &mut self.state,
+                    vec![
+                        i.into(),
+                        format!("{}_col1_{}", prefix, i).into(),
+                        format!("{}_col2_{}", prefix, i).into(),
+                    ],
+                );
+            }
+        }
+
+        /// Delete a row by providing the full row.
+        fn delete(&mut self, row: Vec<DfValue>) {
+            let mut records: Records = Record::Negative(row).into();
+            self.state
+                .process_records(&mut records, None, None)
+                .expect("delete should succeed");
+        }
+
+        /// Look up by column index and key, assert exactly `expected` rows returned.
+        fn assert_lookup_count(&self, col: usize, key: DfValue, expected: usize) {
+            match self.state.lookup(&[col], &PointKey::Single(key.clone())) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(
+                        rows.len(),
+                        expected,
+                        "lookup col={} key={:?}: expected {} rows, got {}",
+                        col,
+                        key,
+                        expected,
+                        rows.len()
+                    );
+                }
+                other => panic!(
+                    "lookup col={} key={:?}: expected Some(Owned), got {:?}",
+                    col, key, other
+                ),
+            }
+        }
+
+        /// Look up by column index and key, assert 1 row with expected pk.
+        fn assert_lookup_row(&self, col: usize, key: DfValue, expected_pk: DfValue) {
+            match self.state.lookup(&[col], &PointKey::Single(key.clone())) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(
+                        rows.len(),
+                        1,
+                        "lookup col={} key={:?}: expected 1 row, got {}",
+                        col,
+                        key,
+                        rows.len()
+                    );
+                    assert_eq!(
+                        rows[0][0], expected_pk,
+                        "lookup col={} key={:?}: pk mismatch",
+                        col, key
+                    );
+                }
+                other => panic!(
+                    "lookup col={} key={:?}: expected Some(Owned), got {:?}",
+                    col, key, other
+                ),
+            }
+        }
+
+        /// Look up by column index and key, assert no rows.
+        fn assert_lookup_empty(&self, col: usize, key: DfValue) {
+            self.assert_lookup_count(col, key, 0);
+        }
+
+        /// Assert that all rows in range [pk_start, pk_start+count) exist in
+        /// the secondary index on `col`.
+        fn assert_secondary_range(&self, col: usize, pk_start: i32, count: i32, prefix: &str) {
+            for i in pk_start..(pk_start + count) {
+                let key = format!("{}_{}", prefix, i);
+                self.assert_lookup_row(col, key.into(), i.into());
+            }
+        }
+    }
+
+    /// Helper to create a PersistentState at a specific path with permanent durability.
+    /// This allows reopening the same database to test crash recovery scenarios.
+    fn setup_persistent_at_path(path: &std::path::Path, name: &str) -> PersistentState {
+        let unique_keys: Option<&[usize]> = None;
+        let params = PersistenceParameters {
+            mode: DurabilityMode::Permanent,
+            storage_dir: Some(path.to_path_buf()),
+            ..PersistenceParameters::default()
+        };
+        PersistentState::new(
+            String::from(name),
+            None,
+            unique_keys,
+            &params,
+            PersistenceType::BaseTable,
+            None,
+        )
+        .expect("should create persistent state")
+    }
+
+    /// Blocks until the index build finishes (succeeded or failed).
+    /// Returns true if finished within `timeout`, false if timed out.
+    fn wait_for_index_build(state: &PersistentState, timeout: std::time::Duration) -> bool {
+        let start = Instant::now();
+        while state.index_build_status() == crate::IndexBuildStatus::InProgress {
+            if start.elapsed() > timeout {
+                return false;
+            }
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+        true
+    }
+
+    // =========================================================================
+    // online_index_build -- core lifecycle, WAL catch-up, high volume, batching
+    // =========================================================================
+
+    mod online_index_build {
+        use std::thread;
+        use std::time::Duration;
+
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use readyset_data::DfValue;
+
+        use super::{insert, setup_persistent, wait_for_index_build, TestHarness};
+        use crate::persistent_state::PersistentState;
+        use crate::{IndexBuildStatus, LookupResult, PointKey, RecordResult, State};
+
+        /// Assert that looking up `key` in `cols` returns exactly `expected` rows.
+        fn assert_lookup(state: &PersistentState, cols: &[usize], key: &PointKey, expected: usize) {
+            match state.lookup(cols, key) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(
+                        rows.len(),
+                        expected,
+                        "lookup cols={:?} key={:?}: expected {} rows, got {}",
+                        cols,
+                        key,
+                        expected,
+                        rows.len()
+                    );
+                }
+                other => panic!(
+                    "lookup cols={:?} key={:?}: expected Some(Owned), got {:?}",
+                    cols, key, other
+                ),
+            }
+        }
+
+        #[test]
+        fn add_secondary_records_sequence_number() {
+            let h = TestHarness::new("add_secondary_records_seq", 10);
+
+            let seq_before = h.state.db.db().latest_sequence_number();
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            assert!(
+                pending_build.sequence_number >= seq_before,
+                "Pending build sequence {} should be >= seq_before {}",
+                pending_build.sequence_number,
+                seq_before
+            );
+            assert_eq!(pending_build.pending_indices.len(), 1);
+            assert_eq!(pending_build.pending_indices[0].index.columns, vec![1]);
+        }
+
+        #[test]
+        fn pending_indices_not_in_active_list() {
+            let h = TestHarness::new("pending_not_active", 5);
+
+            let initial_count = h.state.db.shared_state().indices.len();
+            assert_eq!(initial_count, 1);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let _pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            assert_eq!(
+                h.state.db.shared_state().indices.len(),
+                initial_count,
+                "Pending indices should not be added to active list during build"
+            );
+        }
+
+        #[test]
+        fn activate_pending_indices_adds_to_active_list() {
+            let h = TestHarness::new("activate_adds_to_list", 5);
+            let initial_count = h.state.db.shared_state().indices.len();
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            assert_eq!(h.state.db.shared_state().indices.len(), initial_count);
+
+            ctx.activate_build(pending_build)
+                .expect("activate_build should succeed");
+
+            assert_eq!(h.state.db.shared_state().indices.len(), initial_count + 1);
+            h.assert_lookup_row(1, "value_3".into(), 3.into());
+        }
+
+        #[test]
+        fn writes_during_build_go_to_primary_only() {
+            let mut h = TestHarness::new("writes_primary_only", 5);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+            let seq_at_build = pending_build.sequence_number;
+
+            h.insert_range(100, 5, "after_build");
+            h.assert_lookup_count(0, 100.into(), 1);
+
+            let current_seq = h.state.db.db().latest_sequence_number();
+            assert!(current_seq > seq_at_build);
+        }
+
+        #[test]
+        fn wal_catchup_applies_writes_during_build() {
+            let mut h = TestHarness::new("wal_catchup_applies", 5);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            h.insert_range(100, 3, "during_build");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("WAL catch-up should succeed");
+            assert_eq!(stats.puts_applied, 3);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            h.assert_lookup_row(1, "value_2".into(), 2.into());
+            h.assert_lookup_row(1, "during_build_101".into(), 101.into());
+        }
+
+        #[test]
+        fn build_indices_catches_up_writes_after_prepare() {
+            let mut h = TestHarness::new("catches_up_writes", 5);
+
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = h
+                .state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices to build");
+
+            h.state.mark_index_build_in_progress().unwrap();
+            let ctx = h.state.create_index_build_context();
+
+            // Insert data after prepare but before build_indices
+            h.insert_range(100, 3, "concurrent");
+
+            ctx.build_indices(indices).unwrap();
+
+            h.assert_lookup_row(1, "value_3".into(), 3.into());
+            h.assert_lookup_row(1, "concurrent_101".into(), 101.into());
+        }
+
+        #[test]
+        fn wait_for_index_build_success_and_timeout() {
+            // Part 1: Successful wait
+            {
+                let mut state = setup_persistent("wait_build_success", None);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                state.mark_index_build_in_progress().unwrap();
+
+                let status = state.index_build_status.clone();
+                let handle = thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(50));
+                    status.store(IndexBuildStatus::Succeeded);
+                });
+
+                let completed = wait_for_index_build(&state, Duration::from_secs(1));
+                assert!(completed, "wait_for_index_build should return true");
+                handle.join().unwrap();
+            }
+
+            // Part 2: Timeout
+            {
+                let mut state = setup_persistent("wait_build_timeout", None);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                state.mark_index_build_in_progress().unwrap();
+
+                let completed = wait_for_index_build(&state, Duration::from_millis(200));
+                assert!(
+                    !completed,
+                    "wait_for_index_build should return false on timeout"
+                );
+            }
+        }
+
+        #[test]
+        fn mark_in_progress_rejects_concurrent_build() {
+            let mut state = setup_persistent("reject_concurrent", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+            state.mark_index_build_in_progress().unwrap();
+            let result = state.mark_index_build_in_progress();
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("already"),
+                "error should mention 'already': {err_msg}"
+            );
+        }
+
+        #[test]
+        fn mark_in_progress_after_completed_or_failed() {
+            let mut state = setup_persistent("mark_after_complete", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+            state.mark_index_build_in_progress().unwrap();
+            state.index_build_status.store(IndexBuildStatus::Succeeded);
+            state.mark_index_build_in_progress().unwrap();
+            state.index_build_status.store(IndexBuildStatus::Failed);
+            state.mark_index_build_in_progress().unwrap();
+        }
+
+        #[test]
+        fn snapshot_scan_includes_all_existing_rows() {
+            let h = TestHarness::new("snapshot_includes_all", 10);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            h.assert_secondary_range(1, 0, 10, "value");
+        }
+
+        #[test]
+        fn empty_indices_succeeds() {
+            let h = TestHarness::new("empty_indices", 0);
+
+            let ctx = h.state.create_index_build_context();
+            let indices: Vec<(Index, bool)> = vec![];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+            assert!(pending_build.pending_indices.is_empty());
+        }
+
+        #[test]
+        fn multiple_indices_at_once() {
+            let h = TestHarness::new_three_cols("multi_indices", 10);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![
+                (Index::new(IndexType::HashMap, vec![1]), false),
+                (Index::new(IndexType::HashMap, vec![2]), false),
+            ];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+            assert_eq!(pending_build.pending_indices.len(), 2);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            h.assert_lookup_row(1, "col1_5".into(), 5.into());
+            h.assert_lookup_row(2, "col2_7".into(), 7.into());
+        }
+
+        #[test]
+        fn wal_catchup_with_no_writes_during_build() {
+            let h = TestHarness::new("wal_no_writes", 5);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 0);
+            assert_eq!(stats.deletes_skipped, 0);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+            h.assert_lookup_row(1, "value_3".into(), 3.into());
+        }
+
+        #[test]
+        fn wal_catchup_multiple_indices() {
+            let mut h = TestHarness::new_three_cols("wal_multi_indices", 3);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![
+                (Index::new(IndexType::HashMap, vec![1]), false),
+                (Index::new(IndexType::HashMap, vec![2]), false),
+            ];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            h.insert_range_3col(100, 2, "new");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 2);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+            h.assert_lookup_row(1, "new_col1_100".into(), 100.into());
+            h.assert_lookup_row(2, "new_col2_101".into(), 101.into());
+        }
+
+        #[test]
+        fn wal_catchup_handles_unique_indices() {
+            let mut h = TestHarness::new("wal_unique", 0);
+
+            // Insert initial data with integer col1
+            for i in 0..3 {
+                h.insert(vec![i.into(), (i * 100).into()]);
+            }
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), true)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Insert unique values during build
+            for i in 100..102 {
+                h.insert(vec![i.into(), (i * 100).into()]);
+            }
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 2);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+            h.assert_lookup_row(1, 10000.into(), 100.into());
+        }
+
+        #[test]
+        fn wal_catchup_preserves_operation_order() {
+            let mut h = TestHarness::new("wal_op_order", 3);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Interleaved ops on the same PK
+            let row_foo: Vec<DfValue> = vec![100.into(), "foo".into()];
+            let row_bar: Vec<DfValue> = vec![100.into(), "bar".into()];
+            h.insert(row_foo.clone());
+            h.delete(row_foo);
+            h.insert(row_bar);
+            h.insert(vec![200.into(), "simple".into()]);
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 3); // foo, bar, simple
+            assert_eq!(stats.deletes_applied, 1);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+            h.assert_lookup_row(1, "simple".into(), 200.into());
+            h.assert_lookup_row(1, "bar".into(), 100.into());
+        }
+
+        #[test]
+        fn wal_catchup_null_values_in_unique_index() {
+            let mut h = TestHarness::with_unique_keys("wal_null_unique", &[1], 0);
+
+            // Insert rows with NULL and non-NULL values in column 1
+            h.insert(vec![1.into(), "alpha".into(), "extra_1".into()]);
+            h.insert(vec![2.into(), DfValue::None, "extra_2".into()]);
+            h.insert(vec![3.into(), "gamma".into(), "extra_3".into()]);
+            h.insert(vec![4.into(), DfValue::None, "extra_4".into()]);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), true)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+            assert!(pending_build.pending_indices[0].is_unique);
+
+            // Insert more NULLs during build
+            h.insert(vec![5.into(), DfValue::None, "extra_5".into()]);
+            h.insert(vec![6.into(), DfValue::None, "extra_6".into()]);
+            h.insert(vec![7.into(), "delta".into(), "extra_7".into()]);
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 3);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            // All 4 NULL rows should coexist
+            match h.state.lookup(&[1], &PointKey::Single(DfValue::None)) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(rows.len(), 4, "All 4 NULL rows should coexist");
+                    let mut pks: Vec<i64> = rows
+                        .iter()
+                        .map(|r| match &r[0] {
+                            DfValue::Int(i) => *i,
+                            other => panic!("Expected Int, got {:?}", other),
+                        })
+                        .collect();
+                    pks.sort();
+                    assert_eq!(pks, vec![2, 4, 5, 6]);
+                }
+                _ => panic!("Lookup of NULL should succeed"),
+            }
+            h.assert_lookup_row(1, "delta".into(), 7.into());
+        }
+
+        #[test]
+        fn wal_catchup_with_unavailable_entries() {
+            let h = TestHarness::new("wal_unavailable", 1);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let mut pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Tamper with sequence number to simulate WAL GC
+            pending_build.sequence_number = u64::MAX;
+            let result = ctx.catch_up_from_wal_for_test(&pending_build);
+            assert!(result.is_err(), "Should fail with unavailable WAL entries");
+        }
+
+        /// Closure drain catches rows inserted during the transfer gap.
+        #[test]
+        fn wal_catchup_closure_drain() {
+            let mut h = TestHarness::new("closure_drain", 5);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // WAL catch-up writes
+            h.insert_range(100, 3, "catchup");
+
+            let (stats, last_seq) = ctx
+                .catch_up_from_wal_for_test_with_seq(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 3);
+
+            // Writes during the transfer gap (inserts AND deletes)
+            h.insert_range(200, 5, "gap");
+            h.delete(vec![201.into(), "gap_201".into()]);
+
+            let pending_indices = pending_build.pending_indices.clone();
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            // Closure drain
+            let stats = ctx
+                .closure_drain_for_test(last_seq, &pending_indices)
+                .expect("closure drain should succeed");
+            assert_eq!(stats.puts_applied, 5, "Should catch 5 gap inserts");
+            assert_eq!(stats.deletes_applied, 1, "Should apply 1 gap delete");
+
+            // Verify ALL rows are findable
+            h.assert_secondary_range(1, 0, 5, "value");
+            h.assert_secondary_range(1, 100, 3, "catchup");
+            // gap rows: 200, 202, 203, 204 should exist; 201 deleted
+            h.assert_lookup_row(1, "gap_200".into(), 200.into());
+            h.assert_lookup_empty(1, "gap_201".into());
+            h.assert_lookup_row(1, "gap_204".into(), 204.into());
+        }
+
+        // ---- WAL catch-up handles deletes and inserts after snapshot ----
+
+        #[test]
+        fn wal_catchup_handles_deletes_and_inserts_after_snapshot() {
+            let mut h = TestHarness::new("wal_deletes_inserts", 100);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Delete rows 50-74 and insert rows 100-124
+            for i in 50..75 {
+                h.delete(vec![i.into(), format!("value_{}", i).into()]);
+            }
+            h.insert_range(100, 25, "new");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert!(stats.deletes_skipped >= 25);
+            assert_eq!(stats.puts_applied, 25);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            h.assert_lookup_row(1, "new_110".into(), 110.into());
+            h.assert_lookup_empty(0, 60.into());
+        }
+
+        // ---- High volume tests ----
+
+        #[test]
+        fn wal_catchup_high_volume() {
+            let mut h = TestHarness::new("high_volume", 10_000);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            h.insert_range(10_000, 5_000, "concurrent");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 5_000);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            for (pk, val) in [
+                (0, "value_0"),
+                (9999, "value_9999"),
+                (14999, "concurrent_14999"),
+            ] {
+                h.assert_lookup_row(1, val.into(), pk.into());
+            }
+        }
+
+        #[test]
+        fn high_volume_multiple_indices() {
+            let mut state = setup_persistent("high_vol_multi", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+            for i in 0..5_000 {
+                insert(
+                    &mut state,
+                    vec![
+                        i.into(),
+                        format!("col1_{}", i).into(),
+                        format!("col2_{}", i % 100).into(),
+                    ],
+                );
+            }
+
+            let ctx = state.create_index_build_context();
+            let indices = vec![
+                (Index::new(IndexType::HashMap, vec![1]), false),
+                (Index::new(IndexType::HashMap, vec![2]), false),
+                (Index::new(IndexType::HashMap, vec![1, 2]), false),
+            ];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            for i in 5_000..7_000 {
+                insert(
+                    &mut state,
+                    vec![
+                        i.into(),
+                        format!("col1_{}", i).into(),
+                        format!("col2_{}", i % 100).into(),
+                    ],
+                );
+            }
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 2_000);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            assert_lookup(&state, &[1], &PointKey::Single("col1_6000".into()), 1);
+            assert_lookup(&state, &[2], &PointKey::Single("col2_50".into()), 70);
+            assert_lookup(
+                &state,
+                &[1, 2],
+                &PointKey::Double(("col1_6500".into(), "col2_0".into())),
+                1,
+            );
+        }
+
+        #[test]
+        fn large_row_values_during_build() {
+            let large_value: String = "x".repeat(100 * 1024);
+
+            let mut state = setup_persistent("large_row_values", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..100 {
+                insert(
+                    &mut state,
+                    vec![i.into(), format!("{}_{}", large_value, i).into()],
+                );
+            }
+
+            let ctx = state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            for i in 100..150 {
+                insert(
+                    &mut state,
+                    vec![i.into(), format!("{}_{}", large_value, i).into()],
+                );
+            }
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 50);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            // Verify the 100KB value round-trips exactly
+            let expected_val = format!("{}_{}", large_value, 125);
+            match state.lookup(&[1], &PointKey::Single(expected_val.clone().into())) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(rows.len(), 1);
+                    assert_eq!(rows[0][0], 125.into());
+                    assert_eq!(rows[0][1], DfValue::from(expected_val.clone()));
+                }
+                _ => panic!("Large row should be accessible via secondary index"),
+            }
+        }
+
+        // ---- WAL batch boundary tests (merged into online_index_build) ----
+
+        #[test]
+        fn wal_catchup_across_batch_boundaries() {
+            let mut h = TestHarness::new("wal_batch_boundaries", 10);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Insert well over WAL_CATCHUP_WRITE_THRESHOLD (4096) rows
+            h.insert_range(10, 8990, "batch");
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 8990);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            // Verify rows from different batches are accessible
+            for i in [10, 500, 4095, 4096, 4097, 8999] {
+                h.assert_lookup_row(1, format!("batch_{}", i).into(), i.into());
+            }
+        }
+
+        // ---- Transfer gap write regression tests ----
+
+        #[test]
+        fn build_indices_captures_all_concurrent_writes() {
+            let mut h = TestHarness::new("all_concurrent_writes", 10);
+
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = h
+                .state
+                .prepare_indices_for_build(strict, vec![])
+                .expect("prepare should succeed")
+                .expect("Should have indices");
+
+            h.insert_range(100, 10, "after_prepare");
+
+            let state = h.state;
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices).unwrap();
+
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded);
+            for i in 0..10 {
+                assert_lookup(
+                    &state,
+                    &[1],
+                    &PointKey::Single(format!("value_{}", i).into()),
+                    1,
+                );
+            }
+            for i in 100..110 {
+                assert_lookup(
+                    &state,
+                    &[1],
+                    &PointKey::Single(format!("after_prepare_{}", i).into()),
+                    1,
+                );
+            }
+        }
+
+        #[test]
+        fn build_indices_large_batch_production_path() {
+            let mut h = TestHarness::new("large_batch_prod", 100);
+
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = h
+                .state
+                .prepare_indices_for_build(strict, vec![])
+                .expect("prepare should succeed")
+                .expect("Should have indices");
+
+            h.insert_range(1000, 5000, "bulk");
+
+            let state = h.state;
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices).unwrap();
+
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded);
+            for i in [0, 50, 99, 1000, 2048, 4095, 4096, 4097, 5999] {
+                let key = if i < 100 {
+                    format!("value_{}", i)
+                } else {
+                    format!("bulk_{}", i)
+                };
+                assert_lookup(&state, &[1], &PointKey::Single(key.into()), 1);
+            }
+        }
+
+        #[test]
+        fn build_indices_sends_creating_index_notification() {
+            use readyset_client::TableStatus;
+            use readyset_sql::ast::{Relation, SqlIdentifier};
+
+            use crate::persistent_state::{PersistenceType, PersistentState};
+
+            let table = Relation {
+                schema: None,
+                name: SqlIdentifier::from("test_table"),
+            };
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut state = PersistentState::new(
+                String::from("status_notify_test"),
+                Some(table.clone()),
+                None::<&[usize]>,
+                &Default::default(),
+                PersistenceType::BaseTable,
+                Some(tx),
+            )
+            .expect("should create state");
+
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..5 {
+                insert(
+                    &mut state,
+                    vec![DfValue::from(i), format!("val_{}", i).into()],
+                );
+            }
+
+            // Drain notifications from add_index
+            while rx.try_recv().is_ok() {}
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            ctx.build_indices(indices).unwrap();
+
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded);
+
+            let mut notifications = Vec::new();
+            while let Ok(msg) = rx.try_recv() {
+                notifications.push(msg);
+            }
+
+            // Should have at least one CreatingIndex notification
+            let creating_count = notifications
+                .iter()
+                .filter(|(_, status)| matches!(status, TableStatus::CreatingIndex(_)))
+                .count();
+            assert!(
+                creating_count >= 1,
+                "Should have at least 1 CreatingIndex notification, got {}",
+                creating_count
+            );
+
+            // Check that at least one CreatingIndex has a progress value.
+            // With small tables the build may complete before a progress
+            // notification is emitted, so we only check when progress IS sent.
+            let progress_values: Vec<_> = notifications
+                .iter()
+                .filter_map(|(_, status)| match status {
+                    TableStatus::CreatingIndex(Some(p)) => Some(*p),
+                    _ => None,
+                })
+                .collect();
+            for p in &progress_values {
+                assert!(
+                    *p >= 0.0 && *p <= 1.0,
+                    "progress should be in [0.0, 1.0], got {p}"
+                );
+            }
+
+            // All notifications should be for our table
+            for (notified_table, _) in &notifications {
+                assert_eq!(notified_table, &table);
+            }
+        }
+
+        // ---- WAL catch-up with only deletes ----
+
+        #[test]
+        fn wal_catchup_only_deletes() {
+            let mut h = TestHarness::new("wal_only_deletes", 10);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            // Delete 3 rows, no new inserts
+            for i in 3..6 {
+                h.delete(vec![i.into(), format!("value_{}", i).into()]);
+            }
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert!(
+                stats.deletes_skipped >= 3,
+                "Should skip at least 3 deletes, got {}",
+                stats.deletes_skipped
+            );
+            assert_eq!(stats.puts_applied, 0, "No puts should be applied");
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            // Deletes during WAL catch-up are skipped (not applied to the
+            // secondary) because the rows were already captured in the snapshot
+            // scan. The primary PK CF no longer has these rows, so secondary
+            // lookups that return them are "stale" -- but this is consistent
+            // with how the blocking path behaves. Non-deleted rows are correct.
+            h.assert_lookup_row(1, "value_0".into(), 0.into());
+            h.assert_lookup_row(1, "value_9".into(), 9.into());
+        }
+    }
+
+    // =========================================================================
+    // wal_operation_collector_tests
+    // =========================================================================
+
+    mod wal_operation_collector_tests {
+        use rocksdb::WriteBatchIteratorCf;
+
+        use super::super::{WalOperation, WalOperationCollector};
+
+        const TARGET_CF: u32 = 5;
+        const OTHER_CF: u32 = 99;
+
+        #[test]
+        fn filters_puts_by_cf() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            collector.put_cf(TARGET_CF, b"key1", b"value1");
+            collector.put_cf(TARGET_CF, b"key2", b"value2");
+            collector.put_cf(OTHER_CF, b"key3", b"value3");
+            assert_eq!(collector.operations.len(), 2);
+            assert!(!collector.had_unexpected_op);
+        }
+
+        #[test]
+        fn filters_deletes_by_cf() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            collector.delete_cf(TARGET_CF, b"key1");
+            collector.delete_cf(OTHER_CF, b"key2");
+            assert_eq!(collector.operations.len(), 1);
+        }
+
+        #[test]
+        fn merge_sets_unexpected_flag() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            collector.merge_cf(OTHER_CF, b"key1", b"value1");
+            assert!(!collector.had_unexpected_op);
+            collector.merge_cf(TARGET_CF, b"key2", b"value2");
+            assert!(collector.had_unexpected_op);
+            assert!(collector.operations.is_empty());
+        }
+
+        #[test]
+        fn clear_retains_capacity() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            for i in 0..10 {
+                collector.put_cf(TARGET_CF, format!("key_{i}").as_bytes(), b"val");
+            }
+            assert_eq!(collector.operations.len(), 10);
+            let capacity_before = collector.operations.capacity();
+            collector.clear();
+            assert_eq!(collector.operations.len(), 0);
+            assert_eq!(collector.operations.capacity(), capacity_before);
+        }
+
+        #[test]
+        fn unexpected_flag_survives_clear() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            collector.merge_cf(TARGET_CF, b"key", b"value");
+            assert!(collector.had_unexpected_op);
+            collector.clear();
+            assert!(collector.had_unexpected_op);
+        }
+
+        #[test]
+        fn interleaved_ops_preserve_order() {
+            let mut collector = WalOperationCollector::new(TARGET_CF);
+            collector.put_cf(TARGET_CF, b"key_a", b"val_1");
+            collector.delete_cf(TARGET_CF, b"key_a");
+            collector.put_cf(TARGET_CF, b"key_a", b"val_2");
+
+            assert_eq!(collector.operations.len(), 3);
+            assert!(matches!(&collector.operations[0], WalOperation::Put { .. }));
+            assert!(matches!(
+                &collector.operations[1],
+                WalOperation::Delete { .. }
+            ));
+            assert!(matches!(&collector.operations[2], WalOperation::Put { .. }));
+        }
+    }
+
+    // =========================================================================
+    // crash_recovery_tests
+    // =========================================================================
+
+    mod crash_recovery_tests {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+        use readyset_data::DfValue;
+
+        use super::{
+            get_meta, get_pending_build, insert, setup_persistent_at_path, LookupResult, PointKey,
+            RecordResult, State,
+        };
+
+        /// Parameterized crash recovery: tests three variants of interrupted builds.
+        #[test]
+        fn startup_recovery_variants() {
+            // Variant 1: Normal interrupted build with existing CFs
+            {
+                let dir = tempfile::tempdir().expect("should create temp dir");
+                let path = dir.path();
+                let name = "recovery_normal";
+
+                {
+                    let mut state = setup_persistent_at_path(path, name);
+                    state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                    insert(&mut state, vec![1.into(), "val1".into()]);
+                    insert(&mut state, vec![2.into(), "val2".into()]);
+
+                    let ctx = state.create_index_build_context();
+                    let db = state.db.db();
+                    let seq = db.latest_sequence_number();
+                    ctx.mark_pending_build(vec!["1".to_string()], seq).unwrap();
+                    assert!(get_pending_build(db).is_some());
+                }
+                {
+                    let state = setup_persistent_at_path(path, name);
+                    let db = state.db.db();
+                    assert!(get_pending_build(db).is_none());
+                    match state.lookup(&[0], &PointKey::Single(1.into())) {
+                        LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 1),
+                        _ => panic!("Data should be accessible after recovery"),
+                    }
+                }
+            }
+
+            // Variant 2: Nonexistent CFs in pending marker
+            {
+                let dir = tempfile::tempdir().expect("should create temp dir");
+                let path = dir.path();
+                let name = "recovery_nonexistent";
+
+                {
+                    let mut state = setup_persistent_at_path(path, name);
+                    state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                    insert(&mut state, vec![1.into(), "val".into()]);
+
+                    let ctx = state.create_index_build_context();
+                    let db = state.db.db();
+                    let seq = db.latest_sequence_number();
+                    ctx.mark_pending_build(vec!["999".to_string(), "1000".to_string()], seq)
+                        .unwrap();
+                }
+                {
+                    let state = setup_persistent_at_path(path, name);
+                    assert!(get_pending_build(state.db.db()).is_none());
+                    match state.lookup(&[0], &PointKey::Single(1.into())) {
+                        LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 1),
+                        _ => panic!("Data should be accessible"),
+                    }
+                }
+            }
+
+            // Variant 3: Empty CF list in pending marker
+            {
+                let dir = tempfile::tempdir().expect("should create temp dir");
+                let path = dir.path();
+                let name = "recovery_empty_cfs";
+
+                {
+                    let mut state = setup_persistent_at_path(path, name);
+                    state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                    insert(&mut state, vec![1.into(), "val".into()]);
+
+                    let ctx = state.create_index_build_context();
+                    let db = state.db.db();
+                    let seq = db.latest_sequence_number();
+                    ctx.mark_pending_build(vec![], seq).unwrap();
+                }
+                {
+                    let state = setup_persistent_at_path(path, name);
+                    assert!(
+                        get_pending_build(state.db.db()).is_none(),
+                        "pending_build should be cleared with empty CF list"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn startup_cleans_up_existing_orphan_cfs() {
+            let dir = tempfile::tempdir().expect("should create temp dir");
+            let path = dir.path();
+            let name = "startup_orphan_cfs";
+
+            {
+                let mut state = setup_persistent_at_path(path, name);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                for i in 0..5 {
+                    insert(
+                        &mut state,
+                        vec![DfValue::from(i), format!("val_{}", i).into()],
+                    );
+                }
+
+                let ctx = state.create_index_build_context();
+                let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+                let _pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+                let db = state.db.db();
+                let pending = get_pending_build(db);
+                assert!(pending.is_some());
+                assert_eq!(pending.as_ref().unwrap().column_families, vec!["1"]);
+                // Drop without activating - simulating crash
+            }
+
+            {
+                let state = setup_persistent_at_path(path, name);
+                let db = state.db.db();
+                let meta = get_meta(db).expect("should get meta");
+
+                assert!(get_pending_build(db).is_none());
+                assert_eq!(meta.indices.len(), 0, "indices should be empty after wipe");
+
+                // State is functional
+                let mut state = state;
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+                for i in 0..5 {
+                    insert(
+                        &mut state,
+                        vec![DfValue::from(i), format!("val_{}", i).into()],
+                    );
+                }
+                state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+                match state.lookup(&[1], &PointKey::Single("val_2".into())) {
+                    LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 1),
+                    _ => panic!("New index should be functional after recovery"),
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // pending_build_tests
+    // =========================================================================
+
+    mod pending_build_tests {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use super::{get_pending_build, insert, setup_persistent, TestHarness};
+        use crate::State;
+
+        #[test]
+        fn pending_build_markers_are_persisted() {
+            let mut state = setup_persistent("pending_markers", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            insert(&mut state, vec![1.into(), "val1".into()]);
+
+            let ctx = state.create_index_build_context();
+            let db = state.db.db();
+            let seq = db.latest_sequence_number();
+            let cf_names = vec!["1".to_string()];
+            ctx.mark_pending_build(cf_names.clone(), seq).unwrap();
+
+            let pending = get_pending_build(db);
+            assert!(pending.is_some());
+            assert_eq!(pending.as_ref().unwrap().column_families, cf_names);
+
+            ctx.clear_pending_build().unwrap();
+            assert!(get_pending_build(db).is_none());
+        }
+
+        #[test]
+        fn pending_build_markers_full_flow() {
+            let h = TestHarness::new("pending_full_flow", 3);
+
+            {
+                let db = h.state.db.db();
+                assert!(get_pending_build(db).is_none());
+            }
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            {
+                let db = h.state.db.db();
+                assert!(get_pending_build(db).is_some());
+            }
+
+            let stats = ctx
+                .catch_up_from_wal_for_test(&pending_build)
+                .expect("catch-up should succeed");
+            assert_eq!(stats.puts_applied, 0);
+            assert_eq!(stats.deletes_applied, 0);
+
+            ctx.activate_build(pending_build)
+                .expect("activate should succeed");
+
+            {
+                let db = h.state.db.db();
+                assert!(get_pending_build(db).is_none());
+            }
+        }
+    }
+
+    // =========================================================================
+    // build_indices_error_paths
+    // =========================================================================
+
+    mod build_indices_error_paths {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use super::{get_pending_build, TestHarness};
+        use crate::persistent_state::PersistentState;
+        use crate::{IndexBuildStatus, LookupResult, PointKey, RecordResult, State};
+
+        fn assert_clean_state_after_failure(state: &PersistentState) {
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Failed);
+            let db = state.db.db();
+            assert!(get_pending_build(db).is_none());
+        }
+
+        #[test]
+        fn prepare_failure_restores_flag_and_clears_marker() {
+            let h = TestHarness::new("prepare_failure_flag", 5);
+            let mut state = h.state;
+
+            // Pre-create CF "1" to cause a collision
+            {
+                let db = state.db.db();
+                db.create_cf("1", &rocksdb::Options::default()).unwrap();
+            }
+
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices");
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices)
+                .expect_err("build should fail due to CF collision");
+
+            assert_clean_state_after_failure(&state);
+            match state.lookup(&[0], &PointKey::Single(3.into())) {
+                LookupResult::Some(RecordResult::Owned(rows)) => {
+                    assert_eq!(rows.len(), 1);
+                    assert_eq!(rows[0][1], "value_3".into());
+                }
+                _ => panic!("Existing data should remain accessible"),
+            }
+        }
+
+        #[test]
+        fn prepare_failure_allows_successful_retry() {
+            let h = TestHarness::new("prepare_failure_retry", 5);
+            let mut state = h.state;
+
+            // Fail the first attempt
+            {
+                let db = state.db.db();
+                db.create_cf("1", &rocksdb::Options::default()).unwrap();
+            }
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices");
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices)
+                .expect_err("build should fail due to CF collision");
+            assert_clean_state_after_failure(&state);
+
+            // Remove colliding CF and retry
+            {
+                let db = state.db.db();
+                db.drop_cf("1").unwrap();
+            }
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let indices = state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices");
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices).unwrap();
+
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded);
+            match state.lookup(&[1], &PointKey::Single("value_3".into())) {
+                LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows.len(), 1),
+                _ => panic!("Index should be usable after retry"),
+            }
+        }
+    }
+
+    // =========================================================================
+    // prepare_indices_dedup
+    // =========================================================================
+
+    mod prepare_indices_dedup {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use super::setup_persistent;
+        use crate::State;
+
+        /// Tests all three deduplication scenarios in one test.
+        #[test]
+        fn deduplicates_across_all_scenarios() {
+            // Scenario 1: Same index in both strict and weak
+            {
+                let mut state = setup_persistent("dedup_strict_weak", None);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+                let dup = Index::new(IndexType::HashMap, vec![1]);
+                let result = state
+                    .prepare_indices_for_build(vec![(dup.clone(), None)], vec![dup])
+                    .unwrap();
+                let indices = result.expect("should return Some");
+                assert_eq!(indices.len(), 1, "strict+weak dup should be deduplicated");
+            }
+
+            // Scenario 2: Duplicate within strict
+            {
+                let mut state = setup_persistent("dedup_within_strict", None);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+                let dup = Index::new(IndexType::HashMap, vec![2]);
+                let result = state
+                    .prepare_indices_for_build(vec![(dup.clone(), None), (dup, None)], vec![])
+                    .unwrap();
+                let indices = result.expect("should return Some");
+                assert_eq!(indices.len(), 1, "within-strict dup should be deduplicated");
+            }
+
+            // Scenario 3: Duplicate within weak
+            {
+                let mut state = setup_persistent("dedup_within_weak", None);
+                state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+
+                let dup = Index::new(IndexType::HashMap, vec![3]);
+                let result = state
+                    .prepare_indices_for_build(vec![], vec![dup.clone(), dup])
+                    .unwrap();
+                let indices = result.expect("should return Some");
+                assert_eq!(indices.len(), 1, "within-weak dup should be deduplicated");
+            }
+        }
+
+        #[test]
+        fn prepare_indices_for_build_filters_existing() {
+            let mut state = setup_persistent("prepare_filters_existing", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+
+            let strict = vec![
+                (Index::new(IndexType::HashMap, vec![1]), None), // exists
+                (Index::new(IndexType::HashMap, vec![2]), None), // new
+            ];
+            let result = state.prepare_indices_for_build(strict, vec![]).unwrap();
+            let indices = result.expect("should have indices");
+            assert_eq!(indices.len(), 1);
+            assert_eq!(indices[0].0.columns, vec![2]);
+        }
+
+        #[test]
+        fn prepare_indices_for_build_returns_none_when_all_exist() {
+            let mut state = setup_persistent("prepare_all_exist", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+
+            let strict = vec![(Index::new(IndexType::HashMap, vec![1]), None)];
+            let result = state.prepare_indices_for_build(strict, vec![]).unwrap();
+            assert!(result.is_none());
+        }
+
+        #[test]
+        fn prepare_indices_for_build_creates_primary() {
+            let mut state = setup_persistent("prepare_creates_primary", None);
+            let strict = vec![(Index::new(IndexType::HashMap, vec![0]), None)];
+            let result = state.prepare_indices_for_build(strict, vec![]).unwrap();
+            assert!(result.is_none());
+            assert_eq!(state.db.shared_state().indices.len(), 1);
+        }
+    }
+
+    // =========================================================================
+    // btreemap_wal_tests
+    // =========================================================================
+
+    mod btreemap_wal_tests {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+        use readyset_data::{Bound, DfValue};
+        use vec1::vec1;
+
+        use super::{insert, setup_persistent};
+        use crate::{IndexBuildStatus, RangeKey, RangeLookupResult, State};
+
+        #[test]
+        fn btreemap_index_with_wal_catchup() {
+            let mut state = setup_persistent("btreemap_wal", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..20i32 {
+                insert(&mut state, vec![i.into(), (i * 10).into()]);
+            }
+
+            let strict = vec![(Index::new(IndexType::BTreeMap, vec![1]), None)];
+            let indices = state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices");
+
+            for i in 100..110i32 {
+                insert(&mut state, vec![i.into(), (i * 10).into()]);
+            }
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices).unwrap();
+
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded);
+
+            // Range covering initial data: [50, 100] -> 6 rows
+            let range = RangeKey::from(&(
+                Bound::Included(vec1![DfValue::from(50)]),
+                Bound::Included(vec1![DfValue::from(100)]),
+            ));
+            match state.lookup_range(&[1], &range) {
+                RangeLookupResult::Some(rows) => assert_eq!(rows.len(), 6),
+                _ => panic!("Range lookup should succeed"),
+            }
+
+            // Range covering WAL catch-up data: [1000, 1050] -> 6 rows
+            let range = RangeKey::from(&(
+                Bound::Included(vec1![DfValue::from(1000)]),
+                Bound::Included(vec1![DfValue::from(1050)]),
+            ));
+            match state.lookup_range(&[1], &range) {
+                RangeLookupResult::Some(rows) => assert_eq!(rows.len(), 6),
+                _ => panic!("Range lookup on WAL data should succeed"),
+            }
+
+            // Range spanning both: [180, 1010] -> 4 rows
+            let range = RangeKey::from(&(
+                Bound::Included(vec1![DfValue::from(180)]),
+                Bound::Included(vec1![DfValue::from(1010)]),
+            ));
+            match state.lookup_range(&[1], &range) {
+                RangeLookupResult::Some(rows) => assert_eq!(rows.len(), 4),
+                _ => panic!("Cross-boundary range should succeed"),
+            }
+        }
+    }
+
+    // =========================================================================
+    // cleanup_pending_indices_tests
+    // =========================================================================
+
+    mod cleanup_pending_indices_tests {
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use super::{get_pending_build, insert, setup_persistent, TestHarness};
+        use crate::State;
+
+        #[test]
+        fn cleanup_pending_indices_drops_cfs_and_clears_marker() {
+            let h = TestHarness::new("cleanup_drops_cfs", 5);
+
+            let ctx = h.state.create_index_build_context();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let pending_build = ctx.scan_snapshot(&indices).expect("scan should succeed");
+
+            {
+                let db = h.state.db.db();
+                assert!(get_pending_build(db).is_some());
+                assert!(db
+                    .cf_handle(&pending_build.pending_indices[0].column_family)
+                    .is_some());
+            }
+
+            ctx.cleanup_pending_indices(&pending_build.pending_indices);
+
+            {
+                let db = h.state.db.db();
+                assert!(get_pending_build(db).is_none());
+                assert!(db
+                    .cf_handle(&pending_build.pending_indices[0].column_family)
+                    .is_none());
+            }
+
+            h.assert_lookup_count(0, 2.into(), 1);
+        }
+
+        #[test]
+        fn prepare_failure_cleans_up_partial_cfs() {
+            let mut state = setup_persistent("prepare_partial", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..3 {
+                insert(
+                    &mut state,
+                    vec![
+                        i.into(),
+                        format!("a_{}", i).into(),
+                        format!("b_{}", i).into(),
+                    ],
+                );
+            }
+
+            // Pre-create CF "2" to cause collision on second index
+            {
+                let db = state.db.db();
+                db.create_cf("2", &rocksdb::Options::default()).unwrap();
+            }
+
+            let strict = vec![
+                (Index::new(IndexType::HashMap, vec![1]), None),
+                (Index::new(IndexType::HashMap, vec![2]), None),
+            ];
+            let indices = state
+                .prepare_indices_for_build(strict, vec![])
+                .unwrap()
+                .expect("Should have indices");
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            ctx.build_indices(indices)
+                .expect_err("build should fail due to CF collision");
+
+            // CF "1" (partially created then rolled back) should not exist
+            assert!(state.db.db().cf_handle("1").is_none());
+        }
+    }
+
+    // =========================================================================
+    // shutdown_tests
+    // =========================================================================
+
+    mod shutdown_tests {
+        use std::time::Duration;
+
+        use common::IndexType;
+        use readyset_client::internal::Index;
+
+        use super::{insert, setup_persistent, TestHarness};
+        use crate::{IndexBuildStatus, State};
+
+        #[test]
+        fn completion_channel_unblocks_on_drop() {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+
+            let handle = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(50));
+                drop(tx);
+            });
+
+            match rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("recv should unblock after sender is dropped");
+                }
+            }
+            handle.join().unwrap();
+        }
+
+        #[test]
+        fn shutdown_cancels_build_indices() {
+            let h = TestHarness::new("shutdown_cancels", 1000);
+            let state = h.state;
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+
+            // Request shutdown before build starts
+            state
+                .shutdown_requested
+                .store(true, std::sync::atomic::Ordering::Release);
+
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+            let result = ctx.build_indices(indices);
+
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("shutdown"),
+                "error should mention shutdown: {err_msg}"
+            );
+            assert_eq!(state.index_build_status(), IndexBuildStatus::Failed);
+
+            // Completion channel should be disconnected (guard dropped)
+            let rx = state.build_completion_rx.lock().expect("poisoned").take();
+            if let Some(rx) = rx {
+                assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+            }
+        }
+
+        #[test]
+        fn shutdown_during_background_build() {
+            let mut state = setup_persistent("shutdown_bg_build", None);
+            state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+            for i in 0..5000 {
+                insert(&mut state, vec![i.into(), format!("val_{i}").into()]);
+            }
+
+            state.mark_index_build_in_progress().unwrap();
+            let ctx = state.create_index_build_context();
+            let shutdown = state.shutdown_requested.clone();
+            let completion_rx = state.build_completion_rx.clone();
+            let indices = vec![(Index::new(IndexType::HashMap, vec![1]), false)];
+
+            let handle = std::thread::spawn(move || ctx.build_indices(indices));
+
+            std::thread::sleep(Duration::from_millis(10));
+            shutdown.store(true, std::sync::atomic::Ordering::Release);
+
+            // Wait for build to finish via completion channel
+            if let Some(rx) = completion_rx.lock().expect("poisoned").take() {
+                match rx.recv_timeout(Duration::from_secs(10)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        panic!("build should complete within timeout");
+                    }
+                }
+            }
+
+            let result = handle.join().expect("thread should not panic");
+            match result {
+                Ok(()) => assert_eq!(state.index_build_status(), IndexBuildStatus::Succeeded),
+                Err(e) => {
+                    assert!(e.to_string().contains("shutdown"));
+                    assert_eq!(state.index_build_status(), IndexBuildStatus::Failed);
+                }
+            }
+        }
+    }
+
+    // =========================================================================
+    // prop_tests -- property-based tests
+    // =========================================================================
+
+    mod prop_tests {
+        use proptest::prelude::*;
+        use rocksdb::WriteBatchIteratorCf;
+
+        use crate::persistent_state::index_build::{WalOperation, WalOperationCollector};
+
+        proptest! {
+            /// WalOperationCollector filtering: for arbitrary sequences of
+            /// (cf_id, op_type) operations, verify the collector keeps exactly
+            /// target-CF ops in order.
+            #[test]
+            fn wal_collector_filtering(
+                target_cf in 0u32..10,
+                ops in prop::collection::vec((0u32..10, prop::bool::ANY), 0..100)
+            ) {
+                let mut collector = WalOperationCollector::new(target_cf);
+
+                let mut expected_ops: Vec<(bool, Vec<u8>)> = Vec::new(); // (is_put, key)
+
+                for (i, &(cf_id, is_put)) in ops.iter().enumerate() {
+                    let key = format!("key_{}", i);
+                    if is_put {
+                        collector.put_cf(cf_id, key.as_bytes(), b"val");
+                        if cf_id == target_cf {
+                            expected_ops.push((true, key.into_bytes()));
+                        }
+                    } else {
+                        collector.delete_cf(cf_id, key.as_bytes());
+                        if cf_id == target_cf {
+                            expected_ops.push((false, key.into_bytes()));
+                        }
+                    }
+                }
+
+                prop_assert_eq!(
+                    collector.operations.len(),
+                    expected_ops.len(),
+                    "Collector should have exactly {} ops",
+                    expected_ops.len()
+                );
+
+                for (i, (expected, actual)) in
+                    expected_ops.iter().zip(collector.operations.iter()).enumerate()
+                {
+                    match (expected, actual) {
+                        ((true, key), WalOperation::Put { key: actual_key, .. }) => {
+                            prop_assert_eq!(
+                                key, actual_key,
+                                "Put key mismatch at index {}",
+                                i
+                            );
+                        }
+                        ((false, key), WalOperation::Delete { key: actual_key }) => {
+                            prop_assert_eq!(
+                                key, actual_key,
+                                "Delete key mismatch at index {}",
+                                i
+                            );
+                        }
+                        _ => {
+                            prop_assert!(false, "Op type mismatch at index {}", i);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
