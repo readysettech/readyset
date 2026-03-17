@@ -37,8 +37,8 @@ static STATE: OnceLock<RandomState> = OnceLock::new();
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
 pub use crate::persistent_state::{
-    clean_working_dir, DurabilityMode, PersistenceParameters, PersistenceType, PersistentState,
-    PersistentStateHandle, SnapshotMode,
+    clean_working_dir, DurabilityMode, IndexBuildContext, IndexBuildStatus, PersistenceParameters,
+    PersistenceType, PersistentState, PersistentStateHandle, SnapshotMode,
 };
 
 pub fn init_parallel_row_pool() {
@@ -79,6 +79,7 @@ pub struct EvictRandomResult<'a> {
 }
 
 /// The state of an individual, non-reader node in the graph
+#[allow(clippy::large_enum_variant)]
 pub enum MaterializedNodeState {
     /// The state that stores all the materialized rows in-memory.
     Memory(MemoryState),
@@ -140,6 +141,12 @@ pub trait State: SizeOf + Send {
             self.add_weak_index(index);
         }
     }
+
+    /// Returns the current status of any background index build.
+    ///
+    /// For memory state, always returns `Succeeded` (no async builds).
+    /// For persistent state, checks the atomic status flag.
+    fn index_build_status(&self) -> IndexBuildStatus;
 
     /// Returns whether this state is currently indexed on anything. If not, then it cannot store
     /// any information and is thus "not useful".
@@ -345,6 +352,14 @@ impl State for MaterializedNodeState {
             MaterializedNodeState::Memory(ms) => ms.add_index_multi(strict, weak),
             MaterializedNodeState::Persistent(ps) => ps.add_index_multi(strict, weak),
             MaterializedNodeState::PersistentReadHandle(rh) => rh.add_index_multi(strict, weak),
+        }
+    }
+
+    fn index_build_status(&self) -> IndexBuildStatus {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.index_build_status(),
+            MaterializedNodeState::Persistent(ps) => ps.index_build_status(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.index_build_status(),
         }
     }
 

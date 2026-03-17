@@ -16,8 +16,9 @@ use tracing::trace;
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
-    AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, LookupResult,
-    PersistencePoint, PointKey, RangeKey, RangeLookupResult, RecordResult, Row, Rows, State,
+    AllRecords, EvictBytesResult, EvictKeysResult, EvictRandomResult, IndexBuildStatus,
+    LookupResult, PersistencePoint, PointKey, RangeKey, RangeLookupResult, RecordResult, Row, Rows,
+    State,
 };
 
 #[derive(Default)]
@@ -99,6 +100,10 @@ impl State for MemoryState {
 
     fn is_partial(&self) -> bool {
         self.state.iter().any(SingleState::partial)
+    }
+
+    fn index_build_status(&self) -> IndexBuildStatus {
+        IndexBuildStatus::Succeeded
     }
 
     fn replay_done(&self) -> bool {

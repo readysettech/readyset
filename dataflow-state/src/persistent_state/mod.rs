@@ -61,6 +61,8 @@
 //! atomicity, these offsets are stored inside of rocksdb as part of the persisted
 //! [`PersistentMeta`], and updated as part of every write.
 mod handle;
+#[allow(dead_code)] // Build flow consumers added in a subsequent commit
+pub(crate) mod index_build;
 mod metrics;
 mod recorded;
 
@@ -70,8 +72,9 @@ use std::collections::HashSet;
 use std::io::{self, Read};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::mpsc::RecvTimeoutError;
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fmt, fs};
@@ -82,6 +85,7 @@ use common::{IndexType, Record, Records, Tag};
 #[cfg(feature = "failure_injection")]
 use failpoint_macros::set_failpoint;
 pub use handle::PersistentStateHandle;
+pub use index_build::{IndexBuildContext, IndexBuildStatus};
 use notify::Watcher;
 use rand::Rng;
 use readyset_alloc::thread::StdThreadBuildWrapper;
@@ -216,7 +220,7 @@ fn increment_epoch(db: &DB) -> Result<PersistentMeta<'static>> {
     Ok(meta)
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SnapshotMode {
     SnapshotModeEnabled,
     SnapshotModeDisabled,
@@ -472,6 +476,16 @@ pub struct PersistentState {
     /// Any TableStatus updates sent here will be sent to the current controller (only relevant for
     /// PersistenceType::BaseTable).
     table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
+    /// Atomic status of any background online index build.
+    index_build_status: Arc<index_build::AtomicIndexBuildStatus>,
+    /// Cooperative shutdown flag for in-progress index builds. The domain sets
+    /// this to request cancellation; the build thread polls it.
+    #[allow(dead_code)] // Used by create_index_build_context in a subsequent commit
+    pub(crate) shutdown_requested: Arc<AtomicBool>,
+    /// Receiving half of the build completion channel. `recv_timeout()` blocks
+    /// until the build thread finishes (sender dropped).
+    #[allow(dead_code)] // Used by shut_down() in a subsequent commit
+    pub(crate) build_completion_rx: Mutex<Option<Receiver<()>>>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -639,7 +653,28 @@ impl fmt::Debug for PersistentState {
     }
 }
 
-impl PersistentMeta<'_> {
+impl<'a> PersistentMeta<'a> {
+    /// Build a [`PersistentMeta`] from the current shared state, epoch, and
+    /// replication offset. The caller provides the offset so that both the
+    /// normal write path (borrowed from `PersistentState`) and the background
+    /// index-build path (cloned/owned) can share this constructor.
+    fn new(
+        shared_state: &SharedState,
+        epoch: IndexEpoch,
+        replication_offset: Option<Cow<'a, ReplicationOffset>>,
+    ) -> Self {
+        PersistentMeta {
+            serde_version: DfValue::SERDE_VERSION,
+            indices: shared_state
+                .indices
+                .iter()
+                .map(|pi| pi.index.clone())
+                .collect(),
+            epoch,
+            replication_offset,
+        }
+    }
+
     fn get_indices(&self, unique_keys: &[Box<[usize]>]) -> Vec<PersistentIndex> {
         self.indices
             .iter()
@@ -809,6 +844,10 @@ impl State for PersistentState {
         self.db.row_count()
     }
 
+    fn index_build_status(&self) -> IndexBuildStatus {
+        self.index_build_status.load()
+    }
+
     fn is_useful(&self) -> bool {
         self.db.is_useful()
     }
@@ -914,6 +953,10 @@ impl State for PersistentStateHandle {
 
     fn add_weak_index(&mut self, _: Index) {
         // Add key does nothing, as all keys are propagated via the [`PersistentState::add_index`]
+    }
+
+    fn index_build_status(&self) -> IndexBuildStatus {
+        IndexBuildStatus::Succeeded
     }
 
     fn process_records(
@@ -1907,6 +1950,11 @@ impl PersistentState {
             replay_done: persistence_type == PersistenceType::BaseTable,
             metrics_stop: Some(metrics),
             table_status_tx,
+            index_build_status: Arc::new(index_build::AtomicIndexBuildStatus::new(
+                IndexBuildStatus::Succeeded,
+            )),
+            shutdown_requested: Arc::new(AtomicBool::new(false)),
+            build_completion_rx: Mutex::new(None),
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
@@ -2248,16 +2296,11 @@ impl PersistentState {
     /// * The epoch
     /// * The replication offset
     fn meta(&self, shared_state: &SharedState) -> PersistentMeta<'_> {
-        PersistentMeta {
-            serde_version: DfValue::SERDE_VERSION,
-            indices: shared_state
-                .indices
-                .iter()
-                .map(|pi| pi.index.clone())
-                .collect(),
-            epoch: self.epoch,
-            replication_offset: self.replication_offset().map(Cow::Borrowed),
-        }
+        PersistentMeta::new(
+            shared_state,
+            self.epoch,
+            self.replication_offset().map(Cow::Borrowed),
+        )
     }
 
     /// Add an operation to the given [`WriteBatch`] to set the [replication
