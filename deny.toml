@@ -65,6 +65,7 @@ allow = [
     "BSL-1.0",
     "Zlib",
     "Unicode-3.0",
+    "bzip2-1.0.6", # MIT or Apache 2.0 (https://crates.io/crates/bzip2)
 ]
 # The confidence threshold for detecting a license from license text.
 # The higher the value, the more closely the license text must be to the
@@ -145,8 +146,6 @@ skip = [
     # tokio-postgres uses 0.11, chrono-tz uses 0.12
     { name = "phf", version = "0.11.3" },
     { name = "phf_shared", version = "0.11.3" },
-    # bindgen (build-dep of librocksdb-sys) pulls rustc-hash 1.x; workspace uses 2.x
-    { name = "rustc-hash", version = "1.1.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -156,12 +155,15 @@ skip-tree = [
     { name = "darling", version = "0.20.11" },
     { name = "darling_macro", version = "0.20.11" },
     { name = "fail", version = "0.5.0" },
+    { name = "fixedbitset", version = "0.4.2" },
     { name = "hashbrown", version = "0.14.5" },
-    { name = "itertools", version = "0.10.5" },
     { name = "itertools", version = "0.12.1" },
+    { name = "ordered-float", version = "2.10.1" },
+    { name = "petgraph", version = "0.6.5" },
     { name = "pyroscope", version = "0.5.8" },
     { name = "pyroscope_pprofrs", version = "0.2.10" },
     { name = "rusty-fork", version = "0.3.0" },
+    { name = "sqlparser", version = "0.59.0" },
     { name = "tower", version = "0.4.13" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "windows-core", version = "0.62.2" },
