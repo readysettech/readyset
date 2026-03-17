@@ -502,7 +502,6 @@ pub struct PersistentState {
     index_build_status: Arc<index_build::AtomicIndexBuildStatus>,
     /// Cooperative shutdown flag for in-progress index builds. The domain sets
     /// this to request cancellation; the build thread polls it.
-    #[allow(dead_code)] // Used by create_index_build_context in a subsequent commit
     pub(crate) shutdown_requested: Arc<AtomicBool>,
     /// Receiving half of the build completion channel. `recv_timeout()` blocks
     /// until the build thread finishes (sender dropped).
@@ -931,7 +930,23 @@ impl State for PersistentState {
     }
 
     fn shut_down(&mut self) -> ReadySetResult<()> {
-        trace!("PersistentState received shutdown, stopping the WAL");
+        trace!("PersistentState received shutdown, stopping index build and WAL");
+
+        // Signal any in-progress index build to stop and wait for it
+        self.shutdown_requested
+            .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(rx) = self.build_completion_rx.lock().expect("poisoned").take() {
+            match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    warn!(
+                        table = %self.name,
+                        "Index build did not complete within timeout during shutdown"
+                    );
+                }
+            }
+        }
+
         self.shut_down_wal()
 
         // DurabilityMode::DeleteOnExit will delete all data when the TempFile instance
@@ -1900,15 +1915,55 @@ impl PersistentState {
         let meta = increment_epoch(&db)?;
         let indices = meta.get_indices(&unique_keys);
 
-        // If there are more column families than indices (+1 to account for the default column
-        // family) we either crashed while trying to build the last index (in `Self::add_index`), or
-        // something (like failed deserialization) caused us to reset the meta to the default
-        // value.
-        // Either way, we should drop all column families that are in the db but not in the
-        // meta.
-        if cf_names.len() > indices.len() + 1 {
-            for cf_name in cf_names.iter().skip(indices.len() + 1) {
-                db.drop_cf(cf_name)?;
+        // --- Crash recovery: clean up any interrupted online index build ---
+        // PendingBuildMeta is stored under its own key (PENDING_BUILD_KEY),
+        // separate from PersistentMeta, to avoid races with the domain
+        // thread's replication-offset writes.
+        if let Some(pending_bytes) = db.get_pinned(PENDING_BUILD_KEY)? {
+            match serde_json::from_slice::<PendingBuildMeta>(&pending_bytes) {
+                Ok(pending) => {
+                    info!(
+                        %name,
+                        cfs = ?pending.column_families,
+                        seq = pending.start_sequence_number,
+                        "Cleaning up interrupted online index build on startup"
+                    );
+                    for cf_name in &pending.column_families {
+                        if db.cf_handle(cf_name).is_some() {
+                            if let Err(e) = db.drop_cf(cf_name) {
+                                error!(error = %e, cf = %cf_name, "Failed to drop orphaned pending CF");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(
+                        %name,
+                        error = %e,
+                        "Failed to deserialize PendingBuildMeta during crash recovery"
+                    );
+                }
+            }
+            // Clear the pending build marker regardless of deserialization success
+            db.delete(PENDING_BUILD_KEY)?;
+        }
+
+        // Clean up leftover sidekick directories from interrupted OIB builds.
+        index_build::cleanup_sidekick_directories(&path);
+
+        // --- Orphan CF cleanup using HashSet ---
+        // Build a set of CFs that should exist (default + all index CFs)
+        let expected_cfs: HashSet<&str> = std::iter::once(DEFAULT_CF)
+            .chain(indices.iter().map(|i| i.column_family.as_str()))
+            .collect();
+
+        // Drop CFs that exist on disk but are not in the expected set
+        for cf_name in &cf_names {
+            if !expected_cfs.contains(cf_name.as_str()) {
+                info!(%name, cf = %cf_name, "Dropping orphaned column family");
+                if let Err(e) = db.drop_cf(cf_name) {
+                    error!(error = %e, cf = %cf_name, "Failed to drop orphaned CF");
+                }
             }
         }
 
@@ -1994,6 +2049,7 @@ impl PersistentState {
         // The cloning here clones an inner Arc reference not the database
         self.db.clone()
     }
+
     /// Adds a new primary index, assuming there are none present
     fn add_primary_index(&self, columns: &[usize], is_unique: bool) -> Result<()> {
         // Phase 1: Update metadata under write lock
@@ -2031,6 +2087,44 @@ impl PersistentState {
 
     fn init_primary_index(&self, columns: &[usize], is_unique: bool) -> Result<()> {
         self.add_primary_index(columns, is_unique)
+    }
+
+    /// Like [`add_primary_index`] but takes a mutable reference to
+    /// `SharedState` that the caller already holds. Used by
+    /// `prepare_indices_for_build` to avoid re-acquiring the lock.
+    fn add_primary_index_with_state(
+        &self,
+        shared_state: &mut SharedState,
+        columns: &[usize],
+        is_unique: bool,
+    ) -> ReadySetResult<()> {
+        if !shared_state.indices.is_empty() {
+            return Ok(());
+        }
+
+        info!(base = %self.name, index = ?columns, is_unique, "Base creating primary index (with state)");
+
+        let persistent_index = PersistentIndex {
+            column_family: PK_CF.to_string(),
+            index: Index::hash_map(columns.to_vec()),
+            is_unique,
+            is_primary: true,
+        };
+
+        shared_state.indices.push(persistent_index);
+        let meta = self.meta(shared_state);
+        self.db.db().save_meta(&meta);
+
+        let index_params = IndexParams::new(IndexType::HashMap, columns.len());
+        self.db
+            .db()
+            .create_cf(
+                PK_CF,
+                &index_params.make_rocksdb_options(&self.default_options),
+            )
+            .map_err(|e| internal_err!("Failed to create primary index CF: {e}"))?;
+
+        Ok(())
     }
 
     fn create_secondary(&self, indices: &[Index], is_unique: &[bool]) -> Vec<PersistentIndex> {

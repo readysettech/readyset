@@ -25,8 +25,10 @@
 //!    arrived during the transfer window directly into the primary.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,14 +40,18 @@ use readyset_client::TableStatus;
 use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
-use rocksdb::{WriteBatch, WriteBatchIteratorCf};
+use rocksdb::{
+    BlockBasedOptions, ColumnFamilyDescriptor, IngestExternalFileOptions, ReadOptions,
+    SstFileWriter, WriteBatch, WriteBatchIteratorCf,
+};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub use super::handle::PersistentStateHandle;
 use super::{
-    build_key, recorded, IndexEpoch, IndexParams, PendingBuildMeta, PersistentIndex,
-    PersistentMeta, PersistentState, SharedState, META_KEY, PENDING_BUILD_KEY, PK_CF,
+    build_key, check_if_index_is_unique, recorded, IndexEpoch, IndexParams, PendingBuildMeta,
+    PersistentIndex, PersistentMeta, PersistentState, SharedState, META_KEY, PENDING_BUILD_KEY,
+    PK_CF,
 };
 
 /// Initial capacity for WAL operation collector. Typical write batches contain
@@ -61,6 +67,12 @@ const WAL_CATCHUP_WRITE_THRESHOLD: usize = 4096;
 /// catch-up. If exceeded, the index build fails gracefully rather than
 /// consuming unbounded memory.
 const MAX_RECENT_PUTS: usize = 1_000_000;
+
+/// Monotonic counter for generating unique sidekick directory names.
+static SIDEKICK_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Number of SST entries between shutdown checks during transfer.
+const TRANSFER_SHUTDOWN_CHECK_INTERVAL: u64 = 100_000;
 
 /// Components needed for background index building, cloned from `PersistentState`
 /// so that a copy can be moved into the build thread.
@@ -511,9 +523,102 @@ impl IndexBuildContext {
 // =============================================================================
 
 impl PersistentState {
+    /// Prepares indices for background building by filtering and creating primary index if needed.
+    ///
+    /// Returns `Some(indices_with_uniqueness)` if there are indices to build, `None` otherwise.
+    /// Each element is a tuple of (Index, is_unique).
+    pub fn prepare_indices_for_build(
+        &mut self,
+        strict: Vec<(Index, Option<Vec<super::Tag>>)>,
+        weak: Vec<Index>,
+    ) -> ReadySetResult<Option<Vec<(Index, bool)>>> {
+        let mut indices = Vec::new();
+        let mut shared_state = self.db.shared_state_mut();
+        let mut seen_indices = HashSet::new();
+
+        for (index, tags) in strict
+            .into_iter()
+            .chain(weak.into_iter().map(|x| (x, None)))
+        {
+            if tags.is_some() {
+                return Err(internal_err!("Base tables can't be partial"));
+            }
+            let existing = shared_state.indices.iter().any(|pi| pi.index == index);
+            if existing {
+                continue;
+            }
+
+            // Skip if we've already seen this index in this batch (deduplicates strict/weak)
+            if !seen_indices.insert(index.clone()) {
+                continue;
+            }
+
+            let uniq = check_if_index_is_unique(&self.unique_keys, &index.columns);
+            if shared_state.indices.is_empty() {
+                self.add_primary_index_with_state(&mut shared_state, &index.columns, uniq)?;
+                // Primary indices can only be HashMaps, so if this is our first index and it's
+                // *not* a HashMap index, add another secondary index of the correct index type
+                if index.index_type == common::IndexType::HashMap {
+                    continue;
+                }
+            }
+            indices.push((index, uniq));
+        }
+
+        if indices.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(indices))
+        }
+    }
+
     /// Returns the current [`IndexBuildStatus`].
     pub fn index_build_status(&self) -> IndexBuildStatus {
         self.index_build_status.load()
+    }
+
+    /// Atomically marks that an index build is in progress.
+    ///
+    /// Returns `Ok(())` if the transition succeeded (previous status was
+    /// `Succeeded` or `Failed`). Returns `Err` if a build is already in
+    /// progress, enforcing the single-build-at-a-time invariant.
+    ///
+    /// This should be called before spawning a background index build task.
+    pub fn mark_index_build_in_progress(&self) -> ReadySetResult<()> {
+        // Try transitioning from Succeeded first (the common case).
+        if self
+            .index_build_status
+            .compare_exchange(IndexBuildStatus::Succeeded, IndexBuildStatus::InProgress)
+            .is_ok()
+        {
+            return Ok(());
+        }
+        // Try transitioning from Failed (retry after a previous failure).
+        if self
+            .index_build_status
+            .compare_exchange(IndexBuildStatus::Failed, IndexBuildStatus::InProgress)
+            .is_ok()
+        {
+            return Ok(());
+        }
+        // Already InProgress — another build is running.
+        Err(internal_err!(
+            "Cannot start index build: another build is already in progress"
+        ))
+    }
+
+    /// Creates an IndexBuildContext for background index building.
+    pub fn create_index_build_context(&self) -> IndexBuildContext {
+        IndexBuildContext {
+            db: self.db.clone(),
+            name: self.name.clone(),
+            table: self.table.clone(),
+            default_options: self.default_options.clone(),
+            table_status_tx: self.table_status_tx.clone(),
+            index_build_status: self.index_build_status.clone(),
+            shutdown_requested: self.shutdown_requested.clone(),
+            epoch: self.epoch,
+        }
     }
 }
 
@@ -764,6 +869,258 @@ fn write_secondary_keys(
             WriteOp::Put => batch.put_cf(cf, &serialized_key, pk_key),
             WriteOp::Delete => batch.delete_cf(cf, &serialized_key),
         }
+    }
+}
+
+// =============================================================================
+// Sidekick RocksDB helpers
+// =============================================================================
+
+/// A temporary RocksDB instance used to build secondary indices in isolation.
+/// Lives at `<primary_path>.oib/` alongside the primary DB directory.
+struct SidekickDb {
+    db: rocksdb::DB,
+    path: PathBuf,
+}
+
+impl std::fmt::Debug for SidekickDb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SidekickDb")
+            .field("path", &self.path)
+            .finish()
+    }
+}
+
+/// Opens a sidekick RocksDB instance for bulk-writing secondary index entries.
+///
+/// Each sidekick gets a unique directory name (`<primary_path>.oib-<pid>-<counter>`)
+/// to avoid LOCK collisions when multiple OIBs target the same base table
+/// concurrently. Leftover directories from previous crashes are cleaned up
+/// before opening.
+///
+/// The sidekick is tuned for bulk-write throughput: large memtables, parallel
+/// background jobs, and no WAL (crash = restart the build).
+/// Removes any leftover sidekick directories matching `<primary_path>.oib-*`.
+///
+/// Called from two places:
+/// - `PersistentState::new_inner` (startup): cleans up leftovers from a previous
+///   process that crashed mid-build.
+/// - `open_sidekick` (before opening a new sidekick): cleans up leftovers from a
+///   previous build attempt within the same process (e.g. a retry after failure).
+pub(super) fn cleanup_sidekick_directories(primary_db_path: &std::path::Path) {
+    let Some(parent) = primary_db_path.parent() else {
+        return;
+    };
+    let Some(stem) = primary_db_path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let prefix = format!("{}.oib-", stem);
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with(&prefix) && entry.path().is_dir() {
+                warn!(path = %entry.path().display(), "Removing leftover sidekick directory");
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
+fn open_sidekick(
+    primary_db_path: &std::path::Path,
+    pending_indices: &[PersistentIndex],
+    base_options: &rocksdb::Options,
+) -> ReadySetResult<SidekickDb> {
+    cleanup_sidekick_directories(primary_db_path);
+
+    let counter = SIDEKICK_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let sidekick_path =
+        primary_db_path.with_extension(format!("db.oib-{}-{}", std::process::id(), counter));
+
+    let ncpus = num_cpus::get() as i32;
+
+    // Start from the primary's base options to ensure SST format compatibility
+    // (block size, compression, format version, etc.). Then override for bulk writes.
+    let mut opts = base_options.clone();
+    opts.create_if_missing(true);
+    opts.create_missing_column_families(true);
+
+    // VectorRep doesn't support concurrent writes, but we don't need them.
+    opts.set_allow_concurrent_memtable_write(false);
+
+    // Large memtables for fewer flushes -- the sidekick is ephemeral so we
+    // can afford the memory.
+    opts.set_write_buffer_size(256 * 1024 * 1024); // 256 MB per memtable
+    opts.set_max_write_buffer_number(4);
+    // NOTE: 1 GB total write buffer is sized for production servers with 16+ GB RAM.
+    // On memory-constrained systems, this may need to be reduced via configuration.
+    // Currently not configurable -- revisit if OIB is used on smaller instances.
+    opts.set_db_write_buffer_size(1024 * 1024 * 1024); // 1 GB total
+
+    // Background jobs for flush only (no compaction on sidekick).
+    // Cap at 4 to avoid saturating I/O on large-core machines.
+    opts.set_max_background_jobs(ncpus.min(4));
+
+    // Disable WAL for the sidekick entirely -- on crash we restart the build.
+    opts.set_manual_wal_flush(true);
+
+    // Disable auto-compaction entirely -- the sidekick is only iterated
+    // sequentially at the end, never queried, so compaction is wasted work.
+    opts.set_disable_auto_compactions(true);
+    opts.set_level_zero_file_num_compaction_trigger(1_000_000);
+    opts.set_level_zero_slowdown_writes_trigger(1_000_000);
+    opts.set_level_zero_stop_writes_trigger(1_000_000);
+
+    // Build CF descriptors matching the primary's pending index CFs.
+    // The comparator must match so ingested SSTs are compatible, but we
+    // override the memtable, filters, and block cache for bulk-write perf.
+    let mut cf_descriptors = vec![ColumnFamilyDescriptor::new(
+        "default",
+        rocksdb::Options::default(),
+    )];
+    for idx in pending_indices {
+        let index_params = IndexParams::from(&idx.index);
+        let mut cf_opts = index_params.make_rocksdb_options(base_options);
+
+        // VectorRep: O(1) append during writes, single std::sort at flush.
+        // Eliminates the 35% CPU cost of SkipList::FindLessThan in
+        // HashLinkList flush path.
+        cf_opts.set_memtable_factory(rocksdb::MemtableFactory::Vector);
+
+        // No filters, no block cache -- the sidekick is write-only then
+        // iterated once sequentially. Ribbon filter construction was ~10%
+        // of CPU for zero benefit.
+        let mut block_opts = BlockBasedOptions::default();
+        block_opts.set_block_size(32 * 1024);
+        block_opts.disable_cache();
+        cf_opts.set_block_based_table_factory(&block_opts);
+
+        cf_descriptors.push(ColumnFamilyDescriptor::new(&idx.column_family, cf_opts));
+    }
+
+    let db =
+        rocksdb::DB::open_cf_descriptors(&opts, &sidekick_path, cf_descriptors).map_err(|e| {
+            internal_err!(
+                "Failed to open sidekick RocksDB at {}: {e}",
+                sidekick_path.display()
+            )
+        })?;
+
+    Ok(SidekickDb {
+        db,
+        path: sidekick_path,
+    })
+}
+
+impl IndexBuildContext {
+    /// Transfers all data from the sidekick's CFs to the corresponding CFs on the
+    /// primary DB via `SstFileWriter` + `ingest_external_file_cf`. Each sidekick
+    /// CF is flushed, iterated in sorted order, written to an `SstFileWriter`
+    /// (which produces an SST file with the required external-file metadata), and
+    /// then ingested into the primary as a file-move operation.
+    ///
+    /// Direct ingestion of the sidekick's compaction-output SSTs is not possible
+    /// because RocksDB's `ingest_external_file` requires the
+    /// `kExternalSstFileGlobalSeqnoPropertyName` property that only `SstFileWriter`
+    /// produces ("Corruption: External file version not found").
+    ///
+    /// The `SstFileWriter` for each CF is created with CF-specific options
+    /// (including custom comparators for BTreeMap indices).
+    fn transfer_sidekick_to_primary(
+        &self,
+        sidekick: &SidekickDb,
+        primary_db: &rocksdb::DB,
+        base_options: &rocksdb::Options,
+        pending_indices: &[PersistentIndex],
+    ) -> ReadySetResult<u64> {
+        let mut total_entries: u64 = 0;
+
+        let mut ingest_opts = IngestExternalFileOptions::default();
+        // Move the SST file into the primary's DB directory instead of copying.
+        ingest_opts.set_move_files(true);
+
+        for idx in pending_indices {
+            self.check_shutdown()?;
+
+            let cf_name = &idx.column_family;
+            let sidekick_cf = sidekick.db.cf_handle(cf_name).ok_or_else(|| {
+                internal_err!("Sidekick CF '{cf_name}' not found during transfer")
+            })?;
+            let primary_cf = primary_db
+                .cf_handle(cf_name)
+                .ok_or_else(|| internal_err!("Primary CF '{cf_name}' not found during transfer"))?;
+
+            // Flush sidekick to ensure all memtable data is on disk.
+            sidekick
+                .db
+                .flush_cf(&sidekick_cf)
+                .map_err(|e| internal_err!("Failed to flush sidekick CF '{cf_name}': {e}"))?;
+
+            // Build CF-specific options (includes custom comparator for BTreeMap).
+            let cf_options = IndexParams::from(&idx.index).make_rocksdb_options(base_options);
+
+            // Write an SST file from the sidekick's sorted iterator.
+            let sst_path = sidekick.path.join(format!("transfer_{cf_name}.sst"));
+            let mut sst_writer = SstFileWriter::create(&cf_options);
+            sst_writer.open(&sst_path).map_err(|e| {
+                internal_err!("Failed to open SST writer at {}: {e}", sst_path.display())
+            })?;
+
+            // Optimized read options for sequential scan: large readahead,
+            // no block cache (ephemeral DB), and async I/O for prefetch.
+            let mut read_opts = ReadOptions::default();
+            read_opts.set_readahead_size(4 * 1024 * 1024);
+            read_opts.fill_cache(false);
+            read_opts.set_async_io(true);
+
+            let mut iter = sidekick.db.raw_iterator_cf_opt(&sidekick_cf, read_opts);
+            iter.seek_to_first();
+
+            let mut cf_entries: u64 = 0;
+            while iter.valid() {
+                if let (Some(key), Some(value)) = (iter.key(), iter.value()) {
+                    sst_writer.put(key, value).map_err(|e| {
+                        internal_err!("Failed to write to SST for CF '{cf_name}': {e}")
+                    })?;
+                    cf_entries += 1;
+
+                    if cf_entries.is_multiple_of(TRANSFER_SHUTDOWN_CHECK_INTERVAL) {
+                        self.check_shutdown()?;
+                    }
+                }
+                iter.next();
+            }
+
+            if let Err(e) = iter.status() {
+                return Err(internal_err!(
+                    "Error iterating sidekick CF '{cf_name}': {e}"
+                ));
+            }
+
+            if cf_entries == 0 {
+                // Nothing to ingest for this CF -- drop the empty SST.
+                drop(sst_writer);
+                let _ = fs::remove_file(&sst_path);
+                continue;
+            }
+
+            sst_writer
+                .finish()
+                .map_err(|e| internal_err!("Failed to finish SST for CF '{cf_name}': {e}"))?;
+
+            // Ingest the SST into the primary's column family.
+            primary_db
+                .ingest_external_file_cf_opts(&primary_cf, &ingest_opts, vec![&sst_path])
+                .map_err(|e| {
+                    internal_err!("Failed to ingest SST into primary CF '{cf_name}': {e}")
+                })?;
+
+            total_entries += cf_entries;
+        }
+
+        Ok(total_entries)
     }
 }
 
