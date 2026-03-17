@@ -6,7 +6,10 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]
+async-trait = { workspace = true }
 datafusion = { workspace = true }
+futures = { workspace = true }
+linkme = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 tokio-postgres = { workspace = true }

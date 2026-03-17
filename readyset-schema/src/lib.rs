@@ -5,7 +5,7 @@ use datafusion::arrow::array::{ArrayRef, RecordBatch, StringArray};
 use datafusion::arrow::datatypes::{DataType, FieldRef};
 use datafusion::catalog::{
     CatalogProvider, CatalogProviderList, MemoryCatalogProvider, MemoryCatalogProviderList,
-    MemorySchemaProvider,
+    MemorySchemaProvider, SchemaProvider,
 };
 use datafusion::common::DFSchema;
 use datafusion::config::ConfigOptions;
@@ -18,8 +18,11 @@ use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext, create_udf}
 use readyset_errors::ReadySetResult;
 use readyset_sql::Dialect;
 
+use crate::virtual_relation::{VrelContext, init_vrels};
+
 pub mod mysql;
 pub mod psql;
+pub mod virtual_relation;
 
 const CATALOG: &str = "readyset";
 
@@ -33,8 +36,8 @@ impl ReadysetSchema {
     pub fn init(name: &str, dialect: Dialect) -> ReadySetResult<Arc<Self>> {
         let runtime = Arc::new(RuntimeEnv::default());
         let catalog = Arc::new(MemoryCatalogProvider::new());
-        let schema = Arc::new(MemorySchemaProvider::new());
-        catalog.register_schema(name, schema)?;
+        let schema: Arc<dyn SchemaProvider> = Arc::new(MemorySchemaProvider::new());
+        catalog.register_schema(name, Arc::clone(&schema))?;
         let catalog_list = MemoryCatalogProviderList::new();
         catalog_list.register_catalog(CATALOG.into(), catalog);
 
@@ -59,6 +62,11 @@ impl ReadysetSchema {
             .build();
 
         let sql_opts = SQLOptions::new().with_allow_ddl(false);
+
+        let vrel_ctx = Arc::new(VrelContext { dialect });
+        for (name, provider) in init_vrels(&vrel_ctx) {
+            schema.register_table(name.into(), provider)?;
+        }
 
         Ok(Arc::new(Self {
             name: name.into(),
