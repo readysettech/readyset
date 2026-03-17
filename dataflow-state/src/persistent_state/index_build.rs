@@ -31,9 +31,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bincode::Options;
+use failpoint_macros::set_failpoint;
 use metrics::counter;
 use readyset_client::internal::Index;
 use readyset_client::TableStatus;
@@ -53,6 +54,7 @@ use super::{
     PersistentIndex, PersistentMeta, PersistentState, SharedState, META_KEY, PENDING_BUILD_KEY,
     PK_CF,
 };
+use crate::persistent_state::{bulk_scan_read_opts, AutoCompact};
 
 /// Initial capacity for WAL operation collector. Typical write batches contain
 /// fewer than 64 operations, so this avoids reallocations in most cases.
@@ -74,6 +76,16 @@ static SIDEKICK_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Number of SST entries between shutdown checks during transfer.
 const TRANSFER_SHUTDOWN_CHECK_INTERVAL: u64 = 100_000;
 
+/// Maximum size (in bytes) of a single SST file produced during the sidekick
+/// transfer phase. Matches RocksDB's default `target_file_size_base` (64 MB).
+///
+/// A single monolithic SST covering the entire key range forces RocksDB to
+/// read the whole file for any compaction that touches even a small key range
+/// overlap, and doubles storage temporarily during that compaction. Splitting
+/// at this boundary produces files that align with RocksDB's expectations for
+/// L6, enabling efficient incremental compaction of individual key ranges.
+const TRANSFER_SST_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Components needed for background index building, cloned from `PersistentState`
 /// so that a copy can be moved into the build thread.
 #[derive(Clone)]
@@ -87,6 +99,9 @@ pub struct IndexBuildContext {
     /// Cooperative shutdown flag. The domain sets this to request cancellation;
     /// the build thread polls it in hot loops via `check_shutdown()`.
     pub(crate) shutdown_requested: Arc<AtomicBool>,
+    /// Shared slot for the completion channel receiver. `build_indices` creates
+    /// the channel and stores the receiver here; `shut_down()` takes it to wait.
+    pub(crate) completion_rx: Arc<std::sync::Mutex<Option<Receiver<()>>>>,
     epoch: IndexEpoch,
 }
 
@@ -516,6 +531,269 @@ impl IndexBuildContext {
 
         Ok((stats, last_seen_seq))
     }
+
+    fn prepare_pending_build(
+        &self,
+        indices: &[(Index, bool)],
+    ) -> ReadySetResult<(Vec<PersistentIndex>, u64)> {
+        if let (Some(table_status_tx), Some(table)) = (&self.table_status_tx, &self.table) {
+            if let Err(err) =
+                table_status_tx.send((table.clone(), TableStatus::CreatingIndex(None)))
+            {
+                error!(
+                    error = %err,
+                    table = %table.display_unquoted(),
+                    "Failed to notify controller of new index",
+                );
+            }
+        }
+
+        let db = self.db.db();
+
+        // CF names are sequential integers starting from 0. `indices.len()`
+        // is safe as the starting name because:
+        // - Only one index build runs at a time (enforced by `index_build_status`)
+        // - Pending indices are never pushed to `shared_state.indices`, so
+        //   `len()` doesn't change during a build
+        // - Failed builds clean up their CFs via `cleanup_pending_indices`
+        // - Crash recovery uses `PendingBuildMeta` to drop orphaned CFs on restart
+        // - Even if a name did collide, `create_cf` returns an error (no silent
+        //   corruption)
+        let start_cf_number = self.db.shared_state().indices.len();
+
+        let cf_names: Vec<String> = (0..indices.len())
+            .map(|i| (start_cf_number + i).to_string())
+            .collect();
+
+        let sequence_number = db.latest_sequence_number();
+        self.mark_pending_build(cf_names, sequence_number)?;
+
+        let pending_indices = match self.create_secondary_pending(indices, start_cf_number) {
+            Ok(indices) => indices,
+            Err(e) => {
+                if let Err(meta_err) = self.clear_pending_build() {
+                    error!(error = %meta_err, "Failed to clear pending build after CF creation failure");
+                }
+                return Err(e);
+            }
+        };
+
+        Ok((pending_indices, sequence_number))
+    }
+
+    pub fn build_indices(&self, indices: Vec<(Index, bool)>) -> ReadySetResult<()> {
+        antithesis_sdk::assert_sometimes!(
+            true,
+            "online index build exercised",
+            &serde_json::json!({})
+        );
+
+        // Create the completion channel and guard *before* the failpoint so
+        // that early returns (including failpoint-triggered ones) always drop
+        // the guard, which drops the sender and unblocks any shutdown waiter.
+        let (completion_tx, completion_rx) = build_completion_channel();
+        *self.completion_rx.lock().expect("poisoned") = Some(completion_rx);
+        let mut guard = IndexBuildGuard::new(self.index_build_status.clone(), completion_tx);
+
+        set_failpoint!(readyset_util::failpoints::ONLINE_INDEX_BUILD_START, |_| {
+            Err(internal_err!(
+                "online-index-build-start failpoint triggered"
+            ))
+        });
+        // Record WAL sequence number, persist pending-build marker,
+        // create empty CFs on primary.
+        let (pending_indices, sequence_number) = self.prepare_pending_build(&indices)?;
+
+        // If the build fails, clean up the pending CFs.
+        let result = self.run_build(&pending_indices, sequence_number);
+        if result.is_err() {
+            self.cleanup_pending_indices(&pending_indices);
+        }
+        result?;
+
+        guard.mark_succeeded();
+        Ok(())
+    }
+
+    /// Runs the core index build: scan, WAL catch-up, transfer, and activate.
+    ///
+    /// All secondary index writes go to a separate sidekick RocksDB instance,
+    /// eliminating write pipeline contention with the primary. After the build,
+    /// the sidekick's data is transferred to the primary via SstFileWriter+ingest.
+    fn run_build(
+        &self,
+        pending_indices: &[PersistentIndex],
+        snapshot_seq: u64,
+    ) -> ReadySetResult<()> {
+        let db = self.db.db();
+        let db_path = db.path().to_path_buf();
+
+        // Open sidekick DB with matching CFs
+        let sidekick = open_sidekick(&db_path, pending_indices, &self.default_options)?;
+        let snapshot = db.snapshot();
+
+        // Scan snapshot -> sidekick
+        let scan_start = Instant::now();
+        let pk_cf = db
+            .cf_handle(PK_CF)
+            .ok_or_else(|| internal_err!("primary key column family '{}' not found", PK_CF))?;
+        let iter = snapshot.raw_iterator_cf_opt(&pk_cf, bulk_scan_read_opts());
+
+        let estimated_rows = match db.property_int_value_cf(&pk_cf, "rocksdb.estimate-num-keys") {
+            Ok(Some(n)) => n as usize,
+            Ok(None) => 0,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to estimate row count for progress reporting");
+                0
+            }
+        };
+
+        self.check_shutdown()?;
+
+        // Write to sidekick, not primary.
+        PersistentState::populate_secondary_from_iter(
+            &sidekick.db,
+            iter,
+            pending_indices,
+            &self.name,
+            &self.table,
+            &self.table_status_tx,
+            estimated_rows,
+            AutoCompact::Enable,
+            Some(&self.shutdown_requested),
+        )?;
+        let scan_duration = scan_start.elapsed();
+        info!(
+            base = %self.name,
+            scan_ms = scan_duration.as_millis(),
+            "snapshot scan complete"
+        );
+
+        set_failpoint!(
+            readyset_util::failpoints::ONLINE_INDEX_BUILD_POST_SCAN,
+            |_| {
+                Err(internal_err!(
+                    "online-index-build-post-scan failpoint triggered"
+                ))
+            }
+        );
+
+        // WAL catch-up: two rounds to minimize closure drain lock hold time.
+        //
+        // Round 1 replays everything accumulated during the snapshot scan.
+        // Round 2 replays whatever trickled in during round 1. This shrinks the
+        // dirty window so the closure drain — which holds the domain write lock —
+        // only needs to replay a minimal number of writes.
+        //
+        // A single round + closure drain would produce identical results, but
+        // the two-round approach keeps the write-lock hold time predictably
+        // small regardless of write rate during the scan.
+        self.check_shutdown()?;
+        let (_stats, last_seq) = self.catch_up_from_wal(
+            db,
+            &sidekick.db,
+            Some(&snapshot),
+            snapshot_seq,
+            pending_indices,
+            true, // disable_wal: sidekick doesn't need WAL
+        )?;
+
+        // Release the snapshot before the second catch-up -- it's passed as
+        // None anyway, and dropping it frees RocksDB resources sooner.
+        drop(snapshot);
+
+        let (_stats, final_seq) = self.catch_up_from_wal(
+            db,
+            &sidekick.db,
+            None, // falls through to primary DB for delete lookups
+            last_seq,
+            pending_indices,
+            true, // disable_wal: sidekick doesn't need WAL
+        )?;
+
+        // Transfer sidekick -> primary via SST ingest
+        self.transfer_sidekick_to_primary(&sidekick, db, &self.default_options, pending_indices)?;
+
+        // Close and clean up sidekick
+        let sidekick_path = sidekick.path.clone();
+        drop(sidekick);
+
+        // Clean up sidekick directory
+        if let Err(e) = fs::remove_dir_all(&sidekick_path) {
+            // Not fatal -- crash recovery cleans up on next startup
+            warn!(
+                error = %e,
+                path = %sidekick_path.display(),
+                "Failed to remove sidekick directory after ingestion"
+            );
+        }
+
+        set_failpoint!(
+            readyset_util::failpoints::ONLINE_INDEX_BUILD_PRE_ACTIVATE,
+            |_| {
+                Err(internal_err!(
+                    "online-index-build-pre-activate failpoint triggered"
+                ))
+            }
+        );
+
+        // Activate indices and close the write gap under a single write-lock hold.
+        //
+        // Why a write lock is required here:
+        //   Between the end of transfer and the start of this closure drain,
+        //   concurrent domain inserts may have written new rows to the primary
+        //   PK CF. Those inserts do NOT write secondary keys for the pending
+        //   indices because they aren't activated yet. The closure drain replays
+        //   this gap from the WAL, writing directly to the primary.
+        //
+        //   Holding the write lock for the entire activate+drain window ensures:
+        //   (a) no new inserts land in the gap while we're draining it, and
+        //   (b) readers see a consistent view -- indices are only visible after
+        //       all secondary keys are fully caught up.
+        let mut shared_state = self.db.shared_state_mut();
+        self.activate_pending_indices(&mut shared_state, pending_indices.to_vec())?;
+        let (_stats, _) = self.catch_up_from_wal(
+            db,
+            db,   // primary is both source and dest
+            None, // no snapshot needed
+            final_seq,
+            pending_indices,
+            false, // WAL enabled for primary writes
+        )?;
+        drop(shared_state);
+
+        // Re-enable auto-compaction with raised L0 thresholds. Since we
+        // ingested compacted SSTs, there should be very few L0 files, but
+        // we still raise thresholds as a safety measure.
+        for index in pending_indices {
+            if let Some(cf) = db.cf_handle(&index.column_family) {
+                if let Err(err) = db.set_options_cf(
+                    &cf,
+                    &[
+                        ("level0_slowdown_writes_trigger", "512"),
+                        ("level0_stop_writes_trigger", "1024"),
+                    ],
+                ) {
+                    warn!(
+                        %err,
+                        table = %self.name,
+                        cf = %index.column_family,
+                        "Failed to raise L0 thresholds after index build",
+                    );
+                }
+                if let Err(err) = db.set_options_cf(&cf, &[("disable_auto_compactions", "false")]) {
+                    error!(
+                        %err,
+                        table = %self.name,
+                        cf = %index.column_family,
+                        "Failed to re-enable auto-compaction after index build",
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -617,6 +895,7 @@ impl PersistentState {
             table_status_tx: self.table_status_tx.clone(),
             index_build_status: self.index_build_status.clone(),
             shutdown_requested: self.shutdown_requested.clone(),
+            completion_rx: self.build_completion_rx.clone(),
             epoch: self.epoch,
         }
     }
@@ -1017,9 +1296,15 @@ fn open_sidekick(
 impl IndexBuildContext {
     /// Transfers all data from the sidekick's CFs to the corresponding CFs on the
     /// primary DB via `SstFileWriter` + `ingest_external_file_cf`. Each sidekick
-    /// CF is flushed, iterated in sorted order, written to an `SstFileWriter`
-    /// (which produces an SST file with the required external-file metadata), and
-    /// then ingested into the primary as a file-move operation.
+    /// CF is flushed, iterated in sorted order, and written to one or more SST
+    /// files (split at [`TRANSFER_SST_MAX_BYTES`] boundaries to match RocksDB's
+    /// `target_file_size_base`). The SSTs are then ingested into the primary as
+    /// file-move operations.
+    ///
+    /// Splitting avoids producing a single monolithic SST that would force
+    /// RocksDB to read the entire file for any compaction touching even a small
+    /// key range overlap. Multiple smaller SSTs enable efficient incremental
+    /// compaction.
     ///
     /// Direct ingestion of the sidekick's compaction-output SSTs is not possible
     /// because RocksDB's `ingest_external_file` requires the
@@ -1061,13 +1346,6 @@ impl IndexBuildContext {
             // Build CF-specific options (includes custom comparator for BTreeMap).
             let cf_options = IndexParams::from(&idx.index).make_rocksdb_options(base_options);
 
-            // Write an SST file from the sidekick's sorted iterator.
-            let sst_path = sidekick.path.join(format!("transfer_{cf_name}.sst"));
-            let mut sst_writer = SstFileWriter::create(&cf_options);
-            sst_writer.open(&sst_path).map_err(|e| {
-                internal_err!("Failed to open SST writer at {}: {e}", sst_path.display())
-            })?;
-
             // Optimized read options for sequential scan: large readahead,
             // no block cache (ephemeral DB), and async I/O for prefetch.
             let mut read_opts = ReadOptions::default();
@@ -1078,13 +1356,51 @@ impl IndexBuildContext {
             let mut iter = sidekick.db.raw_iterator_cf_opt(&sidekick_cf, read_opts);
             iter.seek_to_first();
 
+            let mut sst_paths: Vec<PathBuf> = Vec::new();
             let mut cf_entries: u64 = 0;
+            let mut sst_bytes: u64 = 0;
+            let mut sst_writer: Option<SstFileWriter> = None;
+
             while iter.valid() {
                 if let (Some(key), Some(value)) = (iter.key(), iter.value()) {
-                    sst_writer.put(key, value).map_err(|e| {
-                        internal_err!("Failed to write to SST for CF '{cf_name}': {e}")
-                    })?;
+                    // Split output into multiple SST files at TRANSFER_SST_MAX_BYTES
+                    // (default 64 MB, matching RocksDB's target_file_size_base).
+                    // A single monolithic SST would force full-file reads for any
+                    // compaction that overlaps even a small key range. Multiple
+                    // smaller files let RocksDB compact individual ranges
+                    // incrementally.
+                    if sst_writer.is_none() || sst_bytes >= TRANSFER_SST_MAX_BYTES {
+                        // Finish the current SST if one is open.
+                        if let Some(mut writer) = sst_writer.take() {
+                            writer.finish().map_err(|e| {
+                                internal_err!("Failed to finish SST for CF '{cf_name}': {e}")
+                            })?;
+                        }
+
+                        let sst_path = sidekick
+                            .path
+                            .join(format!("transfer_{cf_name}_{}.sst", sst_paths.len()));
+                        let writer = SstFileWriter::create(&cf_options);
+                        writer.open(&sst_path).map_err(|e| {
+                            internal_err!(
+                                "Failed to open SST writer at {}: {e}",
+                                sst_path.display()
+                            )
+                        })?;
+                        sst_paths.push(sst_path);
+                        sst_bytes = 0;
+                        sst_writer = Some(writer);
+                    }
+
+                    sst_writer
+                        .as_mut()
+                        .ok_or_else(|| internal_err!("SST writer missing for CF '{cf_name}'"))?
+                        .put(key, value)
+                        .map_err(|e| {
+                            internal_err!("Failed to write to SST for CF '{cf_name}': {e}")
+                        })?;
                     cf_entries += 1;
+                    sst_bytes += (key.len() + value.len()) as u64;
 
                     if cf_entries.is_multiple_of(TRANSFER_SHUTDOWN_CHECK_INTERVAL) {
                         self.check_shutdown()?;
@@ -1099,22 +1415,31 @@ impl IndexBuildContext {
                 ));
             }
 
-            if cf_entries == 0 {
-                // Nothing to ingest for this CF -- drop the empty SST.
-                drop(sst_writer);
-                let _ = fs::remove_file(&sst_path);
+            // Finish the last SST file.
+            if let Some(mut writer) = sst_writer.take() {
+                writer
+                    .finish()
+                    .map_err(|e| internal_err!("Failed to finish SST for CF '{cf_name}': {e}"))?;
+            }
+
+            if sst_paths.is_empty() {
                 continue;
             }
 
-            sst_writer
-                .finish()
-                .map_err(|e| internal_err!("Failed to finish SST for CF '{cf_name}': {e}"))?;
+            info!(
+                base = %self.name,
+                cf = %cf_name,
+                entries = cf_entries,
+                sst_files = sst_paths.len(),
+                "transferring sidekick data to primary"
+            );
 
-            // Ingest the SST into the primary's column family.
+            // Ingest all SST files into the primary's column family.
+            let sst_refs: Vec<&std::path::Path> = sst_paths.iter().map(|p| p.as_path()).collect();
             primary_db
-                .ingest_external_file_cf_opts(&primary_cf, &ingest_opts, vec![&sst_path])
+                .ingest_external_file_cf_opts(&primary_cf, &ingest_opts, sst_refs)
                 .map_err(|e| {
-                    internal_err!("Failed to ingest SST into primary CF '{cf_name}': {e}")
+                    internal_err!("Failed to ingest SSTs into primary CF '{cf_name}': {e}")
                 })?;
 
             total_entries += cf_entries;

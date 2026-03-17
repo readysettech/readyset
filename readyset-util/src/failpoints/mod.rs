@@ -76,3 +76,15 @@ pub const CONTROLLER_EVENTS_SSE_SEND_DELAY: &str = "controller-events-sse-send-d
 pub const MYSQL_GTID_ROW_EVENT: &str = "mysql-gtid-row-event";
 /// A failpoint before snapshotting each individual table in MySQL.
 pub const MYSQL_SNAPSHOT_TABLE: &str = "mysql-snapshot-table";
+
+/// Failpoint: triggers after OIB snapshot scan completes but before WAL catch-up.
+/// Used to test behavior when WAL catch-up fails after a successful scan.
+pub const ONLINE_INDEX_BUILD_POST_SCAN: &str = "online-index-build-post-scan";
+
+/// Failpoint: triggers after sidekick->primary transfer but before index activation.
+/// Used to test cleanup when activation fails.
+pub const ONLINE_INDEX_BUILD_PRE_ACTIVATE: &str = "online-index-build-pre-activate";
+
+/// Failpoint: triggers at the start of build_indices, before any work begins.
+/// Used to test immediate failure and cleanup.
+pub const ONLINE_INDEX_BUILD_START: &str = "online-index-build-start";

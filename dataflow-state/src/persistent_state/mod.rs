@@ -61,7 +61,6 @@
 //! atomicity, these offsets are stored inside of rocksdb as part of the persisted
 //! [`PersistentMeta`], and updated as part of every write.
 mod handle;
-#[allow(dead_code)] // Build flow consumers added in a subsequent commit
 pub(crate) mod index_build;
 mod metrics;
 mod recorded;
@@ -503,10 +502,11 @@ pub struct PersistentState {
     /// Cooperative shutdown flag for in-progress index builds. The domain sets
     /// this to request cancellation; the build thread polls it.
     pub(crate) shutdown_requested: Arc<AtomicBool>,
-    /// Receiving half of the build completion channel. `recv_timeout()` blocks
-    /// until the build thread finishes (sender dropped).
+    /// Shared slot for the build completion channel receiver. `build_indices`
+    /// creates the channel and stores the receiver here; `shut_down()` takes it
+    /// to wait. Wrapped in Arc so `IndexBuildContext` can share it.
     #[allow(dead_code)] // Used by shut_down() in a subsequent commit
-    pub(crate) build_completion_rx: Mutex<Option<Receiver<()>>>,
+    pub(crate) build_completion_rx: Arc<Mutex<Option<Receiver<()>>>>,
 }
 
 /// Things that are shared between read handles and the state itself, that can be locked under a
@@ -2031,7 +2031,7 @@ impl PersistentState {
                 IndexBuildStatus::Succeeded,
             )),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
-            build_completion_rx: Mutex::new(None),
+            build_completion_rx: Arc::new(Mutex::new(None)),
         };
 
         if let Some(pk) = state.unique_keys.first().cloned() {
