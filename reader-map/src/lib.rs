@@ -236,8 +236,8 @@ use readyset_client::internal::IndexType;
 
 use crate::inner::Inner;
 use crate::read::ReadHandle;
-pub use crate::write::EvictionQuantity;
 use crate::write::WriteHandle;
+pub use crate::write::{BatchEntry, BatchSegment, EvictionQuantity};
 
 mod error;
 mod eviction;

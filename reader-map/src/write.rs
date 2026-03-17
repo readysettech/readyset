@@ -192,6 +192,20 @@ where
         })
     }
 
+    /// Apply a batch of adds and removes across multiple keys.
+    ///
+    /// Each entry's segments are sorted during `absorb_first` and merged in O(N log N + M)
+    /// instead of O(N*M) for individual operations.
+    ///
+    /// The updates will only be visible to readers after the next call to
+    /// [`publish`](Self::publish).
+    pub fn batch(&mut self, entries: Vec<BatchEntry<K, V>>) -> &mut Self {
+        self.add_op(Operation::Batch {
+            entries,
+            timestamp: Instant::now(),
+        })
+    }
+
     /// Remove the value-bag for the given key.
     ///
     /// The value-bag will only disappear from readers after the next call to
@@ -379,6 +393,37 @@ where
             Operation::SetMeta(m) => {
                 self.meta = m.clone();
             }
+            Operation::Batch { entries, timestamp } => {
+                let metrics = self.metrics.clone();
+                for entry in entries.iter_mut() {
+                    // Sort each segment's values in place.
+                    for segment in &mut entry.segments {
+                        match segment {
+                            BatchSegment::Adds(values) | BatchSegment::Removes(values) => {
+                                values.sort_by(|a, b| self.order.cmp(a, b));
+                            }
+                        }
+                    }
+                    // Apply segments in order for this key.
+                    for segment in &entry.segments {
+                        match segment {
+                            BatchSegment::Adds(values) => {
+                                let entry_values =
+                                    self.data_entry(entry.key.clone(), &mut entry.eviction_meta);
+                                entry_values.merge_sorted_adds(values.as_slice(), *timestamp);
+                                metrics.record_updated(entry_values.metrics());
+                            }
+                            BatchSegment::Removes(values) => {
+                                if let Some(entry_values) = self.data.get_mut(&entry.key) {
+                                    entry_values
+                                        .merge_sorted_removes(values.as_slice(), *timestamp);
+                                    metrics.record_updated(entry_values.metrics());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -421,6 +466,25 @@ where
             Operation::SetMeta(m) => {
                 self.meta = m;
             }
+            Operation::Batch { entries, timestamp } => {
+                // Segments were already sorted in absorb_first.
+                for mut entry in entries {
+                    for segment in entry.segments {
+                        match segment {
+                            BatchSegment::Adds(values) => {
+                                let entry_values =
+                                    self.data_entry(entry.key.clone(), &mut entry.eviction_meta);
+                                entry_values.merge_sorted_adds(values, timestamp);
+                            }
+                            BatchSegment::Removes(values) => {
+                                if let Some(entry_values) = self.data.get_mut(&entry.key) {
+                                    entry_values.merge_sorted_removes(values, timestamp);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -443,6 +507,38 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.r_handle
+    }
+}
+
+/// A run of consecutive adds or removes for a single key within a batch.
+#[derive(Debug)]
+pub enum BatchSegment<V> {
+    /// A sorted run of values to add.
+    Adds(Vec<V>),
+    /// A sorted run of values to remove.
+    Removes(Vec<V>),
+}
+
+/// All operations for a single key within a batch. Segments preserve the original
+/// ordering of consecutive add/remove runs.
+#[derive(Debug)]
+pub struct BatchEntry<K, V> {
+    /// The key for this batch entry.
+    pub key: K,
+    /// Ordered runs of adds and removes for this key.
+    pub segments: Vec<BatchSegment<V>>,
+    /// Eviction metadata, populated during absorb if the key is new.
+    pub eviction_meta: Option<EvictionMeta>,
+}
+
+impl<K, V> BatchEntry<K, V> {
+    /// Create a new batch entry for the given key with no segments.
+    pub fn new(key: K) -> Self {
+        Self {
+            key,
+            segments: Vec::new(),
+            eviction_meta: None,
+        }
     }
 }
 
@@ -486,6 +582,12 @@ pub(super) enum Operation<K, V, M> {
     MarkReady,
     /// Set the value of the map meta.
     SetMeta(M),
+    /// A batch of adds and removes across multiple keys. Each entry's segments are
+    /// sorted in place during `absorb_first` and reused by `absorb_second`.
+    Batch {
+        entries: Vec<BatchEntry<K, V>>,
+        timestamp: Instant,
+    },
 }
 
 impl<K, V, M> fmt::Debug for Operation<K, V, M>
@@ -526,6 +628,7 @@ where
             Operation::Purge => f.debug_tuple("Purge").finish(),
             Operation::MarkReady => f.debug_tuple("MarkReady").finish(),
             Operation::SetMeta(a) => f.debug_tuple("SetMeta").field(a).finish(),
+            Operation::Batch { entries, .. } => f.debug_tuple("Batch").field(entries).finish(),
         }
     }
 }

@@ -1,4 +1,7 @@
+use std::cmp::Ordering;
 use std::fmt::{self, Debug};
+use std::mem::ManuallyDrop;
+use std::ptr;
 use std::time::{Duration, Instant};
 
 use partial_map::InsertionOrder;
@@ -180,6 +183,114 @@ where
             Arc::make_mut(&mut self.values).remove(index);
         }
         self.metrics.update(timestamp);
+    }
+
+    /// Backward merge of sorted `adds` into the existing sorted values, in-place.
+    /// Uses `Arc::make_mut` to avoid allocation when the Arc is uniquely owned.
+    fn do_merge_adds(&mut self, adds: Vec<T>, timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let mut adds = ManuallyDrop::new(adds);
+        let values = Arc::make_mut(&mut self.values);
+        let old_len = values.len();
+        let add_len = adds.len();
+        let new_len = old_len + add_len;
+
+        values.reserve(add_len);
+
+        let base = values.as_mut_ptr();
+        let adds_base = adds.as_ptr();
+        let mut old = old_len.checked_sub(1);
+        let mut add = add_len.checked_sub(1);
+
+        // SAFETY: Backward merge filling each slot in [old_len..new_len] exactly once.
+        // Existing elements are moved rightward via ptr::read/ptr::write (non-overlapping
+        // because dst >= old always holds: the gap starts at add_len and shrinks by 1 only
+        // when an add element is placed).  Add elements are moved from the adds buffer,
+        // which is wrapped in ManuallyDrop to prevent double-drop.  When all adds are placed,
+        // the remaining existing elements are already in position.
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
+        unsafe {
+            for dst in (0..new_len).rev() {
+                let Some(a) = add else { break };
+                match old {
+                    Some(o)
+                        if self.order.cmp(&*base.add(o), &*adds_base.add(a))
+                            == Ordering::Greater =>
+                    {
+                        ptr::write(base.add(dst), ptr::read(base.add(o)));
+                        old = o.checked_sub(1);
+                    }
+                    _ => {
+                        ptr::write(base.add(dst), ptr::read(adds_base.add(a)));
+                        add = a.checked_sub(1);
+                    }
+                }
+            }
+            values.set_len(new_len);
+
+            // Free the adds buffer without dropping the elements (they were moved out above).
+            adds.set_len(0);
+            ManuallyDrop::drop(&mut adds);
+        }
+
+        self.metrics.update(timestamp);
+    }
+
+    /// In-place compaction that removes matching values from the existing sorted values.
+    /// Uses `Arc::make_mut` to avoid allocation when the Arc is uniquely owned.
+    fn do_merge_removes(&mut self, removes: &[T], timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let values = Arc::make_mut(&mut self.values);
+        let mut rm = 0;
+        let mut write = 0;
+
+        'outer: for read in 0..values.len() {
+            while rm < removes.len() {
+                match self.order.cmp(&values[read], &removes[rm]) {
+                    Ordering::Greater => {
+                        rm += 1;
+                    }
+                    Ordering::Equal => {
+                        rm += 1;
+                        continue 'outer;
+                    }
+                    Ordering::Less => break,
+                }
+            }
+            values.swap(write, read);
+            write += 1;
+        }
+
+        values.truncate(write);
+        self.metrics.update(timestamp);
+    }
+
+    /// Merge sorted adds into the existing values.
+    /// Accepts `&[T]` (clones into a Vec) or `Vec<T>` (no-op move).
+    pub(crate) fn merge_sorted_adds(&mut self, sorted: impl Into<Vec<T>>, timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let sorted = sorted.into();
+        if !sorted.is_empty() {
+            self.do_merge_adds(sorted, timestamp);
+        }
+    }
+
+    /// Remove sorted values from the existing values.
+    /// Accepts `&[T]` (clones into a Vec) or `Vec<T>` (no-op move).
+    pub(crate) fn merge_sorted_removes(&mut self, sorted: impl Into<Vec<T>>, timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let sorted = sorted.into();
+        if !sorted.is_empty() {
+            self.do_merge_removes(&sorted, timestamp);
+        }
     }
 
     pub(crate) fn clear(&mut self)
