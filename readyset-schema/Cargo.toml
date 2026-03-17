@@ -1,0 +1,21 @@
+[package]
+name = "readyset-schema"
+version = "0.0.1"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+datafusion = { workspace = true }
+mysql_async = { workspace = true }
+mysql_common = { workspace = true }
+tokio-postgres = { workspace = true }
+
+mysql-srv = { path = "../mysql-srv" }
+psql-srv = { path = "../psql-srv" }
+readyset-data = { path = "../readyset-data" }
+readyset-errors = { path = "../readyset-errors" }
+readyset-sql = { path = "../readyset-sql" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

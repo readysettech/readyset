@@ -727,6 +727,9 @@ pub enum ReadySetError {
 
     #[error("CREATE CACHE failed: {0}")]
     CreateCacheError(String),
+
+    #[error("Readyset schema error: {0}")]
+    ReadysetSchemaError(String),
 }
 
 impl ReadySetError {
@@ -1278,6 +1281,8 @@ impl_from_to_string!(hyper::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
 impl_from_to_string!(readyset_sql::AstConversionError, AstConversionError);
 impl_from_to_string!(pem::PemError, PemError);
+impl_from_to_string!(datafusion::error::DataFusionError, ReadysetSchemaError);
+impl_from_to_string!(datafusion::arrow::error::ArrowError, ReadysetSchemaError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {
