@@ -2703,7 +2703,7 @@ impl SizeOf for PersistentStateHandle {
         0
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         self.db()
             .property_int_value("rocksdb.estimate-num-keys")
             .unwrap()
@@ -2735,8 +2735,8 @@ impl SizeOf for PersistentState {
             .sum()
     }
 
-    fn is_empty(&self) -> bool {
-        self.db.is_empty()
+    fn size_is_empty(&self) -> bool {
+        self.db.size_is_empty()
     }
 }
 

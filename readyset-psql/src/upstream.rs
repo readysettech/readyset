@@ -128,7 +128,7 @@ impl SizeOf for CacheEntry {
         size + size_of::<Self>()
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }

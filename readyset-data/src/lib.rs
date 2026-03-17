@@ -155,7 +155,7 @@ impl SizeOf for DfValue {
         size_of::<Self>() + inner
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }

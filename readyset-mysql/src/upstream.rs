@@ -49,7 +49,7 @@ impl SizeOf for CacheEntry {
             }
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         match self {
             Self::Text(values) | Self::Binary(values) => values.is_empty(),
         }

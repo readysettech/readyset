@@ -2096,7 +2096,7 @@ impl Domain {
             .state
             .get(from)
             .expect("migration replay path started with non-materialized node");
-        let is_empty = state.is_empty();
+        let is_empty = state.size_is_empty();
         let mut all_records = state.all_records();
 
         debug!(

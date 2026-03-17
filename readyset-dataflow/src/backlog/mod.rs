@@ -468,7 +468,7 @@ impl SizeOf for WriteHandle {
         self.mem_size
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         self.handle.is_empty()
     }
 }

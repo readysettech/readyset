@@ -314,11 +314,11 @@ impl SizeOf for MaterializedNodeState {
         }
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         match self {
-            MaterializedNodeState::Memory(ms) => ms.is_empty(),
-            MaterializedNodeState::Persistent(ps) => ps.is_empty(),
-            MaterializedNodeState::PersistentReadHandle(rh) => rh.is_empty(),
+            MaterializedNodeState::Memory(ms) => ms.size_is_empty(),
+            MaterializedNodeState::Persistent(ps) => ps.size_is_empty(),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.size_is_empty(),
         }
     }
 }
@@ -689,7 +689,7 @@ impl SizeOf for Row {
         std::mem::size_of::<u64>() + (*self.data).deep_size_of()
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }

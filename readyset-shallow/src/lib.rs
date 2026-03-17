@@ -29,7 +29,7 @@ impl SizeOf for MySqlMetadata {
         sz
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }
@@ -45,7 +45,7 @@ impl SizeOf for PostgreSqlMetadata {
         self.schema.deep_size_of() + self.types.len() * size_of::<tokio_postgres::types::Type>()
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }
@@ -69,7 +69,7 @@ impl SizeOf for QueryMetadata {
             }
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         false
     }
 }

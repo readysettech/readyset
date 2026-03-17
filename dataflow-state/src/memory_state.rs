@@ -38,7 +38,7 @@ impl SizeOf for MemoryState {
         self.mem_size
     }
 
-    fn is_empty(&self) -> bool {
+    fn size_is_empty(&self) -> bool {
         self.state.iter().all(|s| s.is_empty())
     }
 }
@@ -1454,7 +1454,7 @@ mod tests {
         state.insert(vec![1.into(), 100.into()], Some(tag2));
 
         assert_eq!(state.row_count(), 1);
-        assert!(!state.is_empty());
+        assert!(!state.size_is_empty());
     }
 
     #[test]
