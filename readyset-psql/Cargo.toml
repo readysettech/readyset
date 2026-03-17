@@ -55,6 +55,7 @@ readyset-common = { path = "../readyset-common" }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-schema = { path = "../readyset-schema" }
 readyset-shallow = { path = "../readyset-shallow" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

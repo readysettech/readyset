@@ -47,6 +47,7 @@ pub(crate) fn copy_simple_query_message(
 enum ResultsetInner {
     Empty,
     ReadySet(Box<<ResultIterator as IntoIterator>::IntoIter>),
+    ReadysetSchema(readyset_schema::ReadysetSchemaResultIter<'static>),
     ShallowDfValue {
         values: Arc<Vec<CacheEntry>>,
         row: usize,
@@ -219,6 +220,17 @@ impl Resultset {
         }
     }
 
+    pub fn from_readyset_schema(result: readyset_schema::ReadysetSchemaResult) -> Self {
+        let project_field_types = Arc::new(readyset_schema::psql::extract_types(&result));
+        Self {
+            results: ResultsetInner::ReadysetSchema(result.owned_iter()),
+            project_field_types,
+            project_field_names: Vec::new(),
+            cache: None,
+            client_formats: None,
+        }
+    }
+
     pub fn from_shallow_dfvalue(
         values: Arc<Vec<CacheEntry>>,
         project_field_types: Arc<Vec<Type>>,
@@ -271,6 +283,12 @@ impl Stream for Resultset {
                 i.next()
                     .map(|values| convert_dfvalue_row(&values, project_field_types))
             }
+            ResultsetInner::ReadysetSchema(iter) => iter.next_row().map(|(cols, row_idx)| {
+                Ok(PsqlSrvRow::ValueVec(
+                    cols.map(|col| readyset_schema::psql::to_psql_value(col, row_idx))
+                        .collect(),
+                ))
+            }),
             ResultsetInner::ShallowDfValue { values, row } => {
                 if *row >= values.len() {
                     None

@@ -538,6 +538,26 @@ where
         .await
 }
 
+async fn handle_readyset_schema_result<S>(
+    result: readyset_schema::ReadysetSchemaResult,
+    writer: QueryResultWriter<'_, S>,
+    status_flags: StatusFlags,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let columns = readyset_schema::mysql::extract_columns(&result);
+    let mut rw = writer.start(&columns).await?;
+    let mut iter = result.borrowed_iter();
+    while let Some((cols, row_idx)) = iter.next_row() {
+        for col in cols {
+            rw.write_col(readyset_schema::mysql::to_mysql_value(col, row_idx))?;
+        }
+        rw.end_row().await?;
+    }
+    rw.set_status_flags(status_flags).finish().await
+}
+
 async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
@@ -569,6 +589,9 @@ where
             )),
             writer
         ),
+        Ok(QueryResult::ReadysetSchema(result)) => {
+            handle_readyset_schema_result(result, writer, status_flags).await
+        }
         Err(error) => handle_error!(error, writer),
     }
 }

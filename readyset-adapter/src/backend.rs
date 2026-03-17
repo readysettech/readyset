@@ -101,6 +101,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
+use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, ChangeUpstreamStatement,
@@ -115,7 +116,7 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
     convert_placeholders_to_question_marks,
 };
-use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites};
+use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
 use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
@@ -383,6 +384,7 @@ pub struct BackendBuilder {
     default_coalesce_ms: u64,
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
     replication_enabled: bool,
+    readyset_schema: Option<Arc<ReadysetSchema>>,
 }
 
 impl Default for BackendBuilder {
@@ -412,6 +414,7 @@ impl Default for BackendBuilder {
             default_coalesce_ms: 5_000,
             upstream_config: None,
             replication_enabled: true,
+            readyset_schema: None,
         }
     }
 }
@@ -456,7 +459,11 @@ impl BackendBuilder {
         };
 
         Backend {
-            connectors: BackendConnectors { noria, upstream },
+            connectors: BackendConnectors {
+                noria,
+                upstream,
+                readyset_schema_session: None,
+            },
             state: BackendState {
                 client_addr: self.client_addr,
                 proxy_state,
@@ -485,6 +492,8 @@ impl BackendBuilder {
                 routing_changed: false,
                 authority,
                 adapter_start_time,
+                readyset_schema: self.readyset_schema,
+                readyset_schema_route_all: false,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -639,6 +648,11 @@ impl BackendBuilder {
     pub fn get_upstream_config(&self) -> Option<&Arc<RwLock<UpstreamConfig>>> {
         self.upstream_config.as_ref()
     }
+
+    pub fn readyset_schema(mut self, readyset_schema: Arc<ReadysetSchema>) -> Self {
+        self.readyset_schema = Some(readyset_schema);
+        self
+    }
 }
 
 /// A [`PreparedStatement`] stores the data needed for an immediate execution of a prepared
@@ -766,7 +780,9 @@ where
     /// Readyset connector used for reads, and writes when no upstream DB is present
     pub noria: NoriaConnector,
     /// Optional connector to the upstream DB. Used for fallback reads and all writes if it exists
-    pub upstream: Option<DB>,
+    upstream: Option<DB>,
+    /// A current session with the Readyset schema.
+    readyset_schema_session: Option<ReadysetSchemaSession>,
 }
 
 impl<DB> BackendConnectors<DB>
@@ -924,6 +940,10 @@ where
     authority: Arc<Authority>,
     /// The time at which the adapter started.
     adapter_start_time: SystemTime,
+    /// Access to the Readyset schema.
+    readyset_schema: Option<Arc<ReadysetSchema>>,
+    /// Wether or not to route all queries to the Readyset schema.
+    readyset_schema_route_all: bool,
 }
 
 impl<DB> BackendState<DB>
@@ -1153,6 +1173,38 @@ where
             vec![Results::new(rows)],
         ))
     }
+
+    /// Update our tracking of whether to route all queries to the Readyset schema.
+    ///
+    /// Returns true if we should route all queries to the Readyset schema.
+    fn update_readyset_schema_routing(&mut self, search_path: &[SqlIdentifier]) -> bool {
+        let Some(readyset_schema) = &self.readyset_schema else {
+            return false;
+        };
+        let readyset_schema = SqlIdentifier::from(readyset_schema.name());
+        self.readyset_schema_route_all = [readyset_schema] == search_path;
+        self.readyset_schema_route_all
+    }
+
+    fn should_query_readyset_schema(
+        &self,
+        settings: &BackendSettings,
+        query: &ReadySetResult<ShallowCacheQuery>,
+    ) -> bool {
+        if !settings.allow_cache_ddl {
+            return false;
+        }
+        let Some(readyset_schema) = &self.readyset_schema else {
+            return false;
+        };
+        let Ok(query) = query else {
+            return self.readyset_schema_route_all;
+        };
+        if detect_schema_references::references_schema(query, readyset_schema.name()) {
+            return true;
+        }
+        self.readyset_schema_route_all
+    }
 }
 
 /// Settings that have no state and are constant for a given [`Backend`]
@@ -1358,6 +1410,8 @@ where
     /// Results from parsing a SQL statement and determining that it's a command that should
     /// be handled at an outer layer.
     Parser(ParsedCommand),
+    /// Results from a readyset-schema metadata query
+    ReadysetSchema(readyset_schema::ReadysetSchemaResult),
 }
 
 impl<'a, DB: UpstreamDatabase> From<noria_connector::QueryResult<'a>> for QueryResult<'a, DB> {
@@ -1379,6 +1433,7 @@ where
             }
             Self::Parser(r) => f.debug_tuple("Parser").field(r).finish(),
             Self::Shallow(r) => f.debug_tuple("Shallow").field(r).finish(),
+            Self::ReadysetSchema(r) => f.debug_tuple("ReadysetSchema").field(r).finish(),
         }
     }
 }
@@ -1467,6 +1522,41 @@ where
         Err(err())
     }
 
+    /// Uses the provided query to update our tracking of whether to route all queries to the
+    /// Readyset schema.
+    ///
+    /// If we should stop processing the current query, returns a result to be immediately returned
+    /// to the client.
+    fn check_readyset_schema_routing<'a>(
+        state: &mut BackendState<DB>,
+        query: &ReadySetResult<SqlQuery>,
+    ) -> Option<QueryResult<'a, DB>> {
+        state.readyset_schema.as_ref()?;
+
+        let search_path = match query {
+            Ok(SqlQuery::Set(s)) => Handler::handle_set_statement(s).set_search_path?,
+            Ok(SqlQuery::Use(UseStatement { database })) => vec![database.into()],
+            Ok(..) | Err(..) => return None,
+        };
+
+        state
+            .update_readyset_schema_routing(search_path.as_slice())
+            .then(|| QueryResult::Noria(noria_connector::QueryResult::Empty))
+    }
+
+    /// Get a session to the Readyset schema (backed by DataFusion).
+    fn readyset_schema_session<'a>(
+        connectors: &'a mut BackendConnectors<DB>,
+        state: &BackendState<DB>,
+    ) -> ReadySetResult<&'a ReadysetSchemaSession> {
+        let Some(readyset_schema) = &state.readyset_schema else {
+            internal!("Readyset schema not initialized");
+        };
+        Ok(connectors
+            .readyset_schema_session
+            .get_or_insert_with(|| readyset_schema.session()))
+    }
+
     /// Send ping on the upstream connection, if it exists
     pub async fn ping(&mut self) -> Result<(), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
@@ -1498,7 +1588,12 @@ where
             "set-database failpoint injected".to_string()
         )
         .into()));
+
         Self::check_routing(&self.connectors, &mut self.state).await?;
+        if self.state.update_readyset_schema_routing(&[db.into()]) {
+            return Ok(());
+        }
+
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream
                 .query(
@@ -1568,6 +1663,13 @@ where
         database: &str,
     ) -> Result<(), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
+
+        if let Some(readyset_schema) = &self.state.readyset_schema
+            && readyset_schema.name() == database
+        {
+            unsupported!("Change to Readyset schema is disallowed: {database}");
+        }
+
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream.change_user(user, password, database).await?;
         }
@@ -4848,6 +4950,16 @@ where
             (parsed, (shallow_parsed, hint))
         };
 
+        if let Some(result) = Self::check_readyset_schema_routing(state, &parsed) {
+            return Ok(result);
+        }
+
+        if state.should_query_readyset_schema(settings, &shallow_parsed) {
+            let session = Self::readyset_schema_session(connectors, state)?;
+            let result = session.query(query).await?;
+            return Ok(QueryResult::ReadysetSchema(result));
+        }
+
         if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
             if let Some((query_id, _)) =
                 Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
@@ -5180,13 +5292,6 @@ where
             search_path.unwrap_or_else(|| connectors.noria.schema_search_path().to_vec()),
         ))
     }
-}
-
-impl<DB, Handler> Backend<DB, Handler>
-where
-    DB: UpstreamDatabase + 'static,
-    Handler: 'static,
-{
 }
 
 impl<DB, Handler> Drop for Backend<DB, Handler>

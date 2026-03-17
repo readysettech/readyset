@@ -51,6 +51,7 @@ readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
+readyset-schema = { path = "../readyset-schema/" }
 readyset-server = { path = "../readyset-server/" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }

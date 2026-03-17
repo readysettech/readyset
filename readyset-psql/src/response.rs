@@ -294,6 +294,13 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             UpstreamBufferedInMemory(..) => Err(ps::Error::InternalError(
                 "Mismatched QueryResult for UpstreamBufferedInMemory response type: Expected SimpleQuery".to_string(),
             )),
+            ReadysetSchema(result) => {
+                let schema = Arc::new(readyset_schema::psql::extract_columns(&result));
+                Ok(Select {
+                    schema,
+                    resultset: Resultset::from_readyset_schema(result),
+                })
+            }
             Parser(p) => match p {
                 ParsedCommand::Deallocate(name) => Ok(ps::QueryResponse::Deallocate(name)),
             },

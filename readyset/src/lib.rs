@@ -51,6 +51,7 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
+use readyset_schema::ReadysetSchema;
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::{PrometheusBuilder, WorkerOptions};
 use readyset_shallow::CacheManager;
@@ -496,7 +497,7 @@ pub struct Options {
 
     /// If set, simulates a startup verification failure.
     #[arg(long, env = "VERIFY_FAIL", hide = true)]
-    pub verify_fail: bool,
+    verify_fail: bool,
 
     /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
     #[arg(long, env = "CACHE_MODE", default_value_t = CacheMode::default())]
@@ -504,13 +505,19 @@ pub struct Options {
 
     /// Specifies the default TTL for shallow caches when no TTL is specified.
     #[arg(long, env = "DEFAULT_TTL_MS", default_value = "10000")]
-    pub default_ttl_ms: u64,
+    default_ttl_ms: u64,
 
     /// Specifies the default coalesce interval for shallow caches when none is specified.
     ///
     /// A value of 0 will disable coalescing by default.
     #[arg(long, env = "DEFAULT_COALESCE_MS", default_value = "5000")]
-    pub default_coalesce_ms: u64,
+    default_coalesce_ms: u64,
+
+    /// Specifies the name for Readyset's virtual schema.
+    ///
+    /// Make sure this database/schema does not exist on your upstream.
+    #[arg(long, env = "READYSET_SCHEMA", default_value = "readyset")]
+    readyset_schema: String,
 }
 
 impl Options {
@@ -1437,6 +1444,8 @@ where
             options.shallow_refresh_workers,
         );
 
+        let readyset_schema = ReadysetSchema::init(&options.readyset_schema, self.parse_dialect)?;
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
             let connection = info_span!("connection", addr = %client_addr);
@@ -1482,7 +1491,8 @@ where
                 .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new))
                 .sampler_tx(global_sampler_tx.clone())
                 .upstream_config(Some(Arc::clone(&upstream_config)))
-                .replication_enabled(replication_enabled);
+                .replication_enabled(replication_enabled)
+                .readyset_schema(Arc::clone(&readyset_schema));
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.

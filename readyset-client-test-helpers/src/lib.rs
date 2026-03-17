@@ -27,6 +27,7 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
+use readyset_schema::ReadysetSchema;
 use readyset_server::{
     Builder, DurabilityMode, Handle, LocalAuthority, PrometheusBuilder, ReadySetHandle,
 };
@@ -516,6 +517,8 @@ impl TestBuilder {
         };
         let schema_catalog_clone = schema_catalog.clone();
 
+        let readyset_schema = ReadysetSchema::init("readyset", A::DIALECT).unwrap();
+
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
@@ -592,6 +595,7 @@ impl TestBuilder {
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
                         .parsing_preset(self.parsing_preset)
+                        .readyset_schema(Arc::clone(&readyset_schema))
                         .build(
                             noria,
                             fallback_upstream,

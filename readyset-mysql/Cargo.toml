@@ -40,6 +40,7 @@ readyset-client = { path = "../readyset-client" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-schema = { path = "../readyset-schema" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }
 readyset-shallow = { path = "../readyset-shallow" }
