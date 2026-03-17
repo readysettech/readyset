@@ -37,3 +37,8 @@ pub const BLOCK_CACHE_USAGE: &str = "readyset_rocksdb_block_cache_usage";
 
 /// Gauge: Pinned usage of the block cache.
 pub const BLOCK_CACHE_PINNED_USAGE: &str = "readyset_rocksdb_block_cache_pinned_usage";
+
+/// Counter: Total WAL puts applied during OIB catch-up phases.
+pub const OIB_WAL_PUTS: &str = "readyset_oib_wal_puts_applied";
+/// Counter: Total WAL deletes applied during OIB catch-up phases.
+pub const OIB_WAL_DELETES: &str = "readyset_oib_wal_deletes_applied";

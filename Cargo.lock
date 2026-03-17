@@ -1381,6 +1381,7 @@ name = "dataflow-state"
 version = "0.0.1"
 dependencies = [
  "ahash",
+ "antithesis_sdk",
  "anyhow",
  "async-trait",
  "bincode",

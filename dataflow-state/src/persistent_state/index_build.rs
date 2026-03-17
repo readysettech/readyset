@@ -16,7 +16,7 @@
 //! 1. **Prepare**: Record the WAL sequence number, persist a pending-build marker,
 //!    and create empty column families on the primary for each new index.
 //! 2. **Snapshot scan**: Open a sidekick DB, take a primary snapshot, and scan all
-//!    existing rows into the sidekick's CFs (secondary key → PK mapping).
+//!    existing rows into the sidekick's CFs (secondary key -> PK mapping).
 //! 3. **WAL catch-up**: Replay WAL entries written since step 1 into the sidekick,
 //!    applying Puts and Deletes to keep secondary keys consistent.
 //! 4. **Transfer + activate**: Write sidekick data into SST files, ingest them into
@@ -25,13 +25,17 @@
 //!    arrived during the transfer window directly into the primary.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use bincode::Options;
+use metrics::counter;
 use readyset_client::internal::Index;
 use readyset_client::TableStatus;
+use readyset_data::DfValue;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use rocksdb::{WriteBatch, WriteBatchIteratorCf};
@@ -40,8 +44,8 @@ use tracing::{error, info};
 
 pub use super::handle::PersistentStateHandle;
 use super::{
-    IndexEpoch, IndexParams, PendingBuildMeta, PersistentIndex, PersistentMeta, PersistentState,
-    SharedState, META_KEY, PENDING_BUILD_KEY,
+    build_key, recorded, IndexEpoch, IndexParams, PendingBuildMeta, PersistentIndex,
+    PersistentMeta, PersistentState, SharedState, META_KEY, PENDING_BUILD_KEY, PK_CF,
 };
 
 /// Initial capacity for WAL operation collector. Typical write batches contain
@@ -49,9 +53,9 @@ use super::{
 const TYPICAL_WAL_OPS_PER_BATCH: usize = 64;
 
 /// Number of secondary-index operations to accumulate in a [`WriteBatch`]
-/// before flushing to RocksDB during WAL catch-up. Larger values amortize
+/// before writing to RocksDB during WAL catch-up. Larger values amortize
 /// the per-write overhead at the cost of a bigger in-memory batch.
-const WAL_CATCHUP_FLUSH_THRESHOLD: usize = 4096;
+const WAL_CATCHUP_WRITE_THRESHOLD: usize = 4096;
 
 /// Maximum number of entries allowed in the `recent_puts` cache during WAL
 /// catch-up. If exceeded, the index build fails gracefully rather than
@@ -283,6 +287,223 @@ impl IndexBuildContext {
             error!(error = %e, "Failed to clear pending build during cleanup");
         }
     }
+
+    /// Catches up pending indices from WAL entries since `since_seq`, writing
+    /// secondary index entries to `write_db` (which may be the sidekick).
+    ///
+    /// For each `Put` in the WAL, the deserialized row is used to compute
+    /// secondary keys and insert them. For each `Delete`, the row is looked up
+    /// first in a `recent_puts` cache, then in a primary snapshot (if
+    /// provided), then in the primary DB directly.
+    ///
+    /// * `disable_wal` – if true, catch-up writes bypass the WAL (appropriate
+    ///   for the sidekick DB which doesn't need WAL). Set to false when writing
+    ///   to the primary DB (e.g. during the closure drain after activation),
+    ///   where WAL entries must be preserved for crash recovery.
+    fn catch_up_from_wal(
+        &self,
+        primary_db: &rocksdb::DB,
+        write_db: &rocksdb::DB,
+        snapshot: Option<&rocksdb::SnapshotWithThreadMode<'_, rocksdb::DB>>,
+        since_seq: u64,
+        pending_indices: &[PersistentIndex],
+        disable_wal: bool,
+    ) -> ReadySetResult<(WalCatchUpStats, u64)> {
+        let primary_cf_id = cf_id(primary_db, PK_CF)?;
+        let base_label = self.name.to_string();
+
+        let wal_puts_counter = counter!(recorded::OIB_WAL_PUTS, "base" => base_label.clone());
+        let wal_deletes_counter = counter!(recorded::OIB_WAL_DELETES, "base" => base_label);
+
+        // Flush the WAL so get_updates_since can see buffered entries.
+        // false = no fsync; we only need the entries in the OS page cache,
+        // not durably on disk.
+        primary_db
+            .flush_wal(false)
+            .map_err(|e| internal_err!("Failed to flush WAL before catch-up iteration: {e}"))?;
+
+        let wal_iter = primary_db
+            .get_updates_since(since_seq)
+            .map_err(|e| internal_err!("Failed to iterate WAL from sequence {since_seq}: {e}"))?;
+
+        let pending_cf_handles: Vec<_> = pending_indices
+            .iter()
+            .map(|idx| {
+                write_db.cf_handle(&idx.column_family).ok_or_else(|| {
+                    internal_err!(
+                        "Pending index column family '{}' not found during WAL catch-up",
+                        idx.column_family
+                    )
+                })
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
+
+        let pk_cf = primary_db
+            .cf_handle(PK_CF)
+            .ok_or_else(|| internal_err!("No primary index exists during WAL catch-up"))?;
+
+        let mut stats = WalCatchUpStats::default();
+        let mut write_batch = WriteBatch::default();
+        let mut batch_ops = 0usize;
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.disable_wal(disable_wal);
+        let mut last_seen_seq = since_seq;
+
+        let mut collector = WalOperationCollector::new(primary_cf_id);
+        let bincode_opts = bincode::options();
+
+        // Cache of rows inserted during WAL catch-up. When a row is inserted
+        // then deleted within the WAL window, the sidekick may not have it yet
+        // (if it arrived after the scan), so we cache puts to handle deletes.
+        let mut recent_puts: HashMap<Vec<u8>, Vec<DfValue>> = HashMap::new();
+
+        for batch_result in wal_iter {
+            self.check_shutdown()?;
+
+            let (seq, batch) =
+                batch_result.map_err(|e| internal_err!("Failed to read WAL batch: {e}"))?;
+
+            if seq <= since_seq {
+                continue;
+            }
+
+            last_seen_seq = seq;
+            collector.clear();
+            batch.iterate_cf(&mut collector);
+
+            if collector.had_unexpected_op {
+                antithesis_sdk::assert_unreachable!(
+                    "no merge ops in WAL during index build catch-up",
+                    &serde_json::json!({ "sequence": seq })
+                );
+                return Err(internal_err!(
+                    "WAL batch at sequence {} contained an unexpected operation type \
+                     (e.g. merge); aborting index build to avoid producing an incomplete index",
+                    seq
+                ));
+            }
+
+            for op in collector.operations.drain(..) {
+                match op {
+                    WalOperation::Put { key, value } => {
+                        let row: Vec<DfValue> = bincode_opts.deserialize(&value).map_err(|e| {
+                            internal_err!(
+                                "Failed to deserialize row from WAL put at sequence {}: {}",
+                                seq,
+                                e
+                            )
+                        })?;
+
+                        write_secondary_keys(
+                            &row,
+                            &key,
+                            pending_indices,
+                            &pending_cf_handles,
+                            &mut write_batch,
+                            WriteOp::Put,
+                        );
+
+                        if recent_puts.len() <= MAX_RECENT_PUTS {
+                            recent_puts.insert(key, row);
+                        }
+                        batch_ops += 1;
+                        stats.puts_applied += 1;
+                        wal_puts_counter.increment(1);
+                    }
+                    WalOperation::Delete { key } => {
+                        // Look up the row so we can compute secondary keys.
+                        // Priority: recent_puts cache > primary snapshot > primary DB.
+                        // The sidekick doesn't have the PK CF (only secondary CFs),
+                        // so we must use the primary for row lookups.
+                        let row = if let Some(row) = recent_puts.remove(&key) {
+                            Some(row)
+                        } else if let Some(snapshot) = snapshot {
+                            snapshot
+                                .get_cf(&pk_cf, &key)
+                                .map_err(|e| {
+                                    internal_err!(
+                                        "RocksDB error looking up row in snapshot during WAL \
+                                         delete catch-up: {e}"
+                                    )
+                                })?
+                                .map(|bytes| {
+                                    bincode::options()
+                                        .deserialize::<Vec<DfValue>>(bytes.as_ref())
+                                        .map_err(|e| {
+                                            internal_err!(
+                                                "Failed to deserialize row during WAL delete \
+                                                 catch-up (snapshot): {e}"
+                                            )
+                                        })
+                                })
+                                .transpose()?
+                        } else {
+                            primary_db
+                                .get_cf(&pk_cf, &key)
+                                .map_err(|e| {
+                                    internal_err!(
+                                        "RocksDB error looking up row during WAL delete \
+                                         catch-up: {e}"
+                                    )
+                                })?
+                                .map(|bytes| {
+                                    bincode::options()
+                                        .deserialize::<Vec<DfValue>>(bytes.as_ref())
+                                        .map_err(|e| {
+                                            internal_err!(
+                                                "Failed to deserialize row during WAL delete \
+                                                 catch-up (primary): {e}"
+                                            )
+                                        })
+                                })
+                                .transpose()?
+                        };
+
+                        if let Some(row) = row {
+                            write_secondary_keys(
+                                &row,
+                                &key,
+                                pending_indices,
+                                &pending_cf_handles,
+                                &mut write_batch,
+                                WriteOp::Delete,
+                            );
+                            batch_ops += 1;
+                            stats.deletes_applied += 1;
+                            wal_deletes_counter.increment(1);
+                        } else {
+                            stats.deletes_skipped += 1;
+                        }
+                    }
+                }
+
+                if batch_ops >= WAL_CATCHUP_WRITE_THRESHOLD {
+                    write_db
+                        .write_opt(std::mem::take(&mut write_batch), &write_opts)
+                        .map_err(|e| internal_err!("Failed to write WAL catch-up batch: {e}"))?;
+                    batch_ops = 0;
+                }
+            }
+        }
+
+        if !write_batch.is_empty() {
+            write_db
+                .write_opt(write_batch, &write_opts)
+                .map_err(|e| internal_err!("Failed to write final WAL catch-up batch: {e}"))?;
+        }
+
+        info!(
+            since_seq,
+            last_seen_seq,
+            puts_applied = stats.puts_applied,
+            deletes_applied = stats.deletes_applied,
+            deletes_skipped = stats.deletes_skipped,
+            pending_indices = pending_indices.len(),
+            "WAL catch-up completed"
+        );
+
+        Ok((stats, last_seen_seq))
+    }
 }
 
 // =============================================================================
@@ -511,6 +732,39 @@ pub(super) struct WalCatchUpStats {
     pub(super) deletes_applied: u64,
     /// Number of delete operations skipped (row not found in cache or snapshot).
     pub(super) deletes_skipped: u64,
+}
+
+/// Whether to put or delete secondary keys in a [`WriteBatch`].
+enum WriteOp {
+    Put,
+    Delete,
+}
+
+/// Computes and writes secondary index keys for a single row into `batch`.
+///
+/// For each pending index, computes the secondary key from the row, serializes
+/// it (using the unique or non-unique encoding), and adds a put or delete to
+/// the batch.
+fn write_secondary_keys(
+    row: &[DfValue],
+    pk_key: &[u8],
+    pending_indices: &[PersistentIndex],
+    cf_handles: &[impl rocksdb::AsColumnFamilyRef],
+    batch: &mut WriteBatch,
+    op: WriteOp,
+) {
+    for (idx, cf) in pending_indices.iter().zip(cf_handles.iter()) {
+        let index_key = build_key(row, &idx.index.columns);
+        let serialized_key = if idx.is_unique && !index_key.has_null() {
+            PersistentState::serialize_prefix(&index_key)
+        } else {
+            PersistentState::serialize_secondary(&index_key, pk_key)
+        };
+        match op {
+            WriteOp::Put => batch.put_cf(cf, &serialized_key, pk_key),
+            WriteOp::Delete => batch.delete_cf(cf, &serialized_key),
+        }
+    }
 }
 
 /// Returns the RocksDB-internal column family ID for a named CF.
