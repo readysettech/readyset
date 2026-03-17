@@ -6518,9 +6518,12 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "psql-srv",
+ "readyset-client",
  "readyset-data",
  "readyset-errors",
+ "readyset-shallow",
  "readyset-sql",
+ "readyset-util",
  "tokio",
  "tokio-postgres",
 ]

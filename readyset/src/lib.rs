@@ -1444,7 +1444,8 @@ where
             options.shallow_refresh_workers,
         );
 
-        let readyset_schema = ReadysetSchema::init(&options.readyset_schema, self.parse_dialect)?;
+        let readyset_schema =
+            ReadysetSchema::init(&options.readyset_schema, self.parse_dialect, &shallow)?;
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;

@@ -18,10 +18,12 @@ use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext, create_udf}
 use readyset_errors::ReadySetResult;
 use readyset_sql::Dialect;
 
-use crate::virtual_relation::{VrelContext, init_vrels};
+use shallow_vrels::ShallowInfo;
+use virtual_relation::{VrelContext, init_vrels};
 
 pub mod mysql;
 pub mod psql;
+mod shallow_vrels;
 pub mod virtual_relation;
 
 const CATALOG: &str = "readyset";
@@ -33,7 +35,10 @@ pub struct ReadysetSchema {
 }
 
 impl ReadysetSchema {
-    pub fn init(name: &str, dialect: Dialect) -> ReadySetResult<Arc<Self>> {
+    pub fn init<S>(name: &str, dialect: Dialect, shallow: &Arc<S>) -> ReadySetResult<Arc<Self>>
+    where
+        S: ShallowInfo + 'static,
+    {
         let runtime = Arc::new(RuntimeEnv::default());
         let catalog = Arc::new(MemoryCatalogProvider::new());
         let schema: Arc<dyn SchemaProvider> = Arc::new(MemorySchemaProvider::new());
@@ -63,7 +68,10 @@ impl ReadysetSchema {
 
         let sql_opts = SQLOptions::new().with_allow_ddl(false);
 
-        let vrel_ctx = Arc::new(VrelContext { dialect });
+        let vrel_ctx = Arc::new(VrelContext {
+            dialect,
+            shallow: Arc::clone(shallow) as Arc<dyn ShallowInfo>,
+        });
         for (name, provider) in init_vrels(&vrel_ctx) {
             schema.register_table(name.into(), provider)?;
         }

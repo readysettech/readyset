@@ -27,6 +27,8 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::Dialect;
 
+use crate::shallow_vrels::ShallowInfo;
+
 /// The rows yielded by a vrel read.
 pub type VrelRows = Box<dyn Iterator<Item = Vec<DfValue>> + Send>;
 
@@ -36,6 +38,7 @@ pub type VrelRead = Pin<Box<dyn Future<Output = ReadySetResult<VrelRows>> + Send
 /// Context passed into the function that starts a vrel read.
 pub struct VrelContext {
     pub dialect: Dialect,
+    pub shallow: Arc<dyn ShallowInfo>,
 }
 
 /// A function that produces a new vrel read.
@@ -545,7 +548,10 @@ impl ExecutionPlan for VrelExecutionPlan {
 mod tests {
     use datafusion::arrow::array::{Array, Int32Array, StringArray};
 
+    use readyset_client::query::QueryId;
+    use readyset_shallow::CacheInfo;
     use readyset_sql::Dialect;
+    use readyset_sql::ast::Relation;
 
     use super::*;
 
@@ -647,7 +653,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_vrel_query_through_datafusion() {
-        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL).expect("init succeeds");
+        struct NoopShallow;
+        impl crate::ShallowInfo for NoopShallow {
+            fn list_caches(
+                &self,
+                _query_id: Option<QueryId>,
+                _name: Option<&Relation>,
+            ) -> Vec<CacheInfo> {
+                vec![]
+            }
+        }
+
+        let shallow = Arc::new(NoopShallow);
+        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow)
+            .expect("init succeeds");
 
         let session = schema.session();
 

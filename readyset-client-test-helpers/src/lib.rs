@@ -517,7 +517,7 @@ impl TestBuilder {
         };
         let schema_catalog_clone = schema_catalog.clone();
 
-        let readyset_schema = ReadysetSchema::init("readyset", A::DIALECT).unwrap();
+        let readyset_schema = ReadysetSchema::init("readyset", A::DIALECT, &shallow).unwrap();
 
         tokio::spawn(async move {
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
