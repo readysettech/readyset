@@ -399,6 +399,9 @@ async fn show_shallow_cache_entries() {
     let entries: Vec<(String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
+    let vrel_entries: Vec<(String, String, u64, u64, u64)> =
+        readyset.query("SELECT * FROM readyset.shallow_cache_entries").await.unwrap();
+    assert_eq!(vrel_entries.len(), 2);
 
     // Get the query_id from one of the entries
     let query_id = &entries[0].0;
@@ -415,6 +418,9 @@ async fn show_shallow_cache_entries() {
         2,
         "Filtered by query_id should return both entries for this cache"
     );
+    let vrel_filtered: Vec<(String, String, u64, u64, u64)> =
+        readyset.query(format!("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = '{query_id}'")).await.unwrap();
+    assert_eq!(vrel_filtered.len(), 2);
 
     // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
     let limited: Vec<(String, String, String, String, String)> = readyset
@@ -445,6 +451,9 @@ async fn show_shallow_cache_entries() {
         non_existent.is_empty(),
         "Non-existent query_id should return empty results"
     );
+    let vrel_non_existent: Vec<(String, String, u64, u64, u64)> =
+        readyset.query("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = 'q_12345'").await.unwrap();
+    assert_eq!(vrel_non_existent.len(), 0);
 
     shutdown_tx.shutdown().await;
 }

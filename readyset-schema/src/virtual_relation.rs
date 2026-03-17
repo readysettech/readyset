@@ -549,7 +549,7 @@ mod tests {
     use datafusion::arrow::array::{Array, Int32Array, StringArray};
 
     use readyset_client::query::QueryId;
-    use readyset_shallow::CacheInfo;
+    use readyset_shallow::{CacheEntryInfo, CacheInfo};
     use readyset_sql::Dialect;
     use readyset_sql::ast::Relation;
 
@@ -660,6 +660,13 @@ mod tests {
                 _query_id: Option<QueryId>,
                 _name: Option<&Relation>,
             ) -> Vec<CacheInfo> {
+                vec![]
+            }
+            fn list_entries(
+                &self,
+                _query_id: Option<QueryId>,
+                _limit: Option<usize>,
+            ) -> Vec<CacheEntryInfo> {
                 vec![]
             }
         }
