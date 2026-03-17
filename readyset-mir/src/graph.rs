@@ -279,6 +279,19 @@ impl MirGraph {
                 columns.extend(group_by.clone());
                 columns
             }
+            // AliasTable stamps every parent column with a table qualifier, so
+            // its output columns have different identity than its input columns.
+            // What it *references* (needs from its parent) is the parent's
+            // columns as-is, not the stamped versions. Returning the stamped
+            // versions here would cause pull_columns to see false mismatches
+            // and add duplicate columns.
+            MirNodeInner::AliasTable { .. } => {
+                let parent = self
+                    .sorted_ancestors(node)
+                    .next()
+                    .expect("AliasTable node must have a parent");
+                self.columns(parent)
+            }
             _ => self.columns(node),
         }
     }

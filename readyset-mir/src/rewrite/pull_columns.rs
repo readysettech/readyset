@@ -2,7 +2,6 @@ use readyset_errors::ReadySetResult;
 use tracing::{trace, trace_span};
 
 use crate::column::Column;
-use crate::node::node_inner::MirNodeInner;
 use crate::query::MirQuery;
 
 pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
@@ -27,16 +26,6 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
             .filter(|c| !parent_cols.contains(c))
             .collect();
 
-        // AliasTable nodes introduce a table qualifier that doesn't exist in
-        // the ancestor namespace — the parent's columns are unqualified, and
-        // the AliasTable stamps them with its alias. When we need to add a
-        // column to the parent on behalf of an AliasTable, we must translate
-        // back to the parent's namespace by stripping the qualifier. Without
-        // this, column_id_for_column uses table-qualified matching, which can
-        // resolve to the wrong column when duplicates exist (e.g. nested
-        // ROW_NUMBER windows both producing `__rn`).
-        let is_alias_table = matches!(query.graph[mn].inner, MirNodeInner::AliasTable { .. });
-
         let mut found: Vec<&Column> = Vec::new();
         for parent_idx in query.ancestors(mn)? {
             if query.is_root(parent_idx) {
@@ -57,18 +46,7 @@ pub(crate) fn pull_all_required_columns(query: &mut MirQuery<'_>) -> ReadySetRes
                             parent = %parent_idx.index(),
                             "Found column in parent"
                         );
-                        // Translate from AliasTable namespace back to parent
-                        // namespace by stripping the table qualifier. Name-only
-                        // lookup via rposition() then finds the correct column.
-                        let col = if is_alias_table {
-                            Column {
-                                table: None,
-                                ..c.clone()
-                            }
-                        } else {
-                            c.clone()
-                        };
-                        query.graph.add_column(parent_idx, col)?;
+                        query.graph.add_column(parent_idx, c.clone())?;
                         found.push(c);
                     }
                 }
