@@ -262,6 +262,87 @@ async fn scheduled_refresh_starts_immediately() {
 }
 
 #[test]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn show_shallow_caches() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY
+               TTL 32 SECONDS
+               REFRESH 8 SECONDS
+               COALESCE 2 SECONDS
+             some_cache FROM SELECT * FROM foo WHERE a = ?",
+        )
+        .await
+        .unwrap();
+
+    // Check SHOW CACHES.
+    let rows: Vec<(String, String, String, String, String)> =
+        readyset.query("SHOW SHALLOW CACHES").await.unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+
+    let (query_id, name, query, properties, count) = &rows[0];
+    assert_eq!(query_id, "q_89a59a917bc9c0ba");
+    assert_eq!(name, "some_cache");
+    assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
+
+    let mut properties: HashSet<_> = properties.split(",").map(|p| p.trim().to_string()).collect();
+    assert!(properties.remove("shallow"), "missing expected shallow property: {properties:?}");
+    assert!(properties.remove("ttl 32000 ms"), "missing expected ttl: {properties:?}");
+    assert!(properties.remove("refresh 8000 ms"), "missing expected refresh: {properties:?}");
+    assert!(properties.remove("coalesce 2000 ms"), "missing expected coalesce: {properties:?}");
+    assert!(properties.is_empty(), "unexpected properties remaining: {properties:?}");
+
+    assert_eq!(count, "0");
+
+    // Check the shallow_caches vrel.
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool)> =
+        readyset.query("SELECT * FROM readyset.shallow_caches").await.unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+
+    let (query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule) = &rows[0];
+    assert_eq!(query_id, "q_89a59a917bc9c0ba");
+    assert_eq!(name, "some_cache");
+    assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
+    assert_eq!(*ttl_ms, 32000);
+    assert_eq!(*refresh_ms, 8000);
+    assert_eq!(*coalesce_ms, 2000);
+    assert_eq!(*always, false);
+    assert_eq!(*schedule, false);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
 #[tags(serial, slow)]
 #[upstream(mysql57, mysql80, mysql84)]
 async fn show_shallow_cache_entries() {
