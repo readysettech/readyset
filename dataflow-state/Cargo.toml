@@ -44,7 +44,7 @@ readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 fail = { workspace = true, optional = true }
-failpoint-macros = { path = "../failpoint-macros", optional = true }
+failpoint-macros = { path = "../failpoint-macros" }
 
 [dev-dependencies]
 async-trait = { workspace = true }
@@ -58,7 +58,6 @@ readyset-decimal = { path = "../readyset-decimal" }
 [features]
 failure_injection = [
     "fail/failpoints",
-    "failpoint-macros",
     "readyset-util/failure_injection",
 ]
 
