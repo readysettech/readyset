@@ -1033,8 +1033,8 @@ async fn select_one() {
         .await
         .unwrap()
         .iter()
-        .map(|r| r.get(0))
-        .collect::<Vec<i64>>();
+        .map(|r| r.get::<_, i32>(0))
+        .collect::<Vec<i32>>();
     assert_eq!(res, vec![1]);
 
     shutdown_tx.shutdown().await;

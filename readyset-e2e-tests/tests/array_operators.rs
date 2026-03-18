@@ -213,6 +213,58 @@ async fn array_overlap_postgres() {
     shutdown_tx.shutdown().await;
 }
 
+/// REA-6243: array_agg(int4_col + literal) must produce int4[], not int8[].
+/// Without integer literal type narrowing, the literal gets BigInt, promoting the
+/// expression to BigInt. The array then has 8-byte elements but the column type
+/// declares int4[], causing wire protocol deserialization failure.
+#[tokio::test]
+#[tags(serial, slow)]
+#[upstream(postgres13, postgres15)]
+async fn array_agg_int_literal_type_postgres() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .parsing_preset(ParsingPreset::OnlySqlparser)
+        .build::<psql_helpers::PostgreSQLAdapter>()
+        .await;
+    let rs_conn = psql_helpers::connect(rs_opts).await;
+
+    let mut upstream_config = psql_helpers::upstream_config();
+    upstream_config.dbname("noria");
+    let upstream_conn = psql_helpers::connect(upstream_config).await;
+
+    upstream_conn
+        .execute(
+            "CREATE TABLE agg_nums (id int, grp int, val int)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    upstream_conn
+        .execute(
+            "INSERT INTO agg_nums VALUES (1, 1, 10), (2, 1, 20), (3, 1, 30)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+    let query = "SELECT array_agg(val + 5) FROM agg_nums WHERE grp = $1";
+
+    let upstream_rows = upstream_conn.query(query, &[&1i32]).await.unwrap();
+    let expected: Vec<i32> = upstream_rows[0].get::<_, Vec<i32>>(0);
+
+    eventually!(run_test: {
+        let rs_rows = rs_conn.query(query, &[&1i32]).await;
+        AssertUnwindSafe(|| { rs_rows })
+    }, then_assert: |result| {
+        let rs_rows = result().unwrap();
+        let actual: Vec<i32> = rs_rows[0].get::<_, Vec<i32>>(0);
+        assert_eq!(actual, expected, "array_agg(int + literal) type mismatch");
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Tests string concatenation with the `||` operator
 #[tokio::test]
 #[tags(serial, slow)]

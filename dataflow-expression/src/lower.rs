@@ -1538,10 +1538,20 @@ impl Expr {
                 let is_string_literal = lit.is_string();
                 let val: DfValue = lit.try_into_dialect(dialect.into())?;
                 // TODO: Infer type from SQL
-                let ty = if is_string_literal && dialect.engine() == SqlEngine::PostgreSQL {
-                    DfType::Unknown
-                } else {
-                    val.infer_dataflow_type()
+                let ty = match (&val, dialect.engine()) {
+                    (_, SqlEngine::PostgreSQL) if is_string_literal => DfType::Unknown,
+                    // PostgreSQL treats unqualified integer literals as `integer` (INT4)
+                    // when the value fits in 32 bits, otherwise `bigint`. Without this,
+                    // all literals get BigInt (since DfValue::Int is i64), which causes
+                    // type promotion mismatches -- e.g. array_agg(int4_col + 5) produces
+                    // BigInt elements inside an Int4 array, breaking wire protocol
+                    // deserialization (REA-6243).
+                    (DfValue::Int(i), SqlEngine::PostgreSQL)
+                        if *i >= i64::from(i32::MIN) && *i <= i64::from(i32::MAX) =>
+                    {
+                        DfType::Int
+                    }
+                    _ => val.infer_dataflow_type(),
                 };
 
                 Ok(Self::Literal { val, ty })
@@ -2405,7 +2415,7 @@ pub(crate) mod tests {
         infers_type(
             vec!["123".into(), 23.into()],
             Dialect::DEFAULT_POSTGRESQL,
-            DfType::BigInt,
+            DfType::Int,
         );
 
         infers_type(
@@ -2451,6 +2461,23 @@ pub(crate) mod tests {
         //     MySQL,
         //     DfType::Numeric { prec: 5, scale: 2 },
         // );
+    }
+
+    /// PostgreSQL integer literal type narrowing at i32 boundaries.
+    #[test]
+    fn pg_integer_literal_boundary_types() {
+        fn literal_type(val: i64) -> DfType {
+            let lit = AstExpr::Literal(Literal::Integer(val));
+            let expr =
+                Expr::lower(lit, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context()).unwrap();
+            expr.ty().clone()
+        }
+
+        assert_eq!(literal_type(0), DfType::Int);
+        assert_eq!(literal_type(i64::from(i32::MAX)), DfType::Int);
+        assert_eq!(literal_type(i64::from(i32::MAX) + 1), DfType::BigInt);
+        assert_eq!(literal_type(i64::from(i32::MIN)), DfType::Int);
+        assert_eq!(literal_type(i64::from(i32::MIN) - 1), DfType::BigInt);
     }
 
     #[test]
@@ -2560,7 +2587,7 @@ pub(crate) mod tests {
                 elements: vec![
                     Expr::Literal {
                         val: 1u32.into(),
-                        ty: DfType::BigInt
+                        ty: DfType::Int
                     },
                     Expr::Cast {
                         expr: Box::new(Expr::Literal {
@@ -2572,15 +2599,15 @@ pub(crate) mod tests {
                     },
                     Expr::Literal {
                         val: 3u32.into(),
-                        ty: DfType::BigInt
+                        ty: DfType::Int
                     },
                     Expr::Literal {
                         val: 4u32.into(),
-                        ty: DfType::BigInt
+                        ty: DfType::Int
                     }
                 ],
                 shape: vec![2, 2],
-                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt))))
+                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::Int))))
             }
         )
     }
@@ -2596,14 +2623,14 @@ pub(crate) mod tests {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Literal {
                     val: 1u64.into(),
-                    ty: DfType::BigInt
+                    ty: DfType::Int
                 }),
                 right: Box::new(Expr::Cast {
                     expr: Box::new(Expr::Literal {
                         val: "{1,2}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::BigInt)),
+                    ty: DfType::Array(Box::new(DfType::Int)),
                     null_on_failure: false
                 }),
                 ty: DfType::Bool
@@ -2622,14 +2649,14 @@ pub(crate) mod tests {
                 op: BinaryOperator::Equal,
                 left: Box::new(Expr::Literal {
                     val: 1u64.into(),
-                    ty: DfType::BigInt
+                    ty: DfType::Int
                 }),
                 right: Box::new(Expr::Cast {
                     expr: Box::new(Expr::Literal {
                         val: "{1,1}".into(),
                         ty: DfType::Unknown
                     }),
-                    ty: DfType::Array(Box::new(DfType::BigInt)),
+                    ty: DfType::Array(Box::new(DfType::Int)),
                     null_on_failure: false
                 }),
                 ty: DfType::Bool
@@ -2653,10 +2680,10 @@ pub(crate) mod tests {
                     Expr::Array {
                         elements: vec![Expr::Literal {
                             val: 1u64.into(),
-                            ty: DfType::BigInt,
+                            ty: DfType::Int,
                         }],
                         shape: vec![1],
-                        ty: DfType::Array(Box::new(DfType::BigInt))
+                        ty: DfType::Array(Box::new(DfType::Int))
                     },
                     Expr::Literal {
                         val: ",".into(),
@@ -3087,23 +3114,23 @@ pub(crate) mod tests {
                 elements: vec![
                     Expr::Literal {
                         val: 1u32.into(),
-                        ty: DfType::BigInt,
+                        ty: DfType::Int,
                     },
                     Expr::Literal {
                         val: 2u32.into(),
-                        ty: DfType::BigInt,
+                        ty: DfType::Int,
                     },
                     Expr::Literal {
                         val: 3u32.into(),
-                        ty: DfType::BigInt,
+                        ty: DfType::Int,
                     },
                     Expr::Literal {
                         val: 4u32.into(),
-                        ty: DfType::BigInt,
+                        ty: DfType::Int,
                     },
                 ],
                 shape: vec![2, 2],
-                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::BigInt)))),
+                ty: DfType::Array(Box::new(DfType::Array(Box::new(DfType::Int)))),
             }
         );
     }
