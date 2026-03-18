@@ -28,16 +28,21 @@ use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use readyset_client::internal::Index;
 use readyset_client::TableStatus;
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use rocksdb::{WriteBatch, WriteBatchIteratorCf};
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::error;
+use tracing::{error, info};
 
 pub use super::handle::PersistentStateHandle;
-use super::{IndexEpoch, PersistentMeta, PersistentState, SharedState, META_KEY};
+use super::{
+    IndexEpoch, IndexParams, PendingBuildMeta, PersistentIndex, PersistentMeta, PersistentState,
+    SharedState, META_KEY, PENDING_BUILD_KEY,
+};
 
 /// Initial capacity for WAL operation collector. Typical write batches contain
 /// fewer than 64 operations, so this avoids reallocations in most cases.
@@ -106,18 +111,177 @@ impl IndexBuildContext {
         )
     }
 
-    /// Persists a [`PersistentMeta`] with a sync write (fsync). This ensures
-    /// the meta survives OS/hardware crashes, not just process crashes.
-    fn save_meta_sync(db: &rocksdb::DB, meta: &PersistentMeta<'_>) -> ReadySetResult<()> {
+    /// Mark that an index build is starting by writing a [`PendingBuildMeta`]
+    /// to [`PENDING_BUILD_KEY`]. This is stored separately from
+    /// [`PersistentMeta`] so that it never races with the domain thread's
+    /// replication-offset writes to [`META_KEY`].
+    ///
+    /// If the process crashes mid-build, startup recovery reads this key
+    /// and drops the partial column families.
+    pub(super) fn mark_pending_build(
+        &self,
+        column_families: Vec<String>,
+        sequence_number: u64,
+    ) -> ReadySetResult<()> {
+        let db = self.db.db();
+        let start_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let pending = PendingBuildMeta {
+            column_families,
+            start_sequence_number: sequence_number,
+            start_time_unix_secs: start_time,
+        };
+
+        let serialized = serde_json::to_string(&pending)
+            .map_err(|e| internal_err!("Failed to serialize PendingBuildMeta: {e}"))?;
+
         let mut write_opts = rocksdb::WriteOptions::default();
         write_opts.set_sync(true);
         let mut batch = rocksdb::WriteBatch::default();
-        let serialized = serde_json::to_string(meta)
-            .map_err(|e| internal_err!("Failed to serialize persistent meta: {e}"))?;
-        batch.put(META_KEY, serialized);
+        batch.put(PENDING_BUILD_KEY, serialized);
         db.write_opt(batch, &write_opts)
-            .map_err(|e| internal_err!("Failed to persist meta with sync write: {e}"))?;
+            .map_err(|e| internal_err!("Failed to persist pending build marker: {e}"))?;
         Ok(())
+    }
+
+    /// Clear the pending build marker by deleting [`PENDING_BUILD_KEY`].
+    pub(super) fn clear_pending_build(&self) -> ReadySetResult<()> {
+        let db = self.db.db();
+        let mut write_opts = rocksdb::WriteOptions::default();
+        write_opts.set_sync(true);
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.delete(PENDING_BUILD_KEY);
+        db.write_opt(batch, &write_opts)
+            .map_err(|e| internal_err!("Failed to clear pending build marker: {e}"))?;
+        Ok(())
+    }
+
+    /// Activates pending indices by persisting the updated metadata to disk,
+    /// then adding them to shared_state.indices.
+    ///
+    /// Disk is written first so that a write failure doesn't leave in-memory
+    /// state out of sync. The index metadata update and pending-build marker
+    /// deletion are written in a single [`WriteBatch`] for atomicity — if we
+    /// crash between them, we'd either have active indices AND a stale pending
+    /// marker (causing crash recovery to drop valid CFs) or neither.
+    fn activate_pending_indices(
+        &self,
+        shared_state: &mut SharedState,
+        pending_indices: Vec<PersistentIndex>,
+    ) -> ReadySetResult<()> {
+        let db = self.db.db();
+
+        // Temporarily push pending indices so build_meta serializes them,
+        // then roll back if anything fails (serialization or disk write).
+        let rollback_count = pending_indices.len();
+        for idx in &pending_indices {
+            shared_state.indices.push(idx.clone());
+        }
+
+        let result = (|| -> ReadySetResult<()> {
+            let meta = self.build_meta(shared_state);
+            let serialized = serde_json::to_string(&meta)
+                .map_err(|e| internal_err!("Failed to serialize persistent meta: {e}"))?;
+
+            let mut write_opts = rocksdb::WriteOptions::default();
+            write_opts.set_sync(true);
+            let mut batch = rocksdb::WriteBatch::default();
+            batch.put(META_KEY, serialized);
+            batch.delete(PENDING_BUILD_KEY);
+
+            db.write_opt(batch, &write_opts)
+                .map_err(|e| internal_err!("Failed to persist activated indices: {e}"))?;
+
+            Ok(())
+        })();
+
+        if result.is_err() {
+            shared_state
+                .indices
+                .truncate(shared_state.indices.len() - rollback_count);
+        }
+
+        result
+    }
+
+    /// Creates pending column families for the new indices without adding them to shared_state.
+    fn create_secondary_pending(
+        &self,
+        indices: &[(Index, bool)],
+        start_cf_number: usize,
+    ) -> ReadySetResult<Vec<PersistentIndex>> {
+        let db = self.db.db();
+        let mut created: Vec<PersistentIndex> = Vec::with_capacity(indices.len());
+
+        for (i, (index, is_unique)) in indices.iter().enumerate() {
+            info!(
+                base = %self.name,
+                ?index,
+                is_unique,
+                "Creating pending secondary index"
+            );
+
+            let index_params = IndexParams::from(index);
+            let cf_name = (start_cf_number + i).to_string();
+            let persistent = PersistentIndex {
+                column_family: cf_name.clone(),
+                is_unique: *is_unique,
+                is_primary: false,
+                index: index.clone(),
+            };
+
+            if let Err(e) = db.create_cf(
+                &cf_name,
+                &index_params.make_rocksdb_options(&self.default_options),
+            ) {
+                // Cleanup already-created column families
+                for idx in &created {
+                    if let Err(cleanup_err) = db.drop_cf(&idx.column_family) {
+                        error!(
+                            error = %cleanup_err,
+                            cf = %idx.column_family,
+                            "Failed to cleanup orphaned column family"
+                        );
+                    }
+                }
+                return Err(internal_err!(
+                    "Failed to create column family {cf_name} for pending index: {e}"
+                ));
+            }
+
+            created.push(persistent);
+        }
+
+        Ok(created)
+    }
+
+    /// Cleans up pending indices by dropping their column families and
+    /// clearing the pending build marker.
+    fn cleanup_pending_indices(&self, pending_indices: &[PersistentIndex]) {
+        let db = self.db.db();
+
+        for idx in pending_indices {
+            info!(
+                base = %self.name,
+                column_family = %idx.column_family,
+                ?idx.index,
+                "Cleaning up failed pending index"
+            );
+            if let Err(e) = db.drop_cf(&idx.column_family) {
+                error!(
+                    error = %e,
+                    column_family = %idx.column_family,
+                    "Failed to drop column family during cleanup"
+                );
+            }
+        }
+
+        if let Err(e) = self.clear_pending_build() {
+            error!(error = %e, "Failed to clear pending build during cleanup");
+        }
     }
 }
 

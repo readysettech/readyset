@@ -126,6 +126,11 @@ type IndexSeq = u64;
 // RocksDB key used for storing meta information (like indices).
 const META_KEY: &[u8] = b"meta";
 
+// RocksDB key for the pending online index build marker. Stored separately
+// from PersistentMeta so that OIB writes to this key never race with the
+// domain thread's writes to META_KEY (which include replication_offset).
+const PENDING_BUILD_KEY: &[u8] = b"pending_build";
+
 // A default column family is always created, so we'll make use of that for meta information.
 // The indices themselves are stored in a column family each, with their position in
 // PersistentState::indices as name.
@@ -402,6 +407,23 @@ impl Error {
 
 /// Result type for persistent state
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Metadata about an interrupted online index build, used for crash recovery.
+///
+/// Stored under [`PENDING_BUILD_KEY`] in the default column family, separate
+/// from [`PersistentMeta`]. If present at startup, the column families listed
+/// here are partial/incomplete and must be dropped before the table becomes
+/// available.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingBuildMeta {
+    /// The column family names created for the pending indices.
+    column_families: Vec<String>,
+    /// The WAL sequence number at which the build started.
+    start_sequence_number: u64,
+    /// Unix timestamp for post-mortem debugging of crashed builds (not used
+    /// programmatically).
+    start_time_unix_secs: u64,
+}
 
 /// Data structure used to persist metadata about the [`PersistentState`] to rocksdb
 #[derive(Debug, Default, Serialize, Deserialize)]
