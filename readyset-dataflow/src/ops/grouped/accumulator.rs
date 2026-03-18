@@ -271,11 +271,15 @@ impl GroupedOperation for Accumulator {
 
     fn empty_value(&self) -> Option<DfValue> {
         if self.skip_finalization {
+            // Intermediate representation for post-lookup aggregation: an empty array
+            // signals zero rows. finalize_raw converts this to NULL (matching PostgreSQL
+            // ARRAY_AGG semantics) or COALESCE handles it for ARRAY() constructors.
             Some(DfValue::Array(std::sync::Arc::new(
                 readyset_data::Array::from(vec![]),
             )))
         } else {
-            Some("".into())
+            // Non-post-lookup path: ARRAY_AGG over zero rows is NULL in PostgreSQL.
+            Some(DfValue::None)
         }
     }
 

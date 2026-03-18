@@ -174,8 +174,11 @@ impl AccumulationOp {
     }
 
     fn apply_array_agg(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
+        // PostgreSQL: ARRAY_AGG() over zero rows returns NULL, not an empty array.
+        // (ARRAY(SELECT ...) constructors return empty arrays, but those are rewritten
+        // as COALESCE(array_agg(...), ARRAY[]) which handles the NULL-to-empty conversion.)
         if data.is_empty() {
-            return Ok(DfValue::Array(Arc::new(readyset_data::Array::from(vec![]))));
+            return Ok(DfValue::None);
         }
 
         let vals: Vec<DfValue> = match data {

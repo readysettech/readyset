@@ -150,7 +150,13 @@ impl PostLookupAggregateFunction {
         match self {
             PostLookupAggregateFunction::ArrayAgg { op } => {
                 // Fast path: non-distinct, non-ordered ArrayAgg — the raw array is the output.
+                // An empty array means zero input rows; PostgreSQL returns NULL in that case.
                 if !op.is_distinct() && op.order_by().is_none() {
+                    if let DfValue::Array(arr) = value {
+                        if arr.is_empty() {
+                            return Ok(DfValue::None);
+                        }
+                    }
                     return Ok(value.clone());
                 }
                 // Distinct/ordered: fall through to full accumulator path.

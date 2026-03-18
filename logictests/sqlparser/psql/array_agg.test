@@ -190,6 +190,34 @@ select array_agg(tag) from tags where d_id = 3;
 
 
 #####
+# REA-6481: array_agg returns NULL (not empty array) after all rows are removed.
+# Uses a table with a primary key so DELETE works in logictests.
+
+statement ok
+create table rea6481 (id int primary key, grp int, val text);
+
+statement ok
+insert into rea6481 values (1, 10, 'aaa'), (2, 10, 'bbb');
+
+query T
+select array_agg(val) from rea6481 where grp = 10;
+----
+{aaa,bbb}
+
+statement ok
+delete from rea6481 where id = 1;
+
+statement ok
+delete from rea6481 where id = 2;
+
+# After all rows removed, array_agg should return NULL
+query
+select array_agg(val) from rea6481 where grp = 10;
+----
+NULL
+
+
+#####
 # post-lookup aggregations
 
 query T
@@ -247,6 +275,26 @@ query
 select array_agg(tag) from tags where d_id in (12345, 23456);
 ----
 {NULL,NULL}
+
+# REA-6481: post-lookup array_agg returns NULL after all rows removed.
+statement ok
+insert into rea6481 values (3, 20, 'ccc'), (4, 30, 'ddd');
+
+query T
+select array_agg(val) from rea6481 where grp in (20, 30);
+----
+{ccc,ddd}
+
+statement ok
+delete from rea6481 where id = 3;
+
+statement ok
+delete from rea6481 where id = 4;
+
+query
+select array_agg(val) from rea6481 where grp in (20, 30);
+----
+NULL
 
 
 #####
