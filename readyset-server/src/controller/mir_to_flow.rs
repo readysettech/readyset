@@ -1599,20 +1599,7 @@ fn make_reader_processing(
     } else {
         None
     };
-    let returned_cols = if let Some(col) = returned_cols.as_ref() {
-        let returned_cols = col
-            .iter()
-            .map(|col| graph.column_id_for_column(*parent, col))
-            .collect::<ReadySetResult<Vec<_>>>()?;
-
-        // In the future we will avoid reordering column, and must make sure that the returned
-        // columns are a contiguous slice at the start of the row
-        debug_assert!(returned_cols.iter().enumerate().all(|(i, v)| i == *v));
-
-        Some(returned_cols)
-    } else {
-        None
-    };
+    let returned_cols = returned_cols.as_ref().map(|cols| (0..cols.len()).collect());
 
     let aggregates = aggregates
         .clone()
