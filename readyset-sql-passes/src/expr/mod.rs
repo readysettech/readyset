@@ -4,6 +4,7 @@ use readyset_sql::ast::{Expr, Literal, SelectStatement};
 
 use crate::RewriteDialectContext;
 
+pub use self::constant_fold::const_eval_to_dfvalue;
 use self::constant_fold::{constant_fold_expr, constant_fold_expr_preserving_casts};
 use self::normalize_negation::normalize_negation;
 

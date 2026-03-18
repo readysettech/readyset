@@ -4,26 +4,34 @@ use readyset_errors::{ReadySetResult, internal};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{Column, Expr, Literal, Relation};
 
+#[derive(Clone)]
+struct ConstEvalLowerContext;
+impl LowerContext for ConstEvalLowerContext {
+    fn resolve_column(&self, _col: Column) -> ReadySetResult<(usize, DfType)> {
+        internal!("Can't resolve column")
+    }
+
+    fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
+        // TODO(aspen): Support custom types in constant folding
+        None
+    }
+}
+
 /// Statically evaluate the given expression, returning a literal value representing the result.
 ///
 /// Returns an error if the expression evaluation failed, or if the expression is not constant
 fn const_eval(expr: &Expr, dialect: Dialect) -> ReadySetResult<Literal> {
-    #[derive(Clone)]
-    struct ConstEvalLowerContext;
-    impl LowerContext for ConstEvalLowerContext {
-        fn resolve_column(&self, _col: Column) -> ReadySetResult<(usize, DfType)> {
-            internal!("Can't resolve column")
-        }
-
-        fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
-            // TODO(aspen): Support custom types in constant folding
-            None
-        }
-    }
-
-    let dataflow_expr = DataflowExpr::lower(expr.clone(), dialect, &ConstEvalLowerContext)?;
-    let res = dataflow_expr.eval::<DfValue>(&[])?;
+    let res = const_eval_to_dfvalue(expr, dialect)?;
     res.try_into()
+}
+
+/// Statically evaluate the given expression and return the result as a [`DfValue`].
+///
+/// Unlike [`const_eval`], this avoids the round-trip through [`Literal`] and can represent types
+/// that have no literal equivalent (e.g. arrays).
+pub fn const_eval_to_dfvalue(expr: &Expr, dialect: Dialect) -> ReadySetResult<DfValue> {
+    let dataflow_expr = DataflowExpr::lower(expr.clone(), dialect, &ConstEvalLowerContext)?;
+    dataflow_expr.eval::<DfValue>(&[])
 }
 
 struct ConstantFoldVisitor {

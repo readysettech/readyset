@@ -51,7 +51,7 @@ pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_bucket_functions::DetectBucketFunctions;
 pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
-pub use crate::expr::{ScalarOptimizeExpressions, eval_constant_expr};
+pub use crate::expr::{ScalarOptimizeExpressions, const_eval_to_dfvalue, eval_constant_expr};
 pub use crate::implied_tables::ImpliedTableExpansion;
 pub use crate::implied_tables::ImpliedTablesContext;
 pub use crate::inline_literals::InlineLiterals;

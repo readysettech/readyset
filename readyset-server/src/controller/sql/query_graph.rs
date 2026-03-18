@@ -23,7 +23,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::{
-    eval_constant_expr, is_correlated, is_predicate, map_aggregates, LogicalOp,
+    const_eval_to_dfvalue, eval_constant_expr, is_correlated, is_predicate, map_aggregates,
+    LogicalOp,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -890,10 +891,41 @@ fn table_expr_name(table_expr: &TableExpr) -> ReadySetResult<Relation> {
     }
 }
 
-fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
-    // If this is an aggregated query AND it does not contain a GROUP BY clause,
-    // set default values based on the aggregation (or lack thereof) on each
-    // individual field
+/// Replace aggregate calls with their empty-input defaults: COUNT becomes `0`, all others
+/// become `NULL`. Window functions are left untouched (they have their own default handling).
+fn replace_aggregate_defaults(expr: &mut Expr) {
+    struct Visitor;
+
+    impl<'ast> VisitorMut<'ast> for Visitor {
+        type Error = std::convert::Infallible;
+
+        fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+            match expr {
+                Expr::WindowFunction { .. } => Ok(()),
+                Expr::Call(func) if is_aggregate(func) => {
+                    *expr = if matches!(func, FunctionExpr::Count { .. } | FunctionExpr::CountStar)
+                    {
+                        Expr::Literal(Literal::Integer(0))
+                    } else {
+                        Expr::Literal(Literal::Null)
+                    };
+                    Ok(())
+                }
+                _ => walk_expr(self, expr),
+            }
+        }
+    }
+
+    let Ok(()) = Visitor.visit_expr(expr);
+}
+
+/// Replace aggregate function calls with their empty-input default values (COUNT gets 0, all
+/// others get NULL), then constant-fold the resulting expression to produce a concrete `DfValue`.
+///
+/// This handles expressions like `COALESCE(ARRAY_AGG(col), ARRAY['fallback'])`: after
+/// substitution the expression becomes `COALESCE(NULL, ARRAY['fallback'])`, which constant-folds
+/// to `ARRAY['fallback']`.
+fn default_row_for_select(st: &SelectStatement, dialect: Dialect) -> Option<Vec<DfValue>> {
     if !st.contains_aggregate_select() || st.group_by.is_some() {
         return None;
     }
@@ -901,15 +933,13 @@ fn default_row_for_select(st: &SelectStatement) -> Option<Vec<DfValue>> {
         st.fields
             .iter()
             .map(|f| match f {
-                FieldDefinitionExpr::Expr {
-                    expr: Expr::Call(func),
-                    ..
-                } => {
-                    if let FunctionExpr::CountStar | FunctionExpr::Count { .. } = func {
-                        DfValue::Int(0)
-                    } else {
+                FieldDefinitionExpr::Expr { expr, .. } => {
+                    let mut expr = expr.clone();
+                    replace_aggregate_defaults(&mut expr);
+                    const_eval_to_dfvalue(&expr, dialect).unwrap_or_else(|e| {
+                        tracing::warn!(%e, "default_row constant-folding failed");
                         DfValue::None
-                    }
+                    })
                 }
                 _ => DfValue::None,
             })
@@ -968,7 +998,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
         })
     };
 
-    let default_row = default_row_for_select(&stmt);
+    let default_row = default_row_for_select(&stmt, dialect);
     let is_correlated = is_correlated(&stmt);
 
     // Used later on to determine whether to classify predicates as "join predicates" or not
@@ -2369,6 +2399,61 @@ mod tests {
                 err.to_string().contains("exceeds maximum of 2000"),
                 "unexpected error: {err}"
             );
+        }
+    }
+
+    fn make_pg_query_graph(sql: &str) -> QueryGraph {
+        let stmt = readyset_sql_parsing::parse_select_with_config(
+            readyset_sql_parsing::ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            sql,
+        )
+        .unwrap();
+        to_query_graph(stmt, readyset_data::Dialect::DEFAULT_POSTGRESQL).unwrap()
+    }
+
+    mod default_row {
+        use super::*;
+
+        #[test]
+        fn bare_count_returns_zero() {
+            let qg = make_query_graph("SELECT COUNT(*) FROM t");
+            assert_eq!(qg.default_row, Some(vec![DfValue::Int(0)]));
+        }
+
+        #[test]
+        fn bare_aggregate_returns_null() {
+            let qg = make_pg_query_graph("SELECT SUM(x) FROM t");
+            assert_eq!(qg.default_row, Some(vec![DfValue::None]));
+        }
+
+        // Verifies constant-folding produces the correct array contents,
+        // not just "some array". Logictests cover the end-to-end behavior;
+        // this unit test validates the internal DfValue structure.
+        #[test]
+        fn coalesce_array_agg_with_array_fallback() {
+            let qg = make_pg_query_graph(
+                "SELECT COALESCE(ARRAY_AGG(col), ARRAY['Empty String']) FROM t",
+            );
+            let row = qg.default_row.unwrap();
+            assert_eq!(row.len(), 1);
+            let DfValue::Array(arr) = &row[0] else {
+                panic!("expected Array, got {:?}", row[0]);
+            };
+            let elements: Vec<&DfValue> = arr.values().collect();
+            assert_eq!(elements, vec![&DfValue::from("Empty String")]);
+        }
+
+        #[test]
+        fn with_group_by_returns_none() {
+            let qg = make_query_graph("SELECT COUNT(*) FROM t GROUP BY x");
+            assert_eq!(qg.default_row, None);
+        }
+
+        #[test]
+        fn non_aggregate_returns_none() {
+            let qg = make_query_graph("SELECT x FROM t");
+            assert_eq!(qg.default_row, None);
         }
     }
 }

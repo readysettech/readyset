@@ -216,6 +216,26 @@ select array_agg(val) from rea6481 where grp = 10;
 ----
 NULL
 
+# COALESCE(ARRAY_AGG(...), ARRAY[...]) should return the fallback array
+# when all rows are removed (tests default_row constant-folding).
+query T
+select coalesce(array_agg(val), array['fallback']) from rea6481 where grp = 10;
+----
+{fallback}
+
+# COALESCE with non-array aggregates on empty results.
+# COUNT defaults to 0, so COALESCE(0, 42) = 0.
+query I
+select coalesce(count(*), 42) from rea6481 where grp = 10;
+----
+0
+
+# SUM defaults to NULL, so COALESCE(NULL, 99) = 99.
+query I
+select coalesce(sum(id), 99) from rea6481 where grp = 10;
+----
+99
+
 
 #####
 # post-lookup aggregations
@@ -295,6 +315,12 @@ query
 select array_agg(val) from rea6481 where grp in (20, 30);
 ----
 NULL
+
+# COALESCE fallback in post-lookup path
+query T
+select coalesce(array_agg(val), array['empty']) from rea6481 where grp in (20, 30);
+----
+{empty}
 
 
 #####
