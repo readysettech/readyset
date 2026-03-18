@@ -750,6 +750,25 @@ pub struct WorkerOptions {
         action = ArgAction::Set
     )]
     pub feature_topk: bool,
+
+    /// Enable non-blocking index builds for base tables during migrations.
+    ///
+    /// When enabled (default), index builds use snapshot-based scanning with WAL catch-up,
+    /// allowing writes to continue during the build. This prevents blocking the domain
+    /// during index creation on large tables.
+    ///
+    /// When disabled, index builds use the original blocking implementation that holds
+    /// the domain until the index is fully built. This is useful for debugging or if
+    /// issues arise with non-blocking builds.
+    #[arg(
+        long,
+        env = "FEATURE_NON_BLOCKING_INDEX_BUILD",
+        default_value = "true",
+        default_missing_value = "true",
+        num_args = 0..=1,
+        action = ArgAction::Set
+    )]
+    pub feature_non_blocking_index_build: bool,
 }
 
 impl WorkerOptions {

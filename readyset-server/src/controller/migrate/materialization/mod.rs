@@ -101,6 +101,14 @@ pub struct Config {
     ///
     /// Defaults to true.
     pub partial_enabled: bool,
+
+    /// Whether to use non-blocking index builds for base tables.
+    #[serde(default = "default_non_blocking_index_build")]
+    pub non_blocking_index_build: bool,
+}
+
+fn default_non_blocking_index_build() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -110,6 +118,7 @@ impl Default for Config {
             allow_straddled_joins: false,
             partial_enabled: true,
             frontier_strategy: FrontierStrategy::None,
+            non_blocking_index_build: true,
         }
     }
 }

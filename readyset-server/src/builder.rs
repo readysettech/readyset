@@ -109,6 +109,7 @@ impl Builder {
         builder.set_replication_strategy(opts.domain_replication_options.into());
         builder.set_verbose_domain_metrics(opts.verbose_domain_metrics);
         builder.set_frontier_strategy(opts.materialization_frontier);
+        builder.set_non_blocking_index_build(opts.feature_non_blocking_index_build);
 
         if let Some(volume_id) = opts.volume_id {
             builder.set_volume_id(volume_id);
@@ -165,6 +166,14 @@ impl Builder {
     /// Which nodes should be placed beyond the materialization frontier?
     pub fn set_frontier_strategy(&mut self, f: FrontierStrategy) {
         self.config.materialization_config.frontier_strategy = f;
+    }
+
+    /// Set whether to use non-blocking index builds for base tables.
+    ///
+    /// When enabled (default), index builds use snapshot-based scanning with WAL catch-up,
+    /// allowing writes to continue during index creation.
+    pub fn set_non_blocking_index_build(&mut self, enabled: bool) {
+        self.config.materialization_config.non_blocking_index_build = enabled;
     }
 
     /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
