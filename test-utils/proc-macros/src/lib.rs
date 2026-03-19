@@ -113,18 +113,21 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
-    // Auto-expand MySQL 8.0+ variants with an `_auto_` marker so CI can
+    // Auto-expand MySQL 8.0+ variants with an `__xp_` marker so CI can
     // filter them out (they only run in the nightly pipeline). Explicitly
     // declared variants (e.g. `mysql80_gtid`) always run in CI.
     //
-    // Expansion adds the missing flags (mrbr, gtid) as _auto_ variants:
-    //   mysql80           → + auto_mrbr, auto_gtid, auto_nogtid, auto_mrbr_gtid
-    //   mysql80_mrbr      → + auto_mrbr_gtid
-    //   mysql80_gtid      → + auto_mrbr_gtid
+    // The `__xp_` prefix (short for "expanded") uses double underscores to
+    // avoid collisions with user-defined test names.
+    //
+    // Expansion adds the missing flags (mrbr, gtid) as __xp_ variants:
+    //   mysql80           → + __xp_mrbr, __xp_gtid, __xp_nogtid, __xp_mrbr_gtid
+    //   mysql80_mrbr      → + __xp_mrbr_gtid
+    //   mysql80_gtid      → + __xp_mrbr_gtid
     //   mysql80_mrbr_gtid → (nothing, fully specified)
     //   mysql80_nogtid    → (nothing, nogtid is terminal)
     //
-    // Variants containing "auto" or "nogtid" are never expanded further.
+    // Variants containing "__xp_" or "nogtid" are never expanded further.
     let variants: Vec<Ident> = explicit_variants
         .into_iter()
         .flat_map(|ident| {
@@ -143,7 +146,7 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
             let span = ident.span();
             let mut out = vec![ident];
 
-            if !is_mysql80_plus || name.contains("auto") || name.contains("nogtid") {
+            if !is_mysql80_plus || name.contains("__xp_") || name.contains("nogtid") {
                 return out;
             }
 
@@ -157,15 +160,15 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
                 .collect();
 
             match (has_mrbr, has_gtid) {
-                // mysql80 → all four auto variants
+                // mysql80 → all four expanded variants
                 (false, false) => {
-                    for suffix in ["auto_mrbr", "auto_gtid", "auto_nogtid", "auto_mrbr_gtid"] {
-                        out.push(Ident::new(&format!("{base}_{suffix}"), span));
+                    for suffix in ["__xp_mrbr", "__xp_gtid", "__xp_nogtid", "__xp_mrbr_gtid"] {
+                        out.push(Ident::new(&format!("{base}{suffix}"), span));
                     }
                 }
-                // mysql80_mrbr or mysql80_gtid → only auto_mrbr_gtid
+                // mysql80_mrbr or mysql80_gtid → only __xp_mrbr_gtid
                 (true, false) | (false, true) => {
-                    out.push(Ident::new(&format!("{base}_auto_mrbr_gtid"), span));
+                    out.push(Ident::new(&format!("{base}__xp_mrbr_gtid"), span));
                 }
                 // mysql80_mrbr_gtid → fully specified, nothing to add
                 (true, true) => {}
@@ -196,6 +199,7 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let variant_modules = variants.iter().map(|variant| {
         quote! {
+            #[allow(non_snake_case)]
             pub mod #variant {
                 use super::*;
                 // Explicit import so it takes priority over both the glob import and the
