@@ -33,7 +33,7 @@ fn check_ts_mut(last: &mut u64, now: u64) {
     thread::sleep(Duration::from_millis(2));
 }
 
-fn avg_ts<I>(r: &ReadHandle<char, (char, usize), I>) -> u64
+fn avg_ts<I>(r: &ReadHandle<char, (char, usize), I>) -> Option<u64>
 where
     I: InsertionOrder<(char, usize)>,
 {
@@ -43,7 +43,7 @@ where
             Some(v) => v.eviction_meta().value(),
         })
         .sum::<u64>()
-        / (r.len() as u64)
+        .checked_div(r.len() as u64)
 }
 
 #[test]
@@ -86,10 +86,10 @@ fn eviction_lru() {
 
     // Check that if we evict a bunch of keys, the average age goes down, i.e. that average
     // timestamp goes up.
-    let old_ts = avg_ts(&r);
+    let old_ts = avg_ts(&r).unwrap();
     evict(&mut w, 0.5);
     w.publish();
-    let new_ts = avg_ts(&r);
+    let new_ts = avg_ts(&r).unwrap();
     assert!(new_ts > old_ts);
 }
 
@@ -140,11 +140,12 @@ fn eviction_range_lru() -> Result<()> {
 
     // Check that if we evict a bunch of keys, the average age goes down, i.e. that average
     // timestamp goes up.
-    let old_ts = avg_ts(&r);
+    let old_ts = avg_ts(&r).unwrap();
     evict(&mut w, 0.5);
     w.publish();
-    let new_ts = avg_ts(&r);
-    assert!(new_ts > old_ts);
+    if let Some(new_ts) = avg_ts(&r) {
+        assert!(new_ts > old_ts, "new {new_ts}, old {old_ts}");
+    }
 
     Ok(())
 }

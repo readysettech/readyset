@@ -414,12 +414,7 @@ mod tests {
     #[test]
     fn contains_key_single() {
         let (mut w, handle) = make_single();
-        assert_eq!(
-            handle.contains_key(&[1i32.into()]),
-            Err(reader_map::Error::NotPublished)
-        );
 
-        w.publish();
         assert_eq!(handle.contains_key(&[1i32.into()]), Ok(false));
 
         w.insert(1i32.into(), vec![1i32.into()].into_boxed_slice());

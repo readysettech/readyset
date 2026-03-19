@@ -408,6 +408,10 @@ impl<M, S, I> Options<M, S, I> {
 
         let (mut w, r) = left_right::new_from_empty(inner);
         w.append(write::Operation::MarkReady);
+        // Publish once so that left_right exits its `first` state, where it bypasses
+        // absorb_first and calls absorb_second directly.  Batch operations rely on
+        // absorb_first to sort segments before merging.
+        w.publish();
 
         (WriteHandle::new(w), ReadHandle::new(r))
     }

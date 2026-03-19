@@ -40,12 +40,7 @@ pub enum EvictionQuantity {
 ///
 /// let (mut w, r) = reader_map::new();
 ///
-/// // the map is uninitialized, so all lookups should return Err(NotPublished)
-/// assert_eq!(r.get(&x.0).err().unwrap(), reader_map::Error::NotPublished);
-///
-/// w.publish();
-///
-/// // after the first publish, it is empty, but ready
+/// // it is empty, but ready
 /// assert!(r.get(&x.0).unwrap().is_none());
 ///
 /// w.insert(x.0, x);
