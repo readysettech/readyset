@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::future;
 use std::hash::Hash;
@@ -27,8 +27,38 @@ use readyset_util::SizeOf;
 use crate::{CacheInsertGuard, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh};
 
 pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
-type ScheduledRefresh<K, V> = (K, RequestRefresh<K, V>);
-type Scheduler<K, V> = Arc<Mutex<BTreeMap<Instant, Vec<ScheduledRefresh<K, V>>>>>;
+type ScheduledRefresh<K, V> = (K, u64, RequestRefresh<K, V>);
+
+struct RefreshScheduler<K, V>
+where
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    queue: BTreeMap<Instant, Vec<ScheduledRefresh<K, V>>>,
+    /// Guard map tracking keys with an active scheduled refresh callback.
+    /// Each entry maps a key to the version it was registered with.
+    /// Prevents duplicate callbacks from accumulating when a cache miss
+    /// races with a rescheduled callback for the same key.
+    active_keys: HashMap<K, u64>,
+    /// Monotonically increasing counter assigned to each new registration.
+    next_version: u64,
+}
+
+impl<K, V> Default for RefreshScheduler<K, V>
+where
+    K: Clone + Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self {
+            queue: BTreeMap::new(),
+            active_keys: HashMap::new(),
+            next_version: 0,
+        }
+    }
+}
+
+type Scheduler<K, V> = Arc<Mutex<RefreshScheduler<K, V>>>;
 
 #[cfg(target_os = "linux")]
 fn current_timestamp_ms() -> u64 {
@@ -361,27 +391,64 @@ where
 
         let due = {
             let mut sched = scheduler.lock().await;
-            let times: Vec<_> = sched.range(..=now).map(|(instant, _)| *instant).collect();
+            let times: Vec<_> = sched
+                .queue
+                .range(..=now)
+                .map(|(instant, _)| *instant)
+                .collect();
 
             times
                 .into_iter()
-                .filter_map(|instant| sched.remove(&instant))
+                .filter_map(|instant| sched.queue.remove(&instant))
                 .flatten()
                 .collect::<Vec<_>>()
         };
 
-        for (key, callback) in due {
+        let mut to_reschedule = Vec::new();
+        let mut to_evict = Vec::new();
+
+        let refresh_ms = cache.refresh_ms;
+
+        for (key, version, callback) in due {
             match cache.inner.get(&(cache.id, key.clone())).await.as_deref() {
                 Some(CacheEntry::Present(..)) | Some(CacheEntry::Loading(..)) => {
-                    // Keep going as long as the entry hasn't been evicted.
-                    cache
-                        .schedule_refresh(key.clone(), Arc::clone(&callback))
-                        .await;
-
-                    let guard = Self::make_guard(Arc::clone(&cache), key);
+                    // Capture per-item deadline to spread rescheduled callbacks
+                    // across slightly different instants rather than collapsing
+                    // them all to a single point in time.
+                    let deadline = refresh_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+                    let guard = Self::make_guard(Arc::clone(&cache), key.clone());
                     callback(guard);
+                    if let Some(deadline) = deadline {
+                        to_reschedule.push((deadline, key, version, callback));
+                    }
                 }
-                None => {}
+                None => {
+                    to_evict.push((key, version));
+                }
+            }
+        }
+
+        // Apply all scheduler mutations in a single lock acquisition to
+        // reduce contention with the miss-path schedule_refresh calls.
+        if !to_reschedule.is_empty() || !to_evict.is_empty() {
+            let mut sched = scheduler.lock().await;
+            for (deadline, k, version, refresh) in to_reschedule {
+                if sched.active_keys.get(&k) == Some(&version) {
+                    sched
+                        .queue
+                        .entry(deadline)
+                        .or_default()
+                        .push((k, version, refresh));
+                }
+            }
+            for (key, version) in to_evict {
+                // Note: the stale entry for this key may still exist in the
+                // queue from a previous schedule_refresh call.  It will be
+                // harmlessly dropped on the next tick when the version guard
+                // rejects it during the batched reschedule.
+                if sched.active_keys.get(&key) == Some(&version) {
+                    sched.active_keys.remove(&key);
+                }
             }
         }
     }
@@ -491,6 +558,10 @@ where
         waiters
     }
 
+    /// Schedule a refresh callback for a key from the miss path.
+    ///
+    /// Uses the `active_keys` guard set to prevent duplicate callbacks: if a
+    /// callback is already scheduled for this key, the call is a no-op.
     pub(crate) async fn schedule_refresh(&self, k: K, refresh: RequestRefresh<K, V>) {
         let Some(ref scheduler) = self.scheduler else {
             return;
@@ -499,10 +570,18 @@ where
             return;
         };
         let mut sched = scheduler.lock().await;
+        if sched.active_keys.contains_key(&k) {
+            // A callback is already active for this key; skip.
+            return;
+        }
+        let version = sched.next_version;
+        sched.next_version += 1;
+        sched.active_keys.insert(k.clone(), version);
         sched
+            .queue
             .entry(Instant::now() + Duration::from_millis(ms))
-            .or_insert_with(Vec::new)
-            .push((k, refresh));
+            .or_default()
+            .push((k, version, refresh));
     }
 
     pub(crate) async fn insert(
@@ -833,6 +912,141 @@ mod tests {
 
         assert!(cache.inner.weighted_size() <= BYTES); // under limit?
         assert!(cache.inner.entry_count() < COUNT); // did we have to evict?
+    }
+
+    #[tokio::test]
+    async fn test_schedule_refresh_deduplicates() {
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> = new(
+            None,
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(20),
+                refresh: Duration::from_secs(10),
+                schedule: true,
+            },
+        );
+
+        let key = vec!["k"];
+        let callback: RequestRefresh<Vec<&str>, Vec<&str>> = Arc::new(|_guard| {});
+
+        // First schedule should succeed.
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        // Second schedule for the same key should be a no-op.
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        let scheduler = cache.scheduler.as_ref().unwrap();
+        let sched = scheduler.lock().await;
+        let total: usize = sched.queue.values().map(|v| v.len()).sum();
+        assert_eq!(total, 1, "expected exactly one callback, got {total}");
+        assert!(
+            sched.active_keys.contains_key(&key),
+            "key should be in the active set"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_evicted_key_can_be_rescheduled() {
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> = new(
+            None,
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(20),
+                refresh: Duration::from_secs(10),
+                schedule: true,
+            },
+        );
+
+        let key = vec!["k"];
+        let callback: RequestRefresh<Vec<&str>, Vec<&str>> = Arc::new(|_guard| {});
+
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        // Simulate eviction: remove from active_keys (as process_due_callbacks
+        // does when the moka entry is gone).
+        {
+            let mut sched = cache.scheduler.as_ref().unwrap().lock().await;
+            sched.active_keys.remove(&key);
+        }
+
+        // A new miss should be able to schedule again.
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        let sched = cache.scheduler.as_ref().unwrap().lock().await;
+        let total: usize = sched.queue.values().map(|v| v.len()).sum();
+        assert_eq!(
+            total, 2,
+            "expected two callbacks (original + re-registered)"
+        );
+    }
+
+    /// Verify that `process_due_callbacks` drops a stale callback whose
+    /// version no longer matches `active_keys` during the batched reschedule.
+    ///
+    /// Scenario:
+    ///   1. Key K registered via schedule_refresh → version 1.
+    ///   2. K evicted from active_keys (simulating moka TTL expiry).
+    ///   3. New miss re-registers K via schedule_refresh → version 2.
+    ///   4. The stale version-1 entry still sits in the queue. When the
+    ///      batched reschedule runs, it should reject it because
+    ///      active_keys[K] == 2, not 1.
+    #[tokio::test]
+    async fn test_reschedule_rejects_stale_version() {
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> = new(
+            None,
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(20),
+                refresh: Duration::from_secs(10),
+                schedule: true,
+            },
+        );
+
+        let key = vec!["k"];
+        let callback: RequestRefresh<Vec<&str>, Vec<&str>> = Arc::new(|_guard| {});
+
+        // Step 1: First registration → version 1.
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        let scheduler = cache.scheduler.as_ref().unwrap();
+        let old_version = {
+            let sched = scheduler.lock().await;
+            *sched.active_keys.get(&key).expect("key should be active")
+        };
+
+        // Step 2: Simulate eviction — remove from active_keys.
+        {
+            let mut sched = scheduler.lock().await;
+            sched.active_keys.remove(&key);
+        }
+
+        // Step 3: New miss re-registers K → version 2.
+        cache.schedule_refresh(key.clone(), callback.clone()).await;
+
+        let new_version = {
+            let sched = scheduler.lock().await;
+            *sched.active_keys.get(&key).expect("key should be active")
+        };
+        assert_ne!(old_version, new_version, "versions must differ");
+
+        // Step 4: Simulate the batched reschedule that process_due_callbacks
+        // performs.  Insert a stale (old_version) entry into the queue as if
+        // it had been collected from a previous tick's `due` batch.  Then
+        // verify the version guard rejects it.
+        {
+            let sched = scheduler.lock().await;
+
+            // The stale entry should be rejected: active_keys[K] == new_version.
+            let would_reschedule = sched.active_keys.get(&key) == Some(&old_version);
+            assert!(
+                !would_reschedule,
+                "stale version should be rejected by the version guard"
+            );
+
+            // The current entry should be accepted.
+            let would_reschedule = sched.active_keys.get(&key) == Some(&new_version);
+            assert!(
+                would_reschedule,
+                "current version should pass the version guard"
+            );
+        }
     }
 
     #[test]
