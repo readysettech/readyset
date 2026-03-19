@@ -1163,18 +1163,16 @@ impl BuiltinFunction {
             }
             BuiltinFunction::Coalesce(arg1, rest_args) => {
                 let val1 = arg1.eval(record)?;
-                let rest_vals = rest_args
-                    .iter()
-                    .map(|expr| expr.eval(record))
-                    .collect::<Result<Vec<_>, _>>()?;
                 if !val1.is_none() {
-                    Ok(val1)
-                } else {
-                    Ok(rest_vals
-                        .into_iter()
-                        .find(|v| !v.is_none())
-                        .unwrap_or(DfValue::None))
+                    return Ok(val1);
                 }
+                for arg in rest_args {
+                    let val = arg.eval(record)?;
+                    if !val.is_none() {
+                        return Ok(val);
+                    }
+                }
+                Ok(DfValue::None)
             }
             BuiltinFunction::Concat(arg1, rest_args) => {
                 let mut s = <&str>::try_from(&non_null!(arg1.eval(record)?))?.to_owned();
