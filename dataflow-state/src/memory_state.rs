@@ -13,6 +13,8 @@ use readyset_util::SizeOf;
 use replication_offset::ReplicationOffset;
 use tracing::trace;
 
+const PARALLEL_ROW_CREATION_THRESHOLD: usize = 100;
+
 use crate::keyed_state::KeyedState;
 use crate::single_state::SingleState;
 use crate::{
@@ -119,7 +121,7 @@ impl State for MemoryState {
         let num_records = records.len();
 
         // OPTIMIZATION: For large batches, create rows in parallel
-        let use_parallel_creation = num_records > 1000;
+        let use_parallel_creation = num_records > PARALLEL_ROW_CREATION_THRESHOLD;
         let is_partial = self.is_partial();
         let insert_tag = if is_partial { partial_tag } else { None };
 
