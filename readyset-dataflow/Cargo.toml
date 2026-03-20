@@ -15,7 +15,6 @@ bincode = { workspace = true }
 bufstream = { workspace = true }
 byteorder = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-criterion = { workspace = true, features = ["async_tokio"], optional = true }
 derive_more = { workspace = true }
 enum-kinds = { workspace = true }
 exponential-backoff = { workspace = true }
@@ -68,7 +67,6 @@ readyset-decimal = { path = "../readyset-decimal" }
 test-utils = { path = "../test-utils" }
 
 [features]
-bench = ["criterion"]
 failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 display_literals = []
 

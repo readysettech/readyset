@@ -24,9 +24,6 @@ use crate::processing::{ColumnMiss, ColumnRef, ColumnSource};
 
 mod debug;
 
-#[cfg(feature = "bench")]
-pub use process::bench;
-
 // NOTE(jfrg): the migration code should probably move into the dataflow crate...
 // it is the reason why so much stuff here is pub
 

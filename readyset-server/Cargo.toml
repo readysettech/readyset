@@ -15,7 +15,6 @@ categories = ["database", "database-implementations"]
 default = []
 generate_mysql_tests = ["default"]
 profiling = ["timekeeper/default"]
-bench = ["dataflow/bench"]
 failure_injection = [
     "fail/failpoints",
     "dataflow/failure_injection",
@@ -106,9 +105,7 @@ assert_approx_eq = { workspace = true }
 assert_matches = { workspace = true }
 chrono = { workspace = true }
 criterion = { workspace = true }
-dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow", features = [
-    "bench",
-] }
+dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }
 diff = { workspace = true }
 include_dir = { workspace = true }
 mysql_async = { workspace = true }
@@ -118,10 +115,6 @@ tempfile = { workspace = true }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 triomphe = { workspace = true }
-
-[[bench]]
-name = "dataflow"
-harness = false
 
 [lints]
 workspace = true

@@ -5946,7 +5946,6 @@ dependencies = [
  "bufstream",
  "byteorder",
  "clap",
- "criterion",
  "dataflow-expression",
  "dataflow-state",
  "derive_more",

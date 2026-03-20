@@ -3638,11 +3638,11 @@ impl Domain {
                     },
                 )?;
 
-                let misses = process_result.unique_misses();
+                let misses = &process_result.misses;
 
                 let missed_on = if backfill_keys.is_some() {
                     let mut missed_on = HashSet::with_capacity(misses.len());
-                    for miss in &misses {
+                    for miss in misses {
                         #[allow(clippy::unwrap_used)]
                         // this is a partial miss, so it must have a partial key
                         missed_on.insert(miss.replay_key().unwrap());
