@@ -259,7 +259,7 @@ where
         // For example, if we get a -, then a +, for the same group, we don't want to
         // execute two queries. We'll do this by sorting the batch by our group by.
         let mut rs: Vec<_> = rs.into();
-        rs.sort_by(&cmp);
+        rs.sort_unstable_by(&cmp);
 
         // find the current value for this group
         let us = self.us.unwrap();

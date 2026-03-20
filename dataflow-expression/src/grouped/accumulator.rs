@@ -238,6 +238,11 @@ impl AccumulationOp {
                     std::iter::repeat_n(k.value.clone(), repeat_count)
                 })
                 .collect(),
+            AccumulatorData::Ordered(v) => {
+                let mut sorted: Vec<_> = v.iter().collect();
+                sorted.sort_unstable();
+                sorted.into_iter().map(|k| k.value.clone()).collect()
+            }
         };
 
         // When aggregating array-typed columns, stack sub-arrays into a multidimensional
@@ -309,6 +314,22 @@ impl AccumulationOp {
                     }
                 }
             }
+            AccumulatorData::Ordered(v) => {
+                let mut sorted: Vec<_> = v.iter().collect();
+                sorted.sort_unstable();
+                for k in &sorted {
+                    if !first {
+                        result.push_str(separator);
+                    }
+                    result.push_str(&k.to_string());
+                    first = false;
+                    if let Some(max) = max_len {
+                        if result.len() >= max {
+                            return Ok(DfValue::from(truncate_group_concat(&result, max)));
+                        }
+                    }
+                }
+            }
         }
 
         Ok(DfValue::from(result))
@@ -321,7 +342,7 @@ impl AccumulationOp {
     ) -> ReadySetResult<DfValue> {
         let data = match data {
             AccumulatorData::Simple(v) => v,
-            AccumulatorData::DistinctOrdered(_) => {
+            AccumulatorData::DistinctOrdered(_) | AccumulatorData::Ordered(_) => {
                 internal!("Unsupported AccumulatorData type for json_object_agg")
             }
         };
@@ -379,6 +400,14 @@ impl AccumulationOp {
                     std::iter::repeat_n(normalized, repeat_count)
                 })
                 .collect(),
+            AccumulatorData::Ordered(v) => {
+                let mut sorted: Vec<_> = v.iter().collect();
+                sorted.sort_unstable();
+                sorted
+                    .iter()
+                    .map(|k| Self::normalize_collation(&k.value))
+                    .collect()
+            }
         };
 
         DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(values)))
@@ -504,6 +533,10 @@ pub enum AccumulatorData {
     /// this "NULLs ordered first" is not a bug :shrug:). Further note: the `group_concat()` and `string_agg()`
     /// functions don't output NULLs, so really this only affects `array_agg()` which does output NULLs.
     DistinctOrdered(BTreeMap<OrderableDfValue, usize>),
+
+    /// Non-distinct ordered accumulation using a Vec with deferred sorting at finalization.
+    /// More cache-friendly than BTreeMap for bulk inserts (O(1) push vs O(log n) tree insert).
+    Ordered(Vec<OrderableDfValue>),
 }
 
 /// A wrapper for DfValue + order_by information.
@@ -577,6 +610,13 @@ impl AccumulatorData {
                             map.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
                         }
                     }
+                    AccumulatorData::Ordered(vec) => {
+                        let order_by = op.order_by();
+                        vec.extend(arr.values().cloned().map(|val| OrderableDfValue {
+                            value: val,
+                            order_by,
+                        }));
+                    }
                 }
                 Ok(())
             }
@@ -609,6 +649,10 @@ impl AccumulatorData {
                 let order_by = op.order_by();
                 let key = OrderableDfValue { value, order_by };
                 v.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
+            }
+            AccumulatorData::Ordered(v) => {
+                let order_by = op.order_by();
+                v.push(OrderableDfValue { value, order_by });
             }
         }
         Ok(())
@@ -651,6 +695,17 @@ impl AccumulatorData {
                     }
                 };
             }
+            AccumulatorData::Ordered(v) => {
+                let key = OrderableDfValue {
+                    value,
+                    order_by: op.order_by(),
+                };
+                let item_pos = v
+                    .iter()
+                    .rposition(|x| x == &key)
+                    .ok_or_else(|| internal_err!("accumulator couldn't remove value from data"))?;
+                v.swap_remove(item_pos);
+            }
         }
 
         Ok(())
@@ -660,6 +715,7 @@ impl AccumulatorData {
         match self {
             AccumulatorData::Simple(v) => v.is_empty(),
             AccumulatorData::DistinctOrdered(v) => v.is_empty(),
+            AccumulatorData::Ordered(v) => v.is_empty(),
         }
     }
 }
@@ -678,8 +734,10 @@ impl From<&AccumulationOp> for AccumulatorData {
             | StringAgg {
                 distinct, order_by, ..
             } => {
-                if *distinct == DistinctOption::IsDistinct || order_by.is_some() {
+                if *distinct == DistinctOption::IsDistinct {
                     AccumulatorData::DistinctOrdered(Default::default())
+                } else if order_by.is_some() {
+                    AccumulatorData::Ordered(Default::default())
                 } else {
                     AccumulatorData::Simple(Default::default())
                 }
@@ -1434,6 +1492,29 @@ mod tests {
             AccumulatorData::DistinctOrdered(map)
         }
 
+        fn assert_ordered_emit(
+            order_by: Option<(OrderType, NullOrder)>,
+            input: Vec<DfValue>,
+            expected: Vec<DfValue>,
+        ) {
+            let op = AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: DistinctOption::NotDistinct,
+                order_by,
+            };
+            let data = AccumulatorData::Ordered(
+                input
+                    .into_iter()
+                    .map(|value| OrderableDfValue { value, order_by })
+                    .collect(),
+            );
+            let got: Vec<_> = match op.emit_raw(&data) {
+                DfValue::Array(arr) => arr.values().cloned().collect(),
+                other => panic!("Expected Array, got {:?}", other),
+            };
+            assert_eq!(got, expected);
+        }
+
         #[test]
         fn test_emit_raw_simple() {
             let op = AccumulationOp::StringAgg {
@@ -1505,6 +1586,52 @@ mod tests {
                 }
                 other => panic!("Expected Array, got {:?}", other),
             }
+        }
+
+        #[test]
+        fn test_emit_raw_ordered_sorts_ascending() {
+            assert_ordered_emit(
+                Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+                vec![DfValue::from("b"), DfValue::from("a"), DfValue::from("c")],
+                vec![DfValue::from("a"), DfValue::from("b"), DfValue::from("c")],
+            );
+        }
+
+        #[test]
+        fn test_emit_raw_ordered_sorts_descending_with_duplicates() {
+            assert_ordered_emit(
+                Some((OrderType::OrderDescending, NullOrder::NullsFirst)),
+                vec![
+                    DfValue::from("a"),
+                    DfValue::from("c"),
+                    DfValue::from("a"),
+                    DfValue::from("b"),
+                ],
+                vec![
+                    DfValue::from("c"),
+                    DfValue::from("b"),
+                    DfValue::from("a"),
+                    DfValue::from("a"),
+                ],
+            );
+        }
+
+        #[test]
+        fn test_emit_raw_ordered_nulls_last() {
+            assert_ordered_emit(
+                Some((OrderType::OrderAscending, NullOrder::NullsLast)),
+                vec![DfValue::from("b"), DfValue::None, DfValue::from("a")],
+                vec![DfValue::from("a"), DfValue::from("b"), DfValue::None],
+            );
+        }
+
+        #[test]
+        fn test_emit_raw_ordered_nulls_first() {
+            assert_ordered_emit(
+                Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+                vec![DfValue::from("b"), DfValue::None, DfValue::from("a")],
+                vec![DfValue::None, DfValue::from("a"), DfValue::from("b")],
+            );
         }
 
         #[test]
@@ -1704,6 +1831,30 @@ mod tests {
             }
         }
 
+        fn assert_ordered_array_agg(
+            order_type: OrderType,
+            null_order: NullOrder,
+            inputs: Vec<DfValue>,
+            dims: usize,
+            expected: &str,
+        ) {
+            let op = AccumulationOp::ArrayAgg {
+                distinct: DistinctOption::NotDistinct,
+                order_by: Some((order_type, null_order)),
+            };
+            let mut data = AccumulatorData::from(&op);
+            for v in inputs {
+                data.add(&op, v).unwrap();
+            }
+            match op.apply(&data).unwrap() {
+                DfValue::Array(arr) => {
+                    assert_eq!(arr.num_dimensions(), dims);
+                    assert_eq!(arr.to_string(), expected);
+                }
+                other => panic!("Expected Array, got: {:?}", other),
+            }
+        }
+
         fn make_array_val(vals: Vec<i64>) -> DfValue {
             DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(
                 vals.into_iter().map(DfValue::from).collect::<Vec<_>>(),
@@ -1790,6 +1941,48 @@ mod tests {
             assert_eq!(
                 parts,
                 vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)]
+            );
+        }
+
+        #[test]
+        fn ordered_array_agg_preserves_duplicates_sorted() {
+            assert_ordered_array_agg(
+                OrderType::OrderAscending,
+                NullOrder::NullsFirst,
+                vec![3, 1, 2, 1].into_iter().map(DfValue::from).collect(),
+                1,
+                "{1,1,2,3}",
+            );
+        }
+
+        #[test]
+        fn ordered_array_agg_descending_with_null_last() {
+            assert_ordered_array_agg(
+                OrderType::OrderDescending,
+                NullOrder::NullsLast,
+                vec![
+                    DfValue::from(1),
+                    DfValue::None,
+                    DfValue::from(3),
+                    DfValue::from(2),
+                ],
+                1,
+                "{3,2,1,NULL}",
+            );
+        }
+
+        #[test]
+        fn ordered_array_agg_on_array_columns() {
+            assert_ordered_array_agg(
+                OrderType::OrderAscending,
+                NullOrder::NullsFirst,
+                vec![
+                    make_array_val(vec![3, 4]),
+                    make_array_val(vec![1, 2]),
+                    make_array_val(vec![3, 4]),
+                ],
+                2,
+                "{{1,2},{3,4},{3,4}}",
             );
         }
 
@@ -1903,6 +2096,40 @@ mod tests {
         let result_str = result.to_string();
         // Under limit — should NOT be truncated
         assert_eq!(result_str, "hello,world");
+    }
+
+    fn assert_ordered_concat(op: AccumulationOp, inputs: Vec<&str>, expected: &str) {
+        let mut data: AccumulatorData = (&op).into();
+        for s in inputs {
+            data.add(&op, DfValue::from(s)).unwrap();
+        }
+        assert_eq!(op.apply(&data).unwrap().to_string(), expected);
+    }
+
+    #[test]
+    fn ordered_group_concat_sorts_ascending_with_duplicates() {
+        assert_ordered_concat(
+            AccumulationOp::GroupConcat {
+                separator: ",".to_string(),
+                distinct: DistinctOption::NotDistinct,
+                order_by: Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
+            },
+            vec!["c", "a", "b", "a"],
+            "a,a,b,c",
+        );
+    }
+
+    #[test]
+    fn ordered_string_agg_sorts_descending_with_duplicates() {
+        assert_ordered_concat(
+            AccumulationOp::StringAgg {
+                separator: Some(",".to_string()),
+                distinct: DistinctOption::NotDistinct,
+                order_by: Some((OrderType::OrderDescending, NullOrder::NullsFirst)),
+            },
+            vec!["c", "a", "b", "a"],
+            "c,b,a,a",
+        );
     }
 
     #[test]
