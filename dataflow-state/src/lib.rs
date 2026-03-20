@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::fmt::{self, Debug};
 use std::hash::Hash;
 use std::iter::FromIterator;
+use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::vec;
@@ -627,6 +628,7 @@ impl std::hash::BuildHasher for GlobalRandomState {
 pub struct Row {
     data: Arc<Vec<DfValue>>,
     cached_hash: u64,
+    cached_size: usize,
 }
 
 pub type Rows = HashBag<Row, GlobalRandomState>;
@@ -646,12 +648,19 @@ impl PartialEq<[DfValue]> for Row {
 }
 
 impl Row {
+    /// Compute the cached size for a row's data.
+    fn compute_size(data: &Vec<DfValue>) -> usize {
+        size_of::<u64>() + size_of::<usize>() + data.deep_size_of()
+    }
+
     /// Create a new Row with computed hash
     fn new(data: Vec<DfValue>) -> Self {
         let cached_hash = global_random_state().hash_one(&data);
+        let cached_size = Self::compute_size(&data);
         Row {
             data: Arc::new(data),
             cached_hash,
+            cached_size,
         }
     }
 
@@ -671,9 +680,11 @@ impl From<Vec<DfValue>> for Row {
 impl From<Arc<Vec<DfValue>>> for Row {
     fn from(r: Arc<Vec<DfValue>>) -> Self {
         let cached_hash = global_random_state().hash_one(&*r);
+        let cached_size = Self::compute_size(&r);
         Row {
             data: r,
             cached_hash,
+            cached_size,
         }
     }
 }
@@ -700,8 +711,7 @@ impl Deref for Row {
 
 impl SizeOf for Row {
     fn deep_size_of(&self) -> usize {
-        // Include the size of cached_hash (8 bytes) + data
-        std::mem::size_of::<u64>() + (*self.data).deep_size_of()
+        self.cached_size
     }
 
     fn size_is_empty(&self) -> bool {
