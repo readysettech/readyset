@@ -554,6 +554,7 @@ impl DomainBuilder {
             readers,
             channel_coordinator,
             timed_purges: LenMetric::new_meta("timed_purges", &meta),
+            pending_publishes: HashSet::new(),
             delayed_for_self: LenMetric::new_meta("delayed_for_self", &meta),
             state_size,
             total_time: Timer::new(),
@@ -636,6 +637,9 @@ pub struct Domain {
     /// * Each node referenced by a `view` of a TimedPurge must be in `self.nodes`
     /// * Each node referenced by a `view` of a TimedPurge must be a reader node
     timed_purges: LenMetric<VecDeque<TimedPurge>>,
+    /// Reader nodes with a pending background publish to drain accumulated writes
+    /// and keep the upquery publish path fast.
+    pending_publishes: HashSet<LocalNodeIndex>,
     readers: Readers,
     channel_coordinator: Arc<ChannelCoordinator>,
     delayed_for_self: LenMetric<VecDeque<Packet>>,
@@ -3666,6 +3670,8 @@ impl Domain {
                         if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
                             wh.publish();
                             wh.notify_readers()?;
+                            // Schedule a background second publish to keep upquery path fast.
+                            self.pending_publishes.insert(segment.node);
                         }
 
                         // and also unmark the replay request
@@ -4931,6 +4937,9 @@ impl Domain {
     /// If there is a pending timed purge, return the duration until it needs
     /// to happen
     pub fn next_poll_duration(&self) -> Option<time::Duration> {
+        if !self.pending_publishes.is_empty() {
+            return Some(time::Duration::ZERO);
+        }
         // when do we need to be woken up again?
         let now = time::Instant::now();
         self.timed_purges.front().map(|tp| {
@@ -4983,10 +4992,26 @@ impl Domain {
         Ok(())
     }
 
+    /// Drain the pending-publish queue, calling publish on each reader node. This is scheduled
+    /// after hole fills to drain writes that arrive between replay fills and the next upquery,
+    /// keeping the `RequestReaderReplay` publish path fast.
+    fn handle_pending_publishes(&mut self) -> ReadySetResult<()> {
+        for node in self.pending_publishes.drain() {
+            if let Some(wh) = self.reader_write_handles.get_mut(node) {
+                wh.publish();
+            }
+        }
+        Ok(())
+    }
+
     /// Handle an expired timeout from `next_poll_duration`
     pub fn handle_timeout(&mut self) -> ReadySetResult<()> {
         if self.wait_time.is_running() {
             self.wait_time.stop();
+        }
+
+        if !self.pending_publishes.is_empty() {
+            self.handle_pending_publishes()?;
         }
 
         if !self.timed_purges.is_empty() {
