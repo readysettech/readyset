@@ -198,6 +198,14 @@ impl Node {
         }
     }
 
+    /// Called on a freshly-deserialized node, before any other method. Rebuilds any
+    /// `#[serde(skip)]` state that is derivable from serialized fields.
+    pub fn post_deserialize(&mut self) {
+        if let Some(n) = self.as_mut_internal() {
+            Ingredient::post_deserialize(n)
+        }
+    }
+
     pub fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
         assert!(!self.taken);
         if let Some(n) = self.as_mut_internal() {

@@ -78,6 +78,11 @@ pub struct Join {
     /// This implements correct LEFT JOIN semantics for ON-clause predicates
     /// that reference only the left side of the join.
     left_filter: Option<Expr>,
+
+    /// Whether `generate_row_move` is safe to use (no duplicate columns from the same side
+    /// in `emit`). Precomputed at construction time; recomputed in `post_deserialize`.
+    #[serde(skip)]
+    emit_move_safe: bool,
 }
 
 impl Join {
@@ -137,7 +142,7 @@ impl Join {
             "Join::new: left: {:?}, right: {:?}, kind: {:?}, on: {:?}, rhs_full_mat: {:?}",
             left, right, kind, on, rhs_full_mat
         );
-        Self {
+        let mut join = Self {
             left: left.into(),
             right: right.into(),
             on,
@@ -149,7 +154,10 @@ impl Join {
             rhs_full_mat,
             missing_upqueries: Default::default(),
             left_filter,
-        }
+            emit_move_safe: false,
+        };
+        join.recompute_emit_metadata();
+        join
     }
 
     pub fn node_is_lhs(&self, node: LocalNodeIndex) -> bool {
@@ -158,6 +166,19 @@ impl Join {
 
     pub fn node_is_rhs(&self, node: LocalNodeIndex) -> bool {
         node == *self.right
+    }
+
+    /// Recompute all `#[serde(skip)]` emit-related metadata from `self.emit`.
+    /// Called from `new()` and `post_deserialize()`.
+    fn recompute_emit_metadata(&mut self) {
+        self.emit_move_safe = {
+            let mut left_cols = HashSet::new();
+            let mut right_cols = HashSet::new();
+            self.emit.iter().all(|&(side, col)| match side {
+                Side::Left => left_cols.insert(col),
+                Side::Right => right_cols.insert(col),
+            })
+        };
     }
 
     pub fn on_left(&self) -> Vec<usize> {
@@ -176,6 +197,27 @@ impl Join {
                 Side::Right => right[col].clone(),
             })
             .collect()
+    }
+
+    /// Like [`generate_row`], but moves values from the owned side instead of cloning.
+    /// The caller must not read from `owned` after this call.
+    fn generate_row_move(
+        &self,
+        owned: &mut [DfValue],
+        borrowed: &[DfValue],
+        owned_is_left: bool,
+    ) -> Vec<DfValue> {
+        let mut result = Vec::with_capacity(self.emit.len());
+        for &(side, col) in &self.emit {
+            let from_owned =
+                (owned_is_left && side == Side::Left) || (!owned_is_left && side == Side::Right);
+            if from_owned {
+                result.push(std::mem::take(&mut owned[col]));
+            } else {
+                result.push(borrowed[col].clone());
+            }
+        }
+        result
     }
 
     /// Build a hash map from one of the sides of the join.
@@ -675,7 +717,7 @@ impl Join {
 
             let mut rc_diff = 0isize;
             for r in group {
-                let (row, positive) = r.extract();
+                let (mut row, positive) = r.extract();
 
                 rc_diff += if positive { 1 } else { -1 };
 
@@ -696,14 +738,22 @@ impl Join {
                         ret.push((self.generate_null(&row), positive).into());
                     }
                 } else {
-                    for other in other_rows.iter() {
+                    let last_other = other_rows.len() - 1;
+                    for (idx, other) in other_rows.iter().enumerate() {
                         // When processing from the right side, check if the left row
                         // passes the filter
                         if !from_left && !self.left_filter_passes(other)? {
                             continue;
                         }
 
-                        if from == *self.left {
+                        if self.emit_move_safe && idx == last_other {
+                            // Move values from the owned row on the last iteration
+                            // to avoid cloning "this side" columns.
+                            ret.push(
+                                (self.generate_row_move(&mut row, other, from_left), positive)
+                                    .into(),
+                            );
+                        } else if from_left {
                             ret.push((self.generate_row(&row, other), positive).into());
                         } else {
                             ret.push((self.generate_row(other, &row), positive).into());
@@ -1092,7 +1142,9 @@ impl Ingredient for Join {
         Some(Some(self.left.as_global()).into_iter().collect())
     }
 
-    fn on_connected(&mut self, _g: &Graph) {}
+    fn post_deserialize(&mut self) {
+        self.recompute_emit_metadata();
+    }
 
     impl_replace_sibling!(left, right);
 
@@ -2182,5 +2234,54 @@ mod tests {
             let rs = j.one_row(r, (vec![2.into(), "x".into()], false), false);
             assert_eq!(rs.len(), 0);
         }
+    }
+
+    #[test]
+    fn post_deserialize_restores_emit_move_safe() {
+        let l = NodeIndex::new(0);
+        let r = NodeIndex::new(1);
+        // Emit has no duplicate columns per side, so `emit_move_safe` should be true.
+        let j = Join::new(
+            l,
+            r,
+            JoinType::Left,
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            true,
+            None,
+        );
+        assert!(j.emit_move_safe, "new() should set emit_move_safe");
+
+        let bytes = bincode::serialize(&j).unwrap();
+        let mut round_tripped: Join = bincode::deserialize(&bytes).unwrap();
+        assert!(
+            !round_tripped.emit_move_safe,
+            "deserialize should leave emit_move_safe at its Default (false)"
+        );
+
+        round_tripped.post_deserialize();
+        assert!(
+            round_tripped.emit_move_safe,
+            "post_deserialize should recompute emit_move_safe"
+        );
+    }
+
+    #[test]
+    fn post_deserialize_leaves_emit_move_safe_false_when_duplicates() {
+        let l = NodeIndex::new(0);
+        let r = NodeIndex::new(1);
+        // Emit contains (Left, 0) twice, so `emit_move_safe` must stay false.
+        let mut j = Join::new(
+            l,
+            r,
+            JoinType::Left,
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Left, 0), (Side::Right, 1)],
+            true,
+            None,
+        );
+        assert!(!j.emit_move_safe);
+        j.post_deserialize();
+        assert!(!j.emit_move_safe);
     }
 }

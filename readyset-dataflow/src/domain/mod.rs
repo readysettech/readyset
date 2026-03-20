@@ -1483,9 +1483,10 @@ impl Domain {
     #[inline(always)]
     fn handle_add_node(
         &mut self,
-        node: Node,
+        mut node: Node,
         parents: Vec<LocalNodeIndex>,
     ) -> ReadySetResult<Option<Vec<u8>>> {
+        node.post_deserialize();
         let addr = node.local_addr();
         let aux_state = node.initial_auxiliary_state();
         self.not_ready.insert(addr);

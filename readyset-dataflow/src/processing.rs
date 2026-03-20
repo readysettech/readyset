@@ -780,6 +780,10 @@ where
     /// yet.
     fn on_connected(&mut self, _graph: &Graph) {}
 
+    /// Called on a freshly-deserialized ingredient, before any other method. Override to rebuild
+    /// any `#[serde(skip)]` state that is derivable from serialized fields.
+    fn post_deserialize(&mut self) {}
+
     /// Swap out the given `from_idx` with `to_idx` in any state stored within this node.
     ///
     /// This method may be called any number of times after `on_connected` is called. If it is

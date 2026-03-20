@@ -150,6 +150,10 @@ impl Ingredient for NodeOperator {
         impl_ingredient_fn_mut!(self, on_connected, graph)
     }
 
+    fn post_deserialize(&mut self) {
+        impl_ingredient_fn_mut!(self, post_deserialize,)
+    }
+
     fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
         impl_ingredient_fn_mut!(self, replace_sibling, from_idx, to_idx)
     }
