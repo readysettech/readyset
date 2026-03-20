@@ -34,7 +34,7 @@ use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
 use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 
-const BATCH_SIZE: usize = 1024; // How many rows to buffer before pushing to ReadySet
+const BATCH_SIZE: usize = 8192; // How many rows to buffer before pushing to ReadySet
 
 macro_rules! get_transaction {
     ($self:expr) => {
