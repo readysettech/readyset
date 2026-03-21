@@ -183,9 +183,11 @@ enum AvgScaleMode {
 struct AverageDataPair {
     count: DfValue,
     sum: DfValue,
-    /// The zero value for this aggregation, used when count drops to 0.
-    #[serde(default = "default_avg_zero")]
-    zero: DfValue,
+    /// The value returned when the group has no non-NULL rows (i.e., count
+    /// drops to 0).  This is SQL NULL, not a numeric zero — `sum` uses a
+    /// typed numeric zero for correct arithmetic accumulation.
+    #[serde(default = "default_avg_empty_value")]
+    empty_value: DfValue,
     /// If set, round the result to this many decimal places.
     #[serde(default)]
     target_scale: Option<i64>,
@@ -198,8 +200,9 @@ fn default_scale_mode() -> AvgScaleMode {
     // Legacy default: use target_scale (Fixed) or no rounding
     AvgScaleMode::Fixed(0)
 }
-fn default_avg_zero() -> DfValue {
-    DfValue::Double(0.0)
+
+fn default_avg_empty_value() -> DfValue {
+    DfValue::None
 }
 
 /// Computes display scale for Postgres numeric division, matching PostgreSQL behavior.
@@ -314,7 +317,7 @@ impl AverageDataPair {
                 _ => Ok(result),
             }
         } else {
-            Ok(self.zero.clone())
+            Ok(self.empty_value.clone())
         }
     }
 }
@@ -389,7 +392,19 @@ impl GroupedOperation for Aggregator {
         };
 
         let apply_sum = |curr: DfValue, diff: Self::Diff| -> ReadySetResult<DfValue> {
-            if diff.positive {
+            if curr.is_none() {
+                if diff.positive {
+                    // First non-NULL positive value initializes the sum.
+                    Ok(diff.value)
+                } else {
+                    // A negative record when sum is NULL should not occur
+                    // in normal operation, but can arise during state
+                    // recovery / replay.  Start from the typed zero and
+                    // subtract.
+                    let zero = self.new_data()?;
+                    &zero - &diff.value
+                }
+            } else if diff.positive {
                 &curr + &diff.value
             } else {
                 &curr - &diff.value
@@ -414,9 +429,13 @@ impl GroupedOperation for Aggregator {
             count_sum_map
                 .entry(diff.group_hash)
                 .or_insert(AverageDataPair {
+                    // sum starts at typed numeric zero (not NULL) so that
+                    // arithmetic with the first non-NULL value works
+                    // correctly (0 + x = x).  empty_value controls what
+                    // is returned when count drops to 0.
                     sum: avg_zero.clone(),
                     count: DfValue::Int(0),
-                    zero: avg_zero.clone(),
+                    empty_value: DfValue::None,
                     target_scale: avg_target_scale,
                     scale_mode: avg_scale_mode,
                 })
@@ -436,9 +455,12 @@ impl GroupedOperation for Aggregator {
                 }
             };
 
-        diffs
-            .fold(Ok(current.cloned().unwrap_or(self.new_data()?)), apply_diff)
-            .map(Some)
+        let initial = match (current, &self.op) {
+            (Some(val), _) => val.clone(),
+            (None, Aggregation::Sum | Aggregation::Avg) => DfValue::None,
+            (None, _) => self.new_data()?,
+        };
+        diffs.fold(Ok(initial), apply_diff).map(Some)
     }
 
     fn description(&self) -> String {
@@ -1897,6 +1919,115 @@ mod tests {
         assert_eq!(
             avg_op.output_col_type(),
             DfType::Numeric { prec: 23, scale: 4 },
+        );
+    }
+
+    /// Helper: assert that a single NULL input to the given aggregation
+    /// produces a NULL output (not zero).
+    fn assert_all_null_returns_null(agg: Aggregation) {
+        let mut c = setup(agg, true);
+
+        let u: Record = vec![1.into(), DfValue::None].into();
+        let rs = c.narrow_one(u, true);
+        assert_eq!(rs.len(), 1);
+
+        match rs.into_iter().next().unwrap() {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], DfValue::None);
+            }
+            other => panic!("expected Record::Positive, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sum_all_null_returns_null() {
+        assert_all_null_returns_null(Aggregation::Sum);
+    }
+
+    #[test]
+    fn avg_all_null_returns_null() {
+        assert_all_null_returns_null(Aggregation::Avg);
+    }
+
+    /// Helper: assert that a NULL followed by non-NULL values produces the
+    /// expected aggregate (only non-NULL values contribute).
+    fn assert_mix_null_nonnull(agg: Aggregation, values: &[f64], expected: DfValue) {
+        let mut c = setup(agg, true);
+
+        // Add Group=1, Value=NULL
+        let u: Record = vec![1.into(), DfValue::None].into();
+        c.narrow_one(u, true);
+
+        // Add non-NULL values; keep the last result set
+        let mut last_rs = Records::default();
+        for &v in values {
+            let u: Record = vec![1.into(), DfValue::Double(v)].into();
+            last_rs = c.narrow_one(u, true);
+        }
+        let positive = last_rs.into_iter().find(|r| r.is_positive()).unwrap();
+        match positive {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], expected);
+            }
+            other => panic!("expected Record::Positive, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sum_mix_null_nonnull() {
+        assert_mix_null_nonnull(Aggregation::Sum, &[5.0], DfValue::Double(5.0));
+    }
+
+    #[test]
+    fn avg_mix_null_nonnull() {
+        // AVG of 4.0, 6.0 = 5.0 (NULL excluded)
+        assert_mix_null_nonnull(Aggregation::Avg, &[4.0, 6.0], DfValue::Double(5.0));
+    }
+
+    /// SUM with multiple NULLs should still return NULL.
+    #[test]
+    fn sum_multiple_nulls_returns_null() {
+        let mut c = setup(Aggregation::Sum, true);
+
+        let u: Record = vec![1.into(), DfValue::None].into();
+        c.narrow_one(u, true);
+        let u: Record = vec![1.into(), DfValue::None].into();
+        let rs = c.narrow_one(u, true);
+
+        // Should still be NULL — adding more NULL rows doesn't make it 0
+        let positive = rs.into_iter().find(|r| r.is_positive()).unwrap();
+        match positive {
+            Record::Positive(r) => {
+                assert_eq!(r[0], 1.into());
+                assert_eq!(r[1], DfValue::None);
+            }
+            other => panic!("expected Record::Positive, got {other:?}"),
+        }
+    }
+
+    /// SUM negative from NULL state (defensive path for replay/recovery).
+    /// When a group has no prior state and a negative diff arrives, the sum
+    /// should start from zero and subtract.
+    #[test]
+    fn sum_negative_from_null_state() {
+        let mut c = setup(Aggregation::Sum, true);
+
+        // Insert value=5 for group 1, then remove it.
+        let u: Record = vec![1.into(), DfValue::Double(5.0)].into();
+        c.narrow_one(u, true);
+        let u = (vec![1.into(), DfValue::Double(5.0)], false);
+        let rs = c.narrow_one_row(u, true);
+
+        // After removing the only row, group should report NULL (via
+        // empty_value), not 0.
+        let positive = rs.into_iter().find(|r| r.is_positive());
+        // When the group drops to 0 rows and emit_empty is false, no
+        // positive record is emitted — the group simply disappears.
+        assert!(
+            positive.is_none(),
+            "group with 0 rows should not emit a positive record"
         );
     }
 }

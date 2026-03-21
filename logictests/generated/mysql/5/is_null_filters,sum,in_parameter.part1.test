@@ -159,8 +159,7 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NULL
 ? = 2
 ----
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT table_1.column_2 AS alias_1, sum(table_1.column_6) AS alias_2 FROM table_1 WHERE (table_1.column_2 IS NOT NULL) GROUP BY table_1.column_2
 ----
 0
@@ -572,8 +571,7 @@ SELECT table_1.column_12 AS alias_1, table_1.column_12 AS alias_2, sum(table_1.c
 2
 1
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT table_1.column_12 AS alias_1, table_1.column_12 AS alias_2, table_1.column_12 AS alias_3, sum(table_1.column_24) AS alias_4 FROM table_1 WHERE (((table_1.column_12 IS NOT NULL) OR (table_1.column_12 IS NULL)) OR (table_1.column_12 IS NOT NULL)) GROUP BY table_1.column_12, table_1.column_12, table_1.column_12
 ----
 0

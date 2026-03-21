@@ -372,3 +372,15 @@ test_window_aggregation_type!(
     SqlType::BigInt(None),
     ["5188155168561903705"]
 );
+
+// SUM/AVG on all-NULL input should return NULL, not 0
+test_aggregation_type!(mysql, sum_all_null_int, "sum(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
+test_aggregation_type!(mysql, avg_all_null_int, "avg(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
+test_aggregation_type!(postgres, sum_all_null_int, "sum(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
+test_aggregation_type!(postgres, avg_all_null_int, "avg(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
+
+// SUM/AVG on mix of NULL and non-NULL should aggregate only non-NULL values
+test_aggregation_type!(mysql, sum_mix_null_int, "sum(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
+test_aggregation_type!(mysql, avg_mix_null_int, "avg(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
+test_aggregation_type!(postgres, sum_mix_null_int, "sum(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
+test_aggregation_type!(postgres, avg_mix_null_int, "avg(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);

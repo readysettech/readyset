@@ -76,8 +76,7 @@ SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, `table_1`.`column_1` AS 
 74454826
 -365637909
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT sum(distinct `table_1`.`column_4`) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` IS NULL) GROUP BY `table_1`.`column_4`
 ----
 NULL

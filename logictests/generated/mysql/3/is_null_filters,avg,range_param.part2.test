@@ -151,8 +151,7 @@ NULL
 NULL
 NULL
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(`table_1`.`column_5`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` IS NULL) GROUP BY `table_1`.`column_2`
 ----
 NULL
@@ -237,8 +236,7 @@ NULL
 NULL
 NULL
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(`table_1`.`column_9`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` IS NULL) OR (`table_1`.`column_6` IS NULL)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ----
 NULL

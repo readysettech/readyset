@@ -85,8 +85,7 @@ NULL
 NULL
 NULL
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, sum(distinct `table_1`.`column_3`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL) GROUP BY `table_1`.`column_1`
 ----
 NULL
@@ -151,8 +150,7 @@ NULL
 NULL
 NULL
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` IS NULL) GROUP BY `table_1`.`column_4`
 ----
 NULL
@@ -248,8 +246,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2` FROM
 ? = 10
 ----
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, sum(distinct `table_1`.`column_10`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
 -1349026848
