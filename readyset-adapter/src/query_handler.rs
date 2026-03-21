@@ -18,6 +18,11 @@ pub struct SetBehavior {
     /// This `SET` statement changes the encoding to be used for results. Corresponds to `SET
     /// @@character_set_results` in MySQL or `SET NAMES` in Postgres or MySQL.
     pub set_results_encoding: Option<readyset_data::encoding::Encoding>,
+    /// This `SET` statement changes the timezone offset used for TIMESTAMP conversions.
+    /// `Some(Some(secs))` means a fixed offset in seconds from UTC.
+    /// `Some(None)` means "SYSTEM" (use server local timezone).
+    /// `None` means no change (this SET didn't touch time_zone).
+    pub set_timezone_offset: Option<Option<i32>>,
 }
 
 impl SetBehavior {
@@ -47,6 +52,11 @@ impl SetBehavior {
         }
         self
     }
+
+    pub fn set_timezone_offset(mut self, offset: Option<i32>) -> Self {
+        self.set_timezone_offset = Some(offset);
+        self
+    }
 }
 
 impl Default for SetBehavior {
@@ -57,6 +67,7 @@ impl Default for SetBehavior {
             set_autocommit: None,
             set_search_path: None,
             set_results_encoding: None,
+            set_timezone_offset: None,
         }
     }
 }

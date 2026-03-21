@@ -292,6 +292,11 @@ pub struct NoriaConnector {
     /// The encoding in which to return text results. Corresponds to `character_set_results` in
     /// MySQL and `SET NAMES` in both MySQL and Postgres.
     results_encoding: Encoding,
+
+    /// The timezone offset (in seconds from UTC) for TIMESTAMP conversion.
+    /// `None` means "SYSTEM" (use server local timezone via `chrono::Local`).
+    /// `Some(secs)` means a fixed offset.
+    timezone_offset: Option<i32>,
 }
 
 mod request_handler {
@@ -409,6 +414,7 @@ impl NoriaConnector {
             parse_dialect,
             schema_search_path,
             results_encoding: Encoding::Utf8,
+            timezone_offset: None,
         }
     }
 
@@ -934,6 +940,18 @@ impl NoriaConnector {
     /// Returns the encoding for result sets
     pub fn results_encoding(&self) -> Encoding {
         self.results_encoding
+    }
+
+    /// Set the timezone offset for TIMESTAMP conversion.
+    /// `None` means "SYSTEM" (use server local timezone).
+    /// `Some(secs)` means a fixed offset in seconds from UTC.
+    pub fn set_timezone_offset(&mut self, offset: Option<i32>) {
+        self.timezone_offset = offset;
+    }
+
+    /// Returns the timezone offset for TIMESTAMP conversion.
+    pub fn timezone_offset(&self) -> Option<i32> {
+        self.timezone_offset
     }
 
     pub(crate) async fn resnapshot_table(

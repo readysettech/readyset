@@ -933,9 +933,16 @@ impl QueryHandler for MySqlQueryHandler {
                         "autocommit" => behavior.set_autocommit(
                             matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1),
                         ),
-                        "time_zone" => behavior.unsupported(
-                            !matches!(value, Expr::Literal(Literal::String(s)) if s == "+00:00"),
-                        ),
+                        "time_zone" => {
+                            if let Expr::Literal(Literal::String(s)) = value {
+                                match parse_timezone_offset(s) {
+                                    Some(offset) => behavior.set_timezone_offset(offset),
+                                    None => behavior.unsupported(true),
+                                }
+                            } else {
+                                behavior.unsupported(true)
+                            }
+                        }
                         "sql_mode" => {
                             let supported = if let Expr::Literal(Literal::String(s)) = value {
                                 match raw_sql_modes_to_list(s) {
@@ -1020,6 +1027,47 @@ fn get_encoding_for_charset(
         .increment(1);
     }
     encoding
+}
+
+/// MySQL's valid `@@time_zone` offset range: +14:00 (east) to -13:59 (west).
+const MAX_POSITIVE_TZ_OFFSET_SECS: i32 = 14 * 3600; // +14:00
+const MAX_NEGATIVE_TZ_OFFSET_SECS: i32 = 13 * 3600 + 59 * 60; // -13:59
+
+/// Parse a MySQL timezone offset string into seconds from UTC.
+///
+/// Returns `Some(Some(seconds))` for fixed offset strings like `"+05:00"`, `"-05:30"`, `"+00:00"`.
+/// Returns `Some(None)` for `"SYSTEM"` (use server local timezone).
+/// Returns `None` for named timezones like `"US/Eastern"` (unsupported).
+fn parse_timezone_offset(s: &str) -> Option<Option<i32>> {
+    if s.eq_ignore_ascii_case("SYSTEM") {
+        return Some(None);
+    }
+
+    let (sign, rest) = match s.as_bytes().first() {
+        Some(b'+') => (1i32, &s[1..]),
+        Some(b'-') => (-1i32, &s[1..]),
+        _ => return None,
+    };
+
+    let (hours_str, minutes_str) = rest.split_once(':')?;
+    let hours: u32 = hours_str.parse().ok()?;
+    let minutes: u32 = minutes_str.parse().ok()?;
+
+    if minutes > 59 {
+        return None;
+    }
+
+    let total_seconds = hours as i32 * 3600 + minutes as i32 * 60;
+    let max = if sign == 1 {
+        MAX_POSITIVE_TZ_OFFSET_SECS
+    } else {
+        MAX_NEGATIVE_TZ_OFFSET_SECS
+    };
+    if total_seconds > max {
+        return None;
+    }
+
+    Some(Some(sign * total_seconds))
 }
 
 #[cfg(test)]
@@ -1237,5 +1285,107 @@ mod tests {
                 SetBehavior::default().set_results_encoding(Some(encoding))
             )
         }
+    }
+
+    #[test]
+    fn parse_timezone_offset_fixed_offsets() {
+        assert_eq!(super::parse_timezone_offset("+00:00"), Some(Some(0)));
+        assert_eq!(super::parse_timezone_offset("+05:00"), Some(Some(18000)));
+        assert_eq!(super::parse_timezone_offset("-05:00"), Some(Some(-18000)));
+        assert_eq!(super::parse_timezone_offset("+05:30"), Some(Some(19800)));
+        assert_eq!(super::parse_timezone_offset("-05:30"), Some(Some(-19800)));
+        assert_eq!(super::parse_timezone_offset("+13:00"), Some(Some(46800)));
+    }
+
+    #[test]
+    fn parse_timezone_offset_system() {
+        assert_eq!(super::parse_timezone_offset("SYSTEM"), Some(None));
+        assert_eq!(super::parse_timezone_offset("system"), Some(None));
+    }
+
+    #[test]
+    fn parse_timezone_offset_named_unsupported() {
+        assert_eq!(super::parse_timezone_offset("US/Eastern"), None);
+        assert_eq!(super::parse_timezone_offset("America/New_York"), None);
+    }
+
+    #[test]
+    fn parse_timezone_offset_invalid() {
+        assert_eq!(super::parse_timezone_offset(""), None);
+        assert_eq!(super::parse_timezone_offset("abc"), None);
+        assert_eq!(super::parse_timezone_offset("+14:00"), Some(Some(50400)));
+        assert_eq!(super::parse_timezone_offset("+14:01"), None);
+        assert_eq!(super::parse_timezone_offset("+00:60"), None);
+        // MySQL range is -13:59 to +14:00; -14:00 is invalid
+        assert_eq!(super::parse_timezone_offset("-14:00"), None);
+        assert_eq!(super::parse_timezone_offset("-13:59"), Some(Some(-50340)));
+    }
+
+    #[test]
+    fn set_time_zone_utc() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "time_zone".into(),
+                },
+                Expr::Literal(Literal::String("+00:00".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_timezone_offset(Some(0))
+        );
+    }
+
+    #[test]
+    fn set_time_zone_fixed_offset() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "time_zone".into(),
+                },
+                Expr::Literal(Literal::String("+05:30".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_timezone_offset(Some(19800))
+        );
+    }
+
+    #[test]
+    fn set_time_zone_system() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "time_zone".into(),
+                },
+                Expr::Literal(Literal::String("SYSTEM".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_timezone_offset(None)
+        );
+    }
+
+    #[test]
+    fn set_time_zone_named_unsupported() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "time_zone".into(),
+                },
+                Expr::Literal(Literal::String("US/Eastern".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().unsupported(true)
+        );
     }
 }

@@ -2465,6 +2465,168 @@ async fn timestamp_text_protocol() {
     shutdown_tx.shutdown().await;
 }
 
+/// Verifies that TIMESTAMP values returned via the binary (prepared statement) protocol respect
+/// the client's `@@time_zone` session variable. The data is inserted at UTC, then both the
+/// direct MySQL connection and the ReadySet connection are switched to `+05:00` before querying.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn timestamp_client_timezone_binary() {
+    let mut direct_mysql = connect().await;
+    // Insert data with the upstream connection in UTC so the stored value is unambiguous.
+    direct_mysql
+        .query_drop(
+            "SET SESSION time_zone = '+00:00';
+             DROP TABLE IF EXISTS ts_client_tz_bin CASCADE;
+             CREATE TABLE ts_client_tz_bin (id INT PRIMARY KEY, ts TIMESTAMP);
+             INSERT INTO ts_client_tz_bin VALUES (1, '2024-06-15 12:00:00');",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) =
+        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_client_tz_bin WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    // Switch both connections to +05:00.
+    direct_mysql
+        .query_drop("SET SESSION time_zone = '+05:00'")
+        .await
+        .unwrap();
+    conn.query_drop("SET SESSION time_zone = '+05:00'")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let my_row: Row = direct_mysql
+            .exec_first("SELECT * FROM ts_client_tz_bin WHERE id = ?", (1,))
+            .await
+            .unwrap()
+            .unwrap();
+        let rs_row: Row = conn
+            .exec_first("SELECT * FROM ts_client_tz_bin WHERE id = ?", (1,))
+            .await
+            .unwrap()
+            .unwrap();
+        AssertUnwindSafe(move || (rs_row, my_row))
+    }, then_assert: |results| {
+        let (rs_row, my_row) = results();
+        // MySQL returns 2024-06-15 17:00:00 (12:00 UTC + 5h).
+        // ReadySet must do the same.
+        assert_eq!(rs_row.unwrap_raw(), my_row.unwrap_raw());
+    });
+    shutdown_tx.shutdown().await;
+}
+
+/// Same as above but exercises the text protocol (`query` instead of `exec`).
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn timestamp_client_timezone_text() {
+    let mut direct_mysql = connect().await;
+    direct_mysql
+        .query_drop(
+            "SET SESSION time_zone = '+00:00';
+             DROP TABLE IF EXISTS ts_client_tz_text CASCADE;
+             CREATE TABLE ts_client_tz_text (id INT PRIMARY KEY, ts TIMESTAMP);
+             INSERT INTO ts_client_tz_text VALUES (1, '2024-06-15 12:00:00');",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) =
+        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_client_tz_text WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    direct_mysql
+        .query_drop("SET SESSION time_zone = '+05:00'")
+        .await
+        .unwrap();
+    conn.query_drop("SET SESSION time_zone = '+05:00'")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let my_rows: Vec<(i32, String)> = direct_mysql
+            .query("SELECT * FROM ts_client_tz_text WHERE id = 1")
+            .await
+            .unwrap();
+        let rs_rows: Vec<(i32, String)> = conn
+            .query("SELECT * FROM ts_client_tz_text WHERE id = 1")
+            .await
+            .unwrap();
+        AssertUnwindSafe(move || (rs_rows, my_rows))
+    }, then_assert: |results| {
+        let (rs_rows, my_rows) = results();
+        assert_eq!(rs_rows, my_rows);
+    });
+    shutdown_tx.shutdown().await;
+}
+
+/// Verifies that `SET time_zone = 'SYSTEM'` correctly resets TIMESTAMP conversion back to the
+/// server's local timezone after a fixed offset was previously active.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn timestamp_client_timezone_system_reset() {
+    let mut direct_mysql = connect().await;
+    direct_mysql
+        .query_drop(
+            "SET SESSION time_zone = '+00:00';
+             DROP TABLE IF EXISTS ts_sys_reset CASCADE;
+             CREATE TABLE ts_sys_reset (id INT PRIMARY KEY, ts TIMESTAMP);
+             INSERT INTO ts_sys_reset VALUES (1, '2024-06-15 12:00:00');",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) =
+        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_sys_reset WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    // Set a fixed offset first, then reset to SYSTEM on both connections.
+    for c in [&mut direct_mysql, &mut conn] {
+        c.query_drop("SET SESSION time_zone = '+05:00'").await.unwrap();
+    }
+    for c in [&mut direct_mysql, &mut conn] {
+        c.query_drop("SET SESSION time_zone = 'SYSTEM'").await.unwrap();
+    }
+
+    eventually!(run_test: {
+        let my_rows: Vec<(i32, String)> = direct_mysql
+            .query("SELECT * FROM ts_sys_reset WHERE id = 1")
+            .await
+            .unwrap();
+        let rs_rows: Vec<(i32, String)> = conn
+            .query("SELECT * FROM ts_sys_reset WHERE id = 1")
+            .await
+            .unwrap();
+        AssertUnwindSafe(move || (rs_rows, my_rows))
+    }, then_assert: |results| {
+        let (rs_rows, my_rows) = results();
+        assert_eq!(rs_rows, my_rows);
+    });
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(mysql)]

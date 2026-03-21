@@ -5,6 +5,7 @@ use std::convert::TryFrom;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
 
+use chrono::FixedOffset;
 use itertools::{izip, Itertools};
 use mysql_async::consts::StatusFlags;
 use mysql_srv::{
@@ -60,6 +61,7 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
     cs: &mysql_srv::Column,
     ty: &DfType,
     encoding: Encoding,
+    timezone: Option<&FixedOffset>,
 ) -> Result<(), Error> {
     let conv_error = || ReadySetError::DfValueConversionError {
         src_type: format!("{:?}", DfValueKind::from(c)),
@@ -153,7 +155,10 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
                 if ts.is_zero() {
                     rw.write_col(ts)
                 } else {
-                    rw.write_col(ts.to_local())
+                    match timezone {
+                        Some(tz) => rw.write_col(ts.to_fixed_offset(tz)),
+                        None => rw.write_col(ts.to_local()),
+                    }
                 }
             }
             ColumnType::MYSQL_TYPE_DATE => {
@@ -419,6 +424,7 @@ async fn handle_readyset_result<S>(
     result: noria_connector::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    timezone: Option<&FixedOffset>,
     status_flags: StatusFlags,
 ) -> io::Result<()>
 where
@@ -476,7 +482,9 @@ where
                         None => &DfType::Unknown,
                     };
 
-                    if let Err(e) = write_column(&mut rw, val, c, ty, results_encoding).await {
+                    if let Err(e) =
+                        write_column(&mut rw, val, c, ty, results_encoding, timezone).await
+                    {
                         return handle_column_write_err(e, rw).await;
                     }
                 }
@@ -562,6 +570,7 @@ async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    timezone: Option<&FixedOffset>,
     status_flags: StatusFlags,
 ) -> io::Result<()>
 where
@@ -569,7 +578,7 @@ where
 {
     match result {
         Ok(QueryResult::Noria(result)) => {
-            handle_readyset_result(result, writer, results_encoding, status_flags).await
+            handle_readyset_result(result, writer, results_encoding, timezone, status_flags).await
         }
         Ok(QueryResult::Shallow(result)) => {
             handle_shallow_result(result, writer, status_flags).await
@@ -600,6 +609,7 @@ async fn handle_query_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    timezone: Option<&FixedOffset>,
     status_flags: StatusFlags,
 ) -> QueryResultsResponse
 where
@@ -608,7 +618,7 @@ where
     match result {
         Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
         res => QueryResultsResponse::IoResult(
-            handle_execute_result(res, writer, results_encoding, status_flags).await,
+            handle_execute_result(res, writer, results_encoding, timezone, status_flags).await,
         ),
     }
 }
@@ -773,6 +783,9 @@ where
         }
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
+        let timezone = self.noria.connectors.noria.timezone_offset().map(|secs| {
+            FixedOffset::east_opt(secs).expect("timezone offset validated at SET time")
+        });
         let pre_flags = self.build_status_flags();
 
         let (execute_result, post_state) = match self.execute(id, &value_params, &()).await {
@@ -817,7 +830,10 @@ where
                 while let Some(row) = rows.next() {
                     for (c, ty, val) in izip!(mysql_schema.iter(), column_types.iter(), row.iter())
                     {
-                        if let Err(e) = write_column(&mut rw, val, c, ty, results_encoding).await {
+                        if let Err(e) =
+                            write_column(&mut rw, val, c, ty, results_encoding, timezone.as_ref())
+                                .await
+                        {
                             return handle_column_write_err(e, rw).await;
                         };
                     }
@@ -826,7 +842,14 @@ where
                 rw.set_status_flags(status_flags).finish().await
             }
             execute_result => {
-                handle_execute_result(execute_result, results, results_encoding, status_flags).await
+                handle_execute_result(
+                    execute_result,
+                    results,
+                    results_encoding,
+                    timezone.as_ref(),
+                    status_flags,
+                )
+                .await
             }
         }
     }
@@ -899,12 +922,22 @@ where
         }
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
+        let timezone = self.noria.connectors.noria.timezone_offset().map(|secs| {
+            FixedOffset::east_opt(secs).expect("timezone offset validated at SET time")
+        });
         let pre_flags = self.build_status_flags();
         let (query_result, status_flags) = match self.query(query).await {
             Ok((result, state)) => (Ok(result), Self::flags_from_proxy_state(state)),
             Err(e) => (Err(e), pre_flags),
         };
-        handle_query_result(query_result, results, results_encoding, status_flags).await
+        handle_query_result(
+            query_result,
+            results,
+            results_encoding,
+            timezone.as_ref(),
+            status_flags,
+        )
+        .await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {

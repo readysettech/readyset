@@ -66,13 +66,38 @@ impl TimestampTz {
     const NEGATIVE_FLAG: u8 = 0b_0000_0010;
     const TOP_OFFSET_BIT: u8 = 0b_0000_0001;
 
-    #[inline(always)]
-    /// Convert self to local timezone while keeping the same extra
+    /// Convert self to the server's local timezone while keeping subsecond digit count.
+    ///
+    /// The returned `TimestampTz` has its `datetime` field set to the local time in the server's
+    /// timezone, with timezone offset metadata cleared. This is intended for immediate wire
+    /// serialization — do not call `to_chrono()` on the result expecting a meaningful
+    /// timezone-aware value.
+    #[inline]
     pub fn to_local(&self) -> Self {
         let mut ts = *self;
         ts.datetime = self.to_chrono().with_timezone(&chrono::Local).naive_local();
+        ts.extra[0] = 0;
+        ts.extra[1] = 0;
+        ts.extra[2] &= Self::ZERO_FLAG | Self::DATE_ONLY_FLAG | Self::SUBSECOND_DIGITS_BITS;
         ts
     }
+
+    /// Convert self to a given fixed offset while keeping subsecond digit count.
+    ///
+    /// The returned `TimestampTz` has its `datetime` field set to the local time in the target
+    /// timezone, with timezone offset metadata cleared (offset 0, no timezone flag). This is
+    /// intended for immediate wire serialization — do not call `to_chrono()` on the result
+    /// expecting a meaningful timezone-aware value.
+    #[inline]
+    pub fn to_fixed_offset(&self, tz: &FixedOffset) -> Self {
+        let mut ts = *self;
+        ts.datetime = self.to_chrono().with_timezone(tz).naive_local();
+        ts.extra[0] = 0;
+        ts.extra[1] = 0;
+        ts.extra[2] &= Self::ZERO_FLAG | Self::DATE_ONLY_FLAG | Self::SUBSECOND_DIGITS_BITS;
+        ts
+    }
+
     #[inline(always)]
     /// Constructs a [`TimestampTz`] when provided with the number of ms since the unix epoch.
     pub fn from_unix_ms(time_ms: u64) -> Self {
@@ -1042,6 +1067,117 @@ mod tests {
         assert_eq!(ts.subsecond_digits(), 2);
         assert!(ts.has_timezone());
         assert_eq!(ts.to_string(), "2004-10-19 10:23:54.12+05:30");
+    }
+
+    #[test]
+    fn to_fixed_offset_converts_utc_to_target_timezone() {
+        let utc_ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+
+        let plus5 = FixedOffset::east_opt(5 * 3600).unwrap();
+        let shifted = utc_ts.to_fixed_offset(&plus5);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(17, 0, 0)
+                .unwrap()
+        );
+
+        let minus5 = FixedOffset::east_opt(-5 * 3600).unwrap();
+        let shifted_neg = utc_ts.to_fixed_offset(&minus5);
+        assert_eq!(
+            shifted_neg.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(7, 0, 0)
+                .unwrap()
+        );
+
+        let utc = FixedOffset::east_opt(0).unwrap();
+        let shifted_zero = utc_ts.to_fixed_offset(&utc);
+        assert_eq!(
+            shifted_zero.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_fixed_offset_preserves_subsecond_digits() {
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00.123456").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        let plus5 = FixedOffset::east_opt(5 * 3600).unwrap();
+        let shifted = ts.to_fixed_offset(&plus5);
+        assert_eq!(shifted.subsecond_digits(), 6);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_micro_opt(17, 0, 0, 123456)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_fixed_offset_clears_timezone_metadata() {
+        let mut ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        ts.set_offset(3600);
+        assert!(ts.has_timezone());
+
+        let plus5 = FixedOffset::east_opt(5 * 3600).unwrap();
+        let shifted = ts.to_fixed_offset(&plus5);
+        assert!(!shifted.has_timezone());
+        assert_eq!(shifted.get_offset(), 0);
+    }
+
+    #[test]
+    fn to_fixed_offset_date_rollover() {
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 12, 31)
+                .unwrap()
+                .and_hms_opt(23, 0, 0)
+                .unwrap(),
+        );
+        let plus5 = FixedOffset::east_opt(5 * 3600).unwrap();
+        let shifted = ts.to_fixed_offset(&plus5);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2025, 1, 1)
+                .unwrap()
+                .and_hms_opt(4, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_fixed_offset_half_hour_negative() {
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let minus530 = FixedOffset::east_opt(-(5 * 3600 + 30 * 60)).unwrap();
+        let shifted = ts.to_fixed_offset(&minus530);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(6, 30, 0)
+                .unwrap()
+        );
     }
 
     #[test]
