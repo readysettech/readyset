@@ -1216,7 +1216,17 @@ impl BuiltinFunction {
             }
             BuiltinFunction::Substring(string, from, len) => {
                 let string = non_null!(string.eval(record)?);
-                let s = <&str>::try_from(&string)?;
+                // MySQL implicitly casts non-string types to their string
+                // representation for SUBSTRING. Fall back to Display when
+                // the value isn't directly convertible to &str.
+                let fallback;
+                let s = match <&str>::try_from(&string) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        fallback = string.to_string();
+                        &fallback
+                    }
+                };
 
                 let from = match from {
                     Some(from) => non_null!(from.eval(record)?).try_into()?,
@@ -1580,7 +1590,7 @@ impl BuiltinFunction {
 
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveTime;
+    use chrono::{NaiveDate, NaiveTime};
     use chrono_tz::{Asia, Atlantic};
     use lazy_static::lazy_static;
     use pretty_assertions::assert_eq;
@@ -3882,5 +3892,49 @@ mod tests {
             .eval(&[DfValue::TimestampTz(utc_time.into())])
             .unwrap();
         assert_eq!(result, DfValue::TimestampTz(expected_utc.into()));
+    }
+
+    /// MySQL implicitly casts non-string types to string for SUBSTRING.
+    /// SUBSTRING(12345, 1, 3) should return '123'.
+    #[test]
+    fn substring_implicit_cast_int() {
+        let expr = parse_and_lower("substring(c0, 1, 3)", MySQL);
+        let res = expr.eval::<DfValue>(&[DfValue::Int(12345)]).unwrap();
+        assert_eq!(res, "123".into());
+    }
+
+    #[test]
+    fn substring_implicit_cast_double() {
+        let expr = parse_and_lower("substring(c0, 1, 4)", MySQL);
+        let res = expr.eval::<DfValue>(&[DfValue::Double(3.125)]).unwrap();
+        assert_eq!(res, "3.12".into());
+    }
+
+    /// SUBSTRING(NULL, ...) should return NULL.
+    #[test]
+    fn substring_null_returns_null() {
+        let expr = parse_and_lower("substring(c0, 1, 3)", MySQL);
+        let res = expr.eval::<DfValue>(&[DfValue::None]).unwrap();
+        assert_eq!(res, DfValue::None);
+    }
+
+    /// SUBSTRING on unsigned int.
+    #[test]
+    fn substring_implicit_cast_unsigned_int() {
+        let expr = parse_and_lower("substring(c0, 1, 3)", MySQL);
+        let res = expr
+            .eval::<DfValue>(&[DfValue::UnsignedInt(99999)])
+            .unwrap();
+        assert_eq!(res, "999".into());
+    }
+
+    /// SUBSTRING on a DATE value.
+    /// MySQL: SUBSTRING('2025-03-15', 1, 4) → '2025'
+    #[test]
+    fn substring_implicit_cast_date() {
+        let expr = parse_and_lower("substring(c0, 1, 4)", MySQL);
+        let date = NaiveDate::from_ymd_opt(2025, 3, 15).unwrap();
+        let res = expr.eval::<DfValue>(&[DfValue::from(date)]).unwrap();
+        assert_eq!(res, "2025".into());
     }
 }
