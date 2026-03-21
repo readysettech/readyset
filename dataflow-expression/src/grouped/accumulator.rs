@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter, Result};
 use std::sync::Arc;
 
+use readyset_data::upstream_system_props::get_group_concat_max_len;
 use readyset_data::{Array, Collation, DfValue};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::is_aggregate;
@@ -26,6 +27,12 @@ use readyset_sql::ast::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use strum::IntoStaticStr;
+
+/// Truncate a GROUP_CONCAT result to `max_len` bytes, respecting
+/// UTF-8 character boundaries.
+pub(crate) fn truncate_group_concat(s: &str, max_len: usize) -> &str {
+    &s[..s.floor_char_boundary(max_len)]
+}
 
 /// Supported accumulation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, IntoStaticStr)]
@@ -259,6 +266,7 @@ impl AccumulationOp {
         &self,
         data: &AccumulatorData,
         separator: &str,
+        max_len: Option<usize>,
     ) -> ReadySetResult<DfValue> {
         // return SQL NULL if no non-NULL values in the `data`. we won't have NULL values as we've
         // filtered those out already.
@@ -266,21 +274,44 @@ impl AccumulationOp {
             return Ok(DfValue::None);
         }
 
-        let strings: Vec<_> = match data {
-            AccumulatorData::Simple(v) => {
-                v.iter().map(|piece| piece.to_string()).collect::<Vec<_>>()
-            }
-            AccumulatorData::DistinctOrdered(t) => t
-                .iter()
-                .flat_map(|(k, &count)| {
-                    let repeat_count = if self.is_distinct() { 1 } else { count };
-                    std::iter::repeat_n(k.to_string().clone(), repeat_count)
-                })
-                .collect::<Vec<_>>(),
-        };
+        let mut result = String::new();
+        let mut first = true;
 
-        let out_str = strings.join(separator);
-        Ok(out_str.into())
+        match data {
+            AccumulatorData::Simple(v) => {
+                for piece in v.iter() {
+                    if !first {
+                        result.push_str(separator);
+                    }
+                    result.push_str(&piece.to_string());
+                    first = false;
+                    if let Some(max) = max_len {
+                        if result.len() >= max {
+                            return Ok(DfValue::from(truncate_group_concat(&result, max)));
+                        }
+                    }
+                }
+            }
+            AccumulatorData::DistinctOrdered(t) => {
+                for (k, &count) in t.iter() {
+                    let repeat_count = if self.is_distinct() { 1 } else { count };
+                    for _ in 0..repeat_count {
+                        if !first {
+                            result.push_str(separator);
+                        }
+                        result.push_str(&k.to_string());
+                        first = false;
+                        if let Some(max) = max_len {
+                            if result.len() >= max {
+                                return Ok(DfValue::from(truncate_group_concat(&result, max)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(DfValue::from(result))
     }
 
     fn apply_json_object_agg(
@@ -370,14 +401,15 @@ impl AccumulationOp {
         match self {
             AccumulationOp::ArrayAgg { .. } => self.apply_array_agg(data),
             AccumulationOp::GroupConcat { separator, .. } => {
-                self.apply_group_concat(data, separator)
+                let max_len = get_group_concat_max_len();
+                self.apply_group_concat(data, separator, Some(max_len))
             }
             AccumulationOp::JsonObjectAgg {
                 allow_duplicate_keys,
             } => self.apply_json_object_agg(data, *allow_duplicate_keys),
             AccumulationOp::StringAgg { separator, .. } => {
                 let sep = separator.clone().unwrap_or("".to_string());
-                self.apply_group_concat(data, &sep)
+                self.apply_group_concat(data, &sep, None)
             }
         }
     }
@@ -1779,5 +1811,124 @@ mod tests {
                 other => panic!("Expected Array, got: {:?}", other),
             }
         }
+    }
+
+    #[test]
+    fn truncate_group_concat_parameterized() {
+        let long = "a".repeat(500);
+        // Truncation at custom limit
+        assert_eq!(truncate_group_concat(&long, 100).len(), 100);
+        // No truncation when under limit
+        assert_eq!(truncate_group_concat(&long, 1000).len(), 500);
+        // Respects UTF-8 boundaries
+        let multibyte = "é".repeat(100); // 2 bytes each = 200 bytes total
+        let truncated = truncate_group_concat(&multibyte, 51);
+        assert_eq!(truncated.len(), 50); // rounds down to char boundary
+    }
+
+    #[test]
+    fn group_concat_truncates_at_max_len() {
+        // Initialize the global group_concat_max_len for this test.
+        readyset_data::upstream_system_props::init_system_props(
+            &readyset_data::upstream_system_props::UpstreamSystemProperties {
+                timezone_name: "Etc/UTC".into(),
+                ..Default::default()
+            },
+        )
+        .ok(); // ok() because OnceCell may already be set by another test
+
+        let op = AccumulationOp::GroupConcat {
+            separator: ",".to_string(),
+            order_by: None,
+            distinct: DistinctOption::NotDistinct,
+        };
+        let mut data: AccumulatorData = (&op).into();
+
+        // Each value is ~10 chars. 200 values = ~2200 chars, well over 1024.
+        for i in 0..200 {
+            data.add(&op, DfValue::from(format!("val_{i:05}"))).unwrap();
+        }
+
+        let result = op.apply(&data).unwrap();
+        let result_str = result.to_string();
+        assert!(
+            result_str.len() <= 1024,
+            "GROUP_CONCAT output should be truncated to 1024 bytes, got {} bytes",
+            result_str.len()
+        );
+        assert!(
+            !result_str.is_empty(),
+            "GROUP_CONCAT should produce non-empty output"
+        );
+    }
+
+    #[test]
+    fn string_agg_does_not_truncate() {
+        // PostgreSQL's STRING_AGG has no length limit — it should NOT be
+        // truncated at group_concat_max_len.
+        let op = AccumulationOp::StringAgg {
+            separator: Some(",".to_string()),
+            order_by: None,
+            distinct: DistinctOption::NotDistinct,
+        };
+        let mut data: AccumulatorData = (&op).into();
+
+        // Each value is ~10 chars. 200 values = ~2200 chars, well over 1024.
+        for i in 0..200 {
+            data.add(&op, DfValue::from(format!("val_{i:05}"))).unwrap();
+        }
+
+        let result = op.apply(&data).unwrap();
+        let result_str = result.to_string();
+        // Full untruncated output: 200 * 9 (val_NNNNN) + 199 * 1 (,) = 1999 chars
+        assert!(
+            result_str.len() > 1024,
+            "STRING_AGG should NOT be truncated, got {} bytes",
+            result_str.len()
+        );
+    }
+
+    #[test]
+    fn group_concat_under_limit_not_truncated() {
+        let op = AccumulationOp::GroupConcat {
+            separator: ",".to_string(),
+            order_by: None,
+            distinct: DistinctOption::NotDistinct,
+        };
+        let mut data: AccumulatorData = (&op).into();
+        data.add(&op, DfValue::from("hello")).unwrap();
+        data.add(&op, DfValue::from("world")).unwrap();
+
+        let result = op.apply(&data).unwrap();
+        let result_str = result.to_string();
+        // Under limit — should NOT be truncated
+        assert_eq!(result_str, "hello,world");
+    }
+
+    #[test]
+    fn group_concat_truncates_at_utf8_boundary() {
+        let op = AccumulationOp::GroupConcat {
+            separator: "".to_string(),
+            order_by: None,
+            distinct: DistinctOption::NotDistinct,
+        };
+        let mut data: AccumulatorData = (&op).into();
+        // é is 2 bytes in UTF-8. Fill with enough to exceed 1024.
+        // 600 × "éé" = 600 × 4 bytes = 2400 bytes
+        for _ in 0..600 {
+            data.add(&op, DfValue::from("éé")).unwrap();
+        }
+
+        let result = op.apply(&data).unwrap();
+        let result_str = result.to_string();
+        assert!(result_str.len() <= 1024);
+        // Must be valid UTF-8 (would panic on invalid)
+        assert!(result_str.is_char_boundary(result_str.len()));
+        // Should be a multiple of 2 (each é is 2 bytes)
+        assert_eq!(
+            result_str.len() % 2,
+            0,
+            "truncation split a multi-byte char"
+        );
     }
 }

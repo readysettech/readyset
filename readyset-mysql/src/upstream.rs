@@ -647,6 +647,14 @@ impl UpstreamDatabase for MySqlUpstream {
         self.lower_case_table_names().await
     }
 
+    async fn group_concat_max_len(&mut self) -> Result<usize, Self::Error> {
+        let res: Vec<u64> = self.conn.query("select @@group_concat_max_len").await?;
+        let [v] = &res[..] else {
+            internal!("upstream is missing group_concat_max_len system variable");
+        };
+        Ok(*v as usize)
+    }
+
     async fn shallow_exec_meta(
         &mut self,
         _meta: &Self::ExecMeta,

@@ -255,6 +255,12 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error>;
 
+    /// Query the upstream database for its configured `group_concat_max_len` value.
+    /// Defaults to MySQL's default of 1024.
+    async fn group_concat_max_len(&mut self) -> Result<usize, Self::Error> {
+        Ok(readyset_data::upstream_system_props::DEFAULT_GROUP_CONCAT_MAX_LEN)
+    }
+
     /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.
     async fn shallow_exec_meta(
         &mut self,
@@ -485,6 +491,10 @@ where
 
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
         self.upstream().await?.lower_case_table_names().await
+    }
+
+    async fn group_concat_max_len(&mut self) -> Result<usize, Self::Error> {
+        self.upstream().await?.group_concat_max_len().await
     }
 
     async fn shallow_exec_meta(

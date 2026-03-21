@@ -806,6 +806,7 @@ where
         let lower_case_database_names = upstream.lower_case_database_names().await?;
         let lower_case_table_names = upstream.lower_case_table_names().await?;
         let db_version = upstream.version();
+        let group_concat_max_len = upstream.group_concat_max_len().await?;
 
         Ok(UpstreamSystemProperties {
             search_path,
@@ -813,6 +814,7 @@ where
             lower_case_database_names,
             lower_case_table_names,
             db_version,
+            group_concat_max_len,
         })
     };
 

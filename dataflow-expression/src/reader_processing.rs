@@ -3,12 +3,15 @@ use std::fmt::{self, Debug, Write};
 use std::sync::Arc;
 
 use partial_map::InsertionOrder;
+use readyset_data::upstream_system_props::get_group_concat_max_len;
 use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
 
-use crate::grouped::accumulator::{finalize_raw_json, AccumulationOp, AccumulatorData};
+use crate::grouped::accumulator::{
+    finalize_raw_json, truncate_group_concat, AccumulationOp, AccumulatorData,
+};
 
 /// Representation of an aggregate function
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -228,8 +231,19 @@ impl PostLookupAggregateFunction {
             }
         };
 
-        // Pre-allocate: estimate ~16 bytes per element + separators.
+        let max_len = if matches!(self, PostLookupAggregateFunction::GroupConcat { .. }) {
+            Some(get_group_concat_max_len())
+        } else {
+            None
+        };
+
+        // Pre-allocate: estimate ~16 bytes per element + separators, capped at
+        // max_len when set to avoid over-allocating for large result sets.
         let estimated_cap = num_elements * 16 + (num_elements.saturating_sub(1)) * separator.len();
+        let estimated_cap = match max_len {
+            Some(max) => estimated_cap.min(max),
+            None => estimated_cap,
+        };
         let mut result = String::with_capacity(estimated_cap);
         let mut first = true;
         for val in arr.values() {
@@ -246,6 +260,12 @@ impl PostLookupAggregateFunction {
                 write!(&mut result, "{}", val).map_err(|e: fmt::Error| {
                     readyset_errors::internal_err!("fmt::Write failed: {}", e)
                 })?;
+            }
+            // Stop early once we've reached the truncation limit.
+            if let Some(max) = max_len {
+                if result.len() >= max {
+                    return Ok(DfValue::from(truncate_group_concat(&result, max)));
+                }
             }
         }
 

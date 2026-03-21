@@ -584,6 +584,10 @@ impl TestBuilder {
                                 .await
                                 .unwrap(),
                             db_version: cdc_upstream.version(),
+                            group_concat_max_len: cdc_upstream
+                                .group_concat_max_len()
+                                .await
+                                .unwrap(),
                         }
                     } else {
                         UpstreamSystemProperties {
