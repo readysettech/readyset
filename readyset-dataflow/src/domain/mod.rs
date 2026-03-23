@@ -222,51 +222,95 @@ struct StateLookupResult<'a> {
     replay_keys: HashSet<(KeyComparison, KeyComparison)>,
 }
 
-/// Describes a required replay
-#[derive(Clone)]
-struct ReplayDescriptor {
+/// Key for grouping replay misses that can be batched into a single `on_replay_misses` call.
+///
+/// Within one `handle_replay` call, `tag`, `unishard`, `requesting_shard`, and
+/// `requesting_replica` are constant (from the replay piece context), so only `idx`,
+/// `lookup_columns`, and whether the replay key is a range vary per miss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ReplayMissGroup {
     idx: LocalNodeIndex,
-    tag: Tag,
-    replay_key: KeyComparison,
-    lookup_key: KeyComparison,
-    lookup_columns: Vec<usize>,
-    unishard: bool,
-    requesting_shard: usize,
-    requesting_replica: usize,
+    /// Index into [`ReplayMissCollector::columns`].
+    lookup_columns: usize,
+    is_range: bool,
 }
 
-impl ReplayDescriptor {
-    fn from_miss(
-        miss: &Miss,
-        tag: Tag,
-        unishard: bool,
-        requesting_shard: usize,
-        requesting_replica: usize,
-    ) -> Self {
-        #[allow(clippy::unwrap_used)]
-        // We know this is a partial replay
-        ReplayDescriptor {
+/// Collects and groups replay misses, interning lookup columns to avoid redundant clones.
+///
+/// During replay processing, hundreds of misses often share the same lookup columns. Rather than
+/// cloning the `Vec<usize>` for each miss into the [`ReplayMissGroup`] key, we intern unique
+/// column lists here and store a cheap index.
+#[derive(Debug, Default)]
+struct ReplayMissCollector {
+    /// Deduplicated lookup column lists. Typically 1-3 entries per `handle_replay` call.
+    columns: Vec<Vec<usize>>,
+    /// Grouped misses keyed by (node, interned column index, is_range).
+    groups: HashMap<ReplayMissGroup, HashSet<(KeyComparison, KeyComparison)>>,
+}
+
+impl ReplayMissCollector {
+    /// Intern a lookup column slice, returning its index.
+    fn intern_columns(columns: &mut Vec<Vec<usize>>, cols: &[usize]) -> usize {
+        for (i, existing) in columns.iter().enumerate() {
+            if existing.as_slice() == cols {
+                return i;
+            }
+        }
+        let idx = columns.len();
+        columns.push(cols.to_vec());
+        idx
+    }
+
+    fn group(columns: &mut Vec<Vec<usize>>, miss: &Miss) -> (KeyComparison, ReplayMissGroup) {
+        let cols_idx = Self::intern_columns(columns, &miss.lookup_idx);
+        let replay_key = miss
+            .replay_key()
+            .expect("miss must have replay key in partial replay");
+        let group = ReplayMissGroup {
             idx: miss.on,
-            tag,
-            replay_key: miss.replay_key().unwrap(),
-            lookup_key: miss.lookup_key().into_owned(),
-            lookup_columns: miss.lookup_idx.clone(),
-            unishard,
-            requesting_shard,
-            requesting_replica,
+            lookup_columns: cols_idx,
+            is_range: replay_key.is_range(),
+        };
+        (replay_key, group)
+    }
+
+    /// Add a batch of misses to the collector. We know this is a partial replay.
+    /// Consecutive misses typically share the same group, so we hold the HashSet entry open
+    /// and only re-traverse the HashMap when the group changes.
+    fn insert(&mut self, misses: &[Miss]) {
+        let len = misses.len();
+        let Self { columns, groups } = self;
+        let mut misses = misses.iter();
+
+        let Some(mut miss) = misses.next() else {
+            return;
+        };
+        let (mut replay_key, mut group) = Self::group(columns, miss);
+
+        'outer: loop {
+            let entry = groups
+                .entry(group)
+                .or_insert_with(|| HashSet::with_capacity(len));
+
+            loop {
+                entry.insert((replay_key, miss.lookup_key().into_owned()));
+
+                let Some(next) = misses.next() else {
+                    break 'outer;
+                };
+                miss = next;
+                let (rk, g) = Self::group(columns, miss);
+                replay_key = rk;
+                if group != g {
+                    group = g;
+                    break;
+                }
+            }
         }
     }
 
-    // Returns true if the given `ReplayDescriptor` can be processed together with `self`, i.e. they
-    // only differ in their miss and lookup keys, and have the same replay key type (range or
-    // equal).
-    fn can_combine(&self, other: &ReplayDescriptor) -> bool {
-        self.tag == other.tag
-            && self.idx == other.idx
-            && self.lookup_columns == other.lookup_columns
-            && self.unishard == other.unishard
-            && self.requesting_shard == other.requesting_shard
-            && self.replay_key.is_range() == other.replay_key.is_range()
+    fn is_empty(&self) -> bool {
+        self.groups.is_empty()
     }
 }
 
@@ -315,6 +359,26 @@ struct Waiting {
     /// Note that for extended replay paths, the `Hole` is in the *target* of the path, *not* the
     /// destination
     redos: HashMap<Hole, HashSet<Redo>>,
+}
+
+impl Waiting {
+    /// Record a miss for a given hole and redo. Returns `true` if this is a new hole (i.e. a
+    /// replay needs to be dispatched for it).
+    fn record_miss(&mut self, hole: Hole, redo: Redo) -> bool {
+        match self.redos.entry(hole) {
+            Entry::Occupied(e) => {
+                if e.into_mut().insert(redo.clone()) {
+                    *self.holes.entry(redo).or_default() += 1;
+                }
+                false
+            }
+            Entry::Vacant(e) => {
+                e.insert(HashSet::from([redo.clone()]));
+                *self.holes.entry(redo).or_default() += 1;
+                true
+            }
+        }
+    }
 }
 
 /// Data structure representing the set of keys that have been requested by a reader.
@@ -993,22 +1057,13 @@ impl Domain {
                     .entry((Target(node), column_indices.clone()))
                     .or_default();
                 for miss_key in missed_keys {
-                    match w.redos.entry(Hole {
+                    let hole = Hole {
                         node,
                         column_indices: column_indices.clone(),
                         key: miss_key.clone(),
-                    }) {
-                        Entry::Occupied(e) => {
-                            if e.into_mut().insert(redo.clone()) {
-                                *w.holes.entry(redo.clone()).or_default() += 1;
-                            }
-                        }
-                        Entry::Vacant(e) => {
-                            e.insert(HashSet::from([redo.clone()]));
-                            *w.holes.entry(redo.clone()).or_default() += 1;
-
-                            replays.push(miss_key);
-                        }
+                    };
+                    if w.record_miss(hole, redo.clone()) {
+                        replays.push(miss_key);
                     }
                 }
             }
@@ -3350,7 +3405,8 @@ impl Domain {
         }
 
         let mut finished = None;
-        let mut need_replay = Vec::new();
+        let mut need_replay = ReplayMissCollector::default();
+        let mut replay_context: Option<(bool, usize, usize)> = None; // (unishard, requesting_shard, requesting_replica)
         let mut finished_partial = 0;
 
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
@@ -3768,15 +3824,9 @@ impl Domain {
                         internal!("backfill_keys.is_some() implies Context::Partial");
                     };
 
-                    need_replay.extend(misses.iter().map(|m| {
-                        ReplayDescriptor::from_miss(
-                            m,
-                            tag,
-                            unishard,
-                            requesting_shard,
-                            requesting_replica,
-                        )
-                    }));
+                    replay_context = Some((unishard, requesting_shard, requesting_replica));
+
+                    need_replay.insert(misses);
 
                     // we should only finish the replays for keys that *didn't* miss
                     backfill_keys.retain(|k| !missed_on.contains(k));
@@ -4056,33 +4106,29 @@ impl Domain {
             self.finished_partial_replay(tag, finished_partial)?;
         }
 
-        // While there are still misses, we iterate over the array, each time draining it from
-        // elements that can be batched into a single call to `on_replay_misses`
-        while let Some(next_replay) = need_replay.first().cloned() {
-            let misses: HashSet<_> = need_replay
-                .extract_if(.., |rep| next_replay.can_combine(rep))
-                .map(
-                    |ReplayDescriptor {
-                         lookup_key,
-                         replay_key,
-                         ..
-                     }| (replay_key, lookup_key),
-                )
-                .collect();
+        // Drain pre-grouped replay misses, dispatching each group as a batch
+        if let Some((unishard, requesting_shard, requesting_replica)) = replay_context {
+            for (group, misses) in need_replay.groups.drain() {
+                let cols = &need_replay.columns[group.lookup_columns];
+                trace!(%tag, ?misses, on = %group.idx, "missed during replay processing");
 
-            trace!(%tag, ?misses, on = %next_replay.idx, "missed during replay processing");
-
-            self.on_replay_misses(
-                ex,
-                next_replay.idx,
-                &next_replay.lookup_columns,
-                misses,
-                next_replay.unishard,
-                next_replay.requesting_shard,
-                next_replay.requesting_replica,
-                next_replay.tag,
-                cache_name.clone(),
-            )?;
+                self.on_replay_misses(
+                    ex,
+                    group.idx,
+                    cols,
+                    misses,
+                    unishard,
+                    requesting_shard,
+                    requesting_replica,
+                    tag,
+                    cache_name.clone(),
+                )?;
+            }
+        } else {
+            assert!(
+                need_replay.is_empty(),
+                "replay misses without partial replay context"
+            );
         }
 
         if let Some((tag, dst, target, for_keys)) = finished {
