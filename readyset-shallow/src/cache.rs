@@ -195,6 +195,8 @@ pub struct CacheEntryInfo {
     pub last_refreshed_ms: u64,
     /// How long the last refresh query took to execute, in milliseconds.
     pub refresh_time_ms: u64,
+    /// Size of the entry in bytes.
+    pub bytes: usize,
 }
 
 impl From<CacheInfo> for CreateCacheStatement {

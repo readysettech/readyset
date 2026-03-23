@@ -1153,6 +1153,7 @@ where
                         time_or_null(Some(entry.last_accessed_ms)).into(),
                         time_or_null(Some(entry.last_refreshed_ms)).into(),
                         DfValue::from(entry.refresh_time_ms as i64),
+                        DfValue::from(entry.bytes as i64),
                     ]
                 })
                 .collect()
@@ -1165,7 +1166,8 @@ where
             "entry id",
             "last accessed",
             "last refreshed",
-            "refresh time ms"
+            "refresh time ms",
+            "bytes"
         );
 
         Ok(noria_connector::QueryResult::from_owned(

@@ -67,6 +67,7 @@ const SHALLOW_CACHE_ENTRIES_SCHEMA: &[(&str, DfType)] = &[
     ("last_accessed_ms", DfType::UnsignedBigInt),
     ("last_refreshed_ms", DfType::UnsignedBigInt),
     ("refresh_time_ms", DfType::UnsignedBigInt),
+    ("bytes", DfType::UnsignedBigInt),
 ];
 
 fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
@@ -79,6 +80,7 @@ fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
                 entry.last_accessed_ms.into(),
                 entry.last_refreshed_ms.into(),
                 entry.refresh_time_ms.into(),
+                (entry.bytes as u64).into(),
             ]
         }));
         Ok(rows)

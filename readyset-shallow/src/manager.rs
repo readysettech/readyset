@@ -289,12 +289,14 @@ where
             match entry.as_ref() {
                 CacheEntry::Present(values) => {
                     let entry_id = hash(&key.1);
+                    let bytes = entry.deep_size_of();
                     Some(CacheEntryInfo {
                         query_id: cache_query_id,
                         entry_id,
                         last_accessed_ms: values.accessed_ms.load(Ordering::Relaxed),
                         last_refreshed_ms: values.refreshed_ms,
                         refresh_time_ms: values.execution_ms,
+                        bytes,
                     })
                 }
                 CacheEntry::Loading(_) => None,

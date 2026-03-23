@@ -343,7 +343,7 @@ async fn show_shallow_caches() {
 }
 
 #[test]
-#[tags(serial, slow)]
+#[tags(serial)]
 #[upstream(mysql57, mysql80, mysql84)]
 async fn show_shallow_cache_entries() {
     init_test_logging();
@@ -396,10 +396,10 @@ async fn show_shallow_cache_entries() {
         .unwrap();
 
     // Test SHOW SHALLOW CACHE ENTRIES returns all entries
-    let entries: Vec<(String, String, String, String, String)> =
+    let entries: Vec<(String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
-    let vrel_entries: Vec<(String, String, u64, u64, u64)> =
+    let vrel_entries: Vec<(String, String, u64, u64, u64, u64)> =
         readyset.query("SELECT * FROM readyset.shallow_cache_entries").await.unwrap();
     assert_eq!(vrel_entries.len(), 2);
 
@@ -407,7 +407,7 @@ async fn show_shallow_cache_entries() {
     let query_id = &entries[0].0;
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...'
-    let filtered: Vec<(String, String, String, String, String)> = readyset
+    let filtered: Vec<(String, String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}'"
         ))
@@ -418,19 +418,19 @@ async fn show_shallow_cache_entries() {
         2,
         "Filtered by query_id should return both entries for this cache"
     );
-    let vrel_filtered: Vec<(String, String, u64, u64, u64)> =
+    let vrel_filtered: Vec<(String, String, u64, u64, u64, u64)> =
         readyset.query(format!("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = '{query_id}'")).await.unwrap();
     assert_eq!(vrel_filtered.len(), 2);
 
     // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
-    let limited: Vec<(String, String, String, String, String)> = readyset
+    let limited: Vec<(String, String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES LIMIT 1")
         .await
         .unwrap();
     assert_eq!(limited.len(), 1, "LIMIT 1 should return only 1 entry");
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...' LIMIT 1
-    let filtered_limited: Vec<(String, String, String, String, String)> = readyset
+    let filtered_limited: Vec<(String, String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}' LIMIT 1"
         ))
@@ -443,7 +443,7 @@ async fn show_shallow_cache_entries() {
     );
 
     // Test filtering with non-existent query_id returns empty
-    let non_existent: Vec<(String, String, String, String, String)> = readyset
+    let non_existent: Vec<(String, String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_12345'")
         .await
         .unwrap();
@@ -451,9 +451,70 @@ async fn show_shallow_cache_entries() {
         non_existent.is_empty(),
         "Non-existent query_id should return empty results"
     );
-    let vrel_non_existent: Vec<(String, String, u64, u64, u64)> =
+    let vrel_non_existent: Vec<(String, String, u64, u64, u64, u64)> =
         readyset.query("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = 'q_12345'").await.unwrap();
     assert_eq!(vrel_non_existent.len(), 0);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn shallow_cache_entry_bytes() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    async fn assert_size(readyset: &mut mysql_async::Conn, low: u64, high: u64) {
+        // Verify bytes via SHOW SHALLOW CACHE ENTRIES.
+        let entries: Vec<(String, String, String, String, String, String)> =
+            readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
+        assert_eq!(entries.len(), 1);
+        let bytes: u64 = entries[0].5.parse().expect("bytes column should be numeric");
+        assert!((low..high).contains(&bytes), "unexpected size: {bytes}");
+
+        // Verify bytes via vrel.
+        let vrel_entries: Vec<u64> = readyset
+            .query("SELECT bytes FROM readyset.shallow_cache_entries")
+            .await
+            .unwrap();
+        assert_eq!(vrel_entries.len(), 1);
+        let bytes = vrel_entries[0];
+        assert!((low..high).contains(&bytes), "unexpected size: {bytes}");
+    }
+
+    // Create a shallow cache with a 1024 byte entry.
+    readyset
+        .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ REPEAT(CHAR(0x41), 1024)")
+        .await
+        .unwrap();
+
+    assert_size(&mut readyset, 1024, 1536).await;
+
+    // Drop and recreate with a 10240 byte entry.
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    readyset
+        .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ REPEAT(CHAR(0x41), 10240)")
+        .await
+        .unwrap();
+
+    assert_size(&mut readyset, 10240, 15360).await;
 
     shutdown_tx.shutdown().await;
 }
