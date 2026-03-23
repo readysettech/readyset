@@ -360,6 +360,27 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
         }
     }
 
+    /// A convenience float parser that extracts a numeric prefix (like MySQL) and returns 0.0 for
+    /// non-numeric strings. Mirrors MySQL's implicit string-to-float coercion behavior.
+    fn parse_float<F>(str: &str) -> ReadySetResult<F>
+    where
+        F: FromStr + Default,
+    {
+        lazy_static! {
+            static ref FLOAT_PREFIX: Regex =
+                Regex::new(r"^[[:space:]]*([+-]?(\d+\.?\d*|\d*\.\d+)([eE][+-]?\d+)?)").unwrap();
+        }
+
+        let numeric_prefix = FLOAT_PREFIX
+            .captures(str)
+            .map(|caps| caps.get(1).expect("Regex has one capture group").as_str());
+
+        match numeric_prefix {
+            Some(prefix) => Ok(prefix.parse::<F>().unwrap_or_default()),
+            None => Ok(F::default()),
+        }
+    }
+
     fn check_mediumint_bounds(v: DfValue, ty: &DfType) -> ReadySetResult<DfValue> {
         match v {
             DfValue::Int(i) => {
@@ -557,15 +578,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Err(e) => Err(Self::coerce_err(to_ty, e)),
             },
 
-            DfType::Float => str
-                .parse::<f32>()
-                .map_err(|e| Self::coerce_err(to_ty, e))?
-                .try_into(),
+            DfType::Float => Self::parse_float::<f32>(str)?.try_into(),
 
-            DfType::Double => str
-                .parse::<f64>()
-                .map_err(|e| Self::coerce_err(to_ty, e))?
-                .try_into(),
+            DfType::Double => Self::parse_float::<f64>(str)?.try_into(),
 
             DfType::Numeric { .. } => Ok(str
                 .parse::<Decimal>()
@@ -882,6 +897,58 @@ mod tests {
                 .coerce_to(&enum_type, &DfType::Unknown)
                 .unwrap(),
             DfValue::UnsignedInt(0)
+        );
+    }
+
+    #[test]
+    fn coerce_non_numeric_text_to_float() {
+        // MySQL returns 0.0 for non-numeric strings cast to float/double
+        assert_eq!(
+            DfValue::from("hello")
+                .coerce_to(&DfType::Float, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Float(0.0),
+        );
+        assert_eq!(
+            DfValue::from("hello")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(0.0),
+        );
+        assert_eq!(
+            DfValue::from("")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(0.0),
+        );
+    }
+
+    #[test]
+    fn coerce_prefix_numeric_text_to_float() {
+        // MySQL extracts the numeric prefix: "123abc" -> 123.0
+        assert_eq!(
+            DfValue::from("123abc")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(123.0),
+        );
+        assert_eq!(
+            DfValue::from("  -45.67xyz")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(-45.67),
+        );
+        assert_eq!(
+            DfValue::from("1.5e2junk")
+                .coerce_to(&DfType::Float, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Float(150.0),
+        );
+        assert_eq!(
+            DfValue::from("+7.25rest")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(7.25),
         );
     }
 
