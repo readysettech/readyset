@@ -208,7 +208,17 @@ pub enum MirNodeInner {
     /// group_by columns which are deduplicated at every join, so by the end we have every
     /// unique column (the actual aggregate columns) from each aggregate node, and a single
     /// version of each group_by column in the final join.
-    JoinAggregates,
+    ///
+    /// The `group_by` field stores the group columns shared by all joined aggregates: the query's
+    /// GROUP BY columns plus any parameter columns. It is used during dataflow lowering to
+    /// determine which columns are join keys (group columns) vs. aggregate output columns. Without
+    /// it, the lowering code would infer join keys from column name matching, which fails when two
+    /// different aggregates produce the same alias (e.g., `MAX(a.col)` and `MAX(b.col)` both alias
+    /// to `max(col)`).
+    JoinAggregates {
+        /// The group columns shared by all aggregates being joined.
+        group_by: Vec<Column>,
+    },
     /// Node which computes a *left* join on its two parents by finding all rows in the right where
     /// the values in `on_right` are equal to the values of `on_left` on the left
     ///
@@ -635,7 +645,7 @@ impl MirNodeInner {
                     jc
                 )
             }
-            MirNodeInner::JoinAggregates => "AGG ⋈".to_string(),
+            MirNodeInner::JoinAggregates { .. } => "AGG ⋈".to_string(),
             MirNodeInner::Leaf { ref keys, .. } => {
                 let key_cols = keys
                     .iter()

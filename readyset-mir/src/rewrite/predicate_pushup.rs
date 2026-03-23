@@ -25,7 +25,7 @@ fn commutes_with(conditions: &Expr, inner: &MirNodeInner) -> bool {
         MirNodeInner::Filter { .. }
         | MirNodeInner::Identity
         | MirNodeInner::Join { .. }
-        | MirNodeInner::JoinAggregates
+        | MirNodeInner::JoinAggregates { .. }
         | MirNodeInner::DependentJoin { .. }
         | MirNodeInner::ViewKey { .. }
         | MirNodeInner::Project { .. }

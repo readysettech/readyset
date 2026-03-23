@@ -455,7 +455,9 @@ mod tests {
 
             let ja = graph.add_node(MirNode::new(
                 "join_aggregates".into(),
-                MirNodeInner::JoinAggregates,
+                MirNodeInner::JoinAggregates {
+                    group_by: vec![Column::new(Some("base"), "b")],
+                },
             ));
             graph.add_edge(count, ja, 0);
             graph.add_edge(sum, ja, 1);
@@ -496,7 +498,9 @@ mod tests {
 
             let join_aggs = graph.add_node(MirNode::new(
                 "join_aggs".into(),
-                MirNodeInner::JoinAggregates,
+                MirNodeInner::JoinAggregates {
+                    group_by: vec![Column::named("a"), Column::named("b")],
+                },
             ));
             graph.add_edge(agg1, join_aggs, 0);
             graph.add_edge(agg2, join_aggs, 1);

@@ -292,8 +292,46 @@ macro_rules! order_by_clause_str {
     };
 }
 
+/// How an expression alias will be consumed, which determines how column arguments are rendered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AliasStyle {
+    /// For output/display and SQL-rewrite column names: table qualifiers on column arguments are
+    /// stripped, and the result is truncated to a bounded width.
+    Display,
+    /// For internal MIR/dataflow column identity, including name-based join-key matching: table
+    /// qualifiers on an aggregate's column arguments are preserved and the result is left
+    /// complete, so aggregates over same-named columns from different tables stay distinct
+    /// (REA-6523).
+    ColumnIdentity,
+}
+
 impl FunctionExpr {
+    /// Alias for a column argument of an aggregate. Under [`AliasStyle::ColumnIdentity`] a
+    /// table-qualified reference is preserved (`a.val` rather than `val`); otherwise it falls back
+    /// to [`Expr::alias`], which strips the qualifier for display.
+    fn inner_alias(expr: &Expr, dialect: Dialect, style: AliasStyle) -> Option<String> {
+        match expr {
+            Expr::Column(col) if style == AliasStyle::ColumnIdentity => Some(match &col.table {
+                Some(t) => format!("{}.{}", t.name, col.name),
+                None => col.name.to_string(),
+            }),
+            _ => expr.alias(dialect).map(|s| s.to_string()),
+        }
+    }
+
+    /// Display-facing alias for this call, stripping table qualifiers from column arguments.
+    /// Used for output and SQL-rewrite column names.
     pub fn alias(&self, dialect: Dialect) -> Option<String> {
+        self.alias_with(dialect, AliasStyle::Display)
+    }
+
+    /// Like [`Self::alias`] but preserves table qualifiers on the column arguments of
+    /// aggregates, so their MIR/dataflow column names stay distinct (REA-6523).
+    pub fn qualified_alias(&self, dialect: Dialect) -> Option<String> {
+        self.alias_with(dialect, AliasStyle::ColumnIdentity)
+    }
+
+    fn alias_with(&self, dialect: Dialect, style: AliasStyle) -> Option<String> {
         Some(match self {
             FunctionExpr::ArrayAgg {
                 expr,
@@ -303,27 +341,31 @@ impl FunctionExpr {
                 format!(
                     "array_agg({}{}{})",
                     distinct,
-                    expr.alias(dialect)?,
+                    Self::inner_alias(expr, dialect, style)?,
                     order_by_clause_str!(order_by, dialect),
                 )
             }
             FunctionExpr::Avg { expr, distinct } => format!(
                 "avg({}{})",
                 if *distinct { "DISTINCT " } else { "" },
-                expr.alias(dialect)?
+                Self::inner_alias(expr, dialect, style)?
             ),
             FunctionExpr::Count { expr, distinct } => format!(
                 "count({}{})",
                 if *distinct { "DISTINCT " } else { "" },
-                expr.alias(dialect)?
+                Self::inner_alias(expr, dialect, style)?
             ),
             FunctionExpr::Sum { expr, distinct } => format!(
                 "sum({}{})",
                 if *distinct { "DISTINCT " } else { "" },
-                expr.alias(dialect)?
+                Self::inner_alias(expr, dialect, style)?
             ),
-            FunctionExpr::Max(col) => format!("max({})", col.alias(dialect)?),
-            FunctionExpr::Min(col) => format!("min({})", col.alias(dialect)?),
+            FunctionExpr::Max(col) => {
+                format!("max({})", Self::inner_alias(col, dialect, style)?)
+            }
+            FunctionExpr::Min(col) => {
+                format!("min({})", Self::inner_alias(col, dialect, style)?)
+            }
             FunctionExpr::Extract { field, expr } => {
                 format!("extract({field} from {})", expr.alias(dialect)?)
             }
@@ -353,7 +395,7 @@ impl FunctionExpr {
             } => format!(
                 "group_concat({}{}{} {})",
                 distinct,
-                expr.alias(dialect)?,
+                Self::inner_alias(expr, dialect, style)?,
                 order_by_clause_str!(order_by, dialect),
                 separator
                     .as_ref()
@@ -368,7 +410,7 @@ impl FunctionExpr {
             } => format!(
                 "string_agg({}{}, {}{})",
                 distinct,
-                expr.alias(dialect)?,
+                Self::inner_alias(expr, dialect, style)?,
                 separator
                     .as_ref()
                     .map(|s| format!("'{}'", s.replace('\'', "''").replace('\\', "\\\\")))
@@ -404,8 +446,8 @@ impl FunctionExpr {
                 format!(
                     "{}({}, {})",
                     fname,
-                    key.alias(dialect)?,
-                    value.alias(dialect)?
+                    Self::inner_alias(key, dialect, style)?,
+                    Self::inner_alias(value, dialect, style)?
                 )
             }
             FunctionExpr::CountStar => "count(*)".to_string(),
@@ -2086,15 +2128,27 @@ impl Expr {
     /// the table name from Expr::Column variants.
     /// It also truncates the alias to 64 characters.
     pub fn alias(&self, dialect: Dialect) -> Option<SqlIdentifier> {
+        self.alias_with(dialect, AliasStyle::Display)
+    }
+
+    /// Like [`Self::alias`] but preserves table qualifiers on the column arguments of any
+    /// aggregate within this expression, keeping their MIR/dataflow column names distinct
+    /// (REA-6523). Bare column references are still stripped. Unlike [`Self::alias`], the result
+    /// is not truncated, since it is used as functional column identity rather than display.
+    pub fn qualified_alias(&self, dialect: Dialect) -> Option<SqlIdentifier> {
+        self.alias_with(dialect, AliasStyle::ColumnIdentity)
+    }
+
+    fn alias_with(&self, dialect: Dialect, style: AliasStyle) -> Option<SqlIdentifier> {
         // TODO: Match upstream naming (unquoted identifiers, function name without args, etc ..)
         let mut alias = match self {
             Expr::Column(col) => col.name.to_string(), // strip the table's name
             Expr::BinaryOp { lhs, op, rhs } => {
-                let left = lhs.alias(dialect)?;
-                let right = rhs.alias(dialect)?;
+                let left = lhs.alias_with(dialect, style)?;
+                let right = rhs.alias_with(dialect, style)?;
                 format!("{left} {op} {right}")
             }
-            Expr::Call(function) => function.alias(dialect)?,
+            Expr::Call(function) => function.alias_with(dialect, style)?,
 
             // Placeholders in select are not GA'd, but just in case
             Expr::Literal(Literal::Placeholder(_)) => return None,
@@ -2103,7 +2157,15 @@ impl Expr {
             e => e.display(dialect).to_string(),
         };
 
-        alias = alias.chars().take(64).collect();
+        // The 64-char cap bounds output column-header width and is only safe for display. A
+        // qualified alias is used as internal MIR/dataflow column identity (and for name-based
+        // join-key matching), so it must stay complete: truncating could drop the table qualifier
+        // that keeps aggregates over same-named columns distinct (REA-6523), reintroducing the
+        // collision. It also keeps this in step with `FunctionExpr::alias_with`, which never
+        // truncates.
+        if style == AliasStyle::Display {
+            alias = alias.chars().take(64).collect();
+        }
 
         Some(alias.into())
     }
@@ -3652,6 +3714,41 @@ mod tests {
         sqlparser_expr
             .try_into_dialect(dialect)
             .expect("failed to convert sqlparser Expr to readyset Expr")
+    }
+
+    /// A qualified alias is functional column identity (MIR/dataflow column names and name-based
+    /// join-key matching), so it must not be truncated: dropping the table qualifier past the
+    /// 64-char display cap would re-collapse aggregates over same-named columns from different
+    /// tables (REA-6523). The display alias stays stripped and capped.
+    #[test]
+    fn qualified_alias_not_truncated_keeps_aggregates_distinct() {
+        let max_over = |table: &str| {
+            Expr::Call(FunctionExpr::Max(Box::new(Expr::Column(Column {
+                name: "val".into(),
+                table: Some(Relation {
+                    schema: None,
+                    name: table.into(),
+                }),
+            }))))
+        };
+        // Long table names sharing a >64-char prefix, differing only in the final char.
+        let table_a = format!("{}a", "t".repeat(70));
+        let table_b = format!("{}b", "t".repeat(70));
+
+        let qa = max_over(&table_a).qualified_alias(Dialect::MySQL).unwrap();
+        let qb = max_over(&table_b).qualified_alias(Dialect::MySQL).unwrap();
+
+        // The full qualifier is preserved, so the distinguishing suffix survives ...
+        assert_eq!(qa.as_str(), format!("max({table_a}.val)"));
+        assert!(qa.as_str().len() > 64);
+        // ... and the two aggregates remain distinct rather than colliding after truncation.
+        assert_ne!(qa, qb);
+
+        // The display alias still strips the qualifier (and caps length at 64 chars).
+        assert_eq!(
+            max_over(&table_a).alias(Dialect::MySQL).unwrap().as_str(),
+            "max(val)"
+        );
     }
 
     /// Test that MOD(x, y) function call desugars to a BinaryOp with Modulo operator.

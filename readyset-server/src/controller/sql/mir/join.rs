@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use mir::NodeIndex;
+use mir::{Column, NodeIndex};
 use readyset_errors::{internal_err, invariant, unsupported, ReadySetResult};
 use readyset_sql::ast::{Expr, Relation};
 
@@ -194,6 +194,7 @@ pub(super) fn make_joins_for_aggregates(
     query_name: &Relation,
     name: &str,
     ancestors: &[NodeIndex],
+    group_by: &[Column],
 ) -> ReadySetResult<Vec<NodeIndex>> {
     invariant!(ancestors.len() >= 2);
 
@@ -202,6 +203,7 @@ pub(super) fn make_joins_for_aggregates(
         mir_converter.generate_label(&name.into()),
         ancestors[0],
         ancestors[1],
+        group_by,
     )?;
 
     let mut join_nodes = vec![parent_join];
@@ -214,6 +216,7 @@ pub(super) fn make_joins_for_aggregates(
             mir_converter.generate_label(&name.into()),
             *join_nodes.last().unwrap(),
             *ancestor,
+            group_by,
         )?;
 
         join_nodes.push(jn);

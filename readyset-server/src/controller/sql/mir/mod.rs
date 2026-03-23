@@ -1181,11 +1181,17 @@ impl SqlToMirConverter {
         name: Relation,
         left_parent: NodeIndex,
         right_parent: NodeIndex,
+        group_by: &[Column],
     ) -> ReadySetResult<NodeIndex> {
         trace!("Added join aggregates node");
         Ok(self.add_query_node(
             query_name.clone(),
-            MirNode::new(name, MirNodeInner::JoinAggregates),
+            MirNode::new(
+                name,
+                MirNodeInner::JoinAggregates {
+                    group_by: group_by.to_vec(),
+                },
+            ),
             &[left_parent, right_parent],
         ))
     }
@@ -2202,7 +2208,7 @@ impl SqlToMirConverter {
                     .map(|e| -> ReadySetResult<_> {
                         Ok(ProjectExpr::Expr {
                             alias: e
-                                .alias(dialect)
+                                .qualified_alias(dialect)
                                 // returns None if e is a placeholder or a variable
                                 .ok_or_else(|| {
                                     unsupported_err!("Placeholders not allowed in this context")
@@ -2221,7 +2227,7 @@ impl SqlToMirConverter {
             .iter()
             .map(|e| match e {
                 Expr::Column(c) => Column::from(c.clone()),
-                _ => Column::named(e.alias(dialect).unwrap()),
+                _ => Column::named(e.qualified_alias(dialect).unwrap()),
             })
             .collect();
 
@@ -2230,7 +2236,7 @@ impl SqlToMirConverter {
             .map(|(e, order, no)| {
                 let col = match e {
                     Expr::Column(c) => Column::from(c),
-                    _ => Column::named(e.alias(dialect).unwrap()),
+                    _ => Column::named(e.qualified_alias(dialect).unwrap()),
                 };
                 (col, order, no)
             })
@@ -2240,7 +2246,7 @@ impl SqlToMirConverter {
             .iter()
             .map(|e| match e {
                 Expr::Column(c) => Column::from(c.clone()),
-                _ => Column::named(e.alias(dialect).unwrap()),
+                _ => Column::named(e.qualified_alias(dialect).unwrap()),
             })
             .collect();
 
@@ -2867,7 +2873,7 @@ impl SqlToMirConverter {
                                 ..
                             } if is_aggregate(f) => Ok(Column::named(
                                 Expr::Call(f.clone())
-                                    .alias(self.dialect.into())
+                                    .qualified_alias(self.dialect.into())
                                     .unwrap_or_else(|| {
                                         f.display(self.dialect.into()).to_string().into()
                                     }),

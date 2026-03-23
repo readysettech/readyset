@@ -381,7 +381,7 @@ impl MirGraph {
             | MirNodeInner::LeftJoin { project, .. }
             | MirNodeInner::DependentJoin { project, .. }
             | MirNodeInner::DependentLeftJoin { project, .. } => project.clone(),
-            MirNodeInner::JoinAggregates => {
+            MirNodeInner::JoinAggregates { .. } => {
                 let cols = self
                     // see note [edge-ordering]
                     .sorted_ancestors(node)

@@ -90,7 +90,7 @@ impl FunctionProcessor<'_> {
                     .or_default()
                     .push(ProjectExpr::Expr {
                         expr: Expr::Call(f.clone()),
-                        alias: f.alias(self.dialect).unwrap_or_default().into(),
+                        alias: f.qualified_alias(self.dialect).unwrap_or_default().into(),
                     });
 
                 Ok(true)
@@ -148,20 +148,20 @@ pub(crate) fn convert_filters_to_join_keys(
                     None,
                 ),
                 (Expr::Call(f1), Expr::Column(c2)) => (
-                    Column::named(f1.alias(dialect).unwrap()),
+                    Column::named(f1.qualified_alias(dialect).unwrap()),
                     Column::from(c2.clone()),
                     Some(f1),
                     None,
                 ),
                 (Expr::Column(c1), Expr::Call(f2)) => (
                     Column::from(c1.clone()),
-                    Column::named(f2.alias(dialect).unwrap()),
+                    Column::named(f2.qualified_alias(dialect).unwrap()),
                     None,
                     Some(f2),
                 ),
                 (Expr::Call(f1), Expr::Call(f2)) => (
-                    Column::named(f1.alias(dialect).unwrap()),
-                    Column::named(f2.alias(dialect).unwrap()),
+                    Column::named(f1.qualified_alias(dialect).unwrap()),
+                    Column::named(f2.qualified_alias(dialect).unwrap()),
                     Some(f1),
                     Some(f2),
                 ),
@@ -306,7 +306,7 @@ pub(crate) fn convert_filters_to_join_keys(
                 | MirNodeInner::Constant { .. }
                 | MirNodeInner::Filter { .. }
                 | MirNodeInner::Identity
-                | MirNodeInner::JoinAggregates
+                | MirNodeInner::JoinAggregates { .. }
                 | MirNodeInner::DependentJoin { .. }
                 | MirNodeInner::DependentLeftJoin { .. }
                 | MirNodeInner::ViewKey { .. }

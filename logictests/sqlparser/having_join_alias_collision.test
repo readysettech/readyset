@@ -1,0 +1,108 @@
+# REA-6523: HAVING without GROUP BY over a column with some NULLs following
+# a JOIN returns incorrect answer set.
+#
+# Root cause: MAX(a.col) in SELECT and MAX(b.col) in HAVING both alias to
+# "max(col)" after table-name stripping. The JoinAggregates node treated
+# the duplicate alias as a join key, requiring the two MAX values to be
+# equal. When they differed the inner join produced zero rows and the
+# reader fell back to the default_row (0, NULL, NULL, NULL).
+
+statement ok
+CREATE TABLE rea6523_a (rownum INT PRIMARY KEY, val INT);
+
+statement ok
+CREATE TABLE rea6523_b (rownum INT PRIMARY KEY, val INT);
+
+statement ok
+INSERT INTO rea6523_a VALUES (1, 100), (2, 200), (3, 300);
+
+# b.val has a NULL and different non-NULL values from a.val
+statement ok
+INSERT INTO rea6523_b VALUES (1, 10), (2, NULL), (3, 20);
+
+# Core bug: HAVING aggregate references a nullable column from the joined
+# table whose alias collides with a SELECT aggregate on the other table.
+# Expected: one row with count=3, max(a.val)=300, max(b.val)=20.
+# Bug produced: (0, NULL, NULL) -- the default_row.
+query III
+SELECT COUNT(*), MAX(a.val), MAX(b.val)
+FROM rea6523_a a
+JOIN rea6523_b b ON b.rownum = a.rownum
+HAVING MAX(b.val) > 5;
+----
+3
+300
+20
+
+# Same pattern with four aggregates (two pairs sharing the alias "max(val)")
+# to stress the chained JoinAggregates path.
+query IIII
+SELECT COUNT(*), MAX(a.val), MIN(a.val), MAX(b.val)
+FROM rea6523_a a
+JOIN rea6523_b b ON b.rownum = a.rownum
+HAVING MAX(b.val) > 5;
+----
+3
+300
+100
+20
+
+# GROUP BY + JOIN with same-named columns from different tables.
+# This is the most common real-world pattern: explicit GROUP BY with HAVING
+# referencing an aggregate whose alias would collide.
+query IIII rowsort
+SELECT a.rownum, COUNT(*), MAX(a.val), MAX(b.val)
+FROM rea6523_a a
+JOIN rea6523_b b ON b.rownum = a.rownum
+GROUP BY a.rownum
+HAVING MAX(b.val) > 5;
+----
+1
+1
+100
+10
+3
+1
+300
+20
+
+# Chained JoinAggregates with GROUP BY: 4+ aggregates from two tables force
+# multiple JoinAggregates nodes where the second join's left parent is itself
+# a JoinAggregates output.
+query IIIIII rowsort
+SELECT a.rownum, COUNT(*), MAX(a.val), MIN(a.val), MAX(b.val), MIN(b.val)
+FROM rea6523_a a
+JOIN rea6523_b b ON b.rownum = a.rownum
+GROUP BY a.rownum
+HAVING MAX(b.val) > 5;
+----
+1
+1
+100
+100
+10
+10
+3
+1
+300
+300
+20
+20
+
+# SUM on same-named columns from different tables to stress the qualified
+# alias beyond MAX.
+query III
+SELECT COUNT(*), SUM(a.val), SUM(b.val)
+FROM rea6523_a a
+JOIN rea6523_b b ON b.rownum = a.rownum
+HAVING SUM(b.val) > 0;
+----
+3
+600
+30
+
+statement ok
+DROP TABLE rea6523_b;
+
+statement ok
+DROP TABLE rea6523_a;

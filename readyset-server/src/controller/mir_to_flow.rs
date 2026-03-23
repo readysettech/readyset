@@ -235,7 +235,7 @@ pub(super) fn mir_node_to_flow_parts(
                         mig,
                     )?)
                 }
-                MirNodeInner::JoinAggregates => {
+                MirNodeInner::JoinAggregates { ref group_by } => {
                     invariant_eq!(ancestors.len(), 2);
                     let left = ancestors[0];
                     let right = ancestors[1];
@@ -245,6 +245,7 @@ pub(super) fn mir_node_to_flow_parts(
                         left,
                         right,
                         &graph.referenced_columns(mir_node),
+                        group_by,
                         mig,
                     )?)
                 }
@@ -475,7 +476,7 @@ fn record_reachable(node: &MirNodeInner) {
         MirNodeInner::Join { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Join"}"#)
         }
-        MirNodeInner::JoinAggregates => {
+        MirNodeInner::JoinAggregates { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"JoinAggregates"}"#)
         }
         MirNodeInner::LeftJoin { .. } => {
@@ -1219,15 +1220,17 @@ fn make_join_node(
     Ok(DfNodeIndex::new(n))
 }
 
-/// Joins two parent aggregate nodes together. Columns that are shared between both parents are
-/// assumed to be group_by columns and all unique columns are considered to be the aggregate
-/// columns themselves.
+/// Joins two parent aggregate nodes together. The explicit `group_by` columns are used to
+/// determine which columns are join keys vs. aggregate output columns. Previously this was
+/// inferred from column name matching, which failed when two different aggregates produced the
+/// same alias (e.g., `MAX(a.col)` and `MAX(b.col)` both aliasing to `max(col)`).
 fn make_join_aggregates_node(
     graph: &MirGraph,
     name: Relation,
     left: MirNodeIndex,
     right: MirNodeIndex,
     columns: &[Column],
+    group_by: &[Column],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let mut left_na = graph.resolve_dataflow_node(left).ok_or_else(|| {
@@ -1243,46 +1246,45 @@ fn make_join_aggregates_node(
     let mut left_cols = mig.dataflow_state.ingredients[left_na.address()].columns();
     let mut right_cols = mig.dataflow_state.ingredients[right_na.address()].columns();
 
+    let left_mir_cols = graph.columns(left);
+    let right_mir_cols = graph.columns(right);
+
     let mut on = vec![];
-    // We gather up all of the columns from each respective parent. If a column is in both parents,
-    // then we know it was a group_by column and add it as a join key. Otherwise if the column is
-    // exclusively in the left parent (such as the aggregate column itself), we make a Side::Left
-    // with the left parent index. We finally iterate through the right parent and add the columns
-    // that were exclusively in the right parent as Side::Right with the right parent index for
-    // each given unique column.
-    let mut project = graph
-        .columns(left)
-        .iter()
-        .enumerate()
-        .map(|(i, c)| {
-            if let Ok(j) = graph.column_id_for_column(right, c) {
-                // If the column was found in both, it's a group_by column and gets added as
-                // a join key
-                on.push((i, j));
-                (Side::Left, i)
-            } else {
-                // Column exclusively in left parent, so gets added as coming from the left.
-                (Side::Left, i)
-            }
-        })
-        .chain(
-            graph
-                .columns(right)
-                .iter()
-                .enumerate()
-                .filter_map(|(i, c)| {
-                    // If column is in left, don't do anything it's already been added.
-                    // If it's in right, add it with right index.
-                    if graph.column_id_for_column(left, c).is_ok() {
-                        None
-                    } else {
-                        // Column exclusively in right parent, so gets added as coming from the
-                        // right.
-                        Some((Side::Right, i))
-                    }
-                }),
-        )
-        .collect::<Vec<_>>();
+    // Use the explicit group_by columns to determine join keys. A left column is a join key
+    // only if it is a group-by column AND the same group-by column exists in the right parent.
+    // All other columns (aggregate outputs) are projected from their respective sides, even if
+    // they happen to share the same name.
+    antithesis_sdk::assert_sometimes!(
+        !group_by.is_empty(),
+        "JoinAggregates with explicit group_by columns",
+        &serde_json::json!({"group_by_count": group_by.len()})
+    );
+    antithesis_sdk::assert_sometimes!(
+        group_by.is_empty(),
+        "JoinAggregates with empty group_by (no GROUP BY or parameter columns)",
+        &serde_json::json!({})
+    );
+    let mut project: Vec<(Side, usize)> = Vec::with_capacity(left_mir_cols.len());
+    for (i, c) in left_mir_cols.iter().enumerate() {
+        if group_by.contains(c) {
+            let j = graph.column_id_for_column(right, c).map_err(|_| {
+                internal_err!(
+                    "group_by column {} not found in right parent of JoinAggregates",
+                    c
+                )
+            })?;
+            on.push((i, j));
+        }
+        project.push((Side::Left, i));
+    }
+
+    // Add columns from the right parent that are NOT group-by columns (i.e., aggregate
+    // outputs). Group-by columns are already represented via the left side of the join.
+    for (i, c) in right_mir_cols.iter().enumerate() {
+        if !group_by.contains(c) {
+            project.push((Side::Right, i));
+        }
+    }
 
     // Skip join side swapping for Constant nodes — they are always small
     if !is_constant_backed(graph, left) && !is_constant_backed(graph, right) {

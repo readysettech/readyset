@@ -4,7 +4,7 @@ use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggre
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
-use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{self, Expr, FunctionExpr, Relation, SqlIdentifier};
 use readyset_sql::{
     analysis::{is_aggregate, ReferredColumns},
@@ -257,8 +257,25 @@ pub(super) fn make_grouped(
     let joinable_agg_nodes = joinable_aggregate_nodes(mir_converter, &agg_nodes);
 
     if joinable_agg_nodes.len() >= 2 {
-        let join_nodes =
-            make_joins_for_aggregates(mir_converter, query_name, &name.name, &joinable_agg_nodes)?;
+        // The joinable aggregates all share the same group columns: the GROUP BY columns plus
+        // any parameter columns folded in by `group_cols` above. Use those as the JoinAggregates
+        // join keys so that aggregate output columns which happen to share a name (e.g.
+        // `max(a.x)` and `max(b.x)`) are not mistaken for shared group columns and collapsed.
+        let group_by = match &mir_converter.get_node(joinable_agg_nodes[0]).unwrap().inner {
+            MirNodeInner::Aggregation { group_by, .. }
+            | MirNodeInner::Extremum { group_by, .. }
+            | MirNodeInner::Accumulator { group_by, .. } => group_by.clone(),
+            other => {
+                internal!("joinable_aggregate_nodes returned non-aggregate MIR node: {other:?}")
+            }
+        };
+        let join_nodes = make_joins_for_aggregates(
+            mir_converter,
+            query_name,
+            &name.name,
+            &joinable_agg_nodes,
+            &group_by,
+        )?;
         agg_nodes.extend(join_nodes);
     }
 
