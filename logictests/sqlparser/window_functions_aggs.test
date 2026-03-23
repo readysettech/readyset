@@ -1,0 +1,144 @@
+statement ok
+CREATE TABLE t1 (id INT PRIMARY KEY, category INT, value INT);
+
+statement ok
+INSERT INTO t1 VALUES (1, 1, 10), (2, 1, 20), (3, 2, 15), (4, 2, 25);
+
+# Test 1: Simple WF + GROUP BY, no aggregates in WF clauses
+query III rowsort
+SELECT category, sum(value) AS s, row_number() OVER (ORDER BY category) AS rn FROM t1 GROUP BY category;
+----
+1
+30
+1
+2
+40
+2
+
+# Test 2: Aggregate in WF ORDER BY
+query III rowsort
+SELECT category, sum(value), rank() OVER (ORDER BY sum(value) DESC) AS rnk FROM t1 GROUP BY category;
+----
+1
+30
+2
+2
+40
+1
+
+# Test 3: Aggregate in WF PARTITION BY
+query III rowsort
+SELECT category, count(*) AS cnt, row_number() OVER (PARTITION BY count(*) ORDER BY category) AS rn FROM t1 GROUP BY category;
+----
+1
+2
+1
+2
+2
+2
+
+# Test 4: Aggregate in WF function argument (window aggregate over aggregate)
+query III rowsort
+SELECT category, sum(value) AS s, sum(sum(value)) OVER () AS grand_total FROM t1 GROUP BY category;
+----
+1
+30
+70
+2
+40
+70
+
+# Test 5: avg aggregate used in WF ORDER BY
+query IRI rowsort
+SELECT category, avg(value) AS a, row_number() OVER (ORDER BY avg(value) DESC) AS rn FROM t1 GROUP BY category;
+----
+1
+15.0000
+2
+2
+20.0000
+1
+
+# Test 6: Aggregate in both PARTITION BY and ORDER BY
+query III rowsort
+SELECT category, sum(value) AS s, rank() OVER (PARTITION BY count(*) ORDER BY sum(value)) AS rnk FROM t1 GROUP BY category;
+----
+1
+30
+1
+2
+40
+2
+
+statement ok
+CREATE TABLE t2 (id INT PRIMARY KEY, grp INT, val INT);
+
+statement ok
+INSERT INTO t2 VALUES (1, 1, 5), (2, 1, 15), (3, 1, 10), (4, 2, 20), (5, 3, 30);
+
+# Test 7: dense_rank with unequal group sizes
+query III rowsort
+SELECT grp, count(*) AS cnt, dense_rank() OVER (ORDER BY count(*) DESC) AS dr FROM t2 GROUP BY grp;
+----
+1
+3
+1
+2
+1
+2
+3
+1
+2
+
+# Test 8: WF + GROUP BY where WF uses only GROUP BY columns (no agg in WF)
+query III rowsort
+SELECT category, sum(value), row_number() OVER (PARTITION BY category) AS rn FROM t1 GROUP BY category;
+----
+1
+30
+1
+2
+40
+1
+
+# Test 9: Aggregate ONLY inside WF (not in SELECT list) — edge case
+query II rowsort
+SELECT category, row_number() OVER (ORDER BY sum(value) DESC) AS rn FROM t1 GROUP BY category;
+----
+1
+2
+2
+1
+
+# Test 10: WF appears BEFORE its aggregate in SELECT list order
+query III rowsort
+SELECT row_number() OVER (ORDER BY sum(value) DESC) AS rn, category, sum(value) AS s FROM t1 GROUP BY category;
+----
+1
+2
+40
+2
+1
+30
+
+# Test 11: HAVING + WF + GROUP BY
+query III rowsort
+SELECT category, sum(value) AS s, rank() OVER (ORDER BY sum(value) DESC) AS rnk FROM t1 GROUP BY category HAVING sum(value) > 25;
+----
+1
+30
+2
+2
+40
+1
+
+# Test 12: Aggregate nested inside CASE WHEN in WF ORDER BY (Comment 2 coverage)
+query III rowsort
+SELECT category, sum(value) AS s, row_number() OVER (ORDER BY CASE WHEN sum(value) > 35 THEN 0 ELSE 1 END, category) AS rn FROM t1 GROUP BY category;
+----
+1
+30
+2
+2
+40
+1

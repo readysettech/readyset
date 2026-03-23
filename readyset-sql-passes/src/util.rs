@@ -372,8 +372,9 @@ pub fn map_aggregates(
             ArrayArguments::Subquery(..) => {}
         },
         Expr::Collate { expr, .. } => ret.append(&mut map_aggregates(expr, dialect)),
-        // Window functions are handled separately
-        // `PARTITION BY` and `ORDER BY` can *NOT* contain aggregates
+        // Window functions are handled separately — aggregate extraction
+        // from PARTITION BY, ORDER BY, and function args is performed
+        // in QueryGraph construction (query_graph.rs).
         Expr::WindowFunction { .. } => {}
     }
     ret

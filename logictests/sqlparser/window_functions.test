@@ -28,12 +28,16 @@ SELECT a, count(b) OVER (PARTITION BY a) FROM t WHERE b = 2 AND a = 1;
 1
 1
 
-onlyif readyset
-statement error: Aggregates in window functions
-SELECT a, count(*) OVER (PARTITION BY sum(a)) FROM t;
+query II rowsort
+SELECT a, count(*) OVER (PARTITION BY sum(b)) FROM t GROUP BY a;
+----
+1
+1
+2
+1
 
 onlyif readyset
-statement error: Mixing window functions and aggregates
+statement error: Using group by without aggregates is not yet supported
 SELECT a, count(*) OVER (PARTITION BY a) FROM t GROUP BY a;
 
 query II rowsort

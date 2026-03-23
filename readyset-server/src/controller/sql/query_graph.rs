@@ -1469,6 +1469,122 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                         let fn_name: SqlIdentifier =
                             expr.display(dialect.into()).to_string().into();
 
+                        // Extract aggregate calls from WF sub-expressions, replacing
+                        // them with Expr::Column refs to the materialized aggregate
+                        // columns.  This is needed because SQL evaluates aggregates
+                        // BEFORE window functions — by the time the WF executes, each
+                        // aggregate result is already a column.
+                        //
+                        // Register extracted aggregates using `or_insert` semantics:
+                        // if the same aggregate already appears in the SELECT list
+                        // (e.g., `count(*) AS cnt`), reuse its registered name.
+                        // After map_aggregates rewrites, patch column names to
+                        // match the canonical registration.
+                        // Recursively rename column references in an expression tree.
+                        // Needed when map_aggregates writes a column name that
+                        // differs from the canonical registration (e.g., the same
+                        // aggregate appears aliased in the SELECT list).  The column
+                        // may be nested arbitrarily deep (e.g., inside CASE WHEN
+                        // sum(value) > 30 ...).
+                        struct RenameColumn {
+                            from: SqlIdentifier,
+                            to: SqlIdentifier,
+                        }
+                        impl<'ast> VisitorMut<'ast> for RenameColumn {
+                            type Error = std::convert::Infallible;
+                            fn visit_column(
+                                &mut self,
+                                column: &'ast mut Column,
+                            ) -> Result<(), Self::Error> {
+                                if column.table.is_none() && column.name == self.from {
+                                    column.name = self.to.clone();
+                                }
+                                Ok(())
+                            }
+                        }
+
+                        let merge_and_patch = |extracted: Vec<(FunctionExpr, SqlIdentifier)>,
+                                               expr: &mut Expr,
+                                               aggregates: &mut HashMap<
+                            FunctionExpr,
+                            SqlIdentifier,
+                        >| {
+                            for (func, new_name) in extracted {
+                                let canonical = aggregates
+                                    .entry(func)
+                                    .or_insert_with(|| new_name.clone())
+                                    .clone();
+                                if canonical != new_name {
+                                    let mut renamer = RenameColumn {
+                                        from: new_name,
+                                        to: canonical,
+                                    };
+                                    // Infallible — unwrap is safe.
+                                    let _ = renamer.visit_expr(expr);
+                                }
+                            }
+                        };
+
+                        let mut partition_by = partition_by.clone();
+                        for pb in partition_by.iter_mut() {
+                            let extracted = map_aggregates(pb, dialect.into());
+                            merge_and_patch(extracted, pb, &mut aggregates);
+                        }
+
+                        let mut order_by = order_by.clone();
+                        for (ob_expr, _, _) in order_by.iter_mut() {
+                            let extracted = map_aggregates(ob_expr, dialect.into());
+                            merge_and_patch(extracted, ob_expr, &mut aggregates);
+                        }
+
+                        // Extract aggregates from the WF function's arguments.
+                        // We cannot wrap the whole function in Expr::Call and run
+                        // map_aggregates, because that would treat the WF's own
+                        // function (e.g., SUM in `SUM(SUM(x)) OVER ()`) as a
+                        // regular aggregate.  Instead, process each argument
+                        // individually via into_arguments / reconstruction.
+                        let mut function = function.clone();
+                        let args: Vec<Expr> = function.arguments().cloned().collect();
+                        if !args.is_empty() {
+                            let mut new_args: Vec<Expr> = Vec::with_capacity(args.len());
+                            for mut arg in args {
+                                let extracted = map_aggregates(&mut arg, dialect.into());
+                                merge_and_patch(extracted, &mut arg, &mut aggregates);
+                                new_args.push(arg);
+                            }
+                            // Reconstruct the function with rewritten arguments.
+                            // WF functions have at most one argument in practice
+                            // (Sum/Count/Avg/Min/Max take one; Rank/RowNumber/
+                            // DenseRank/CountStar take none).
+                            match &mut function {
+                                FunctionExpr::Max(expr)
+                                | FunctionExpr::Min(expr)
+                                | FunctionExpr::Avg { expr, .. }
+                                | FunctionExpr::Sum { expr, .. }
+                                | FunctionExpr::Count { expr, .. } => {
+                                    let Some(new_arg) = new_args.into_iter().next() else {
+                                        internal!(
+                                            "WF aggregate function must have exactly one argument"
+                                        )
+                                    };
+                                    **expr = new_arg;
+                                }
+                                // Rank, RowNumber, DenseRank, CountStar have no args.
+                                // If a new WF function with arguments is added in the
+                                // future, it must be handled above — otherwise the
+                                // rewritten args are silently dropped.
+                                _ => {
+                                    debug_assert!(
+                                        new_args.iter().all(|a| {
+                                            !readyset_sql_passes::is_aggregated_expr(a)
+                                                .unwrap_or(true)
+                                        }),
+                                        "Unhandled WF function variant with aggregate arguments"
+                                    );
+                                }
+                            }
+                        }
+
                         columns.push(OutputColumn::Data {
                             alias: alias.clone().unwrap_or(fn_name.clone()),
                             column: Column {
@@ -1478,9 +1594,9 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                         });
 
                         window_functions.push(WindowFunction {
-                            function: function.clone(),
-                            partition_by: partition_by.clone(),
-                            order_by: order_by.clone(),
+                            function,
+                            partition_by,
+                            order_by,
                             alias: alias.clone().unwrap_or(fn_name),
                         })
                     }
@@ -1683,10 +1799,6 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
             })
             .collect()
     };
-
-    if !window_functions.is_empty() && !group_by.is_empty() {
-        unsupported!("Mixing window functions and aggregates is not yet supported");
-    }
 
     if !group_by.is_empty() && aggregates.is_empty() {
         unsupported!("Using group by without aggregates is not yet supported");

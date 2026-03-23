@@ -63,6 +63,7 @@ pub use crate::remove_numeric_field_references::RemoveNumericFieldReferences;
 pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::resolve_schemas::ResolveSchemasContext;
 pub use crate::rewrite_between::RewriteBetween;
+pub use crate::rewrite_utils::is_aggregated_expr;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::star_expansion::StarExpansionContext;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};

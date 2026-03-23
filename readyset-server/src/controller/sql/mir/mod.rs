@@ -2146,12 +2146,20 @@ impl SqlToMirConverter {
             .cloned()
             .collect::<Vec<_>>();
 
-        let has_agg = |e: &Expr| matches!(e, Expr::Call(f) if is_aggregate(f));
-        if partition_by.iter().any(has_agg)
-            || arguments.iter().any(has_agg)
-            || order_cols.iter().any(has_agg)
+        // Safety net: all aggregates should have been rewritten to Column refs
+        // during QueryGraph construction. If any survived (possibly nested
+        // inside CASE WHEN, BinaryOp, etc.), it means map_aggregates did not
+        // handle the expression shape — reject rather than produce wrong results.
+        let has_residual_agg =
+            |e: &Expr| readyset_sql_passes::is_aggregated_expr(e).unwrap_or(false);
+        if partition_by.iter().any(has_residual_agg)
+            || arguments.iter().any(has_residual_agg)
+            || order_cols.iter().any(has_residual_agg)
         {
-            unsupported!("Aggregates in window functions not yet supported");
+            unsupported!(
+                "Unresolved aggregate inside window function PARTITION BY, ORDER BY, \
+                 or arguments — the surrounding expression shape is not supported"
+            );
         }
 
         // if the partition, ordering cols, or args require projection,
@@ -2598,20 +2606,8 @@ impl SqlToMirConverter {
                 prev_node = subquery_leaf;
             }
 
-            // 8. Add window functions or grouped nodes (mutually exclusive for now)
-            if !query_graph.aggregates.is_empty() && !query_graph.window_functions.is_empty() {
-                unsupported!("Mixing window functions and aggregates is not yet supported")
-            };
-
+            // 8. Add grouped (aggregate) nodes
             let group_by: Vec<_> = view_key.columns.iter().map(|(c, _)| c.clone()).collect();
-
-            prev_node = self.make_window_node(
-                query_name,
-                format!("q_{:x}", query_graph.signature().hash).into(),
-                prev_node,
-                &query_graph.window_functions,
-                group_by,
-            )?;
 
             let mut func_nodes: Vec<NodeIndex> = make_grouped(
                 self,
@@ -2636,6 +2632,16 @@ impl SqlToMirConverter {
 
                 prev_node = subquery_leaf;
             }
+
+            // 9a. Add window function nodes (after aggregation and HAVING,
+            //     matching SQL evaluation order)
+            prev_node = self.make_window_node(
+                query_name,
+                format!("q_{:x}", query_graph.signature().hash).into(),
+                prev_node,
+                &query_graph.window_functions,
+                group_by,
+            )?;
 
             // 10. Get the final node
             let mut final_node = prev_node;

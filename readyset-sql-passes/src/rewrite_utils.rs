@@ -1171,7 +1171,7 @@ pub(crate) fn for_each_window_function_mut<'a>(
     .visit_expr(expr)
 }
 
-pub(crate) fn is_aggregated_expr(expr: &Expr) -> ReadySetResult<bool> {
+pub fn is_aggregated_expr(expr: &Expr) -> ReadySetResult<bool> {
     let mut has_aggregates = false;
     for_each_aggregate(expr, false, &mut |_| has_aggregates = true)?;
     Ok(has_aggregates)
