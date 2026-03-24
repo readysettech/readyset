@@ -590,7 +590,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
             // The connection has been switched to TLS successfully. Read the handshake
             // again as per TLS handshake protocol.
-            self.conn.set_seq(packet.seq + 1);
+            self.conn.set_seq(packet.next_seq());
             packet = self.conn.next().await?.ok_or_else(|| {
                 // We use the stdlib's "custom" [`io::ErrorKind`] for this expected/benign error that
                 // occurs during a Layer 4 network health check, to indicate it can be ignored higher up
@@ -601,7 +601,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         } else {
             // Client connected using a non encrypted stream. Write an error if TLS mode is required.
             if self.tls_mode == TlsMode::Required {
-                self.conn.set_seq(packet.seq + 1);
+                self.conn.set_seq(packet.next_seq());
                 writers::write_err(
                     ErrorKind::ER_SECURE_TRANSPORT_REQUIRED,
                     b"Connections using insecure transport are prohibited.",
@@ -625,7 +625,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             self.shim.on_connect_attrs(&handshake.connect_attrs);
         }
 
-        self.conn.set_seq(packet.seq + 1);
+        self.conn.set_seq(packet.next_seq());
 
         self.client_capabilities = handshake.capabilities;
         let charset = handshake.charset;
@@ -681,7 +681,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     "peer terminated connection when asked to switch auth plugin",
                 )
             })?;
-            self.conn.set_seq(packet.seq + 1);
+            self.conn.set_seq(packet.next_seq());
 
             packet.data.to_vec()
         } else {
@@ -733,7 +733,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         let mut stmts: HashMap<u32, _> = HashMap::new();
         while let Some(packet) = self.conn.next().await? {
-            self.conn.set_seq(packet.seq + 1);
+            self.conn.set_seq(packet.next_seq());
             let cmd = commands::parse(&packet).map_err(|e| {
                 other_error(OtherErrorKind::GenericErr {
                     error: format!("{e:?}"),

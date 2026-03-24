@@ -218,6 +218,13 @@ where
     where
         C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     {
+        self.test_with_opts(c, "").await;
+    }
+
+    async fn test_with_opts<C>(self, c: C, extra_opts: &str)
+    where
+        C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
+    {
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -236,11 +243,14 @@ where
         });
 
         // Connect to the server
-        let mut db = mysql::Conn::new(
-            mysql::Opts::from_url(&format!("mysql://user:password@127.0.0.1:{port}")).unwrap(),
-        )
-        .await
-        .unwrap();
+        let mut url = format!("mysql://user:password@127.0.0.1:{port}");
+        if !extra_opts.is_empty() {
+            url.push('?');
+            url.push_str(extra_opts);
+        }
+        let mut db = mysql::Conn::new(mysql::Opts::from_url(&url).unwrap())
+            .await
+            .unwrap();
 
         // Run the test closure
         c(&mut db).await;
@@ -1303,5 +1313,41 @@ async fn really_long_query() {
             db.query::<Row, _>(long).await.unwrap();
         })
     })
+    .await;
+}
+
+/// Regression test for REA-6058: queries larger than MAX_PACKET_CHUNK_SIZE (16MB) are split into
+/// multiple MySQL protocol segments. The server must use the correct sequence number (accounting
+/// for all segments) when sending the response. Previously, the server used `first_seq + 1`
+/// instead of `first_seq + num_segments`, causing "packet out of order" on the client.
+#[tokio::test]
+async fn large_packet_query_response_seq() {
+    // Build a query that exceeds 16MB (MAX_PACKET_CHUNK_SIZE = 16_777_215).
+    // We use a simple SELECT with a huge comment to avoid any parsing complexity.
+    let padding = "x".repeat(17_000_000);
+    let query = format!("SELECT 1 /* {padding} */");
+    let expected_len = query.len();
+
+    TestingShim::new(
+        move |q, w| {
+            // Verify the server received the full query
+            assert_eq!(q.len(), expected_len);
+            Box::pin(async move { w.completed(0, 0, None).await })
+        },
+        |_| 0,
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        move |_, _, _| unreachable!(),
+    )
+    .test_with_opts(
+        move |db| {
+            Box::pin(async move {
+                // This would fail with "packet out of order" before the fix because the server
+                // response had seq=1 (based on first chunk) instead of seq=2 (after both chunks).
+                db.query_drop(&query).await.unwrap();
+            })
+        },
+        "max_allowed_packet=67108864",
+    )
     .await;
 }

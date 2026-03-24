@@ -347,9 +347,26 @@ impl Packet {
         }
     }
 
-    fn append(&mut self, segment: BytesMut) {
+    /// Appends a continuation segment to this packet. Uses `checked_add` rather than
+    /// `wrapping_add` because `segments` is an internal count, not a protocol-defined wrapping
+    /// counter - overflow would silently corrupt `next_seq()`. In practice unreachable (MySQL
+    /// caps `max_allowed_packet` at 1GB ~ 64 segments), but guards against malformed input.
+    fn append(&mut self, segment: BytesMut) -> io::Result<()> {
         self.data.unsplit(segment);
-        self.segments += 1;
+        self.segments = self.segments.checked_add(1).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "packet exceeds maximum segment count",
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Returns the sequence number that should be used for the next packet in the conversation.
+    /// For single-segment packets this is `seq + 1`; for multi-segment (large) packets this
+    /// accounts for all segments consumed.
+    pub fn next_seq(&self) -> u8 {
+        self.seq.wrapping_add(self.segments)
     }
 }
 
@@ -445,19 +462,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
         loop {
             match self.parse_next_segment()? {
                 Some(segment) => {
-                    if segment.seq != packet.seq + packet.segments {
+                    let expected_seq = packet.seq.wrapping_add(packet.segments);
+                    if segment.seq != expected_seq {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!(
-                                "expected seq {}, got {}",
-                                packet.seq + packet.segments,
-                                segment.seq
-                            ),
+                            format!("expected seq {expected_seq}, got {}", segment.seq),
                         ));
                     }
 
                     let segment_len = segment.len();
-                    packet.append(segment.data);
+                    packet.append(segment.data)?;
 
                     if segment_len < MAX_PACKET_CHUNK_SIZE {
                         break;
@@ -561,7 +575,7 @@ mod tests {
             &[0; MAX_PACKET_CHUNK_SIZE]
         );
         assert_eq!(&packet[MAX_PACKET_CHUNK_SIZE..], &[0x10]);
-        //assert_eq!(packet.segments, 2);
+        assert_eq!(packet.segments, 2);
 
         assert!(reader.next().await.unwrap().is_none());
     }
@@ -616,5 +630,52 @@ mod tests {
             writer.flush().await
         })
         .await;
+    }
+
+    #[test]
+    fn test_next_seq_single_segment() {
+        let packet = Packet::new(BytesMut::from(&[0x10][..]), 0);
+        assert_eq!(packet.next_seq(), 1);
+
+        let packet = Packet::new(BytesMut::from(&[0x10][..]), 127);
+        assert_eq!(packet.next_seq(), 128);
+
+        let packet = Packet::new(BytesMut::from(&[0x10][..]), 255);
+        assert_eq!(packet.next_seq(), 0); // wraps
+    }
+
+    /// Write `data_len` bytes through a PacketConn pair and verify the resulting
+    /// Packet has the expected segment count and next_seq value.
+    async fn assert_next_seq(data_len: usize, expected_segments: u8, expected_next_seq: u8) {
+        let (u_out, u_in) = tokio::net::UnixStream::pair().unwrap();
+        let data = vec![0xAB; data_len];
+        tokio::spawn(async move {
+            let mut writer = PacketConn::new(u_out);
+            writer.enqueue_packet(data);
+            writer.flush().await.unwrap();
+        });
+        let mut reader = PacketConn::new(u_in);
+        let packet = reader.next().await.unwrap().unwrap();
+        assert_eq!(packet.seq, 0);
+        assert_eq!(packet.segments, expected_segments);
+        assert_eq!(packet.next_seq(), expected_next_seq);
+    }
+
+    #[test]
+    fn test_next_seq_multi_segment_wrapping() {
+        let mut packet = Packet::new(BytesMut::from(&[0x10][..]), 254);
+        packet.append(BytesMut::from(&[0x20][..])).unwrap();
+        assert_eq!(packet.segments, 2);
+        assert_eq!(packet.next_seq(), 0); // 254 + 2 wraps to 0
+    }
+
+    #[tokio::test]
+    async fn test_next_seq_multi_segment() {
+        // Just over MAX_PACKET_CHUNK_SIZE: 2 segments
+        assert_next_seq(MAX_PACKET_CHUNK_SIZE + 1, 2, 2).await;
+        // Exactly MAX_PACKET_CHUNK_SIZE: full chunk + empty terminator = 2 segments
+        assert_next_seq(MAX_PACKET_CHUNK_SIZE, 2, 2).await;
+        // 2x MAX_PACKET_CHUNK_SIZE: 2 full chunks + empty terminator = 3 segments
+        assert_next_seq(MAX_PACKET_CHUNK_SIZE * 2, 3, 3).await;
     }
 }
