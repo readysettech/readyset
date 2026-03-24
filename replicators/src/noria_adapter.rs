@@ -1079,8 +1079,14 @@ impl<'a> NoriaAdapter<'a> {
             }
             return Ok(());
         };
+        let batch_size = actions.len();
         actions.push(TableOperation::SetReplicationOffset(pos.clone()));
+        let start = std::time::Instant::now();
         table_mutator.perform_all(actions).await?;
+        let duration = start.elapsed();
+        histogram!(recorded::REPLICATOR_BATCH_SIZE).record(batch_size as f64);
+        counter!(recorded::REPLICATOR_PERFORM_ALL_CALLS).increment(1);
+        histogram!(recorded::REPLICATOR_PERFORM_ALL_DURATION).record(duration.as_micros() as f64);
 
         self.replication_offsets
             .tables

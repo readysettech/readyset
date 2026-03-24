@@ -347,6 +347,15 @@ pub mod recorded {
     /// Counter: Number of replication actions performed successfully.
     pub const REPLICATOR_SUCCESS: &str = "readyset_replicator.update_success";
 
+    /// Histogram: Number of table operations per perform_all RPC call.
+    pub const REPLICATOR_BATCH_SIZE: &str = "readyset_replicator.batch_size";
+
+    /// Counter: Total number of perform_all RPC calls made by the replicator.
+    pub const REPLICATOR_PERFORM_ALL_CALLS: &str = "readyset_replicator.perform_all_calls";
+
+    /// Histogram: Duration in microseconds of each perform_all RPC call.
+    pub const REPLICATOR_PERFORM_ALL_DURATION: &str = "readyset_replicator.perform_all_duration_us";
+
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
