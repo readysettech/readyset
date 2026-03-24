@@ -132,9 +132,30 @@ pub struct UpstreamConfig {
     /// batch during replication. This bounds memory usage for large transactions.
     /// When a transaction contains more rows than this limit, intermediate
     /// batches are flushed with the current replication offset.
-    #[arg(long, env = "REPLICATION_BATCH_SIZE", default_value = "50000")]
+    #[arg(long, env = "REPLICATION_BATCH_SIZE", default_value = "50000",
+          value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     #[serde(default = "default_replication_batch_size")]
     pub replication_batch_size: usize,
+
+    /// Maximum number of committed transactions to coalesce into a single
+    /// replication batch (group commit). After the first transaction commits,
+    /// additional transactions arriving within the group commit window are
+    /// batched together into a single RPC. Set to 1 to disable group commit.
+    /// Default: 20.
+    #[arg(long, env = "GROUP_COMMIT_MAX_TRX", default_value = "20",
+          value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(0..))]
+    #[serde(default = "default_group_commit_max_trx")]
+    pub group_commit_max_trx: usize,
+
+    /// Microsecond budget for group commit. After the first transaction in a
+    /// group commits, we wait up to this duration for additional transactions
+    /// before flushing the batch. Lower values reduce replication latency,
+    /// higher values improve throughput under high write volume.
+    /// Default: 500us (0.5ms).
+    #[arg(long, env = "GROUP_COMMIT_WAIT_US", default_value = "500",
+          value_parser = clap::builder::RangedU64ValueParser::<u64>::new().range(0..))]
+    #[serde(default = "default_group_commit_wait_us")]
+    pub group_commit_wait_us: u64,
 
     /// Hostname to report when registering as a replica with the upstream database (MySQL only).
     /// If not set, no hostname will be reported.
@@ -381,6 +402,14 @@ fn default_replication_batch_size() -> usize {
     50_000
 }
 
+fn default_group_commit_max_trx() -> usize {
+    20
+}
+
+fn default_group_commit_wait_us() -> u64 {
+    500
+}
+
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
     i.parse::<u64>().map(Duration::from_secs)
 }
@@ -399,6 +428,8 @@ impl Default for UpstreamConfig {
             require_gtid: false,
             max_gtid_rows_to_skip: default_max_gtid_rows_to_skip(),
             replication_batch_size: default_replication_batch_size(),
+            group_commit_max_trx: default_group_commit_max_trx(),
+            group_commit_wait_us: default_group_commit_wait_us(),
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
             replica_report_user: Default::default(),

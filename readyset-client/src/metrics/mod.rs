@@ -356,6 +356,15 @@ pub mod recorded {
     /// Histogram: Duration in microseconds of each perform_all RPC call.
     pub const REPLICATOR_PERFORM_ALL_DURATION: &str = "readyset_replicator.perform_all_duration_us";
 
+    /// Histogram: Number of committed transactions coalesced per group commit
+    /// flush. A value of 1 means no coalescing occurred. Higher values
+    /// indicate effective group commit batching.
+    pub const REPLICATOR_GROUP_COMMIT_TXNS: &str = "readyset_replicator.group_commit_txns";
+
+    /// Histogram: Duration in microseconds of the group commit wait window.
+    /// Measures elapsed time from the first commit (leader) to the flush.
+    pub const REPLICATOR_GROUP_COMMIT_DURATION: &str =
+        "readyset_replicator.group_commit_duration_us";
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
