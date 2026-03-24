@@ -1,0 +1,164 @@
+# Tests for DISTINCT + TopK (ORDER BY + LIMIT) interactions
+
+statement ok
+CREATE TABLE td1 (id INT, val INT, cat TEXT, PRIMARY KEY (id))
+
+statement ok
+INSERT INTO td1 (id, val, cat) VALUES
+  (1, 10, 'a'),
+  (2, 20, 'a'),
+  (3, 10, 'b'),
+  (4, 30, 'a'),
+  (5, 20, 'b'),
+  (6, 10, 'a'),
+  (7, 40, 'c'),
+  (8, 20, 'c'),
+  (9, 10, 'c'),
+  (10, 30, 'b')
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 3
+----
+10
+20
+30
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val DESC LIMIT 3
+----
+40
+30
+20
+
+# LIMIT larger than distinct count
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 10
+----
+10
+20
+30
+40
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 1
+----
+10
+
+query IT nosort
+SELECT DISTINCT val, cat FROM td1 ORDER BY val ASC, cat ASC LIMIT 4
+----
+10
+a
+10
+b
+10
+c
+20
+a
+
+# distinct values should be preserved
+# Delete one of the three rows with val=10 (id=1). val=10 still exists.
+
+statement ok
+DELETE FROM td1 WHERE id = 1
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 3
+----
+10
+20
+30
+
+# Delete all rows of a distinct value
+# Delete remaining val=10 rows (id=3, 6, 9)
+
+statement ok
+DELETE FROM td1 WHERE id = 3
+
+statement ok
+DELETE FROM td1 WHERE id = 6
+
+statement ok
+DELETE FROM td1 WHERE id = 9
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 3
+----
+20
+30
+40
+
+# Insert duplicates, should not affect distinct result
+
+statement ok
+INSERT INTO td1 (id, val, cat) VALUES (11, 20, 'a'), (12, 20, 'b')
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 3
+----
+20
+30
+40
+
+# Insert a new distinct value that enters top-k
+statement ok
+INSERT INTO td1 (id, val, cat) VALUES (13, 5, 'a')
+
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val ASC LIMIT 3
+----
+5
+20
+30
+
+# DISTINCT with ORDER BY DESC after mutations
+query I nosort
+SELECT DISTINCT val FROM td1 ORDER BY val DESC LIMIT 2
+----
+40
+30
+
+# Separate table for parameterized DISTINCT + TopK
+
+statement ok
+CREATE TABLE td2 (id INT, grp INT, score INT, PRIMARY KEY (id))
+
+statement ok
+INSERT INTO td2 (id, grp, score) VALUES
+  (1, 1, 100),
+  (2, 1, 200),
+  (3, 1, 100),
+  (4, 2, 300),
+  (5, 2, 300),
+  (6, 2, 400)
+
+# DISTINCT scores per group via WHERE + LIMIT
+query I nosort
+SELECT DISTINCT score FROM td2 WHERE grp = 1 ORDER BY score ASC LIMIT 3
+----
+100
+200
+
+query I nosort
+SELECT DISTINCT score FROM td2 WHERE grp = 2 ORDER BY score DESC LIMIT 1
+----
+400
+
+# Delete duplicates in td2, distinct count unchanged
+statement ok
+DELETE FROM td2 WHERE id = 3
+
+query I nosort
+SELECT DISTINCT score FROM td2 WHERE grp = 1 ORDER BY score ASC LIMIT 3
+----
+100
+200
+
+# Delete last occurrence, distinct value disappears
+statement ok
+DELETE FROM td2 WHERE id = 1
+
+query I nosort
+SELECT DISTINCT score FROM td2 WHERE grp = 1 ORDER BY score ASC LIMIT 3
+----
+200

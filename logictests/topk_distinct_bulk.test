@@ -1,0 +1,139 @@
+statement ok
+CREATE TABLE test (id INT, text_col TEXT, PRIMARY KEY (id))
+
+# Insert many rows with heavy duplication — only 5 distinct text_col values
+# across 30 rows, simulating a real table with many duplicates
+
+statement ok
+INSERT INTO test (id, text_col) VALUES
+  (1, 'A'),
+  (2, 'Text1.1448924895255814'),
+  (3, 'A'),
+  (4, 'Text1002001.1038219022'),
+  (5, 'A'),
+  (6, 'Bravo'),
+  (7, 'Text1.1448924895255814'),
+  (8, 'A'),
+  (9, 'Zulu'),
+  (10, 'Text1002001.1038219022')
+
+statement ok
+INSERT INTO test (id, text_col) VALUES
+  (11, 'A'),
+  (12, 'A'),
+  (13, 'Text1.1448924895255814'),
+  (14, 'Bravo'),
+  (15, 'A'),
+  (16, 'Text1002001.1038219022'),
+  (17, 'A'),
+  (18, 'A'),
+  (19, 'Text1.1448924895255814'),
+  (20, 'Zulu')
+
+statement ok
+INSERT INTO test (id, text_col) VALUES
+  (21, 'A'),
+  (22, 'Bravo'),
+  (23, 'A'),
+  (24, 'Text1.1448924895255814'),
+  (25, 'Text1002001.1038219022'),
+  (26, 'A'),
+  (27, 'A'),
+  (28, 'Zulu'),
+  (29, 'A'),
+  (30, 'Bravo')
+
+# 5 distinct values: A, Bravo, Text1.1448924895255814, Text1002001.1038219022, Zulu
+# Sorted ASC: A, Bravo, Text1.1448924895255814, Text1002001.1038219022, Zulu
+
+# This is the query from the bug report
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col LIMIT 3
+----
+A
+Bravo
+Text1.1448924895255814
+
+# Same query DESC
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col DESC LIMIT 3
+----
+Zulu
+Text1002001.1038219022
+Text1.1448924895255814
+
+# LIMIT larger than distinct count
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col LIMIT 10
+----
+A
+Bravo
+Text1.1448924895255814
+Text1002001.1038219022
+Zulu
+
+# LIMIT 1
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col LIMIT 1
+----
+A
+
+# Now delete some rows — keep at least one of each distinct value
+statement ok
+DELETE FROM test WHERE id = 1
+
+statement ok
+DELETE FROM test WHERE id = 3
+
+statement ok
+DELETE FROM test WHERE id = 5
+
+# 'A' still exists via other rows. Result should be unchanged.
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col LIMIT 3
+----
+A
+Bravo
+Text1.1448924895255814
+
+# Delete ALL 'A' rows
+statement ok
+DELETE FROM test WHERE id = 8
+
+statement ok
+DELETE FROM test WHERE id = 11
+
+statement ok
+DELETE FROM test WHERE id = 12
+
+statement ok
+DELETE FROM test WHERE id = 15
+
+statement ok
+DELETE FROM test WHERE id = 17
+
+statement ok
+DELETE FROM test WHERE id = 18
+
+statement ok
+DELETE FROM test WHERE id = 21
+
+statement ok
+DELETE FROM test WHERE id = 23
+
+statement ok
+DELETE FROM test WHERE id = 26
+
+statement ok
+DELETE FROM test WHERE id = 27
+
+statement ok
+DELETE FROM test WHERE id = 29
+
+# 'A' is gone. 4 distinct values remain.
+query T nosort
+SELECT DISTINCT text_col FROM test ORDER BY text_col LIMIT 3
+----
+Bravo
+Text1.1448924895255814
+Text1002001.1038219022

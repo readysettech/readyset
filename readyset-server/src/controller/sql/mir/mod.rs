@@ -2646,15 +2646,16 @@ impl SqlToMirConverter {
             // 10. Get the final node
             let mut final_node = prev_node;
 
-            if let Some(Pagination {
-                order,
-                limit,
-                offset,
-            }) = query_graph.pagination.as_ref()
-            {
-                let make_topk = offset.is_none();
-                // view key will have the offset parameter if it exists. We must filter it out
-                // of the group by, because the column originates at this node
+            // Helper: build a TopK or Paginate node and wire it into the graph.
+            // Returns the last node created by make_paginate_node.
+            let mut add_topk_or_paginate = |this: &mut Self,
+                                            final_node: NodeIndex,
+                                            pagination: &Pagination|
+             -> ReadySetResult<NodeIndex> {
+                let make_topk = pagination.offset.is_none();
+                // view key will have the offset parameter if it exists. We must
+                // filter it out of the group by, because the column originates
+                // at this node.
                 let group_by: Vec<Column> = view_key
                     .columns
                     .iter()
@@ -2667,24 +2668,37 @@ impl SqlToMirConverter {
                     })
                     .collect();
 
-                // Order by expression projections and either a topk or paginate node
-                let paginate_nodes = self.make_paginate_node(
+                let paginate_nodes = this.make_paginate_node(
                     query_name,
                     format!(
                         "q_{:x}_n{}",
                         query_graph.signature().hash,
-                        self.mir_graph.node_count()
+                        this.mir_graph.node_count()
                     )
                     .into(),
                     final_node,
                     group_by,
-                    order,
-                    *limit,
+                    &pagination.order,
+                    pagination.limit,
                     make_topk,
                     Some(&query_graph.columns),
                 )?;
                 func_nodes.extend(paginate_nodes.clone());
-                final_node = *paginate_nodes.last().unwrap();
+                Ok(*paginate_nodes
+                    .last()
+                    .expect("make_paginate_node must return at least one node"))
+            };
+
+            // Correctness: When the query has both DISTINCT and pagination
+            // (ORDER BY + LIMIT), we must defer TopK creation until after the
+            // Distinct node. Otherwise TopK selects top K rows before
+            // deduplication, which can return fewer than K distinct values.
+            let defer_pagination = query_graph.distinct;
+
+            if let Some(pagination) = query_graph.pagination.as_ref() {
+                if !defer_pagination {
+                    final_node = add_topk_or_paginate(self, final_node, pagination)?;
+                }
             }
 
             // 10. Generate leaf views that expose the query result
@@ -2804,6 +2818,14 @@ impl SqlToMirConverter {
                 // *inputs* to those expressions
                 final_node =
                     self.make_distinct_node(query_name, name, final_node, self.columns(final_node));
+            }
+
+            // Now create the deferred TopK node after Distinct, so that
+            // TopK limits *distinct* rows rather than raw rows with duplicates.
+            if let Some(pagination) = query_graph.pagination.as_ref() {
+                if defer_pagination {
+                    final_node = add_topk_or_paginate(self, final_node, pagination)?;
+                }
             }
 
             if leaf_behavior.should_make_leaf() {
@@ -3287,6 +3309,72 @@ mod tests {
             limit: true
         },
         expect_topk_node: true
+    }
+
+    /// Verify that when a query has both DISTINCT and ORDER BY + LIMIT,
+    /// the TopK node is placed after the Distinct node in the MIR graph.
+    #[test]
+    fn topk_placed_after_distinct() -> ReadySetResult<()> {
+        let query = parse_select(
+            readyset_sql::Dialect::PostgreSQL,
+            "SELECT DISTINCT a FROM topk_test ORDER BY a LIMIT 3",
+        )
+        .expect("parse failed");
+
+        let table_name = "topk_test";
+        let columns = &[
+            ColumnSpecification {
+                column: Column::from("topk_test.a"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("topk_test.b"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+            ColumnSpecification {
+                column: Column::from("topk_test.c"),
+                sql_type: SqlType::Int(None),
+                generated: None,
+                constraints: vec![],
+                comment: None,
+            },
+        ];
+
+        let qg = to_query_graph(query, Dialect::DEFAULT_MYSQL)?;
+        let (mut converter, node) =
+            sql_to_mir_test("q_distinct_topk", qg, table_name, columns, None)?;
+        let mir_query = converter.make_mir_query("q_distinct_topk".into(), node);
+
+        let topo = mir_query.topo_nodes();
+        let distinct_pos = topo.iter().position(|n| {
+            matches!(
+                &mir_query.get_node(*n).expect("node exists").inner,
+                MirNodeInner::Distinct { .. }
+            )
+        });
+        let topk_pos = topo.iter().position(|n| {
+            matches!(
+                &mir_query.get_node(*n).expect("node exists").inner,
+                MirNodeInner::TopK { .. }
+            )
+        });
+
+        let distinct_pos =
+            distinct_pos.expect("Distinct node must exist for SELECT DISTINCT query");
+        let topk_pos = topk_pos.expect("TopK node must exist for ORDER BY + LIMIT query");
+        assert!(
+            distinct_pos < topk_pos,
+            "Distinct (position {distinct_pos}) must come before TopK (position {topk_pos}) \
+             in the MIR graph so that TopK limits distinct rows, not raw duplicates"
+        );
+
+        Ok(())
     }
 
     macro_rules! test_mir_with_config {
