@@ -82,6 +82,14 @@ impl GroupedOperation for ExtremumOperator {
         &self.group[..]
     }
 
+    fn empty_value(&self) -> Option<DfValue> {
+        Some(DfValue::None)
+    }
+
+    fn emit_empty(&self) -> bool {
+        self.group_by().is_empty()
+    }
+
     fn to_diff(&self, r: &[DfValue], pos: bool) -> ReadySetResult<Self::Diff> {
         let v = &r[self.over];
         if let DfValue::None = *v {

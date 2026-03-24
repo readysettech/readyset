@@ -314,16 +314,13 @@ impl GroupedOperation for Aggregator {
 
     fn empty_value(&self) -> Option<DfValue> {
         match self.op {
-            Aggregation::Count => Some(0.into()),
-            _ => None,
+            Aggregation::Count => Some(DfValue::Int(0)),
+            Aggregation::Sum | Aggregation::Avg => Some(DfValue::None),
         }
     }
 
     fn emit_empty(&self) -> bool {
-        match self.op {
-            Aggregation::Count => self.group_by().is_empty(),
-            _ => false,
-        }
+        self.group_by().is_empty()
     }
 
     fn can_lose_state(&self) -> bool {
@@ -1350,5 +1347,96 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(grouped.output_col_type(), DfType::Numeric { .. }));
+    }
+
+    fn setup_no_group_by(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x"]);
+        g.set_op(
+            "identity",
+            &["xs"],
+            aggregation
+                .over(
+                    s.as_global(),
+                    0,
+                    &[], // no group by
+                    &DfType::BigInt,
+                    &Dialect::DEFAULT_MYSQL,
+                )
+                .unwrap(),
+            mat,
+        );
+        g
+    }
+
+    #[test]
+    fn count_no_group_by_empty_input() {
+        let mut c = setup_no_group_by(Aggregation::Count, true);
+        // Empty input should still produce count=0
+        let rs = c.narrow_one(Records::default(), true);
+        assert_eq!(
+            rs,
+            vec![Record::Positive(vec![DfValue::Int(0), DfValue::Int(0)])].into()
+        );
+        // Idempotency: second empty input should produce nothing
+        let rs2 = c.narrow_one(Records::default(), true);
+        assert!(rs2.is_empty());
+    }
+
+    #[test]
+    fn sum_no_group_by_empty_input() {
+        let mut c = setup_no_group_by(Aggregation::Sum, true);
+        // Empty input should produce sum=NULL
+        let rs = c.narrow_one(Records::default(), true);
+        assert_eq!(
+            rs,
+            vec![Record::Positive(vec![DfValue::None, DfValue::Int(0)])].into()
+        );
+    }
+
+    #[test]
+    fn sum_no_group_by_empty_then_real_data() {
+        let mut c = setup_no_group_by(Aggregation::Sum, true);
+        // Empty input → default [NULL, 0]
+        let rs = c.narrow_one(Records::default(), true);
+        assert_eq!(rs.len(), 1);
+
+        // Real data arrives: rows with value 5 and 3
+        let u: Records = vec![
+            Record::Positive(vec![5.into()]),
+            Record::Positive(vec![3.into()]),
+        ]
+        .into();
+        let rs2 = c.narrow_one(u, true);
+        // Should revoke [NULL, 0] and emit [8, 2] — NOT [NULL, 2]
+        assert!(rs2
+            .iter()
+            .any(|r| r.is_positive() && r[0] == DfValue::from(8i64)));
+    }
+
+    #[test]
+    fn sum_no_group_by_data_then_delete_all() {
+        let mut c = setup_no_group_by(Aggregation::Sum, true);
+        // Insert rows: 5 + 3 = 8
+        let u: Records = vec![
+            Record::Positive(vec![5.into()]),
+            Record::Positive(vec![3.into()]),
+        ]
+        .into();
+        let rs = c.narrow_one(u, true);
+        assert!(rs
+            .iter()
+            .any(|r| r.is_positive() && r[0] == DfValue::from(8i64)));
+
+        // Delete all rows
+        let d: Records = vec![
+            Record::Negative(vec![5.into()]),
+            Record::Negative(vec![3.into()]),
+        ]
+        .into();
+        let rs2 = c.narrow_one(d, true);
+        // Should emit [NULL, 0] — NOT [0, 0]
+        // SQL: SUM on empty input returns NULL, not 0
+        assert!(rs2.iter().any(|r| r.is_positive() && r[0] == DfValue::None));
     }
 }

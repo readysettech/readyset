@@ -202,12 +202,47 @@ where
     ) -> ReadySetResult<ProcessingResult> {
         debug_assert_eq!(from, *self.src);
 
-        // TODO(peter): We can't just exit if rs is empty because it means that we never emit 0 for
-        // empty tables on count operations. It also means we emit an empty result for
-        // GROUP_CONCAT(col1) with no group by, when we should emit NULL.
         if rs.is_empty() {
+            if !self.inner.emit_empty() {
+                return Ok(ProcessingResult {
+                    results: rs,
+                    ..Default::default()
+                });
+            }
+
+            // Aggregate-only-no-GROUP-BY with empty input: SQL mandates
+            // exactly 1 row (e.g., COUNT(*)=0, SUM(x)=NULL).
+            // Check if we already have state for the empty group — if so,
+            // the current state is correct and no output is needed.
+            let us = self.us.unwrap();
+            let db = state.get(*us).ok_or_else(|| {
+                internal_err!("grouped operators must have their own state materialized")
+            })?;
+            let empty_key = PointKey::from(std::iter::empty::<DfValue>());
+            let existing = db.lookup(&self.out_key[..], &empty_key);
+            match existing {
+                LookupResult::Some(rs) if !rs.is_empty() => {
+                    // State already exists — nothing to emit.
+                    return Ok(ProcessingResult {
+                        results: Records::default(),
+                        ..Default::default()
+                    });
+                }
+                LookupResult::Missing => {
+                    // Partial state — data may exist upstream that hasn't
+                    // been replayed.  No-GROUP-BY aggregates should always
+                    // be fully materialized (column_source returns
+                    // RequiresFullReplay), so this should be unreachable.
+                    internal!("aggregate-only-no-GROUP-BY node has partial state");
+                }
+                _ => {} // LookupResult::Some(empty) — fall through to emit default
+            }
+
+            // No existing state for the empty group — emit the default row.
+            let default_value = self.inner.empty_value().unwrap_or(DfValue::None);
+            let rec = vec![default_value, DfValue::Int(0)]; // [agg_value, rows_in_group=0]
             return Ok(ProcessingResult {
-                results: rs,
+                results: vec![Record::Positive(rec)].into(),
                 ..Default::default()
             });
         }
@@ -279,19 +314,25 @@ where
 
                 let old = rs.into_iter().next();
 
-                // current value is in the second to last output column  or None if there is no
-                // current group
-                let current = old
-                    .as_ref()
-                    .and_then(|rows| rows.get(rows.len() - 2))
-                    .cloned();
-
                 // current row count for a group is in the last output column or 0 if there is no
                 // current group
                 let rows_in_group: i64 = old
                     .as_ref()
                     .and_then(|rows| rows.last().and_then(|v| v.try_into().ok()))
                     .unwrap_or(0);
+
+                // current value is in the second to last output column, or None if there is no
+                // current group.  When rows_in_group == 0, the state is from an empty-input
+                // default (e.g., count=0 or sum=NULL emitted by emit_empty) — treat as "no
+                // previous data" so apply() starts from scratch rather than incrementing from
+                // the default value (NULL + x = NULL would be wrong for SUM/AVG).
+                let current = if rows_in_group == 0 {
+                    None
+                } else {
+                    old.as_ref()
+                        .and_then(|rows| rows.get(rows.len() - 2))
+                        .cloned()
+                };
 
                 // new is the result of applying all diffs for the group to the current value
                 let new = match this.inner.apply(
@@ -377,8 +418,10 @@ where
                     }
                     _ => {
                         if let Some(old) = old {
-                            // revoke old value
-                            debug_assert!(current.is_some());
+                            // revoke old value.  current can be None when
+                            // rows_in_group == 0 (empty-input default row) —
+                            // we still need to revoke the default.
+                            debug_assert!(current.is_some() || rows_in_group == 0);
                             out.push(Record::Negative(old.into_owned()));
                         }
                         // emit positive, which is group + new, unless it's the empty value
@@ -387,10 +430,20 @@ where
                         if rows_in_group_new > 0 || this.inner.emit_empty() {
                             // A record for a grouped node consists of the group itself, followed by
                             // the value of the aggregate for that group, followed by the number of
-                            // rows in that group
+                            // rows in that group.
+                            //
+                            // When rows_in_group_new == 0, all input rows were deleted —
+                            // use empty_value() (e.g., NULL for SUM, 0 for COUNT) rather
+                            // than the computed `new` (which would be the arithmetic
+                            // result of subtracting all values, e.g., 0 for SUM).
+                            let value = if rows_in_group_new <= 0 && this.inner.emit_empty() {
+                                this.inner.empty_value().unwrap_or(DfValue::None)
+                            } else {
+                                new
+                            };
                             let mut rec = group;
-                            rec.push(new);
-                            rec.push((rows_in_group_new).into());
+                            rec.push(value);
+                            rec.push(rows_in_group_new.into());
                             out.push(Record::Positive(rec));
                         }
                     }

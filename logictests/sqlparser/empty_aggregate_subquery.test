@@ -1,0 +1,339 @@
+statement ok
+CREATE TABLE agg_t (id INT PRIMARY KEY, val INT);
+
+statement ok
+INSERT INTO agg_t VALUES (1, 10), (2, 20), (3, 30);
+
+statement ok
+CREATE TABLE agg_s (id INT PRIMARY KEY, status INT);
+
+statement ok
+INSERT INTO agg_s VALUES (1, 10), (2, 20), (3, 30);
+
+# Core bug: INNER JOIN with COUNT(*) subquery that has WHERE FALSE
+# SQL: COUNT(*) without GROUP BY always returns 1 row (count=0 when no input rows)
+# The join should produce rows because count(*)=0 and status != 0 for all rows.
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+INNER JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub ON agg_s.status != sub.cnt;
+----
+1
+10
+2
+20
+3
+30
+
+# Same pattern with explicit WHERE — mirrors the ticket's reported query shape
+query III rowsort
+SELECT agg_s.id, agg_s.status, sub.cnt
+FROM agg_s
+INNER JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub ON agg_s.status != sub.cnt
+WHERE agg_s.status != sub.cnt
+ORDER BY agg_s.id;
+----
+1
+10
+0
+2
+20
+0
+3
+30
+0
+
+# CROSS JOIN with COUNT(*) subquery that returns 0
+query III rowsort
+SELECT agg_s.id, agg_s.status, sub.cnt
+FROM agg_s
+CROSS JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub;
+----
+1
+10
+0
+2
+20
+0
+3
+30
+0
+
+# NOT IN with COUNT(*) WHERE FALSE — the original reported pattern.
+# count(*) WHERE FALSE = 0, and no status is 0, so NOT IN (0) keeps all rows.
+# After unnesting this becomes LEFT JOINs with 3VL probe tables (GNL,
+# NP_3VL, EP_3VL), which depend on the COUNT subquery returning 1 row.
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status NOT IN (SELECT count(*) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+1
+10
+2
+20
+3
+30
+
+# SUM without GROUP BY on empty input returns NULL per SQL.
+query II rowsort
+SELECT agg_s.id, sub.s
+FROM agg_s
+CROSS JOIN (SELECT sum(val) AS s FROM agg_t WHERE FALSE) AS sub;
+----
+1
+NULL
+2
+NULL
+3
+NULL
+
+# NOT IN with NULL-on-empty aggregate (3VL edge case).
+# SUM(val) WHERE FALSE returns NULL per SQL.  NOT IN (NULL) evaluates
+# to UNKNOWN for every row (3VL), so the result should be 0 rows.
+# This exercises the NP_3VL probe path — the probe must detect that
+# the RHS contains NULL and suppress all output.
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status NOT IN (SELECT sum(val) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+
+# Same 3VL edge case with MIN — returns NULL on empty input.
+# MIN/MAX go through the ExtremumOperator (separate from Aggregator),
+# so this covers a different dataflow code path.
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status NOT IN (SELECT min(val) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+
+# Same with MAX — also ExtremumOperator path.
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status NOT IN (SELECT max(val) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+
+# =====================================================================
+# Multiple aggregates in one subquery (JoinAggregates path)
+# =====================================================================
+
+# COUNT + SUM in the same subquery, both on empty input.
+# COUNT=0, SUM=NULL. CROSS JOIN should produce 3 rows.
+query IIII rowsort
+SELECT agg_s.id, agg_s.status, sub.cnt, sub.s
+FROM agg_s
+CROSS JOIN (SELECT count(*) AS cnt, sum(val) AS s FROM agg_t WHERE FALSE) AS sub;
+----
+1
+10
+0
+NULL
+2
+20
+0
+NULL
+3
+30
+0
+NULL
+
+# COUNT + MIN + MAX in the same subquery on empty input.
+query IIII rowsort
+SELECT agg_s.id, sub.cnt, sub.mn, sub.mx
+FROM agg_s
+CROSS JOIN (SELECT count(*) AS cnt, min(val) AS mn, max(val) AS mx FROM agg_t WHERE FALSE) AS sub;
+----
+1
+0
+NULL
+NULL
+2
+0
+NULL
+NULL
+3
+0
+NULL
+NULL
+
+# =====================================================================
+# INNER JOIN with NULL-on-empty aggregate (SUM/MIN/MAX)
+# NULL in the ON condition: any comparison with NULL is UNKNOWN,
+# so INNER JOIN produces 0 rows.
+# =====================================================================
+
+# SUM=NULL in ON equality → 0 rows (NULL = anything is UNKNOWN)
+query II rowsort
+SELECT agg_s.id, sub.s
+FROM agg_s
+INNER JOIN (SELECT sum(val) AS s FROM agg_t WHERE FALSE) AS sub ON agg_s.status = sub.s;
+----
+
+# MIN=NULL in ON → 0 rows
+query II rowsort
+SELECT agg_s.id, sub.mn
+FROM agg_s
+INNER JOIN (SELECT min(val) AS mn FROM agg_t WHERE FALSE) AS sub ON agg_s.status = sub.mn;
+----
+
+# But COUNT=0 in ON equality: status = 0 is false for all rows → 0 rows
+query II rowsort
+SELECT agg_s.id, sub.cnt
+FROM agg_s
+INNER JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub ON agg_s.status = sub.cnt;
+----
+
+# COUNT=0 in ON inequality: status != 0 is true for all rows → 3 rows
+query II rowsort
+SELECT agg_s.id, sub.cnt
+FROM agg_s
+INNER JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub ON agg_s.status != sub.cnt;
+----
+1
+0
+2
+0
+3
+0
+
+# =====================================================================
+# CROSS JOIN with empty-input aggregate subquery (replaces LEFT JOIN
+# ON TRUE which is unsupported — CROSS JOIN is semantically equivalent
+# when the RHS always produces exactly 1 row).
+# =====================================================================
+
+# CROSS JOIN with COUNT=0 subquery: produces 3 rows with cnt=0
+query III rowsort
+SELECT agg_s.id, agg_s.status, sub.cnt
+FROM agg_s
+CROSS JOIN (SELECT count(*) AS cnt FROM agg_t WHERE FALSE) AS sub;
+----
+1
+10
+0
+2
+20
+0
+3
+30
+0
+
+# CROSS JOIN with SUM=NULL subquery: produces 3 rows with s=NULL
+query II rowsort
+SELECT agg_s.id, sub.s
+FROM agg_s
+CROSS JOIN (SELECT sum(val) AS s FROM agg_t WHERE FALSE) AS sub;
+----
+1
+NULL
+2
+NULL
+3
+NULL
+
+# =====================================================================
+# IN (not NOT IN) with empty-input aggregate
+# IN (0) for COUNT — keeps rows where status = 0 (none match)
+# =====================================================================
+
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status IN (SELECT count(*) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+
+# IN (NULL) for SUM — NULL IN (...) is UNKNOWN → 0 rows
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status IN (SELECT sum(val) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+
+# =====================================================================
+# Scalar comparison with empty-input aggregate
+# =====================================================================
+
+# status = COUNT (0): no row has status=0 → 0 rows
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status = (SELECT count(*) FROM agg_t WHERE FALSE);
+----
+
+# status > COUNT (0): all rows have status>0 → 3 rows
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status > (SELECT count(*) FROM agg_t WHERE FALSE)
+ORDER BY agg_s.id;
+----
+1
+10
+2
+20
+3
+30
+
+# status = SUM (NULL): NULL comparison → UNKNOWN → 0 rows
+query II rowsort
+SELECT agg_s.id, agg_s.status
+FROM agg_s
+WHERE agg_s.status = (SELECT sum(val) FROM agg_t WHERE FALSE);
+----
+
+# =====================================================================
+# Empty-input aggregate with actual empty table (not WHERE FALSE)
+# =====================================================================
+
+statement ok
+CREATE TABLE agg_empty (id INT PRIMARY KEY, val INT);
+
+# COUNT on truly empty table → 0
+query III rowsort
+SELECT agg_s.id, agg_s.status, sub.cnt
+FROM agg_s
+CROSS JOIN (SELECT count(*) AS cnt FROM agg_empty) AS sub;
+----
+1
+10
+0
+2
+20
+0
+3
+30
+0
+
+# SUM on truly empty table → NULL
+query II rowsort
+SELECT agg_s.id, sub.s
+FROM agg_s
+CROSS JOIN (SELECT sum(val) AS s FROM agg_empty) AS sub;
+----
+1
+NULL
+2
+NULL
+3
+NULL
+
+# MIN on truly empty table → NULL
+query II rowsort
+SELECT agg_s.id, sub.mn
+FROM agg_s
+CROSS JOIN (SELECT min(val) AS mn FROM agg_empty) AS sub;
+----
+1
+NULL
+2
+NULL
+3
+NULL
