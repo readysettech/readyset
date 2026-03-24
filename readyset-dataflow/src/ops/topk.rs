@@ -164,15 +164,16 @@ impl TopK {
         &'topk self,
         out: &mut Vec<Record>,
         current: &mut Vec<CurrentRecord<'topk, 'state>>,
-        current_group_key: &[DfValue],
+        current_group_key: Option<&[DfValue]>,
         original_group_len: usize,
         state: &'state StateMap,
         nodes: &DomainNodes,
         buffered_state: &mut TopKState,
     ) -> ReadySetResult<Option<Lookup>> {
-        if current_group_key.is_empty() {
-            return Ok(None);
-        }
+        let current_group_key = match current_group_key {
+            Some(key) => key,
+            None => return Ok(None),
+        };
 
         let mut lookup = None;
 
@@ -202,29 +203,48 @@ impl TopK {
                 internal!("We shouldn't have been able to get this record if the parent would miss")
             };
 
-            let mut old_current = current
+            let mut old_current: Vec<_> = current
                 .drain(..)
                 .map(|r| (r.row, r.original_index))
-                .collect::<HashMap<_, _>>();
+                .collect();
 
             let mut rs = parent_records.collect::<Result<Vec<_>, _>>()?;
             rs.sort_unstable_by(|a, b| self.total_cmp(a, b));
 
-            current.extend(
-                rs.into_iter()
-                    .take(self.k + self.buffered)
-                    .map(|row| CurrentRecord {
-                        original_index: old_current.remove(&row).unwrap_or_default(),
-                        row,
-                        order: &self.order,
-                    }),
-            );
+            current.extend(rs.into_iter().take(self.k + self.buffered).map(|row| {
+                // Find and remove the first matching entry from old_current
+                // to correctly handle duplicate rows. Order of old_current
+                // doesn't matter (it's a lookup bag), so use swap_remove
+                // to avoid O(k) element shifting.
+                let original_index = match old_current
+                    .iter()
+                    .position(|(old_row, _)| old_row.as_ref() == row.as_ref())
+                {
+                    Some(pos) => old_current.swap_remove(pos).1,
+                    None => None,
+                };
+                CurrentRecord {
+                    original_index,
+                    row,
+                    order: &self.order,
+                }
+            }));
 
-            lookup = Some(Lookup {
-                on: *self.src,
-                cols: self.group_by.clone(),
-                key: current_group_key.to_vec().try_into().expect("Empty group"),
-            })
+            // Only construct the Lookup when the group key is non-empty, since
+            // KeyComparison::Equal requires Vec1 (at least one element).
+            // Empty group_by means a single global group — no key-based lookup needed.
+            if let Ok(key) = current_group_key.to_vec().try_into() {
+                lookup = Some(Lookup {
+                    on: *self.src,
+                    cols: self.group_by.clone(),
+                    key,
+                })
+            } else {
+                debug_assert!(
+                    self.group_by.is_empty(),
+                    "Failed to construct Lookup with non-empty group_by"
+                );
+            }
         }
 
         let k = min(current.len(), self.k);
@@ -396,7 +416,7 @@ impl Ingredient for TopK {
 
         let mut out = Vec::with_capacity(rs.len());
         // the lookup key of the group currently being processed
-        let mut current_group_key = Vec::new();
+        let mut current_group_key: Option<Vec<DfValue>> = None;
         // the original length of the group currently being processed before we started doing
         // anything to it. We need to keep track of this so that we can lookup into our parent to
         // backfill a group if processing drops us below `k` records when we were originally at `k`
@@ -412,15 +432,22 @@ impl Ingredient for TopK {
 
         // records are now chunked by group
         for r in &rs {
+            let projected_refs = self.project_group(r.rec())?;
+
             // Does this record belong to the same group or did we start processing a new group?
-            if current_group_key.iter().cmp(self.project_group(r.rec())?) != Ordering::Equal {
+            // Compare using borrowed references to avoid allocating on every record.
+            let is_same_group = current_group_key.as_deref().is_some_and(|key: &[DfValue]| {
+                key.len() == projected_refs.len()
+                    && key.iter().zip(projected_refs.iter()).all(|(a, b)| a == *b)
+            });
+            if !is_same_group {
                 // new group!
 
                 // first, tidy up the old one
                 if let Some(lookup) = self.post_group(
                     &mut out,
                     &mut current,
-                    &current_group_key,
+                    current_group_key.as_deref(),
                     original_group_len,
                     state,
                     nodes,
@@ -431,8 +458,8 @@ impl Ingredient for TopK {
                     }
                 }
 
-                // make ready for the new one
-                current_group_key = self.project_group(r.rec())?.into_iter().cloned().collect();
+                // make ready for the new one — only clone into owned values on group change
+                current_group_key.replace(projected_refs.into_iter().cloned().collect());
 
                 // We can’t check for misses against `buffered_state` (the aux state), even though
                 // evictions affect both main and aux.
@@ -440,15 +467,28 @@ impl Ingredient for TopK {
                 // Only the main state marks missing keys as "filled" when an upquery resolves a hole.
                 // If we relied on the aux state instead, we’d never see those fills and could loop
                 // forever reporting misses.
+                // Invariant: current_group_key was just set to Some above
+                let group_key_ref = current_group_key
+                    .as_ref()
+                    .expect("current_group_key must be Some after assignment");
                 missed = if let LookupResult::Some(r) =
-                    db.lookup(&self.group_by, &PointKey::from(current_group_key.clone()))
+                    db.lookup(&self.group_by, &PointKey::from(group_key_ref.clone()))
                 {
                     if replay.is_partial() {
-                        lookups.push(Lookup {
-                            on: *us,
-                            cols: self.group_by.clone(),
-                            key: current_group_key.clone().try_into().expect("Empty group"),
-                        });
+                        // Empty group_by means a single global group — no key-based
+                        // lookup needed since Vec1 requires at least one element.
+                        if let Ok(key) = group_key_ref.clone().try_into() {
+                            lookups.push(Lookup {
+                                on: *us,
+                                cols: self.group_by.clone(),
+                                key,
+                            });
+                        } else {
+                            debug_assert!(
+                                self.group_by.is_empty(),
+                                "Failed to construct Lookup with non-empty group_by"
+                            );
+                        }
                     }
 
                     // verify that the states match and that the eviction affected both states
@@ -458,7 +498,7 @@ impl Ingredient for TopK {
                             .sorted_by(|a, b| self.order.cmp(a, b).reverse().then(a.cmp(b)))
                             .collect::<Vec<_>>(),
                         buffered_state
-                            .get(&current_group_key)
+                            .get(group_key_ref)
                             .unwrap_or(&Vec::new())
                             .iter()
                             .take(self.k)
@@ -471,7 +511,7 @@ impl Ingredient for TopK {
                     true
                 };
 
-                current = match buffered_state.get(&current_group_key) {
+                current = match buffered_state.get(group_key_ref) {
                     Some(records) => {
                         original_group_len = records.len();
 
@@ -563,7 +603,7 @@ impl Ingredient for TopK {
         if let Some(lookup) = self.post_group(
             &mut out,
             &mut current,
-            &current_group_key,
+            current_group_key.as_deref(),
             original_group_len,
             state,
             nodes,
@@ -963,5 +1003,77 @@ mod tests {
 
         let emit = g.narrow_one(vec![(ra3.clone(), false), (ra0, true)], true);
         assert_eq!(emit, vec![(ra3, false), (ra1, true)].into());
+    }
+
+    /// Test that empty group_by with duplicate values handles deletes correctly.
+    ///
+    /// Exercises two bugs:
+    /// 1. Empty group key (`group_by = []`) collided with the `Vec::new()` sentinel
+    ///    used for "no group selected yet", causing `post_group` to skip processing.
+    /// 2. HashMap in backfill collapsed duplicate rows (same value) into one entry,
+    ///    causing spurious Positive emissions that inflated the row count.
+    #[test]
+    fn empty_group_by_with_duplicate_values() {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "val"]);
+
+        // group_by = [] means all rows are in one group; k = 3
+        g.set_op(
+            "topk",
+            &["x", "val"],
+            TopK::new(
+                s.as_global(),
+                vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)],
+                vec![],
+                3,
+            ),
+            true,
+        );
+
+        let ni = g.node().local_addr();
+
+        // 4 rows all with val = 1, distinguished by x
+        let r1: Vec<DfValue> = vec![1.into(), 1.into()];
+        let r2: Vec<DfValue> = vec![2.into(), 1.into()];
+        let r3: Vec<DfValue> = vec![3.into(), 1.into()];
+        let r4: Vec<DfValue> = vec![4.into(), 1.into()];
+
+        // Seed the parent with all 4 rows (needed for backfill lookups)
+        g.seed(s, r1.clone());
+        g.seed(s, r2.clone());
+        g.seed(s, r3.clone());
+        g.seed(s, r4.clone());
+
+        // Insert all 4 rows into topk
+        g.narrow_one_row(r1.clone(), true);
+        g.narrow_one_row(r2.clone(), true);
+        g.narrow_one_row(r3.clone(), true);
+        g.narrow_one_row(r4, true);
+
+        // With k=3, top-k state should have exactly 3 rows
+        assert_eq!(g.states[ni].row_count(), 3);
+
+        // Delete 2 rows. Negatives for r1 and r2.
+        let emit = g.narrow_one(vec![(r1, false), (r2, false)], true);
+
+        // Should have emitted negatives for r1 and r2 (they were in top-k)
+        assert!(
+            emit.iter().any(|r| !r.is_positive() && r[0] == 1.into()),
+            "expected negative for r1, got: {:?}",
+            emit
+        );
+        assert!(
+            emit.iter().any(|r| !r.is_positive() && r[0] == 2.into()),
+            "expected negative for r2, got: {:?}",
+            emit
+        );
+
+        // After backfill from parent (which still has all 4 rows in seed state),
+        // topk should maintain 3 rows in state
+        assert_eq!(
+            g.states[ni].row_count(),
+            3,
+            "state should have 3 rows after backfill"
+        );
     }
 }
