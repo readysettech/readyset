@@ -128,6 +128,14 @@ pub struct UpstreamConfig {
     #[serde(default = "default_max_gtid_rows_to_skip")]
     pub max_gtid_rows_to_skip: u64,
 
+    /// Maximum number of row events to accumulate in memory before flushing a
+    /// batch during replication. This bounds memory usage for large transactions.
+    /// When a transaction contains more rows than this limit, intermediate
+    /// batches are flushed with the current replication offset.
+    #[arg(long, env = "REPLICATION_BATCH_SIZE", default_value = "50000")]
+    #[serde(default = "default_replication_batch_size")]
+    pub replication_batch_size: usize,
+
     /// Hostname to report when registering as a replica with the upstream database (MySQL only).
     /// If not set, no hostname will be reported.
     #[arg(long = "report-host", env = "REPORT_HOST")]
@@ -369,6 +377,10 @@ fn default_max_gtid_rows_to_skip() -> u64 {
     10_000
 }
 
+fn default_replication_batch_size() -> usize {
+    50_000
+}
+
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
     i.parse::<u64>().map(Duration::from_secs)
 }
@@ -386,6 +398,7 @@ impl Default for UpstreamConfig {
             replication_server_uuid: Default::default(),
             require_gtid: false,
             max_gtid_rows_to_skip: default_max_gtid_rows_to_skip(),
+            replication_batch_size: default_replication_batch_size(),
             replica_report_host: Default::default(),
             replica_report_port: Default::default(),
             replica_report_user: Default::default(),

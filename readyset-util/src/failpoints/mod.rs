@@ -74,3 +74,5 @@ pub const CONTROLLER_EVENTS_SSE_SEND_DELAY: &str = "controller-events-sse-send-d
 /// A failpoint after processing a row event in MySQL GTID replication.
 /// Use with "Nx*off->panic" to crash after N events within a transaction.
 pub const MYSQL_GTID_ROW_EVENT: &str = "mysql-gtid-row-event";
+/// A failpoint before snapshotting each individual table in MySQL.
+pub const MYSQL_SNAPSHOT_TABLE: &str = "mysql-snapshot-table";

@@ -179,6 +179,14 @@ pub(crate) struct MySqlBinlogConnector {
     /// single transaction. If the pending event index exceeds this limit,
     /// replication fails assuming corrupt state.
     max_gtid_rows_to_skip: u64,
+    /// Maximum number of row events to accumulate in memory before flushing a
+    /// batch. This bounds memory usage for large transactions.
+    replication_batch_size: usize,
+    /// Accumulated row actions for the current transaction being batched.
+    /// Keyed by table relation to merge actions for the same table.
+    pending_actions: HashMap<Relation, ReplicationAction>,
+    /// Number of row events accumulated in `pending_actions`.
+    pending_row_count: usize,
 }
 
 impl MySqlBinlogConnector {
@@ -433,6 +441,9 @@ impl MySqlBinlogConnector {
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
             events_to_skip: 0,
             max_gtid_rows_to_skip: config.max_gtid_rows_to_skip,
+            replication_batch_size: config.replication_batch_size,
+            pending_actions: HashMap::new(),
+            pending_row_count: 0,
         };
 
         // Crash recovery: if we have a pending GTID, skip the events that were
@@ -1045,12 +1056,20 @@ impl MySqlBinlogConnector {
                 self.finalize_current_gtid();
                 Ok(ReplicationAction::LogPosition)
             }
+            Ok(SqlQuery::Commit(_)) if self.pending_row_count > 0 => {
+                // Pending actions need to be flushed, but no position report
+                // is due. Return Empty to signal the caller to flush without
+                // triggering the expensive advance_offset path.
+                self.finalize_current_gtid();
+                Ok(ReplicationAction::Empty)
+            }
             Ok(SqlQuery::Commit(_)) => {
                 self.finalize_current_gtid();
                 Err(ReadySetError::SkipEvent)
             }
             Ok(SqlQuery::Rollback(stmt)) if stmt.ends_transaction() => {
                 self.clear_current_gtid();
+                self.discard_pending_actions();
                 Err(ReadySetError::SkipEvent)
             }
             Ok(SqlQuery::Truncate(truncate)) if truncate.tables.len() == 1 => {
@@ -1179,18 +1198,11 @@ impl MySqlBinlogConnector {
         }
     }
 
-    /// Merge table actions into a hashmap of actions.
-    /// If the table already exists in the hashmap, the actions are merged.
-    /// If the table does not exist in the hashmap, a new entry is created.
+    /// Merge a replication action into a hashmap of accumulated actions.
     ///
-    /// # Arguments
-    /// * `map` - the hashmap to merge the actions into
-    /// * `action` - the action to merge
-    ///
-    /// # Returns
-    /// This function does not return anything, it modifies the hashmap in place.
-    async fn merge_table_actions(
-        &mut self,
+    /// If the table already exists in the hashmap, the row operations are
+    /// appended (preserving order). Otherwise a new entry is created.
+    fn merge_table_actions(
         map: &mut HashMap<Relation, ReplicationAction>,
         action: ReplicationAction,
     ) {
@@ -1280,8 +1292,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_ev.read_event());
                     let binlog_action =
                         handle_err!(self, self.process_event_write_rows(event).await);
-                    self.merge_table_actions(&mut hash_actions, binlog_action)
-                        .await;
+                    Self::merge_table_actions(&mut hash_actions, binlog_action);
                     self.advance_current_gtid_event();
                     // Failpoint for GTID crash recovery testing
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
@@ -1295,8 +1306,7 @@ impl MySqlBinlogConnector {
 
                     let binlog_action =
                         handle_err!(self, self.process_event_update_rows(event).await);
-                    self.merge_table_actions(&mut hash_actions, binlog_action)
-                        .await;
+                    Self::merge_table_actions(&mut hash_actions, binlog_action);
                     self.advance_current_gtid_event();
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                 }
@@ -1308,8 +1318,7 @@ impl MySqlBinlogConnector {
                     let event = handle_err!(self, binlog_ev.read_event());
                     let binlog_action =
                         handle_err!(self, self.process_event_delete_rows(event).await);
-                    self.merge_table_actions(&mut hash_actions, binlog_action)
-                        .await;
+                    Self::merge_table_actions(&mut hash_actions, binlog_action);
                     self.advance_current_gtid_event();
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
                 }
@@ -1368,6 +1377,41 @@ impl MySqlBinlogConnector {
             "Row V1 event that will affect current tables: {:?}",
             self.replication_offset
         );
+    }
+
+    /// Accumulate a row action into the pending batch.
+    ///
+    /// Returns `true` if the batch has reached `replication_batch_size` and
+    /// should be flushed.
+    fn accumulate_action(&mut self, action: ReplicationAction) -> bool {
+        let row_count = match &action {
+            ReplicationAction::TableAction { actions, .. } => actions.len(),
+            _ => 0,
+        };
+        Self::merge_table_actions(&mut self.pending_actions, action);
+        self.pending_row_count += row_count;
+        self.pending_row_count >= self.replication_batch_size
+    }
+
+    /// Drain the pending action accumulator and return the batch.
+    ///
+    /// If `include_log_position` is true, a `LogPosition` sentinel is appended
+    /// so the caller persists the replication offset with this batch.
+    fn flush_pending_actions(&mut self, include_log_position: bool) -> Vec<ReplicationAction> {
+        self.pending_row_count = 0;
+        let mut actions: Vec<ReplicationAction> = std::mem::take(&mut self.pending_actions)
+            .into_values()
+            .collect();
+        if include_log_position && !actions.is_empty() {
+            actions.push(ReplicationAction::LogPosition);
+        }
+        actions
+    }
+
+    /// Discard accumulated actions (e.g. on ROLLBACK).
+    fn discard_pending_actions(&mut self) {
+        self.pending_actions.clear();
+        self.pending_row_count = 0;
     }
 
     /// Check whatever we need to report the current position
@@ -1449,18 +1493,48 @@ impl MySqlBinlogConnector {
                     let action = match self.process_event_query(event, is_last).await {
                         Ok(action) => action,
                         Err(ReadySetError::SkipEvent) => {
+                            // SkipEvent is returned for BEGIN (no-op) and
+                            // COMMIT without pending actions. ROLLBACK discards
+                            // pending actions inside process_event_query.
+                            // COMMIT with pending actions returns LogPosition.
                             continue;
                         }
                         Err(err) => return Err(binlog_err!(self, None, err)),
                     };
-                    // DDL statements (CREATE TABLE, ALTER TABLE, etc.) are
-                    // implicitly committed by MySQL — there is no XID_EVENT or
-                    // COMMIT query following them. Finalize the pending GTID so
-                    // the returned offset reflects the committed state.
-                    if matches!(action, ReplicationAction::DdlChange { .. }) {
-                        self.finalize_current_gtid();
+
+                    match &action {
+                        ReplicationAction::DdlChange { .. } => {
+                            // DDL statements are implicitly committed by MySQL —
+                            // there is no XID_EVENT following them. Finalize the
+                            // pending GTID so the returned offset reflects the
+                            // committed state.
+                            let mut actions = self.flush_pending_actions(true);
+                            self.finalize_current_gtid();
+                            actions.push(action);
+                            return Ok((actions, self.current_offset()));
+                        }
+                        ReplicationAction::LogPosition => {
+                            // COMMIT query with position report — flush batch
+                            let mut actions = self.flush_pending_actions(false);
+                            actions.push(action);
+                            return Ok((actions, self.current_offset()));
+                        }
+                        ReplicationAction::Empty => {
+                            // COMMIT with pending actions but no position report
+                            // due — flush the batch without LogPosition.
+                            let actions = self.flush_pending_actions(false);
+                            if !actions.is_empty() {
+                                return Ok((actions, self.current_offset()));
+                            }
+                            continue;
+                        }
+                        _ => {
+                            // Flush pending before returning (e.g. TRUNCATE)
+                            let mut actions = self.flush_pending_actions(false);
+                            actions.push(action);
+                            return Ok((actions, self.current_offset()));
+                        }
                     }
-                    return Ok((vec![action], self.current_offset()));
                 }
                 ev @ EventType::TABLE_MAP_EVENT => {
                     // Used for row-based binary logging. This event precedes each row operation
@@ -1487,7 +1561,10 @@ impl MySqlBinlogConnector {
                     let action = self.process_event_write_rows(event).await?;
                     self.advance_current_gtid_event();
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
-                    return Ok((vec![action], self.current_offset()));
+                    if self.accumulate_action(action) {
+                        let actions = self.flush_pending_actions(true);
+                        return Ok((actions, self.current_offset()));
+                    }
                 }
 
                 EventType::UPDATE_ROWS_EVENT => {
@@ -1498,7 +1575,10 @@ impl MySqlBinlogConnector {
                     let action = self.process_event_update_rows(event).await?;
                     self.advance_current_gtid_event();
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
-                    return Ok((vec![action], self.current_offset()));
+                    if self.accumulate_action(action) {
+                        let actions = self.flush_pending_actions(true);
+                        return Ok((actions, self.current_offset()));
+                    }
                 }
 
                 EventType::DELETE_ROWS_EVENT => {
@@ -1509,48 +1589,70 @@ impl MySqlBinlogConnector {
                     let action = self.process_event_delete_rows(event).await?;
                     self.advance_current_gtid_event();
                     set_failpoint!(failpoints::MYSQL_GTID_ROW_EVENT);
-                    return Ok((vec![action], self.current_offset()));
+                    if self.accumulate_action(action) {
+                        let actions = self.flush_pending_actions(true);
+                        return Ok((actions, self.current_offset()));
+                    }
                 }
 
                 EventType::TRANSACTION_PAYLOAD_EVENT => {
+                    let mut actions = self.flush_pending_actions(false);
                     let event = handle_err!(self, binlog_event.read_event());
-                    let actions = handle_err!(
+                    let payload_actions = handle_err!(
                         self,
                         self.process_event_transaction_payload(event, is_last).await
                     );
+                    actions.extend(payload_actions);
                     return Ok((actions, self.current_offset()));
                 }
 
                 EventType::XID_EVENT => {
-                    // Generated for a commit of a transaction that modifies one or more tables of
-                    // an XA-capable storage engine (InnoDB).
+                    // Generated for a commit of a transaction that modifies one or
+                    // more tables of an XA-capable storage engine (InnoDB).
                     self.finalize_current_gtid();
-                    if self.report_position_elapsed() || is_last {
-                        return Ok((vec![ReplicationAction::LogPosition], self.current_offset()));
+                    let has_pending = self.pending_row_count > 0;
+                    let report_pos = self.report_position_elapsed() || is_last;
+                    if has_pending || report_pos {
+                        // Only include LogPosition when position reporting is
+                        // due. Table actions already persist the offset via
+                        // SetReplicationOffset in the RPC. LogPosition triggers
+                        // advance_offset which deserializes the full controller
+                        // state — too expensive to do per-transaction.
+                        let mut actions = self.flush_pending_actions(false);
+                        if report_pos {
+                            actions.push(ReplicationAction::LogPosition);
+                        }
+                        return Ok((actions, self.current_offset()));
                     }
                     continue;
                 }
 
                 /* The V1 event numbers are used from 5.1.16 until OR MariaDB */
                 EventType::WRITE_ROWS_EVENT_V1 => {
+                    let mut actions = self.flush_pending_actions(false);
                     let event: binlog::events::WriteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.current_offset()));
+                    actions.push(action);
+                    return Ok((actions, self.current_offset()));
                 }
 
                 EventType::UPDATE_ROWS_EVENT_V1 => {
+                    let mut actions = self.flush_pending_actions(false);
                     let event: binlog::events::UpdateRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.current_offset()));
+                    actions.push(action);
+                    return Ok((actions, self.current_offset()));
                 }
 
                 EventType::DELETE_ROWS_EVENT_V1 => {
+                    let mut actions = self.flush_pending_actions(false);
                     let event: binlog::events::DeleteRowsEventV1<'_> =
                         handle_err!(self, binlog_event.read_event());
                     let action = self.process_row_v1_metadata(event.table_id()).await?;
-                    return Ok((vec![action], self.current_offset()));
+                    actions.push(action);
+                    return Ok((actions, self.current_offset()));
                 }
                 EventType::GTID_EVENT | EventType::GTID_TAGGED_LOG_EVENT => {
                     // GTID stands for Global Transaction Identifier It is composed of two parts:
@@ -1587,8 +1689,11 @@ impl MySqlBinlogConnector {
                         };
 
                     if should_set_pending {
-                        // Safety net: finalize any unfinalized pending GTID before
-                        // starting a new transaction.
+                        // Safety net: finalize any unfinalized pending GTID and
+                        // flush accumulated actions before starting a new
+                        // transaction. This shouldn't happen in normal operation
+                        // (XID_EVENT/COMMIT handles this), but protects against
+                        // edge cases.
                         if self
                             .replication_offset
                             .gtid_set_mut()
@@ -1600,6 +1705,15 @@ impl MySqlBinlogConnector {
                                  before starting new transaction"
                             );
                             self.finalize_current_gtid();
+                        }
+                        if self.pending_row_count > 0 {
+                            warn!(
+                                pending_row_count = self.pending_row_count,
+                                incoming_gtid = %incoming_gtid,
+                                "Flushing orphaned pending actions before new GTID"
+                            );
+                            let actions = self.flush_pending_actions(true);
+                            return Ok((actions, self.current_offset()));
                         }
                         // Reset skip counter: the persisted pending GTID did not
                         // match the first GTID we received after reconnect.
@@ -1673,7 +1787,9 @@ impl MySqlBinlogConnector {
             // We didn't get an actionable event, but we still need to check that we haven't reached
             // the until limit
             if is_last {
-                return Ok((vec![ReplicationAction::LogPosition], self.current_offset()));
+                let mut actions = self.flush_pending_actions(false);
+                actions.push(ReplicationAction::LogPosition);
+                return Ok((actions, self.current_offset()));
             }
         }
     }
@@ -2214,5 +2330,112 @@ impl Connector for MySqlBinlogConnector {
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         self.next_action_inner(until).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use readyset_client::TableOperation;
+
+    fn make_relation(name: &str) -> Relation {
+        Relation {
+            schema: Some("test_db".into()),
+            name: SqlIdentifier::from(name),
+        }
+    }
+
+    fn make_table_action(table_name: &str, row_values: Vec<i32>) -> ReplicationAction {
+        ReplicationAction::TableAction {
+            table: make_relation(table_name),
+            actions: row_values
+                .into_iter()
+                .map(|v| TableOperation::Insert(vec![DfValue::from(v)]))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn merge_table_actions_creates_new_entry() {
+        let mut map = HashMap::new();
+        let action = make_table_action("users", vec![1, 2, 3]);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action);
+
+        assert_eq!(map.len(), 1);
+        let entry = map.get(&make_relation("users")).expect("entry exists");
+        if let ReplicationAction::TableAction { actions, .. } = entry {
+            assert_eq!(actions.len(), 3);
+        } else {
+            panic!("expected TableAction");
+        }
+    }
+
+    #[test]
+    fn merge_table_actions_extends_existing() {
+        let mut map = HashMap::new();
+        let action1 = make_table_action("users", vec![1, 2]);
+        let action2 = make_table_action("users", vec![3, 4]);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action1);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action2);
+
+        assert_eq!(map.len(), 1);
+        let entry = map.get(&make_relation("users")).expect("entry exists");
+        if let ReplicationAction::TableAction { actions, .. } = entry {
+            assert_eq!(actions.len(), 4);
+        } else {
+            panic!("expected TableAction");
+        }
+    }
+
+    #[test]
+    fn merge_table_actions_separate_tables() {
+        let mut map = HashMap::new();
+        let action1 = make_table_action("users", vec![1]);
+        let action2 = make_table_action("posts", vec![2]);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action1);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action2);
+
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key(&make_relation("users")));
+        assert!(map.contains_key(&make_relation("posts")));
+    }
+
+    #[test]
+    fn merge_table_actions_ignores_empty() {
+        let mut map = HashMap::new();
+        MySqlBinlogConnector::merge_table_actions(&mut map, ReplicationAction::Empty);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn merge_table_actions_preserves_order() {
+        let mut map = HashMap::new();
+        let action1 = make_table_action("users", vec![10, 20]);
+        let action2 = make_table_action("users", vec![30, 40]);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action1);
+        MySqlBinlogConnector::merge_table_actions(&mut map, action2);
+
+        let entry = map.get(&make_relation("users")).expect("entry exists");
+        if let ReplicationAction::TableAction { actions, .. } = entry {
+            // Verify ordering: 10, 20, 30, 40
+            let values: Vec<_> = actions
+                .iter()
+                .filter_map(|op| match op {
+                    TableOperation::Insert(row) => Some(row[0].clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                values,
+                vec![
+                    DfValue::from(10),
+                    DfValue::from(20),
+                    DfValue::from(30),
+                    DfValue::from(40)
+                ]
+            );
+        } else {
+            panic!("expected TableAction");
+        }
     }
 }

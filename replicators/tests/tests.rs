@@ -4460,6 +4460,169 @@ async fn alter_table_add_key_mysql() {
     shutdown_tx.shutdown().await;
 }
 
+/// Test that transaction batching with intermediate flushes persists the correct
+/// replication offset, and that crash recovery correctly skips already-applied
+/// rows without re-snapshotting.
+///
+/// With `replication_batch_size = 3`:
+/// 1. Creates table, inserts snapshot row
+/// 2. Starts replicator with small batch size
+/// 3. Inserts 7 rows in a single transaction
+///    - Rows 1-3: accumulated, batch full → flushed via 1 RPC (persisted)
+///    - Rows 4-5: accumulated in memory (second batch, not yet full)
+///    - Failpoint: crash after 5th row event
+/// 4. Verifies partial state: snapshot + rows 1-3 only. Rows 4-5 were in
+///    the in-memory accumulator and never reached storage — this confirms
+///    only 1 RPC call was made (the first batch).
+/// 5. Arms a snapshot failpoint that panics if any table is snapshotted
+/// 6. Restarts replicator — crash recovery skips rows 1-3, applies 4-7
+/// 7. Verifies all 7 rows present (no re-snapshot panic means recovery
+///    used replication)
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
+async fn mysql_transaction_batch_crash_recovery() {
+    readyset_tracing::init_test_logging();
+    let _fail_scenario = FailScenario::setup();
+    let url = mysql_url();
+
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "CREATE TABLE batch_crash (id INT PRIMARY KEY, val INT);
+             INSERT INTO batch_crash VALUES (0, 100);",
+        )
+        .await
+        .unwrap();
+
+    // Start Readyset with a small batch size to trigger intermediate flushes
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_batch_size: 3,
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot
+    ctx.get_results("batch_crash", &[&[DfValue::Int(0), DfValue::Int(100)]])
+        .await
+        .unwrap();
+
+    // Crash after the 5th row event. With batch_size=3, the first batch
+    // (rows 1-3) will have been flushed and persisted via a single RPC.
+    // Rows 4-5 are accumulated in the second batch but never flushed.
+    static ROW_EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    ROW_EVENT_COUNT.store(0, Ordering::SeqCst);
+
+    fail::cfg_callback(failpoints::MYSQL_GTID_ROW_EVENT, move || {
+        let count = ROW_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
+        info!(
+            "FAILPOINT: mysql-gtid-row-event triggered, count={}",
+            count + 1
+        );
+        if count >= 5 {
+            panic!("Injected crash after {} row events", count + 1);
+        }
+    })
+    .unwrap();
+
+    // Insert 7 rows in a single transaction
+    client.query("START TRANSACTION;").await.unwrap();
+    for i in 1..=7 {
+        client
+            .query(&format!("INSERT INTO batch_crash VALUES ({}, {});", i, i))
+            .await
+            .unwrap();
+    }
+    client.query("COMMIT;").await.unwrap();
+
+    // Let the replicator process events and crash
+    sleep(Duration::from_secs(2)).await;
+    ctx.stop_repl().await;
+
+    // Verify partial state: snapshot + first batch (rows 1-3) only.
+    // Rows 4-5 were in the in-memory accumulator and never persisted.
+    // This proves only 1 RPC call was made (the first batch of 3 rows).
+    ctx.get_results(
+        "batch_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Clear crash failpoint and arm the snapshot failpoint: if the
+    // replicator attempts to re-snapshot any table, this will panic,
+    // proving that recovery must use replication instead.
+    fail::cfg(failpoints::MYSQL_GTID_ROW_EVENT, "off").unwrap();
+    fail::cfg(
+        failpoints::MYSQL_SNAPSHOT_TABLE,
+        "panic(re-snapshot should not happen during recovery)",
+    )
+    .unwrap();
+
+    let telemetry_sender = TelemetrySender::new_no_op();
+    ctx.replicator_tx = Some(
+        ctx.start_repl(
+            Some(Config {
+                replication_batch_size: 3,
+                ..Default::default()
+            }),
+            telemetry_sender,
+            false,
+            ParsingPreset::for_tests(),
+        )
+        .await
+        .unwrap(),
+    );
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify all rows present after recovery.
+    // The replicator should have:
+    // - Loaded the persisted offset with event_index=3 (from the first batch)
+    // - Skipped rows 1-3 (already applied)
+    // - Applied rows 4-7 (remaining in the transaction)
+    ctx.get_results(
+        "batch_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+            &[DfValue::Int(4), DfValue::Int(4)],
+            &[DfValue::Int(5), DfValue::Int(5)],
+            &[DfValue::Int(6), DfValue::Int(6)],
+            &[DfValue::Int(7), DfValue::Int(7)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    fail::cfg(failpoints::MYSQL_SNAPSHOT_TABLE, "off").unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres)]

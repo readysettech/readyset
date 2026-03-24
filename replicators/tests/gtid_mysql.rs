@@ -870,13 +870,18 @@ async fn gtid_crash_recovery() {
         .await
         .unwrap();
 
+    // Use batch size of 1 so each row event is flushed individually,
+    // ensuring the failpoint crash leaves exactly 2 rows applied.
+    let config = Config {
+        require_gtid: true,
+        replication_batch_size: 1,
+        ..Default::default()
+    };
+
     // Start Readyset and wait for snapshot
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
-        Some(Config {
-            require_gtid: true,
-            ..Default::default()
-        }),
+        Some(config.clone()),
     )
     .await
     .unwrap();
@@ -948,10 +953,7 @@ async fn gtid_crash_recovery() {
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
         ctx.start_repl(
-            Some(Config {
-                require_gtid: true,
-                ..Default::default()
-            }),
+            Some(config),
             telemetry_sender,
             ParsingPreset::for_tests(),
         )
@@ -1031,12 +1033,17 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
         .unwrap();
 
     // Start Readyset and wait for snapshot
+    // Use batch size of 1 so each row event is flushed individually,
+    // ensuring the failpoint crash leaves exactly 2 rows applied.
+    let config = Config {
+        require_gtid: true,
+        replication_batch_size: 1,
+        ..Default::default()
+    };
+
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
-        Some(Config {
-            require_gtid: true,
-            ..Default::default()
-        }),
+        Some(config.clone()),
     )
     .await
     .unwrap();
@@ -1121,10 +1128,7 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
         ctx.start_repl(
-            Some(Config {
-                require_gtid: true,
-                ..Default::default()
-            }),
+            Some(config),
             telemetry_sender,
             ParsingPreset::for_tests(),
         )
@@ -1639,13 +1643,18 @@ async fn gtid_tag_crash_recovery() {
         .await
         .unwrap();
 
+    // Use batch size of 1 so each row event is flushed individually,
+    // ensuring the failpoint crash leaves exactly 2 rows applied.
+    let config = Config {
+        require_gtid: true,
+        replication_batch_size: 1,
+        ..Default::default()
+    };
+
     // Start Readyset and wait for snapshot
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(
         url.to_string(),
-        Some(Config {
-            require_gtid: true,
-            ..Default::default()
-        }),
+        Some(config.clone()),
     )
     .await
     .unwrap();
@@ -1728,10 +1737,7 @@ async fn gtid_tag_crash_recovery() {
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
         ctx.start_repl(
-            Some(Config {
-                require_gtid: true,
-                ..Default::default()
-            }),
+            Some(config),
             telemetry_sender,
             ParsingPreset::for_tests(),
         )

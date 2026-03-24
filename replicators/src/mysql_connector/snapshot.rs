@@ -7,6 +7,8 @@ use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::Instant;
 
+use failpoint_macros::set_failpoint;
+
 use futures::future::TryFutureExt;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -25,6 +27,7 @@ use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::ParsingPreset;
+use readyset_util::failpoints;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidSet, ReplicationOffset, ReplicationOffsets};
 use serde_json::Value;
@@ -704,6 +707,7 @@ impl MySqlReplicator<'_> {
         table: Relation,
         snapshot_report_interval_secs: u16,
     ) -> ReadySetResult<JoinHandle<(Relation, ReplicationOffset, ReadySetResult<()>)>> {
+        set_failpoint!(failpoints::MYSQL_SNAPSHOT_TABLE);
         let span = info_span!(
             "Snapshotting table",
             table = %table.display(readyset_sql::Dialect::MySQL)
