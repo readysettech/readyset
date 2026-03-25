@@ -9,6 +9,8 @@ use std::convert::TryInto;
 
 use dataflow_state::PointKey;
 use itertools::Itertools;
+use metrics::counter;
+use readyset_client::metrics::recorded;
 use readyset_client::{internal, KeyComparison};
 use readyset_data::{Bound, DfValue};
 use readyset_errors::{internal, internal_err, ReadySetResult};
@@ -148,6 +150,8 @@ impl TopK {
             //
             // The push/no-push decision is simplified here, please refer to the loops
             // below and their comments.
+            counter!(recorded::TOPK_BACKFILL_REQUESTS).increment(1);
+
             let IngredientLookupResult::Records(parent_records) = self.lookup(
                 *self.src,
                 &self.group_by,

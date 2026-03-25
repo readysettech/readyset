@@ -298,6 +298,11 @@ pub mod recorded {
     /// | ntype | The operator node type. |
     pub const NODE_ON_INPUT_RAW_INVOCATIONS: &str = "readyset_domain.node_on_input_raw_invocations";
 
+    /// Counter: The number of times a TopK operator has triggered a backfill
+    /// from its parent because a group dropped below k rows after deletions.
+    /// High values indicate the buffer zone may be undersized.
+    pub const TOPK_BACKFILL_REQUESTS: &str = "readyset_domain.topk_backfill_requests";
+
     /// Histogram: The amount of time in microseconds a snapshot takes to be performed.
     pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
