@@ -82,6 +82,22 @@ impl TimestampTz {
         ts
     }
 
+    /// Convert self to a given IANA timezone while keeping subsecond digit count.
+    ///
+    /// The returned `TimestampTz` has its `datetime` field set to the local time in the target
+    /// timezone, with timezone offset metadata cleared. This is intended for immediate wire
+    /// serialization — do not call `to_chrono()` on the result expecting a meaningful
+    /// timezone-aware value.
+    #[inline]
+    pub fn to_tz(&self, tz: &chrono_tz::Tz) -> Self {
+        let mut ts = *self;
+        ts.datetime = self.to_chrono().with_timezone(tz).naive_local();
+        ts.extra[0] = 0;
+        ts.extra[1] = 0;
+        ts.extra[2] &= Self::ZERO_FLAG | Self::DATE_ONLY_FLAG | Self::SUBSECOND_DIGITS_BITS;
+        ts
+    }
+
     /// Convert self to a given fixed offset while keeping subsecond digit count.
     ///
     /// The returned `TimestampTz` has its `datetime` field set to the local time in the target
@@ -1176,6 +1192,100 @@ mod tests {
             NaiveDate::from_ymd_opt(2024, 6, 15)
                 .unwrap()
                 .and_hms_opt(6, 30, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_tz_summer_dst() {
+        // 2024-06-15 12:00 UTC → America/New_York is EDT (UTC-4) → 08:00
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let shifted = ts.to_tz(&chrono_tz::America::New_York);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(8, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_tz_winter_no_dst() {
+        // 2024-01-15 12:00 UTC → America/New_York is EST (UTC-5) → 07:00
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let shifted = ts.to_tz(&chrono_tz::America::New_York);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .and_hms_opt(7, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_tz_preserves_subsecond_digits() {
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00.123456").unwrap();
+        assert_eq!(ts.subsecond_digits(), 6);
+        let shifted = ts.to_tz(&chrono_tz::Asia::Kolkata);
+        assert_eq!(shifted.subsecond_digits(), 6);
+        // Asia/Kolkata is UTC+5:30 → 17:30:00.123456
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_micro_opt(17, 30, 0, 123456)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_tz_clears_offset_metadata() {
+        // Input has +05:00 offset: 2024-06-15 12:00:00+05:00 (= 07:00 UTC)
+        // Converting to America/New_York (EDT = UTC-4) → 03:00 local
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00+05:00").unwrap();
+        assert!(ts.has_timezone());
+        assert_eq!(ts.get_offset(), 5 * 3600);
+
+        let shifted = ts.to_tz(&chrono_tz::America::New_York);
+        assert!(!shifted.has_timezone());
+        assert_eq!(shifted.get_offset(), 0);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(3, 0, 0)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn to_tz_spring_forward_boundary() {
+        // 2024-03-10 07:30 UTC → America/New_York: spring forward at 02:00→03:00 EST→EDT
+        // 07:30 UTC = 03:30 EDT (UTC-4), the gap 02:00-03:00 is skipped
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 3, 10)
+                .unwrap()
+                .and_hms_opt(7, 30, 0)
+                .unwrap(),
+        );
+        let shifted = ts.to_tz(&chrono_tz::America::New_York);
+        assert_eq!(
+            shifted.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 3, 10)
+                .unwrap()
+                .and_hms_opt(3, 30, 0)
                 .unwrap()
         );
     }
