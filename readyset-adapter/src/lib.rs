@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use clap::ValueEnum;
 
 pub use crate::backend::{Backend, BackendBuilder, ConnectionInfo, recreate_shallow_caches};
-pub use crate::query_handler::{QueryHandler, SetBehavior};
+pub use crate::query_handler::{QueryHandler, SessionTimezone, SetBehavior};
 pub use crate::status_reporter::{ReadySetStatus, ReadySetStatusReporter};
 pub use crate::upstream_database::{
     UpstreamConfig, UpstreamDatabase, UpstreamDestination, UpstreamPrepare,

@@ -2,10 +2,11 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::str::FromStr;
 
+use chrono::FixedOffset;
 use lazy_static::lazy_static;
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
-use readyset_adapter::{QueryHandler, SetBehavior};
+use readyset_adapter::{QueryHandler, SessionTimezone, SetBehavior};
 use readyset_client::results::Results;
 use readyset_client::ColumnSchema;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
@@ -935,8 +936,8 @@ impl QueryHandler for MySqlQueryHandler {
                         ),
                         "time_zone" => {
                             if let Expr::Literal(Literal::String(s)) = value {
-                                match parse_timezone_offset(s) {
-                                    Some(offset) => behavior.set_timezone_offset(offset),
+                                match parse_timezone(s) {
+                                    Some(tz) => behavior.set_timezone(tz),
                                     None => behavior.unsupported(true),
                                 }
                             } else {
@@ -1033,16 +1034,21 @@ fn get_encoding_for_charset(
 const MAX_POSITIVE_TZ_OFFSET_SECS: i32 = 14 * 3600; // +14:00
 const MAX_NEGATIVE_TZ_OFFSET_SECS: i32 = 13 * 3600 + 59 * 60; // -13:59
 
-/// Parse a MySQL timezone offset string into seconds from UTC.
+/// Parse a MySQL timezone string into a [`SessionTimezone`].
 ///
-/// Returns `Some(Some(seconds))` for fixed offset strings like `"+05:00"`, `"-05:30"`, `"+00:00"`.
-/// Returns `Some(None)` for `"SYSTEM"` (use server local timezone).
-/// Returns `None` for named timezones like `"US/Eastern"` (unsupported).
-fn parse_timezone_offset(s: &str) -> Option<Option<i32>> {
+/// Returns `Some(SessionTimezone::System)` for `"SYSTEM"`.
+/// Returns `Some(SessionTimezone::FixedOffset(_))` for offsets like `"+05:00"`.
+/// Returns `None` for named timezones like `"US/Eastern"` (unsupported) and unparseable strings.
+fn parse_timezone(s: &str) -> Option<SessionTimezone> {
     if s.eq_ignore_ascii_case("SYSTEM") {
-        return Some(None);
+        return Some(SessionTimezone::System);
     }
 
+    parse_fixed_offset(s).map(SessionTimezone::FixedOffset)
+}
+
+/// Parse a fixed-offset timezone string like `"+05:00"` into a [`FixedOffset`].
+fn parse_fixed_offset(s: &str) -> Option<FixedOffset> {
     let (sign, rest) = match s.as_bytes().first() {
         Some(b'+') => (1i32, &s[1..]),
         Some(b'-') => (-1i32, &s[1..]),
@@ -1067,7 +1073,7 @@ fn parse_timezone_offset(s: &str) -> Option<Option<i32>> {
         return None;
     }
 
-    Some(Some(sign * total_seconds))
+    FixedOffset::east_opt(sign * total_seconds)
 }
 
 #[cfg(test)]
@@ -1287,38 +1293,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn parse_timezone_offset_fixed_offsets() {
-        assert_eq!(super::parse_timezone_offset("+00:00"), Some(Some(0)));
-        assert_eq!(super::parse_timezone_offset("+05:00"), Some(Some(18000)));
-        assert_eq!(super::parse_timezone_offset("-05:00"), Some(Some(-18000)));
-        assert_eq!(super::parse_timezone_offset("+05:30"), Some(Some(19800)));
-        assert_eq!(super::parse_timezone_offset("-05:30"), Some(Some(-19800)));
-        assert_eq!(super::parse_timezone_offset("+13:00"), Some(Some(46800)));
+    fn fixed(secs: i32) -> super::SessionTimezone {
+        super::SessionTimezone::FixedOffset(chrono::FixedOffset::east_opt(secs).unwrap())
     }
 
     #[test]
-    fn parse_timezone_offset_system() {
-        assert_eq!(super::parse_timezone_offset("SYSTEM"), Some(None));
-        assert_eq!(super::parse_timezone_offset("system"), Some(None));
+    fn parse_timezone_fixed_offsets() {
+        assert_eq!(super::parse_timezone("+00:00"), Some(fixed(0)));
+        assert_eq!(super::parse_timezone("+05:00"), Some(fixed(18000)));
+        assert_eq!(super::parse_timezone("-05:00"), Some(fixed(-18000)));
+        assert_eq!(super::parse_timezone("+05:30"), Some(fixed(19800)));
+        assert_eq!(super::parse_timezone("-05:30"), Some(fixed(-19800)));
+        assert_eq!(super::parse_timezone("+13:00"), Some(fixed(46800)));
     }
 
     #[test]
-    fn parse_timezone_offset_named_unsupported() {
-        assert_eq!(super::parse_timezone_offset("US/Eastern"), None);
-        assert_eq!(super::parse_timezone_offset("America/New_York"), None);
+    fn parse_timezone_system() {
+        assert_eq!(
+            super::parse_timezone("SYSTEM"),
+            Some(super::SessionTimezone::System)
+        );
+        assert_eq!(
+            super::parse_timezone("system"),
+            Some(super::SessionTimezone::System)
+        );
     }
 
     #[test]
-    fn parse_timezone_offset_invalid() {
-        assert_eq!(super::parse_timezone_offset(""), None);
-        assert_eq!(super::parse_timezone_offset("abc"), None);
-        assert_eq!(super::parse_timezone_offset("+14:00"), Some(Some(50400)));
-        assert_eq!(super::parse_timezone_offset("+14:01"), None);
-        assert_eq!(super::parse_timezone_offset("+00:60"), None);
+    fn parse_timezone_named_unsupported() {
+        assert_eq!(super::parse_timezone("US/Eastern"), None);
+        assert_eq!(super::parse_timezone("America/New_York"), None);
+    }
+
+    #[test]
+    fn parse_timezone_invalid() {
+        assert_eq!(super::parse_timezone(""), None);
+        assert_eq!(super::parse_timezone("abc"), None);
+        assert_eq!(super::parse_timezone("+14:00"), Some(fixed(50400)));
+        assert_eq!(super::parse_timezone("+14:01"), None);
+        assert_eq!(super::parse_timezone("+00:60"), None);
         // MySQL range is -13:59 to +14:00; -14:00 is invalid
-        assert_eq!(super::parse_timezone_offset("-14:00"), None);
-        assert_eq!(super::parse_timezone_offset("-13:59"), Some(Some(-50340)));
+        assert_eq!(super::parse_timezone("-14:00"), None);
+        assert_eq!(super::parse_timezone("-13:59"), Some(fixed(-50340)));
     }
 
     #[test]
@@ -1334,7 +1350,7 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone_offset(Some(0))
+            SetBehavior::default().set_timezone(fixed(0))
         );
     }
 
@@ -1351,7 +1367,7 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone_offset(Some(19800))
+            SetBehavior::default().set_timezone(fixed(19800))
         );
     }
 
@@ -1368,7 +1384,7 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone_offset(None)
+            SetBehavior::default().set_timezone(SessionTimezone::System)
         );
     }
 

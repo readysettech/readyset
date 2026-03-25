@@ -5668,6 +5668,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
+ "chrono",
  "clap",
  "criterion",
  "crossbeam-skiplist",

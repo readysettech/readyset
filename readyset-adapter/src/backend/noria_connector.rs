@@ -39,6 +39,7 @@ use tokio::sync::RwLock;
 use tracing::{error, info, trace, warn};
 
 use crate::backend::SelectSchema;
+use crate::query_handler::SessionTimezone;
 use crate::utils;
 
 #[derive(Clone, Debug)]
@@ -293,10 +294,8 @@ pub struct NoriaConnector {
     /// MySQL and `SET NAMES` in both MySQL and Postgres.
     results_encoding: Encoding,
 
-    /// The timezone offset (in seconds from UTC) for TIMESTAMP conversion.
-    /// `None` means "SYSTEM" (use server local timezone via `chrono::Local`).
-    /// `Some(secs)` means a fixed offset.
-    timezone_offset: Option<i32>,
+    /// The session timezone for TIMESTAMP conversion.
+    timezone: SessionTimezone,
 }
 
 mod request_handler {
@@ -414,7 +413,7 @@ impl NoriaConnector {
             parse_dialect,
             schema_search_path,
             results_encoding: Encoding::Utf8,
-            timezone_offset: None,
+            timezone: SessionTimezone::System,
         }
     }
 
@@ -942,16 +941,14 @@ impl NoriaConnector {
         self.results_encoding
     }
 
-    /// Set the timezone offset for TIMESTAMP conversion.
-    /// `None` means "SYSTEM" (use server local timezone).
-    /// `Some(secs)` means a fixed offset in seconds from UTC.
-    pub fn set_timezone_offset(&mut self, offset: Option<i32>) {
-        self.timezone_offset = offset;
+    /// Set the session timezone for TIMESTAMP conversion.
+    pub fn set_timezone(&mut self, tz: SessionTimezone) {
+        self.timezone = tz;
     }
 
-    /// Returns the timezone offset for TIMESTAMP conversion.
-    pub fn timezone_offset(&self) -> Option<i32> {
-        self.timezone_offset
+    /// Returns the session timezone for TIMESTAMP conversion.
+    pub fn timezone(&self) -> SessionTimezone {
+        self.timezone
     }
 
     pub(crate) async fn resnapshot_table(

@@ -1,7 +1,34 @@
+use chrono::FixedOffset;
+use readyset_data::TimestampTz;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{SetStatement, SqlIdentifier, SqlQuery};
 
 use crate::backend::noria_connector;
+
+/// Represents the session timezone configuration.
+///
+/// MySQL's `time_zone` session variable can be set to:
+/// - `"SYSTEM"` — use the server's local timezone
+/// - A fixed offset like `"+05:00"` or `"-08:00"`
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SessionTimezone {
+    /// Use the server's local timezone (corresponds to `SET time_zone = 'SYSTEM'`).
+    #[default]
+    System,
+    /// A fixed UTC offset (e.g., `SET time_zone = '+05:00'`).
+    FixedOffset(FixedOffset),
+}
+
+impl SessionTimezone {
+    /// Convert a [`TimestampTz`] to this session timezone.
+    #[inline]
+    pub fn convert(&self, ts: &TimestampTz) -> TimestampTz {
+        match self {
+            Self::System => ts.to_local(),
+            Self::FixedOffset(tz) => ts.to_fixed_offset(tz),
+        }
+    }
+}
 
 /// How we should be handling a SQL `SET` statement.
 #[must_use]
@@ -18,11 +45,10 @@ pub struct SetBehavior {
     /// This `SET` statement changes the encoding to be used for results. Corresponds to `SET
     /// @@character_set_results` in MySQL or `SET NAMES` in Postgres or MySQL.
     pub set_results_encoding: Option<readyset_data::encoding::Encoding>,
-    /// This `SET` statement changes the timezone offset used for TIMESTAMP conversions.
-    /// `Some(Some(secs))` means a fixed offset in seconds from UTC.
-    /// `Some(None)` means "SYSTEM" (use server local timezone).
+    /// This `SET` statement changes the session timezone for TIMESTAMP conversions.
+    /// `Some(tz)` means change to the given timezone.
     /// `None` means no change (this SET didn't touch time_zone).
-    pub set_timezone_offset: Option<Option<i32>>,
+    pub set_timezone: Option<SessionTimezone>,
 }
 
 impl SetBehavior {
@@ -53,8 +79,8 @@ impl SetBehavior {
         self
     }
 
-    pub fn set_timezone_offset(mut self, offset: Option<i32>) -> Self {
-        self.set_timezone_offset = Some(offset);
+    pub fn set_timezone(mut self, tz: SessionTimezone) -> Self {
+        self.set_timezone = Some(tz);
         self
     }
 }
@@ -67,7 +93,7 @@ impl Default for SetBehavior {
             set_autocommit: None,
             set_search_path: None,
             set_results_encoding: None,
-            set_timezone_offset: None,
+            set_timezone: None,
         }
     }
 }
@@ -91,4 +117,52 @@ pub trait QueryHandler: Sized + Send {
     ///
     /// See the documentation of [`SetStatement`] for more information.
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use chrono::NaiveDate;
+    use readyset_data::TimestampTz;
+
+    use super::*;
+
+    #[test]
+    fn convert_fixed_offset() {
+        // 2024-06-15 12:00 UTC → +05:00 → 17:00
+        let ts = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let tz = SessionTimezone::FixedOffset(FixedOffset::east_opt(5 * 3600).unwrap());
+        let result = tz.convert(&ts);
+        assert_eq!(
+            result.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(17, 0, 0)
+                .unwrap()
+        );
+        assert!(!result.has_timezone());
+    }
+
+    #[test]
+    fn convert_fixed_offset_preserves_subsecond_digits() {
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00.123").unwrap();
+        assert_eq!(ts.subsecond_digits(), 3);
+        let tz = SessionTimezone::FixedOffset(FixedOffset::east_opt(-5 * 3600).unwrap());
+        let result = tz.convert(&ts);
+        assert_eq!(result.subsecond_digits(), 3);
+    }
+
+    #[test]
+    fn convert_system_clears_offset_metadata() {
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00+05:00").unwrap();
+        assert!(ts.has_timezone());
+        let result = SessionTimezone::System.convert(&ts);
+        assert!(!result.has_timezone());
+    }
 }

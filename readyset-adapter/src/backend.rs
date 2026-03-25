@@ -4931,7 +4931,7 @@ where
             set_autocommit,
             set_search_path,
             set_results_encoding,
-            set_timezone_offset,
+            set_timezone,
         } = Handler::handle_set_statement(set);
 
         // NOTE: The unsupported check runs before autocommit processing intentionally.
@@ -4990,9 +4990,9 @@ where
             trace!(?encoding, "Setting results_encoding");
             connectors.noria.set_results_encoding(encoding);
         }
-        if let Some(offset) = set_timezone_offset {
-            trace!(?offset, "Setting timezone_offset");
-            connectors.noria.set_timezone_offset(offset);
+        if let Some(tz) = set_timezone {
+            trace!(?tz, "Setting timezone");
+            connectors.noria.set_timezone(tz);
         }
 
         Ok(())
