@@ -1,0 +1,166 @@
+# Tests for cross-table non-equality predicates in JOIN ON clauses.
+# REA-5883: LEFT JOIN with only inequality ON condition (no equality)
+# previously caused "Empty join key" panic on domain reload.
+
+statement ok
+CREATE TABLE ineq_s (id INT PRIMARY KEY, name TEXT, status INT);
+
+statement ok
+INSERT INTO ineq_s VALUES (1, 'A', 10), (2, 'B', 20), (3, 'C', 30);
+
+statement ok
+CREATE TABLE ineq_t (id INT PRIMARY KEY, val INT);
+
+statement ok
+INSERT INTO ineq_t VALUES (1, 10), (2, 20);
+
+# LEFT JOIN with only != in ON — should be rejected (no equality key).
+# Previously this created a broken dataflow node instead of returning
+# an unsupported error.
+onlyif readyset
+statement error
+SELECT ineq_s.name FROM ineq_s LEFT JOIN ineq_t ON ineq_s.id != ineq_t.id;
+
+# LEFT JOIN with only < in ON — same issue with range predicates.
+onlyif readyset
+statement error
+SELECT ineq_s.name FROM ineq_s LEFT JOIN ineq_t ON ineq_s.status < ineq_t.val;
+
+# =====================================================================
+# Equality + cross-table inequality in ON (INNER JOIN)
+# =====================================================================
+
+# Equality key + cross-table != (filters all — status matches val)
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+INNER JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status != ineq_t.val;
+----
+
+# Equality key + cross-table >= (passes — status >= val)
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+INNER JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status >= ineq_t.val;
+----
+A
+10
+B
+20
+
+# =====================================================================
+# Equality + cross-table inequality in ON (LEFT JOIN)
+# =====================================================================
+
+# Equality key + cross-table != in LEFT JOIN ON.
+# The cross-table inequality becomes a global predicate, which is
+# not yet supported for LEFT JOINs → rejected.
+onlyif readyset
+statement error
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status != ineq_t.val;
+
+# Equality key + cross-table < in LEFT JOIN ON — same: rejected.
+onlyif readyset
+statement error
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status < ineq_t.val;
+
+# =====================================================================
+# Equality + right-local predicate in ON (LEFT JOIN)
+# Right-local: references only the RHS table — acts as a pre-filter
+# on the right side before the join.
+# =====================================================================
+
+# Right-local: ineq_t.val > 15 (only id=2/val=20 passes)
+# id=1: t.val=10, 10 > 15 false → right row filtered → NULL extension
+# id=2: t.val=20, 20 > 15 true → match
+# id=3: no match → NULL
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_t.val > 15;
+----
+A
+NULL
+B
+20
+C
+NULL
+
+# =====================================================================
+# Equality + left-local predicate in ON (LEFT JOIN)
+# Left-local: references only the LHS table — evaluated as part of
+# the join condition (not as a pre-filter).
+# =====================================================================
+
+# Left-local: ineq_s.status > 15 (only id=2/status=20 and id=3/status=30 pass)
+# id=1: s.status=10, 10 > 15 false → ON fails → NULL extension
+# id=2: s.status=20, 20 > 15 true, match exists → join
+# id=3: s.status=30, 30 > 15 true, but no match in ineq_t → NULL extension
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status > 15;
+----
+A
+NULL
+B
+20
+C
+NULL
+
+# =====================================================================
+# Equality + same-table column comparison in ON (LEFT JOIN)
+# Same-table comparison: both columns from one table — classified as
+# local predicate (not global).
+# =====================================================================
+
+# Same-table RHS: ineq_t.id < ineq_t.val (id=1: 1<10 true; id=2: 2<20 true)
+# Both pass → both join normally
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_t.id < ineq_t.val;
+----
+A
+10
+B
+20
+C
+NULL
+
+# Same-table LHS: ineq_s.id < ineq_s.status (1<10 true; 2<20 true; 3<30 true)
+# All pass the left-local pred → normal join behavior
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.id < ineq_s.status;
+----
+A
+10
+B
+20
+C
+NULL
+
+# =====================================================================
+# Equality + mixed predicates: left-local + right-local + cross-table
+# =====================================================================
+
+# All three predicate types combined in one ON clause.
+# Cross-table inequality makes this a global pred → rejected for LEFT JOIN.
+onlyif readyset
+statement error
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+LEFT JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status > 5 AND ineq_t.val < 25 AND ineq_s.status != ineq_t.val;
+
+# Same combination works for INNER JOIN (global preds allowed)
+query TI rowsort
+SELECT ineq_s.name, ineq_t.val
+FROM ineq_s
+INNER JOIN ineq_t ON ineq_s.id = ineq_t.id AND ineq_s.status > 5 AND ineq_t.val < 25 AND ineq_s.status != ineq_t.val;
+----

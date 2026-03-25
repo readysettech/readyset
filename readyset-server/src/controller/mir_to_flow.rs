@@ -1071,6 +1071,13 @@ fn make_join_node(
         })
         .collect::<ReadySetResult<Vec<_>>>()?;
 
+    // NOTE: on_idxs can be legitimately empty for certain join shapes.
+    // However, a bug upstream (e.g., in classify_conditionals or
+    // collect_join_predicates) could also produce an empty on_idxs
+    // unexpectedly — this would cause an "Empty join key" panic at
+    // runtime during replay.  If such a panic is observed, investigate
+    // how the join ended up with no equality key columns.
+
     // Skip join side swapping for Constant nodes — they are always small
     let (left, right) = if is_constant_backed(graph, left) || is_constant_backed(graph, right) {
         (left, right)

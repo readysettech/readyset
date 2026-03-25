@@ -1,0 +1,64 @@
+# Tests for REA-5884: cross-table equality in WHERE (not ON) combined
+# with IN/NOT IN/range predicates returning wrong results.
+# Root cause same as REA-5883: classify_conditionals misclassified
+# cross-table predicates as local to the LHS table.
+
+statement ok
+CREATE TABLE s5884 (sn TEXT PRIMARY KEY, pn TEXT);
+
+statement ok
+INSERT INTO s5884 VALUES ('S11111', 'P11111'), ('S22222', 'P11111'), ('S33333', 'P22222'), ('S44444', 'P44444'), ('S55555', 'P55555');
+
+statement ok
+CREATE TABLE spj5884 (sn TEXT, pn TEXT, jn TEXT, qty INT);
+
+statement ok
+INSERT INTO spj5884 VALUES
+  ('S11111', 'P11111', 'J11111', 200),
+  ('S11111', 'P11111', 'J44444', 700),
+  ('S22222', 'P33333', 'J11111', 400),
+  ('S33333', 'P33333', 'J11111', 200),
+  ('S33333', 'P44444', 'J22222', 500),
+  ('S55555', 'P55555', 'J55555', 500),
+  ('S55555', 'P55555', 'J77777', 100),
+  ('S55555', 'P22222', 'J22222', 200);
+
+# Core bug: JOIN ON equality + cross-table equality in WHERE + NOT IN
+# s.pn = spj.pn is a cross-table predicate in WHERE that was
+# misclassified as local to s, causing it to be dropped/misapplied.
+# Expected: rows where s.sn = spj.sn AND s.pn = spj.pn AND sn NOT IN (...)
+#   S33333: s.pn=P22222, spj has (S33333, P33333) and (S33333, P44444) — no pn match
+#   S44444: s.pn=P44444, spj has no S44444 rows
+#   S55555: s.pn=P55555, spj has (S55555, P55555, J55555) and (S55555, P55555, J77777) — match!
+query T rowsort
+SELECT spj5884.pn FROM spj5884 JOIN s5884 ON s5884.sn = spj5884.sn WHERE s5884.sn NOT IN ('S11111', 'S22222', 'XXXX') AND s5884.pn = spj5884.pn;
+----
+P55555
+P55555
+
+# Same with IN instead of NOT IN
+# S11111: s.pn=P11111, spj has (S11111, P11111) x2 — match!
+# S22222: s.pn=P11111, spj has (S22222, P33333) — no pn match
+query T rowsort
+SELECT spj5884.pn FROM spj5884 JOIN s5884 ON s5884.sn = spj5884.sn WHERE s5884.sn IN ('S11111', 'S22222', 'XXXX') AND s5884.pn = spj5884.pn;
+----
+P11111
+P11111
+
+# Same with range predicate instead of IN
+# sn > 'S11111': S22222(pn=P11111 vs P33333 no), S33333(P22222 vs P33333,P44444 no),
+#                S44444(P44444 vs nothing), S55555(P55555 vs P55555 yes x2)
+query T rowsort
+SELECT spj5884.pn FROM spj5884 JOIN s5884 ON s5884.sn = spj5884.sn WHERE s5884.sn > 'S11111' AND s5884.pn = spj5884.pn;
+----
+P55555
+P55555
+
+# Cross-table equality in WHERE only (no other filter) — should also work
+query T rowsort
+SELECT spj5884.pn FROM spj5884 JOIN s5884 ON s5884.sn = spj5884.sn WHERE s5884.pn = spj5884.pn;
+----
+P11111
+P11111
+P55555
+P55555

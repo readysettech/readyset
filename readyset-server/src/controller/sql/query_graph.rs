@@ -646,7 +646,23 @@ fn classify_conditionals(
                         }
                     }
 
-                    // Column from a specific table: Store locally
+                    // Cross-table non-equality predicate (e.g., s.sn != spj.sn):
+                    // must be classified as global, not local.
+                    (
+                        Expr::Column(Column {
+                            table: Some(lhs_table),
+                            ..
+                        }),
+                        Expr::Column(Column {
+                            table: Some(rhs_table),
+                            ..
+                        }),
+                    ) if lhs_table != rhs_table => {
+                        global.push(ce.clone());
+                    }
+
+                    // Column from a specific table vs non-column or same-table
+                    // column: store as a local predicate for that table.
                     (
                         Expr::Column(Column {
                             table: Some(table), ..
