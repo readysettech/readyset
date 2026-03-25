@@ -585,6 +585,73 @@ fn build_select_inner(
                 env.ddl_steps.extend(inner_ddl);
                 join_subqueries.insert(*alias_var, (inner_query, sq_alias));
             }
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::FromSubquery,
+                alias: alias_var,
+                constraints: inner_constraints,
+                shared_vars,
+            } => {
+                let sq_alias = state.fresh_subquery_alias();
+                // Bind the alias var so outer references (e.g.
+                // `From(alias_var)`, `ProjectColumn { table: alias_var, .. }`)
+                // resolve through env to `sq_alias` — same env-binding shape
+                // as the Cte arm.
+                env.bind(
+                    *alias_var,
+                    Binding::Table {
+                        name: sq_alias.clone(),
+                        alias: None,
+                    },
+                );
+                let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
+                    inner_constraints,
+                    env,
+                    var_kinds,
+                    shared_vars,
+                    state,
+                    entropy,
+                    placeholder_idx,
+                )?;
+                params.extend(inner_params);
+                env.ddl_steps.extend(inner_ddl);
+                for (idx, inner_field) in inner_query.fields.iter().enumerate() {
+                    // FieldDefinitionExpr::All / AllInTable used to hit
+                    // `let-else continue` and silently disappear from the
+                    // outer projection. Reject them so the generator
+                    // surfaces the bug instead.
+                    let (expr, alias) = match inner_field {
+                        FieldDefinitionExpr::Expr { expr, alias } => (expr, alias),
+                        FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
+                            return Err(ResolveError::Unsupported {
+                                variant: "All/AllInTable in FROM-subquery projection",
+                                location: "FromSubquery",
+                            });
+                        }
+                    };
+                    // Index-based fallback name (col0, col1, ...) so multiple
+                    // non-Column projections don't collide on a single `"col"`.
+                    let name = match (alias, expr) {
+                        (Some(a), _) => a.clone(),
+                        (None, Expr::Column(c)) => c.name.clone(),
+                        _ => SqlIdentifier::from(format!("col{idx}")),
+                    };
+                    fields.push(FieldDefinitionExpr::Expr {
+                        expr: Expr::Column(Column {
+                            name,
+                            table: Some(Relation {
+                                schema: None,
+                                name: sq_alias.clone(),
+                            }),
+                        }),
+                        alias: None,
+                    });
+                }
+                tables.push(TableExpr {
+                    inner: TableExprInner::Subquery(Box::new(inner_query)),
+                    alias: Some(sq_alias),
+                    column_aliases: vec![],
+                });
+            }
             Constraint::WindowFunction {
                 function,
                 partition_col,

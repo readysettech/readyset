@@ -113,6 +113,8 @@ pub enum SubqueryRelationKind {
     /// (`... JOIN (SELECT ...) AS sqN ON ...`). The alias var is referenced
     /// by a sibling `Join { right: JoinRight::Table(alias) }` constraint.
     JoinTarget,
+    /// Derived table in FROM position (`FROM (SELECT ...) AS sq`).
+    FromSubquery,
 }
 
 /// What the right side of a JOIN is. Always a relation var — base table,
@@ -352,7 +354,8 @@ impl Constraint {
                 conditions.iter().flat_map(|c| c.var_ids()).collect()
             }
             Constraint::OrderBy { col, table, .. } => vec![*col, *table],
-            Constraint::SubqueryExpr { .. } | Constraint::SubqueryRelation { .. } => vec![],
+            Constraint::SubqueryExpr { .. } => vec![],
+            Constraint::SubqueryRelation { alias, .. } => vec![*alias],
             Constraint::Or(preferred, fallback) => {
                 let mut ids: Vec<VarId> = preferred.iter().flat_map(|c| c.var_ids()).collect();
                 ids.extend(fallback.iter().flat_map(|c| c.var_ids()));

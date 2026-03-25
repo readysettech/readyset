@@ -542,8 +542,8 @@ impl PatternBuilder {
     /// ColumnExists constraints into the subquery's inner scope only —
     /// they do not leak into the outer pattern's constraint list. To
     /// commit the subquery, call one of the consuming methods on the
-    /// returned builder (`commit_as_where`, `commit_as_join`, or
-    /// `commit_as_cte`).
+    /// returned builder (`commit_as_where`, `commit_as_from`,
+    /// `commit_as_join`, or `commit_as_cte`).
     pub fn subquery(&mut self) -> SubqueryBuilder<'_> {
         SubqueryBuilder::start(self)
     }
@@ -758,6 +758,37 @@ impl<'a> SubqueryBuilder<'a> {
             constraints,
             shared_vars,
         });
+    }
+
+    /// Commit the subquery scope as a derived table in the outer FROM
+    /// clause (`FROM (SELECT ...) AS sq`). Returns a `VarId` for the
+    /// outer relation alias — peer to `commit_as_join` / `commit_as_cte`
+    /// which both return their alias var. This lets composing patterns
+    /// unify against a real outer relation rather than relying on a
+    /// hardcoded `VarId(0)`.
+    ///
+    /// The alias is allocated as `VarKind::DerivedRelation` so
+    /// `compose` refuses to unify it with a partner pattern's
+    /// base-table primary — same invariant as `commit_as_cte`. Outer
+    /// references via `From(alias)` / `ProjectColumn { table: alias, .. }`
+    /// resolve through `env` to the fresh `sqN` SQL identifier the
+    /// resolver binds at build time.
+    pub fn commit_as_from(self) -> VarId {
+        let shared_vars = self.compute_shared_vars();
+        let SubqueryBuilder {
+            outer, constraints, ..
+        } = self;
+        let alias = outer.allocator.alloc(VarKind::DerivedRelation);
+        outer.constraints.push(Constraint::SubqueryRelation {
+            kind: SubqueryRelationKind::FromSubquery,
+            alias,
+            constraints,
+            shared_vars,
+        });
+        if outer.primary_table.is_none() {
+            outer.primary_table = Some(alias);
+        }
+        alias
     }
 
     /// Commit the subquery scope as the right side of a JOIN.

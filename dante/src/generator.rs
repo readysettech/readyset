@@ -217,6 +217,7 @@ impl ConstraintRegistry {
         reg.register(joins::left_join());
         reg.register(joins::self_join());
         reg.register(joins::cross_join());
+        reg.register(joins::left_join_with_rhs_filter());
 
         // Ordering patterns
         reg.register(ordering::topk());
@@ -237,6 +238,7 @@ impl ConstraintRegistry {
         reg.register(hoisting::aggregated_join_subquery_eq_filter());
         reg.register(hoisting::aggregated_join_subquery_having_filter());
         reg.register(hoisting::having_to_where_promotion());
+        reg.register(hoisting::from_subquery_filter());
 
         // Advanced patterns
         reg.register(advanced::window_function());

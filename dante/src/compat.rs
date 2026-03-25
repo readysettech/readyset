@@ -199,6 +199,47 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             condition: CompatCondition::MaxOccurrences("cte", 2),
             reason: "limit CTE nesting depth to 2",
         },
+        // Derived-relation sources (CTE alias, FROM-subquery alias) auto-expose
+        // their inner projections as outer SELECT columns at resolve time —
+        // the resolver's `Cte` / `FromSubquery` arms synthesize outer column
+        // refs from `inner_query.fields` rather than from outer
+        // `ProjectColumn` constraints. This means the
+        // "ungrouped projection with aggregate" rule above can't see the
+        // exposed columns and won't catch a partner pattern that adds
+        // aggregate constraints (`ProjectAggregate`, `GroupBy`, `Having`,
+        // `HavingKeyFilter`). MySQL then rejects the resolved query with
+        // ERROR 42000 (1055): "Expression #N of SELECT list is not in GROUP BY"
+        // or 1140: "In aggregated query without GROUP BY...".
+        //
+        // Reject any composition that mixes a derived-relation source with
+        // aggregate-class constraints. Sole-aggregate uses (e.g.
+        // `SELECT count(cte.c) FROM cte`) would be valid SQL but require
+        // tracking which outer projections are aggregate-only at resolve
+        // time; until that's modeled, the safer invariant is "derived
+        // source ⇒ no aggregate".
+        CompatibilityRule {
+            name: "derived_source_with_aggregate",
+            condition: CompatCondition::Custom(|constraints| {
+                let has_derived_source = constraints
+                    .iter()
+                    .any(|c| matches!(c, Constraint::SubqueryRelation { .. }));
+                if !has_derived_source {
+                    return false;
+                }
+                constraints.iter().any(|c| {
+                    matches!(
+                        c,
+                        Constraint::ProjectAggregate { .. }
+                            | Constraint::GroupBy { .. }
+                            | Constraint::Having { .. }
+                            | Constraint::HavingKeyFilter { .. }
+                    )
+                })
+            }),
+            reason: "derived-relation source (CTE / FROM-subquery alias) auto-exposes inner \
+                     projections that aren't tracked by the outer GROUP BY — composing with \
+                     aggregate constraints produces queries MySQL rejects (only_full_group_by)",
+        },
         // Hoisting patterns should not compose with each other.
         CompatibilityRule {
             name: "max_hoisting_per_query",
@@ -210,6 +251,21 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             name: "no_window_with_hoisting",
             condition: CompatCondition::TagConflict("hoisting", "window"),
             reason: "window functions block the hoisting pass",
+        },
+        CompatibilityRule {
+            name: "max_loj_promotion_per_query",
+            condition: CompatCondition::MaxOccurrences("loj_promotion", 1),
+            reason: "limit LOJ promotion patterns to 1 per query",
+        },
+        CompatibilityRule {
+            name: "no_loj_promotion_with_hoisting",
+            condition: CompatCondition::TagConflict("loj_promotion", "hoisting"),
+            reason: "LOJ promotion and hoisting patterns target different passes",
+        },
+        CompatibilityRule {
+            name: "no_loj_promotion_with_subquery",
+            condition: CompatCondition::TagConflict("loj_promotion", "subquery"),
+            reason: "LOJ promotion pattern should stay simple for the optimizer",
         },
         // MySQL error 3065: ORDER BY columns must be in the SELECT list
         // when DISTINCT is used.
@@ -350,6 +406,23 @@ mod tests {
         assert!(!rule.is_violated(&[], &["subquery", "subquery"]));
         assert!(rule.is_violated(&[], &["subquery", "subquery", "subquery"]));
         assert!(!rule.is_violated(&[], &[]));
+    }
+
+    #[test]
+    fn default_rules_has_no_duplicate_tag_conflicts() {
+        use std::collections::HashSet;
+        let rules = default_rules();
+        let mut seen: HashSet<(&'static str, &'static str)> = HashSet::new();
+        for rule in &rules {
+            if let CompatCondition::TagConflict(a, b) = rule.condition {
+                // Normalize to canonical order so (a,b) and (b,a) collide.
+                let key = if a <= b { (a, b) } else { (b, a) };
+                assert!(
+                    seen.insert(key),
+                    "duplicate TagConflict rule for ({a:?}, {b:?})"
+                );
+            }
+        }
     }
 
     #[test]
@@ -521,6 +594,106 @@ mod tests {
         let rules = default_rules();
         let result = check_rules(&rules, &[Constraint::Distinct], &["filter", "ordering"]);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn derived_relation_source_with_aggregate_rejected() {
+        use crate::constraint::{AggregateFn, SubqueryRelationKind};
+
+        // A `Cte` or FROM-subquery alias auto-exposes its inner projections as
+        // outer SELECT columns at resolve time — those columns aren't tracked
+        // by `Constraint::ProjectColumn` at the outer level, so the
+        // "ungrouped projection with aggregate" rule misses them. Mixing a
+        // derived-relation source with aggregate constraints from a partner
+        // pattern produces SQL like
+        //
+        //   SELECT count(t0.c1), sq.c0 FROM t0 CROSS JOIN sq GROUP BY t0.c1
+        //
+        // where `sq.c0` is auto-exposed but not in GROUP BY — MySQL rejects
+        // with code 1055.
+        let rules = default_rules();
+
+        let cte_constraints = vec![
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::Cte,
+                alias: VarId(0),
+                constraints: vec![
+                    Constraint::From(VarId(1)),
+                    Constraint::ProjectColumn {
+                        col: VarId(2),
+                        table: VarId(1),
+                    },
+                ],
+                shared_vars: vec![],
+            },
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: VarId(3),
+                table: VarId(4),
+            },
+            Constraint::GroupBy {
+                col: VarId(5),
+                table: VarId(4),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &cte_constraints, &[]).is_some(),
+            "CTE + ProjectAggregate must be rejected — derived alias auto-exposes \
+             inner projections that won't be in GROUP BY"
+        );
+
+        let from_subquery_constraints = vec![
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::FromSubquery,
+                alias: VarId(0),
+                constraints: vec![
+                    Constraint::From(VarId(1)),
+                    Constraint::ProjectColumn {
+                        col: VarId(2),
+                        table: VarId(1),
+                    },
+                ],
+                shared_vars: vec![],
+            },
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: VarId(3),
+                table: VarId(4),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &from_subquery_constraints, &[]).is_some(),
+            "FROM-subquery + ProjectAggregate must be rejected (same reason as CTE)"
+        );
+    }
+
+    #[test]
+    fn derived_relation_source_without_aggregate_allowed() {
+        use crate::constraint::SubqueryRelationKind;
+
+        // A derived-relation source by itself — no aggregate composition —
+        // is fine. The auto-exposed inner projections are the only outer
+        // SELECT items, and there's no GROUP BY violation.
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::FromSubquery,
+                alias: VarId(0),
+                constraints: vec![
+                    Constraint::From(VarId(1)),
+                    Constraint::ProjectColumn {
+                        col: VarId(2),
+                        table: VarId(1),
+                    },
+                ],
+                shared_vars: vec![],
+            },
+            Constraint::From(VarId(0)),
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_none(),
+            "FROM-subquery without aggregate constraints must be allowed"
+        );
     }
 
     #[test]

@@ -111,6 +111,37 @@ pub fn having_to_where_promotion() -> Pattern {
     b.build()
 }
 
+/// SELECT sq.c0, sq.c1
+/// FROM (SELECT t.c0, t.c1 FROM t WHERE t.c2 = ?) AS sq
+///
+/// Non-aggregated derived table as the leftmost FROM item with a
+/// parametrizable filter. The `inline_leading_derived_table` pass
+/// will flatten this into `SELECT t.c0, t.c1 FROM t WHERE t.c2 = ?`.
+pub fn from_subquery_filter() -> Pattern {
+    let mut b = PatternBuilder::new("from_subquery_filter");
+
+    let mut sq = b.subquery();
+    let t_inner = sq.table();
+    let c_proj = sq.column(t_inner);
+    let c_filter = sq.column(t_inner);
+    // Ensure projected column and filter column are distinct so the
+    // derived table never has duplicate column names.
+    sq.constraint(Constraint::NotEq(c_proj, c_filter));
+    sq.from(t_inner);
+    sq.project_column(c_proj, t_inner);
+    sq.project_column(c_filter, t_inner);
+    sq.constraint(Constraint::WhereParam {
+        col: c_filter,
+        table: t_inner,
+        op: BinaryOperator::Equal,
+    });
+    let _derived_alias = sq.commit_as_from();
+
+    b.tags(&["subquery", "inline_leading"]);
+    b.set_weight(3);
+    b.build()
+}
+
 #[cfg(test)]
 mod tests {
     use readyset_sql::Dialect;
@@ -127,13 +158,19 @@ mod tests {
         assert!(p.tags.contains(&"aggregate"));
         assert!(p.min_depth >= 1);
 
-        // Should have a SubqueryRelation with JoinTarget kind (the
-        // commit_as_join sibling constraint that the resolver renders
-        // as the JOIN's inline subquery).
+        // Should have a SubqueryRelation { kind: JoinTarget } and a Join
+        // referencing its alias.
         assert!(p.constraints.iter().any(|c| matches!(
             c,
             Constraint::SubqueryRelation {
                 kind: crate::constraint::SubqueryRelationKind::JoinTarget,
+                ..
+            }
+        )));
+        assert!(p.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::Join {
+                right: crate::constraint::JoinRight::Table(_),
                 ..
             }
         )));
@@ -205,5 +242,37 @@ mod tests {
         );
         assert!(sql.contains("HAVING"), "expected HAVING in sql: {sql}");
         assert!(sql.contains("= ?"), "expected = ? in sql: {sql}");
+    }
+
+    #[test]
+    fn from_subquery_filter_builds() {
+        let p = from_subquery_filter();
+        assert_eq!(p.name, "from_subquery_filter");
+        assert!(p.tags.contains(&"subquery"));
+        assert!(p.tags.contains(&"inline_leading"));
+        assert!(p.min_depth >= 1);
+        // Primary is the FROM-subquery alias and must be DerivedRelation
+        // so `compose` refuses to unify it with a partner pattern's
+        // base-table primary (same invariant as CTE aliases).
+        assert_eq!(
+            p.vars[p.primary_table.0],
+            crate::var::VarKind::DerivedRelation,
+            "FROM-subquery alias must be DerivedRelation, got: {:?}",
+            p.vars[p.primary_table.0]
+        );
+    }
+
+    #[test]
+    fn from_subquery_filter_resolves() {
+        let p = from_subquery_filter();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        // Should be a derived table in FROM, not a JOIN
+        assert!(!sql.contains("JOIN"), "should not have JOIN in sql: {sql}");
+        assert!(sql.contains("= ?"), "expected = ? in sql: {sql}");
+        // The outer query should reference the subquery alias columns
+        assert!(
+            sql.contains("`sq"),
+            "expected sq alias reference in sql: {sql}"
+        );
     }
 }

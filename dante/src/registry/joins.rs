@@ -1,6 +1,6 @@
 //! Join patterns: inner, left, self-join, cross join.
 
-use readyset_sql::ast::JoinOperator;
+use readyset_sql::ast::{BinaryOperator, JoinOperator};
 
 use crate::constraint::TypeClass;
 use crate::pattern::{Pattern, PatternBuilder};
@@ -52,6 +52,38 @@ pub fn left_join() -> Pattern {
     b.project_column(c2, t2);
 
     b.tags(&["join", "two_table"]);
+    b.build()
+}
+
+/// SELECT t0.c0, t1.c1 FROM t0 LEFT JOIN t1 ON t0.c2 = t1.c3 WHERE t1.c4 = ?
+///
+/// LEFT JOIN with a WHERE filter on the RHS table. The filter null-rejects
+/// the RHS, so `normalize_null_rejecting_outer_joins` in
+/// `derived_tables_rewrite` can promote this to INNER JOIN.
+pub fn left_join_with_rhs_filter() -> Pattern {
+    let mut b = PatternBuilder::new("left_join_with_rhs_filter");
+    let t1 = b.table();
+    let t2 = b.table();
+    b.not_eq(t1, t2);
+
+    let c1 = b.column(t1);
+    let c2 = b.column(t2);
+    let jc1 = b.column(t1);
+    let jc2 = b.column(t2);
+    let c_filter = b.column(t2); // filter on RHS table
+
+    b.column_type_class(jc1, TypeClass::Integer);
+    b.column_type_class(jc2, TypeClass::Integer);
+    b.type_compatible(jc1, jc2);
+
+    b.from(t1);
+    b.join_table(JoinOperator::LeftJoin, t2, jc1, jc2);
+    b.project_column(c1, t1);
+    b.project_column(c2, t2);
+    b.where_param(c_filter, t2, BinaryOperator::Equal);
+
+    b.tags(&["join", "two_table", "loj_promotion"]);
+    b.set_weight(3);
     b.build()
 }
 
@@ -182,5 +214,25 @@ mod tests {
         let p = cross_join();
         let sql = resolve_pattern(&p, Dialect::MySQL);
         assert!(sql.contains("CROSS JOIN"), "sql: {sql}");
+    }
+
+    #[test]
+    fn left_join_with_rhs_filter_builds() {
+        let p = left_join_with_rhs_filter();
+        assert_eq!(p.name, "left_join_with_rhs_filter");
+        assert!(p.tags.contains(&"loj_promotion"));
+        assert!(p.tags.contains(&"join"));
+    }
+
+    #[test]
+    fn left_join_with_rhs_filter_resolves() {
+        let p = left_join_with_rhs_filter();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(
+            sql.contains("LEFT JOIN"),
+            "expected LEFT JOIN in sql: {sql}"
+        );
+        assert!(sql.contains("WHERE"), "expected WHERE in sql: {sql}");
+        assert!(sql.contains("= ?"), "expected = ? in sql: {sql}");
     }
 }
