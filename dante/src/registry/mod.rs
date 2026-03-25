@@ -6,6 +6,7 @@ pub mod basic;
 pub mod ctes;
 pub mod filters;
 pub mod functions;
+pub mod hoisting;
 pub mod joins;
 pub mod ordering;
 pub mod subqueries;

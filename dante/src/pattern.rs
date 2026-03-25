@@ -187,13 +187,12 @@ impl Recipe {
             }
         }
 
-        let (mut base_has_limit, mut base_has_distinct, mut base_has_having, mut base_has_order_by) =
-            (false, false, false, false);
+        let (mut base_has_limit, mut base_has_distinct, mut base_has_order_by) =
+            (false, false, false);
         for c in &self.constraints {
             match c {
                 Constraint::Limit { .. } => base_has_limit = true,
                 Constraint::Distinct => base_has_distinct = true,
-                Constraint::Having { .. } => base_has_having = true,
                 Constraint::OrderBy { .. } => base_has_order_by = true,
                 _ => {}
             }
@@ -212,10 +211,14 @@ impl Recipe {
                 Constraint::Limit { .. } if base_has_limit => true,
                 // Deduplicate Distinct
                 Constraint::Distinct if base_has_distinct => true,
-                // Keep only one Having
-                Constraint::Having { .. } if base_has_having => true,
                 // Keep only one OrderBy
                 Constraint::OrderBy { .. } if base_has_order_by => true,
+                // Having / HavingKeyFilter: keep all, the resolver
+                // AND-merges them into a single HAVING clause. Dedup used
+                // to drop them silently — and worse, conflated the two as
+                // a single dedup category, so a `Having COUNT(x)>?`
+                // composed with a `HavingKeyFilter c=?` would silently
+                // drop one of them.
                 _ => false,
             };
 
@@ -412,6 +415,13 @@ impl PatternBuilder {
             table,
             op,
         });
+    }
+
+    /// Emit a `HavingKeyFilter` constraint — a parametrizable filter on a
+    /// GROUP BY key column in the HAVING clause.
+    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
+        self.constraints
+            .push(Constraint::HavingKeyFilter { col, table, op });
     }
 
     pub fn where_param(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
@@ -705,6 +715,11 @@ impl<'a> SubqueryBuilder<'a> {
         self.constraints.push(Constraint::GroupBy { col, table });
     }
 
+    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
+        self.constraints
+            .push(Constraint::HavingKeyFilter { col, table, op });
+    }
+
     pub fn column_type_class(&mut self, col: VarId, type_class: TypeClass) {
         self.constraints
             .push(Constraint::ColumnTypeClass { col, type_class });
@@ -841,6 +856,7 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
         | Constraint::WhereBetweenParam { col, table } => vec![*col, *table],
         Constraint::ProjectAggregate { col, table, .. }
         | Constraint::Having { col, table, .. }
+        | Constraint::HavingKeyFilter { col, table, .. }
         | Constraint::WhereParam { col, table, .. }
         | Constraint::WhereInParam { col, table, .. }
         | Constraint::WhereLike { col, table, .. }
@@ -1683,7 +1699,7 @@ mod tests {
     }
 
     #[test]
-    fn compose_deduplicates_having() {
+    fn compose_keeps_both_havings_for_and_merge() {
         use crate::constraint::AggregateFn;
         use readyset_sql::ast::BinaryOperator;
 
@@ -1727,8 +1743,9 @@ mod tests {
             .filter(|c| matches!(c, Constraint::Having { .. }))
             .count();
         assert_eq!(
-            having_count, 1,
-            "compose should deduplicate Having, got {having_count}"
+            having_count, 2,
+            "compose must keep both Having constraints — resolver AND-merges \
+             them; the old dedup silently dropped one"
         );
     }
 

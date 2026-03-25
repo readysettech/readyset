@@ -199,6 +199,18 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             condition: CompatCondition::MaxOccurrences("cte", 2),
             reason: "limit CTE nesting depth to 2",
         },
+        // Hoisting patterns should not compose with each other.
+        CompatibilityRule {
+            name: "max_hoisting_per_query",
+            condition: CompatCondition::MaxOccurrences("hoisting", 1),
+            reason: "limit hoisting patterns to 1 per query",
+        },
+        // Window functions block the hoisting pass entirely.
+        CompatibilityRule {
+            name: "no_window_with_hoisting",
+            condition: CompatCondition::TagConflict("hoisting", "window"),
+            reason: "window functions block the hoisting pass",
+        },
         // MySQL error 3065: ORDER BY columns must be in the SELECT list
         // when DISTINCT is used.
         CompatibilityRule {
@@ -224,6 +236,28 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                 })
             }),
             reason: "DISTINCT with ORDER BY on unprojected column (MySQL error 3065)",
+        },
+        // `HavingKeyFilter { col }` only makes sense when `col` is a
+        // GROUP BY key — otherwise MySQL `only_full_group_by` rejects the
+        // query at runtime. Reject the recipe at compose-time so the
+        // failure is local to pattern composition rather than surfacing
+        // as a remote MySQL error.
+        CompatibilityRule {
+            name: "having_key_filter_must_be_grouped",
+            condition: CompatCondition::Custom(|constraints| {
+                let group_by_cols: std::collections::HashSet<VarId> = constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::GroupBy { col, .. } => Some(*col),
+                        _ => None,
+                    })
+                    .collect();
+                constraints.iter().any(|c| match c {
+                    Constraint::HavingKeyFilter { col, .. } => !group_by_cols.contains(col),
+                    _ => false,
+                })
+            }),
+            reason: "HavingKeyFilter requires its column to be a GROUP BY key",
         },
     ]
 }

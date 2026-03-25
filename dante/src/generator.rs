@@ -233,6 +233,11 @@ impl ConstraintRegistry {
         reg.register(ctes::simple_cte());
         reg.register(ctes::cte_with_join());
 
+        // Hoisting patterns (exercise HoistParametrizableFilters pass)
+        reg.register(hoisting::aggregated_join_subquery_eq_filter());
+        reg.register(hoisting::aggregated_join_subquery_having_filter());
+        reg.register(hoisting::having_to_where_promotion());
+
         // Advanced patterns
         reg.register(advanced::window_function());
         reg.register(advanced::distinct());

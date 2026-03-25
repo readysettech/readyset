@@ -207,6 +207,15 @@ pub enum Constraint {
         table: VarId,
         op: BinaryOperator,
     },
+    /// A parametrizable filter in HAVING on a GROUP BY key column.
+    /// Unlike `Having` (which wraps an aggregate function), this emits
+    /// `HAVING col op ?` where `col` must also be a GROUP BY key.
+    /// The hoisting pass can extract these to the outer WHERE.
+    HavingKeyFilter {
+        col: VarId,
+        table: VarId,
+        op: BinaryOperator,
+    },
     /// A WHERE filter with a parameter placeholder.
     WhereParam {
         col: VarId,
@@ -321,6 +330,7 @@ impl Constraint {
             | Constraint::WhereBetweenParam { col, table } => vec![*col, *table],
             Constraint::ProjectAggregate { col, table, .. }
             | Constraint::Having { col, table, .. }
+            | Constraint::HavingKeyFilter { col, table, .. }
             | Constraint::WhereParam { col, table, .. }
             | Constraint::WhereInParam { col, table, .. }
             | Constraint::WhereLike { col, table, .. }
@@ -430,6 +440,11 @@ impl Constraint {
                 op,
             } => Constraint::Having {
                 function: function.clone(),
+                col: f(*col),
+                table: f(*table),
+                op: *op,
+            },
+            Constraint::HavingKeyFilter { col, table, op } => Constraint::HavingKeyFilter {
                 col: f(*col),
                 table: f(*table),
                 op: *op,
@@ -591,6 +606,11 @@ mod tests {
             col: c,
             table: t,
             op: BinaryOperator::Greater,
+        };
+        let _ = Constraint::HavingKeyFilter {
+            col: c,
+            table: t,
+            op: BinaryOperator::Equal,
         };
     }
 

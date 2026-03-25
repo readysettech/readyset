@@ -439,11 +439,29 @@ fn build_select_inner(
                 let col_expr = make_column_expr(&col_name, &table_name);
                 let func_expr = make_aggregate_expr(function, col_expr);
                 let placeholder = make_placeholder(dialect, placeholder_idx);
-                having_expr = Some(Expr::BinaryOp {
+                let new_expr = Expr::BinaryOp {
                     lhs: Box::new(Expr::Call(func_expr)),
                     op: *op,
                     rhs: Box::new(Expr::Literal(Literal::Placeholder(placeholder))),
+                };
+                and_merge(&mut having_expr, new_expr);
+                let col_type = get_col_type(env, *col)?;
+                params.push(ParamMeta {
+                    sql_type: col_type,
+                    gen_spec: ColumnGenerationSpec::Random,
+                    count: 1,
                 });
+            }
+            Constraint::HavingKeyFilter { col, table, op } => {
+                let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                let col_expr = make_column_expr(&col_name, &table_name);
+                let placeholder = make_placeholder(dialect, placeholder_idx);
+                let new_expr = Expr::BinaryOp {
+                    lhs: Box::new(col_expr),
+                    op: *op,
+                    rhs: Box::new(Expr::Literal(Literal::Placeholder(placeholder))),
+                };
+                and_merge(&mut having_expr, new_expr);
                 let col_type = get_col_type(env, *col)?;
                 params.push(ParamMeta {
                     sql_type: col_type,
@@ -778,6 +796,21 @@ fn first_projected_column(stmt: &SelectStatement) -> Option<SqlIdentifier> {
 }
 
 /// Make a column expression: table.col
+/// AND-merge `new_expr` into the existing optional expression. Used by both
+/// `Having` and `HavingKeyFilter` so the two constraints compose
+/// symmetrically — emitting one then the other (in either order) keeps both
+/// predicates instead of silently overwriting.
+fn and_merge(slot: &mut Option<Expr>, new_expr: Expr) {
+    *slot = match slot.take() {
+        Some(existing) => Some(Expr::BinaryOp {
+            lhs: Box::new(existing),
+            op: BinaryOperator::And,
+            rhs: Box::new(new_expr),
+        }),
+        None => Some(new_expr),
+    };
+}
+
 fn make_column_expr(col_name: &SqlIdentifier, table_name: &SqlIdentifier) -> Expr {
     Expr::Column(Column {
         name: col_name.clone(),
