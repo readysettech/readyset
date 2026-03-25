@@ -10,6 +10,10 @@ use crate::backend::noria_connector;
 /// MySQL's `time_zone` session variable can be set to:
 /// - `"SYSTEM"` — use the server's local timezone
 /// - A fixed offset like `"+05:00"` or `"-08:00"`
+/// - An IANA timezone name like `"US/Eastern"` or `"America/New_York"`
+///
+/// IANA timezones have DST rules, so the UTC offset depends on the specific timestamp
+/// being converted — it cannot be resolved to a fixed offset at `SET` time.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SessionTimezone {
     /// Use the server's local timezone (corresponds to `SET time_zone = 'SYSTEM'`).
@@ -17,6 +21,8 @@ pub enum SessionTimezone {
     System,
     /// A fixed UTC offset (e.g., `SET time_zone = '+05:00'`).
     FixedOffset(FixedOffset),
+    /// An IANA named timezone (e.g., `SET time_zone = 'US/Eastern'`).
+    Named(chrono_tz::Tz),
 }
 
 impl SessionTimezone {
@@ -26,6 +32,7 @@ impl SessionTimezone {
         match self {
             Self::System => ts.to_local(),
             Self::FixedOffset(tz) => ts.to_fixed_offset(tz),
+            Self::Named(tz) => ts.to_tz(tz),
         }
     }
 }
@@ -164,5 +171,53 @@ mod tests {
         assert!(ts.has_timezone());
         let result = SessionTimezone::System.convert(&ts);
         assert!(!result.has_timezone());
+    }
+
+    #[test]
+    fn convert_named_dst() {
+        let tz = SessionTimezone::Named(chrono_tz::US::Eastern);
+
+        // 2024-06-15 12:00 UTC → US/Eastern (EDT, UTC-4) → 08:00
+        let summer = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let result = tz.convert(&summer);
+        assert_eq!(
+            result.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 6, 15)
+                .unwrap()
+                .and_hms_opt(8, 0, 0)
+                .unwrap()
+        );
+        assert!(!result.has_timezone());
+
+        // 2024-01-15 12:00 UTC → US/Eastern (EST, UTC-5) → 07:00
+        let winter = TimestampTz::from(
+            NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        );
+        let result = tz.convert(&winter);
+        assert_eq!(
+            result.to_chrono().naive_local(),
+            NaiveDate::from_ymd_opt(2024, 1, 15)
+                .unwrap()
+                .and_hms_opt(7, 0, 0)
+                .unwrap()
+        );
+        assert!(!result.has_timezone());
+    }
+
+    #[test]
+    fn convert_named_preserves_subsecond_digits() {
+        let ts = TimestampTz::from_str("2024-06-15 12:00:00.123").unwrap();
+        assert_eq!(ts.subsecond_digits(), 3);
+        let tz = SessionTimezone::Named(chrono_tz::US::Eastern);
+        let result = tz.convert(&ts);
+        assert_eq!(result.subsecond_digits(), 3);
     }
 }

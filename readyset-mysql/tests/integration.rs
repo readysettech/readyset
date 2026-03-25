@@ -2627,6 +2627,118 @@ async fn timestamp_client_timezone_system_reset() {
     shutdown_tx.shutdown().await;
 }
 
+/// Verifies that TIMESTAMP values respect an IANA named timezone (with DST) set via
+/// `SET time_zone = 'US/Eastern'`. Uses the binary protocol. The test inserts a row in summer
+/// (EDT, UTC-4) and one in winter (EST, UTC-5) to verify DST-dependent offsets are applied.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn timestamp_client_named_timezone_binary() {
+    let mut direct_mysql = connect().await;
+    direct_mysql
+        .query_drop(
+            "SET SESSION time_zone = '+00:00';
+             DROP TABLE IF EXISTS ts_named_tz_bin CASCADE;
+             CREATE TABLE ts_named_tz_bin (id INT PRIMARY KEY, ts TIMESTAMP);
+             INSERT INTO ts_named_tz_bin VALUES (1, '2024-06-15 12:00:00');
+             INSERT INTO ts_named_tz_bin VALUES (2, '2024-01-15 12:00:00');",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) =
+        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_named_tz_bin WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    direct_mysql
+        .query_drop("SET SESSION time_zone = 'US/Eastern'")
+        .await
+        .unwrap();
+    conn.query_drop("SET SESSION time_zone = 'US/Eastern'")
+        .await
+        .unwrap();
+
+    for id in 1..=2 {
+        eventually!(run_test: {
+            let my_row: Row = direct_mysql
+                .exec_first("SELECT * FROM ts_named_tz_bin WHERE id = ?", (id,))
+                .await
+                .unwrap()
+                .unwrap();
+            let rs_row: Row = conn
+                .exec_first("SELECT * FROM ts_named_tz_bin WHERE id = ?", (id,))
+                .await
+                .unwrap()
+                .unwrap();
+            AssertUnwindSafe(move || (rs_row, my_row))
+        }, then_assert: |results| {
+            let (rs_row, my_row) = results();
+            assert_eq!(rs_row.unwrap_raw(), my_row.unwrap_raw());
+        });
+    }
+    shutdown_tx.shutdown().await;
+}
+
+/// Same as above but exercises the text protocol.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn timestamp_client_named_timezone_text() {
+    let mut direct_mysql = connect().await;
+    direct_mysql
+        .query_drop(
+            "SET SESSION time_zone = '+00:00';
+             DROP TABLE IF EXISTS ts_named_tz_text CASCADE;
+             CREATE TABLE ts_named_tz_text (id INT PRIMARY KEY, ts TIMESTAMP);
+             INSERT INTO ts_named_tz_text VALUES (1, '2024-06-15 12:00:00');
+             INSERT INTO ts_named_tz_text VALUES (2, '2024-01-15 12:00:00');",
+        )
+        .await
+        .unwrap();
+
+    let (opts, _handle, shutdown_tx) =
+        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let mut conn = Conn::new(opts).await.unwrap();
+    sleep().await;
+
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM ts_named_tz_text WHERE id = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    direct_mysql
+        .query_drop("SET SESSION time_zone = 'US/Eastern'")
+        .await
+        .unwrap();
+    conn.query_drop("SET SESSION time_zone = 'US/Eastern'")
+        .await
+        .unwrap();
+
+    for id in 1..=2 {
+        eventually!(run_test: {
+            let my_rows: Vec<(i32, String)> = direct_mysql
+                .query(format!("SELECT * FROM ts_named_tz_text WHERE id = {id}"))
+                .await
+                .unwrap();
+            let rs_rows: Vec<(i32, String)> = conn
+                .query(format!("SELECT * FROM ts_named_tz_text WHERE id = {id}"))
+                .await
+                .unwrap();
+            AssertUnwindSafe(move || (rs_rows, my_rows))
+        }, then_assert: |results| {
+            let (rs_rows, my_rows) = results();
+            assert_eq!(rs_rows, my_rows);
+        });
+    }
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(mysql)]

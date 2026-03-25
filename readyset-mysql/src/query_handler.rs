@@ -1038,13 +1038,22 @@ const MAX_NEGATIVE_TZ_OFFSET_SECS: i32 = 13 * 3600 + 59 * 60; // -13:59
 ///
 /// Returns `Some(SessionTimezone::System)` for `"SYSTEM"`.
 /// Returns `Some(SessionTimezone::FixedOffset(_))` for offsets like `"+05:00"`.
-/// Returns `None` for named timezones like `"US/Eastern"` (unsupported) and unparseable strings.
+/// Returns `Some(SessionTimezone::Named(tz))` for IANA names like `"US/Eastern"`.
+/// Returns `None` for genuinely unparseable strings.
 fn parse_timezone(s: &str) -> Option<SessionTimezone> {
     if s.eq_ignore_ascii_case("SYSTEM") {
         return Some(SessionTimezone::System);
     }
 
-    parse_fixed_offset(s).map(SessionTimezone::FixedOffset)
+    if let Some(offset) = parse_fixed_offset(s) {
+        return Some(SessionTimezone::FixedOffset(offset));
+    }
+
+    if let Ok(tz) = s.parse::<chrono_tz::Tz>() {
+        return Some(SessionTimezone::Named(tz));
+    }
+
+    None
 }
 
 /// Parse a fixed-offset timezone string like `"+05:00"` into a [`FixedOffset`].
@@ -1320,9 +1329,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_timezone_named_unsupported() {
-        assert_eq!(super::parse_timezone("US/Eastern"), None);
-        assert_eq!(super::parse_timezone("America/New_York"), None);
+    fn parse_timezone_named() {
+        use super::SessionTimezone::Named;
+        assert_eq!(
+            super::parse_timezone("US/Eastern"),
+            Some(Named(chrono_tz::US::Eastern))
+        );
+        assert_eq!(
+            super::parse_timezone("America/New_York"),
+            Some(Named(chrono_tz::America::New_York))
+        );
+        assert_eq!(super::parse_timezone("UTC"), Some(Named(chrono_tz::UTC)));
     }
 
     #[test]
@@ -1389,7 +1406,7 @@ mod tests {
     }
 
     #[test]
-    fn set_time_zone_named_unsupported() {
+    fn set_time_zone_named() {
         let stmt = SetStatement::Variable(SetVariables {
             variables: vec![(
                 Variable {
@@ -1401,7 +1418,162 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().unsupported(true)
+            SetBehavior::default().set_timezone(SessionTimezone::Named(chrono_tz::US::Eastern))
         );
+    }
+
+    mod proptest_timezone {
+        use proptest::prelude::*;
+        use readyset_adapter::SessionTimezone;
+        use readyset_sql::ast::{SetStatement, SetVariables, Variable, VariableScope};
+
+        use super::super::*;
+
+        /// Generate a valid MySQL fixed-offset timezone string and its expected seconds.
+        /// MySQL accepts offsets from -13:59 to +14:00.
+        fn valid_offset_strategy() -> impl Strategy<Value = (String, i32)> {
+            prop_oneof![
+                // General case: hours 0..=13, minutes 0..=59
+                (any::<bool>(), 0u32..=13, 0u32..=59).prop_map(|(positive, h, m)| {
+                    let sign_char = if positive { '+' } else { '-' };
+                    let sign_val: i32 = if positive { 1 } else { -1 };
+                    (
+                        format!("{sign_char}{h:02}:{m:02}"),
+                        sign_val * (h as i32 * 3600 + m as i32 * 60),
+                    )
+                }),
+                // Boundary: exactly +14:00 (positive only; -14:00 is invalid per MySQL)
+                Just(("+14:00".to_string(), 14 * 3600)),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn parse_valid_offset_returns_correct_seconds((s, expected_secs) in valid_offset_strategy()) {
+                let result = parse_timezone(&s);
+                let expected_offset = chrono::FixedOffset::east_opt(expected_secs).unwrap();
+                prop_assert_eq!(result, Some(SessionTimezone::FixedOffset(expected_offset)));
+            }
+
+            #[test]
+            fn parse_valid_offset_result_is_valid_for_chrono((s, _) in valid_offset_strategy()) {
+                match parse_timezone(&s) {
+                    Some(SessionTimezone::FixedOffset(_)) => {}
+                    other => panic!("expected FixedOffset, got {other:?}"),
+                }
+            }
+        }
+
+        /// Named IANA timezones that MySQL supports.
+        fn named_timezone_strategy() -> impl Strategy<Value = String> {
+            prop_oneof![
+                Just("US/Eastern".to_string()),
+                Just("US/Central".to_string()),
+                Just("US/Pacific".to_string()),
+                Just("America/New_York".to_string()),
+                Just("America/Chicago".to_string()),
+                Just("America/Los_Angeles".to_string()),
+                Just("Europe/London".to_string()),
+                Just("Europe/Berlin".to_string()),
+                Just("Europe/Paris".to_string()),
+                Just("Asia/Tokyo".to_string()),
+                Just("Asia/Kolkata".to_string()),
+                Just("Asia/Shanghai".to_string()),
+                Just("Australia/Sydney".to_string()),
+                Just("Pacific/Auckland".to_string()),
+                Just("Africa/Cairo".to_string()),
+                Just("Canada/Eastern".to_string()),
+                Just("Etc/GMT".to_string()),
+                Just("Etc/GMT+5".to_string()),
+                Just("Etc/UTC".to_string()),
+                Just("UTC".to_string()),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn parse_named_timezone_returns_named(s in named_timezone_strategy()) {
+                let result = parse_timezone(&s);
+                match result {
+                    Some(SessionTimezone::Named(_)) => {},
+                    other => panic!("expected Named, got {other:?} for {s:?}"),
+                }
+            }
+
+            #[test]
+            fn handle_set_named_timezone_is_supported(s in named_timezone_strategy()) {
+                let stmt = SetStatement::Variable(SetVariables {
+                    variables: vec![(
+                        Variable {
+                            scope: VariableScope::Session,
+                            name: "time_zone".into(),
+                        },
+                        Expr::Literal(Literal::String(s.clone())),
+                    )],
+                });
+                let behavior = MySqlQueryHandler::handle_set_statement(&stmt);
+                prop_assert!(!behavior.unsupported);
+                match behavior.set_timezone {
+                    Some(SessionTimezone::Named(_)) => {},
+                    other => panic!("expected Some(Named(_)), got {other:?} for {s:?}"),
+                }
+            }
+        }
+
+        /// Out-of-range offsets that MySQL would reject.
+        fn invalid_offset_strategy() -> impl Strategy<Value = String> {
+            prop_oneof![
+                // Hours too large (15..=23)
+                (any::<bool>(), 15u32..=23, 0u32..=59).prop_map(|(pos, h, m)| {
+                    format!("{}{h:02}:{m:02}", if pos { '+' } else { '-' })
+                }),
+                // +/-14:MM where MM > 0 (both exceed MySQL's valid range)
+                (any::<bool>(), 1u32..=59).prop_map(|(pos, m)| {
+                    format!("{}{:02}:{m:02}", if pos { '+' } else { '-' }, 14)
+                }),
+                // Minutes out of range (60..=99)
+                (any::<bool>(), 0u32..=13, 60u32..=99).prop_map(|(pos, h, m)| {
+                    format!("{}{h:02}:{m:02}", if pos { '+' } else { '-' })
+                }),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn parse_invalid_offset_returns_none(s in invalid_offset_strategy()) {
+                prop_assert_eq!(parse_timezone(&s), None);
+            }
+
+            #[test]
+            fn handle_set_valid_offset_sets_timezone((s, expected_secs) in valid_offset_strategy()) {
+                let stmt = SetStatement::Variable(SetVariables {
+                    variables: vec![(
+                        Variable {
+                            scope: VariableScope::Session,
+                            name: "time_zone".into(),
+                        },
+                        Expr::Literal(Literal::String(s.clone())),
+                    )],
+                });
+                let behavior = MySqlQueryHandler::handle_set_statement(&stmt);
+                prop_assert!(!behavior.unsupported);
+                let expected_offset = chrono::FixedOffset::east_opt(expected_secs).unwrap();
+                prop_assert_eq!(
+                    behavior.set_timezone,
+                    Some(SessionTimezone::FixedOffset(expected_offset))
+                );
+            }
+        }
+
+        #[test]
+        fn parse_system_case_insensitive() {
+            for s in ["SYSTEM", "system", "System", "sYsTeM"] {
+                assert_eq!(
+                    parse_timezone(s),
+                    Some(SessionTimezone::System),
+                    "{s:?} should parse as SYSTEM"
+                );
+            }
+        }
     }
 }

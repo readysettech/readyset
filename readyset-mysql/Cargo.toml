@@ -19,6 +19,7 @@ assert_matches = { workspace = true }
 async-trait = { workspace = true }
 bincode = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 fail = { workspace = true }
 futures-util = { workspace = true }
 itertools = { workspace = true }
