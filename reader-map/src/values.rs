@@ -10,6 +10,13 @@ use triomphe::Arc;
 
 use crate::eviction::EvictionMeta;
 
+/// When the ratio of batch size to existing values is below this threshold,
+/// use binary search + insert/remove (O(k log n) comparisons + O(kn) memcpy)
+/// instead of merge (O(n) pointer-chasing comparisons). The former is faster
+/// when k << n because memcpy is cache-friendly while merge comparisons chase
+/// heap pointers.
+const MERGE_THRESHOLD: usize = 32;
+
 #[derive(Clone, Default)]
 pub(crate) struct Metrics {
     /// The timestamp when a value was first inserted into this `Values`.
@@ -269,26 +276,74 @@ where
         self.metrics.update(timestamp);
     }
 
+    /// Insert sorted values using binary search + insert for each element.
+    /// O(k * n) memcpy but only O(k * log n) comparisons — faster than merge when k << n
+    /// because the shifts are sequential memcpy (cache-friendly) while merge comparisons
+    /// chase pointers through heap-allocated values.
+    fn do_individual_adds(&mut self, adds: &[T], timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let values = Arc::make_mut(&mut self.values);
+        for value in adds {
+            let pos = values
+                .binary_search_by(|x| self.order.cmp(x, value))
+                .unwrap_or_else(|x| x);
+            values.insert(pos, value.clone());
+        }
+        self.metrics.update(timestamp);
+    }
+
+    /// Remove sorted values using binary search for each element.
+    /// O(k * n) memcpy but only O(k * log n) comparisons.
+    fn do_individual_removes(&mut self, removes: &[T], timestamp: Instant)
+    where
+        T: Ord + Clone,
+    {
+        let values = Arc::make_mut(&mut self.values);
+        for value in removes {
+            if let Ok(pos) = values.binary_search_by(|x| self.order.cmp(x, value)) {
+                values.remove(pos);
+            }
+        }
+        self.metrics.update(timestamp);
+    }
+
     /// Merge sorted adds into the existing values.
+    /// Uses merge for large batches, binary search + insert for small batches.
     /// Accepts `&[T]` (clones into a Vec) or `Vec<T>` (no-op move).
     pub(crate) fn merge_sorted_adds(&mut self, sorted: impl Into<Vec<T>>, timestamp: Instant)
     where
         T: Ord + Clone,
     {
         let sorted = sorted.into();
-        if !sorted.is_empty() {
+        if sorted.is_empty() {
+            return;
+        }
+        // When adds are small relative to existing values, binary search + insert is faster:
+        // merge does O(n) pointer-chasing comparisons, while individual inserts do
+        // O(k * log n) comparisons + O(k * n) cache-friendly memcpy.
+        if !self.values.is_empty() && sorted.len() * MERGE_THRESHOLD < self.values.len() {
+            self.do_individual_adds(&sorted, timestamp);
+        } else {
             self.do_merge_adds(sorted, timestamp);
         }
     }
 
     /// Remove sorted values from the existing values.
+    /// Uses merge for large batches, binary search + remove for small batches.
     /// Accepts `&[T]` (clones into a Vec) or `Vec<T>` (no-op move).
     pub(crate) fn merge_sorted_removes(&mut self, sorted: impl Into<Vec<T>>, timestamp: Instant)
     where
         T: Ord + Clone,
     {
         let sorted = sorted.into();
-        if !sorted.is_empty() {
+        if sorted.is_empty() {
+            return;
+        }
+        if !self.values.is_empty() && sorted.len() * MERGE_THRESHOLD < self.values.len() {
+            self.do_individual_removes(&sorted, timestamp);
+        } else {
             self.do_merge_removes(&sorted, timestamp);
         }
     }
