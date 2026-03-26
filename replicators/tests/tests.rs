@@ -4623,6 +4623,389 @@ async fn mysql_transaction_batch_crash_recovery() {
     shutdown_tx.shutdown().await;
 }
 
+/// Test that transaction batching correctly handles normal replication followed
+/// by a crash mid-transaction, and that crash recovery replays the lost rows.
+///
+/// With `replication_batch_size = 10`:
+/// 1. Creates table, inserts snapshot row
+/// 2. Inserts 5 rows in transaction A — committed and fully replicated
+/// 3. Inserts 5 rows in transaction B — crash after 3rd row event
+/// 4. Verifies transaction A data is present but transaction B is not
+///    (the batch was never flushed before the panic)
+/// 5. Restarts replicator, crash recovery replays transaction B
+/// 6. Verifies all data from both transactions is present
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
+async fn mysql_batch_replication_then_crash_recovery() {
+    readyset_tracing::init_test_logging();
+    let _fail_scenario = FailScenario::setup();
+    let url = mysql_url();
+
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "CREATE TABLE batch_then_crash (id INT PRIMARY KEY, val INT);
+             INSERT INTO batch_then_crash VALUES (0, 100);",
+        )
+        .await
+        .unwrap();
+
+    // Batch size 10 means all 5 rows in a transaction fit in one batch.
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(Config {
+            replication_batch_size: 10,
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot
+    ctx.get_results(
+        "batch_then_crash",
+        &[&[DfValue::Int(0), DfValue::Int(100)]],
+    )
+    .await
+    .unwrap();
+
+    // Transaction A: 5 rows, committed normally (no failpoint yet)
+    client.query("START TRANSACTION;").await.unwrap();
+    for i in 1..=5 {
+        client
+            .query(&format!(
+                "INSERT INTO batch_then_crash VALUES ({i}, {i});"
+            ))
+            .await
+            .unwrap();
+    }
+    client.query("COMMIT;").await.unwrap();
+
+    // Wait for transaction A to be fully replicated
+    ctx.get_results(
+        "batch_then_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+            &[DfValue::Int(4), DfValue::Int(4)],
+            &[DfValue::Int(5), DfValue::Int(5)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Now install failpoint: crash after 3rd row event of the NEXT
+    // transaction (transaction B). The counter starts at 0 since we
+    // install it after transaction A is already replicated.
+    static BATCH_ROW_EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    BATCH_ROW_EVENT_COUNT.store(0, Ordering::SeqCst);
+
+    fail::cfg_callback(failpoints::MYSQL_GTID_ROW_EVENT, move || {
+        let count = BATCH_ROW_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
+        info!(
+            "FAILPOINT: batch-then-crash row event, count={}",
+            count + 1
+        );
+        if count >= 3 {
+            panic!("Injected crash after {} row events", count + 1);
+        }
+    })
+    .unwrap();
+
+    // Transaction B: 5 rows, will crash after 3rd row event.
+    // With batch_size=10, none of these rows are flushed before the
+    // crash because the batch threshold isn't reached.
+    client.query("START TRANSACTION;").await.unwrap();
+    for i in 6..=10 {
+        client
+            .query(&format!(
+                "INSERT INTO batch_then_crash VALUES ({i}, {i});"
+            ))
+            .await
+            .unwrap();
+    }
+    client.query("COMMIT;").await.unwrap();
+
+    // Let the replicator hit the failpoint
+    sleep(Duration::from_secs(2)).await;
+    ctx.stop_repl().await;
+
+    // Transaction A data should be present, transaction B should NOT
+    // (batch was never flushed before the panic)
+    ctx.get_results(
+        "batch_then_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+            &[DfValue::Int(4), DfValue::Int(4)],
+            &[DfValue::Int(5), DfValue::Int(5)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Clear failpoint and restart
+    fail::cfg(failpoints::MYSQL_GTID_ROW_EVENT, "off").unwrap();
+
+    let telemetry_sender = TelemetrySender::new_no_op();
+    ctx.replicator_tx = Some(
+        ctx.start_repl(
+            Some(Config {
+                replication_batch_size: 10,
+                ..Default::default()
+            }),
+            telemetry_sender,
+            false,
+            ParsingPreset::for_tests(),
+        )
+        .await
+        .unwrap(),
+    );
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // After recovery: all data from both transactions should be present
+    ctx.get_results(
+        "batch_then_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+            &[DfValue::Int(4), DfValue::Int(4)],
+            &[DfValue::Int(5), DfValue::Int(5)],
+            &[DfValue::Int(6), DfValue::Int(6)],
+            &[DfValue::Int(7), DfValue::Int(7)],
+            &[DfValue::Int(8), DfValue::Int(8)],
+            &[DfValue::Int(9), DfValue::Int(9)],
+            &[DfValue::Int(10), DfValue::Int(10)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that group commit coalesces multiple transactions and that crash
+/// recovery works correctly when a crash occurs mid-group.
+///
+/// With `group_commit_wait_us = 30_000_000` (30s) and `group_commit_max_trx = 3`:
+/// 1. Creates table, inserts snapshot row
+/// 2. Runs 3 autocommit transactions — reaches max_trx, group flushes
+/// 3. Verifies all 3 transactions replicated
+/// 4. Installs failpoint: crash after 3rd row event
+/// 5. Runs 2 more transactions (1-row + 5-row), crash during 2nd
+///    transaction's 2nd row. The group has NOT been flushed yet (only
+///    2 transactions, below the max_trx=3 threshold, and the 30s
+///    timeout hasn't expired), so none of these rows reach storage.
+/// 6. Verifies only the first 3 transactions' data is present
+/// 7. Restarts with short group_commit_wait_us, verifies recovery
+///    replays the 2 lost transactions
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
+async fn mysql_group_commit_crash_recovery() {
+    readyset_tracing::init_test_logging();
+    let _fail_scenario = FailScenario::setup();
+    let url = mysql_url();
+
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "CREATE TABLE gc_crash (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_crash VALUES (0, 100);",
+        )
+        .await
+        .unwrap();
+
+    // Long wait (300s) ensures the group only flushes when max_trx is
+    // reached, giving us precise control over when the flush happens.
+    // This needs to be very large because CI machines under load can
+    // take >30s to run through the test, which would cause the timeout
+    // to expire and flush the group prematurely.
+    let config = Config {
+        group_commit_max_trx: 3,
+        group_commit_wait_us: 300_000_000,
+        replication_batch_size: 50_000,
+        ..Default::default()
+    };
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
+        url.to_string(),
+        Some(config),
+    )
+    .await
+    .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot
+    ctx.get_results("gc_crash", &[&[DfValue::Int(0), DfValue::Int(100)]])
+        .await
+        .unwrap();
+
+    // Phase 1: Run exactly 3 autocommit transactions.
+    // With max_trx=3, the group will flush after the 3rd commit.
+    client
+        .query("INSERT INTO gc_crash VALUES (1, 1);")
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO gc_crash VALUES (2, 2);")
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO gc_crash VALUES (3, 3);")
+        .await
+        .unwrap();
+
+    // Wait for group to flush and verify
+    ctx.get_results(
+        "gc_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Phase 2: Install failpoint and run 2 more transactions.
+    // Transaction C: 1 row (autocommit)
+    // Transaction D: 5 rows (explicit transaction), crash during 2nd row
+    //
+    // The failpoint fires per row event. Transaction C has 1 row event,
+    // transaction D starts with its rows. Crash after 3 total row events
+    // (= C's 1 row + D's first 2 rows).
+    //
+    // With max_trx=3 and only 2 transactions committed before crash,
+    // the group hasn't reached the flush threshold and the 30s timeout
+    // hasn't expired, so NO rows from this group reach storage.
+    static GC_ROW_EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    GC_ROW_EVENT_COUNT.store(0, Ordering::SeqCst);
+
+    fail::cfg_callback(failpoints::MYSQL_GTID_ROW_EVENT, move || {
+        let count = GC_ROW_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
+        info!(
+            "FAILPOINT: gc-crash row event, count={}",
+            count + 1
+        );
+        if count >= 3 {
+            panic!("Injected crash after {} row events", count + 1);
+        }
+    })
+    .unwrap();
+
+    // Transaction C: single autocommit row
+    client
+        .query("INSERT INTO gc_crash VALUES (4, 4);")
+        .await
+        .unwrap();
+
+    // Transaction D: 5 rows, crash will happen during 2nd row
+    client.query("START TRANSACTION;").await.unwrap();
+    for i in 5..=9 {
+        client
+            .query(&format!("INSERT INTO gc_crash VALUES ({i}, {i});"))
+            .await
+            .unwrap();
+    }
+    client.query("COMMIT;").await.unwrap();
+
+    // Let the replicator hit the failpoint
+    sleep(Duration::from_secs(2)).await;
+    ctx.stop_repl().await;
+
+    // Only phase 1 data should be present. The group from phase 2
+    // was never flushed (below max_trx threshold, timeout not expired).
+    ctx.get_results(
+        "gc_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    // Clear failpoint and restart with a short group commit window
+    // so recovery flushes promptly.
+    fail::cfg(failpoints::MYSQL_GTID_ROW_EVENT, "off").unwrap();
+
+    let telemetry_sender = TelemetrySender::new_no_op();
+    ctx.replicator_tx = Some(
+        ctx.start_repl(
+            Some(Config {
+                group_commit_max_trx: 3,
+                group_commit_wait_us: 500,
+                replication_batch_size: 50_000,
+                ..Default::default()
+            }),
+            telemetry_sender,
+            false,
+            ParsingPreset::for_tests(),
+        )
+        .await
+        .unwrap(),
+    );
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // After recovery: all data should be present, including both
+    // transactions C and D from the lost group.
+    ctx.get_results(
+        "gc_crash",
+        &[
+            &[DfValue::Int(0), DfValue::Int(100)],
+            &[DfValue::Int(1), DfValue::Int(1)],
+            &[DfValue::Int(2), DfValue::Int(2)],
+            &[DfValue::Int(3), DfValue::Int(3)],
+            &[DfValue::Int(4), DfValue::Int(4)],
+            &[DfValue::Int(5), DfValue::Int(5)],
+            &[DfValue::Int(6), DfValue::Int(6)],
+            &[DfValue::Int(7), DfValue::Int(7)],
+            &[DfValue::Int(8), DfValue::Int(8)],
+            &[DfValue::Int(9), DfValue::Int(9)],
+        ],
+    )
+    .await
+    .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres)]
@@ -4744,6 +5127,264 @@ async fn alter_table_add_key_postgres() {
 
     // Verify again after resnapshot
     verify_tables_and_caches(&mut ctx, table_id).await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that `INSERT INTO ... SELECT FROM ...` executed via binlog replication
+/// correctly replicates rows into a table that was created during replication
+/// (not during snapshot). This exercises the interaction between group commit
+/// batching and DDL processing: the CREATE TABLE for the destination table and
+/// the subsequent INSERT rows must not be bundled into the same replication
+/// batch, because that causes the just-created table's mutator lookup to fail
+/// and be negatively cached — silently discarding the rows.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn mysql_insert_select_after_create_table() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Create the source table (schema only) during snapshot.
+    client
+        .query(
+            "DROP TABLE IF EXISTS insert_select_src CASCADE;
+             DROP TABLE IF EXISTS insert_select_dst CASCADE;
+             CREATE TABLE insert_select_src (id INT PRIMARY KEY, val INT);",
+        )
+        .await
+        .unwrap();
+
+    // Use a large group commit window so the INSERT rows are guaranteed to
+    // still be pending when the CREATE TABLE DDL arrives from the binlog.
+    let config = Config {
+        group_commit_wait_us: 10_000_000, // 10 seconds
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Insert rows into the source table AFTER snapshot — these arrive via
+    // binlog replication and sit in the group commit pending buffer. When
+    // the following CREATE TABLE DDL arrives, the connector flushes them
+    // together with the DDL in the same batch, which triggers the bug:
+    // the just-created destination table's mutator lookup fails, gets
+    // negatively cached, and subsequent row actions are discarded.
+    client
+        .query(
+            "INSERT INTO insert_select_src (id, val) VALUES (1, 10), (2, 20), (3, 30);
+             CREATE TABLE insert_select_dst (id INT PRIMARY KEY, val INT);
+             INSERT INTO insert_select_dst (id, val) SELECT id, val FROM insert_select_src;",
+        )
+        .await
+        .unwrap();
+
+    // The source table should have all three rows via replication.
+    check_results!(
+        ctx,
+        "insert_select_src",
+        "Source",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+            &[DfValue::Int(3), DfValue::Int(30)],
+        ]
+    );
+
+    // The destination table should also have all three rows.
+    check_results!(
+        ctx,
+        "insert_select_dst",
+        "InsertSelect",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+            &[DfValue::Int(3), DfValue::Int(30)],
+        ]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that compressed transactions (TRANSACTION_PAYLOAD_EVENT) participate
+/// in group commit alongside uncompressed transactions.
+///
+/// With `group_commit_max_trx = 3` and a 30-second wait window:
+/// 1. Uncompressed INSERT (trx 1) — coalesces, group not full
+/// 2. Compressed INSERT  (trx 2) — coalesces, group not full
+///    → Verify data is NOT yet visible (still in pending buffer)
+/// 3. Compressed INSERT  (trx 3) — group reaches max_trx → flush
+///    → Verify all three rows appear promptly
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql80, mysql84)]
+async fn mysql_compressed_transaction_flushes_group_commit() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Set up table during snapshot (compression OFF for snapshot data).
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_compress_test CASCADE;
+             CREATE TABLE gc_compress_test (id INT PRIMARY KEY, val INT);",
+        )
+        .await
+        .unwrap();
+
+    // Long wait window so the timeout never fires during the test.
+    // max_trx = 3 so the group flushes after exactly 3 committed
+    // transactions regardless of how they are encoded.
+    let config = Config {
+        group_commit_wait_us: 30_000_000, // 30 seconds
+        group_commit_max_trx: 3,
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Trx 1: uncompressed INSERT — coalesces in group commit.
+    client
+        .query("INSERT INTO gc_compress_test VALUES (1, 10)")
+        .await
+        .unwrap();
+
+    // Trx 2: compressed INSERT — coalesces (2 < 3).
+    client
+        .query("SET binlog_transaction_compression = 'ON'")
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO gc_compress_test VALUES (2, 20)")
+        .await
+        .unwrap();
+
+    // Data should NOT be visible yet — the group has 2 transactions,
+    // below the max_trx threshold of 3.
+    sleep(Duration::from_secs(2)).await;
+    let result = ctx.get_results_inner("gc_compress_test").await;
+    assert!(
+        result.is_err() || result.unwrap().is_empty(),
+        "expected no rows before group commit flush"
+    );
+
+    // Trx 3: compressed INSERT — reaches max_trx, triggers flush.
+    client
+        .query("INSERT INTO gc_compress_test VALUES (3, 30)")
+        .await
+        .unwrap();
+    client
+        .query("SET binlog_transaction_compression = 'OFF'")
+        .await
+        .unwrap();
+
+    // All three rows should appear promptly.
+    check_results!(
+        ctx,
+        "gc_compress_test",
+        "CompressedFlush",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+            &[DfValue::Int(3), DfValue::Int(30)],
+        ]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that TRUNCATE arriving during group commit is deferred and processed
+/// separately from the pending row actions. Uses two tables: an INSERT into
+/// table A sits in the group commit buffer, then a TRUNCATE on table B
+/// arrives. The TRUNCATE must not be bundled with the flushed INSERT — they
+/// share the same offset, and the storage layer would drop the second
+/// TableAction as "already processed".
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql57, mysql80, mysql84)]
+async fn mysql_truncate_during_group_commit() {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Snapshot: two tables, one row each.
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_trunc_a CASCADE;
+             DROP TABLE IF EXISTS gc_trunc_b CASCADE;
+             CREATE TABLE gc_trunc_a (id INT PRIMARY KEY, val INT);
+             CREATE TABLE gc_trunc_b (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_trunc_a VALUES (1, 10);
+             INSERT INTO gc_trunc_b VALUES (1, 100);",
+        )
+        .await
+        .unwrap();
+
+    let config = Config {
+        group_commit_wait_us: 10_000_000, // 10 seconds
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot.
+    check_results!(
+        ctx,
+        "gc_trunc_a",
+        "SnapshotA",
+        &[&[DfValue::Int(1), DfValue::Int(10)]]
+    );
+    check_results!(
+        ctx,
+        "gc_trunc_b",
+        "SnapshotB",
+        &[&[DfValue::Int(1), DfValue::Int(100)]]
+    );
+
+    // INSERT into table A (sits in group commit), then TRUNCATE table B.
+    client
+        .query(
+            "INSERT INTO gc_trunc_a VALUES (2, 20);
+             TRUNCATE TABLE gc_trunc_b;",
+        )
+        .await
+        .unwrap();
+
+    // Table A should have both rows (original + new insert).
+    check_results!(
+        ctx,
+        "gc_trunc_a",
+        "AfterInsert",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+        ]
+    );
+
+    // Table B should be empty after truncate.
+    check_results!(ctx, "gc_trunc_b", "AfterTruncate", &[]);
 
     shutdown_tx.shutdown().await;
 }
