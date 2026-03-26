@@ -12,20 +12,20 @@
 # evict_key_preserves_overlapping_rows_in_weak_index in memory_state.rs.
 
 statement ok
-create table t1 (x int, y text)
+create table tb (x int, y text)
 
 statement ok
-insert into t1 (x, y)
+insert into tb (x, y)
 values
 (1, 'a'),
 (2, 'b'),
 (3, 'c')
 
 statement ok
-create table t2 (x int, y text, z int)
+create table ta (x int, y text, z int)
 
 statement ok
-insert into t2 (x, y, z)
+insert into ta (x, y, z)
 values
 (1, 'a', 3),
 (1, 'b', 3),
@@ -37,37 +37,37 @@ values
 onlyif readyset
 statement ok
 create cache from
-select t1.x
-from t2
-join t1
-on t1.x = t2.x
-where t1.x = ?
+select tb.x
+from ta
+join tb
+on tb.x = ta.x
+where tb.x = ?
 
 onlyif readyset
 statement ok
 create cache from
-select t1.x
-from t2
-join t1
-on t1.y = t2.y
-where t1.x = 1
+select tb.x
+from ta
+join tb
+on tb.y = ta.y
+where tb.x = 1
 
 onlyif readyset
 statement ok
 create cache from
-select t1.x
-from t2
-join t1
-on t1.x = t2.z
-where t2.y = 'a'
+select tb.x
+from ta
+join tb
+on tb.x = ta.z
+where ta.y = 'a'
 
 
 query I nosort
-select t1.x
-from t2
-join t1
-on t1.x = t2.x
-where t1.x = ?
+select tb.x
+from ta
+join tb
+on tb.x = ta.x
+where tb.x = ?
 ? = 1
 ----
 1
@@ -77,11 +77,11 @@ where t1.x = ?
 # Now we have a strict partial index on [0] with a filled hole on [0] = [1]
 
 query I nosort
-select t1.x
-from t2
-join t1
-on t1.y = t2.y
-where t1.x = 1
+select tb.x
+from ta
+join tb
+on tb.y = ta.y
+where tb.x = 1
 ----
 1
 1
@@ -91,11 +91,11 @@ where t1.x = 1
 
 
 query I nosort
-select t1.x
-from t2
-join t1
-on t1.x = t2.z
-where t2.y = 'a'
+select tb.x
+from ta
+join tb
+on tb.x = ta.z
+where ta.y = 'a'
 ----
 3
 3
@@ -109,14 +109,14 @@ graphviz
 # (try to) do a regular write that does a weak lookup on [2] = [3]
 
 statement ok
-insert into t1 (x, y) values (3, 'c');
+insert into tb (x, y) values (3, 'c');
 
 query I nosort
-select t1.x
-from t2
-join t1
-on t1.x = t2.z
-where t2.y = 'a'
+select tb.x
+from ta
+join tb
+on tb.x = ta.z
+where ta.y = 'a'
 ----
 3
 3

@@ -9,7 +9,6 @@ statement ok
 INSERT INTO table_1 (column_2, column_1) VALUES (0, 2), (1, 1), (2, 0), (3, 1), (4, 1)
 
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
@@ -17,8 +16,7 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
 1
@@ -33,7 +31,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
@@ -41,7 +38,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -52,7 +48,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_1 FROM table_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -71,7 +66,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.colum
 1
 2
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -82,7 +76,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -93,7 +86,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -112,7 +104,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -131,16 +122,14 @@ statement ok
 DELETE FROM table_1 WHERE (column_2 = 1)
 
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
-SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
+SELECT 1 AS alias_1 FROM table_1 LEFT JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
 1
 1
@@ -148,14 +137,12 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2)
 ----
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -165,7 +152,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_1 FROM table_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -178,7 +164,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.colum
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -188,7 +173,6 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -198,7 +182,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
@@ -211,7 +194,6 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 
 1
 1
 
-# REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0

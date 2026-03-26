@@ -88,27 +88,28 @@
 //!   outermost expressions must be a bare `rel.col` so it can become a GROUP BY key; mixed expressions over downstream outputs are rejected.
 //! * **Engine constraint**: GROUP BY must project at least one aggregate-derived field; we bail if hoisting would produce a GROUP BY
 //!   query with no aggregate-derived projection.
-use crate::drop_redundant_join::{deep_columns_visitor, deep_columns_visitor_mut};
+use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
-    alias_for_expr, analyse_fix_correlated_subquery_group_by, and_predicates_skip_true,
-    as_sub_query_with_alias, collect_local_from_items, columns_iter, contains_select,
+    and_predicates_skip_true, are_group_by_keys_pinned_by_correlation, as_sub_query_with_alias,
+    build_ext_to_int_fields_map, collect_local_from_items, columns_iter, contains_select,
+    deep_columns_expr_visitor, deep_columns_visitor, deep_columns_visitor_mut,
     default_alias_for_select_item_expression, expect_field_as_expr, expect_field_as_expr_mut,
     expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
-    for_each_window_function, get_from_item_reference_name, get_select_item_alias,
-    get_unique_alias, hoist_parametrizable_join_filters_to_where, is_aggregated_expr,
-    is_aggregated_select, is_simple_parametrizable_filter, normalize_comma_separated_lhs,
-    outermost_expression, split_correlated_constraint, split_correlated_expression, split_expr,
-    split_expr_mut,
+    extract_correlation_keys, for_each_window_function, get_from_item_reference_name,
+    get_select_item_alias, hoist_parametrizable_join_filters_to_where, is_aggregated_expr,
+    is_aggregation_or_grouped, is_simple_parametrizable_filter,
+    make_aliases_distinct_from_base_statement, outermost_expression,
+    partition_correlated_predicates, split_expr, split_expr_mut,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
     is_supported_subquery_predicate,
 };
-use crate::{as_column, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of};
+use crate::{as_column, get_local_from_items_iter, is_column_of};
 use itertools::Either;
 use itertools::Itertools;
 use readyset_errors::{
-    ReadySetError, ReadySetResult, internal, invalid_query, invalid_query_err, unsupported,
+    ReadySetError, ReadySetResult, invalid_query, invalid_query_err, unsupported,
 };
 use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::ast::{
@@ -147,86 +148,6 @@ impl InlineLeadingDerivedTable for SelectStatement {
 
         Ok(self)
     }
-}
-
-/// When inlining a FROM item, ensure that any alias it used doesn’t collide
-/// with names in the outer query—if so, consistently rename them.
-/// Also reserves aliases bound inside downstream subquery scopes to avoid name-capture after hoist.
-fn make_inner_aliases_distinct_from_base_statement(
-    base_stmt: &SelectStatement,
-    inner_dt: &mut TableExpr,
-    reserved_aliases: &HashSet<Relation>,
-) -> ReadySetResult<bool> {
-    // Collect base statement FROM item names, excluding the one we are going to inline
-    let mut base_locals = get_local_from_items_iter!(base_stmt)
-        .map(get_from_item_reference_name)
-        .collect::<ReadySetResult<HashSet<Relation>>>()?;
-    base_locals.remove(&get_from_item_reference_name(inner_dt)?);
-
-    // Also reserve aliases that appear inside downstream subquery scopes. After hoisting,
-    // inlinable FROM-item aliases become visible at the base level; if a downstream subquery
-    // already binds the same alias locally, the new base-level alias could be shadowed.
-    base_locals.extend(reserved_aliases.iter().cloned());
-
-    let (inner_stmt, _inner_stmt_alias) = expect_sub_query_with_alias_mut(inner_dt);
-
-    // Iterate the inlinable statement FROM clause, detect the collided names and replace it with
-    // the new distinct ones.
-    // Collect the collided old and new names to replace the columns referencing the old names inside the
-    // inlinable statement outside the loop.
-    let mut update_alias_map = HashMap::new();
-
-    // Helper to efficiently build a combined alias space
-    fn build_combined_aliases(base: &HashSet<Relation>, inl: &[Relation]) -> HashSet<Relation> {
-        let mut out = HashSet::with_capacity(base.len() + inl.len());
-        out.extend(base.iter().cloned());
-        out.extend(inl.iter().cloned());
-        out
-    }
-
-    let mut inner_locals = get_local_from_items_iter!(inner_stmt)
-        .rev()
-        .map(get_from_item_reference_name)
-        .collect::<ReadySetResult<Vec<_>>>()?;
-
-    while let Some(inl_ref_name) = inner_locals.pop() {
-        if !base_locals.insert(inl_ref_name.clone()) {
-            // Make sure the new alias does not collide with either existing base or inlinable aliases.
-            let update_inner_ref_name: Relation = get_unique_alias(
-                &build_combined_aliases(&base_locals, &inner_locals),
-                inl_ref_name.name.as_str(),
-            )
-            .into();
-            let existing = update_alias_map.insert(inl_ref_name, update_inner_ref_name.clone());
-            debug_assert!(existing.is_none());
-            base_locals.insert(update_inner_ref_name);
-        }
-    }
-
-    let has_duplicate_aliases = !update_alias_map.is_empty();
-
-    // Update the columns referencing the collided FROM item names inside the inlinable statement
-    for (exist_ref_name, update_ref_name) in update_alias_map {
-        // Skip subqueries that locally bind the very alias we’re renaming, so we don’t rewrite shadowed references.
-        deep_columns_visitor_mut(inner_stmt, &exist_ref_name, &mut |expr| {
-            let column = as_column!(expr);
-            if column.table.as_ref() == Some(&exist_ref_name) {
-                column.table = Some(update_ref_name.clone());
-            }
-        })?;
-        if let Some(inner_rel) = get_local_from_items_iter_mut!(inner_stmt).find(|rel| {
-            get_from_item_reference_name(rel).is_ok_and(|rel_name| rel_name == exist_ref_name)
-        }) {
-            inner_rel.alias = Some(update_ref_name.name);
-        } else {
-            internal!(
-                "Inner local FROM item {} not found",
-                exist_ref_name.display_unquoted()
-            );
-        }
-    }
-
-    Ok(has_duplicate_aliases)
 }
 
 /// Collect all local FROM-item reference names in `stmt`, descending into **all** nested SELECT
@@ -279,37 +200,6 @@ fn collect_downstream_scoped_aliases(
         }
     }
     Ok(out)
-}
-
-/// Return (expression, alias) for a select field.
-fn get_expr_with_alias(fe: &FieldDefinitionExpr) -> (Expr, SqlIdentifier) {
-    let (expr, maybe_alias) = expect_field_as_expr(fe);
-    (expr.clone(), alias_for_expr(expr, maybe_alias))
-}
-
-/// Build a map from an outer column alias to the inner expression,
-/// so we can replace references after inlining.
-fn build_ext_to_int_fields_map(
-    stmt: &SelectStatement,
-    stmt_alias: SqlIdentifier,
-) -> ReadySetResult<HashMap<Column, Expr>> {
-    let mut ext_to_int_map = HashMap::new();
-    for field in stmt.fields.iter() {
-        let (expr, alias) = get_expr_with_alias(field);
-        if ext_to_int_map
-            .insert(
-                Column {
-                    name: alias.clone(),
-                    table: Some(stmt_alias.clone().into()),
-                },
-                expr.clone(),
-            )
-            .is_some()
-        {
-            invalid_query!("Duplicate select field alias {}", alias.as_str())
-        }
-    }
-    Ok(ext_to_int_map)
 }
 
 fn rebind_column_refs(
@@ -387,18 +277,6 @@ fn limit_clause_as_numbers(limit_clause: &LimitClause) -> ReadySetResult<(u64, u
     Ok((literal_as_number(&lim)?, literal_as_number(&offs)?))
 }
 
-fn deep_columns_expr_visitor(
-    expr: &Expr,
-    shadow_rel: &Relation,
-    visitor: &mut impl FnMut(&Expr),
-) -> ReadySetResult<()> {
-    let dummy_stmt = SelectStatement {
-        where_clause: Some(expr.clone()),
-        ..SelectStatement::default()
-    };
-    deep_columns_visitor(&dummy_stmt, shadow_rel, visitor)
-}
-
 /// Collect the set of base FROM-item relations at this level, excluding `lhs_rel`.
 fn visible_base_rels_except(
     base_stmt: &SelectStatement,
@@ -409,8 +287,8 @@ fn visible_base_rels_except(
     Ok(base)
 }
 
-/// Return true if `expr` references `rel` anywhere, descending into subqueries but
-/// skipping subqueries that bind (shadow) `rel` locally.
+/// Return true if `expr` references `rel` anywhere, descending into nested subqueries
+/// but skipping subqueries that shadow `rel` with a local FROM-item of the same name.
 fn refs_rel_anywhere(expr: &Expr, rel: &Relation) -> ReadySetResult<bool> {
     let mut seen = false;
     deep_columns_expr_visitor(expr, rel, &mut |e| {
@@ -697,7 +575,7 @@ fn hoist_lhsmost_from_item(
     // Make sure the inner FROM item's aliases of the LHS-most statement do not clash with
     // the existing base statement's FROM items
     let reserved_aliases = collect_downstream_scoped_aliases(base_stmt)?;
-    make_inner_aliases_distinct_from_base_statement(base_stmt, &mut lhs_dt, &reserved_aliases)?;
+    make_aliases_distinct_from_base_statement(base_stmt, &mut lhs_dt, &reserved_aliases)?;
 
     // Embed the LHS-most derived table into the base statement
     hoist_lhsmost_from_item_internals(
@@ -719,16 +597,12 @@ fn is_window_function_select(stmt: &SelectStatement) -> ReadySetResult<bool> {
     Ok(has_wf)
 }
 
-fn is_aggregation_or_grouped(stmt: &SelectStatement) -> ReadySetResult<bool> {
-    Ok(stmt.distinct || is_aggregated_select(stmt)? || stmt.group_by.is_some())
-}
-
 /// Classify whether a SELECT is **AtMostOne** (0..1 rows) possibly **under single-projecting wrappers**.
 /// This "drills" through wrappers that cannot increase cardinality and uses three independent proofs:
 ///   1) `LIMIT 1` found anywhere under a chain of single-subquery wrappers (`has_limit_one_deep`);
 ///   2) aggregate-only / no GROUP BY classification (`agg_only_no_gby_cardinality`);
 ///   3) GROUP BY keys fully pinned by correlated equalities to the outer scope
-///      (`split_correlated_constraint` + `align_group_by_and_windows_with_correlation`).
+///      (`extract_correlation_keys` + `align_group_by_and_windows_with_correlation`).
 ///
 /// We conservatively **only** descend through wrappers that:
 ///   • have exactly one FROM item which is a subquery with alias, and
@@ -753,10 +627,10 @@ fn is_at_most_one_deep(stmt: &SelectStatement) -> ReadySetResult<bool> {
             if let Some(where_expr) = &cur.where_clause {
                 let locals = collect_local_from_items(cur)?;
                 let (maybe_corr, _remaining) =
-                    split_correlated_expression(where_expr, &|rel| !locals.contains(rel));
+                    partition_correlated_predicates(where_expr, &|rel| !locals.contains(rel));
                 if let Some(corr) = maybe_corr {
-                    let cols_set = split_correlated_constraint(&corr, &locals)?;
-                    if analyse_fix_correlated_subquery_group_by(&cols_set, &mut group_by.clone())? {
+                    let cols_set = extract_correlation_keys(&corr, &locals)?;
+                    if are_group_by_keys_pinned_by_correlation(&cols_set, group_by) {
                         return Ok(true);
                     }
                 }
@@ -961,7 +835,12 @@ fn orders_equivalent_under_projection(
             &inner_alias.clone().into(),
             outer_to_inner_fields,
         )?;
-        outer_stmt.order.expect("must have order clause").order_by
+        outer_stmt
+            .order
+            .ok_or_else(|| {
+                ReadySetError::Internal("order clause removed unexpectedly during rebind".into())
+            })?
+            .order_by
     };
 
     Ok(norm_outer_order.len() <= norm_inner_order.len()
@@ -1181,6 +1060,11 @@ fn hoist_lhsmost_derived_table(
         return Ok(false);
     };
 
+    // === Reject if hoisting would introduce a self-join
+    if crate::util::would_create_self_join(stmt, lhs_stmt, 0) {
+        return Ok(false);
+    }
+
     if !all_downstream_joins_cardinality_preserving(stmt)? {
         return Ok(false);
     }
@@ -1191,6 +1075,17 @@ fn hoist_lhsmost_derived_table(
 
     if let Some(where_expr) = &stmt.where_clause
         && is_hoisting_block_unnesting(where_expr, true, &lhs_rel, &outer_to_inner_fields)?
+    {
+        return Ok(false);
+    }
+
+    // Defense-in-depth: also check HAVING for lhs_rel columns that map to subquery
+    // expressions.  After hoisting, such mappings would inject subqueries into HAVING
+    // (violating §4.3).  In practice this is rare (requires non-aggregated inner
+    // projecting a scalar subquery), and `unnest_subqueries` would reject downstream,
+    // but the hoisting pass should not perform irreversible mutations it can't verify safe.
+    if let Some(having_expr) = &stmt.having
+        && is_hoisting_block_unnesting(having_expr, false, &lhs_rel, &outer_to_inner_fields)?
     {
         return Ok(false);
     }
@@ -2191,5 +2086,90 @@ mod tests {
         ORDER BY "o1"."rownum" ASC NULLS LAST
         LIMIT 10"#;
         test_it("test36", original, expected);
+    }
+
+    // Self-join bail-out: hoisting would introduce t1 from subquery alongside t1 in JOIN
+    #[test]
+    fn self_join_bail_out() {
+        let original = r#"
+            SELECT "sq"."id", "t1"."val"
+            FROM (SELECT "t1"."id" FROM "t1") AS "sq"
+            JOIN "t1" ON "sq"."id" = "t1"."id"
+        "#;
+        // Expected: unchanged (hoisting bailed out)
+        test_it("self_join_bail_out", original, original);
+    }
+
+    // ─── Coverage gap tests ────────────────────────────────────────────────
+
+    // Expression-based GROUP BY with aggregate output — verify hoisting works
+    // when GROUP BY uses an expression, not just a simple column. The outer
+    // SELECT must reference at least one aggregate-derived output for the
+    // engine's "no GROUP BY without aggregates" constraint.
+    #[test]
+    fn test_expression_group_by() {
+        let original = r#"
+            SELECT "sq"."bucket", "sq"."total"
+            FROM (SELECT ("t1"."x" / 10) AS "bucket", SUM("t1"."val") AS "total"
+                  FROM "t1"
+                  GROUP BY ("t1"."x" / 10)) AS "sq"
+        "#;
+        // Inner has GROUP BY expression + aggregate. Outer references
+        // sq.total (aggregate-derived). Should hoist.
+        let expected = r#"
+            SELECT ("t1"."x" / 10) AS "bucket", sum("t1"."val") AS "total"
+            FROM "t1"
+            GROUP BY ("t1"."x" / 10)
+        "#;
+        test_it("expression_group_by", original, expected);
+    }
+
+    // Downstream INNER JOIN with non-rejecting ON (ON TRUE) + ExactlyOne RHS
+    // — should hoist because cardinality is preserved.
+    #[test]
+    fn test_downstream_inner_exactly_one_on_true() {
+        let original = r#"
+            SELECT "sq"."a", "sub"."cnt"
+            FROM (SELECT "t1"."a" FROM "t1") AS "sq"
+            INNER JOIN (SELECT COUNT(*) AS "cnt" FROM "t2") AS "sub" ON TRUE
+        "#;
+        // sub is ExactlyOne (COUNT no GBY), INNER + ON TRUE → cardinality-preserving.
+        let expected = r#"
+            SELECT "t1"."a", "sub"."cnt"
+            FROM "t1"
+            INNER JOIN (SELECT count(*) AS "cnt" FROM "t2") AS "sub" ON TRUE
+        "#;
+        test_it("downstream_inner_exactly_one_on_true", original, expected);
+    }
+
+    // Downstream INNER JOIN with real ON predicate → bail (not non-rejecting).
+    #[test]
+    fn test_downstream_inner_real_on_bail() {
+        let original = r#"
+            SELECT "sq"."a", "t2"."b"
+            FROM (SELECT "t1"."a" FROM "t1") AS "sq"
+            INNER JOIN "t2" ON ("sq"."a" = "t2"."b")
+        "#;
+        // Real ON predicate → not non-rejecting → bail.
+        test_it("downstream_inner_real_on_bail", original, original);
+    }
+
+    // Empty-result inner query (WHERE FALSE) — should bail because
+    // agg_only_no_gby_cardinality classifies it as not-exactly-one
+    // (no aggregates, WHERE FALSE doesn't qualify as ExactlyOne).
+    #[test]
+    fn test_empty_result_inner_bail() {
+        let original = r#"
+            SELECT "sq"."a"
+            FROM (SELECT "t1"."a" FROM "t1" WHERE FALSE) AS "sq"
+        "#;
+        // No downstream joins → single FROM item → should still hoist
+        // (the WHERE FALSE goes to base WHERE).
+        let expected = r#"
+            SELECT "t1"."a"
+            FROM "t1"
+            WHERE FALSE
+        "#;
+        test_it("empty_result_inner", original, expected);
     }
 }

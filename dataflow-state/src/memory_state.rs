@@ -1610,7 +1610,6 @@ mod tests {
             }
         }
 
-        #[ignore = "Test doesn't pass yet due to it finding known bugs"]
         #[test]
         fn run_cases() {
             let config = ProptestStatefulConfig {

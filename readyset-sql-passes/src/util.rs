@@ -385,6 +385,27 @@ pub fn map_aggregates(
     ret
 }
 
+/// Returns true if inlining the subquery `inl_stmt` into `base_stmt` (replacing
+/// the FROM item at ordinal `inl_from_item_ord_idx`) would produce a self-join —
+/// the same base table appearing in both the outer query and the inlined subquery.
+pub(crate) fn would_create_self_join(
+    base_stmt: &SelectStatement,
+    inl_stmt: &SelectStatement,
+    inl_from_item_ord_idx: usize,
+) -> bool {
+    // Collect base tables from the outer query, excluding the item being inlined
+    let outer_base_tables: HashSet<&Relation> = outermost_table_exprs(base_stmt)
+        .enumerate()
+        .filter(|(idx, _)| *idx != inl_from_item_ord_idx)
+        .filter_map(|(_, te)| te.inner.as_table())
+        .collect();
+
+    // Check if any base table in the inlined subquery overlaps
+    outermost_table_exprs(inl_stmt)
+        .filter_map(|te| te.inner.as_table())
+        .any(|rel| outer_base_tables.contains(rel))
+}
+
 /// Returns true if the given binary operator is a (boolean-valued) predicate
 ///
 /// TODO(aspen): Replace this with actual typechecking at some point

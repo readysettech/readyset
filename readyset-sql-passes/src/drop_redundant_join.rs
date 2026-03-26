@@ -1,4 +1,4 @@
-pub(crate) use crate::rewrite_utils::{
+use crate::rewrite_utils::{
     alias_for_expr, as_sub_query_with_alias_mut, deep_columns_visitor, deep_columns_visitor_mut,
     expect_field_as_expr, expect_sub_query_with_alias_mut, get_from_item_reference_name,
     is_column_eq_column, project_columns_if_not_exist_fix_duplicate_aliases,
@@ -63,10 +63,20 @@ impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
                 .collect::<HashSet<_>>();
 
             if let Some(keys) = &body.keys {
+                // Only single-column PK/UNIQUE keys guarantee individual column
+                // uniqueness.  A composite key like UNIQUE(a, b) only guarantees
+                // the *pair* is unique — neither `a` nor `b` alone is unique.
                 unique_cols.extend(
                     keys.iter()
-                        .filter(|key| key.is_primary_key())
-                        .flat_map(|key| key.get_columns().into_iter().cloned())
+                        .filter_map(|key| {
+                            if key.is_primary_key() || key.is_unique_key() {
+                                let cols = key.get_columns();
+                                if cols.len() == 1 { Some(cols) } else { None }
+                            } else {
+                                None
+                            }
+                        })
+                        .flat_map(|cols| cols.into_iter().cloned())
                         .collect::<HashSet<_>>(),
                 );
             }
@@ -161,10 +171,13 @@ fn lhs_is_subset_of_rhs(
     };
 
     let lhs_base_stmt = lhs_subquery.as_ref();
+    let Some(lhs_first_table) = lhs_base_stmt.tables.first() else {
+        return Ok(false); // FROM-less inner subquery — cannot prove subset
+    };
     if let TableExpr {
         inner: TableExprInner::Table(lhs_base_table),
         ..
-    } = &lhs_base_stmt.tables[0]
+    } = lhs_first_table
         && lhs_base_table.eq(rhs_base_table)
     {
         // Extending the projection of a grouping subquery could change its cardinality;
@@ -182,7 +195,7 @@ fn lhs_is_subset_of_rhs(
         });
         if let Some(Expr::Column(Column { name, table })) = lhs_field
             && name.eq(&rhs_col.name)
-            && table.as_ref() == Some(&get_from_item_reference_name(&lhs_base_stmt.tables[0])?)
+            && table.as_ref() == Some(&get_from_item_reference_name(lhs_first_table)?)
         {
             return Ok(true);
         }
@@ -246,15 +259,20 @@ fn rebind_rhs_refs(
                 column.name = alias.clone();
                 column.table = Some(lhs_rel.clone());
             } else {
+                // SAFETY: `collect_rhs_refs` and `rebind_rhs_refs` use the same
+                // `deep_columns_visitor` traversal, so every column found here was also
+                // found during collection. The `col_to_alias` map covers all collected
+                // column names. TODO: refactor visitor callback to return `ReadySetResult`.
                 unreachable!(
-                    "Expected every referenced RHS column to be projected into the LHS subquery before rebinding"
+                    "RHS column '{}' not found in LHS projection (col_to_alias)",
+                    column.name
                 )
             }
         }
     })
 }
 
-/// Eliminate a very specific redundant LEFT self-join pattern.
+/// Eliminate a very specific redundant self-join pattern.
 ///
 /// Targeted shape (outer-level only):
 ///
@@ -269,7 +287,7 @@ fn rebind_rhs_refs(
 ///
 /// Under the following conditions:
 ///   • There is exactly one FROM item and at least one JOIN in the outer statement.
-///   • The first JOIN is a JOIN whose RHS is a base table `T1`.
+///   • The first JOIN is a LEFT JOIN whose RHS is a base table `T1`.
 ///   • The join condition is a single, pure equality `LHS.<key> = T1.<key>` between
 ///     different relations (`is_column_eq_column` enforces this).
 ///   • `lhs_is_subset_of_rhs` proves that `LHS.<key>` is a direct projection of the
@@ -316,9 +334,8 @@ fn drop_redundant_self_joins(
         | JoinOperator::LeftJoin
         | JoinOperator::LeftOuterJoin
         | JoinOperator::InnerJoin
-        | JoinOperator::CrossJoin
-        | JoinOperator::StraightJoin => {}
-        JoinOperator::RightJoin | JoinOperator::RightOuterJoin => {
+        | JoinOperator::CrossJoin => {}
+        JoinOperator::RightJoin | JoinOperator::RightOuterJoin | JoinOperator::StraightJoin => {
             return Ok(any_rewrite);
         }
     }
@@ -358,12 +375,22 @@ fn drop_redundant_self_joins(
     }
 
     // Remove both RHS and LHS from `stmt`. We will restore the LHS before exit.
+    //
+    // IMPORTANT COUPLING: the join is removed BEFORE `collect_rhs_refs` runs. This is safe
+    // because `is_column_eq_column` (above) guarantees the ON is a single `col = col`
+    // equality — both columns are the join key, already handled by `lhs_col`/`rhs_col`.
+    // If `is_column_eq_column` is ever relaxed to accept AND-conjunctions (multi-column
+    // keys), additional RHS columns in the ON would be missed by `collect_rhs_refs` since
+    // the join is already gone.  Any such extension MUST also update this section to walk
+    // the removed ON before collection, or defer the removal until after collection.
     stmt.join.remove(0);
     let mut stmt_tables = mem::take(&mut stmt.tables);
 
     let mut rhs_refs = HashSet::new();
     collect_rhs_refs(stmt, &rhs_rel, &mut rhs_refs)?;
 
+    // SAFETY: `lhs_is_subset_of_rhs` returned `Ok(true)` only if stmt_tables[0] is a
+    // subquery whose first FROM item is the same base table as the RHS.
     let (lhs_stmt, _) = expect_sub_query_with_alias_mut(&mut stmt_tables[0]);
     let inner_lhs_rel = get_from_item_reference_name(&lhs_stmt.tables[0])?;
 
@@ -394,4 +421,343 @@ fn drop_redundant_self_joins(
     any_rewrite = true;
 
     Ok(any_rewrite)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use readyset_sql::ast::{
+        ColumnSpecification, CreateTableBody, IndexKeyPart, SqlType, TableKey,
+    };
+
+    /// Build a minimal `CreateTableBody` with the given column names, inline constraints,
+    /// and table-level keys.
+    fn make_body(
+        cols: &[(&str, &str, Vec<ColumnConstraint>)],
+        keys: Vec<TableKey>,
+    ) -> CreateTableBody {
+        CreateTableBody {
+            fields: cols
+                .iter()
+                .map(|(table, name, constraints)| ColumnSpecification {
+                    column: Column {
+                        name: (*name).into(),
+                        table: Some(Relation::from(*table)),
+                    },
+                    sql_type: SqlType::Int(None),
+                    constraints: constraints.clone(),
+                    generated: None,
+                    comment: None,
+                })
+                .collect(),
+            keys: if keys.is_empty() { None } else { Some(keys) },
+        }
+    }
+
+    fn mk_col(table: &str, name: &str) -> Column {
+        Column {
+            name: name.into(),
+            table: Some(Relation::from(table)),
+        }
+    }
+
+    #[test]
+    fn single_column_pk_key_is_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "id", vec![]), ("t", "name", vec![])],
+            vec![TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "id"))],
+            }],
+        );
+        let ctx: UniqueColumnsSchemaImpl = UniqueColumnsSchemaImpl {
+            unique_cols_schema: {
+                let schema_impl =
+                    UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+                schema_impl.unique_cols_schema
+            },
+        };
+        let unique = ctx
+            .unique_columns_of(&rel)
+            .expect("single-column PK table should have unique columns");
+        assert!(unique.contains(&mk_col("t", "id")));
+    }
+
+    #[test]
+    fn composite_pk_columns_are_not_individually_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "id", vec![]),
+                ("t", "tenant_id", vec![]),
+                ("t", "name", vec![]),
+            ],
+            vec![TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![
+                    IndexKeyPart::Column(mk_col("t", "id")),
+                    IndexKeyPart::Column(mk_col("t", "tenant_id")),
+                ],
+            }],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        // Neither column individually should be in the unique set.
+        let unique = schema_impl.unique_columns_of(&rel);
+        assert!(
+            unique.is_none() || !unique.as_ref().unwrap().contains(&mk_col("t", "id")),
+            "composite PK column 'id' should NOT be individually unique"
+        );
+        assert!(
+            unique.is_none() || !unique.as_ref().unwrap().contains(&mk_col("t", "tenant_id")),
+            "composite PK column 'tenant_id' should NOT be individually unique"
+        );
+    }
+
+    #[test]
+    fn composite_unique_key_columns_are_not_individually_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "a", vec![]), ("t", "b", vec![]), ("t", "c", vec![])],
+            vec![TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![
+                    IndexKeyPart::Column(mk_col("t", "a")),
+                    IndexKeyPart::Column(mk_col("t", "b")),
+                ],
+                index_type: None,
+                nulls_distinct: None,
+            }],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl.unique_columns_of(&rel);
+        assert!(
+            unique.is_none() || !unique.as_ref().unwrap().contains(&mk_col("t", "a")),
+            "composite UNIQUE column 'a' should NOT be individually unique"
+        );
+    }
+
+    #[test]
+    fn inline_pk_constraint_is_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "id", vec![ColumnConstraint::PrimaryKey]),
+                ("t", "name", vec![]),
+            ],
+            vec![],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl
+            .unique_columns_of(&rel)
+            .expect("inline PK table should have unique columns");
+        assert!(unique.contains(&mk_col("t", "id")));
+        assert!(!unique.contains(&mk_col("t", "name")));
+    }
+
+    #[test]
+    fn inline_unique_not_null_is_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[(
+                "t",
+                "email",
+                vec![ColumnConstraint::NotNull, ColumnConstraint::Unique],
+            )],
+            vec![],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl
+            .unique_columns_of(&rel)
+            .expect("inline UNIQUE+NOT NULL table should have unique columns");
+        assert!(unique.contains(&mk_col("t", "email")));
+    }
+
+    #[test]
+    fn mixed_single_and_composite_keys() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "id", vec![]),
+                ("t", "tenant_id", vec![]),
+                ("t", "email", vec![]),
+            ],
+            vec![
+                // Single-column PK — id IS individually unique
+                TableKey::PrimaryKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: vec![IndexKeyPart::Column(mk_col("t", "id"))],
+                },
+                // Composite UNIQUE — neither column individually unique
+                TableKey::UniqueKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: vec![
+                        IndexKeyPart::Column(mk_col("t", "tenant_id")),
+                        IndexKeyPart::Column(mk_col("t", "email")),
+                    ],
+                    index_type: None,
+                    nulls_distinct: None,
+                },
+            ],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl
+            .unique_columns_of(&rel)
+            .expect("mixed-key table should have unique columns from single-column PK");
+        assert!(
+            unique.contains(&mk_col("t", "id")),
+            "single-column PK should be unique"
+        );
+        assert!(
+            !unique.contains(&mk_col("t", "tenant_id")),
+            "composite UNIQUE column should NOT be individually unique"
+        );
+        assert!(
+            !unique.contains(&mk_col("t", "email")),
+            "composite UNIQUE column should NOT be individually unique"
+        );
+    }
+
+    #[test]
+    fn table_with_no_keys_returns_none() {
+        let rel: Relation = "t".into();
+        let body = make_body(&[("t", "a", vec![]), ("t", "b", vec![])], vec![]);
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        assert!(
+            schema_impl.unique_columns_of(&rel).is_none(),
+            "table with no PK/UNIQUE should return None"
+        );
+    }
+
+    // ── End-to-end rewrite tests ──
+
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    /// Mock schema: `t` has a single-column PK on `id`.
+    struct TestUniqueSchema;
+
+    impl UniqueColumnsSchema for TestUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "t" {
+                Some(HashSet::from([mk_col("t", "id")]))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn parse_and_rewrite(sql: &str) -> readyset_sql::ast::SelectStatement {
+        let mut stmt =
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"));
+        drop_redundant_self_joins_main(&mut stmt, &TestUniqueSchema)
+            .unwrap_or_else(|e| panic!("rewrite failed: {e}\n  sql: {sql}"));
+        stmt
+    }
+
+    /// Returns true if the rewrite eliminated a join (join count decreased).
+    fn did_eliminate(sql: &str) -> bool {
+        let mut stmt =
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"));
+        let join_count_before = stmt.join.len();
+        drop_redundant_self_joins_main(&mut stmt, &TestUniqueSchema)
+            .unwrap_or_else(|e| panic!("rewrite failed: {e}\n  sql: {sql}"));
+        stmt.join.len() < join_count_before
+    }
+
+    // ── R4: Positive end-to-end test — join eliminated ──
+
+    #[test]
+    fn self_join_on_unique_key_is_eliminated() {
+        let stmt = parse_and_rewrite(
+            r#"SELECT "sq"."id", "t"."name"
+               FROM (SELECT "t"."id" FROM "t" WHERE "t"."active" = TRUE) AS "sq"
+               LEFT JOIN "t" ON "sq"."id" = "t"."id""#,
+        );
+        assert!(
+            stmt.join.is_empty(),
+            "self-join should be eliminated (JOIN removed)"
+        );
+    }
+
+    // ── R5: Negative tests — bail-out conditions ──
+
+    #[test]
+    fn bail_no_unique_key() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."x" FROM (SELECT "u"."x" FROM "u") AS "sq"
+                   LEFT JOIN "u" ON "sq"."x" = "u"."x""#
+            ),
+            "should bail: u.x is not a unique key"
+        );
+    }
+
+    #[test]
+    fn bail_group_by_in_inner() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id" FROM (SELECT "t"."id" FROM "t" GROUP BY "t"."id") AS "sq"
+                   LEFT JOIN "t" ON "sq"."id" = "t"."id""#
+            ),
+            "should bail: inner LHS has GROUP BY"
+        );
+    }
+
+    #[test]
+    fn bail_rhs_is_subquery() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id" FROM (SELECT "t"."id" FROM "t") AS "sq"
+                   LEFT JOIN (SELECT "t"."id", "t"."name" FROM "t") AS "t2"
+                   ON "sq"."id" = "t2"."id""#
+            ),
+            "should bail: RHS is a subquery, not a base table"
+        );
+    }
+
+    #[test]
+    fn bail_non_equality_on() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id" FROM (SELECT "t"."id" FROM "t") AS "sq"
+                   LEFT JOIN "t" ON "sq"."id" > "t"."id""#
+            ),
+            "should bail: ON is not a column equality"
+        );
+    }
+
+    #[test]
+    fn bail_different_base_table() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id" FROM (SELECT "u"."id" FROM "u") AS "sq"
+                   LEFT JOIN "t" ON "sq"."id" = "t"."id""#
+            ),
+            "should bail: inner selects from u, RHS is t"
+        );
+    }
+
+    #[test]
+    fn bail_from_less_inner_subquery() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."x" FROM (SELECT 1 AS "x") AS "sq"
+                   LEFT JOIN "t" ON "sq"."x" = "t"."id""#
+            ),
+            "should bail: inner subquery has no FROM clause"
+        );
+    }
 }

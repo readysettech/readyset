@@ -2,13 +2,13 @@ use crate::get_local_from_items_iter_mut;
 use crate::rewrite_utils::{
     RewriteStatus, add_expression_to_join_constraint, align_group_by_and_windows_with_correlation,
     analyse_lone_aggregates_subquery_fields, and_predicates_skip_true, as_sub_query_with_alias,
-    as_sub_query_with_alias_mut, collect_local_from_items, collect_outermost_columns_mut,
-    columns_iter, columns_iter_mut, contain_subqueries_with_limit_clause,
-    default_alias_for_select_item_expression, expect_field_as_expr, expect_field_as_expr_mut,
-    expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr,
-    get_from_item_reference_name, is_filter_pushable_from_item,
-    move_correlated_constraints_from_join_to_where, project_columns_if,
-    split_correlated_constraint, split_correlated_expression,
+    as_sub_query_with_alias_mut, collect_columns_in_expr_mut, collect_local_from_items,
+    collect_outermost_columns_mut, columns_iter, columns_iter_mut,
+    contain_subqueries_with_limit_clause, default_alias_for_select_item_expression,
+    expect_field_as_expr, expect_field_as_expr_mut, expect_sub_query_with_alias_mut,
+    extract_aggregate_fallback_for_expr, extract_correlation_keys, get_from_item_reference_name,
+    is_filter_pushable_from_item, move_correlated_constraints_from_join_to_where,
+    partition_correlated_predicates, project_columns_if,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, UnnestContext, agg_only_no_gby_cardinality, force_empty_select,
@@ -43,7 +43,7 @@ fn split_correlated_expr(
     local_tables: &HashSet<Relation>,
     outer_tables: &HashSet<Relation>,
 ) -> (Option<Expr>, Option<Expr>) {
-    split_correlated_expression(expr, &|rel| {
+    partition_correlated_predicates(expr, &|rel| {
         is_outer_from_item(rel, local_tables, outer_tables)
     })
 }
@@ -157,7 +157,7 @@ fn extract_correlated_subquery(
 
             align_group_by_and_windows_with_correlation(
                 &mut stmt,
-                &split_correlated_constraint(&correlated_expr, &local_from_items)?,
+                &extract_correlation_keys(&correlated_expr, &local_from_items)?,
             )?;
 
             let mut tab_expr = TableExpr {
@@ -191,12 +191,14 @@ fn try_extract_correlated_subquery(
     if let Some((subquery_tab_expr, outer_join_on)) =
         extract_correlated_subquery(stmt, stmt_alias.clone(), outer_tables)?
     {
-        let subquery_alias = subquery_tab_expr.alias.clone();
+        // SAFETY: `extract_correlated_subquery` constructs the returned `TableExpr` with
+        // `alias: Some(stmt_alias.clone())` (L163-166), so the alias is always present.
+        let subquery_alias = subquery_tab_expr
+            .alias
+            .clone()
+            .expect("extract_correlated_subquery always sets alias");
         let _ = mem::replace(tab_expr, subquery_tab_expr);
-        return Ok(Some((
-            subquery_alias.map(|alias| alias.into()).expect("Checked"),
-            outer_join_on,
-        )));
+        return Ok(Some((subquery_alias.into(), outer_join_on)));
     }
 
     let local_from_items = collect_local_from_items(stmt)?;
@@ -211,7 +213,7 @@ fn try_extract_correlated_subquery(
 
             align_group_by_and_windows_with_correlation(
                 stmt,
-                &split_correlated_constraint(&outer_join_on, &local_from_items)?,
+                &extract_correlation_keys(&outer_join_on, &local_from_items)?,
             )?;
 
             project_local_columns(tab_expr, &mut outer_join_on, outer_tables)?;
@@ -393,7 +395,10 @@ fn get_join_operator_for_lateral(
                 join_operator
             }
             JoinConstraint::Using(_) => {
-                unreachable!("USING should have been desugared earlier")
+                // SAFETY: `expand_join_on_using` runs unconditionally in Block A (step 8)
+                // before all Block B passes, guaranteeing no USING constraints remain.
+                // TODO: refactor to return `ReadySetResult` with `internal!()`.
+                unreachable!("USING should have been desugared by expand_join_on_using")
             }
         });
     }
@@ -435,34 +440,33 @@ fn coalesce_fields_references(
             *maybe_alias = Some(default_alias_for_select_item_expression(expr));
         }
     }
-    // 2: extract fields to a temp statement
-    let mut bogo_stmt = SelectStatement {
-        fields: mem::take(&mut stmt.fields),
-        ..Default::default()
-    };
-    // 3: apply coalesce replacements
-    for expr in collect_outermost_columns_mut(&mut bogo_stmt)? {
-        if let Expr::Column(col) = expr
-            && let Some(inl_expr) = fields_map.get(col)
-        {
-            match inl_expr {
-                Ok(inl_expr) => {
-                    let _ = mem::replace(expr, inl_expr.clone());
+    // 2: apply COALESCE replacements in SELECT fields only
+    for select_item in &mut stmt.fields {
+        let (expr, _) = expect_field_as_expr_mut(select_item);
+        for col_expr in collect_columns_in_expr_mut(expr) {
+            if let Expr::Column(col) = col_expr
+                && let Some(inl_expr) = fields_map.get(col)
+            {
+                match inl_expr {
+                    Ok(inl_expr) => {
+                        *col_expr = inl_expr.clone();
+                    }
+                    Err(e) => return Err(e.clone()),
                 }
-                Err(e) => return Err(e.clone()),
             }
         }
     }
-    // 4: error if unmapped columns remain
-    if collect_outermost_columns_mut(stmt)?
+    // 3: error if mapped columns remain in non-field positions (WHERE, JOIN ON, etc.)
+    //    Temporarily take fields to exclude them from the outermost-columns check.
+    let saved_fields = mem::take(&mut stmt.fields);
+    let has_unmapped = collect_outermost_columns_mut(stmt)
         .into_iter()
-        .any(|expr| matches!(expr, Expr::Column(col) if fields_map.get(col).is_some()))
-    {
+        .any(|expr| matches!(expr, Expr::Column(col) if fields_map.get(col).is_some()));
+    stmt.fields = saved_fields;
+    if has_unmapped {
         // TODO: think of a better error message
         unsupported!("COALESCE function call in place of a column reference")
     }
-    // 5: restore updated fields
-    stmt.fields = mem::take(&mut bogo_stmt.fields);
 
     Ok(())
 }
@@ -750,8 +754,9 @@ fn resolve_lateral_subqueries(
             };
             new_joins.push(JoinClause {
                 operator,
+                // SAFETY: the `len() == 1` guard guarantees `pop()` returns `Some`.
                 right: if were_regular.len() == 1 {
-                    JoinRightSide::Table(were_regular.pop().unwrap())
+                    JoinRightSide::Table(were_regular.pop().expect("len checked == 1"))
                 } else {
                     JoinRightSide::Tables(were_regular)
                 },

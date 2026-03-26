@@ -32,6 +32,116 @@ use readyset_sql::ast::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Returns `(null_rejecting, null_preserving)` for a function expression.
+///
+/// - **null_rejecting**: non-NULL arguments guarantee non-NULL result (strict).
+/// - **null_preserving**: any NULL argument guarantees NULL result (NULL propagation).
+///
+/// Aggregates, window functions, and special-case functions (`COALESCE`,
+/// `IFNULL`, etc.) return `(false, false)` — their nullability is handled by
+/// dedicated logic in `infer_expr_nullability`.
+///
+/// **Important:** this match is intentionally exhaustive (no `_ =>` arm)
+/// so that adding a new variant forces explicit classification.
+fn call_null_attributes(func_expr: &FunctionExpr) -> (bool, bool) {
+    match func_expr {
+        // ── Strict scalar functions ──
+        FunctionExpr::DayOfWeek(..)
+        | FunctionExpr::Month(..)
+        | FunctionExpr::Timediff(..)
+        | FunctionExpr::Addtime(..)
+        | FunctionExpr::DateFormat(..)
+        | FunctionExpr::DateTrunc(..)
+        | FunctionExpr::Round(..)
+        | FunctionExpr::SplitPart(..)
+        | FunctionExpr::Extract { .. }
+        | FunctionExpr::Lower { .. }
+        | FunctionExpr::Upper { .. }
+        | FunctionExpr::Substring { .. }
+        | FunctionExpr::Length(..)
+        | FunctionExpr::OctetLength(..)
+        | FunctionExpr::CharLength(..)
+        | FunctionExpr::Ascii(..)
+        | FunctionExpr::Hex(..)
+        | FunctionExpr::JsonDepth(..)
+        | FunctionExpr::JsonArrayLength(..)
+        | FunctionExpr::JsonbInsert(..)
+        | FunctionExpr::JsonbPretty(..)
+        | FunctionExpr::StAsText(..)
+        | FunctionExpr::StAsWkt(..)
+        | FunctionExpr::StAsEwkt(..) => (true, true),
+
+        // ── Non-strict scalars (dialect-dependent, special semantics, or
+        //    can return NULL from non-NULL inputs) ──
+        FunctionExpr::ConvertTz(..)
+        | FunctionExpr::IfNull(..)
+        | FunctionExpr::Coalesce(..)
+        | FunctionExpr::Concat(..)
+        | FunctionExpr::ConcatWs(..)
+        | FunctionExpr::Greatest(..)
+        | FunctionExpr::Least(..)
+        | FunctionExpr::ArrayToString(..)
+        | FunctionExpr::Bucket { .. }
+        | FunctionExpr::JsonValid(..)
+        | FunctionExpr::JsonQuote(..)
+        | FunctionExpr::JsonOverlaps(..)
+        | FunctionExpr::JsonTypeof(..)
+        | FunctionExpr::JsonObject(..)
+        | FunctionExpr::JsonbObject(..)
+        | FunctionExpr::JsonBuildObject(..)
+        | FunctionExpr::JsonbBuildObject(..)
+        | FunctionExpr::JsonStripNulls(..)
+        | FunctionExpr::JsonbStripNulls(..)
+        | FunctionExpr::JsonExtractPath(..)
+        | FunctionExpr::JsonbExtractPath(..)
+        | FunctionExpr::JsonExtractPathText(..)
+        | FunctionExpr::JsonbSet(..)
+        | FunctionExpr::JsonbSetLax(..) => (false, false),
+
+        // ── Aggregates ──
+        // Aggregates skip NULLs and operate over groups, so their output being
+        // non-NULL does not prove individual input values are non-NULL.
+        // `derive_from_expr` relies on `(false, _)` to avoid recursing into
+        // aggregate arguments; `infer_expr_nullability` handles aggregate
+        // output nullability with dedicated arms instead.
+        FunctionExpr::Avg { .. }
+        | FunctionExpr::Count { .. }
+        | FunctionExpr::CountStar
+        | FunctionExpr::Sum { .. }
+        | FunctionExpr::Max(..)
+        | FunctionExpr::Min(..)
+        | FunctionExpr::GroupConcat { .. }
+        | FunctionExpr::StringAgg { .. }
+        | FunctionExpr::ArrayAgg { .. }
+        | FunctionExpr::JsonObjectAgg { .. } => (false, false),
+
+        // ── Window functions ──
+        FunctionExpr::RowNumber | FunctionExpr::Rank | FunctionExpr::DenseRank => (false, false),
+
+        // ── No-paren / session functions ──
+        FunctionExpr::CurrentDate
+        | FunctionExpr::CurrentTimestamp(..)
+        | FunctionExpr::CurrentTime
+        | FunctionExpr::LocalTimestamp
+        | FunctionExpr::LocalTime
+        | FunctionExpr::CurrentUser
+        | FunctionExpr::SessionUser
+        | FunctionExpr::CurrentCatalog
+        | FunctionExpr::SqlUser => (false, false),
+
+        // ── UDF — unknown semantics ──
+        FunctionExpr::Udf { .. } => (false, false),
+    }
+}
+
+fn is_null_rejecting_call(func_expr: &FunctionExpr) -> bool {
+    call_null_attributes(func_expr).0
+}
+
+fn is_null_preserving_call(func_expr: &FunctionExpr) -> bool {
+    call_null_attributes(func_expr).1
+}
+
 /// Identifies **strict** binary operators whose truth value in a filter is
 /// null-rejecting (if any operand is NULL, the predicate can't be TRUE).
 ///
@@ -64,6 +174,15 @@ fn is_null_rejecting_binary_op(op: &BinaryOperator) -> bool {
 
 /// Walks a predicate and collects **columns proven non-NULL** for surviving rows
 /// by recognizing null-rejecting constructs.
+///
+/// This function derives **column-level** facts: "column X must be non-NULL for
+/// every row that survives the filter." It must NOT recurse into aggregate
+/// function arguments because aggregates operate over groups, skipping NULLs —
+/// the aggregate's output being non-NULL does not prove that individual input
+/// column values are non-NULL. (That output-level reasoning is handled by
+/// `infer_expr_nullability` instead.) Aggregates return `(false, false)` from
+/// `call_null_attributes`, so `is_null_rejecting_call` returns false for them
+/// and recursion stops.
 ///
 /// Evidence sources:
 /// - Conjunctive descent (`AND`) and strict binary ops (e.g., `=`, `>`, `LIKE`).
@@ -126,79 +245,13 @@ fn derive_from_expr(predicate: &Expr, non_null_columns: &mut HashSet<Column>) {
             derive_from_expr(expr.as_ref(), non_null_columns);
         }
         // Function calls
-        Expr::Call(func_expr) => match func_expr {
-            // Never derive through COALESCE/IFNULL (result may be non-NULL even if some args are NULL)
-            FunctionExpr::Coalesce(_) | FunctionExpr::IfNull(_, _) => {
-                // intentionally no-op
-            }
-            // Single-argument functions that propagate NULL: if f(col) is non-NULL in a
-            // null-rejecting context, col must be non-NULL.
-            FunctionExpr::GroupConcat { expr, .. }
-            | FunctionExpr::Extract { expr, .. }
-            | FunctionExpr::Lower { expr, .. }
-            | FunctionExpr::Upper { expr, .. }
-            | FunctionExpr::Avg { expr, .. }
-            | FunctionExpr::Max(expr)
-            | FunctionExpr::Min(expr)
-            | FunctionExpr::Sum { expr, .. }
-            | FunctionExpr::ArrayAgg { expr, .. }
-            | FunctionExpr::StringAgg { expr, .. } => {
-                derive_from_expr(expr.as_ref(), non_null_columns);
-            }
-            FunctionExpr::Substring { string, pos, len } => {
-                derive_from_expr(string.as_ref(), non_null_columns);
-                if let Some(pos) = pos {
-                    derive_from_expr(pos.as_ref(), non_null_columns);
-                }
-                if let Some(len) = len {
-                    derive_from_expr(len.as_ref(), non_null_columns);
-                }
-            }
-            FunctionExpr::Bucket { expr, interval } => {
-                derive_from_expr(expr.as_ref(), non_null_columns);
-                derive_from_expr(interval.as_ref(), non_null_columns);
-            }
-            // Multi-argument strict functions: null input implies null output.
-            // This list mirrors the strict-function arm in `infer_expr_nullability`.
-            FunctionExpr::ConvertTz(..)
-            | FunctionExpr::DayOfWeek(..)
-            | FunctionExpr::Month(..)
-            | FunctionExpr::Timediff(..)
-            | FunctionExpr::Addtime(..)
-            | FunctionExpr::DateFormat(..)
-            | FunctionExpr::DateTrunc(..)
-            | FunctionExpr::Round(..)
-            | FunctionExpr::Greatest(..)
-            | FunctionExpr::Least(..)
-            | FunctionExpr::Concat(..)
-            | FunctionExpr::ConcatWs(..)
-            | FunctionExpr::SplitPart(..)
-            | FunctionExpr::Length(..)
-            | FunctionExpr::OctetLength(..)
-            | FunctionExpr::CharLength(..)
-            | FunctionExpr::Ascii(..)
-            | FunctionExpr::Hex(..)
-            | FunctionExpr::JsonDepth(..)
-            | FunctionExpr::JsonValid(..)
-            | FunctionExpr::JsonOverlaps(..)
-            | FunctionExpr::JsonQuote(..)
-            | FunctionExpr::JsonArrayLength(..)
-            | FunctionExpr::JsonStripNulls(..)
-            | FunctionExpr::JsonbStripNulls(..)
-            | FunctionExpr::JsonbPretty(..)
-            | FunctionExpr::ArrayToString(..)
-            | FunctionExpr::StAsText(..)
-            | FunctionExpr::StAsWkt(..)
-            | FunctionExpr::StAsEwkt(..) => {
+        Expr::Call(func_expr) => {
+            if is_null_rejecting_call(func_expr) {
                 for arg in func_expr.arguments() {
                     derive_from_expr(arg, non_null_columns);
                 }
             }
-            // All other function variants have unknown or non-strict null semantics
-            // (e.g. json_typeof(null) = 'null', not SQL NULL). Conservatively no-op
-            // to avoid false positives.
-            _ => {}
-        },
+        }
         // Unknown
         _ => {}
     }
@@ -307,7 +360,7 @@ fn collect_relations<'a>(
 ///    (`present_sides`). This avoids false positives due to join-introduced NULLs.
 ///
 /// Returns the set of columns proven non-NULL at projection time.
-fn derive_from_stmt(
+pub(crate) fn derive_from_stmt(
     stmt: &SelectStatement,
     schema: &dyn NonNullSchema,
 ) -> ReadySetResult<HashSet<Column>> {
@@ -391,8 +444,77 @@ fn derive_from_stmt(
     Ok(non_null_columns)
 }
 
+/// Returns true if the expression is null-preserving:
+/// that is, it evaluates to NULL if any of its inputs are NULL.
+/// Used to detect whether expressions are safe to inline from the RHS of LEFT JOINs
+/// without breaking NULL extension semantics.
+///
+/// Aggregates return `false` here (via `is_null_preserving_call`) because they
+/// do not propagate NULLs — they skip them. This is correct: this function asks
+/// "does a NULL column value flow through to a NULL expression result?", and
+/// aggregates break that flow.
+pub(crate) fn is_expr_null_preserving(expr: &Expr) -> bool {
+    fn is_expr_null_preserving_inner(expr: &Expr) -> bool {
+        match expr {
+            Expr::Literal(Literal::Null) => true,
+            Expr::Literal(_) => true,
+            Expr::Column(_) => true,
+            Expr::UnaryOp { rhs, .. } => is_expr_null_preserving_inner(rhs),
+            Expr::BinaryOp { lhs, rhs, .. } => {
+                is_expr_null_preserving_inner(lhs) && is_expr_null_preserving_inner(rhs)
+            }
+            Expr::Between {
+                operand, min, max, ..
+            } => {
+                is_expr_null_preserving_inner(operand)
+                    && is_expr_null_preserving_inner(min)
+                    && is_expr_null_preserving_inner(max)
+            }
+            Expr::In { lhs, rhs, .. } => {
+                is_expr_null_preserving_inner(lhs)
+                    && match rhs {
+                        InValue::List(values) => values.iter().all(is_expr_null_preserving_inner),
+                        _ => false,
+                    }
+            }
+            Expr::Cast { expr, .. } => is_expr_null_preserving_inner(expr),
+            Expr::CaseWhen {
+                branches,
+                else_expr,
+            } => branches
+                // We must be sure that all arms are null-preserving *and*
+                // none of them are unconditional non-null literals
+                .iter()
+                .map(|b| &b.body)
+                .chain(else_expr.as_ref().into_iter().map(|b| b.as_ref()))
+                .all(|e| {
+                    !matches!(e, Expr::Literal(lit) if !matches!(lit, Literal::Null))
+                        && is_expr_null_preserving_inner(e)
+                }),
+            Expr::Call(func_expr) => {
+                if is_null_preserving_call(func_expr) {
+                    func_expr.arguments().all(is_expr_null_preserving_inner)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    !matches!(expr, Expr::Literal(lit) if !matches!(lit, Literal::Null))
+        && is_expr_null_preserving_inner(expr)
+}
+
 /// Infers whether `expr` is guaranteed non-NULL given the set of columns proven
 /// non-NULL at projection time.
+///
+/// Unlike `derive_from_expr` (which extracts **column-level** non-NULL facts
+/// from predicates), this function answers an **expression-level** question:
+/// "is the result of evaluating this expression guaranteed non-NULL?"
+/// Because of this, it is the only function that handles aggregates explicitly:
+/// `COUNT` always returns non-NULL; `AVG/SUM/MIN/MAX` return non-NULL iff their
+/// argument column is non-NULL (assuming non-empty groups post-GROUP BY).
 ///
 /// Conservative 3VL-aware rules:
 /// - Literals: NULL → false; non-NULL → true
@@ -405,9 +527,9 @@ fn derive_from_stmt(
 /// - `CASE`: non-NULL only if every THEN and ELSE is non-NULL (no branch pruning)
 /// - `CAST`: mirrors argument nullability
 /// - Window: `count/rank/dense_rank/row_number` → non-NULL; others mirror argument nullability per frame (assume no empty frames)
-/// - Aggregates: `count` → non-NULL; others mirror argument nullability per group (this function is never invoked for scalar aggregates),
-/// - Calls: `coalesce/ifnull` → non-NULL if any arg is non-NULL; otherwise only functions
-///   whitelisted by `call_returns_nonnull_if_all_args_nonnull`
+/// - Aggregates: `count` → non-NULL; others mirror argument nullability per group
+/// - Calls: `coalesce/ifnull` → non-NULL if any arg is non-NULL; strict scalars
+///   (per `is_null_rejecting_call`) → non-NULL iff all args are non-NULL
 ///
 /// Any unrecognized construct yields `false` to avoid false positives.
 fn infer_expr_nullability(expr: &Expr, non_null_columns: &HashSet<Column>) -> ReadySetResult<bool> {
@@ -526,106 +648,25 @@ fn infer_expr_nullability(expr: &Expr, non_null_columns: &HashSet<Column>) -> Re
             | FunctionExpr::Sum { expr, .. } => {
                 infer_expr_nullability(expr.as_ref(), non_null_columns)
             }
-            // COALESCE: non-null if any argument is non-null
-            FunctionExpr::Coalesce(arguments) => {
-                for arg in arguments {
+            FunctionExpr::Coalesce(..) | FunctionExpr::IfNull(..) => {
+                for arg in func_expr.arguments() {
                     if infer_expr_nullability(arg, non_null_columns)? {
                         return Ok(true);
                     }
                 }
                 Ok(false)
             }
-            // IFNULL: non-null if either argument is non-null
-            FunctionExpr::IfNull(a, b) => {
-                if infer_expr_nullability(a, non_null_columns)? {
-                    return Ok(true);
-                }
-                if infer_expr_nullability(b, non_null_columns)? {
-                    return Ok(true);
-                }
-                Ok(false)
-            }
-            // These functions are non-null iff all their arguments are non-null.
-            // Each entry here is a conscious decision: functions that can return NULL
-            // even with non-null inputs (e.g. path-lookup functions) must NOT appear here.
-            FunctionExpr::ConvertTz(..)
-            | FunctionExpr::DayOfWeek(..)
-            | FunctionExpr::Month(..)
-            | FunctionExpr::Timediff(..)
-            | FunctionExpr::Addtime(..)
-            | FunctionExpr::DateFormat(..)
-            | FunctionExpr::DateTrunc(..)
-            | FunctionExpr::Round(..)
-            | FunctionExpr::Greatest(..)
-            | FunctionExpr::Least(..)
-            | FunctionExpr::Concat(..)
-            | FunctionExpr::ConcatWs(..)
-            | FunctionExpr::SplitPart(..)
-            | FunctionExpr::Length(..)
-            | FunctionExpr::OctetLength(..)
-            | FunctionExpr::CharLength(..)
-            | FunctionExpr::Ascii(..)
-            | FunctionExpr::Hex(..)
-            | FunctionExpr::JsonDepth(..)
-            | FunctionExpr::JsonValid(..)
-            | FunctionExpr::JsonOverlaps(..)
-            | FunctionExpr::JsonQuote(..)
-            | FunctionExpr::JsonArrayLength(..)
-            | FunctionExpr::JsonStripNulls(..)
-            | FunctionExpr::JsonbStripNulls(..)
-            | FunctionExpr::JsonbPretty(..)
-            | FunctionExpr::ArrayToString(..)
-            | FunctionExpr::StAsText(..)
-            | FunctionExpr::StAsWkt(..)
-            | FunctionExpr::StAsEwkt(..) => {
-                let other = func_expr;
-                for arg in other.arguments() {
+            // General built-in functions
+            _ => Ok(if is_null_rejecting_call(func_expr) {
+                for arg in func_expr.arguments() {
                     if !infer_expr_nullability(arg, non_null_columns)? {
                         return Ok(false);
                     }
                 }
-                Ok(true)
-            }
-            // These functions can return NULL even when all inputs are non-null
-            // (e.g. a JSON path lookup returns NULL on missing key).
-            // Conservatively return false.
-            FunctionExpr::JsonTypeof(..)
-            | FunctionExpr::JsonExtractPath(..)
-            | FunctionExpr::JsonbExtractPath(..)
-            | FunctionExpr::JsonExtractPathText(..)
-            | FunctionExpr::JsonObject(..)
-            | FunctionExpr::JsonbObject(..)
-            | FunctionExpr::JsonBuildObject(..)
-            | FunctionExpr::JsonbBuildObject(..)
-            | FunctionExpr::JsonbInsert(..)
-            | FunctionExpr::JsonbSet(..)
-            | FunctionExpr::JsonbSetLax(..) => Ok(false),
-            // Aggregates and group functions: mirror their primary expression argument
-            FunctionExpr::ArrayAgg { expr, .. } | FunctionExpr::StringAgg { expr, .. } => {
-                infer_expr_nullability(expr.as_ref(), non_null_columns)
-            }
-            // JsonObjectAgg can produce null entries; conservatively nullable
-            FunctionExpr::JsonObjectAgg { .. } => Ok(false),
-            // Bucket is non-null if both arguments are non-null
-            FunctionExpr::Bucket { expr, interval } => {
-                Ok(infer_expr_nullability(expr.as_ref(), non_null_columns)?
-                    && infer_expr_nullability(interval.as_ref(), non_null_columns)?)
-            }
-            // Window-function variants used as bare Calls: always non-null
-            FunctionExpr::RowNumber | FunctionExpr::Rank | FunctionExpr::DenseRank => Ok(true),
-            // No-paren functions that have no arguments and are always non-null
-            FunctionExpr::CurrentDate
-            | FunctionExpr::CurrentTimestamp(_)
-            | FunctionExpr::CurrentTime
-            | FunctionExpr::LocalTimestamp
-            | FunctionExpr::LocalTime => Ok(true),
-            // These no-paren functions can return null depending on context
-            FunctionExpr::CurrentUser
-            | FunctionExpr::SessionUser
-            | FunctionExpr::CurrentCatalog
-            | FunctionExpr::SqlUser => Ok(false),
-            // UDFs have unknown null semantics; conservatively assume nullable
-            FunctionExpr::Udf { .. } => Ok(false),
+                true
+            } else {
+                false
+            }),
         },
         // Avoid false positive
         _ => Ok(false),

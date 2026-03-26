@@ -101,10 +101,10 @@ use readyset_sql::ast::{
 };
 
 use crate::get_local_from_items_iter_mut;
+use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
     as_sub_query_with_alias_mut, collect_local_from_items,
     default_alias_for_select_item_expression, get_from_item_reference_name, get_unique_alias,
-    normalize_comma_separated_lhs,
 };
 use std::iter;
 use std::mem;
@@ -262,6 +262,23 @@ impl<'ast> Visitor<'ast> for ArrayConstructorValidator {
                             unsupported!(
                                 "Nested array constructors (array constructor within array constructor) are not supported"
                             );
+                        }
+                        // ORDER BY expressions must be bare column references so they
+                        // can be re-qualified to the inner subquery alias during rewrite.
+                        // Non-column expressions (function calls, arithmetic, etc.) are
+                        // rejected here with a clean error rather than hitting
+                        // `unsupported!` inside `extract_array_subquery_order_by_clause`.
+                        if let Some(order) = &query.order {
+                            for ob in &order.order_by {
+                                if let FieldReference::Expr(expr) = &ob.field
+                                    && !matches!(expr, Expr::Column(_))
+                                {
+                                    unsupported!(
+                                        "ARRAY constructor subquery ORDER BY must use \
+                                             column references"
+                                    );
+                                }
+                            }
                         }
                     }
                     other => {
@@ -1108,5 +1125,28 @@ mod tests {
         let stmt = test_rewrite(sql);
         // LEFT OUTER JOIN (original) + LEFT OUTER JOIN (lateral)
         assert!(stmt.join.len() >= 2);
+    }
+
+    // ── ORDER BY validation in array constructor subqueries ──
+
+    #[test]
+    fn test_array_ctor_with_column_order_by_passes() {
+        test_validation_succeeds(
+            "SELECT ARRAY(SELECT p.title FROM posts p ORDER BY p.title) FROM users u",
+        );
+    }
+
+    #[test]
+    fn test_array_ctor_with_function_order_by_rejected() {
+        test_validation_error(
+            "SELECT ARRAY(SELECT p.title FROM posts p ORDER BY lower(p.title)) FROM users u",
+        );
+    }
+
+    #[test]
+    fn test_array_ctor_with_arithmetic_order_by_rejected() {
+        test_validation_error(
+            "SELECT ARRAY(SELECT p.id FROM posts p ORDER BY p.id + 1) FROM users u",
+        );
     }
 }

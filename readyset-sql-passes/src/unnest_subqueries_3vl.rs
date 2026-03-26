@@ -1,6 +1,6 @@
 use crate::infer_nullability::infer_select_field_nullability;
 use crate::rewrite_utils::{
-    and_predicates_skip_true, collect_local_from_items, construct_is_not_null_expr,
+    and_predicates_skip_true, collect_local_from_items, construct_null_check_expr,
     construct_scalar_expr, ensure_first_field_alias, expect_only_subquery_from_with_alias_mut,
     expect_sub_query_with_alias, expect_sub_query_with_alias_mut, get_first_field_expr,
     get_unique_alias,
@@ -198,13 +198,14 @@ impl ProbeRegistry {
         if need_ep && entry.non_empty.is_none() {
             // EP probe: LEFT join of `EXISTS(RHS)` variant that projects `present_`.
             let ep_alias = get_unique_alias(&get_locals(base_stmt)?, "EP_3VL");
-            // EP does not need TOP-K preservation: presence after LIMIT/OFFSET is equivalent
-            // to presence before it (for LIMIT > 0). Avoid wrapper here.
+            // EP (non-empty) must reflect *post-TOP-K* emptiness.
+            // We can usually drop ORDER BY and LIMIT for EP, but OFFSET > 0 must be preserved
+            // (OFFSET can turn a non-empty RHS into an empty RHS). Avoid an extra wrapper here.
             let (ep_dt, ep_on) = shape_dt_as_exists_with_opts!(
                 &mut rhs_stmt_original.clone(),
                 ep_alias.clone(),
                 AsJoinableOpts {
-                    preserve_top_k_for_exists: false, // do not preserve TOP-K for EP
+                    preserve_top_k_for_exists: false, // may drop ORDER/LIMIT; must still preserve OFFSET>0
                     force_wrapper: false,             // no need for a single-anchor wrapper for EP
                     bubble_alias_to_anchor_top: None, // EP doesn’t use the first-field alias
                 }
@@ -241,12 +242,12 @@ impl ProbeRegistry {
             // This detects null-producing RHS rows per outer correlation partition.
             np_stmt.where_clause = and_predicates_skip_true(
                 mem::take(&mut np_stmt.where_clause),
-                construct_is_not_null_expr(
+                construct_null_check_expr(
                     Expr::Column(Column {
                         table: Some(anchor_alias.into()),
                         name: original_ff_alias,
                     }),
-                    /* IS NULL? */ true,
+                    true,
                 ),
             );
 
@@ -355,7 +356,7 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
         let has_null_present = info
             .has_null_present_col()
             .ok_or_else(|| internal_err!("NP_3VL present_ should exist"))?;
-        construct_is_not_null_expr(has_null_present, /* IS NULL? */ true)
+        construct_null_check_expr(has_null_present, true)
     };
 
     // If LHS is provably non-null, the guard is just `rhs_not_null`
@@ -369,10 +370,10 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
         let ep_present = info
             .non_empty_present_col()
             .ok_or_else(|| internal_err!("EP_3VL present_ should exist"))?;
-        construct_is_not_null_expr(ep_present, /* IS NULL? */ true)
+        construct_null_check_expr(ep_present, true)
     };
 
-    let lhs_not_null = construct_is_not_null_expr(lhs, /* IS NULL? */ false);
+    let lhs_not_null = construct_null_check_expr(lhs, false);
     let check = construct_scalar_expr(
         if rhs_ctx.is_null_free() {
             lhs_not_null
@@ -439,7 +440,7 @@ pub(crate) fn add_3vl_for_select_list_in_subquery(
         need_ep,
     )?;
 
-    let equal_match = construct_is_not_null_expr(input.rhs, /* IS NULL? */ false);
+    let equal_match = construct_null_check_expr(input.rhs, false);
 
     // rhs_has_null := NP.present_ IS NOT NULL  (or FALSE when RHS null-free)
     let rhs_has_null = if input.rhs_ctx.is_null_free() {
@@ -448,7 +449,7 @@ pub(crate) fn add_3vl_for_select_list_in_subquery(
         let has_null_present = info
             .has_null_present_col()
             .expect("NP_3VL present_ should exist");
-        construct_is_not_null_expr(has_null_present, /* IS NULL? */ false)
+        construct_null_check_expr(has_null_present, false)
     };
 
     // rhs_non_empty := EP.present_ IS NOT NULL  (or FALSE when not requested)
@@ -458,14 +459,14 @@ pub(crate) fn add_3vl_for_select_list_in_subquery(
         let ep_present = info
             .non_empty_present_col()
             .expect("EP_3VL present_ should exist");
-        construct_is_not_null_expr(ep_present, /* IS NULL? */ false)
+        construct_null_check_expr(ep_present, false)
     };
 
     // lhs_has_null := (lhs IS NULL) or FALSE if known non-null
     let lhs_has_null = if input.flags.is_lhs_null_free {
         Expr::Literal(false.into())
     } else {
-        construct_is_not_null_expr(input.lhs, /* IS NULL? */ true)
+        construct_null_check_expr(input.lhs, true)
     };
 
     Ok(construct_3vl_case_expr(

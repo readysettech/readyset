@@ -21,20 +21,16 @@
 //!   will then build `rep.x = C.x` rather than erroring due to multiple matches in the LHS.
 //! - If there was *no* prior USING merge and multiple LHS items expose the same column, we surface
 //!   an ambiguity error (aligned with PostgreSQL).
-use crate::rewrite_utils::{
-    and_predicates, as_sub_query_with_alias_mut, construct_scalar_expr,
-    get_from_item_reference_name,
-};
-use crate::{get_local_from_items_iter_mut, star_expansion::StarExpansionContext, util};
-use itertools::Either;
-use readyset_errors::{ReadySetResult, invalid_query, unsupported};
+use crate::rewrite_utils::{and_predicates, construct_scalar_expr, get_from_item_reference_name};
+use crate::{star_expansion::StarExpansionContext, util};
+use readyset_errors::{ReadySetError, ReadySetResult, invalid_query, unsupported};
 use readyset_sql::DialectDisplay;
+use readyset_sql::analysis::visit_mut::{VisitorMut, walk_select_statement};
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, JoinConstraint, JoinRightSide, Relation, SelectStatement,
     SqlIdentifier, TableExpr, TableExprInner,
 };
 use std::collections::HashMap;
-use std::iter;
 
 /// Applies the USING→ON desugaring to this statement and all immediate subqueries in `FROM`.
 ///
@@ -55,13 +51,32 @@ impl ExpandJoinOnUsing for SelectStatement {
         &mut self,
         context: C,
     ) -> ReadySetResult<&mut Self> {
-        for from_item in get_local_from_items_iter_mut!(self) {
-            if let Some((stmt, _)) = as_sub_query_with_alias_mut(from_item) {
-                rewrite_using_to_on_predicates(stmt, &context)?;
-            }
-        }
-        rewrite_using_to_on_predicates(self, &context)?;
+        ExpandUsingVisitor { context: &context }.visit_select_statement(self)?;
         Ok(self)
+    }
+}
+
+/// Visitor that recursively expands `JOIN ... USING` → `JOIN ... ON` in every
+/// `SelectStatement` it encounters.  The default `walk_select_statement` handles
+/// recursion into all subquery positions (FROM, WHERE, HAVING, SELECT, JOIN ON,
+/// IN, ARRAY, etc.) automatically.
+struct ExpandUsingVisitor<'a, C> {
+    context: &'a C,
+}
+
+impl<'ast, C: StarExpansionContext> VisitorMut<'ast> for ExpandUsingVisitor<'_, C> {
+    type Error = ReadySetError;
+
+    fn visit_select_statement(
+        &mut self,
+        select_statement: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        // Recurse into nested subqueries first (bottom-up), so schema introspection
+        // on derived tables sees already-expanded inner joins.
+        walk_select_statement(self, select_statement)?;
+        // Then expand this statement's own USING clauses.
+        rewrite_using_to_on_predicates(select_statement, self.context)?;
+        Ok(())
     }
 }
 

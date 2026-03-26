@@ -24,15 +24,19 @@ pub use shallow_cache_rewrites::{
     anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_prepared,
     literalize_shallow_query, rewrite_shallow,
 };
-use tracing::{trace, trace_span};
+use tracing::{trace, trace_span, warn};
 
+use crate::derived_tables_rewrite::DerivedTablesRewrite;
 use crate::disallow_row::DisallowRow as _;
 use crate::drop_redundant_join::DropRedundantSelfJoin as _;
 use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
+use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
 use crate::rewrite_utils::contains_question_mark_placeholders;
 use crate::unnest_subqueries::UnnestSubqueries as _;
+use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
+use crate::validate_query_semantics::ValidateQuerySemantics as _;
 use crate::{
     ArrayConstructorRewrite as _, BaseSchemasContext, ImpliedTableExpansion as _,
     ImpliedTablesContext, OrderLimitRemoval as _, ResolveSchemas as _, ResolveSchemasContext,
@@ -287,14 +291,32 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     query.expand_join_on_using(&context)?;
     trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
     if !contains_question_mark_placeholders(query)? {
-        query.rewrite_array_constructors()?;
-        trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
-        query.drop_redundant_join(&context)?;
-        trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
-        query.inline_leading_derived_table()?;
-        trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
-        query.unnest_subqueries(&context)?;
-        trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
+        let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
+        trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
+        match invariants_ok {
+            Ok(_) => {
+                query.validate_query_semantics(flags.dialect)?;
+                trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
+                query.rewrite_array_constructors()?;
+                trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
+                query.drop_redundant_join(&context)?;
+                trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
+                query.inline_leading_derived_table()?;
+                trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
+                query.unnest_subqueries(&context)?;
+                trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
+                query.derived_tables_rewrite()?;
+                trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
+                query.query_optimization_rewrite(
+                    &context,
+                    OptimizationStrategy::HoistParametrizableFilters,
+                )?;
+                trace!(parent: &span, pass="query_optimization_rewrite", query = %query.display(flags.dialect));
+            }
+            Err(e) => {
+                warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
+            }
+        }
     }
     query.order_limit_removal(&context)?;
     trace!(parent: &span, pass="order_limit_removal", query = %query.display(flags.dialect));
@@ -1861,7 +1883,21 @@ mod tests {
                         vec!["id".into(), "name".into(), "credit_card_number".into()],
                     ),
                     (Relation::from("x"), vec!["y".into()]),
-                    (Relation::from("t"), vec!["x".into(), "y".into()]),
+                    (
+                        Relation::from("test"),
+                        vec!["x".into(), "y".into(), "z".into()],
+                    ),
+                    (
+                        Relation::from("t"),
+                        vec![
+                            "x".into(),
+                            "y".into(),
+                            "a".into(),
+                            "b".into(),
+                            "c".into(),
+                            "d".into(),
+                        ],
+                    ),
                     (
                         Relation::from("t2"),
                         vec!["x".into(), "y".into(), "z".into()],
@@ -2031,7 +2067,9 @@ mod tests {
 
             assert_eq!(
                 query,
-                parse_select_statement_postgres("SELECT x, y FROM test WHERE x = $1")
+                parse_select_statement_postgres(
+                    "SELECT test.x, test.y FROM test WHERE test.x = $1"
+                )
             );
 
             assert_eq!(keys, vec![vec![4.into()]]);
@@ -2047,7 +2085,7 @@ mod tests {
             assert_eq!(
                 query,
                 parse_select_statement_postgres(
-                    "SELECT x, y FROM test WHERE x = $1 AND y = $2 AND z = $3"
+                    "SELECT test.x, test.y FROM test WHERE test.x = $1 AND test.y = $2 AND test.z = $3"
                 )
             );
 
@@ -2139,7 +2177,7 @@ mod tests {
 
             assert_eq!(
                 query,
-                parse_select_statement_postgres("SELECT a FROM t WHERE b = $1 AND c = $2")
+                parse_select_statement_postgres("SELECT t.a FROM t WHERE t.b = $1 AND t.c = $2")
             );
 
             assert_eq!(
@@ -2159,7 +2197,7 @@ mod tests {
 
             assert_eq!(
                 query,
-                parse_select_statement_postgres("SELECT a FROM t WHERE b = $1 AND c = $2")
+                parse_select_statement_postgres("SELECT t.a FROM t WHERE t.b = $1 AND t.c = $2")
             );
 
             assert_eq!(
@@ -2180,7 +2218,7 @@ mod tests {
             assert_eq!(
                 query,
                 parse_select_statement_postgres(
-                    "SELECT a FROM t WHERE b = $1 AND c = $2 AND d = $3"
+                    "SELECT t.a FROM t WHERE t.b = $1 AND t.c = $2 AND t.d = $3"
                 )
             );
 

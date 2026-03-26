@@ -81,13 +81,13 @@ fn assert_nullability(sql: &str, expect_non_null: bool, schema: &dyn NonNullSche
 
 #[test]
 fn null_inf_01_where_is_not_null_plus_concat_call() {
-    // WHERE proves s.city non-NULL; concat is strict → result non-NULL.
+    // WHERE proves s.city non-NULL; concat is not strict → result NULL-able.
     let sql = r#"
         SELECT concat(s.city, '-ok') AS x
         FROM s
         WHERE s.city IS NOT NULL
     "#;
-    assert_nullability(sql, true, &TestSchema::new());
+    assert_nullability(sql, false, &TestSchema::new());
 }
 
 #[test]
@@ -535,7 +535,7 @@ fn null_inf_30_where_only_on_outer_base_does_not_promote_dp() {
 
 #[test]
 fn null_inf_31_concat_of_present_rhs_and_present_derived() {
-    // p present via WHERE; dp present via INNER JOIN ON; concat(strict) over both → non-NULL.
+    // p present via WHERE; dp present via INNER JOIN ON; concat(not strict) over both → NULL-able.
     let sql = r#"
         SELECT concat(p.city, (dp.c)::text) AS s
         FROM spj
@@ -548,5 +548,5 @@ fn null_inf_31_concat_of_present_rhs_and_present_derived() {
         JOIN (SELECT 1 AS t) AS t ON dp.c > 0
         WHERE p.city = 'LONDON'
         "#;
-    assert_nullability(sql, true, &TestSchema::new());
+    assert_nullability(sql, false, &TestSchema::new());
 }

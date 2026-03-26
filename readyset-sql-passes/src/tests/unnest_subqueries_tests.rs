@@ -562,7 +562,6 @@ where
     test_it("test12", original_text, expected_text);
 }
 
-// Test with no rewrite, as any rewrite would cause `problematic self-join` issue
 // WHERE IN; correlated; with GROUP BY; NP/EP omitted when null-safe.
 #[test]
 fn test13() {
@@ -599,9 +598,11 @@ where
             )
     );"#;
 
-    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty" FROM "spj" WHERE
-        EXISTS (SELECT 1 FROM "p" AS "p5" WHERE ("p5"."weight" = (SELECT min("p6"."weight") FROM "p" AS "p6"
-        WHERE "p6"."pn" IN (SELECT "s"."pn" FROM "s" WHERE ("s"."sn" = "spj"."sn") GROUP BY "s"."pn", "s"."status"))))"#;
+    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty" FROM "spj" INNER JOIN
+    (SELECT DISTINCT 1 AS "present_", "GNL"."sn" AS "sn" FROM "p" AS "p5" INNER JOIN
+    (SELECT min("p6"."weight") AS "min(weight)", "GNL"."sn" AS "sn" FROM "p" AS "p6" INNER JOIN
+    (SELECT DISTINCT "s"."pn" AS "pn", "s"."sn" AS "sn" FROM "s") AS "GNL" ON ("p6"."pn" = "GNL"."pn") GROUP BY "GNL"."sn") AS "GNL"
+    ON ("p5"."weight" = "GNL"."min(weight)")) AS "GNL" ON ("GNL"."sn" = "spj"."sn")"#;
     test_it("test13", original_text, expected_text);
 }
 
@@ -668,20 +669,16 @@ WHERE
       WHERE p4.weight > 50
     );"#;
 
-    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty", "l1"."total_weight",
-        "l2"."avg_weight_for_status", "l3"."adjusted_sum", coalesce("GNL1"."count(*)", 0) AS "high_weight_count" FROM
-        "spj" LEFT OUTER JOIN (SELECT sum("p1"."weight") AS "total_weight", "p1"."pn" AS "pn" FROM
-        "p" AS "p1" GROUP BY "p1"."pn") AS "l1" ON ("l1"."pn" = "spj"."pn") LEFT OUTER JOIN
-        (SELECT avg("p2"."weight") AS "avg_weight_for_status", "GNL"."sn" AS "sn" FROM "p" AS "p2" INNER JOIN
-        (SELECT max("s2"."city") AS "max(city)", "s2"."sn" AS "sn" FROM "s" AS "s2" GROUP BY "s2"."sn") AS "GNL" ON
-        ("p2"."city" = "GNL"."max(city)") WHERE ("p2"."weight" > 0) GROUP BY "GNL"."sn") AS "l2" ON
-        ("l2"."sn" = "spj"."sn") INNER JOIN (SELECT ("l_mid"."sum_weight" * 1.10) AS "adjusted_sum", "l_mid"."jn" AS "jn"
-        FROM (SELECT sum("p3"."weight") AS "sum_weight", "p3"."jn" AS "jn" FROM "p" AS "p3"
-        GROUP BY "p3"."jn") AS "l_mid") AS "l3" ON ("l3"."jn" = "spj"."jn") INNER JOIN
-        (SELECT DISTINCT "p4"."pn" AS "pn" FROM "p" AS "p4" WHERE ("p4"."weight" > 50)) AS "GNL"
-        ON ("spj"."pn" = "GNL"."pn") LEFT OUTER JOIN (SELECT count(*) AS "count(*)", "p_non"."pn" AS "pn"
-        FROM "p" AS "p_non" WHERE ("p_non"."weight" > 100) GROUP BY "p_non"."pn") AS "GNL1" ON ("GNL1"."pn" = "spj"."pn")
-        WHERE ("spj"."qty" = (SELECT max("spj2"."qty") FROM "spj" AS "spj2" WHERE ("spj2"."pn" = "spj"."pn")))"#;
+    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty", "l1"."total_weight", "l2"."avg_weight_for_status", "l3"."adjusted_sum",
+    (SELECT count(*) FROM "p" AS "p_non" WHERE (("p_non"."pn" = "spj"."pn") AND ("p_non"."weight" > 100))) AS "high_weight_count" FROM "spj"
+    LEFT OUTER JOIN (SELECT sum("p1"."weight") AS "total_weight", "p1"."pn" AS "pn" FROM "p" AS "p1" GROUP BY "p1"."pn") AS "l1" ON
+    ("l1"."pn" = "spj"."pn") LEFT OUTER JOIN (SELECT avg("p2"."weight") AS "avg_weight_for_status", "GNL"."sn" AS "sn" FROM "p" AS "p2"
+    INNER JOIN (SELECT max("s2"."city") AS "max(city)", "s2"."sn" AS "sn" FROM "s" AS "s2" GROUP BY "s2"."sn") AS "GNL" ON ("p2"."city" = "GNL"."max(city)")
+    WHERE ("p2"."weight" > 0) GROUP BY "GNL"."sn") AS "l2" ON ("l2"."sn" = "spj"."sn") INNER JOIN (SELECT ("l_mid"."sum_weight" * 1.10) AS "adjusted_sum",
+    "l_mid"."jn" AS "jn" FROM (SELECT sum("p3"."weight") AS "sum_weight", "p3"."jn" AS "jn" FROM "p" AS "p3" GROUP BY "p3"."jn") AS "l_mid") AS "l3"
+    ON ("l3"."jn" = "spj"."jn") INNER JOIN (SELECT max("spj2"."qty") AS "max(qty)", "spj2"."pn" AS "pn" FROM "spj" AS "spj2" GROUP BY "spj2"."pn") AS "GNL"
+    ON (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."max(qty)")) INNER JOIN
+    (SELECT DISTINCT "p4"."pn" AS "pn" FROM "p" AS "p4" WHERE ("p4"."weight" > 50)) AS "GNL1" ON ("spj"."pn" = "GNL1"."pn")"#;
     test_it("test14", original_text, expected_text);
 }
 
@@ -1486,9 +1483,11 @@ FROM s AS s;"#;
     test_it("test48", original_text, expected_text);
 }
 
-// Test with partial rewrite, as the full rewrite would cause `problematic self-join` issue
 // WHERE NOT IN; correlated; LATERAL subquery flattened; rewritten as LEFT OUTER JOIN; anti-semi
 // via IS NULL guard; NP/EP omitted when null-safe; RHS deduplicated (DISTINCT).
+// Pay attention to "city_has_job", it looks like it needs the 3VL-guard, as it's LHS `s.city`
+// is not NULL-free, but EXISTS in the WHERE references s.city in NULL-rejecting condition,
+// so the 3VL can be dropped.
 #[test]
 fn test49() {
     let original_text = r#"
@@ -1501,9 +1500,9 @@ SELECT
     SELECT 1
     FROM SPJ sp
     WHERE sp.sn = S.sn
-      AND sp.pn IN (SELECT pn FROM P WHERE color = 'RED')
+      AND sp.pn IN (SELECT p.pn FROM P WHERE p.color = 'RED')
   ) AS supplies_red_parts,
-  (S.city IN (SELECT city FROM J WHERE city IS NOT NULL)) AS city_has_job
+  (S.city IN (SELECT j.city FROM J WHERE j.city IS NOT NULL)) AS city_has_job
 FROM S
 CROSS JOIN LATERAL (
   SELECT COUNT(*) AS spj_cnt
@@ -1535,17 +1534,18 @@ WHERE
   );
 "#;
     let expected_text = r#"SELECT "s"."sn", "s"."sname", coalesce("lsp"."spj_cnt", 0), "lmax"."max_qty_for_supplier",
-        EXISTS (SELECT 1 FROM "spj" AS "sp" WHERE (("sp"."sn" = "s"."sn") AND "sp"."pn" IN
-        (SELECT "pn" FROM "p" WHERE ("color" = 'RED')))) AS "supplies_red_parts", "s"."city" IN
-        (SELECT "city" FROM "j" WHERE ("city" IS NOT NULL)) AS "city_has_job" FROM "s" LEFT OUTER JOIN
-        (SELECT count(*) AS "spj_cnt", "sp"."sn" AS "sn" FROM "spj" AS "sp" GROUP BY "sp"."sn") AS "lsp" ON
-        ("lsp"."sn" = "s"."sn") LEFT OUTER JOIN (SELECT max("qty") AS "max_qty_for_supplier", "sp"."sn" AS "sn"
-        FROM "spj" AS "sp" GROUP BY "sp"."sn") AS "lmax" ON ("lmax"."sn" = "s"."sn") INNER JOIN
-        (SELECT DISTINCT 1 AS "present_", "GNL"."sn" AS "sn", "j"."city" AS "city" FROM "j" INNER JOIN
-        (SELECT DISTINCT "sp2"."jn" AS "jn", "sp2"."sn" AS "sn" FROM "spj" AS "sp2" WHERE ("sp2"."qty" > 0)) AS "GNL"
-        ON ("j"."jn" = "GNL"."jn")) AS "GNL" ON (("GNL"."city" = "s"."city") AND ("GNL"."sn" = "s"."sn")) LEFT OUTER JOIN
-        (SELECT count(*) AS "count(*)", "sp3"."sn" AS "sn" FROM "spj" AS "sp3" GROUP BY "sp3"."sn") AS "GNL1" ON
-        ("GNL1"."sn" = "s"."sn") WHERE (("s"."status" IS NOT NULL) AND ("s"."status" != coalesce("GNL1"."count(*)", 0)))"#;
+    ("GNL2"."present_" IS NOT NULL) AS "supplies_red_parts", ("GNL3"."city" IS NOT NULL) AS "city_has_job" FROM "s" LEFT OUTER JOIN
+    (SELECT count(*) AS "spj_cnt", "sp"."sn" AS "sn" FROM "spj" AS "sp" GROUP BY "sp"."sn") AS "lsp" ON ("lsp"."sn" = "s"."sn")
+    LEFT OUTER JOIN (SELECT max("qty") AS "max_qty_for_supplier", "sp"."sn" AS "sn" FROM "spj" AS "sp" GROUP BY "sp"."sn") AS "lmax"
+    ON ("lmax"."sn" = "s"."sn") INNER JOIN (SELECT DISTINCT 1 AS "present_", "GNL"."sn" AS "sn", "j"."city" AS "city" FROM "j"
+    INNER JOIN (SELECT DISTINCT "sp2"."jn" AS "jn", "sp2"."sn" AS "sn" FROM "spj" AS "sp2" WHERE ("sp2"."qty" > 0)) AS "GNL"
+    ON ("j"."jn" = "GNL"."jn")) AS "GNL" ON (("GNL"."city" = "s"."city") AND ("GNL"."sn" = "s"."sn")) LEFT OUTER JOIN
+    (SELECT count(*) AS "count(*)", "sp3"."sn" AS "sn" FROM "spj" AS "sp3" GROUP BY "sp3"."sn") AS "GNL1" ON
+    ("GNL1"."sn" = "s"."sn") LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_", "sp"."sn" AS "sn" FROM "spj" AS "sp" INNER JOIN
+    (SELECT DISTINCT "p"."pn" AS "pn" FROM "p" WHERE ("p"."color" = 'RED')) AS "GNL" ON ("sp"."pn" = "GNL"."pn")) AS "GNL2"
+    ON ("GNL2"."sn" = "s"."sn") LEFT OUTER JOIN (SELECT DISTINCT "j"."city" AS "city" FROM "j" WHERE ("j"."city" IS NOT NULL)) AS "GNL3"
+    ON ("s"."city" = "GNL3"."city")
+    WHERE (("s"."status" IS NOT NULL) AND ("s"."status" != coalesce("GNL1"."count(*)", 0)))"#;
     test_it("test49", original_text, expected_text);
 }
 
@@ -1575,7 +1575,6 @@ where
     test_it("test50", original_text, expected_text);
 }
 
-// No rewrite: bail out due to problematic self-join
 #[test]
 fn test51() {
     let original_text = r#"
@@ -1586,9 +1585,9 @@ fn test51() {
             (SELECT t.a, row_number() OVER (ORDER BY t.a) as rn FROM t) sq
          WHERE sq.rn <= 2
      );"#;
-    let expected_text = r#"SELECT "t"."a", "t"."b" FROM "t" WHERE "t"."a"
-        IN (SELECT "sq"."a" FROM (SELECT "t"."a", ROW_NUMBER() OVER(ORDER BY "t"."a" ASC NULLS LAST) AS "rn" FROM "t") AS "sq"
-        WHERE ("sq"."rn" <= 2))"#;
+    let expected_text = r#"SELECT "t"."a", "t"."b" FROM "t" INNER JOIN (SELECT DISTINCT "sq"."a" AS "a" FROM
+    (SELECT "t"."a", ROW_NUMBER() OVER(ORDER BY "t"."a" ASC NULLS LAST) AS "rn" FROM "t") AS "sq"
+     WHERE ("sq"."rn" <= 2)) AS "GNL" ON ("t"."a" = "GNL"."a")"#;
     test_it("test51", original_text, expected_text);
 }
 
@@ -6532,4 +6531,556 @@ ORDER BY
     GROUP BY "inner_subq"."jn") AS "array_subq") AS "array_subq") AS "tags" ON ("tags"."jn" = "inner"."jn")
     ORDER BY "tags" NULLS LAST"#;
     test_it("test239", original_text, expected_text);
+}
+
+#[test]
+fn test239b() {
+    let original_text = r#"select array(select tags.tag from tags where tags.d_id = d.id order by tags.tag desc) from dogs d where d.id = 1;"#;
+    let expected_text = r#"SELECT coalesce("array_subq"."agg_result", ARRAY[]) FROM "dogs" AS "d" LEFT OUTER JOIN
+    (SELECT array_agg("inner_subq"."tag" ORDER BY "inner_subq"."tag" DESC NULLS FIRST) AS "agg_result", "inner_subq"."d_id" AS "d_id"
+    FROM (SELECT "tags"."tag" AS "tag", "tags"."d_id" AS "d_id" FROM "tags" ORDER BY "tags"."tag" DESC NULLS FIRST) AS "inner_subq"
+    GROUP BY "inner_subq"."d_id") AS "array_subq" ON ("array_subq"."d_id" = "d"."id")
+    WHERE ("d"."id" = 1)"#;
+    test_it("test239b", original_text, expected_text);
+}
+
+#[test]
+fn test240() {
+    let original_text = r#"
+SELECT count(*) AS should_equal_baseline
+FROM (
+  SELECT
+    dt.RowNum,
+    NULLIF(dt.RowNum, dt.RowNum) AS x
+  FROM qa.DataTypes dt
+) AS v
+WHERE v.x NOT IN (
+  SELECT d1.RowNum
+  FROM qa.DataTypes1 d1
+  OFFSET 1000000
+);
+    "#;
+    let expected_text = r#"SELECT count(*) AS "should_equal_baseline" FROM (SELECT "dt"."rownum",
+    nullif("dt"."rownum", "dt"."rownum") AS "x" FROM "qa"."datatypes" AS "dt") AS "v" LEFT OUTER JOIN
+    (SELECT "INNER"."rownum" AS "rownum" FROM (SELECT "d1"."rownum" AS "rownum", ROW_NUMBER() OVER() AS "__rn"
+    FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE ("INNER"."__rn" > 1000000)) AS "GNL"
+    ON ("v"."x" = "GNL"."rownum") LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_"
+    FROM (SELECT "INNER"."present_" AS "present_", "INNER"."rownum" AS "rownum" FROM
+    (SELECT 1 AS "present_", "d1"."rownum" AS "rownum", ROW_NUMBER() OVER() AS "__rn"
+    FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE ("INNER"."__rn" > 1000000)) AS "NP_3VL"
+    WHERE ("NP_3VL"."rownum" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN (SELECT DISTINCT "INNER"."present_" AS "present_"
+    FROM (SELECT 1 AS "present_", ROW_NUMBER() OVER() AS "__rn" FROM "qa"."datatypes1" AS "d1") AS "INNER"
+    WHERE ("INNER"."__rn" > 1000000)) AS "EP_3VL"
+    WHERE (("GNL"."rownum" IS NULL)
+    AND ((("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)));"#;
+    test_it("test240", original_text, expected_text);
+}
+
+#[test]
+fn test241() {
+    let original_text = r#"
+SELECT count(*) AS should_equal_baseline
+FROM (
+  SELECT
+    dt.RowNum,
+    dt.test_int,
+    NULLIF(dt.RowNum, dt.RowNum) AS x
+  FROM qa.DataTypes dt
+) AS v
+WHERE v.x NOT IN (
+  SELECT d1.RowNum FROM qa.DataTypes1 d1
+  WHERE d1.test_int = v.test_int
+  OFFSET 1000000
+  LIMIT 10
+);
+"#;
+    let expected_text = r#"SELECT count(*) AS "should_equal_baseline" FROM
+    (SELECT "dt"."rownum", "dt"."test_int", nullif("dt"."rownum", "dt"."rownum") AS "x" FROM "qa"."datatypes" AS "dt") AS "v"
+    LEFT OUTER JOIN (SELECT "INNER"."rownum" AS "rownum", "INNER"."test_int" AS "test_int" FROM
+    (SELECT "d1"."rownum" AS "rownum", "d1"."test_int" AS "test_int", ROW_NUMBER() OVER(PARTITION BY "d1"."test_int") AS "__rn"
+    FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE (("INNER"."__rn" > 1000000) AND ("INNER"."__rn" <= 1000010))) AS "GNL"
+    ON (("GNL"."test_int" = "v"."test_int") AND ("v"."x" = "GNL"."rownum")) LEFT OUTER JOIN
+    (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."test_int" AS "test_int" FROM
+    (SELECT "INNER"."present_" AS "present_", "INNER"."rownum" AS "rownum", "INNER"."test_int" AS "test_int"
+    FROM (SELECT 1 AS "present_", "d1"."rownum" AS "rownum", "d1"."test_int" AS "test_int",
+    ROW_NUMBER() OVER(PARTITION BY "d1"."test_int") AS "__rn" FROM "qa"."datatypes1" AS "d1") AS "INNER"
+    WHERE (("INNER"."__rn" > 1000000) AND ("INNER"."__rn" <= 1000010))) AS "NP_3VL"
+    WHERE ("NP_3VL"."rownum" IS NULL)) AS "NP_3VL" ON ("NP_3VL"."test_int" = "v"."test_int") LEFT OUTER JOIN
+    (SELECT DISTINCT "INNER"."present_" AS "present_", "INNER"."test_int" AS "test_int" FROM
+    (SELECT 1 AS "present_", "d1"."test_int" AS "test_int", ROW_NUMBER() OVER(PARTITION BY "d1"."test_int") AS "__rn"
+    FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE ("INNER"."__rn" > 1000000)) AS "EP_3VL" ON ("EP_3VL"."test_int" = "v"."test_int")
+    WHERE (("GNL"."rownum" IS NULL) AND ((("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+    test_it("test241", original_text, expected_text);
+}
+
+#[test]
+fn test242() {
+    let original_text = r#"
+SELECT s.sn
+FROM s
+WHERE EXISTS (
+  SELECT 1
+  FROM spj t
+  WHERE t.sn = s.sn
+  OFFSET 1
+);
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN (SELECT DISTINCT "INNER"."present_" AS "present_",
+    "INNER"."sn" AS "sn" FROM (SELECT 1 AS "present_", "t"."sn" AS "sn", ROW_NUMBER() OVER(PARTITION BY "t"."sn") AS "__rn"
+    FROM "spj" AS "t") AS "INNER" WHERE ("INNER"."__rn" > 1)) AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test242", original_text, expected_text);
+}
+
+#[test]
+fn test243() {
+    let original_text = r#"SELECT s.sn FROM s WHERE EXISTS (SELECT 1 FROM spj OFFSET 1);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN (SELECT DISTINCT "INNER"."present_" AS "present_"
+    FROM (SELECT 1 AS "present_", ROW_NUMBER() OVER() AS "__rn" FROM "spj") AS "INNER" WHERE ("INNER"."__rn" > 1)) AS "GNL""#;
+    test_it("test243", original_text, expected_text);
+}
+
+#[test]
+fn test244() {
+    let original_text = r#"SELECT s.sn FROM s WHERE EXISTS (SELECT 1 FROM spj OFFSET 1 LIMIT 0);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" WHERE FALSE"#;
+    test_it("test244", original_text, expected_text);
+}
+
+// No 3VL guard needed: both sides are non-null
+#[test]
+fn test245() {
+    let original_text = r#"SELECT spj.sn FROM spj WHERE spj.qty NOT IN (SELECT p.weight FROM p);"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN
+    (SELECT "p"."weight" AS "weight" FROM "p") AS "GNL" ON ("spj"."qty" = "GNL"."weight")
+    WHERE ("GNL"."weight" IS NULL)"#;
+    test_it("test245", original_text, expected_text);
+}
+
+#[test]
+fn test246() {
+    let original_text = r#"SELECT spj.sn
+FROM spj
+WHERE spj.qty NOT IN (
+SELECT CASE WHEN p.color = 'RED' THEN NULL ELSE p.weight END
+FROM p
+);"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT CASE WHEN ("p"."color" = 'RED')
+    THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "GNL"
+    ON ("spj"."qty" = "GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END") LEFT OUTER JOIN
+    (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", CASE WHEN ("p"."color" = 'RED')
+    THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "NP_3VL"
+    WHERE ("NP_3VL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL)) AS "NP_3VL"
+    WHERE (("GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL) AND ("NP_3VL"."present_" IS NULL))"#;
+    test_it("test246", original_text, expected_text);
+}
+
+// 3VL required: RHS can produce NULLs
+#[test]
+fn test247() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty NOT IN (
+    SELECT CASE WHEN p.color = 'RED' THEN NULL ELSE p.weight END
+    FROM p
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT CASE WHEN ("p"."color" = 'RED')
+    THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "GNL"
+    ON ("spj"."qty" = "GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END") LEFT OUTER JOIN
+    (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", CASE WHEN ("p"."color" = 'RED')
+    THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "NP_3VL"
+    WHERE ("NP_3VL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL)) AS "NP_3VL"
+    WHERE (("GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL) AND ("NP_3VL"."present_" IS NULL))"#;
+    test_it("test247", original_text, expected_text);
+}
+
+#[test]
+fn test248() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty NOT IN (
+  SELECT p.weight
+  FROM p
+  OFFSET 1000000
+);
+"#;
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT "INNER"."weight" AS "weight"
+    FROM (SELECT "p"."weight" AS "weight", ROW_NUMBER() OVER() AS "__rn" FROM "p") AS "INNER"
+    WHERE ("INNER"."__rn" > 1000000)) AS "GNL" ON ("spj"."qty" = "GNL"."weight") WHERE ("GNL"."weight" IS NULL)"#;
+    test_it("test248", original_text, expected_text);
+}
+
+// 3VL required: RHS can produce NULLs, and OFFSET must be preserved via RN>...
+#[test]
+fn test249() {
+    let original_text = r#"
+SELECT spj.sn
+FROM spj
+WHERE spj.qty NOT IN (
+  SELECT CASE WHEN p.color = 'RED' THEN NULL ELSE p.weight END
+  FROM p
+  OFFSET 1000000
+);
+"#;
+    // EXPECTED SHAPE:
+    // - GNL: RN wrapper + WHERE __rn > 1000000, projects the CASE expr
+    // - NP_3VL: DISTINCT present_ over the same offset-applied RHS, filtered by CASE expr IS NULL
+    // - WHERE: (GNL.case_expr IS NULL) AND (NP_3VL.present_ IS NULL)
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT
+    "INNER"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" AS
+    "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END"
+    FROM (SELECT CASE WHEN ("p"."color" = 'RED') THEN NULL ELSE "p"."weight" END
+    AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END", ROW_NUMBER() OVER() AS "__rn" FROM "p") AS "INNER"
+    WHERE ("INNER"."__rn" > 1000000)) AS "GNL" ON ("spj"."qty" = "GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END")
+    LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT "INNER"."present_" AS "present_",
+    "INNER"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" AS
+    "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END"
+    FROM (SELECT 1 AS "present_", CASE WHEN ("p"."color" = 'RED') THEN NULL ELSE "p"."weight" END
+    AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END", ROW_NUMBER() OVER() AS "__rn" FROM "p") AS "INNER"
+    WHERE ("INNER"."__rn" > 1000000)) AS "NP_3VL" WHERE (
+    "NP_3VL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL)) AS "NP_3VL"
+    WHERE (("GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" IS NULL) AND ("NP_3VL"."present_" IS NULL));"#;
+    test_it("test249", original_text, expected_text);
+}
+
+// ── Redundant LIMIT/ORDER stripping for aggregate-only-no-GROUP-BY (ExactlyOne) ──
+
+/// WHERE scalar: aggregate-only subquery with redundant ORDER BY + LIMIT.
+/// The LIMIT and ORDER BY are meaningless (one aggregate row) and must be
+/// stripped — NOT materialized via ROW_NUMBER.
+#[test]
+fn test250_scalar_agg_redundant_order_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (SELECT AVG(spj.qty) FROM spj ORDER BY spj.sn LIMIT 10);
+"#;
+    // LIMIT 10 + ORDER BY stripped; ExactlyOne → INNER JOIN, no COALESCE needed for AVG.
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT avg("spj"."qty") AS "avg(qty)" FROM "spj") AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg(qty)")"#;
+    test_it("test250", original_text, expected_text);
+}
+
+/// WHERE scalar: aggregate-only subquery with only redundant ORDER BY (no LIMIT).
+/// ORDER BY alone on one row is dead weight and must be stripped.
+#[test]
+fn test251_scalar_agg_redundant_order_only() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (SELECT AVG(spj.qty) FROM spj ORDER BY spj.sn);
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT avg("spj"."qty") AS "avg(qty)" FROM "spj") AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg(qty)")"#;
+    test_it("test251", original_text, expected_text);
+}
+
+/// WHERE scalar: aggregate-only subquery with only redundant LIMIT (no ORDER BY).
+/// LIMIT > 1 on a single aggregate row is meaningless.
+#[test]
+fn test252_scalar_agg_redundant_limit_only() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (SELECT AVG(spj.qty) FROM spj LIMIT 100);
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT avg("spj"."qty") AS "avg(qty)" FROM "spj") AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg(qty)")"#;
+    test_it("test252", original_text, expected_text);
+}
+
+/// WHERE scalar: aggregate-only subquery with OFFSET > 0 — NOT redundant.
+/// OFFSET > 0 on a single-row aggregate eliminates the row entirely
+/// (ExactlyZero). The subquery is definitely empty; comparison yields NULL
+/// which WHERE filters out → FALSE.
+#[test]
+fn test253_scalar_agg_offset_positive_is_empty() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (SELECT AVG(spj.qty) FROM spj OFFSET 1);
+"#;
+    // Scalar with zero rows ⇒ NULL → filtered → FALSE
+    let expected_text = r#"SELECT "s"."sn" FROM "s" WHERE FALSE"#;
+    test_it("test253", original_text, expected_text);
+}
+
+/// WHERE scalar: aggregate-only subquery with LIMIT 1 OFFSET 0 — LIMIT 1
+/// is recognized by both `has_limit_one_deep` and the strip logic.
+/// Either path results in LIMIT/ORDER being cleared.
+#[test]
+fn test254_scalar_agg_limit_one_offset_zero() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (SELECT AVG(spj.qty) FROM spj LIMIT 1 OFFSET 0);
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT avg("spj"."qty") AS "avg(qty)" FROM "spj") AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg(qty)")"#;
+    test_it("test254", original_text, expected_text);
+}
+
+/// WHERE EXISTS: aggregate-only subquery wrapped in a projecting subquery
+/// with redundant ORDER BY + LIMIT.  The wrapper's LIMIT/ORDER are
+/// meaningless because the inner produces ExactlyOne row.
+/// ExactlyOne EXISTS is constant-folded to TRUE (conjunct dropped).
+#[test]
+fn test255_exists_nested_wrapper_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE EXISTS (
+    SELECT sq.cnt FROM (SELECT COUNT(*) AS cnt FROM spj) AS sq
+    ORDER BY sq.cnt LIMIT 5
+);
+"#;
+    // EXISTS(aggregate-only through wrapper) → always true → conjunct dropped
+    let expected_text = r#"SELECT "s"."sn" FROM "s""#;
+    test_it("test255", original_text, expected_text);
+}
+
+/// WHERE NOT IN: aggregate-only subquery with redundant LIMIT.
+/// NOT IN(one-row) simplifies to != (no 3VL probes needed).
+/// LIMIT must be stripped so ExactlyOne classification holds.
+#[test]
+fn test256_not_in_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status NOT IN (SELECT COUNT(*) FROM spj LIMIT 10);
+"#;
+    // NOT IN(ExactlyOne) → != ; COALESCE for COUNT
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT count(*) AS "count(*)" FROM "spj") AS "GNL"
+        WHERE ("s"."status" != "GNL"."count(*)")"#;
+    test_it("test256", original_text, expected_text);
+}
+
+/// SELECT-list scalar: correlated aggregate-only subquery with redundant
+/// ORDER BY + LIMIT.  Before the correlation hoist adds GROUP BY, the
+/// subquery is aggregate-only-no-GROUP-BY (ExactlyOne per outer row).
+/// LIMIT/ORDER are stripped at that point.  After GROUP BY injection, the
+/// subquery is grouped but the LIMIT is already gone — no ROW_NUMBER.
+#[test]
+fn test257_select_list_correlated_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn,
+       (SELECT COUNT(*) FROM spj WHERE spj.sn = s.sn ORDER BY spj.qty LIMIT 10) AS cnt
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", coalesce("GNL"."count(*)", 0) AS "cnt"
+        FROM "s" LEFT OUTER JOIN (SELECT count(*) AS "count(*)", "spj"."sn" AS "sn"
+        FROM "spj" GROUP BY "spj"."sn") AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test257", original_text, expected_text);
+}
+
+/// Aggregate-only with HAVING (AtMostOne) and redundant LIMIT.
+/// LIMIT is still stripped (AtMostOne ≤ 1 row), but ExactlyOne constant
+/// folds do NOT apply (HAVING may filter the row away).
+#[test]
+fn test258_agg_having_atmostone_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE EXISTS (
+    SELECT COUNT(*) FROM spj HAVING COUNT(*) > 100 LIMIT 10
+);
+"#;
+    // AtMostOne: EXISTS is NOT constant-folded; becomes INNER JOIN.
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT DISTINCT 1 AS "present_" FROM "spj" HAVING (count(*) > 100)) AS "GNL""#;
+    test_it("test258", original_text, expected_text);
+}
+
+/// SELECT-list scalar: non-correlated aggregate-only with redundant LIMIT.
+/// Strip LIMIT, preserve ExactlyOne → COALESCE for COUNT.
+#[test]
+fn test259_select_list_uncorrelated_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn,
+       (SELECT COUNT(*) FROM spj ORDER BY spj.qty LIMIT 10) AS total
+FROM s;
+"#;
+    let expected_text = r#"SELECT "s"."sn", "GNL"."count(*)" AS "total"
+        FROM "s" LEFT OUTER JOIN (SELECT count(*) AS "count(*)" FROM "spj") AS "GNL""#;
+    test_it("test259", original_text, expected_text);
+}
+
+// ── Redundant LIMIT/ORDER stripping through wrapper chains (deeply nested ExactlyOne) ──
+
+/// WHERE scalar: single projecting wrapper around aggregate-only ExactlyOne.
+/// The wrapper itself is not aggregate-only, but `agg_only_no_gby_cardinality`
+/// descends through the wrapper to discover the inner ExactlyOne.
+/// LIMIT and ORDER BY on the wrapper are redundant and must be stripped.
+/// Note: the wrapper goes through the uncorrelated-IN-like path which adds
+/// DISTINCT (harmless on a single-row subquery).
+#[test]
+fn test260_wrapper_around_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (
+    SELECT sq.avg_qty FROM (SELECT AVG(spj.qty) AS avg_qty FROM spj) AS sq
+    ORDER BY sq.avg_qty LIMIT 10
+);
+"#;
+    // Wrapper LIMIT/ORDER stripped; inner ExactlyOne propagates → INNER JOIN.
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT DISTINCT "sq"."avg_qty" AS "avg_qty"
+        FROM (SELECT avg("spj"."qty") AS "avg_qty" FROM "spj") AS "sq") AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg_qty")"#;
+    test_it("test260", original_text, expected_text);
+}
+
+/// WHERE scalar: TWO projecting wrappers around aggregate-only ExactlyOne.
+/// `agg_only_no_gby_cardinality` must recurse through both wrappers.
+#[test]
+fn test261_double_wrapper_around_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (
+    SELECT w2.val FROM (
+        SELECT w1.avg_qty AS val FROM (
+            SELECT AVG(spj.qty) AS avg_qty FROM spj
+        ) AS w1
+    ) AS w2
+    ORDER BY w2.val LIMIT 5
+);
+"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT DISTINCT "w2"."val" AS "val" FROM (SELECT "w1"."avg_qty" AS "val"
+        FROM (SELECT avg("spj"."qty") AS "avg_qty" FROM "spj") AS "w1") AS "w2") AS "GNL"
+        WHERE ("s"."status" > "GNL"."val")"#;
+    test_it("test261", original_text, expected_text);
+}
+
+/// WHERE scalar: wrapper with non-trivial WHERE filter around ExactlyOne inner.
+/// The wrapper degrades ExactlyOne → AtMostOne (0 or 1 rows).  AtMostOne is
+/// a valid scalar shape (0 rows → NULL per standard SQL), so the scalar
+/// validation gate accepts it and LIMIT/ORDER are stripped as redundant.
+#[test]
+fn test262_wrapper_with_filter_around_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status > (
+    SELECT sq.avg_qty FROM (SELECT AVG(spj.qty) AS avg_qty FROM spj) AS sq
+    WHERE sq.avg_qty > 0
+    ORDER BY sq.avg_qty LIMIT 10
+);
+"#;
+    // AtMostOne accepted; LIMIT/ORDER stripped; DISTINCT added by IN-like path.
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT DISTINCT "sq"."avg_qty" AS "avg_qty"
+        FROM (SELECT avg("spj"."qty") AS "avg_qty" FROM "spj") AS "sq"
+        WHERE ("sq"."avg_qty" > 0)) AS "GNL"
+        WHERE ("s"."status" > "GNL"."avg_qty")"#;
+    test_it("test262", original_text, expected_text);
+}
+
+/// SELECT-list scalar: correlated aggregate-only under a projecting wrapper
+/// with redundant ORDER BY + LIMIT.  The early strip in
+/// `as_joinable_derived_table_with_opts` fires BEFORE the nested hoist
+/// injects GROUP BY into the inner, so `agg_only_no_gby_cardinality` still
+/// sees ExactlyOne and clears LIMIT/ORDER.  No ROW_NUMBER materialization.
+#[test]
+fn test263_select_list_correlated_wrapper_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn,
+       (SELECT sq.cnt FROM (SELECT COUNT(*) AS cnt FROM spj WHERE spj.sn = s.sn) AS sq
+        ORDER BY sq.cnt LIMIT 10) AS cnt
+FROM s;
+"#;
+    // LIMIT/ORDER stripped; correlation hoisted; no ROW_NUMBER.
+    let expected_text = r#"SELECT "s"."sn", coalesce("GNL"."cnt", 0) AS "cnt"
+        FROM "s" LEFT OUTER JOIN (SELECT DISTINCT "sq"."cnt" AS "cnt", "sq"."sn" AS "sn"
+        FROM (SELECT count(*) AS "cnt", "spj"."sn" AS "sn" FROM "spj"
+        GROUP BY "spj"."sn") AS "sq") AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test263", original_text, expected_text);
+}
+
+/// WHERE EXISTS: wrapper around aggregate-only ExactlyOne with redundant LIMIT.
+/// ExactlyOne propagates through the wrapper → EXISTS is constant-folded to TRUE.
+#[test]
+fn test264_exists_wrapper_around_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE EXISTS (
+    SELECT sq.cnt FROM (SELECT COUNT(*) AS cnt FROM spj) AS sq
+    ORDER BY sq.cnt LIMIT 5
+);
+"#;
+    // ExactlyOne through wrapper → EXISTS always true → conjunct dropped.
+    let expected_text = r#"SELECT "s"."sn" FROM "s""#;
+    test_it("test264", original_text, expected_text);
+}
+
+/// NOT IN: wrapper around aggregate-only ExactlyOne with redundant LIMIT.
+/// LIMIT stripped; ExactlyOne → NOT IN simplifies to != .
+#[test]
+fn test265_not_in_wrapper_around_agg_redundant_limit() {
+    let original_text = r#"
+SELECT s.sn FROM s
+WHERE s.status NOT IN (
+    SELECT sq.cnt FROM (SELECT COUNT(*) AS cnt FROM spj) AS sq
+    ORDER BY sq.cnt LIMIT 10
+);
+"#;
+    // NOT IN(ExactlyOne through wrapper) → != ; DISTINCT added by IN path.
+    let expected_text = r#"SELECT "s"."sn" FROM "s" INNER JOIN
+        (SELECT DISTINCT "sq"."cnt" AS "cnt"
+        FROM (SELECT count(*) AS "cnt" FROM "spj") AS "sq") AS "GNL"
+        WHERE ("s"."status" != "GNL"."cnt")"#;
+    test_it("test265", original_text, expected_text);
+}
+
+// ── Subqueries in HAVING are rejected with a clean error ──
+
+/// A subquery in HAVING should be rejected with `unsupported!` rather than
+/// silently passing through and hitting the hard guardrail in derived_tables_rewrite.
+#[test]
+fn test266_having_subquery_rejected() {
+    let original_text = r#"
+SELECT s.city, COUNT(*) FROM s
+GROUP BY s.city
+HAVING COUNT(*) > (SELECT AVG(spj.qty) FROM spj);
+"#;
+    // Empty expected text → assert the rewrite errors.
+    test_it("test266", original_text, "");
+}
+
+/// Correlated subquery in HAVING should also be rejected.
+#[test]
+fn test267_having_correlated_subquery_rejected() {
+    let original_text = r#"
+SELECT s.city, COUNT(*) FROM s
+GROUP BY s.city
+HAVING COUNT(*) > (SELECT AVG(spj.qty) FROM spj WHERE spj.sn = s.sn);
+"#;
+    test_it("test267", original_text, "");
+}
+
+// ── NOT EXISTS in SELECT-list position ──
+
+/// Uncorrelated NOT EXISTS in SELECT-list: aggregate-only-no-GBY (ExactlyOne)
+/// → always one row → EXISTS is TRUE → NOT EXISTS is FALSE → constant FALSE.
+#[test]
+fn test268_select_list_not_exists_uncorrelated_exactly_one() {
+    let original_text = r#"
+SELECT s.sn, NOT EXISTS (SELECT COUNT(*) FROM spj) AS never_true
+FROM s;
+"#;
+    // ExactlyOne → NOT EXISTS constant-folded to FALSE.
+    let expected_text = r#"SELECT "s"."sn", FALSE AS "never_true" FROM "s""#;
+    test_it("test268", original_text, expected_text);
+}
+
+/// Correlated NOT EXISTS in SELECT-list: produces IS NULL on the presence probe.
+#[test]
+fn test269_select_list_not_exists_correlated() {
+    let original_text = r#"
+SELECT s.sn, NOT EXISTS (SELECT spj.qty FROM spj WHERE spj.sn = s.sn) AS has_no_parts
+FROM s;
+"#;
+    // NOT EXISTS → LEFT JOIN + present_ IS NULL
+    let expected_text = r#"SELECT "s"."sn", ("GNL"."present_" IS NULL) AS "has_no_parts"
+        FROM "s" LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_", "spj"."sn" AS "sn"
+        FROM "spj") AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
+    test_it("test269", original_text, expected_text);
 }
