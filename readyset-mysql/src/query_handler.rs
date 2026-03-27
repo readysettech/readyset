@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use chrono::FixedOffset;
 use lazy_static::lazy_static;
+use mysql_srv::AuthKeys;
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::SelectSchema;
 use readyset_adapter::{QueryHandler, SessionTimezone, SetBehavior};
@@ -12,7 +13,8 @@ use readyset_client::ColumnSchema;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SqlIdentifier, SqlQuery,
+    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, ShowStatement, SqlIdentifier,
+    SqlQuery,
 };
 use tracing::warn;
 
@@ -833,18 +835,18 @@ pub struct MySqlQueryHandler;
 
 impl QueryHandler for MySqlQueryHandler {
     fn requires_fallback(query: &SqlQuery) -> bool {
-        // Currently any query with variables requires a fallback
         match query {
+            // Any query with variables requires a fallback
             SqlQuery::Select(stmt) => stmt.fields.iter().any(|field| match field {
                 FieldDefinitionExpr::Expr { expr, .. } => expr.contains_vars(),
                 _ => false,
             }),
+            SqlQuery::Show(ShowStatement::ReadySetRsaPublicKey) => true,
             _ => false,
         }
     }
 
     fn return_default_response(query: &SqlQuery) -> bool {
-        // For now we only care if we are querying for the `@@version_comment` alone
         match query {
             SqlQuery::Select(stmt) => stmt.fields.iter().any(|field| {
                 matches!(field, FieldDefinitionExpr::Expr {
@@ -852,6 +854,7 @@ impl QueryHandler for MySqlQueryHandler {
                     ..
                 } if var.as_non_user_var() == Some(VERSION_COMMENT_VARIABLE_NAME) && stmt.fields.len() == 1)
             }),
+            SqlQuery::Show(ShowStatement::ReadySetRsaPublicKey) => true,
             _ => false,
         }
     }
@@ -914,6 +917,27 @@ impl QueryHandler for MySqlQueryHandler {
                         columns: Cow::Owned(vec![field_name]),
                     },
                     vec![Results::new(vec![vec![VERSION_COMMENT_DEFAULT]])],
+                ))
+            }
+            SqlQuery::Show(ShowStatement::ReadySetRsaPublicKey) => {
+                let pem = AuthKeys::try_get()
+                    .ok_or_else(|| ReadySetError::Internal("RSA keys not initialized".into()))?
+                    .public_key_pem();
+                let field_name: SqlIdentifier =
+                    "Caching_sha2_password_rsa_public_key".into();
+                Ok(QueryResult::from_owned(
+                    SelectSchema {
+                        schema: Cow::Owned(vec![ColumnSchema {
+                            column: Column {
+                                name: field_name.clone(),
+                                table: None,
+                            },
+                            column_type: DfType::Text(Collation::Utf8),
+                            base: None,
+                        }]),
+                        columns: Cow::Owned(vec![field_name]),
+                    },
+                    vec![Results::new(vec![vec![DfValue::from(pem)]])],
                 ))
             }
             _ => Ok(QueryResult::empty(SelectSchema {

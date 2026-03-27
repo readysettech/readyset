@@ -32,6 +32,8 @@ pub enum ShowStatement {
         query_id: Option<String>,
         limit: Option<u64>,
     },
+    /// SHOW READYSET RSA PUBLIC KEY
+    ReadySetRsaPublicKey,
 }
 
 impl DialectDisplay for ShowStatement {
@@ -98,6 +100,9 @@ impl DialectDisplay for ShowStatement {
                         write!(f, " LIMIT {limit}")?;
                     }
                     Ok(())
+                }
+                Self::ReadySetRsaPublicKey => {
+                    write!(f, "READYSET RSA PUBLIC KEY")
                 }
             }
         })

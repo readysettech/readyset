@@ -139,6 +139,18 @@ pub fn readyset_migration_status(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], S
     Ok((i, ShowStatement::ReadySetMigrationStatus(id)))
 }
 
+/// Parses READYSET RSA PUBLIC KEY
+fn readyset_rsa_public_key(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    let (i, _) = tag_no_case("readyset")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("rsa")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("public")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("key")(i)?;
+    Ok((i, ShowStatement::ReadySetRsaPublicKey))
+}
+
 fn readyset_tables() -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
     move |i| {
         let (i, _) = tag_no_case("readyset")(i)?;
@@ -181,6 +193,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             caches(dialect),
             proxied_queries(dialect),
             show_rls(dialect),
+            readyset_rsa_public_key,
             readyset_migration_status,
             readyset_status(),
             value(
@@ -246,6 +259,8 @@ fn filter_predicate(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::DialectDisplay;
+
     use super::*;
 
     #[test]
@@ -691,5 +706,38 @@ mod tests {
             res,
             ShowStatement::CachedQueries(Some(CacheType::Shallow), None)
         );
+    }
+
+    #[test]
+    fn show_readyset_rsa_public_key() {
+        for &dialect in Dialect::ALL {
+            let res = show(dialect)(LocatedSpan::new(b"SHOW READYSET RSA PUBLIC KEY"))
+                .unwrap()
+                .1;
+            assert_eq!(res, ShowStatement::ReadySetRsaPublicKey);
+
+            // Also verify with tabs/mixed whitespace
+            let res = show(dialect)(LocatedSpan::new(b"SHOW\tREADYSET\tRSA\tPUBLIC\tKEY"))
+                .unwrap()
+                .1;
+            assert_eq!(res, ShowStatement::ReadySetRsaPublicKey);
+        }
+    }
+
+    #[test]
+    fn show_readyset_rsa_public_key_display_roundtrip() {
+        for &dialect in Dialect::ALL {
+            let parsed = show(dialect)(LocatedSpan::new(b"SHOW READYSET RSA PUBLIC KEY"))
+                .unwrap()
+                .1;
+            let displayed = parsed.display(dialect).to_string();
+            assert_eq!(displayed, "SHOW READYSET RSA PUBLIC KEY");
+
+            // Parse the displayed string to verify roundtrip
+            let reparsed = show(dialect)(LocatedSpan::new(displayed.as_bytes()))
+                .unwrap()
+                .1;
+            assert_eq!(reparsed, ShowStatement::ReadySetRsaPublicKey);
+        }
     }
 }

@@ -225,6 +225,7 @@ enum ReadysetKeyword {
     REFRESH,
     REPLAY,
     RESNAPSHOT,
+    RSA,
     SHALLOW,
     SIMPLIFIED,
     STOP,
@@ -261,6 +262,7 @@ impl ReadysetKeyword {
             Self::REFRESH => "REFRESH",
             Self::REPLAY => "REPLAY",
             Self::RESNAPSHOT => "RESNAPSHOT",
+            Self::RSA => "RSA",
             Self::SHALLOW => "SHALLOW",
             Self::SIMPLIFIED => "SIMPLIFIED",
             Self::STOP => "STOP",
@@ -953,9 +955,21 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
                     readyset_sql::ast::ReadySetTablesOptions { all: true },
                 ),
             ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::RSA,
+                ReadysetKeyword::Standard(Keyword::PUBLIC),
+                ReadysetKeyword::Standard(Keyword::KEY),
+            ],
+        ) {
+            Ok(SqlQuery::Show(
+                readyset_sql::ast::ShowStatement::ReadySetRsaPublicKey,
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(
-                "expected VERSION, STATUS, TABLES, ALL TABLES, or MIGRATION STATUS after READYSET"
+                "expected VERSION, STATUS, TABLES, ALL TABLES, \
+                 MIGRATION STATUS, or RSA PUBLIC KEY after READYSET"
                     .into(),
             ))
         }

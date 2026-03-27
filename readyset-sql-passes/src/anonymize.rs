@@ -210,7 +210,8 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | ShowStatement::Databases
             | ShowStatement::Rls(..)
             | ShowStatement::ReplayPaths
-            | ShowStatement::ShallowCacheEntries { .. } => {}
+            | ShowStatement::ShallowCacheEntries { .. }
+            | ShowStatement::ReadySetRsaPublicKey => {}
         }
         Ok(())
     }

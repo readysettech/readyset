@@ -346,6 +346,9 @@ impl SqlQuery {
                 | ShowStatement::Rls(_)
                 | ShowStatement::ReplayPaths
                 | ShowStatement::ShallowCacheEntries { .. } => true,
+                // Handled by the MySQL query handler via the
+                // requires_fallback + return_default_response path.
+                ShowStatement::ReadySetRsaPublicKey => false,
             },
             SqlQuery::CreateRls(_) | SqlQuery::DropRls(_) => true,
             SqlQuery::CreateDatabase(_)
