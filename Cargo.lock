@@ -4219,6 +4219,8 @@ dependencies = [
  "bytes",
  "chrono",
  "database-utils",
+ "fail",
+ "failpoint-macros",
  "futures",
  "getrandom 0.4.1",
  "itoa",

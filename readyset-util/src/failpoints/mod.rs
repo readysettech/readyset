@@ -88,3 +88,13 @@ pub const ONLINE_INDEX_BUILD_PRE_ACTIVATE: &str = "online-index-build-pre-activa
 /// Failpoint: triggers at the start of build_indices, before any work begins.
 /// Used to test immediate failure and cleanup.
 pub const ONLINE_INDEX_BUILD_START: &str = "online-index-build-start";
+
+/// Triggers inside the `caching_sha2_password` fast-auth branch, just before
+/// the server sends `FAST_AUTH_SUCCESS`. Used to assert that the fast-auth
+/// path was (or was not) taken for a given connection.
+pub const CACHING_SHA2_FAST_AUTH_SUCCESS: &str = "caching-sha2-fast-auth-success";
+
+/// Triggers at the top of `caching_sha2_password`'s full-auth exchange,
+/// before any packet is sent. Used to assert that the full-auth path was
+/// (or was not) taken for a given connection.
+pub const CACHING_SHA2_FULL_AUTH_BEGIN: &str = "caching-sha2-full-auth-begin";

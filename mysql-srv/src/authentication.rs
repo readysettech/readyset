@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
@@ -15,7 +16,10 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use failpoint_macros::set_failpoint;
 use getrandom::fill;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Oaep, RsaPrivateKey};
@@ -23,9 +27,11 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;
-use tracing::error;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::{debug, error, warn};
 
 use crate::error::MsqlSrvError;
+use crate::packet::PacketConn;
 
 pub type AuthData = [u8; 20];
 
@@ -38,14 +44,13 @@ pub const CACHING_SHA2_PASSWORD: &str = "caching_sha2_password";
 const RSA_PRIVATE_KEY_FILE: &str = "caching_sha2_password_private_key.pem";
 const RSA_PUBLIC_KEY_FILE: &str = "caching_sha2_password_public_key.pem";
 
+/// Auth "more data" prefix for multi-packet exchanges.
+const AUTH_MORE_DATA: u8 = 0x01;
 /// Client requests the server's RSA public key during full-auth.
-#[allow(dead_code)] // Used in CL 4
 pub const RSA_PUBLIC_KEY_REQUEST: u8 = 0x02;
 /// Server indicates fast-auth succeeded (cache hit).
-#[allow(dead_code)] // Used in CL 4
 pub const FAST_AUTH_SUCCESS: u8 = 0x03;
 /// Server requests full authentication (cache miss).
-#[allow(dead_code)] // Used in CL 4
 pub const PERFORM_FULL_AUTH: u8 = 0x04;
 /// Auth-switch-request indicator byte.
 pub const AUTH_SWITCH_REQUEST: u8 = 0xfe;
@@ -286,7 +291,7 @@ impl FromStr for AuthPlugin {
 
 impl Default for AuthPlugin {
     fn default() -> Self {
-        AuthPlugin::Native(MysqlNativePassword)
+        AuthPlugin::Sha2(CachingSha2Password)
     }
 }
 
@@ -334,15 +339,22 @@ impl AuthPlugin {
     }
 
     /// Verify authentication using the appropriate plugin.
-    /// For mysql_native_password this is synchronous.
-    /// For caching_sha2_password (CL 4) this will be async with network I/O.
-    pub fn handle_authentication_native(&self, ctx: &AuthContext<'_>) -> bool {
+    ///
+    /// For `mysql_native_password` this is a synchronous hash comparison.
+    /// For `caching_sha2_password` this may involve additional network I/O
+    /// (fast-auth status packets, RSA key exchange, encrypted password).
+    pub async fn handle_authentication<S>(
+        &self,
+        ctx: &AuthContext<'_>,
+        conn: &mut PacketConn<S>,
+        auth_cache: &Arc<AuthCache>,
+    ) -> Result<bool, io::Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
         match self {
-            AuthPlugin::Native(p) => p.handle_authentication(ctx),
-            AuthPlugin::Sha2(_) => {
-                // Will be implemented in CL 4. For now, fall back to rejecting.
-                false
-            }
+            AuthPlugin::Native(p) => Ok(p.handle_authentication(ctx)),
+            AuthPlugin::Sha2(p) => p.handle_authentication(ctx, conn, auth_cache).await,
         }
     }
 }
@@ -394,7 +406,7 @@ impl MysqlNativePassword {
         if !ctx.require_auth {
             return true;
         }
-        ctx.password.as_ref().is_some_and(|password| {
+        ctx.password.is_some_and(|password| {
             let expected = self.hash_password(password, ctx.auth_data);
             if ctx.handshake_password.len() != expected.len() {
                 return false;
@@ -441,12 +453,158 @@ impl CachingSha2Password {
 
         Ok(xor_slice_modulus(&decrypted, auth_data))
     }
+
+    /// Send a one-byte auth status packet (prefixed with 0x01).
+    async fn send_auth_status_packet<S>(
+        conn: &mut PacketConn<S>,
+        status: u8,
+    ) -> Result<(), io::Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        let packet = vec![AUTH_MORE_DATA, status];
+        conn.enqueue_packet(packet);
+        conn.flush().await?;
+        Ok(())
+    }
+
+    /// Authenticate a client using `caching_sha2_password`.
+    ///
+    /// Attempts fast-auth first (cache hit) and falls back to the full
+    /// RSA-based exchange on cache miss.
+    pub async fn handle_authentication<S>(
+        &self,
+        ctx: &AuthContext<'_>,
+        conn: &mut PacketConn<S>,
+        auth_cache: &Arc<AuthCache>,
+    ) -> Result<bool, io::Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        // Empty from client + no stored password = allow
+        // Empty from client + stored password exists = reject
+        if ctx.handshake_password.is_empty()
+            || (ctx.handshake_password.len() == 1 && ctx.handshake_password[0] == 0)
+        {
+            if !ctx.require_auth {
+                return Ok(true);
+            }
+            // Allow only if stored password is explicitly empty
+            return Ok(ctx.password.is_some_and(|p| p.is_empty()));
+        }
+
+        if !ctx.require_auth {
+            // Send fast_auth_success if a password was provided (len > 1)
+            if ctx.handshake_password.len() > 1 {
+                Self::send_auth_status_packet(conn, FAST_AUTH_SUCCESS).await?;
+            }
+            return Ok(true);
+        }
+
+        // Fast-auth scramble must be exactly 32 bytes
+        if ctx.handshake_password.len() == 32
+            && auth_cache.check(ctx.username, ctx.handshake_password, ctx.auth_data)
+        {
+            set_failpoint!(failpoints::CACHING_SHA2_FAST_AUTH_SUCCESS);
+            Self::send_auth_status_packet(conn, FAST_AUTH_SUCCESS).await?;
+            return Ok(true);
+        }
+
+        // Cache miss -> full authentication
+        self.handle_full_auth(ctx, conn, auth_cache).await
+    }
+
+    /// Perform the full authentication exchange (RSA key exchange path).
+    ///
+    /// Sends `PERFORM_FULL_AUTH` to the client, then reads either a
+    /// plaintext password (TLS) or an RSA-encrypted password (non-TLS).
+    async fn handle_full_auth<S>(
+        &self,
+        ctx: &AuthContext<'_>,
+        conn: &mut PacketConn<S>,
+        auth_cache: &Arc<AuthCache>,
+    ) -> Result<bool, io::Error>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send,
+    {
+        set_failpoint!(failpoints::CACHING_SHA2_FULL_AUTH_BEGIN);
+        // Send perform_full_authentication status
+        Self::send_auth_status_packet(conn, PERFORM_FULL_AUTH).await?;
+
+        // Read the client's response
+        let packet = conn.next().await?.ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                "peer terminated connection during full auth",
+            )
+        })?;
+        conn.set_seq(packet.next_seq());
+
+        let plaintext_password = if conn.stream.is_secure() {
+            // TLS connection: password is plaintext + NUL
+            packet.data.to_vec()
+        } else {
+            let keys =
+                AuthKeys::try_get().ok_or_else(|| io::Error::other("RSA keys not initialized"))?;
+
+            let encrypted = if packet.data.len() == 1 && packet.data[0] == RSA_PUBLIC_KEY_REQUEST {
+                // Client requests RSA public key (--get-server-public-key)
+                let pem_bytes = keys.public_key_pem().as_bytes();
+                let mut key_packet = vec![AUTH_MORE_DATA];
+                key_packet.extend_from_slice(pem_bytes);
+                conn.enqueue_packet(key_packet);
+                conn.flush().await?;
+
+                // Read the encrypted password
+                let enc_packet = conn.next().await?.ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "peer terminated connection during RSA exchange",
+                    )
+                })?;
+                conn.set_seq(enc_packet.next_seq());
+                enc_packet.data.to_vec()
+            } else {
+                // Client already has the public key
+                // (--server-public-key-path), sent encrypted directly
+                packet.data.to_vec()
+            };
+
+            match CachingSha2Password::decrypt_password(&encrypted, ctx.auth_data, keys) {
+                Ok(decrypted) => decrypted,
+                Err(e) => {
+                    warn!(username = ctx.username, error = %e, "RSA password decryption failed");
+                    return Ok(false);
+                }
+            }
+        };
+
+        // MySQL NUL-terminates the password. Validate and strip the trailing NUL.
+        let received_password = match plaintext_password.split_last() {
+            Some((&0, rest)) => rest,
+            _ => {
+                debug!(username = ctx.username, "password not NUL-terminated");
+                return Ok(false);
+            }
+        };
+
+        // Verify against stored password
+        if let Some(stored) = ctx.password {
+            // Constant-time comparison to prevent timing side-channel attacks.
+            if constant_time_eq(stored, received_password) {
+                // Cache the digest for fast-auth on subsequent connections
+                auth_cache.insert(ctx.username, stored);
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 }
 
 /// Constant-time equality check for byte slices of equal length.
 ///
 /// Used for password verification to prevent timing side-channel attacks.
-#[allow(dead_code)] // Used in CL 4
 pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.ct_eq(b).into()
 }

@@ -15,6 +15,7 @@ categories = ["api-bindings", "network-programming", "database-implementations"]
 byteorder = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+fail = { workspace = true }
 getrandom = { workspace = true }
 itoa = { workspace = true }
 mysql-time = { path = "../mysql-time" }
@@ -31,6 +32,7 @@ tokio-native-tls = { workspace = true }
 tracing = { workspace = true }
 
 database-utils = { path = "../database-utils" }
+failpoint-macros = { path = "../failpoint-macros" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-data = { path = "../readyset-data" }
 readyset-util = { path = "../readyset-util" }
@@ -40,6 +42,9 @@ tokio-postgres = { workspace = true }
 slab = { workspace = true }
 futures = { workspace = true }
 tempfile = { workspace = true }
+
+[features]
+failure_injection = ["fail/failpoints", "readyset-util/failure_injection"]
 
 [lints]
 workspace = true

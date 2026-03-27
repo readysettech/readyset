@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::{io, net};
 
 use database_utils::TlsMode;
@@ -17,8 +18,9 @@ use mysql::consts::Command;
 use mysql::prelude::Queryable;
 use mysql::{Row, ServerError};
 use mysql_srv::{
-    AuthCache, AuthKeys, AuthPlugin, CachedSchema, Column, ErrorKind, MySqlIntermediary, MySqlShim,
-    ParamParser, QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
+    AuthCache, AuthKeys, AuthPlugin, CachedSchema, CachingSha2Password, Column, ErrorKind,
+    MySqlIntermediary, MySqlShim, ParamParser, QueryResultWriter, QueryResultsResponse,
+    StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_util::redacted::RedactedString;
@@ -35,6 +37,8 @@ struct TestingShim<Q, P, E, I, CU, W> {
     on_e: E,
     on_i: I,
     on_cu: CU,
+    #[allow(clippy::type_complexity)]
+    password_fn: Option<Box<dyn Fn(&str) -> Option<Vec<u8>> + Send>>,
     _phantom: PhantomData<W>,
 }
 
@@ -152,6 +156,9 @@ where
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
+        if let Some(f) = &self.password_fn {
+            return f(username);
+        }
         if username == "user" {
             Some(b"password".to_vec())
         } else {
@@ -200,6 +207,7 @@ where
             on_e,
             on_i,
             on_cu,
+            password_fn: None,
             _phantom: PhantomData,
         }
     }
@@ -211,6 +219,11 @@ where
 
     fn with_columns(mut self, c: Vec<Column>) -> Self {
         self.columns = c;
+        self
+    }
+
+    fn with_password_fn(mut self, f: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static) -> Self {
+        self.password_fn = Some(Box::new(f));
         self
     }
 
@@ -1360,4 +1373,209 @@ async fn large_packet_query_response_seq() {
         "max_allowed_packet=67108864",
     )
     .await;
+}
+
+fn ensure_auth_keys() {
+    let _ = AuthKeys::initialize(None);
+}
+
+/// Helper: spin up a server that uses `caching_sha2_password` and accepts
+/// `num_connections` sequential connections, then connect with `mysql_async`.
+///
+/// The closure receives a list of connection URLs for each accepted
+/// connection. For single-connection tests pass `num_connections = 1`.
+async fn sha2_test_server<F, Fut>(
+    user: &str,
+    password: &str,
+    auth_cache: Arc<AuthCache>,
+    num_connections: usize,
+    test_fn: F,
+) where
+    F: FnOnce(u16, Arc<AuthCache>) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    ensure_auth_keys();
+
+    let listener = net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("local_addr").port();
+
+    listener
+        .set_nonblocking(true)
+        .expect("couldn't set nonblocking");
+    let listener = TcpListener::from_std(listener).expect("from_std");
+
+    let stored_user = user.to_string();
+    let stored_password = password.to_string();
+    let server_cache = Arc::clone(&auth_cache);
+
+    let server_handle = tokio::spawn(async move {
+        for _ in 0..num_connections {
+            let (socket, _) = listener.accept().await.expect("accept");
+            let user = stored_user.clone();
+            let pass = stored_password.clone();
+            let cache = Arc::clone(&server_cache);
+
+            let shim = TestingShim::new(
+                move |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
+                |_| 0,
+                |_, _, _| unreachable!(),
+                |_| Box::pin(async move { Ok(()) }),
+                |_, _, _| Box::pin(async move { Ok(()) }),
+            )
+            .with_password_fn(move |username| {
+                if username == user {
+                    Some(pass.as_bytes().to_vec())
+                } else {
+                    None
+                }
+            });
+
+            MySqlIntermediary::run_on_tcp(
+                shim,
+                socket,
+                false,
+                None,
+                TlsMode::Optional,
+                cache,
+                AuthPlugin::Sha2(CachingSha2Password),
+            )
+            .await
+            .expect("server run");
+        }
+    });
+
+    let test_handle = tokio::spawn(test_fn(port, auth_cache));
+    test_handle.await.expect("test_fn");
+    server_handle.await.expect("server");
+}
+
+/// T1: Connect with caching_sha2_password over non-TLS (RSA key exchange).
+#[tokio::test]
+async fn sha2_rsa_key_exchange() {
+    let cache = AuthCache::new();
+    sha2_test_server("user", "password", cache, 1, |port, _cache| async move {
+        let url = format!("mysql://user:password@127.0.0.1:{port}?prefer_socket=false");
+        let mut db = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url"))
+            .await
+            .expect("connect");
+        assert!(db.ping().await.is_ok());
+        drop(db);
+    })
+    .await;
+}
+
+/// T5: Wrong password is rejected.
+#[tokio::test]
+async fn sha2_wrong_password_rejected() {
+    let cache = AuthCache::new();
+    sha2_test_server("user", "password", cache, 1, |port, _cache| async move {
+        let url = format!("mysql://user:wrong@127.0.0.1:{port}?prefer_socket=false");
+        let res = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url")).await;
+        assert!(res.is_err(), "connection with wrong password should fail");
+    })
+    .await;
+}
+
+/// T3: First connection populates the cache, second uses fast-auth.
+#[tokio::test]
+async fn sha2_cache_population_then_fast_auth() {
+    let cache = AuthCache::new();
+    sha2_test_server("user", "password", cache, 2, |port, _cache| async move {
+        let url = format!("mysql://user:password@127.0.0.1:{port}?prefer_socket=false");
+
+        // First connection: full auth (cache miss -> RSA exchange)
+        let mut db1 = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url"))
+            .await
+            .expect("first connect");
+        assert!(db1.ping().await.is_ok());
+        drop(db1);
+
+        // Second connection: fast auth (cache hit)
+        let mut db2 = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url"))
+            .await
+            .expect("second connect (fast auth)");
+        assert!(db2.ping().await.is_ok());
+        drop(db2);
+    })
+    .await;
+}
+
+/// T6: Empty password allowed when server has no stored password.
+#[tokio::test]
+async fn sha2_empty_password_allowed() {
+    let cache = AuthCache::new();
+    // Server stores no password for "nopass" (password_for_username
+    // returns None).
+    sha2_test_server("nopass", "", cache, 1, |port, _cache| async move {
+        let url = format!("mysql://nopass@127.0.0.1:{port}?prefer_socket=false");
+        let mut db = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url"))
+            .await
+            .expect("connect with empty password");
+        assert!(db.ping().await.is_ok());
+        drop(db);
+    })
+    .await;
+}
+
+/// T7: Empty password rejected when server has a stored password.
+#[tokio::test]
+async fn sha2_empty_password_rejected_when_stored_exists() {
+    let cache = AuthCache::new();
+    sha2_test_server("user", "password", cache, 1, |port, _cache| async move {
+        let url = format!("mysql://user@127.0.0.1:{port}?prefer_socket=false");
+        let res = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url")).await;
+        assert!(
+            res.is_err(),
+            "empty password should be rejected when server has stored password"
+        );
+    })
+    .await;
+}
+
+/// T13: Failed authentication returns the correct error code (was
+/// previously commented out).
+#[tokio::test]
+async fn failed_authentication() {
+    let _ = AuthKeys::initialize(None);
+    let listener = net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("local_addr").port();
+    listener
+        .set_nonblocking(true)
+        .expect("couldn't set nonblocking");
+    let listener = TcpListener::from_std(listener).expect("from_std");
+
+    let server_handle = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("accept");
+        let shim = TestingShim::new(
+            move |_, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+        );
+        // Server ignores the result; the test validates the client error.
+        let _ = MySqlIntermediary::run_on_tcp(
+            shim,
+            socket,
+            false,
+            None,
+            TlsMode::Optional,
+            AuthCache::new(),
+            AuthPlugin::default(),
+        )
+        .await;
+    });
+
+    let url = format!("mysql://user:bad_password@127.0.0.1:{port}");
+    let res = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url")).await;
+    assert!(res.is_err());
+    match res.unwrap_err() {
+        mysql::Error::Server(err) => {
+            assert_eq!(err.code, ErrorKind::ER_ACCESS_DENIED_ERROR as u16);
+            assert_eq!(err.message, "Access denied for user user");
+        }
+        err => panic!("Expected mysql server error, got: {err:?}"),
+    }
+
+    server_handle.await.expect("server");
 }

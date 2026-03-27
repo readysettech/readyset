@@ -208,7 +208,9 @@ use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, info};
 use writers::write_err;
 
-pub use crate::authentication::{AuthCache, AuthContext, AuthKeys, AuthPlugin};
+pub use crate::authentication::{
+    AuthCache, AuthContext, AuthKeys, AuthPlugin, CachingSha2Password,
+};
 use crate::commands::change_user;
 use crate::constants::CONNECT_ATTRS;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
@@ -419,7 +421,6 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     // Tls mode
     tls_mode: TlsMode,
     /// Shared cache of SHA256(SHA256(password)) for caching_sha2_password fast-auth.
-    #[allow(dead_code)] // Used in CL 4
     auth_cache: Arc<AuthCache>,
     /// The authentication plugin to advertise during the handshake.
     auth_plugin: AuthPlugin,
@@ -706,13 +707,20 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         let plain_password = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
-        let auth_success = self.auth_plugin.handle_authentication_native(&AuthContext {
-            username: &username,
-            password: plain_password.as_deref(),
-            handshake_password: &handshake_password,
-            auth_data: &self.auth_data,
-            require_auth,
-        });
+        let auth_success = self
+            .auth_plugin
+            .handle_authentication(
+                &AuthContext {
+                    username: &username,
+                    password: plain_password.as_deref(),
+                    handshake_password: &handshake_password,
+                    auth_data: &self.auth_data,
+                    require_auth,
+                },
+                &mut self.conn,
+                &self.auth_cache,
+            )
+            .await?;
         let plain_password = if require_auth {
             Some(RedactedString::from(
                 plain_password
@@ -793,14 +801,20 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     }
                     let plain_password = self.shim.password_for_username(&username);
                     let require_auth = self.shim.require_authentication();
-                    let auth_success =
-                        self.auth_plugin.handle_authentication_native(&AuthContext {
-                            username: &username,
-                            password: plain_password.as_deref(),
-                            handshake_password: &authpassword,
-                            auth_data: &self.auth_data,
-                            require_auth,
-                        });
+                    let auth_success = self
+                        .auth_plugin
+                        .handle_authentication(
+                            &AuthContext {
+                                username: &username,
+                                password: plain_password.as_deref(),
+                                handshake_password: &authpassword,
+                                auth_data: &self.auth_data,
+                                require_auth,
+                            },
+                            &mut self.conn,
+                            &self.auth_cache,
+                        )
+                        .await?;
 
                     if auth_success {
                         debug!("Successfully authenticated client");

@@ -33,7 +33,7 @@ pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
     /// Reusable packets. We sort the elements from smallest capacity to largest.
     preallocated: Vec<QueuedPacket>,
 
-    pub stream: SwitchableStream<S>,
+    pub(crate) stream: SwitchableStream<S>,
 }
 
 /// Type for packets being enqueued in the packet writer.
