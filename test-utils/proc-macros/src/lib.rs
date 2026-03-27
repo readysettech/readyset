@@ -75,6 +75,293 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
     result.into_token_stream().into()
 }
 
+// ── Structured upstream parsing ──────────────────────────────────────────
+
+/// Known MySQL versions, as (numeric_id, variant_name) pairs.
+const MYSQL_VERSIONS: &[(u32, &str)] = &[(57, "mysql57"), (80, "mysql80"), (84, "mysql84")];
+
+/// Known PostgreSQL versions, as (numeric_id, variant_name) pairs.
+const POSTGRES_VERSIONS: &[(u32, &str)] = &[(13, "postgres13"), (15, "postgres15")];
+
+/// Minimum MySQL version that supports flags (gtid, mrbr, etc.).
+const MYSQL_MODERN_MIN: u32 = 80;
+
+#[derive(Debug, Clone, Copy)]
+enum Family {
+    Mysql,
+    Postgres,
+}
+
+impl Family {
+    fn name(&self) -> &'static str {
+        match self {
+            Family::Mysql => "mysql",
+            Family::Postgres => "postgres",
+        }
+    }
+}
+
+#[derive(Debug)]
+enum VersionSet {
+    All,
+    Modern,
+    Single(u32),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Flag {
+    Gtid,
+    Nogtid,
+    Mrbr,
+    MrbrGtid,
+}
+
+impl Flag {
+    fn name(&self) -> &'static str {
+        match self {
+            Flag::Gtid => "gtid",
+            Flag::Nogtid => "nogtid",
+            Flag::Mrbr => "mrbr",
+            Flag::MrbrGtid => "mrbr_gtid",
+        }
+    }
+}
+
+/// Known flag names, used to detect flags misplaced in the version-set position.
+const KNOWN_FLAGS: &[&str] = &["gtid", "nogtid", "mrbr", "mrbr_gtid"];
+
+/// Result of parsing `#[upstream(...)]` arguments, with token spans preserved for error reporting.
+#[derive(Debug)]
+struct ParsedArgs {
+    family: Family,
+    version_set: VersionSet,
+    flag: Option<Flag>,
+    /// Span of the version-set token (or call_site if defaulted to All).
+    version_span: proc_macro2::Span,
+    /// Span of the flag token (or call_site if absent).
+    flag_span: proc_macro2::Span,
+}
+
+/// Parse `#[upstream(family, version_set, flag)]` arguments.
+fn parse_structured_args(args: proc_macro2::TokenStream) -> Result<ParsedArgs, Error> {
+    let tokens: Vec<TokenTree> = args
+        .into_iter()
+        .filter(|tt| !matches!(tt, TokenTree::Punct(p) if p.as_char() == ','))
+        .collect();
+
+    if tokens.is_empty() {
+        return Err(Error::new(
+            Span::call_site(),
+            "expected a database family (mysql or postgres)",
+        ));
+    }
+
+    // Token 0: family
+    let family = match &tokens[0] {
+        TokenTree::Ident(ident) => match ident.to_string().as_str() {
+            "mysql" => Family::Mysql,
+            "postgres" => Family::Postgres,
+            other => {
+                return Err(Error::new(
+                    ident.span(),
+                    format!("unknown database family '{other}'; expected 'mysql' or 'postgres'"),
+                ));
+            }
+        },
+        other => {
+            return Err(Error::new(
+                other.span(),
+                "expected a database family identifier",
+            ));
+        }
+    };
+
+    // Token 1: optional version set
+    let (version_set, version_span) = if tokens.len() >= 2 {
+        match &tokens[1] {
+            TokenTree::Ident(ident) => {
+                let s = ident.to_string();
+                match s.as_str() {
+                    "all" => (VersionSet::All, ident.span()),
+                    "modern" => {
+                        if matches!(family, Family::Postgres) {
+                            return Err(Error::new(
+                                ident.span(),
+                                "'modern' version set is only valid for mysql",
+                            ));
+                        }
+                        (VersionSet::Modern, ident.span())
+                    }
+                    other => {
+                        let hint = if KNOWN_FLAGS.contains(&other) {
+                            match family {
+                                Family::Mysql => format!(
+                                    "; '{other}' is a flag — \
+                                     did you mean #[upstream(mysql, modern, {other})]?",
+                                ),
+                                Family::Postgres => format!(
+                                    "; '{other}' is a flag, but flags are only valid for mysql",
+                                ),
+                            }
+                        } else {
+                            String::new()
+                        };
+                        return Err(Error::new(
+                            ident.span(),
+                            format!(
+                                "unknown version set '{other}'; \
+                                 expected 'all', 'modern', or an integer version number{hint}"
+                            ),
+                        ));
+                    }
+                }
+            }
+            TokenTree::Literal(lit) => {
+                let ver: u32 = lit
+                    .to_string()
+                    .replace('_', "")
+                    .trim_end_matches(|c: char| c.is_alphabetic())
+                    .parse()
+                    .map_err(|_| Error::new(lit.span(), "expected an integer version number"))?;
+                (VersionSet::Single(ver), lit.span())
+            }
+            other => {
+                return Err(Error::new(
+                    other.span(),
+                    "expected a version set ('all', 'modern') or integer version number",
+                ));
+            }
+        }
+    } else {
+        (VersionSet::All, Span::call_site())
+    };
+
+    // Token 2: optional flag
+    let (flag, flag_span) = if tokens.len() >= 3 {
+        let (flag, span) = match &tokens[2] {
+            TokenTree::Ident(ident) => match ident.to_string().as_str() {
+                "gtid" => (Flag::Gtid, ident.span()),
+                "nogtid" => (Flag::Nogtid, ident.span()),
+                "mrbr" => (Flag::Mrbr, ident.span()),
+                "mrbr_gtid" => (Flag::MrbrGtid, ident.span()),
+                other => {
+                    return Err(Error::new(
+                        ident.span(),
+                        format!(
+                            "unknown flag '{other}'; \
+                             expected 'gtid', 'nogtid', 'mrbr', or 'mrbr_gtid'"
+                        ),
+                    ));
+                }
+            },
+            other => {
+                return Err(Error::new(other.span(), "expected a flag identifier"));
+            }
+        };
+        if matches!(family, Family::Postgres) {
+            return Err(Error::new(
+                span,
+                "flags are only valid for mysql, not postgres",
+            ));
+        }
+        (Some(flag), span)
+    } else {
+        (None, Span::call_site())
+    };
+
+    if tokens.len() > 3 {
+        return Err(Error::new(
+            tokens[3].span(),
+            "unexpected extra arguments; expected at most: family, version_set, flag",
+        ));
+    }
+
+    Ok(ParsedArgs {
+        family,
+        version_set,
+        flag,
+        version_span,
+        flag_span,
+    })
+}
+
+/// A resolved variant: the generated identifier plus the structured metadata that produced it.
+#[derive(Debug)]
+struct ResolvedVariant {
+    ident: Ident,
+    family: Family,
+    version: u32,
+    flag: Option<Flag>,
+}
+
+/// Resolve parsed arguments into a list of concrete variants with structured metadata.
+fn resolve_variants(args: &ParsedArgs) -> Result<Vec<ResolvedVariant>, Error> {
+    let versions: &[(u32, &str)] = match args.family {
+        Family::Mysql => MYSQL_VERSIONS,
+        Family::Postgres => POSTGRES_VERSIONS,
+    };
+    let family_name = args.family.name();
+
+    let filtered: Vec<(u32, &str)> = match &args.version_set {
+        VersionSet::All => versions.to_vec(),
+        VersionSet::Modern => versions
+            .iter()
+            .filter(|(ver, _)| *ver >= MYSQL_MODERN_MIN)
+            .copied()
+            .collect(),
+        VersionSet::Single(target) => {
+            let found = versions.iter().find(|(ver, _)| ver == target);
+            match found {
+                Some(entry) => vec![*entry],
+                None => {
+                    let valid: Vec<String> = versions.iter().map(|(v, _)| v.to_string()).collect();
+                    return Err(Error::new(
+                        args.version_span,
+                        format!(
+                            "unknown version '{target}' for {family_name}; \
+                             valid versions are: {}",
+                            valid.join(", ")
+                        ),
+                    ));
+                }
+            }
+        }
+    };
+
+    if let Some(f) = args.flag {
+        for (ver, name) in &filtered {
+            if *ver < MYSQL_MODERN_MIN {
+                return Err(Error::new(
+                    args.flag_span,
+                    format!(
+                        "flag '{}' is not valid for {name} \
+                         (only MySQL 8.0+ supports flags)",
+                        f.name()
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Use version_span for generated idents so errors in downstream macros
+    // point back to the version token in the #[upstream(...)] attribute.
+    Ok(filtered
+        .iter()
+        .map(|(ver, base)| {
+            let name = match args.flag {
+                Some(f) => format!("{base}_{}", f.name()),
+                None => base.to_string(),
+            };
+            ResolvedVariant {
+                ident: Ident::new(&name, args.version_span),
+                family: args.family,
+                version: *ver,
+                flag: args.flag,
+            }
+        })
+        .collect())
+}
+
 /// Generate a separate copy of a test for each upstream database variant.
 ///
 /// Each variant becomes a nested module, making it filterable via nextest:
@@ -83,35 +370,64 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 /// cargo nextest run -E 'test(/:mysql80:/)'
 /// ```
 ///
-/// When combined with [`tags`], `#[tags(...)]` must be outermost so it runs first.
+/// # Structured syntax
+///
+/// The first argument is a database family (`mysql` or `postgres`). Optional second and third
+/// arguments narrow the version set and add a flag:
 ///
 /// ```rust,ignore
-/// #[upstream(mysql80, mysql84)]
-/// #[tokio::test(flavor = "multi_thread")]
-/// async fn my_test() { /* body */ }
+/// #[upstream(mysql)]                    // all MySQL versions
+/// #[upstream(mysql, modern)]            // MySQL 8.0+
+/// #[upstream(mysql, modern, gtid)]      // MySQL 8.0+ with gtid flag
+/// #[upstream(mysql, 84, gtid)]          // single version with flag
+/// #[upstream(postgres)]                 // all PostgreSQL versions
+/// #[upstream(postgres, 15)]             // single PostgreSQL version
+/// ```
 ///
-/// // Expands to:
+/// # Limitations
+///
+/// The version set is a single token — either a named group (`all`, `modern`) or one integer
+/// version number. There is no way to specify an arbitrary multi-version list like
+/// `#[upstream(mysql, 80, 84, gtid)]`. If a new subset is needed, the options are:
+///
+/// 1. Add a named version set (e.g. `v8` for all 8.x versions) to [`MYSQL_VERSIONS`] /
+///    [`parse_structured_args`].
+/// 2. Support a list syntax such as `#[upstream(mysql, [80, 84], gtid)]`.
+///
+/// # Expansion example
+///
+/// ```rust,ignore
+/// #[upstream(mysql, modern)]
+/// #[test]
+/// fn my_test() { assert!(true); }
+///
+/// // Expands to (simplified):
 /// pub mod my_test {
-///     pub mod mysql80 {
-///         use super::*;
-///         #[tokio::test(flavor = "multi_thread")]
-///         async fn my_test() { /* body */ }
-///     }
-///     pub mod mysql84 { /* ... same ... */ }
+///     pub mod mysql80 { ... fn my_test() { assert!(true); } }
+///     pub mod mysql84 { ... }
+///     // __xp_ variants (nightly-only, auto-expanded):
+///     pub mod mysql80__xp_mrbr   { ... }
+///     pub mod mysql80__xp_gtid   { ... }
+///     pub mod mysql80__xp_nogtid { ... }
+///     pub mod mysql80__xp_mrbr_gtid { ... }
+///     // ... same four for mysql84
 /// }
 /// ```
+///
+/// When combined with [`tags`], `#[tags(...)]` must be outermost so it runs first.
 #[proc_macro_attribute]
 pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as proc_macro2::TokenStream);
     let item = parse_macro_input!(item as ItemFn);
 
-    let explicit_variants: Vec<Ident> = args
-        .into_iter()
-        .filter_map(|tt| match tt {
-            TokenTree::Ident(ident) => Some(ident),
-            _ => None,
-        })
-        .collect();
+    let parsed = match parse_structured_args(args) {
+        Ok(parsed) => parsed,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    let explicit_variants: Vec<ResolvedVariant> = match resolve_variants(&parsed) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     // Auto-expand MySQL 8.0+ variants with an `__xp_` marker so CI can
     // filter them out (they only run in the nightly pipeline). Explicitly
@@ -130,34 +446,27 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
     // Variants containing "__xp_" or "nogtid" are never expanded further.
     let variants: Vec<Ident> = explicit_variants
         .into_iter()
-        .flat_map(|ident| {
-            let name = ident.to_string();
-            let is_mysql80_plus = name
-                .strip_prefix("mysql")
-                .and_then(|rest| {
-                    rest.chars()
-                        .take_while(|c| c.is_ascii_digit())
-                        .collect::<String>()
-                        .parse::<u32>()
-                        .ok()
-                })
-                .is_some_and(|ver| ver >= 80);
+        .flat_map(|rv| {
+            let span = rv.ident.span();
+            let mut out = vec![rv.ident];
 
-            let span = ident.span();
-            let mut out = vec![ident];
+            let is_mysql_modern =
+                matches!(rv.family, Family::Mysql) && rv.version >= MYSQL_MODERN_MIN;
+            let is_nogtid = matches!(rv.flag, Some(Flag::Nogtid));
 
-            if !is_mysql80_plus || name.contains("__xp_") || name.contains("nogtid") {
+            if !is_mysql_modern || is_nogtid {
                 return out;
             }
 
-            let has_mrbr = name.contains("mrbr");
-            let has_gtid = name.contains("gtid");
+            let has_mrbr = matches!(rv.flag, Some(Flag::Mrbr | Flag::MrbrGtid));
+            let has_gtid = matches!(rv.flag, Some(Flag::Gtid | Flag::MrbrGtid));
 
-            // Extract the base (e.g. "mysql80" from "mysql80_gtid")
-            let base: String = name
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric())
-                .collect();
+            // Base is the version-only name (e.g. "mysql80") for constructing expanded idents.
+            let base = MYSQL_VERSIONS
+                .iter()
+                .find(|(v, _)| *v == rv.version)
+                .expect("version was already validated")
+                .1;
 
             match (has_mrbr, has_gtid) {
                 // mysql80 → all four expanded variants

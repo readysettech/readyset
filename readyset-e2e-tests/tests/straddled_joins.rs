@@ -10,7 +10,7 @@ use test_utils::{tags, upstream};
 /// REA-6145: no tag found for value
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_sj_eviction_no_remapping() {
     readyset_tracing::init_test_logging();
     let db_name = "sj_eviction_no_remapping";

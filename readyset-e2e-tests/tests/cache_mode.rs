@@ -15,7 +15,7 @@ use test_utils::{tags, upstream};
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn cache_mode_shallow() {
     init_test_logging();
 
@@ -76,7 +76,7 @@ async fn cache_mode_shallow() {
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn cache_mode_deep() {
     init_test_logging();
 
@@ -131,7 +131,7 @@ async fn cache_mode_deep() {
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn cache_mode_deep_then_shallow() {
     init_test_logging();
 

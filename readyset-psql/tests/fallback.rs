@@ -43,7 +43,7 @@ macro_rules! assert_last_statement_matches {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn create_table() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -74,7 +74,7 @@ async fn create_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn delete_case_sensitive() {
     for (opts, _handle, shutdown_tx) in [
         TestBuilder::default()
@@ -145,7 +145,7 @@ async fn delete_case_sensitive() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn prepare_typed_insert() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
@@ -191,7 +191,7 @@ async fn prepare_typed_insert() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn unsupported_query_ad_hoc() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -214,7 +214,7 @@ async fn unsupported_query_ad_hoc() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn prepare_execute_fallback() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -246,7 +246,7 @@ async fn prepare_execute_fallback() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn proxy_unsupported_sets() {
     let (config, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
@@ -275,7 +275,7 @@ async fn proxy_unsupported_sets() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn proxy_unsupported_type() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -319,7 +319,7 @@ async fn proxy_unsupported_type() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn schema_resolution_with_unreplicated_tables() {
     readyset_tracing::init_test_logging();
     let (config, _handle, shutdown_tx) = setup().await;
@@ -387,7 +387,7 @@ async fn schema_resolution_with_unreplicated_tables() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn generated_columns() {
     // Tests that we handle tables that have generated columns by not snapshotting them and falling
     // back to upstream
@@ -490,7 +490,7 @@ async fn generated_columns() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 #[ignore = "ENG-2548 Test reproduces client panic due to known bug"]
 async fn add_column_then_read() {
     let (config, _handle, shutdown_tx) = setup().await;
@@ -524,7 +524,7 @@ async fn add_column_then_read() {
 #[ignore = "ENG-2575 Test reproduces client error due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn drop_column_then_read() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -559,7 +559,7 @@ async fn drop_column_then_read() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn deletion_propagation_after_alter() {
     readyset_tracing::init_test_logging();
 
@@ -615,7 +615,7 @@ async fn deletion_propagation_after_alter() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn write_propagation_after_alter_and_drop() {
     readyset_tracing::init_test_logging();
 
@@ -663,7 +663,7 @@ async fn write_propagation_after_alter_and_drop() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn rename_column_then_create_view() {
     readyset_tracing::init_test_logging();
 
@@ -705,7 +705,7 @@ async fn rename_column_then_create_view() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn alter_enum_after_drop() {
     readyset_tracing::init_test_logging();
 
@@ -744,7 +744,7 @@ async fn alter_enum_after_drop() {
 #[ignore = "ENG-2823 Test reproduces error due to known bug"]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn alter_enum_rename_value() {
     readyset_tracing::init_test_logging();
 
@@ -780,7 +780,7 @@ async fn alter_enum_rename_value() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn insert_enum_value_appended_after_create_table() {
     readyset_tracing::init_test_logging();
 
@@ -822,7 +822,7 @@ async fn insert_enum_value_appended_after_create_table() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn insert_array_of_enum_value_appended_after_create_table() {
     // This test is based off insert_enum_value_appended_after_create_table but inserts an array of
     // enum values instead of a single value, which triggers a similar bug to the one that the
@@ -979,7 +979,7 @@ async fn assert_table_ignored(client: &Client) {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn handle_action_replication_failure_ignores_table() {
     replication_failure_ignores_table(readyset_util::failpoints::REPLICATION_HANDLE_ACTION).await;
 }
@@ -987,7 +987,7 @@ async fn handle_action_replication_failure_ignores_table() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn next_action_replication_failure_ignores_table() {
     replication_failure_ignores_table(readyset_util::failpoints::POSTGRES_REPLICATION_NEXT_ACTION)
         .await;
@@ -1061,7 +1061,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn handle_action_replication_failure_retries_if_failed_to_drop() {
     replication_failure_retries_if_failed_to_drop(
         readyset_util::failpoints::REPLICATION_HANDLE_ACTION,
@@ -1072,7 +1072,7 @@ async fn handle_action_replication_failure_retries_if_failed_to_drop() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn next_action_replication_failure_retries_if_failed_to_drop() {
     replication_failure_retries_if_failed_to_drop(
         readyset_util::failpoints::POSTGRES_REPLICATION_NEXT_ACTION,
@@ -1187,7 +1187,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn replication_of_other_tables_succeeds_even_after_error() {
     readyset_tracing::init_test_logging();
 
@@ -1266,7 +1266,7 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 #[ignore = "REA-3933 (see comments on ticket)"]
 async fn show_proxied_queries_show_caches_query_text_matches() {
     readyset_tracing::init_test_logging();
@@ -1311,7 +1311,7 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn insert_delete_a_record_in_the_same_transaction() {
     readyset_tracing::init_test_logging();
     let (config, _handle, shutdown_tx) = setup().await;
@@ -1343,7 +1343,7 @@ async fn insert_delete_a_record_in_the_same_transaction() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn pgsql_test_replication_after_resnapshot() {
     use std::time::Duration;
 
@@ -1426,7 +1426,7 @@ async fn pgsql_test_replication_after_resnapshot() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn start_replication_in_middle_of_commit() {
     use std::time::Duration;
 
@@ -1550,7 +1550,7 @@ async fn start_replication_in_middle_of_commit() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn column_metadata() {
     let (config, _handle, shutdown_tx) = setup().await;
     let client = connect(config).await;
@@ -1577,7 +1577,7 @@ async fn column_metadata() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn pgsql_test_replication_after_resnapshot_with_catchup() {
     readyset_tracing::init_test_logging();
 
@@ -1662,7 +1662,7 @@ async fn pgsql_test_replication_after_resnapshot_with_catchup() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn create_view_then_drop_table_then_create_view_with_same_name() {
     readyset_tracing::init_test_logging();
 
@@ -1707,7 +1707,7 @@ async fn create_view_then_drop_table_then_create_view_with_same_name() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn create_view_then_drop_view_then_create_view_with_same_name() {
     readyset_tracing::init_test_logging();
 
@@ -1754,7 +1754,7 @@ async fn create_view_then_drop_view_then_create_view_with_same_name() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn start_replication_invalidated_replication_slot() {
     use readyset_errors::ReadySetError;
 
@@ -1842,7 +1842,7 @@ async fn start_replication_invalidated_replication_slot() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn recreate_replication_slot() {
     use readyset_errors::ReadySetError;
 
@@ -1963,7 +1963,7 @@ async fn recreate_replication_slot() {
 // cache
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn named_cache_queryable_after_being_cleared() {
     readyset_tracing::init_test_logging();
     let prefix = "named_cache_queryable_after_being_cleared";
@@ -2197,7 +2197,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn caches_recreated_after_backwards_incompatible_upgrade() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2217,7 +2217,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn caches_recreated_using_rewritten_query() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2239,7 +2239,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn dropped_caches_not_recreated() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2262,7 +2262,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn dropped_then_recreated_cache_recreated() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2288,7 +2288,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn caches_added_if_extend_recipe_times_out() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2321,7 +2321,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn create_cache_not_added_if_extend_recipe_fails() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2342,7 +2342,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn drop_cache_not_added_if_drop_fails() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
@@ -2365,7 +2365,7 @@ mod failure_injection_tests {
     // restarting
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn replication_slot_exists_check() {
         use readyset_errors::ReadySetError;
 
@@ -2430,7 +2430,7 @@ mod failure_injection_tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[tags(serial, slow)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     async fn backwards_incompatible_upgrade_doesnt_resnapshot() {
         // If we make a backwards-incompatible change to the serialization of the controller state,
         // we shouldn't have to resnapshot the actual data in the base tables (assuming the schema
@@ -2479,7 +2479,7 @@ mod failure_injection_tests {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn drop_and_recreate_demo_cache() {
     // This tests dropping and recreating the cached used by the readyset demo script.
     // There was an error returned at one point in doing this, so this test is an attempt to block
@@ -2546,7 +2546,7 @@ async fn drop_and_recreate_demo_cache() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn drop_all_proxied_queries() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -2607,7 +2607,7 @@ async fn drop_all_proxied_queries() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres15)]
+#[upstream(postgres, 15)]
 async fn numeric_inf_nan() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
@@ -2651,7 +2651,7 @@ async fn numeric_inf_nan() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn real_type() {
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
@@ -2686,7 +2686,7 @@ async fn real_type() {
 /// and that we proxy the TO SAVEPOINT clause correctly to upstream.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn rollback_to_savepoint_preserves_transaction() {
     readyset_tracing::init_test_logging();
     let (config, _handle, shutdown_tx) = setup().await;

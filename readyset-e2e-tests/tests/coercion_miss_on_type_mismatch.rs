@@ -16,7 +16,7 @@ use test_utils::{tags, upstream};
 /// The fix returns empty() instead.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_group_concat_join_type_mismatch() {
     readyset_tracing::init_test_logging();
     let db_name = "gc_type_mismatch";

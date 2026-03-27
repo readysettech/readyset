@@ -23,7 +23,7 @@ use test_utils::{tags, upstream};
 /// expressions is marked as non-replicated.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn functional_uk_only_rejects_table() {
     readyset_tracing::init_test_logging();
     let db_name = "functional_uk_only_test";
@@ -88,7 +88,7 @@ async fn functional_uk_only_rejects_table() {
 /// IS replicated (uses the second unique key for snapshotting).
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn no_pk_functional_first_uk_usable_second_uk_succeeds() {
     readyset_tracing::init_test_logging();
     let db_name = "no_pk_fallback_uk_test";
@@ -172,7 +172,7 @@ async fn no_pk_functional_first_uk_usable_second_uk_succeeds() {
 /// allowing the table to be processed successfully.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn test_functional_index_snapshot() {
     readyset_tracing::init_test_logging();
     let db_name = "func_index_snapshot_test";
@@ -244,7 +244,7 @@ async fn test_functional_index_snapshot() {
 /// The CREATE TABLE statement comes through the binlog and should be parsed successfully.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn test_functional_index_replication() {
     readyset_tracing::init_test_logging();
     let db_name = "func_index_repl_test";
@@ -319,7 +319,7 @@ async fn test_functional_index_replication() {
 /// the regular column references.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn test_mixed_functional_index_snapshot() {
     readyset_tracing::init_test_logging();
     let db_name = "mixed_index_snapshot_test";
@@ -391,7 +391,7 @@ async fn test_mixed_functional_index_snapshot() {
 /// during streaming replication. The CREATE TABLE comes through the binlog.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn test_mixed_functional_index_replication() {
     readyset_tracing::init_test_logging();
     let db_name = "mixed_index_repl_test";
@@ -465,7 +465,7 @@ async fn test_mixed_functional_index_replication() {
 /// the primary key even when the table has functional index expressions.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn test_mixed_functional_index_update_delete() {
     readyset_tracing::init_test_logging();
     let db_name = "mixed_index_update_delete_test";

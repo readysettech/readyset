@@ -1,0 +1,5 @@
+error: 'modern' version set is only valid for mysql
+ --> tests/compile-fail/modern_with_postgres.rs:5:22
+  |
+5 | #[upstream(postgres, modern)]
+  |                      ^^^^^^

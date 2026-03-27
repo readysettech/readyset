@@ -711,7 +711,7 @@ macro_rules! vertical_tests {
             }
 
             #[tags(serial)]
-            #[upstream(mysql80, mysql84)]
+            #[upstream(mysql, modern)]
             #[test]
             #[cfg_attr(not(feature = "vertical_tests"), ignore)]
             fn $name() {

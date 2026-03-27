@@ -15,7 +15,7 @@ use test_utils::{tags, upstream};
 /// returned_cols would not form a contiguous 0..N slice.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn duplicate_projected_columns_mysql() {
     init_test_logging();
 
@@ -74,7 +74,7 @@ async fn duplicate_projected_columns_mysql() {
 /// Same test against PostgreSQL.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn duplicate_projected_columns_postgres() {
     init_test_logging();
 

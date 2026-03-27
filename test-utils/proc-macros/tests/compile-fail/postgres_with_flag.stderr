@@ -1,0 +1,5 @@
+error: flags are only valid for mysql, not postgres
+ --> tests/compile-fail/postgres_with_flag.rs:5:27
+  |
+5 | #[upstream(postgres, all, gtid)]
+  |                           ^^^^

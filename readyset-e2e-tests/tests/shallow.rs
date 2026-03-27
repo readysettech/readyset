@@ -19,7 +19,7 @@ use tokio_postgres::SimpleQueryMessage;
 
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn scheduled_refresh_expiration() {
     init_test_logging();
 
@@ -93,7 +93,7 @@ async fn scheduled_refresh_expiration() {
 
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn execution_longer_than_ttl_is_cacheable() {
     init_test_logging();
 
@@ -166,7 +166,7 @@ async fn execution_longer_than_ttl_is_cacheable() {
 
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn scheduled_refresh_starts_immediately() {
     init_test_logging();
 
@@ -263,7 +263,7 @@ async fn scheduled_refresh_starts_immediately() {
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn show_shallow_caches() {
     init_test_logging();
 
@@ -344,7 +344,7 @@ async fn show_shallow_caches() {
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn show_shallow_cache_entries() {
     init_test_logging();
 
@@ -460,7 +460,7 @@ async fn show_shallow_cache_entries() {
 
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn shallow_cache_entry_bytes() {
     init_test_logging();
 
@@ -521,7 +521,7 @@ async fn shallow_cache_entry_bytes() {
 
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mysql_change_upstream() {
     init_test_logging();
 
@@ -642,7 +642,7 @@ async fn mysql_change_upstream() {
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint creates a shallow cache and returns results.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_creates_shallow_cache() {
     init_test_logging();
 
@@ -700,7 +700,7 @@ async fn hint_creates_shallow_cache() {
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works on a UNION query.
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_creates_shallow_cache_union() {
     init_test_logging();
 
@@ -756,7 +756,7 @@ async fn hint_creates_shallow_cache_union() {
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a CTE.
 #[test]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn hint_creates_shallow_cache_cte() {
     init_test_logging();
 
@@ -812,7 +812,7 @@ async fn hint_creates_shallow_cache_cte() {
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a window function.
 #[test]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn hint_creates_shallow_cache_window_function() {
     init_test_logging();
 
@@ -870,7 +870,7 @@ async fn hint_creates_shallow_cache_window_function() {
 /// Verify that a `/*rs+ CREATE SHALLOW CACHE */` hint works with a derived table (subquery).
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_creates_shallow_cache_subquery() {
     init_test_logging();
 
@@ -932,7 +932,7 @@ fn first_row_col(rows: &[SimpleQueryMessage], col: usize) -> &str {
 
 #[test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn pg_change_upstream() {
     init_test_logging();
 
@@ -1066,7 +1066,7 @@ async fn pg_change_upstream() {
 /// Verify that the same query without a hint uses the cache created by a hint.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_query_id_matches_without_hint() {
     init_test_logging();
 
@@ -1118,7 +1118,7 @@ async fn hint_query_id_matches_without_hint() {
 /// Verify that a second hinted query is idempotent when the cache already exists.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_idempotent_when_cache_exists() {
     init_test_logging();
 
@@ -1176,7 +1176,7 @@ async fn hint_idempotent_when_cache_exists() {
 /// after the TTL elapses, proving the policy was applied.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_ttl_option_applies() {
     init_test_logging();
 
@@ -1249,7 +1249,7 @@ async fn hint_ttl_option_applies() {
 /// via the binary protocol (plan_prepare + execute path).
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_prepared_statement_creates_cache() {
     init_test_logging();
 
@@ -1333,7 +1333,7 @@ async fn hint_prepared_statement_creates_cache() {
 /// The query should fall through to normal execution without error.
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn hint_skipped_when_cache_ddl_disabled() {
     use readyset_adapter::BackendBuilder;
 
@@ -1406,7 +1406,7 @@ async fn hint_skipped_when_cache_ddl_disabled() {
 /// The query should fall through to normal execution and return correct results.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn malformed_hint_falls_through() {
     init_test_logging();
 
@@ -1461,7 +1461,7 @@ async fn malformed_hint_falls_through() {
 /// rather than creating duplicate cache entries.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn multiple_hints_produce_same_cache() {
     init_test_logging();
 
@@ -1538,7 +1538,7 @@ async fn multiple_hints_produce_same_cache() {
 /// the cache lookup to be skipped entirely.
 #[test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn malformed_hint_does_not_bypass_existing_cache() {
     init_test_logging();
 
@@ -1620,7 +1620,7 @@ async fn malformed_hint_does_not_bypass_existing_cache() {
 /// Verify that `/*rs+ SKIP CACHE */` bypasses the shallow cache and routes to upstream.
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn skip_cache_hint_bypasses_shallow_cache() {
     init_test_logging();
 
@@ -1717,7 +1717,7 @@ async fn skip_cache_hint_bypasses_shallow_cache() {
 /// via the binary protocol (plan_prepare + execute path).
 #[test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
     init_test_logging();
 

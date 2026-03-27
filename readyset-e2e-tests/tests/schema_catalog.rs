@@ -114,7 +114,7 @@ macro_rules! assert_schema_generation_error {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn create_cache_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -140,7 +140,7 @@ async fn create_cache_errors_when_catalog_is_stale() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn explain_create_cache_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -186,7 +186,7 @@ async fn explain_create_cache_errors_when_catalog_is_stale() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn create_cache_concurrently_errors_when_catalog_is_stale() {
     let mut harness = SchemaGenerationRace::new().await;
 
@@ -259,7 +259,7 @@ async fn create_cache_concurrently_errors_when_catalog_is_stale() {
 /// adapter catches up and the same command succeeds.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
@@ -351,7 +351,7 @@ async fn schema_generation_mismatch_recovered_after_delayed_sse_update() {
 /// 7. Verify CREATE CACHE succeeds
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     readyset_tracing::init_test_logging();
     let failpoint_guard = FailScenario::setup();
@@ -460,7 +460,7 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
 /// DDL replication), CREATE CACHE FROM <query_id> failed with "Schema generation mismatch".
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn create_cache_by_query_id_text_protocol() {
     readyset_tracing::init_test_logging();
 
@@ -536,7 +536,7 @@ async fn create_cache_by_query_id_text_protocol() {
 /// statement code path, which records the schema generation during prepare.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn create_cache_by_query_id_prepared() {
     readyset_tracing::init_test_logging();
 

@@ -1,0 +1,5 @@
+error: unknown version set 'gtid'; expected 'all', 'modern', or an integer version number; 'gtid' is a flag — did you mean #[upstream(mysql, modern, gtid)]?
+ --> tests/compile-fail/flag_as_version_mysql.rs:6:19
+  |
+6 | #[upstream(mysql, gtid)]
+  |                   ^^^^

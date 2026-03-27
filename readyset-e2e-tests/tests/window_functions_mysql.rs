@@ -29,7 +29,7 @@ use test_utils::{tags, upstream};
 /// Window function queries that filter on the generated output column.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_window_output_column_filter_patterns() {
     readyset_tracing::init_test_logging();
     let db_name = "window_output_column_filter_patterns";

@@ -31,7 +31,7 @@ fn row_count(rows: &[SimpleQueryMessage]) -> usize {
 /// columns" and drop the table from replication.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn replica_identity_different_from_pk() {
     readyset_tracing::init_test_logging();
 

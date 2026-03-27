@@ -94,35 +94,35 @@ async fn test_mod_type_inner_postgres(
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_smallint_smallint_postgres() {
     test_mod_type_inner_postgres(SqlType::Int2, SqlType::Int2, "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_smallint_integer_postgres() {
     test_mod_type_inner_postgres(SqlType::Int2, SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_integer_bigint_postgres() {
     test_mod_type_inner_postgres(SqlType::Int(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_bigint_bigint_postgres() {
     test_mod_type_inner_postgres(SqlType::BigInt(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_bigint_smallint_postgres() {
     test_mod_type_inner_postgres(SqlType::BigInt(None), SqlType::Int2, "7", "3").await;
 }
@@ -196,35 +196,35 @@ async fn test_mod_type_inner_mysql(
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_int_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Int(None), SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_bigint_int_mysql() {
     test_mod_type_inner_mysql(SqlType::BigInt(None), SqlType::Int(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_int_bigint_mysql() {
     test_mod_type_inner_mysql(SqlType::Int(None), SqlType::BigInt(None), "7", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_float_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Float, SqlType::Int(None), "7.5", "3").await;
 }
 
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_double_int_mysql() {
     test_mod_type_inner_mysql(SqlType::Double, SqlType::Int(None), "7.5", "3").await;
 }
@@ -243,7 +243,7 @@ async fn mod_double_int_mysql() {
 ///    parameter values.
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mod_correctness_through_cache_mysql() {
     readyset_tracing::init_test_logging();
     let db_name = "mod_correctness_cache";
@@ -335,7 +335,7 @@ async fn mod_correctness_through_cache_mysql() {
 /// against a PostgreSQL upstream.
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn mod_correctness_through_cache_postgres() {
     readyset_tracing::init_test_logging();
 

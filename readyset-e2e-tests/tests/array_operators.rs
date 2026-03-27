@@ -29,7 +29,7 @@ async fn setup_array_table(upstream_conn: &tokio_postgres::Client) {
 /// Tests array comparison operators: =, <>, <, >, <=, >=
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn array_comparison_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -96,7 +96,7 @@ async fn array_comparison_postgres() {
 /// Tests array containment operators: @> and <@
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn array_containment_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -160,7 +160,7 @@ async fn array_containment_postgres() {
 /// Tests array overlap operator: &&
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn array_overlap_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -219,7 +219,7 @@ async fn array_overlap_postgres() {
 /// declares int4[], causing wire protocol deserialization failure.
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn array_agg_int_literal_type_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
@@ -268,7 +268,7 @@ async fn array_agg_int_literal_type_postgres() {
 /// Tests string concatenation with the `||` operator
 #[tokio::test]
 #[tags(serial, slow)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn string_concat_postgres() {
     readyset_tracing::init_test_logging();
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()

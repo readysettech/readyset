@@ -167,7 +167,7 @@ macro_rules! test_aggregation_type {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(postgres13, postgres15)]
+            #[upstream(postgres)]
             async fn [<$name _postgres>]() {
                 test_aggregation_type_inner_postgres(
                     $expr,
@@ -183,7 +183,7 @@ macro_rules! test_aggregation_type {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<$name _mysql>]() {
                 test_aggregation_type_inner_mysql(
                     $expr,
@@ -199,7 +199,7 @@ macro_rules! test_aggregation_type {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<$name _mysql>]() {
                 test_aggregation_type_inner_mysql(
                     $expr,
@@ -218,7 +218,7 @@ macro_rules! test_window_aggregation_type {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(postgres13, postgres15)]
+            #[upstream(postgres)]
             async fn [<$name _window_postgres>]() {
                 test_aggregation_type_inner_postgres(
                     $expr,
@@ -234,7 +234,7 @@ macro_rules! test_window_aggregation_type {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(mysql80, mysql84)]
+            #[upstream(mysql, modern)]
             async fn [<$name _window_mysql>]() {
                 test_aggregation_type_inner_mysql(
                     $expr,

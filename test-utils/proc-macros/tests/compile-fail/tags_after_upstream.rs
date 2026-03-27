@@ -3,7 +3,7 @@
 use test_utils::{tags, upstream};
 
 // Wrong ordering: #[upstream] before #[tags] should fail.
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 #[tags(serial)]
 #[test]
 fn tags_after_upstream() {

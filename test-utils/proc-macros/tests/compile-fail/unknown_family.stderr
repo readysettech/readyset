@@ -1,0 +1,5 @@
+error: unknown database family 'sqlite'; expected 'mysql' or 'postgres'
+ --> tests/compile-fail/unknown_family.rs:5:12
+  |
+5 | #[upstream(sqlite)]
+  |            ^^^^^^

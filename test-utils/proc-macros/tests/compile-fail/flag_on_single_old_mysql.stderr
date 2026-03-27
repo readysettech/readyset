@@ -1,0 +1,5 @@
+error: flag 'gtid' is not valid for mysql57 (only MySQL 8.0+ supports flags)
+ --> tests/compile-fail/flag_on_single_old_mysql.rs:5:23
+  |
+5 | #[upstream(mysql, 57, gtid)]
+  |                       ^^^^

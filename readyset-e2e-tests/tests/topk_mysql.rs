@@ -26,7 +26,7 @@ async fn assert_last_target_was(rs_conn: &mut Conn, expected: QueryDestination) 
 /// 3. A parameterized LIMIT cache can handle different values including the fallback case
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_topk_dual_lookup() {
     readyset_tracing::init_test_logging();
     let db_name = "topk_dual_lookup_test";
@@ -168,7 +168,7 @@ async fn test_topk_dual_lookup() {
 /// 2. All queries with different LIMIT values hit the same cache
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_topk_limit_catch_all() {
     readyset_tracing::init_test_logging();
     let db_name = "plain_literal_limit_test";
@@ -245,7 +245,7 @@ async fn test_topk_limit_catch_all() {
 // and that the hook evicts as expected
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn test_topk_eviction_aux_cleanup() {
     readyset_tracing::init_test_logging();
     let db_name = "topk_eviction_aux_cleanup";

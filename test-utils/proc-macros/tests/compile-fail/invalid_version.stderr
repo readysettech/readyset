@@ -1,0 +1,5 @@
+error: unknown version '14' for postgres; valid versions are: 13, 15
+ --> tests/compile-fail/invalid_version.rs:5:22
+  |
+5 | #[upstream(postgres, 14)]
+  |                      ^^

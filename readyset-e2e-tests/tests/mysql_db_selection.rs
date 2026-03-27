@@ -10,7 +10,7 @@ use test_utils::{tags, upstream};
 /// subsequent unqualified queries to the chosen database.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn non_default_db_in_connection_opts() {
     readyset_tracing::init_test_logging();
 
@@ -36,7 +36,7 @@ async fn non_default_db_in_connection_opts() {
 /// schema_search_path, so subsequent unqualified queries resolve against the new database.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn change_user_updates_schema_search_path() {
     readyset_tracing::init_test_logging();
 
@@ -93,7 +93,7 @@ mod failure_injection {
 
     #[tokio::test]
     #[tags(serial)]
-    #[upstream(mysql57, mysql80, mysql84)]
+    #[upstream(mysql)]
     async fn handshake_db_selection_failure_rejects_connection() {
         readyset_tracing::init_test_logging();
 

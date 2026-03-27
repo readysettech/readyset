@@ -71,7 +71,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn http_tests() {
     std::thread::spawn(|| {
         if let Err(err) = start_adapter("http_tests") {

@@ -66,7 +66,7 @@ async fn min_replication_offset(conn: &mut mysql_async::Conn) -> String {
 /// REPLICATION restores it to "Running".
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn stop_start_replication_updates_status() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_stop_start_status";
@@ -142,7 +142,7 @@ async fn stop_start_replication_updates_status() {
 /// cached queries. After starting replication again, they should catch up.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn stop_replication_freezes_cache_data() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_freeze_cache";
@@ -232,7 +232,7 @@ async fn stop_replication_freezes_cache_data() {
 /// be MISSING from the cache because we jumped past it.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn set_replication_position_skips_missed_writes() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_set_position";
@@ -353,7 +353,7 @@ async fn set_replication_position_skips_missed_writes() {
 /// is not stopped.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn failover_commands_require_stopped_replication() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_require_stopped";
@@ -408,7 +408,7 @@ async fn failover_commands_require_stopped_replication() {
 /// prevents new data from replicating, then fixing the URL restores it.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn change_cdc_url() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_change_cdc";
@@ -560,7 +560,7 @@ async fn change_cdc_url() {
 /// start replication, and verify new writes replicate correctly via GTID.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_nogtid, mysql84_nogtid)]
+#[upstream(mysql, modern, nogtid)]
 async fn set_replication_position_binlog_to_gtid() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_binlog_to_gtid";
@@ -688,7 +688,7 @@ async fn set_replication_position_binlog_to_gtid() {
 /// offset is MySQL (cross-dialect transition is not allowed).
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn set_replication_position_rejects_mysql_to_postgres() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_mysql_to_pg";

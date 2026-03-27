@@ -1,0 +1,5 @@
+error: unknown version set 'gtid'; expected 'all', 'modern', or an integer version number; 'gtid' is a flag, but flags are only valid for mysql
+ --> tests/compile-fail/flag_as_version_postgres.rs:6:22
+  |
+6 | #[upstream(postgres, gtid)]
+  |                      ^^^^

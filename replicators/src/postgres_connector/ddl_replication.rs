@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_table() {
         let client = setup("create_table").await;
@@ -537,7 +537,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_table_with_reserved_keyword_as_name() {
         readyset_tracing::init_test_logging();
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_table_with_foreign_key_and_no_pk() {
         readyset_tracing::init_test_logging();
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_partitioned_table() {
         readyset_tracing::init_test_logging();
@@ -615,7 +615,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn alter_table() {
         let client = setup("alter_table").await;
@@ -651,7 +651,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn alter_table_rename_column() {
         readyset_tracing::init_test_logging();
@@ -690,7 +690,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_view() {
         let client = setup("create_view").await;
@@ -747,7 +747,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn drop_table() {
         let client = setup("drop_table").await;
@@ -768,7 +768,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn create_type() {
         let client = setup("create_type").await;
@@ -794,7 +794,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn rollback_no_ddl() {
         readyset_tracing::init_test_logging();
@@ -824,7 +824,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn alter_type_add_value_before() {
         readyset_tracing::init_test_logging();
@@ -875,7 +875,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn drop_type() {
         let client = setup("drop_type").await;
@@ -899,7 +899,7 @@ mod tests {
     }
 
     #[tags(serial)]
-    #[upstream(postgres13, postgres15)]
+    #[upstream(postgres)]
     #[tokio::test]
     async fn rename_type() {
         let client = setup("rename_type").await;

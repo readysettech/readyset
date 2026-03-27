@@ -1,0 +1,7 @@
+error: expected a database family (mysql or postgres)
+ --> tests/compile-fail/empty_args.rs:5:1
+  |
+5 | #[upstream()]
+  | ^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `upstream` (in Nightly builds, run with -Z macro-backtrace for more info)

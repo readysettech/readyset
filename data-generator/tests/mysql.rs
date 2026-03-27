@@ -34,7 +34,7 @@ async fn mysql_connection() -> mysql_async::Conn {
 }
 
 #[tags(serial, slow, no_retry)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 #[proptest]
 fn value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
@@ -62,7 +62,7 @@ fn value_of_type_always_valid(
 }
 
 #[tags(serial, slow, no_retry)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 #[proptest]
 fn unique_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
@@ -94,7 +94,7 @@ fn unique_value_of_type_always_valid(
 }
 
 #[tags(serial, slow, no_retry)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 #[proptest]
 fn random_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,

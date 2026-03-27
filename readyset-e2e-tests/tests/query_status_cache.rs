@@ -25,7 +25,7 @@ async fn proxied_queries(conn: &mut mysql_async::Conn) -> Vec<(String, String)> 
 /// query against t2.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn add_table_makes_query_cacheable() {
     readyset_tracing::init_test_logging();
     let db_name = "add_table_cacheable_test";
@@ -137,7 +137,7 @@ async fn add_table_makes_query_cacheable() {
 /// invalidated despite the qualification mismatch.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn alter_table_invalidates_proxied_query() {
     readyset_tracing::init_test_logging();
     let db_name = "alter_table_invalidation_test";

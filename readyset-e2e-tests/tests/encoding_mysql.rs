@@ -336,14 +336,14 @@ macro_rules! test_encoding_replication {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<test_ $name _snapshot>]() {
                 test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
 
             #[tokio::test]
             #[tags(serial, slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<test_ $name _streaming>]() {
                 test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
@@ -356,14 +356,14 @@ macro_rules! test_encoding_replication_very_slow {
         paste::paste! {
             #[tokio::test]
             #[tags(serial, very_slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<test_ $name _snapshot>]() {
                 test_snapshot_encoding(stringify!($name), $coltype, $charset, $range).await;
             }
 
             #[tokio::test]
             #[tags(serial, very_slow)]
-            #[upstream(mysql57, mysql80, mysql84)]
+            #[upstream(mysql)]
             async fn [<test_ $name _streaming>]() {
                 test_streaming_encoding(stringify!($name), $coltype, $charset, $range).await;
             }

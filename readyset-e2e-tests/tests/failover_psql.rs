@@ -52,7 +52,7 @@ async fn upstream_wal_position(conn: &tokio_postgres::Client) -> String {
 /// REPLICATION restores it to "Running".
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn psql_stop_start_replication_updates_status() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_psql_stop_start_status";
@@ -142,7 +142,7 @@ async fn psql_stop_start_replication_updates_status() {
 /// cached queries. After starting replication again, they should catch up.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn psql_stop_replication_freezes_cache_data() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_psql_freeze_cache";
@@ -252,7 +252,7 @@ async fn psql_stop_replication_freezes_cache_data() {
 /// is not stopped.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn psql_failover_commands_require_stopped_replication() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_psql_require_stopped";
@@ -311,7 +311,7 @@ async fn psql_failover_commands_require_stopped_replication() {
 /// prevents new data from replicating, then fixing the URL restores it.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(postgres13, postgres15)]
+#[upstream(postgres)]
 async fn psql_change_cdc_url() {
     readyset_tracing::init_test_logging();
     let db_name = "failover_psql_change_cdc";

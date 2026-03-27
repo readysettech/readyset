@@ -411,7 +411,7 @@ macro_rules! check_results {
 /// 5. Inserts a row and verifies binlog replication works
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_basic_replication() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -482,7 +482,7 @@ async fn gtid_basic_replication() {
 /// Test that multiple sequential GTID transactions are replicated correctly.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_multiple_transactions() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -553,7 +553,7 @@ async fn gtid_multiple_transactions() {
 /// Test that UPDATE and DELETE operations replicate correctly in GTID mode.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_update_delete() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -652,7 +652,7 @@ async fn gtid_update_delete() {
 /// 5. Verifies that the offline writes are caught up
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_catch_up_after_offline() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -761,7 +761,7 @@ async fn gtid_catch_up_after_offline() {
 /// Test that rolled back transactions are not replicated in GTID mode.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_transaction_rollback() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -852,7 +852,7 @@ async fn gtid_transaction_rollback() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_crash_recovery() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -1010,7 +1010,7 @@ async fn gtid_crash_recovery() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_crash_recovery_with_post_crash_transactions() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -1181,7 +1181,7 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
 /// 4. Verifies the tagged transaction is replicated
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_basic_replication() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1248,7 +1248,7 @@ async fn gtid_tag_basic_replication() {
 /// Test that alternating tagged and untagged GTID transactions all replicate.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_mixed_tagged_and_untagged() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1319,7 +1319,7 @@ async fn gtid_tag_mixed_tagged_and_untagged() {
 /// Test that rows from multiple different GTID tags all replicate correctly.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_multiple_tags() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1395,7 +1395,7 @@ async fn gtid_tag_multiple_tags() {
 /// Test that UPDATE and DELETE operations using tagged GTIDs replicate correctly.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_update_delete() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1501,7 +1501,7 @@ async fn gtid_tag_update_delete() {
 /// 5. Verifies that the offline writes are caught up
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_catch_up_after_offline() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1621,7 +1621,7 @@ async fn gtid_tag_catch_up_after_offline() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql84_gtid)]
+#[upstream(mysql, 84, gtid)]
 async fn gtid_tag_crash_recovery() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -1778,7 +1778,7 @@ async fn gtid_tag_crash_recovery() {
 /// rotate events must be ignored.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_binlog_rotation() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -1860,7 +1860,7 @@ async fn gtid_binlog_rotation() {
 /// 4. Verify the new table appears in SHOW READYSET TABLES and data replicates
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80_gtid, mysql84_gtid)]
+#[upstream(mysql, modern, gtid)]
 async fn gtid_ddl_replication() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();

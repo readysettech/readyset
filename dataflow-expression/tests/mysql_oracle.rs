@@ -102,7 +102,7 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
 
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn example_exprs_eval_same_as_mysql() {
     let mut conn = connect().await;
 
@@ -204,7 +204,7 @@ async fn example_exprs_eval_same_as_mysql() {
 
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn example_exprs_eval_same_as_mysql8() {
     let mut conn = connect().await;
 

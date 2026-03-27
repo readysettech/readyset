@@ -379,7 +379,7 @@ mod tests {
             assert_eq!(expected, actual);
         }
 
-        #[upstream(postgres13, postgres15)]
+        #[upstream(postgres)]
         #[test]
         fn test_dates_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -393,7 +393,7 @@ mod tests {
             }
         }
 
-        #[upstream(postgres13, postgres15)]
+        #[upstream(postgres)]
         #[test]
         fn test_times_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -406,7 +406,7 @@ mod tests {
             }
         }
 
-        #[upstream(postgres15)]
+        #[upstream(postgres, 15)]
         #[test]
         fn test_timestamps_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -425,7 +425,7 @@ mod tests {
             }
         }
 
-        #[upstream(postgres15)]
+        #[upstream(postgres, 15)]
         #[test]
         fn test_timestamptzs_same_as_postgres() {
             let mut client = config().connect(NoTls).unwrap();
@@ -472,7 +472,7 @@ mod tests {
                     .prop_map(|(date, time)| NaiveDateTime::new(date, time))
             }
 
-            #[upstream(postgres13, postgres15)]
+            #[upstream(postgres)]
             #[test]
             fn test_write_date() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -482,7 +482,7 @@ mod tests {
                 })
             }
 
-            #[upstream(postgres13, postgres15)]
+            #[upstream(postgres)]
             #[test]
             fn test_write_time() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -501,7 +501,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp`] for more information about these
             /// discrepancies.
-            #[upstream(postgres15)]
+            #[upstream(postgres, 15)]
             #[test]
             fn test_write_timestamp() {
                 let client = RefCell::new(config().connect(NoTls).unwrap());
@@ -523,7 +523,7 @@ mod tests {
             ///
             /// See the documentation for [`write_timestamp_tz`] for more information about these
             /// discrepancies.
-            #[upstream(postgres15)]
+            #[upstream(postgres, 15)]
             #[test]
             fn test_write_timestamp_tz() {
                 fn arbitrary_stable_timezone() -> impl Strategy<Value = Tz> {
