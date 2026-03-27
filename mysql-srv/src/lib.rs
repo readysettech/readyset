@@ -205,10 +205,9 @@ use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
 use tokio_native_tls::TlsAcceptor;
-use tracing::{debug, info, trace};
+use tracing::{debug, info};
 use writers::write_err;
 
-use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
 pub use crate::authentication::{AuthCache, AuthContext, AuthKeys, AuthPlugin};
 use crate::commands::change_user;
 use crate::constants::CONNECT_ATTRS;
@@ -420,10 +419,9 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     // Tls mode
     tls_mode: TlsMode,
     /// Shared cache of SHA256(SHA256(password)) for caching_sha2_password fast-auth.
-    #[allow(dead_code)] // Used in CL 3
+    #[allow(dead_code)] // Used in CL 4
     auth_cache: Arc<AuthCache>,
     /// The authentication plugin to advertise during the handshake.
-    #[allow(dead_code)] // Used in CL 3
     auth_plugin: AuthPlugin,
 }
 
@@ -530,8 +528,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     /// whether authentication was successful, the username, the plaintext password if one was
     /// provided, and a database name if one was specified by the client in the handshake response.
     async fn init(&mut self) -> Result<InitResult, io::Error> {
-        let auth_data =
-            generate_auth_data().map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
+        let auth_data = AuthPlugin::generate_auth_data()
+            .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
         self.auth_data = auth_data;
         let version = self.shim.version();
         let version_len = version.len() + if version.ends_with('\0') { 0 } else { 1 };
@@ -550,7 +548,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             + 10                      // reserved
             + 12                      // auth_data part 2
             + 1                       // auth_data part 2 NUL
-            + AUTH_PLUGIN_NAME.len()  // auth plugin name
+            + self.auth_plugin.name().len()  // auth plugin name
             + 1, // auth plugin name NUL
         );
         init_packet.extend_from_slice(&[10]); // protocol 10
@@ -582,7 +580,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         init_packet.extend_from_slice(&[0x00; 10][..]); // filler
         init_packet.extend_from_slice(&auth_data[8..]);
         init_packet.push(0);
-        init_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
+        init_packet.extend_from_slice(self.auth_plugin.name().as_bytes());
         init_packet.push(0);
 
         self.conn.enqueue_packet(init_packet);
@@ -653,7 +651,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         let database = handshake.database.map(String::from);
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
 
-        let handshake_password = if client_auth_plugin.iter().all(|apn| apn != AUTH_PLUGIN_NAME)
+        let client_plugin_matches = client_auth_plugin
+            .as_deref()
+            .and_then(|s| s.parse::<AuthPlugin>().ok())
+            .is_some_and(|p| p == self.auth_plugin);
+
+        let handshake_password = if !client_plugin_matches
             // Some clients (at the very least certain versions of PHP's MySQL PDO library) send an
             // empty password response in the initial handshake, even if the auth plugin is set and
             // correct. We want to send a switch-authentication request in that case too
@@ -684,13 +687,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 "Client offered incorrect authentication plugin, sending switch request",
             );
 
-            let mut auth_switch_request_packet =
-                Vec::with_capacity(1 + AUTH_PLUGIN_NAME.len() + 1 + auth_data.len() + 1);
-            auth_switch_request_packet.push(0xfe);
-            auth_switch_request_packet.extend_from_slice(AUTH_PLUGIN_NAME.as_bytes());
-            auth_switch_request_packet.push(0);
-            auth_switch_request_packet.extend_from_slice(&auth_data);
-            auth_switch_request_packet.push(0);
+            let auth_switch_request_packet = self.auth_plugin.get_switch_packet(&auth_data);
             self.conn.enqueue_packet(auth_switch_request_packet);
             self.conn.flush().await?;
 
@@ -709,13 +706,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         let plain_password = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
-        let auth_success = !require_auth
-            || plain_password.as_ref().is_some_and(|password| {
-                let expected = hash_password(password, &auth_data);
-                let actual = handshake_password.as_slice();
-                trace!(?expected, ?actual);
-                expected == actual
-            });
+        let auth_success = self.auth_plugin.handle_authentication_native(&AuthContext {
+            username: &username,
+            password: plain_password.as_deref(),
+            handshake_password: &handshake_password,
+            auth_data: &self.auth_data,
+            require_auth,
+        });
         let plain_password = if require_auth {
             Some(RedactedString::from(
                 plain_password
@@ -780,9 +777,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     let username = change_user.username.to_owned();
                     let authpassword = change_user.password.to_vec();
 
-                    if change_user.auth_plugin_name != AUTH_PLUGIN_NAME {
-                        // This should never happen, as we already accepted a connection using
-                        // AUTH_PLUGIN_NAME
+                    if change_user.auth_plugin_name.parse::<AuthPlugin>().is_err() {
                         writers::write_err(
                             ErrorKind::ER_ACCESS_DENIED_ERROR,
                             format!(
@@ -797,12 +792,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         continue;
                     }
                     let plain_password = self.shim.password_for_username(&username);
-                    let auth_success = !self.shim.require_authentication()
-                        || plain_password.as_ref().is_some_and(|password| {
-                            let expected = hash_password(password, &self.auth_data);
-                            let actual = authpassword.as_slice();
-                            trace!(?expected, ?actual);
-                            expected == actual
+                    let require_auth = self.shim.require_authentication();
+                    let auth_success =
+                        self.auth_plugin.handle_authentication_native(&AuthContext {
+                            username: &username,
+                            password: plain_password.as_deref(),
+                            handshake_password: &authpassword,
+                            auth_data: &self.auth_data,
+                            require_auth,
                         });
 
                     if auth_success {

@@ -35,10 +35,6 @@ pub const MYSQL_NATIVE_PASSWORD: &str = "mysql_native_password";
 /// The name of the default auth plugin since MySQL 8.0.
 pub const CACHING_SHA2_PASSWORD: &str = "caching_sha2_password";
 
-/// Kept for backwards compatibility during the migration (CL 1-2).
-/// Removed in CL 3 when all callers switch to the new types.
-pub const AUTH_PLUGIN_NAME: &str = "mysql_native_password";
-
 const RSA_PRIVATE_KEY_FILE: &str = "caching_sha2_password_private_key.pem";
 const RSA_PUBLIC_KEY_FILE: &str = "caching_sha2_password_public_key.pem";
 
@@ -51,6 +47,8 @@ pub const FAST_AUTH_SUCCESS: u8 = 0x03;
 /// Server requests full authentication (cache miss).
 #[allow(dead_code)] // Used in CL 4
 pub const PERFORM_FULL_AUTH: u8 = 0x04;
+/// Auth-switch-request indicator byte.
+pub const AUTH_SWITCH_REQUEST: u8 = 0xfe;
 /// Holds the RSA key pair used for `caching_sha2_password` full-auth exchanges.
 ///
 /// Initialized once at startup via [`AuthKeys::initialize`] and accessed
@@ -262,7 +260,7 @@ impl AuthCache {
 }
 
 /// Represents a MySQL authentication plugin.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthPlugin {
     /// MySQL Native Password (SHA1-based, legacy).
     Native(MysqlNativePassword),
@@ -306,6 +304,47 @@ impl AuthPlugin {
             AuthPlugin::Sha2(_) => CACHING_SHA2_PASSWORD,
         }
     }
+
+    /// Generate 20 random bytes of auth data for use as auth challenge data.
+    pub fn generate_auth_data() -> Result<AuthData, MsqlSrvError> {
+        let mut buf = [0u8; 20];
+        match fill(&mut buf) {
+            Ok(_) => {
+                for byte in &mut buf {
+                    *byte &= 0x7f;
+                    if *byte == b'\0' || *byte == b'$' {
+                        *byte = *byte % 90 + 37;
+                    }
+                }
+                Ok(buf)
+            }
+            Err(_) => Err(MsqlSrvError::GetRandomError),
+        }
+    }
+
+    /// Build an auth switch request packet for this plugin.
+    pub fn get_switch_packet(&self, auth_data: &AuthData) -> Vec<u8> {
+        let mut packet = Vec::with_capacity(1 + self.name().len() + 1 + auth_data.len() + 1);
+        packet.push(AUTH_SWITCH_REQUEST);
+        packet.extend_from_slice(self.name().as_bytes());
+        packet.push(0); // NUL terminator
+        packet.extend_from_slice(auth_data);
+        packet.push(0);
+        packet
+    }
+
+    /// Verify authentication using the appropriate plugin.
+    /// For mysql_native_password this is synchronous.
+    /// For caching_sha2_password (CL 4) this will be async with network I/O.
+    pub fn handle_authentication_native(&self, ctx: &AuthContext<'_>) -> bool {
+        match self {
+            AuthPlugin::Native(p) => p.handle_authentication(ctx),
+            AuthPlugin::Sha2(_) => {
+                // Will be implemented in CL 4. For now, fall back to rejecting.
+                false
+            }
+        }
+    }
 }
 
 /// Context for authentication process.
@@ -329,7 +368,7 @@ pub struct AuthContext<'a> {
 }
 
 /// MySQL Native Password authentication plugin (SHA1-based).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MysqlNativePassword;
 
 impl MysqlNativePassword {
@@ -349,10 +388,25 @@ impl MysqlNativePassword {
         xor_slice_mut(&mut res, &sha1(&salted));
         res
     }
+
+    /// Verify the client's password hash against the stored password.
+    pub fn handle_authentication(&self, ctx: &AuthContext<'_>) -> bool {
+        if !ctx.require_auth {
+            return true;
+        }
+        ctx.password.as_ref().is_some_and(|password| {
+            let expected = self.hash_password(password, ctx.auth_data);
+            if ctx.handshake_password.len() != expected.len() {
+                return false;
+            }
+            // Constant-time comparison to prevent timing side-channel attacks.
+            ctx.handshake_password.ct_eq(&expected).into()
+        })
+    }
 }
 
 /// Caching SHA-2 Password authentication plugin (SHA256-based).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CachingSha2Password;
 
 impl CachingSha2Password {
@@ -389,30 +443,12 @@ impl CachingSha2Password {
     }
 }
 
-/// Generate 20 random bytes of auth data for use as auth challenge data.
-pub fn generate_auth_data() -> Result<AuthData, MsqlSrvError> {
-    let mut buf = [0u8; 20];
-    match fill(&mut buf) {
-        Ok(_) => {
-            // MySQL's auth data must be printable ASCII characters
-            for byte in &mut buf {
-                *byte &= 0x7f;
-                if *byte == b'\0' || *byte == b'$' {
-                    *byte = *byte % 90 + 37;
-                }
-            }
-            Ok(buf)
-        }
-        Err(_) => Err(MsqlSrvError::GetRandomError),
-    }
-}
-
-/// Hash a password alongside random challenge data per the mysql secure
-/// password authentication algorithm.
+/// Constant-time equality check for byte slices of equal length.
 ///
-/// Delegates to [`MysqlNativePassword::hash_password`].
-pub fn hash_password(password: &[u8], auth_data: &AuthData) -> [u8; 20] {
-    MysqlNativePassword.hash_password(password, auth_data)
+/// Used for password verification to prevent timing side-channel attacks.
+#[allow(dead_code)] // Used in CL 4
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.ct_eq(b).into()
 }
 
 /// XOR `b1` with `b2`, cycling `b2` if it is shorter than `b1`.
@@ -461,16 +497,6 @@ mod tests {
                 98, 3, 19, 63, 63, 49, 91, 179, 27, 253, 105, 140, 3, 177, 140, 44, 225, 127, 86,
                 219
             ]
-        );
-    }
-
-    #[test]
-    fn hash_password_compat() {
-        let auth_data: AuthData = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
-        let password = b"password";
-        assert_eq!(
-            hash_password(password, &auth_data),
-            MysqlNativePassword.hash_password(password, &auth_data)
         );
     }
 
