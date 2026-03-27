@@ -52,6 +52,21 @@ pub enum MsqlSrvError {
     /// Error from mysql_common indicating that the column type is unknown.
     #[error("Unknown column type")]
     UnknownColumnType(#[from] myc::constants::UnknownColumnType),
+    /// Failed to decrypt client password during RSA-based authentication.
+    #[error("Failed to decrypt client password: {0}")]
+    DecryptionError(String),
+    /// Failed to create or convert an RSA private key.
+    #[error("RSA key creation failed: {0}")]
+    KeyCreationError(String),
+    /// Failed to encode a key to PEM format or convert PEM bytes to UTF-8.
+    #[error("Key encoding failed: {0}")]
+    EncodingError(String),
+    /// `AuthKeys::initialize()` was called more than once.
+    #[error("Auth keys already initialized")]
+    KeyAlreadyInitialized,
+    /// An RSA key file on disk could not be read or parsed.
+    #[error("Failed to load RSA key from file: {0}")]
+    KeyLoadError(String),
 }
 
 impl From<MsqlSrvError> for io::Error {

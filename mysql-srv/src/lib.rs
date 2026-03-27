@@ -205,6 +205,7 @@ use tracing::{debug, info, trace};
 use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
+pub use crate::authentication::{AuthCache, AuthKeys, AuthPlugin};
 use crate::commands::change_user;
 use crate::constants::CONNECT_ATTRS;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};

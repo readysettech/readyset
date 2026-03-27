@@ -20,7 +20,10 @@ itoa = { workspace = true }
 mysql-time = { path = "../mysql-time" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
+rsa = { workspace = true }
 sha-1 = { workspace = true }
+sha2 = { workspace = true }
+subtle = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
@@ -36,6 +39,7 @@ readyset-util = { path = "../readyset-util" }
 tokio-postgres = { workspace = true }
 slab = { workspace = true }
 futures = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
