@@ -783,22 +783,28 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         })
                     })?;
                     let username = change_user.username.to_owned();
-                    let authpassword = change_user.password.to_vec();
 
-                    if change_user.auth_plugin_name.parse::<AuthPlugin>().is_err() {
-                        writers::write_err(
-                            ErrorKind::ER_ACCESS_DENIED_ERROR,
-                            format!(
-                                "Access denied for user {}. Incorrect auth plugin {}",
-                                username, change_user.auth_plugin_name
-                            )
-                            .as_bytes(),
-                            &mut self.conn,
+                    // Generate fresh nonce for this exchange (prevents replay attacks)
+                    let change_user_auth_data = AuthPlugin::generate_auth_data()
+                        .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
+
+                    // Always send auth switch to ensure the client uses the
+                    // fresh nonce. Without this, the client would hash its
+                    // password against the original handshake nonce while we
+                    // verify against the fresh one, causing auth failure.
+                    self.conn
+                        .enqueue_packet(self.auth_plugin.get_switch_packet(&change_user_auth_data));
+                    self.conn.flush().await?;
+
+                    let packet = self.conn.next().await?.ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::ConnectionAborted,
+                            "peer terminated connection during change_user auth switch",
                         )
-                        .await?;
-                        self.conn.flush().await?;
-                        continue;
-                    }
+                    })?;
+                    self.conn.set_seq(packet.next_seq());
+                    let authpassword = packet.data.to_vec();
+
                     let plain_password = self.shim.password_for_username(&username);
                     let require_auth = self.shim.require_authentication();
                     let auth_success = self
@@ -808,7 +814,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                 username: &username,
                                 password: plain_password.as_deref(),
                                 handshake_password: &authpassword,
-                                auth_data: &self.auth_data,
+                                auth_data: &change_user_auth_data,
                                 require_auth,
                             },
                             &mut self.conn,
