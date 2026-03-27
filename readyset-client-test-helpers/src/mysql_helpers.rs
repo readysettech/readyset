@@ -1,5 +1,6 @@
 use std::env;
 use std::fmt::Display;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use database_utils::TlsMode;
@@ -130,6 +131,8 @@ impl Adapter for MySQLAdapter {
     async fn run_backend(
         backend: readyset_adapter::Backend<Self::Upstream, Self::Handler>,
         s: TcpStream,
+        auth_plugin: AuthPlugin,
+        auth_cache: Arc<AuthCache>,
     ) {
         let _ = AuthKeys::initialize(None);
         MySqlIntermediary::run_on_tcp(
@@ -141,8 +144,8 @@ impl Adapter for MySQLAdapter {
             false,
             None,
             TlsMode::Optional,
-            AuthCache::new(),
-            AuthPlugin::default(),
+            auth_cache,
+            auth_plugin,
         )
         .await
         .unwrap()

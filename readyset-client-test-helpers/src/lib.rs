@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
+use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
 use readyset_adapter::metrics_handle::MetricsHandle;
@@ -183,7 +184,12 @@ pub trait Adapter: Send {
 
     async fn recreate_database(db_name: &str);
 
-    async fn run_backend(backend: Backend<Self::Upstream, Self::Handler>, s: TcpStream);
+    async fn run_backend(
+        backend: Backend<Self::Upstream, Self::Handler>,
+        s: TcpStream,
+        auth_plugin: AuthPlugin,
+        auth_cache: Arc<AuthCache>,
+    );
 }
 
 #[derive(Debug, Clone, Default)]
@@ -229,6 +235,7 @@ pub struct TestBuilder {
     require_gtid: bool,
     replication_lag_interval: Option<u16>,
     replication_heartbeat: bool,
+    auth_plugin: AuthPlugin,
 }
 
 impl Default for TestBuilder {
@@ -271,7 +278,16 @@ impl TestBuilder {
             require_gtid: false,
             replication_lag_interval: None,
             replication_heartbeat: false,
+            auth_plugin: AuthPlugin::default(),
         }
+    }
+
+    /// Set the MySQL authentication plugin used by the adapter for client
+    /// handshakes. Only meaningful for MySQL adapters; PostgreSQL tests
+    /// ignore this value.
+    pub fn auth_plugin(mut self, auth_plugin: AuthPlugin) -> Self {
+        self.auth_plugin = auth_plugin;
+        self
     }
 
     pub fn replicate(mut self, default: bool) -> Self {
@@ -547,6 +563,8 @@ impl TestBuilder {
 
         let shallow_for_schema = Arc::clone(&shallow);
 
+        let auth_cache = AuthCache::new();
+
         tokio::spawn(async move {
             let repl_lag_handle = ReadySetHandle::new(authority.clone()).await;
             let repl_lag: Arc<ControllerReplicationLag> =
@@ -647,12 +665,14 @@ impl TestBuilder {
                         )
                         .await;
 
+                    let auth_plugin = self.auth_plugin;
+                    let auth_cache = auth_cache.clone();
                     let mut backend_shutdown_rx_clone = backend_shutdown_rx_connection.clone();
                     tokio::spawn(async move {
                         tokio::select! {
                             biased;
                             _ = backend_shutdown_rx_clone.recv() => {},
-                            _ = A::run_backend(backend, s) => {},
+                            _ = A::run_backend(backend, s, auth_plugin, auth_cache) => {},
                         }
                     });
                 }

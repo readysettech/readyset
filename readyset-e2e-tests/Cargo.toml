@@ -22,10 +22,12 @@ futures = { workspace = true }
 itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
+mysql-srv = { path = "../mysql-srv" }
 paste = { workspace = true }
 postgres-types = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
+rsa = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
 replication-offset = { path = "../replication-offset" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
@@ -47,6 +49,7 @@ utf8mb4_all_codepoints_test = []
 # Tests that rely on failpoints to inject schema catalog races.
 failure_injection = [
     "fail/failpoints",
+    "mysql-srv/failure_injection",
     "readyset-adapter/failure_injection",
     "readyset-server/failure_injection",
     "readyset-util/failure_injection",
