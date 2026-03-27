@@ -42,6 +42,15 @@ pub const AUTH_PLUGIN_NAME: &str = "mysql_native_password";
 const RSA_PRIVATE_KEY_FILE: &str = "caching_sha2_password_private_key.pem";
 const RSA_PUBLIC_KEY_FILE: &str = "caching_sha2_password_public_key.pem";
 
+/// Client requests the server's RSA public key during full-auth.
+#[allow(dead_code)] // Used in CL 4
+pub const RSA_PUBLIC_KEY_REQUEST: u8 = 0x02;
+/// Server indicates fast-auth succeeded (cache hit).
+#[allow(dead_code)] // Used in CL 4
+pub const FAST_AUTH_SUCCESS: u8 = 0x03;
+/// Server requests full authentication (cache miss).
+#[allow(dead_code)] // Used in CL 4
+pub const PERFORM_FULL_AUTH: u8 = 0x04;
 /// Holds the RSA key pair used for `caching_sha2_password` full-auth exchanges.
 ///
 /// Initialized once at startup via [`AuthKeys::initialize`] and accessed
@@ -283,6 +292,12 @@ impl Default for AuthPlugin {
     }
 }
 
+impl std::fmt::Display for AuthPlugin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 impl AuthPlugin {
     /// The wire-protocol name of this authentication plugin.
     pub fn name(&self) -> &'static str {
@@ -291,6 +306,26 @@ impl AuthPlugin {
             AuthPlugin::Sha2(_) => CACHING_SHA2_PASSWORD,
         }
     }
+}
+
+/// Context for authentication process.
+///
+/// Bundles together the pieces of state that the authentication flow
+/// needs. Constructed once per connection during the handshake and
+/// threaded through the auth path.
+#[derive(Debug)]
+pub struct AuthContext<'a> {
+    /// Username sent by the client in the handshake.
+    pub username: &'a str,
+    /// Plain-text password returned by [`MySqlShim::password_for_username`],
+    /// or `None` when the backend does not know the user.
+    pub password: Option<&'a [u8]>,
+    /// The password bytes from the client handshake (or auth-switch response).
+    pub handshake_password: &'a [u8],
+    /// The 20-byte random challenge sent in the server greeting.
+    pub auth_data: &'a AuthData,
+    /// Whether the server requires authentication (false = allow-all).
+    pub require_auth: bool,
 }
 
 /// MySQL Native Password authentication plugin (SHA1-based).

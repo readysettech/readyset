@@ -10,7 +10,7 @@ use database_utils::{
     UpstreamConfig,
 };
 use itertools::Itertools as _;
-use mysql_srv::MySqlIntermediary;
+use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::{
     backend::{noria_connector::ReadBehavior, MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
@@ -209,18 +209,23 @@ async fn setup_adapter(
         }
 
         match database_type {
-            DatabaseType::MySQL => MySqlIntermediary::run_on_tcp(
-                readyset_mysql::Backend {
-                    noria: make_backend!(MySqlUpstream, MySqlQueryHandler, Dialect::MySQL,),
-                    enable_statement_logging: false,
-                },
-                s,
-                false,
-                None,
-                TlsMode::Optional,
-            )
-            .await
-            .unwrap(),
+            DatabaseType::MySQL => {
+                let _ = AuthKeys::initialize(None);
+                MySqlIntermediary::run_on_tcp(
+                    readyset_mysql::Backend {
+                        noria: make_backend!(MySqlUpstream, MySqlQueryHandler, Dialect::MySQL,),
+                        enable_statement_logging: false,
+                    },
+                    s,
+                    false,
+                    None,
+                    TlsMode::Optional,
+                    AuthCache::new(),
+                    AuthPlugin::default(),
+                )
+                .await
+                .unwrap()
+            }
             DatabaseType::PostgreSQL => {
                 psql_srv::run_backend(
                     readyset_psql::Backend::new(make_backend!(

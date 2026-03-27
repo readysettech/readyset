@@ -19,6 +19,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
         SwitchableStream(Some(Stream::Plain(s)))
     }
 
+    /// Returns `true` if the connection has been upgraded to TLS.
+    #[allow(dead_code)] // Used in CL 4
+    pub fn is_secure(&self) -> bool {
+        matches!(self.0.as_ref(), Some(Stream::Tls(_)))
+    }
+
     pub async fn switch_to_tls(&mut self, tls_acceptor: Arc<TlsAcceptor>) -> io::Result<()> {
         match self.0.take() {
             Some(Stream::Plain(stream)) => {

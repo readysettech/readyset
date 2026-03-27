@@ -7895,6 +7895,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "libc",
+ "mysql-srv",
  "num_cpus",
  "parking_lot",
  "pprof",

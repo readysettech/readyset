@@ -17,8 +17,8 @@ use mysql::consts::Command;
 use mysql::prelude::Queryable;
 use mysql::{Row, ServerError};
 use mysql_srv::{
-    CachedSchema, Column, ErrorKind, MySqlIntermediary, MySqlShim, ParamParser, QueryResultWriter,
-    QueryResultsResponse, StatementMetaWriter,
+    AuthCache, AuthKeys, AuthPlugin, CachedSchema, Column, ErrorKind, MySqlIntermediary, MySqlShim,
+    ParamParser, QueryResultWriter, QueryResultsResponse, StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_util::redacted::RedactedString;
@@ -225,6 +225,7 @@ where
     where
         C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     {
+        let _ = AuthKeys::initialize(None);
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
 
@@ -239,7 +240,16 @@ where
         // Spawn the server task
         let server_handle = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            MySqlIntermediary::run_on_tcp(self, socket, false, None, TlsMode::Optional).await
+            MySqlIntermediary::run_on_tcp(
+                self,
+                socket,
+                false,
+                None,
+                TlsMode::Optional,
+                AuthCache::new(),
+                AuthPlugin::default(),
+            )
+            .await
         });
 
         // Connect to the server

@@ -20,6 +20,7 @@ clap = { workspace = true, features = ["derive"] }
 benchmarks = { path = "../benchmarks" }
 
 readyset-client = { path = "../readyset-client" }
+mysql-srv = { path = "../mysql-srv" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-server = { path = "../readyset-server" }

@@ -136,6 +136,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
+//!     let _ = AuthKeys::initialize(None);
 //!     let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
 //!     let port = listener.local_addr().unwrap().port();
 //!     let mut rt = tokio::runtime::Runtime::new().unwrap();
@@ -147,7 +148,10 @@
 //!                 s.set_nonblocking(true).expect("couldn't set nonblocking");
 //!                 tokio::net::TcpStream::from_std(s).unwrap()
 //!             };
-//!             rt.block_on(MySqlIntermediary::run_on_tcp(Backend, s, false, None, TlsMode::Optional))
+//!             rt.block_on(MySqlIntermediary::run_on_tcp(
+//!                 Backend, s, false, None, TlsMode::Optional,
+//!                 AuthCache::new(), AuthPlugin::default(),
+//!             ))
 //!                 .unwrap();
 //!         }
 //!     });
@@ -205,7 +209,7 @@ use tracing::{debug, info, trace};
 use writers::write_err;
 
 use crate::authentication::{generate_auth_data, hash_password, AUTH_PLUGIN_NAME};
-pub use crate::authentication::{AuthCache, AuthKeys, AuthPlugin};
+pub use crate::authentication::{AuthCache, AuthContext, AuthKeys, AuthPlugin};
 use crate::commands::change_user;
 use crate::constants::CONNECT_ATTRS;
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
@@ -415,6 +419,12 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     tls_acceptor: Option<Arc<TlsAcceptor>>,
     // Tls mode
     tls_mode: TlsMode,
+    /// Shared cache of SHA256(SHA256(password)) for caching_sha2_password fast-auth.
+    #[allow(dead_code)] // Used in CL 3
+    auth_cache: Arc<AuthCache>,
+    /// The authentication plugin to advertise during the handshake.
+    #[allow(dead_code)] // Used in CL 3
+    auth_plugin: AuthPlugin,
 }
 
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
@@ -426,6 +436,8 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        auth_cache: Arc<AuthCache>,
+        auth_plugin: AuthPlugin,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
         MySqlIntermediary::run_on(
@@ -434,6 +446,8 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
             enable_statement_logging,
             tls_acceptor,
             tls_mode,
+            auth_cache,
+            auth_plugin,
         )
         .await
     }
@@ -472,6 +486,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        auth_cache: Arc<AuthCache>,
+        auth_plugin: AuthPlugin,
     ) -> Result<(), io::Error> {
         let mut mi = MySqlIntermediary {
             shim,
@@ -482,6 +498,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             auth_data: [0; 20],
             tls_acceptor,
             tls_mode,
+            auth_cache,
+            auth_plugin,
         };
         if let InitResult {
             auth_success: true,

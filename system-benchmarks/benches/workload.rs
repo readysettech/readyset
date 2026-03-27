@@ -28,6 +28,7 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection, TlsMode,
 };
+use mysql_srv::{AuthCache, AuthKeys, AuthPlugin};
 use prometheus_parse::Scrape;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
@@ -716,6 +717,8 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
     let rt = init_adapter_runtime()?;
     let _tracing_guard = init_adapter_tracing(&rt, &options)?;
 
+    let _ = AuthKeys::initialize(None);
+
     match database_type {
         DatabaseType::MySQL => NoriaAdapter {
             description: "Readyset benchmark adapter",
@@ -727,6 +730,8 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                 enable_statement_logging: false,
                 tls_acceptor: None,
                 tls_mode: TlsMode::Optional,
+                auth_cache: AuthCache::new(),
+                mysql_authentication_method: AuthPlugin::default(),
             },
             database_type: DatabaseType::MySQL,
             parse_dialect: readyset_sql::Dialect::MySQL,

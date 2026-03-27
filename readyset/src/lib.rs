@@ -284,6 +284,10 @@ pub struct Options {
     #[command(flatten)]
     pub psql_options: psql::Options,
 
+    /// readyset-mysql-specific options
+    #[command(flatten)]
+    pub mysql_options: mysql::MySqlOptions,
+
     /// Configure how ReadySet behaves when receiving unsupported SET statements.
     ///
     /// The possible values are:
