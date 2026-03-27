@@ -3789,16 +3789,22 @@ impl Domain {
                 }
 
                 // only continue with the keys that weren't captured
-                if let ReplayPiece {
-                    context:
-                        ReplayPieceContext::Partial {
-                            ref mut for_keys, ..
-                        },
-                    ..
-                } = m
-                {
-                    if let Some(backfill_keys) = &mut backfill_keys {
-                        backfill_keys.retain(|k| for_keys.contains(k));
+                // Only need to sync backfill_keys with for_keys when a materialized union
+                // captured some keys (removing them from for_keys). In the common case
+                // (no captures), for_keys still contains all of backfill_keys, so the
+                // retain would be a no-op.
+                if !process_result.captured.is_empty() {
+                    if let ReplayPiece {
+                        context:
+                            ReplayPieceContext::Partial {
+                                ref mut for_keys, ..
+                            },
+                        ..
+                    } = m
+                    {
+                        if let Some(backfill_keys) = &mut backfill_keys {
+                            backfill_keys.retain(|k| for_keys.contains(k));
+                        }
                     }
                 }
 
