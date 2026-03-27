@@ -114,11 +114,11 @@ async fn mysql_modern_async() {
 #[allow(unused_imports)]
 mod _verify_expansion {
     // ── Explicit variants ──
-    use super::mysql_all::{mysql57, mysql80, mysql84};
-    use super::mysql_modern::{mysql80 as _m80, mysql84 as _m84};
-    use super::mysql_modern_gtid::{mysql80_gtid, mysql84_gtid};
-    use super::mysql_modern_mrbr::{mysql80_mrbr, mysql84_mrbr};
-    use super::mysql_modern_nogtid::{mysql80_nogtid, mysql84_nogtid};
+    use super::mysql_all::{mysql57, mysql80, mysql84, mysql96};
+    use super::mysql_modern::{mysql80 as _m80, mysql84 as _m84, mysql96 as _m96};
+    use super::mysql_modern_gtid::{mysql80_gtid, mysql84_gtid, mysql96_gtid};
+    use super::mysql_modern_mrbr::{mysql80_mrbr, mysql84_mrbr, mysql96_mrbr};
+    use super::mysql_modern_nogtid::{mysql80_nogtid, mysql84_nogtid, mysql96_nogtid};
     use super::mysql_single_gtid::mysql84_gtid as _s84g;
     use super::mysql_single_mrbr_gtid::mysql84_mrbr_gtid as _s84mg;
     use super::postgres_all::{postgres13, postgres15};
@@ -134,7 +134,11 @@ mod _verify_expansion {
     use super::mysql_all::mysql84__xp_gtid as _;
     use super::mysql_all::mysql84__xp_mrbr as _;
     use super::mysql_all::mysql84__xp_mrbr_gtid as _;
+    // mysql96 (from mysql_all) → three (no __xp_nogtid; GTID defaults to ON in 9.5+)
     use super::mysql_all::mysql84__xp_nogtid as _;
+    use super::mysql_all::mysql96__xp_gtid as _;
+    use super::mysql_all::mysql96__xp_mrbr as _;
+    use super::mysql_all::mysql96__xp_mrbr_gtid as _;
     // mysql80 (from mysql_modern) → same four __xp_ variants
     use super::mysql_modern::mysql80__xp_gtid as _mm80_gtid;
     use super::mysql_modern::mysql80__xp_mrbr as _mm80_mrbr;
@@ -144,15 +148,21 @@ mod _verify_expansion {
     use super::mysql_modern::mysql84__xp_gtid as _mm84_gtid;
     use super::mysql_modern::mysql84__xp_mrbr as _mm84_mrbr;
     use super::mysql_modern::mysql84__xp_mrbr_gtid as _mm84_mrbr_gtid;
+    // mysql96 (from mysql_modern) → three (no __xp_nogtid; GTID defaults to ON in 9.5+)
     use super::mysql_modern::mysql84__xp_nogtid as _mm84_nogtid;
+    use super::mysql_modern::mysql96__xp_gtid as _mm96_gtid;
+    use super::mysql_modern::mysql96__xp_mrbr as _mm96_mrbr;
+    use super::mysql_modern::mysql96__xp_mrbr_gtid as _mm96_mrbr_gtid;
 
     // ── __xp_ auto-expansion for flagged modern MySQL ──
     // mysql80_gtid → + __xp_mrbr_gtid (base is "mysql80", not "mysql80_gtid")
     use super::mysql_modern_gtid::mysql80__xp_mrbr_gtid as _g80xp;
     use super::mysql_modern_gtid::mysql84__xp_mrbr_gtid as _g84xp;
+    use super::mysql_modern_gtid::mysql96__xp_mrbr_gtid as _g96xp;
     // mysql80_mrbr → + __xp_mrbr_gtid
     use super::mysql_modern_mrbr::mysql80__xp_mrbr_gtid as _mr80xp;
     use super::mysql_modern_mrbr::mysql84__xp_mrbr_gtid as _mr84xp;
+    use super::mysql_modern_mrbr::mysql96__xp_mrbr_gtid as _mr96xp;
     // mysql84_gtid (single) → + __xp_mrbr_gtid
     use super::mysql_single_gtid::mysql84__xp_mrbr_gtid as _sg84xp;
 

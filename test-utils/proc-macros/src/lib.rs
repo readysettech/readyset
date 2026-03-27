@@ -78,13 +78,23 @@ pub fn skip_flaky_finder(_args: TokenStream, item: TokenStream) -> TokenStream {
 // ── Structured upstream parsing ──────────────────────────────────────────
 
 /// Known MySQL versions, as (numeric_id, variant_name) pairs.
-const MYSQL_VERSIONS: &[(u32, &str)] = &[(57, "mysql57"), (80, "mysql80"), (84, "mysql84")];
+const MYSQL_VERSIONS: &[(u32, &str)] = &[
+    (57, "mysql57"),
+    (80, "mysql80"),
+    (84, "mysql84"),
+    (96, "mysql96"),
+];
 
 /// Known PostgreSQL versions, as (numeric_id, variant_name) pairs.
 const POSTGRES_VERSIONS: &[(u32, &str)] = &[(13, "postgres13"), (15, "postgres15")];
 
 /// Minimum MySQL version that supports flags (gtid, mrbr, etc.).
 const MYSQL_MODERN_MIN: u32 = 80;
+
+/// Minimum MySQL version where `gtid_mode` defaults to ON (9.5+).
+/// For these versions, `__xp_nogtid` is not generated since the base variant
+/// already has GTID enabled on the server.
+const MYSQL_GTID_DEFAULT_MIN: u32 = 95;
 
 #[derive(Debug, Clone, Copy)]
 enum Family {
@@ -438,6 +448,7 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
     //
     // Expansion adds the missing flags (mrbr, gtid) as __xp_ variants:
     //   mysql80           → + __xp_mrbr, __xp_gtid, __xp_nogtid, __xp_mrbr_gtid
+    //   mysql96           → + __xp_mrbr, __xp_gtid, __xp_mrbr_gtid  (no __xp_nogtid; GTID is default in 9.5+)
     //   mysql80_mrbr      → + __xp_mrbr_gtid
     //   mysql80_gtid      → + __xp_mrbr_gtid
     //   mysql80_mrbr_gtid → (nothing, fully specified)
@@ -470,10 +481,14 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
 
             match (has_mrbr, has_gtid) {
                 // mysql80 → all four expanded variants
+                // mysql96 → three (no __xp_nogtid; GTID defaults to ON in 9.5+)
                 (false, false) => {
-                    for suffix in ["__xp_mrbr", "__xp_gtid", "__xp_nogtid", "__xp_mrbr_gtid"] {
-                        out.push(Ident::new(&format!("{base}{suffix}"), span));
+                    out.push(Ident::new(&format!("{base}__xp_mrbr"), span));
+                    out.push(Ident::new(&format!("{base}__xp_gtid"), span));
+                    if rv.version < MYSQL_GTID_DEFAULT_MIN {
+                        out.push(Ident::new(&format!("{base}__xp_nogtid"), span));
                     }
+                    out.push(Ident::new(&format!("{base}__xp_mrbr_gtid"), span));
                 }
                 // mysql80_mrbr or mysql80_gtid → only __xp_mrbr_gtid
                 (true, false) | (false, true) => {
