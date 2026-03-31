@@ -5,9 +5,9 @@
 #
 # - `test_large_packet_write` is absurdly long locally even compared to other tests marked slow, and
 #   not very valuable unless you're working on related code.
-# - Only mysql80 and postgres15 upstream tests run by default. Other upstream versions (mysql57,
-#   mysql84, postgres13) are excluded to keep local test runs fast. The `ci` profile runs all of them.
-default-filter = 'not test(/:very_slow:/) and not (test(/:mysql\d+\w*:/) and not test(/:mysql80\w*:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
+# - Only mysql84 and postgres15 upstream tests run by default. Other upstream versions (mysql57,
+#   mysql80, postgres13) are excluded to keep local test runs fast. The `ci` profile runs all of them.
+default-filter = 'not test(/:very_slow:/) and not (test(/:mysql\d+\w*:/) and not test(/:mysql84\w*:/)) and not (test(/:postgres\d+:/) and not test(/:postgres15:/))'
 slow-timeout = { period = "120s", terminate-after = 2, grace-period = "20s" }
 
 [test-groups]
