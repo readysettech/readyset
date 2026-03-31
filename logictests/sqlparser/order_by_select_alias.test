@@ -1,0 +1,93 @@
+# ORDER BY on SELECT aliases with GROUP BY + aggregates
+
+statement ok
+CREATE TABLE obs (id INT PRIMARY KEY, grp INT, val INT)
+
+statement ok
+INSERT INTO obs VALUES
+  (1, 1, 10), (2, 1, 20), (3, 1, 30),
+  (4, 2, 5),  (5, 2, 15),
+  (6, 3, 100), (7, 3, 200), (8, 3, 50)
+
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM obs GROUP BY grp ORDER BY rn LIMIT 2
+----
+3
+350
+1
+1
+60
+2
+
+query III nosort
+SELECT grp, sum(val) AS s,
+  rank() OVER (ORDER BY sum(val) ASC) AS rnk
+FROM obs GROUP BY grp ORDER BY rnk LIMIT 2
+----
+2
+20
+1
+1
+60
+2
+
+query III rowsort
+SELECT grp, count(*) AS cnt,
+  dense_rank() OVER (ORDER BY count(*) DESC) AS dr
+FROM obs GROUP BY grp ORDER BY dr LIMIT 2
+----
+1
+3
+1
+3
+3
+1
+
+# Mixed ORDER BY: WF alias + aggregate alias + GROUP BY col
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM obs GROUP BY grp ORDER BY rn, s, grp LIMIT 3
+----
+3
+350
+1
+1
+60
+2
+2
+20
+3
+
+query II nosort
+SELECT grp, sum(val) AS s
+FROM obs GROUP BY grp ORDER BY s DESC LIMIT 2
+----
+3
+350
+1
+60
+
+query II nosort
+SELECT grp, sum(val) AS s
+FROM obs GROUP BY grp ORDER BY grp ASC LIMIT 2
+----
+1
+60
+2
+20
+
+# HAVING + WF alias
+query III nosort
+SELECT grp, sum(val) AS s,
+  rank() OVER (ORDER BY sum(val) DESC) AS rnk
+FROM obs GROUP BY grp HAVING sum(val) > 50 ORDER BY rnk LIMIT 2
+----
+3
+350
+1
+1
+60
+2

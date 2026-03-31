@@ -15,8 +15,9 @@ pub trait NormalizeTopKWithAggregate: Sized {
     /// (since it's only ever going to return one row)
     ///
     /// If the query *has* a GROUP BY clause, this query checks that all the columns in the ORDER BY
-    /// clause either appear in the GROUP BY clause, or reference the results of aggregates, and
-    /// returns an error otherwise.
+    /// clause either appear in the GROUP BY clause, reference the results of aggregates, or
+    /// reference any aliased expression in the SELECT list (e.g. window functions, CASE
+    /// expressions), and returns an error otherwise.
     fn normalize_topk_with_aggregate<C: RewriteDialectContext>(
         &mut self,
         context: C,
@@ -72,7 +73,30 @@ impl NormalizeTopKWithAggregate for SelectStatement {
                                 }),
                             };
 
-                            if !in_group_by_clause && !references_aggregate {
+                            // ...or reference any aliased expression in the
+                            // SELECT list (window functions, CASE, regular
+                            // functions, etc. are valid ORDER BY targets when
+                            // they appear in SELECT).
+                            let references_select_alias = match order_field {
+                                FieldReference::Numeric(_) => false,
+                                FieldReference::Expr(Expr::Column(col)) => {
+                                    self.fields.iter().any(|f| {
+                                        matches!(
+                                            f,
+                                            FieldDefinitionExpr::Expr {
+                                                alias: Some(alias),
+                                                ..
+                                            } if *alias == col.name
+                                        )
+                                    })
+                                }
+                                _ => false,
+                            };
+
+                            if !in_group_by_clause
+                                && !references_aggregate
+                                && !references_select_alias
+                            {
                                 return Err(ReadySetError::ExprNotInGroupBy {
                                     expression: order_field
                                         .display(context.dialect().into())
@@ -309,5 +333,51 @@ mod tests {
             .normalize_topk_with_aggregate(Dialect::MySQL)
             .unwrap();
         assert_eq!(result, query);
+    }
+
+    #[test]
+    fn order_by_select_alias_does_nothing() {
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT grp, sum(val) AS s, grp * 2 AS doubled
+             FROM t GROUP BY grp ORDER BY doubled LIMIT 2",
+        )
+        .unwrap();
+        let mut result = query.clone();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
+        assert_eq!(result, query);
+    }
+
+    #[test]
+    fn order_by_mixed_select_aliases_does_nothing() {
+        let query = parse_query(
+            Dialect::MySQL,
+            "SELECT grp, sum(val) AS s, grp * 2 AS doubled
+             FROM t GROUP BY grp ORDER BY doubled, s, grp",
+        )
+        .unwrap();
+        let mut result = query.clone();
+        result
+            .normalize_topk_with_aggregate(Dialect::MySQL)
+            .unwrap();
+        assert_eq!(result, query);
+    }
+
+    #[test]
+    fn order_by_non_select_alias_still_errors() {
+        let mut query = parse_query(
+            Dialect::MySQL,
+            "SELECT grp, sum(val) AS s, grp * 2 AS doubled
+             FROM t GROUP BY grp ORDER BY other_col",
+        )
+        .unwrap();
+        let result = query.normalize_topk_with_aggregate(Dialect::MySQL);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.err(),
+            Some(ReadySetError::ExprNotInGroupBy { .. })
+        ));
     }
 }
