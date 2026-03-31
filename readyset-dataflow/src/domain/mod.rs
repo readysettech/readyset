@@ -328,7 +328,7 @@ struct Redo {
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct Hole {
     node: LocalNodeIndex,
-    column_indices: Vec<usize>,
+    column_indices: Arc<[usize]>,
     key: KeyComparison,
 }
 
@@ -1056,10 +1056,11 @@ impl Domain {
                 let replays = needed_replays
                     .entry((Target(node), column_indices.clone()))
                     .or_default();
+                let column_indices: Arc<[usize]> = Arc::from(column_indices.as_slice());
                 for miss_key in missed_keys {
                     let hole = Hole {
                         node,
-                        column_indices: column_indices.clone(),
+                        column_indices: Arc::clone(&column_indices),
                         key: miss_key.clone(),
                     };
                     if w.record_miss(hole, redo.clone()) {
@@ -3493,7 +3494,7 @@ impl Domain {
                         for_keys.retain(|k| {
                             w.redos.contains_key(&Hole {
                                 node: target.expect("already checked target_in_self"),
-                                column_indices: partial_index.columns.to_owned(),
+                                column_indices: Arc::from(partial_index.columns.as_slice()),
                                 key: k.clone(),
                             })
                         });
@@ -3648,12 +3649,14 @@ impl Domain {
                                 for key in backfill_keys.clone() {
                                     let hole = Hole {
                                         node: target.unwrap(),
-                                        column_indices: self.replay_paths[tag]
-                                            .target_index
-                                            .as_ref()
-                                            .unwrap()
-                                            .columns
-                                            .clone(),
+                                        column_indices: Arc::from(
+                                            self.replay_paths[tag]
+                                                .target_index
+                                                .as_ref()
+                                                .unwrap()
+                                                .columns
+                                                .as_slice(),
+                                        ),
                                         key,
                                     };
                                     if let Some(redos) = waiting.redos.get(&hole) {
@@ -4163,7 +4166,7 @@ impl Domain {
                 for key in for_keys.unwrap() {
                     let hole = Hole {
                         node: target,
-                        column_indices: key_index.columns.clone(),
+                        column_indices: Arc::from(key_index.columns.as_slice()),
                         key,
                     };
                     let replay = match waiting.redos.remove(&hole) {
