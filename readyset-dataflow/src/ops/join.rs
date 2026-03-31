@@ -51,10 +51,6 @@ pub struct Join {
     // Which columns to emit
     emit: Vec<(Side, usize)>,
 
-    // Which columns to emit when the left/right row is being modified in place.
-    in_place_left_emit: Vec<(Side, usize)>,
-    in_place_right_emit: Vec<(Side, usize)>,
-
     /// Buffered records from one half of a remapped upquery. The key is (column index,
     /// side).
     // We skip serde since we don't want the state of the node, just the configuration.
@@ -101,43 +97,6 @@ impl Join {
         rhs_full_mat: bool,
         left_filter: Option<Expr>,
     ) -> Self {
-        let (in_place_left_emit, in_place_right_emit) = {
-            let compute_in_place_emit = |side| {
-                let num_columns = emit
-                    .iter()
-                    .filter(|&&(from_side, _)| from_side == side)
-                    .map(|&(_, c)| c + 1)
-                    .max()
-                    .unwrap_or(0);
-
-                // Tracks how columns have moved. At any point during the iteration, column i in
-                // the original row will be located at position remap[i].
-                let mut remap: Vec<_> = (0..num_columns).collect();
-                emit.iter()
-                    .enumerate()
-                    .map(|(i, &(from_side, c))| {
-                        if from_side == side {
-                            let remapped = remap[c];
-                            let other = remap.iter().position(|&c| c == i);
-
-                            remap[c] = i;
-                            if let Some(other) = other {
-                                remap[other] = remapped;
-                            }
-
-                            (from_side, remapped)
-                        } else {
-                            (from_side, c)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            };
-
-            (
-                compute_in_place_emit(Side::Left),
-                compute_in_place_emit(Side::Right),
-            )
-        };
         debug!(
             "Join::new: left: {:?}, right: {:?}, kind: {:?}, on: {:?}, rhs_full_mat: {:?}",
             left, right, kind, on, rhs_full_mat
@@ -147,8 +106,6 @@ impl Join {
             right: right.into(),
             on,
             emit,
-            in_place_left_emit,
-            in_place_right_emit,
             generated_column_buffer: Default::default(),
             kind,
             rhs_full_mat,
