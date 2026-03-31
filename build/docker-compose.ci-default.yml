@@ -2,7 +2,7 @@
 
 services:
   mysql:
-    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/mysql:8.0
+    image: 305232526136.dkr.ecr.us-east-2.amazonaws.com/ecr-public/docker/library/mysql:8.4
     expose:
       - "3306"
   postgres:
