@@ -131,3 +131,93 @@ select val from topk_no_predicates order by val asc limit 3
 ----
 1
 1
+
+# ---- Aggregates + TopK ----
+
+statement ok
+CREATE TABLE agg_topk (id INT, grp INT, val INT, PRIMARY KEY (id))
+
+statement ok
+INSERT INTO agg_topk VALUES
+  (1, 1, 10), (2, 1, 20), (3, 1, 30),
+  (4, 2, 5),  (5, 2, 15),
+  (6, 3, 100), (7, 3, 200), (8, 3, 50),
+  (9, 4, 1)
+
+# SUM aggregate ordered by the aggregate result with LIMIT
+query II nosort
+SELECT grp, sum(val) AS s FROM agg_topk GROUP BY grp ORDER BY s ASC LIMIT 2
+----
+4
+1
+2
+20
+
+# COUNT aggregate with LIMIT
+query II nosort
+SELECT grp, count(*) AS cnt FROM agg_topk GROUP BY grp ORDER BY cnt DESC LIMIT 2
+----
+1
+3
+3
+3
+
+# MIN/MAX aggregate with LIMIT
+query II nosort
+SELECT grp, min(val) AS m FROM agg_topk GROUP BY grp ORDER BY m ASC LIMIT 3
+----
+4
+1
+2
+5
+1
+10
+
+# AVG aggregate with LIMIT
+query IR nosort
+SELECT grp, avg(val) AS a FROM agg_topk GROUP BY grp ORDER BY a DESC LIMIT 2
+----
+3
+116.6667
+1
+20.0000
+
+# Aggregate with HAVING + LIMIT
+query II nosort
+SELECT grp, sum(val) AS s FROM agg_topk GROUP BY grp HAVING sum(val) > 10 ORDER BY s DESC LIMIT 2
+----
+3
+350
+1
+60
+
+# Delete a row and verify aggregate + topk updates
+statement ok
+DELETE FROM agg_topk WHERE id = 6
+
+# grp=3 now has sum=250 instead of 350
+query II nosort
+SELECT grp, sum(val) AS s FROM agg_topk GROUP BY grp ORDER BY s DESC LIMIT 2
+----
+3
+250
+1
+60
+
+# Delete all rows in a group
+statement ok
+DELETE FROM agg_topk WHERE id = 9
+
+# grp=4 is gone, only 3 groups remain
+query II nosort
+SELECT grp, sum(val) AS s FROM agg_topk GROUP BY grp ORDER BY s ASC LIMIT 3
+----
+2
+20
+1
+60
+3
+250
+
+# Window function + aggregate + TopK tests are in
+# logictests/sqlparser/window_functions_aggs_topk.test

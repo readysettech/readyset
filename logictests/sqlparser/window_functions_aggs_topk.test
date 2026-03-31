@@ -1,0 +1,126 @@
+# Tests for Window Functions + Aggregates + TopK (ORDER BY + LIMIT)
+# Verifies correct row counts when WFs and aggregates interact with TopK
+
+statement ok
+CREATE TABLE wf_topk (id INT PRIMARY KEY, grp INT, val INT)
+
+statement ok
+INSERT INTO wf_topk VALUES
+  (1, 1, 10), (2, 1, 20), (3, 1, 30),
+  (4, 2, 5),  (5, 2, 15),
+  (6, 3, 100), (7, 3, 200), (8, 3, 50)
+
+# row_number() over aggregate + LIMIT
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM wf_topk GROUP BY grp ORDER BY rn LIMIT 2
+----
+3
+350
+1
+1
+60
+2
+
+# rank() over aggregate + LIMIT
+query III nosort
+SELECT grp, sum(val) AS s,
+  rank() OVER (ORDER BY sum(val) ASC) AS rnk
+FROM wf_topk GROUP BY grp ORDER BY rnk LIMIT 2
+----
+2
+20
+1
+1
+60
+2
+
+# dense_rank() with count aggregate + LIMIT
+query III nosort
+SELECT grp, count(*) AS cnt,
+  dense_rank() OVER (ORDER BY count(*) DESC) AS dr
+FROM wf_topk GROUP BY grp ORDER BY dr LIMIT 2
+----
+1
+3
+1
+3
+3
+1
+
+# Aggregate in WF PARTITION BY + LIMIT
+query III nosort
+SELECT grp, count(*) AS cnt,
+  row_number() OVER (PARTITION BY count(*) ORDER BY grp) AS rn
+FROM wf_topk GROUP BY grp ORDER BY cnt DESC, grp LIMIT 2
+----
+1
+3
+1
+3
+3
+2
+
+# WF + aggregate + ORDER BY aggregate + LIMIT
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM wf_topk GROUP BY grp ORDER BY s DESC LIMIT 2
+----
+3
+350
+1
+1
+60
+2
+
+# Delete a row and verify WF + aggregate + TopK updates
+statement ok
+DELETE FROM wf_topk WHERE id = 6
+
+# grp=3 now has sum=250, count=2
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM wf_topk GROUP BY grp ORDER BY rn LIMIT 2
+----
+3
+250
+1
+1
+60
+2
+
+# Insert rows to create a new group
+statement ok
+INSERT INTO wf_topk VALUES (9, 4, 500), (10, 4, 500)
+
+# grp=4 has sum=1000, should be rank 1
+query III nosort
+SELECT grp, sum(val) AS s,
+  row_number() OVER (ORDER BY sum(val) DESC) AS rn
+FROM wf_topk GROUP BY grp ORDER BY rn LIMIT 3
+----
+4
+1000
+1
+3
+250
+2
+1
+60
+3
+
+# HAVING + WF + LIMIT
+query III nosort
+SELECT grp, sum(val) AS s,
+  rank() OVER (ORDER BY sum(val) DESC) AS rnk
+FROM wf_topk GROUP BY grp HAVING sum(val) > 50 ORDER BY rnk LIMIT 2
+----
+4
+1000
+1
+3
+250
+2
