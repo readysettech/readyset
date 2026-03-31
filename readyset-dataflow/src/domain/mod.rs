@@ -323,14 +323,8 @@ struct Redo {
     requesting_replica: usize,
 }
 
-/// Struct indicating a single hole in a partial materialization that needs to be filled to satisfy
-/// some downstream replay. Used in [`Waiting`].
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
-struct Hole {
-    node: LocalNodeIndex,
-    column_indices: Arc<[usize]>,
-    key: KeyComparison,
-}
+/// Map from (node, column_indices) to (key -> redos waiting on that hole).
+type RedoMap = HashMap<(LocalNodeIndex, Arc<[usize]>), HashMap<KeyComparison, HashSet<Redo>>>;
 
 /// When a replay misses while being processed, it triggers a replay to backfill the hole that it
 /// missed in. We need to ensure that when this happens, we re-run the original replay to fill the
@@ -355,17 +349,25 @@ struct Waiting {
     /// For each eventual redo, how many holes are we waiting for?
     holes: HashMap<Redo, usize>,
     /// For each hole, which redos do we expect we'll have to do?
+    /// Outer key is (node, column_indices), inner key is the specific key comparison.
     ///
-    /// Note that for extended replay paths, the `Hole` is in the *target* of the path, *not* the
+    /// Note that for extended replay paths, the node is the *target* of the path, *not* the
     /// destination
-    redos: HashMap<Hole, HashSet<Redo>>,
+    redos: RedoMap,
 }
 
 impl Waiting {
     /// Record a miss for a given hole and redo. Returns `true` if this is a new hole (i.e. a
     /// replay needs to be dispatched for it).
-    fn record_miss(&mut self, hole: Hole, redo: Redo) -> bool {
-        match self.redos.entry(hole) {
+    fn record_miss(
+        &mut self,
+        node: LocalNodeIndex,
+        column_indices: Arc<[usize]>,
+        key: KeyComparison,
+        redo: Redo,
+    ) -> bool {
+        let inner = self.redos.entry((node, column_indices)).or_default();
+        match inner.entry(key) {
             Entry::Occupied(e) => {
                 if e.into_mut().insert(redo.clone()) {
                     *self.holes.entry(redo).or_default() += 1;
@@ -1058,12 +1060,12 @@ impl Domain {
                     .or_default();
                 let column_indices: Arc<[usize]> = Arc::from(column_indices.as_slice());
                 for miss_key in missed_keys {
-                    let hole = Hole {
+                    if w.record_miss(
                         node,
-                        column_indices: Arc::clone(&column_indices),
-                        key: miss_key.clone(),
-                    };
-                    if w.record_miss(hole, redo.clone()) {
+                        Arc::clone(&column_indices),
+                        miss_key.clone(),
+                        redo.clone(),
+                    ) {
                         replays.push(miss_key);
                     }
                 }
@@ -1181,7 +1183,6 @@ impl Domain {
     where
         P: Fn(bool, Vec<KeyComparison>) -> Packet,
     {
-        #[allow(clippy::unwrap_used)] // documented invariant
         let TriggerEndpoint::End {
             source,
             ref mut options,
@@ -1214,13 +1215,10 @@ impl Domain {
             ex.send(options[0], pkt(true, keys));
         } else if let Some(key_shard_i) = ask_shard_by_key_i {
             trace!(?tag, ?keys, "sending sharded replay request");
-            let mut shards = HashMap::new();
+            let mut shards: HashMap<usize, Vec<_>> = HashMap::new();
             for key in keys {
                 for shard in key.shard_keys_at(key_shard_i, options.len()) {
-                    shards
-                        .entry(shard)
-                        .or_insert_with(Vec::new)
-                        .push(key.clone());
+                    shards.entry(shard).or_default().push(key.clone());
                 }
             }
             for (shard, keys) in shards {
@@ -1244,13 +1242,11 @@ impl Domain {
             TriggerEndpoint::End { .. } => {
                 // A backfill request we made to another domain was just satisfied!
                 let mut requests_satisfied = 0;
-                #[allow(clippy::unwrap_used)] // Replay paths can't be empty
                 let last = self.replay_paths[tag].last_segment();
                 if let Some(target) = self.replay_paths[tag].target_node() {
                     if let Some(tags) = self.replay_paths.tags_for_index(
                         Destination(last.node),
                         Target(target),
-                        #[allow(clippy::unwrap_used)]
                         // We already know it's a partial replay path, so it must have a partial
                         // key
                         last.partial_index.as_ref().unwrap(),
@@ -1436,8 +1432,6 @@ impl Domain {
             }
         }
 
-        // We checked it's Some above, it's only an Option so we can take()
-        #[allow(clippy::unwrap_used)]
         match m.as_ref().unwrap() {
             Packet::Update(x) if x.is_empty() => {
                 // no need to deal with our children if we're not sending them anything
@@ -1455,8 +1449,6 @@ impl Domain {
         // NOTE: we can't directly iterate over .children due to self.dispatch in the loop
         let nchildren = self.nodes[me].borrow().children().len();
         for i in 0..nchildren {
-            // We checked it's Some above, it's only an Option so we can take()
-            #[allow(clippy::unwrap_used)]
             // avoid cloning if we can
             let mut m = if i == nchildren - 1 {
                 m.take().unwrap()
@@ -1984,7 +1976,6 @@ impl Domain {
         let mut n = self.nodes[node].borrow_mut();
         let name = n.name().clone();
         let cols = index.columns.clone();
-        #[allow(clippy::unwrap_used)] // checked it was a reader above
         let r = n.as_mut_reader().unwrap();
 
         let name2 = name.clone();
@@ -3147,8 +3138,6 @@ impl Domain {
         while let Some(tp) = self.timed_purges.front() {
             let now = time::Instant::now();
             if tp.time <= now {
-                #[allow(clippy::unwrap_used)]
-                // we know it's Some because we check at the head of the while
                 let tp = self.timed_purges.pop_front().unwrap();
                 // nodes in tp.view must reference nodes in self
                 let node = self.nodes[tp.view].borrow_mut();
@@ -3265,8 +3254,6 @@ impl Domain {
                         let ms = ms.into_iter().map(|m| {
                             // This is the only point where the replay_key and miss_key are
                             // different.
-                            #[allow(clippy::unwrap_used)]
-                            // keys can't be empty coming from misses
                             (key.clone(), KeyComparison::try_from(m).unwrap())
                         });
                         replay_keys.extend(ms);
@@ -3491,13 +3478,13 @@ impl Domain {
                     let partial_index = target_segment.partial_index.as_ref().unwrap();
                     if let Some(w) = self.waiting.get(dst) {
                         // discard all the keys that we aren't waiting for
-                        for_keys.retain(|k| {
-                            w.redos.contains_key(&Hole {
-                                node: target.expect("already checked target_in_self"),
-                                column_indices: Arc::from(partial_index.columns.as_slice()),
-                                key: k.clone(),
-                            })
-                        });
+                        let target_node = target.expect("already checked target_in_self");
+                        let outer_key = (target_node, Arc::from(partial_index.columns.as_slice()));
+                        if let Some(inner) = w.redos.get(&outer_key) {
+                            for_keys.retain(|k| inner.contains_key(k));
+                        } else {
+                            for_keys.clear();
+                        }
                     } else if !self.reader_triggered.contains_key(dst) {
                         internal!(
                             "Received replay targeted at node {dst} that is not waiting for any \
@@ -3527,9 +3514,6 @@ impl Domain {
                         // note that we need to use the partial_keys column IDs from the
                         // *start* of the path here, as the records haven't been processed
                         // yet
-                        // We already know it's a partial replay path, so it must have a
-                        // partial key
-                        #[allow(clippy::unwrap_used)]
                         let partial_keys = path.first().partial_index.as_ref().unwrap();
                         data.retain(|r| {
                             for_keys.iter().any(|k| {
@@ -3646,31 +3630,33 @@ impl Domain {
                         // have to replay the same set of rows over again (sad!)
                         if let Some(state) = self.state.get_mut(segment.node) {
                             if let Some(waiting) = self.waiting.get(segment.node) {
-                                for key in backfill_keys.clone() {
-                                    let hole = Hole {
-                                        node: target.unwrap(),
-                                        column_indices: Arc::from(
-                                            self.replay_paths[tag]
-                                                .target_index
-                                                .as_ref()
-                                                .unwrap()
-                                                .columns
-                                                .as_slice(),
-                                        ),
-                                        key,
-                                    };
-                                    if let Some(redos) = waiting.redos.get(&hole) {
-                                        for redo in redos {
-                                            // Are we about to satisfy the last hole this
-                                            // redo was waiting for?
-                                            if waiting.holes.get(redo) == Some(&1) {
-                                                trace!(
-                                                    key = ?redo.replay_key,
-                                                    tag = ?redo.tag,
-                                                    local = %segment.node,
-                                                    "Marking remapped hole filled"
-                                                );
-                                                state.mark_filled(redo.replay_key.clone(), redo.tag)
+                                let target_node = target.unwrap();
+                                let cols: Arc<[usize]> = Arc::from(
+                                    self.replay_paths[tag]
+                                        .target_index
+                                        .as_ref()
+                                        .unwrap()
+                                        .columns
+                                        .as_slice(),
+                                );
+                                if let Some(inner) = waiting.redos.get(&(target_node, cols)) {
+                                    for key in backfill_keys.clone() {
+                                        if let Some(redos) = inner.get(&key) {
+                                            for redo in redos {
+                                                // Are we about to satisfy the last hole
+                                                // this redo was waiting for?
+                                                if waiting.holes.get(redo) == Some(&1) {
+                                                    trace!(
+                                                        key = ?redo.replay_key,
+                                                        tag = ?redo.tag,
+                                                        local = %segment.node,
+                                                        "Marking remapped hole filled"
+                                                    );
+                                                    state.mark_filled(
+                                                        redo.replay_key.clone(),
+                                                        redo.tag,
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -3703,8 +3689,6 @@ impl Domain {
                 let missed_on = if backfill_keys.is_some() {
                     let mut missed_on = HashSet::with_capacity(misses.len());
                     for miss in misses {
-                        #[allow(clippy::unwrap_used)]
-                        // this is a partial miss, so it must have a partial key
                         missed_on.insert(miss.replay_key().unwrap());
                     }
                     missed_on
@@ -3843,8 +3827,6 @@ impl Domain {
 
                     // prune all replayed records for keys where any replayed record for
                     // that key missed.
-                    #[allow(clippy::unwrap_used)]
-                    // We know this is a partial replay
                     let partial_index = partial_key_cols.as_ref().unwrap();
                     m.data_mut().retain(|r| {
                         // XXX: don't we technically need to translate the columns a
@@ -3970,8 +3952,6 @@ impl Domain {
                             pns_for = Some(lookup.on);
                         }
 
-                        #[allow(clippy::unwrap_used)]
-                        // we know this is a partial replay path
                         let tag_match = |rp: &ReplayPath, pn| {
                             let path_index = rp.target_index.as_ref().unwrap();
                             rp.target_node() == Some(pn)
@@ -4001,7 +3981,6 @@ impl Domain {
 
                                         // TODO: could there have been multiple
                                         invariant_eq!(tags.len(), 1);
-                                        #[allow(clippy::unwrap_used)] // we check len is 1 first
                                         evict_tags.push(*tags.iter().next().unwrap());
                                     }
                                 }
@@ -4150,31 +4129,39 @@ impl Domain {
                     "partial replay finished to node with waiting backfills"
                 );
 
-                #[allow(clippy::unwrap_used)]
-                // We already know this is a partial replay path
                 let key_index = self.replay_paths[tag].target_index.clone().unwrap();
 
                 // We try to batch as many redos together, so they can be later issued in a single
                 // call to `RequestPartialReplay`
-                let mut replay_sets = HashMap::new();
+                let mut replay_sets: HashMap<_, Vec<KeyComparison>> = HashMap::new();
 
                 // we got a partial replay result that we were waiting for. it's time we let any
                 // downstream nodes that missed in us on that key know that they can (probably)
                 // continue with their replays.
-                #[allow(clippy::unwrap_used)]
-                // this is a partial replay (since it's in waiting), so it must have keys
+                let outer_key = (target, Arc::from(key_index.columns.as_slice()));
+                let inner = match waiting.redos.get_mut(&outer_key) {
+                    Some(inner) => inner,
+                    None => {
+                        if !waiting.holes.is_empty() {
+                            self.waiting.insert(dst, waiting);
+                        }
+                        internal!(
+                            "backfill for node with no pending redos, tag {:?} (for node {})",
+                            tag,
+                            dst
+                        );
+                    }
+                };
                 for key in for_keys.unwrap() {
-                    let hole = Hole {
-                        node: target,
-                        column_indices: Arc::from(key_index.columns.as_slice()),
-                        key,
-                    };
-                    let replay = match waiting.redos.remove(&hole) {
+                    let replay = match inner.remove(&key) {
                         Some(x) => x,
                         None => {
+                            if !waiting.holes.is_empty() {
+                                self.waiting.insert(dst, waiting);
+                            }
                             internal!(
-                                "backfill for unnecessary hole {:?}, tag {:?} (for node {})",
-                                Sensitive(&hole),
+                                "backfill for unnecessary hole key {:?}, tag {:?} (for node {})",
+                                Sensitive(&key),
                                 tag,
                                 dst
                             );
@@ -4212,9 +4199,13 @@ impl Domain {
                     {
                         replay_sets
                             .entry((tag, unishard, requesting_shard, requesting_replica))
-                            .or_insert_with(|| Vec::new())
+                            .or_default()
                             .push(replay_key);
                     }
+                }
+                // Clean up empty inner map to maintain redos.is_empty() invariant
+                if inner.is_empty() {
+                    waiting.redos.remove(&outer_key);
                 }
 
                 // After we actually finished sorting the Redos into batches, issue each batch
@@ -4450,7 +4441,6 @@ impl Domain {
                         // Only trigger downstream evictions if we actually evicted something.
                         if result.bytes_freed > 0 {
                             bytes_freed += Self::trigger_downstream_evictions(
-                                #[allow(clippy::unwrap_used)]
                                 dest.partial_index.as_ref().unwrap(),
                                 &keys,
                                 dest.node,
@@ -4493,7 +4483,6 @@ impl Domain {
     ) -> ReadySetResult<()> {
         let mut from = path[0].node;
         for segment in path {
-            #[allow(clippy::unwrap_used)]
             // partial_key must be Some for partial replay paths
             nodes[segment.node].borrow_mut().process_eviction(
                 from,
