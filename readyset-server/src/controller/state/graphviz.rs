@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
+use dataflow_expression::{PostLookup, PostLookupAggregateFunction};
 use petgraph::Direction;
 use readyset_client::debug::info::NodeSize;
 
@@ -88,6 +89,50 @@ impl Display for Graphviz<'_> {
             }
         }
 
+        // Reader processing pseudo-nodes: rendered outside domain subgraphs so they
+        // don't clutter the dataflow layout.  Each pseudo-node is a dashed "note"
+        // shape linked to its reader with a gray dashed edge (no arrowhead).
+        for &index in &nodes {
+            let node = &self.graph[index];
+            if let Some(reader) = node.as_reader() {
+                let PostLookup {
+                    ref order_by,
+                    limit,
+                    ref aggregates,
+                    // Column projection and default rows are omitted from the
+                    // pseudo-node as they are less interesting for dataflow debugging.
+                    returned_cols: _,
+                    default_row: _,
+                } = reader.reader_processing().post_processing;
+                let has_aggregates = aggregates
+                    .as_ref()
+                    .is_some_and(|a| !a.group_by.is_empty() || !a.aggregates.is_empty());
+                if order_by.is_none() && limit.is_none() && !has_aggregates {
+                    continue;
+                }
+                let id = index.index();
+                let mut label = String::from("<b>ReaderProcessing</b>");
+                write_reader_processing(
+                    &mut label,
+                    order_by.as_deref(),
+                    limit,
+                    aggregates.as_ref(),
+                )
+                .expect("write to String is infallible");
+                out!(
+                    f,
+                    1,
+                    "n{id}_rp [label=< {label} >, shape=note, fontsize=9, \
+                     fillcolor=\"#f0f0f0\", style=\"dashed,filled\"]"
+                );
+                out!(
+                    f,
+                    1,
+                    "n{id} -> n{id}_rp [ style=dashed, arrowhead=none, color=gray ]"
+                );
+            }
+        }
+
         // edges.
         for edge in self.graph.raw_edges() {
             if self.graph[edge.source()].is_graph_root() {
@@ -133,4 +178,62 @@ impl Display for Graphviz<'_> {
 
         Ok(())
     }
+}
+
+/// Write post-lookup processing info as HTML content for a graphviz pseudo-node label.
+fn write_reader_processing(
+    w: &mut impl Write,
+    order_by: Option<
+        &[(
+            usize,
+            readyset_sql::ast::OrderType,
+            readyset_sql::ast::NullOrder,
+        )],
+    >,
+    limit: Option<usize>,
+    aggregates: Option<&dataflow_expression::PostLookupAggregates>,
+) -> fmt::Result {
+    if let Some(order_by) = order_by {
+        if !order_by.is_empty() {
+            write!(w, "<br/>ORDER BY ")?;
+            for (i, (col, order, null_order)) in order_by.iter().enumerate() {
+                if i > 0 {
+                    w.write_str(", ")?;
+                }
+                write!(w, "[{col}] {order} {null_order}")?;
+            }
+        }
+    }
+
+    if let Some(limit) = limit {
+        write!(w, "<br/>LIMIT {limit}")?;
+    }
+
+    if let Some(aggs) = aggregates {
+        if !aggs.group_by.is_empty() {
+            write!(w, "<br/>GROUP BY ")?;
+            for (i, col) in aggs.group_by.iter().enumerate() {
+                if i > 0 {
+                    w.write_str(", ")?;
+                }
+                write!(w, "[{col}]")?;
+            }
+        }
+        for agg in &aggs.aggregates {
+            // SQL-standard names for graphviz readability (vs. abbreviated
+            // names in PostLookupAggregate::description()).
+            let name = match &agg.function {
+                PostLookupAggregateFunction::Sum => "SUM",
+                PostLookupAggregateFunction::Max => "MAX",
+                PostLookupAggregateFunction::Min => "MIN",
+                PostLookupAggregateFunction::GroupConcat { .. } => "GROUP_CONCAT",
+                PostLookupAggregateFunction::ArrayAgg { .. } => "ARRAY_AGG",
+                PostLookupAggregateFunction::StringAgg { .. } => "STRING_AGG",
+                PostLookupAggregateFunction::JsonObjectAgg { .. } => "JSON_OBJECT_AGG",
+            };
+            write!(w, "<br/>{name}([{}])", agg.column)?;
+        }
+    }
+
+    Ok(())
 }
