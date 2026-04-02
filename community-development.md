@@ -25,8 +25,7 @@ storage.
    **Ubuntu:**
 
    ```bash
-   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang liblz4-dev
-   sudo apt-get -y install cmake
+   sudo apt update && sudo apt install -y build-essential libssl-dev pkg-config llvm clang libclang-dev liblz4-dev cmake
    ```
 
    **Arch:**
