@@ -949,6 +949,105 @@ impl Domain {
         Ok(())
     }
 
+    /// For generated columns (e.g. straddled joins), remap a single miss through the node's
+    /// `handle_upquery` and record any upstream key mappings needed for eviction translation.
+    /// Returns the list of remapped `ColumnMiss`es to replay.
+    fn remap_generated_miss(
+        &mut self,
+        miss_in: LocalNodeIndex,
+        miss_columns: Arc<[usize]>,
+        replay_key: &KeyComparison,
+        miss_key: KeyComparison,
+    ) -> ReadySetResult<Vec<ColumnMiss>> {
+        let miss = ColumnMiss {
+            node: miss_in,
+            column_indices: Arc::clone(&miss_columns),
+            missed_keys: vec1![miss_key],
+        };
+        let remapped = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
+        trace!(?remapped, "Remapped misses on generated columns");
+
+        // Record that we remapped these keys, so that any evictions on the upstream keys can
+        // be translated into the original keys. If the node we missed in is fully materialized,
+        // we don't need to record the remaps, since we're guaranteed not to get any evictions
+        // on the upstream keys.
+        for upstream_miss in &remapped {
+            let Some(state) = self.state.get(upstream_miss.node) else {
+                continue;
+            };
+            if state.is_partial() {
+                self.remapped_keys.insert(
+                    miss_in,
+                    Arc::clone(&miss_columns),
+                    replay_key.clone(),
+                    upstream_miss.clone(),
+                )
+            }
+        }
+
+        // For straddled joins, handle_upquery returns a pair of misses. One from left and one
+        // for right. We only take the first miss/upquery path (left) and the other side will
+        // be triggered in on_input when we have the join conditions.
+        let lhs_misses = if let Join(join) =
+            self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap()
+        {
+            if !join.is_rhs_full_mat() {
+                remapped.clone()
+            } else {
+                debug_assert!(remapped.len() == 2);
+                let side = join.side_to_trigger_upquery();
+                let (this_key, other_key) = match side {
+                    Side::Left => (remapped[0].clone(), remapped[1].clone()),
+                    Side::Right => (remapped[1].clone(), remapped[0].clone()),
+                };
+
+                // Handle the case where multiple entries for the same column may exist in
+                // an IN(?, ?, ?)
+                join.add_missing_upquery(this_key.missed_keys.clone().to_vec(), side, other_key);
+                vec![this_key]
+            }
+        } else {
+            remapped
+        };
+
+        invariant!(
+            !lhs_misses.is_empty(),
+            "columns {:?} in {} are generated, but could not remap an upquery",
+            miss_columns,
+            miss_in
+        );
+        Ok(lhs_misses)
+    }
+
+    /// Record a batch of column misses into `Waiting` and collect the keys that need replays.
+    fn record_column_misses(
+        w: &mut Waiting,
+        needed_replays: &mut HashMap<(Target, Arc<[usize]>), Vec<KeyComparison>>,
+        misses: Vec<ColumnMiss>,
+        redo: Redo,
+    ) {
+        for ColumnMiss {
+            node,
+            column_indices,
+            missed_keys,
+        } in misses
+        {
+            let replays = needed_replays
+                .entry((Target(node), Arc::clone(&column_indices)))
+                .or_default();
+            for miss_key in missed_keys {
+                if w.record_miss(
+                    node,
+                    Arc::clone(&column_indices),
+                    miss_key.clone(),
+                    redo.clone(),
+                ) {
+                    replays.push(miss_key);
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn on_replay_misses(
         &mut self,
@@ -975,75 +1074,25 @@ impl Domain {
         // Map of replays we need to do, grouped by the set of columns at the *target* of the replay
         // (which in the case of remapped upqueries might be different than the columns we missed
         // on!)
-        let mut needed_replays: HashMap<_, Vec<KeyComparison>> = Default::default();
-        let column_indices: Arc<[_]> = Arc::from(miss_columns);
+        let mut needed_replays: HashMap<(Target, Arc<[usize]>), Vec<KeyComparison>> =
+            Default::default();
+
+        let miss_columns_arc: Arc<[usize]> = Arc::from(miss_columns);
 
         for (replay_key, miss_key) in missed_keys {
-            let miss = ColumnMiss {
-                node: miss_in,
-                column_indices: Arc::clone(&column_indices),
-                missed_keys: vec1![miss_key],
-            };
             let misses = if is_generated {
-                // If these columns were generated, ask the node to remap them for us
-                let remapped = self.nodes[miss_in].borrow_mut().handle_upquery(miss)?;
-                trace!(?remapped, "Remapped misses on generated columns");
-
-                // For straddled joins, handle_upquery return a pair of misses. One from left and one for right.
-                // We only take the first miss/upquery path (left) and the other side will be triggered in on_input
-                // when we have the join conditions.
-                let lhs_misses = if let NodeOperator::Join(join) =
-                    self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap()
-                {
-                    if !join.is_rhs_full_mat() {
-                        remapped.clone()
-                    } else {
-                        debug_assert!(remapped.len() == 2);
-                        let side = join.side_to_trigger_upquery();
-                        let (this_key, other_key) = match side {
-                            Side::Left => (remapped[0].clone(), remapped[1].clone()),
-                            Side::Right => (remapped[1].clone(), remapped[0].clone()),
-                        };
-
-                        // Handle the case where multiple entries for the same column may exist in an IN(?, ?, ?)
-                        join.add_missing_upquery(
-                            this_key.missed_keys.clone().to_vec(),
-                            side,
-                            other_key,
-                        );
-                        vec![this_key]
-                    }
-                } else {
-                    remapped.clone()
-                };
-
-                // Record that we remapped these keys, so that any evictions on the upstream keys
-                // can be translated into the original keys.  If the node we missed in is fully
-                // materialized, we don't need to record the remaps, since we're guaranteed not
-                // to get any evictions on the upstream keys
-                for upstream_miss in &remapped {
-                    let Some(state) = self.state.get(upstream_miss.node) else {
-                        continue;
-                    };
-                    if state.is_partial() {
-                        self.remapped_keys.insert(
-                            miss_in,
-                            Arc::clone(&column_indices),
-                            replay_key.clone(),
-                            upstream_miss.clone(),
-                        )
-                    }
-                }
-
-                invariant!(
-                    !lhs_misses.is_empty(),
-                    "columns {:?} in {} are generated, but could not remap an upquery",
-                    miss_columns,
-                    miss_in
-                );
-                lhs_misses
+                self.remap_generated_miss(
+                    miss_in,
+                    Arc::clone(&miss_columns_arc),
+                    &replay_key,
+                    miss_key,
+                )?
             } else {
-                vec![miss]
+                vec![ColumnMiss {
+                    node: miss_in,
+                    column_indices: Arc::clone(&miss_columns_arc),
+                    missed_keys: vec1![miss_key],
+                }]
             };
 
             let redo = Redo {
@@ -1053,27 +1102,7 @@ impl Domain {
                 requesting_shard,
                 requesting_replica,
             };
-            for ColumnMiss {
-                node,
-                column_indices,
-                missed_keys,
-            } in misses
-            {
-                // redo should wait for backfill to complete before redoing
-                let replays = needed_replays
-                    .entry((Target(node), column_indices.clone()))
-                    .or_default();
-                for miss_key in missed_keys {
-                    if w.record_miss(
-                        node,
-                        Arc::clone(&column_indices),
-                        miss_key.clone(),
-                        redo.clone(),
-                    ) {
-                        replays.push(miss_key);
-                    }
-                }
-            }
+            Self::record_column_misses(&mut w, &mut needed_replays, misses, redo);
         }
 
         self.waiting.insert(miss_in, w);
