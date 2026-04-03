@@ -63,6 +63,8 @@ readyset-util = { path = "../readyset-util" }
 replication-offset = { path = "../replication-offset" }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
+readyset-decimal = { path = "../readyset-decimal" }
 test-utils = { path = "../test-utils" }
 
 [features]

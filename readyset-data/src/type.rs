@@ -252,12 +252,24 @@ impl DfType {
 
     /// Returns the MySQL output type for AVG() given the input column type.
     ///
-    /// Per [MySQL's `Item_sum_avg::resolve_type`][examples] and the
+    /// Per MySQL's [precision math examples][examples] and the
     /// [`div_precision_increment`][dpi] system variable (default 4):
     ///
-    /// - Integer input → `DECIMAL(prec + incr, 0 + incr)`, i.e. `DECIMAL(14, 4)` at default
+    /// - Integer input → `DECIMAL(decimal_precision + incr, 0 + incr)`
     /// - `DECIMAL(prec, scale)` input → `DECIMAL(min(prec+incr, 65), min(scale+incr, 30))`
     /// - Float/Double/Text input → `DOUBLE`
+    ///
+    /// The `decimal_precision` for each integer type is the number of decimal
+    /// digits needed to represent the type's maximum value
+    /// (`floor(log10(max_value)) + 1`):
+    ///
+    /// | Type       | Signed | Unsigned |
+    /// |------------|--------|----------|
+    /// | TINYINT    |      3 |        3 |
+    /// | SMALLINT   |      5 |        5 |
+    /// | MEDIUMINT  |      7 |        8 |
+    /// | INT        |     10 |       10 |
+    /// | BIGINT     |     19 |       20 |
     ///
     /// We hardcode the increment to 4 (MySQL's default). If we ever need to support
     /// non-default `div_precision_increment`, this should be parameterized.
@@ -265,15 +277,34 @@ impl DfType {
     /// [examples]: https://dev.mysql.com/doc/refman/8.4/en/precision-math-examples.html
     /// [dpi]: https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_div_precision_increment
     pub fn mysql_avg_output_type(over_col_ty: &DfType) -> DfType {
-        if over_col_ty.is_any_int() {
-            DfType::Numeric { prec: 14, scale: 4 }
+        const DIV_PREC_INCR: u16 = 4;
+        if let Some(dec_prec) = over_col_ty.mysql_decimal_precision() {
+            DfType::Numeric {
+                prec: (dec_prec + DIV_PREC_INCR).min(65),
+                scale: (DIV_PREC_INCR as u8).min(30),
+            }
         } else if let DfType::Numeric { prec, scale } = over_col_ty {
             DfType::Numeric {
-                prec: (*prec + 4).min(65),
-                scale: (*scale + 4).min(30),
+                prec: (*prec + DIV_PREC_INCR).min(65),
+                scale: (*scale + DIV_PREC_INCR as u8).min(30),
             }
         } else {
             DfType::Double
+        }
+    }
+
+    /// Returns the decimal precision for MySQL integer types, or `None` for non-integer types.
+    /// This is the number of decimal digits needed to represent the type's maximum value.
+    pub fn mysql_decimal_precision(&self) -> Option<u16> {
+        match self {
+            Self::TinyInt | Self::UnsignedTinyInt => Some(3),
+            Self::SmallInt | Self::UnsignedSmallInt => Some(5),
+            Self::MediumInt => Some(7),
+            Self::UnsignedMediumInt => Some(8),
+            Self::Int | Self::UnsignedInt => Some(10),
+            Self::BigInt => Some(19),
+            Self::UnsignedBigInt => Some(20),
+            _ => None,
         }
     }
 }

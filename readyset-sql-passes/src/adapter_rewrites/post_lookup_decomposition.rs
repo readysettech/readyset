@@ -632,7 +632,7 @@ mod tests {
         let types: Vec<&DfType> = vec![&DfType::BigInt, &DfType::BigInt, &DfType::BigInt];
         assert_eq!(
             PostLookupAggregateKind::Avg.result_type(&types, mysql),
-            DfType::Numeric { prec: 14, scale: 4 },
+            DfType::Numeric { prec: 23, scale: 4 },
         );
     }
 

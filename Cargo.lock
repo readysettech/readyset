@@ -5939,6 +5939,7 @@ version = "0.7.0"
 dependencies = [
  "ahash",
  "antithesis_sdk",
+ "assert_matches",
  "async-bincode",
  "bincode",
  "bufstream",

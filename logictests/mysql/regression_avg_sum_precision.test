@@ -1,0 +1,74 @@
+# Regression tests for AVG/SUM precision on DECIMAL and INT types.
+#
+# REA-5423: MySQL AVG on DECIMAL returned too many digits due to wrong scale.
+# REA-6118: MySQL AVG on INT returned Double instead of DECIMAL(14,4).
+#
+# These tests verify byte-for-byte match with upstream MySQL.
+
+# --- REA-6118: AVG on INT should return DECIMAL with 4 decimal places ---
+
+statement ok
+CREATE TABLE t_avg_int (id INT PRIMARY KEY, val INT)
+
+statement ok
+INSERT INTO t_avg_int VALUES (1, 5), (2, 3)
+
+# AVG(5,3) = 4.0000 (DECIMAL(14,4))
+query R nosort
+SELECT AVG(val) FROM t_avg_int
+----
+4.0000
+
+# --- REA-6118: AVG on BIGINT should also return DECIMAL with 4 decimal places ---
+
+statement ok
+CREATE TABLE t_avg_bigint (id INT PRIMARY KEY, val BIGINT)
+
+statement ok
+INSERT INTO t_avg_bigint VALUES (1, 5000000000), (2, 3000000000)
+
+# AVG(5000000000, 3000000000) = 4000000000.0000
+query R nosort
+SELECT AVG(val) FROM t_avg_bigint
+----
+4000000000.0000
+
+# --- REA-5423: AVG on DECIMAL(7,2) should have scale 6 (input_scale + 4) ---
+
+statement ok
+CREATE TABLE t_avg_dec (id INT PRIMARY KEY, val DECIMAL(7,2))
+
+statement ok
+INSERT INTO t_avg_dec VALUES (1, 3.16), (2, 3.17)
+
+# AVG(3.16, 3.17) = 3.165000 (scale = 2 + 4 = 6)
+query R nosort
+SELECT AVG(val) FROM t_avg_dec
+----
+3.165000
+
+# --- REA-5423: SUM on DECIMAL(10,2) should preserve input scale ---
+
+statement ok
+CREATE TABLE t_sum_dec (id INT PRIMARY KEY, val DECIMAL(10,2))
+
+statement ok
+INSERT INTO t_sum_dec VALUES (1, 3.50), (2, 3.30)
+
+# SUM should preserve the DECIMAL scale of 2
+query R nosort
+SELECT SUM(val) FROM t_sum_dec
+----
+6.80
+
+statement ok
+DROP TABLE t_avg_int
+
+statement ok
+DROP TABLE t_avg_bigint
+
+statement ok
+DROP TABLE t_avg_dec
+
+statement ok
+DROP TABLE t_sum_dec

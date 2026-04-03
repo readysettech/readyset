@@ -50,12 +50,34 @@ impl Aggregation {
                         if over_col_ty.is_any_float() || over_col_ty.is_any_text() {
                             // MySQL returns DOUBLE for SUM over float and text columns
                             DfType::Double
+                        } else if let Some(dec_prec) = over_col_ty.mysql_decimal_precision() {
+                            // MySQL SUM on integers: DECIMAL(prec + 22, 0), capped at 65
+                            DfType::Numeric {
+                                prec: (dec_prec + 22).min(65),
+                                scale: 0,
+                            }
+                        } else if let DfType::Numeric { prec, scale } = over_col_ty {
+                            // MySQL SUM on DECIMAL: DECIMAL(min(prec+22, 65), scale)
+                            DfType::Numeric {
+                                prec: (*prec + 22).min(65),
+                                scale: *scale,
+                            }
                         } else {
                             DfType::DEFAULT_NUMERIC
                         }
                     }
                     SqlEngine::PostgreSQL => {
-                        if over_col_ty.is_any_bigint() || over_col_ty.is_numeric() {
+                        if over_col_ty.is_any_bigint() {
+                            // SUM(bigint) → numeric (scale 0)
+                            DfType::DEFAULT_NUMERIC
+                        } else if let DfType::Numeric { prec, scale } = over_col_ty {
+                            // SUM(numeric(p,s)) → numeric preserving scale
+                            DfType::Numeric {
+                                prec: *prec,
+                                scale: *scale,
+                            }
+                        } else if over_col_ty.is_numeric() {
+                            // SUM(numeric) without explicit precision
                             DfType::DEFAULT_NUMERIC
                         } else if over_col_ty.is_any_int() {
                             DfType::BigInt
@@ -84,6 +106,18 @@ impl Aggregation {
             }
         };
 
+        let avg_scale_mode = match (&self, dialect.engine()) {
+            (Aggregation::Avg, SqlEngine::PostgreSQL) => match &out_ty {
+                DfType::Numeric { .. } => AvgScaleMode::PostgresComputed,
+                _ => AvgScaleMode::Fixed(0), // Double — no rounding
+            },
+            (Aggregation::Avg, SqlEngine::MySQL) => match &out_ty {
+                DfType::Numeric { scale, .. } => AvgScaleMode::Fixed(*scale as i64),
+                _ => AvgScaleMode::Fixed(0),
+            },
+            _ => AvgScaleMode::Fixed(0),
+        };
+
         Ok(GroupedOperator::new(
             src,
             Aggregator {
@@ -92,6 +126,7 @@ impl Aggregation {
                 group: group_by.into(),
                 over_else: None,
                 out_ty,
+                avg_scale_mode,
             },
         ))
     }
@@ -117,6 +152,9 @@ pub struct Aggregator {
     over_else: Option<Literal>,
     // Output type of this column
     out_ty: DfType,
+    /// How to compute the display scale for AVG results.
+    #[serde(default = "default_scale_mode")]
+    avg_scale_mode: AvgScaleMode,
 }
 
 /// Diff type for numerical aggregations.
@@ -130,6 +168,16 @@ pub struct NumericalDiff {
     group_hash: GroupHash,
 }
 
+/// Controls how AVG display scale is computed after division.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum AvgScaleMode {
+    /// MySQL: round to a fixed number of decimal places (determined at plan time).
+    Fixed(i64),
+    /// PostgreSQL: dynamically compute display scale targeting ~16 significant digits,
+    /// dependent on the magnitude of sum and count.
+    PostgresComputed,
+}
+
 /// For storing (Count, Sum) in additional state for Average.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AverageDataPair {
@@ -141,12 +189,108 @@ struct AverageDataPair {
     /// If set, round the result to this many decimal places.
     #[serde(default)]
     target_scale: Option<i64>,
+    /// Scale computation strategy for the AVG result.
+    #[serde(default = "default_scale_mode")]
+    scale_mode: AvgScaleMode,
 }
 
+fn default_scale_mode() -> AvgScaleMode {
+    // Legacy default: use target_scale (Fixed) or no rounding
+    AvgScaleMode::Fixed(0)
+}
 fn default_avg_zero() -> DfValue {
     DfValue::Double(0.0)
 }
 
+/// Computes display scale for Postgres numeric division, matching PostgreSQL behavior.
+///
+/// Returns the number of digits after the decimal point for a numeric division
+/// result, targeting ~16 significant digits.
+///
+/// The algorithm operates on base-10000 digit weights:
+/// - Estimate the quotient's weight (number of base-10000 groups before the decimal)
+/// - Set scale = 16 - weight * 4 (more integer digits → fewer fractional digits)
+/// - Ensure at least as many decimal places as either input has
+/// - Clamp to [0, 1000]
+fn postgres_select_div_scale(sum: &DfValue, count: &DfValue) -> i64 {
+    const NUMERIC_MIN_SIG_DIGITS: i64 = 16;
+    const DEC_DIGITS: i64 = 4;
+    const MAX_DISPLAY_SCALE: i64 = 1000;
+
+    /// Compute the base-10000 weight and first base-10000 digit of an integer value.
+    fn weight_and_first_int(val: u128) -> (i64, u16) {
+        if val == 0 {
+            return (0, 0);
+        }
+        let digits = (val as f64).log10().floor() as i64 + 1;
+        let weight = (digits - 1) / DEC_DIGITS;
+        let first_group_digits = ((digits - 1) % DEC_DIGITS) + 1;
+        let divisor = 10u128.pow((digits - first_group_digits) as u32);
+        let first = val / divisor;
+        (weight, first.max(1) as u16)
+    }
+
+    /// Compute weight/first-digit and display scale from a DfValue.
+    fn decompose(val: &DfValue) -> (i64, u16, i64) {
+        match val {
+            DfValue::Numeric(dec) => {
+                let (mantissa, scale) = match dec.mantissa_and_scale() {
+                    Some(ms) => ms,
+                    None => return (0, 0, 0),
+                };
+                if mantissa == 0 {
+                    return (0, 0, scale);
+                }
+                let abs = mantissa.unsigned_abs();
+                let total_digits = (abs as f64).log10().floor() as i64 + 1;
+                let int_digits = total_digits - scale;
+
+                let (weight, first) = if int_digits <= 0 {
+                    // Value < 1
+                    let leading_zeros = (-int_digits) / DEC_DIGITS;
+                    let w = -(leading_zeros + 1);
+                    // First non-zero base-10000 digit
+                    let frac_offset = ((-int_digits) % DEC_DIGITS) as u32;
+                    let f = (abs / 10u128.pow(total_digits as u32 - 1 - frac_offset)) % 10000;
+                    (w, f.max(1) as u16)
+                } else {
+                    let w = (int_digits - 1) / DEC_DIGITS;
+                    let first_group = ((int_digits - 1) % DEC_DIGITS) + 1;
+                    let divisor = 10u128.pow((int_digits - first_group) as u32);
+                    let int_part = abs / 10u128.pow(scale as u32);
+                    let f = int_part / divisor;
+                    (w, f.max(1) as u16)
+                };
+                (weight, first, scale)
+            }
+            DfValue::Int(n) => {
+                let (w, f) = weight_and_first_int(n.unsigned_abs() as u128);
+                (w, f, 0)
+            }
+            DfValue::UnsignedInt(n) => {
+                let (w, f) = weight_and_first_int(*n as u128);
+                (w, f, 0)
+            }
+            _ => (0, 1, 0),
+        }
+    }
+
+    let (weight1, first1, sum_dscale) = decompose(sum);
+    let (weight2, first2, count_dscale) = decompose(count);
+
+    let mut qweight = weight1 - weight2;
+    if first1 <= first2 {
+        qweight -= 1;
+    }
+
+    let mut rscale = NUMERIC_MIN_SIG_DIGITS - qweight * DEC_DIGITS;
+    rscale = rscale.max(sum_dscale);
+    rscale = rscale.max(count_dscale);
+    rscale = rscale.max(0);
+    rscale = rscale.min(MAX_DISPLAY_SCALE);
+
+    rscale
+}
 impl AverageDataPair {
     fn apply_diff(&mut self, d: NumericalDiff) -> ReadySetResult<DfValue> {
         if d.positive {
@@ -159,8 +303,14 @@ impl AverageDataPair {
 
         if self.count > DfValue::Int(0) {
             let result = (&self.sum / &self.count)?;
-            match (&result, self.target_scale) {
-                (DfValue::Numeric(dec), Some(scale)) => Ok(DfValue::from(dec.round_dp(scale))),
+            match (&result, &self.scale_mode) {
+                (DfValue::Numeric(dec), AvgScaleMode::Fixed(scale)) => {
+                    Ok(DfValue::from(dec.round_dp(*scale)))
+                }
+                (DfValue::Numeric(dec), AvgScaleMode::PostgresComputed) => {
+                    let scale = postgres_select_div_scale(&self.sum, &self.count);
+                    Ok(DfValue::from(dec.round_dp(scale)))
+                }
                 _ => Ok(result),
             }
         } else {
@@ -259,6 +409,7 @@ impl GroupedOperation for Aggregator {
             DfType::Numeric { scale, .. } => Some(*scale as i64),
             _ => None,
         };
+        let avg_scale_mode = self.avg_scale_mode;
         let mut apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DfValue> {
             count_sum_map
                 .entry(diff.group_hash)
@@ -267,6 +418,7 @@ impl GroupedOperation for Aggregator {
                     count: DfValue::Int(0),
                     zero: avg_zero.clone(),
                     target_scale: avg_target_scale,
+                    scale_mode: avg_scale_mode,
                 })
                 .apply_diff(diff)
         };
@@ -334,6 +486,7 @@ impl GroupedOperation for Aggregator {
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use readyset_decimal::Decimal;
 
     use super::*;
@@ -1470,5 +1623,280 @@ mod tests {
         // Should emit [NULL, 0] — NOT [0, 0]
         // SQL: SUM on empty input returns NULL, not 0
         assert!(rs2.iter().any(|r| r.is_positive() && r[0] == DfValue::None));
+    }
+
+    fn setup_pg(aggregation: Aggregation, over_col_ty: &DfType, mat: bool) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            aggregation
+                .over(
+                    s.as_global(),
+                    1,
+                    &[0],
+                    over_col_ty,
+                    &Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap(),
+            mat,
+        );
+        g
+    }
+
+    /// Postgres AVG(INT) should return NUMERIC with display scale ~16 for small values.
+    #[test]
+    fn avg_postgres_int_scale() {
+        let mut c = setup_pg(Aggregation::Avg, &DfType::Int, true);
+
+        // Insert group=1, value=5
+        let u: Record = vec![1.into(), DfValue::Int(5)].into();
+        c.narrow_one(u, true);
+
+        // Insert group=1, value=3 → AVG = 4.0
+        let u: Record = vec![1.into(), DfValue::Int(3)].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        assert_eq!(r[0], 1.into());
+        // sum=8 (weight 0), count=2 (weight 0), rscale = 16 - 0*4 = 16
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(16)));
+    }
+
+    /// Postgres AVG scale decreases with larger magnitude results.
+    /// AVG(50000, 30000) = 40000 → scale 12 (not 16) because result has more integer digits.
+    #[test]
+    fn avg_postgres_large_values_scale() {
+        let mut c = setup_pg(Aggregation::Avg, &DfType::Int, true);
+        let u: Record = vec![1.into(), DfValue::Int(50000)].into();
+        c.narrow_one(u, true);
+        let u: Record = vec![1.into(), DfValue::Int(30000)].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        // 40000 has weight=1 in base-10000, so scale = 16 - 1*4 = 12
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
+    }
+
+    /// MySQL AVG output type varies by integer subtype.
+    #[test]
+    fn avg_mysql_per_type_precision() {
+        fn check(ty: &DfType, expected_prec: u16) {
+            let mut g = ops::test::MockGraph::new();
+            let s = g.add_base("source", &["x", "y"]);
+            let agg = Aggregation::Avg
+                .over(s.as_global(), 1, &[0], ty, &Dialect::DEFAULT_MYSQL)
+                .unwrap();
+            assert_eq!(
+                agg.output_col_type(),
+                DfType::Numeric {
+                    prec: expected_prec,
+                    scale: 4
+                },
+                "MySQL AVG({:?}) should be DECIMAL({},4)",
+                ty,
+                expected_prec
+            );
+        }
+
+        check(&DfType::TinyInt, 7);
+        check(&DfType::UnsignedTinyInt, 7);
+        check(&DfType::SmallInt, 9);
+        check(&DfType::UnsignedSmallInt, 9);
+        check(&DfType::MediumInt, 11);
+        check(&DfType::UnsignedMediumInt, 12);
+        check(&DfType::Int, 14);
+        check(&DfType::UnsignedInt, 14);
+        check(&DfType::BigInt, 23);
+        check(&DfType::UnsignedBigInt, 24);
+    }
+
+    // ---- Regression tests for aggregate precision/scale bugs ----
+
+    /// Helper for setting up MySQL aggregation tests with specific column types.
+    fn setup_mysql(
+        aggregation: Aggregation,
+        over_col_ty: &DfType,
+        mat: bool,
+    ) -> ops::test::MockGraph {
+        let mut g = ops::test::MockGraph::new();
+        let s = g.add_base("source", &["x", "y"]);
+        g.set_op(
+            "identity",
+            &["x", "ys"],
+            aggregation
+                .over(s.as_global(), 1, &[0], over_col_ty, &Dialect::DEFAULT_MYSQL)
+                .unwrap(),
+            mat,
+        );
+        g
+    }
+
+    /// REA-6199: Postgres AVG on INT should return Numeric with dynamic scale
+    /// (~16 significant digits for small values), not scale 0.
+    ///
+    /// Bug: Postgres AVG used DEFAULT_NUMERIC (scale=0) for all non-float types,
+    /// causing results like `33437` instead of `33437.314617500000`.
+    #[test]
+    fn regression_rea_6199_postgres_avg_int_scale() {
+        let mut c = setup_pg(Aggregation::Avg, &DfType::Int, true);
+
+        // Insert group=1, value=5
+        let u: Record = vec![1.into(), DfValue::Int(5)].into();
+        c.narrow_one(u, true);
+
+        // Insert group=1, value=3 → AVG = 4.0
+        let u: Record = vec![1.into(), DfValue::Int(3)].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        // sum=8 (weight 0), count=2 (weight 0), rscale = 16 - 0*4 = 16
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(16)));
+    }
+
+    /// REA-6199: Postgres AVG on NUMERIC(10,6) should return result with appropriate
+    /// display scale, not 0 or excessive digits.
+    #[test]
+    fn regression_rea_6199_postgres_avg_numeric_scale() {
+        let mut c = setup_pg(
+            Aggregation::Avg,
+            &DfType::Numeric { prec: 10, scale: 6 },
+            true,
+        );
+
+        // Insert group=1, value=33437.314617
+        let v1 = DfValue::from(readyset_decimal::Decimal::new(33437314617, 6));
+        let u: Record = vec![1.into(), v1].into();
+        c.narrow_one(u, true);
+
+        // Insert group=1, value=33437.314618 → AVG ≈ 33437.3146175
+        let v2 = DfValue::from(readyset_decimal::Decimal::new(33437314618, 6));
+        let u: Record = vec![1.into(), v2].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        // postgres_select_div_scale for sum≈66874.6 (weight 1, first 6),
+        // count=2 (weight 0, first 2) yields rscale = 16 - 1*4 = 12.
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
+    }
+
+    /// REA-6118: MySQL AVG on INT should return DECIMAL with scale 4, not Double.
+    ///
+    /// Bug: MySQL AVG(INT) returned a Double-like value (e.g., 35634.28571428572)
+    /// instead of DECIMAL(14,4) (e.g., 35634.2857).
+    #[test]
+    fn regression_rea_6118_mysql_avg_int_returns_decimal_not_double() {
+        let mut c = setup_mysql(Aggregation::Avg, &DfType::Int, true);
+
+        // Insert values that produce a non-integer average, mimicking the
+        // Antithesis scenario from REA-6118
+        let u: Record = vec![1.into(), DfValue::Int(71268)].into();
+        c.narrow_one(u, true);
+        let u: Record = vec![1.into(), DfValue::Int(1)].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(4)));
+    }
+
+    /// REA-5423: MySQL AVG on DECIMAL(7,2) should return DECIMAL with scale 6
+    /// (input_scale 2 + div_precision_increment 4 = 6).
+    ///
+    /// Bug: AVG on DECIMAL returned too many digits (like 3.1617615204639344
+    /// instead of 3.161762), suggesting wrong scale or Double output.
+    #[test]
+    fn regression_rea_5423_mysql_avg_decimal_scale() {
+        let mut c = setup_mysql(
+            Aggregation::Avg,
+            &DfType::Numeric { prec: 7, scale: 2 },
+            true,
+        );
+
+        // Insert group=1, value=3.16
+        let v1 = DfValue::from(readyset_decimal::Decimal::new(316, 2));
+        let u: Record = vec![1.into(), v1].into();
+        c.narrow_one(u, true);
+
+        // Insert group=1, value=3.17 → AVG = 3.165
+        let v2 = DfValue::from(readyset_decimal::Decimal::new(317, 2));
+        let u: Record = vec![1.into(), v2].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(6)));
+    }
+
+    /// REA-5423: MySQL SUM on DECIMAL(10,2) should preserve scale 2, not use
+    /// DEFAULT_NUMERIC (scale 0).
+    #[test]
+    fn regression_rea_5423_mysql_sum_decimal_preserves_scale() {
+        let sum_op = Aggregation::Sum
+            .over(
+                0.into(),
+                1,
+                &[0],
+                &DfType::Numeric { prec: 10, scale: 2 },
+                &Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap();
+
+        assert_eq!(
+            sum_op.output_col_type(),
+            DfType::Numeric { prec: 32, scale: 2 },
+        );
+    }
+
+    /// REA-6199: Postgres SUM on NUMERIC(10,2) should preserve scale 2, not use
+    /// DEFAULT_NUMERIC (scale 0).
+    #[test]
+    fn regression_rea_6199_postgres_sum_numeric_preserves_scale() {
+        let sum_op = Aggregation::Sum
+            .over(
+                0.into(),
+                1,
+                &[0],
+                &DfType::Numeric { prec: 10, scale: 2 },
+                &Dialect::DEFAULT_POSTGRESQL,
+            )
+            .unwrap();
+
+        assert_eq!(
+            sum_op.output_col_type(),
+            DfType::Numeric { prec: 10, scale: 2 },
+        );
+    }
+
+    /// REA-6118: MySQL AVG on INT should produce output type DECIMAL(14,4),
+    /// matching MySQL's convention for AVG on regular INT.
+    #[test]
+    fn regression_rea_6118_mysql_avg_int_output_type() {
+        let avg_op = Aggregation::Avg
+            .over(0.into(), 1, &[0], &DfType::Int, &Dialect::DEFAULT_MYSQL)
+            .unwrap();
+
+        assert_eq!(
+            avg_op.output_col_type(),
+            DfType::Numeric { prec: 14, scale: 4 },
+        );
+    }
+
+    /// REA-6118: MySQL AVG on BIGINT should produce DECIMAL(23,4), not DECIMAL(14,4).
+    #[test]
+    fn regression_rea_6118_mysql_avg_bigint_output_type() {
+        let avg_op = Aggregation::Avg
+            .over(0.into(), 1, &[0], &DfType::BigInt, &Dialect::DEFAULT_MYSQL)
+            .unwrap();
+
+        assert_eq!(
+            avg_op.output_col_type(),
+            DfType::Numeric { prec: 23, scale: 4 },
+        );
     }
 }
