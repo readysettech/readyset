@@ -305,7 +305,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
                 query.unnest_subqueries(&context)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
-                query.derived_tables_rewrite()?;
+                query.derived_tables_rewrite(flags.dialect)?;
                 trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
                 query.query_optimization_rewrite(
                     &context,

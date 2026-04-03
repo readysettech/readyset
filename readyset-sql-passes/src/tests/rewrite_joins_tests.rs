@@ -39,7 +39,7 @@ fn parse_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// Parse `sql`, run `normalize_joins_shape`, and return the MySQL display string.
 fn normalize(sql: &str) -> SelectStatement {
     let mut stmt = parse_mysql(sql);
-    derived_tables_rewrite_main(&mut stmt)
+    derived_tables_rewrite_main(&mut stmt, Dialect::MySQL)
         .unwrap_or_else(|e| panic!("normalize_joins_shape failed: {e}\n  sql: {sql}"));
     println!(">>> Normalized: {}", stmt.display(Dialect::PostgreSQL));
     stmt
@@ -101,7 +101,7 @@ fn sj_operator_survives_reorder_of_neighbours() {
          STRAIGHT_JOIN t3 ON t1.id = t3.t1id
          INNER JOIN t4 ON t4.fk = t3.id"#,
     );
-    normalize_joins_shape(&mut stmt).expect("normalize_joins_shape should succeed");
+    normalize_joins_shape(&mut stmt, Dialect::MySQL).expect("normalize_joins_shape should succeed");
 
     // stmt.join: [t2, t3(SJ), t4]
     assert!(

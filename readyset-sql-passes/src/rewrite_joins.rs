@@ -1245,7 +1245,10 @@ fn move_applicable_where_conditions_to_straight_joins(
 ///
 /// This is a **local rewrite pass** — intended to operate on a single flat SELECT.
 /// It is called by [`normalize_joins_shape`] to apply normalization recursively across the query.
-fn normalize_statement_joins_shape(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+fn normalize_statement_joins_shape(
+    stmt: &mut SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<bool> {
     let mut was_rewritten = false;
 
     if stmt.tables.is_empty() {
@@ -1309,7 +1312,7 @@ fn normalize_statement_joins_shape(stmt: &mut SelectStatement) -> ReadySetResult
 
     // Eliminate WHERE TRUE — a redundant leftover from constraint movement or rewrites.
     if let Some(where_expr) = &stmt.where_clause
-        && is_always_true_filter(where_expr)
+        && is_always_true_filter(where_expr, dialect)
     {
         stmt.where_clause = None;
         was_rewritten = true;
@@ -1328,16 +1331,19 @@ fn normalize_statement_joins_shape(stmt: &mut SelectStatement) -> ReadySetResult
 /// semantically equivalent join shape compatible with ReadySet’s engine.
 ///
 /// Returns `true` if any rewrites were applied across any subquery.
-pub(crate) fn normalize_joins_shape(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+pub(crate) fn normalize_joins_shape(
+    stmt: &mut SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<bool> {
     let mut was_rewritten = false;
 
     for dt in get_local_from_items_iter_mut!(stmt) {
         if let Some((dt_stmt, _)) = as_sub_query_with_alias_mut(dt) {
-            was_rewritten |= normalize_joins_shape(dt_stmt)?;
+            was_rewritten |= normalize_joins_shape(dt_stmt, dialect)?;
         }
     }
 
-    was_rewritten |= normalize_statement_joins_shape(stmt)?;
+    was_rewritten |= normalize_statement_joins_shape(stmt, dialect)?;
 
     Ok(was_rewritten)
 }

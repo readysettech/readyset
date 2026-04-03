@@ -57,12 +57,12 @@ pub trait DerivedTablesRewrite: Sized {
     /// 1. Subqueries unnesting & inlining
     /// 2. Join normalization and filter hoisting
     /// 3. Aggregated‐subquery filter extraction
-    fn derived_tables_rewrite(&mut self) -> ReadySetResult<&mut Self>;
+    fn derived_tables_rewrite(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self>;
 }
 
 impl DerivedTablesRewrite for SelectStatement {
-    fn derived_tables_rewrite(&mut self) -> ReadySetResult<&mut Self> {
-        if derived_tables_rewrite_main(self)? {
+    fn derived_tables_rewrite(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
+        if derived_tables_rewrite_main(self, dialect)? {
             trace!(
                 name = "Derived tables rewritten",
                 "{}",
@@ -1003,7 +1003,10 @@ fn strip_redundant_distinct(stmt: &mut SelectStatement) -> ReadySetResult<bool> 
 /// 8. **DISTINCT fix** — convert `GROUP BY` without aggregates to `SELECT DISTINCT`.
 ///
 /// Returns `true` if any rewrite was applied.
-pub(crate) fn derived_tables_rewrite_main(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+pub(crate) fn derived_tables_rewrite_main(
+    stmt: &mut SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<bool> {
     let mut rewritten = false;
 
     // NOTE: no global bail-out for residual expression subqueries.  The
@@ -1033,7 +1036,7 @@ pub(crate) fn derived_tables_rewrite_main(stmt: &mut SelectStatement) -> ReadySe
     rewritten |= derived_tables_rewrite_impl(stmt, true)?;
 
     // Structural join reordering (canonicalization)
-    rewritten |= normalize_joins_shape(stmt)?;
+    rewritten |= normalize_joins_shape(stmt, dialect)?;
 
     // Normalize GROUP BY, HAVING and ORDER BY
     rewritten |= normalize_having_and_group_by(stmt)?;

@@ -49,7 +49,7 @@ fn parse_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// and return the final statement for assertion.
 fn hoist_pg(sql: &str) -> readyset_sql::ast::SelectStatement {
     let mut stmt = parse_pg(sql);
-    derived_tables_rewrite_main(&mut stmt)
+    derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL)
         .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
     hoist_parametrizable_filters(&mut stmt)
         .unwrap_or_else(|e| panic!("hoist_parametrizable_filters failed: {e}\n  sql: {sql}"));
@@ -60,7 +60,7 @@ fn hoist_pg(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// Parse `sql` with MySQL dialect, run derived-tables rewrite then hoist pass.
 fn hoist_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
     let mut stmt = parse_mysql(sql);
-    derived_tables_rewrite_main(&mut stmt)
+    derived_tables_rewrite_main(&mut stmt, Dialect::MySQL)
         .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
     hoist_parametrizable_filters(&mut stmt)
         .unwrap_or_else(|e| panic!("hoist_parametrizable_filters failed: {e}\n  sql: {sql}"));
@@ -421,7 +421,8 @@ fn second_pass_does_not_duplicate_predicates() {
         r#"SELECT sub.x, sub.total
            FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x = $1 LIMIT 100) AS sub"#,
     );
-    derived_tables_rewrite_main(&mut stmt).expect("derived_tables_rewrite_main");
+    derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL)
+        .expect("derived_tables_rewrite_main");
 
     let changed_1 = hoist_parametrizable_filters(&mut stmt).expect("first hoist");
     assert!(changed_1, "first pass should have rewritten");

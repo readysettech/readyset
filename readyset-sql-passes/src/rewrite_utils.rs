@@ -3320,17 +3320,45 @@ pub(crate) fn fix_groupby_without_aggregates(stmt: &mut SelectStatement) -> Read
     Ok(was_rewritten)
 }
 
-pub(crate) fn is_always_true_filter(expr: &Expr) -> bool {
+/// Determines whether a column-free WHERE expression is unconditionally true
+/// and can be safely eliminated (e.g. `WHERE TRUE` left over from constraint movement).
+///
+/// Returns `false` conservatively for any expression it cannot prove is always true.
+///
+/// Two-phase evaluation:
+///   1. **Pre-fold**: handle bare literals directly — `constant_fold_expr` is a no-op
+///      on `Expr::Literal`, so we short-circuit here. NULL is always false (filters all
+///      rows). MySQL treats non-zero integers as truthy (`WHERE 1`); PostgreSQL rejects
+///      integer-typed WHERE, so we conservatively return false.
+///   2. **Post-fold**: for compound constant expressions (e.g. `NOT FALSE`, `1 AND 1`),
+///      `constant_fold_expr` evaluates them and represents boolean results as
+///      `Integer(0/1)` (because `DfValue` stores booleans as `UnsignedInt`).
+///      We match only 0/1 — any other fold result is conservatively false.
+pub(crate) fn is_always_true_filter(expr: &Expr, sql_dialect: Dialect) -> bool {
+    // Expressions containing column references are never statically evaluable.
     if columns_iter(expr).count() > 0 {
         return false;
     }
     let mut expr = expr.clone();
+    // Phase 1: bare literals — short-circuit before the (no-op) fold.
+    match expr {
+        Expr::Literal(Literal::Null) => return false,
+        Expr::Literal(Literal::Boolean(v)) => return v,
+        Expr::Literal(Literal::Integer(i)) if sql_dialect == Dialect::MySQL => return i != 0,
+        Expr::Literal(Literal::UnsignedInteger(i)) if sql_dialect == Dialect::MySQL => {
+            return i != 0;
+        }
+        Expr::Literal(_) => return false,
+        _ => {}
+    }
+    // Phase 2: compound constant expressions — fold then inspect the result.
+    // constant_fold_expr represents boolean outcomes as Integer(0) / Integer(1).
     constant_fold_expr(&mut expr, dialect::Dialect::DEFAULT_POSTGRESQL);
     match expr {
-        Expr::Literal(Literal::Boolean(true)) => true,
-        Expr::Literal(Literal::Boolean(false)) => false,
+        Expr::Literal(Literal::Null) => false,
+        Expr::Literal(Literal::Boolean(v)) => v,
         Expr::Literal(Literal::Integer(0)) | Expr::Literal(Literal::UnsignedInteger(0)) => false,
-        Expr::Literal(_) => true,
+        Expr::Literal(Literal::Integer(1)) | Expr::Literal(Literal::UnsignedInteger(1)) => true,
         _ => false,
     }
 }
