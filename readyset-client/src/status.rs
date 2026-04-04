@@ -117,6 +117,28 @@ impl Display for ReplicationStatus {
     }
 }
 
+/// Snapshot of replication lag, computed by the background polling task.
+///
+/// For Postgres and MySQL file-based modes, lag values are in bytes.
+/// For MySQL GTID mode, lag values are in transactions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplicationLagStatus {
+    /// The replication mode name (e.g. "postgres", "mysql_file", "mysql_gtid").
+    /// Derived from the `ReplicationOffset` variant via strum.
+    pub mode: String,
+    /// The upstream's current position, formatted for display.
+    pub upstream_offset: String,
+    /// The last event consumed from the replication stream, formatted for display.
+    pub replicator_offset: String,
+    /// The maximum persisted offset across all RocksDB tables, formatted for display.
+    /// This is the persistence frontier — the furthest any table has durably stored.
+    pub persisted_offset: String,
+    /// Lag between upstream and replicator stream position (bytes or transactions).
+    pub consume_lag: u64,
+    /// Lag between upstream and max persisted offset (bytes or transactions).
+    pub persist_lag: u64,
+}
+
 #[derive(Debug)]
 pub struct CacheProperties {
     cache_type: CacheType,

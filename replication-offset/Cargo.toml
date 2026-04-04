@@ -9,6 +9,7 @@ edition = "2024"
 readyset-sql = { path = "../readyset-sql" }
 readyset-errors = { path = "../readyset-errors" }
 serde = { workspace = true, features = ["derive"] }
+strum = { workspace = true }
 readyset-util = { path = "../readyset-util" }
 bytes = { workspace = true }
 serde_json = { workspace = true }

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
@@ -67,6 +68,60 @@ impl MySqlPosition {
         })
     }
 
+    /// Computes the byte lag between `self` (ReadySet's position) and `upstream`.
+    ///
+    /// For same-file positions, returns the difference in byte offsets. For cross-file
+    /// positions, sums the remaining bytes in ReadySet's file, all intermediate file
+    /// sizes, and the upstream's offset in its file.
+    ///
+    /// `binlog_file_sizes` maps binlog file suffix to total file size in bytes
+    /// (from `SHOW BINARY LOGS`).
+    ///
+    /// Returns an error if the positions are from different binlog streams or if a
+    /// required file size is missing from the map.
+    pub fn try_byte_lag_behind(
+        &self,
+        upstream: &MySqlPosition,
+        binlog_file_sizes: &HashMap<u32, u64>,
+    ) -> ReadySetResult<u64> {
+        if self.binlog_file_base_name != upstream.binlog_file_base_name {
+            return Err(ReadySetError::Internal(
+                "Cannot compute lag between positions in different binlog streams".into(),
+            ));
+        }
+
+        match self.binlog_file_suffix.cmp(&upstream.binlog_file_suffix) {
+            Ordering::Equal => Ok(upstream.position.saturating_sub(self.position)),
+            Ordering::Less => {
+                let readyset_file_size = binlog_file_sizes
+                    .get(&self.binlog_file_suffix)
+                    .ok_or_else(|| {
+                        ReadySetError::Internal(format!(
+                            "Missing binlog file size for suffix {}",
+                            self.binlog_file_suffix
+                        ))
+                    })?;
+                let mut lag = readyset_file_size.saturating_sub(self.position);
+
+                for suffix in (self.binlog_file_suffix + 1)..upstream.binlog_file_suffix {
+                    let file_size = binlog_file_sizes.get(&suffix).ok_or_else(|| {
+                        ReadySetError::Internal(format!(
+                            "Missing binlog file size for suffix {suffix}"
+                        ))
+                    })?;
+                    lag = lag.saturating_add(*file_size);
+                }
+
+                lag = lag.saturating_add(upstream.position);
+                Ok(lag)
+            }
+            // Readyset is in a later binlog file than the upstream position we queried.
+            // This can happen transiently if a binlog rotate occurs between querying
+            // the upstream and reading our position. Report 0 lag.
+            Ordering::Greater => Ok(0),
+        }
+    }
+
     /// This method compares `self` and `other`, returning an [`Ordering`] if the two items are
     /// comparable and an error otherwise.
     pub fn try_partial_cmp(&self, other: &Self) -> ReadySetResult<Ordering> {
@@ -129,6 +184,8 @@ impl From<MySqlPosition> for ReplicationOffset {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use super::MySqlPosition;
     use crate::ReplicationOffset;
 
@@ -207,5 +264,99 @@ mod test {
                 position: 42,
             })
         );
+    }
+
+    fn pos(suffix: u32, position: u64) -> MySqlPosition {
+        MySqlPosition {
+            binlog_file_base_name: "binlog".to_owned(),
+            binlog_file_suffix: suffix,
+            binlog_file_suffix_length: 6,
+            position,
+        }
+    }
+
+    #[test]
+    fn test_byte_lag_same_file() {
+        let readyset = pos(1, 100);
+        let upstream = pos(1, 500);
+        let sizes = HashMap::new();
+        assert_eq!(
+            readyset.try_byte_lag_behind(&upstream, &sizes).unwrap(),
+            400
+        );
+    }
+
+    #[test]
+    fn test_byte_lag_same_position() {
+        let p = pos(1, 100);
+        let sizes = HashMap::new();
+        assert_eq!(p.try_byte_lag_behind(&p, &sizes).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_byte_lag_cross_file_adjacent() {
+        let readyset = pos(1, 800);
+        let upstream = pos(2, 200);
+        // file 1 size = 1000, remaining = 1000 - 800 = 200, + upstream 200 = 400
+        let sizes = HashMap::from([(1, 1000)]);
+        assert_eq!(
+            readyset.try_byte_lag_behind(&upstream, &sizes).unwrap(),
+            400
+        );
+    }
+
+    #[test]
+    fn test_byte_lag_cross_file_with_intermediates() {
+        let readyset = pos(1, 800);
+        let upstream = pos(4, 300);
+        // file 1: 1000 - 800 = 200 remaining
+        // file 2: 2000 (full intermediate)
+        // file 3: 1500 (full intermediate)
+        // file 4: 300 (upstream position)
+        // total: 200 + 2000 + 1500 + 300 = 4000
+        let sizes = HashMap::from([(1, 1000), (2, 2000), (3, 1500)]);
+        assert_eq!(
+            readyset.try_byte_lag_behind(&upstream, &sizes).unwrap(),
+            4000
+        );
+    }
+
+    #[test]
+    fn test_byte_lag_readyset_ahead_returns_zero() {
+        // Can happen transiently during a binlog rotate race.
+        let readyset = pos(3, 100);
+        let upstream = pos(1, 500);
+        let sizes = HashMap::new();
+        assert_eq!(readyset.try_byte_lag_behind(&upstream, &sizes).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_byte_lag_different_base_names() {
+        let readyset = pos(1, 100);
+        let upstream = MySqlPosition {
+            binlog_file_base_name: "other".to_owned(),
+            binlog_file_suffix: 1,
+            binlog_file_suffix_length: 6,
+            position: 500,
+        };
+        let sizes = HashMap::new();
+        assert!(readyset.try_byte_lag_behind(&upstream, &sizes).is_err());
+    }
+
+    #[test]
+    fn test_byte_lag_missing_file_size() {
+        let readyset = pos(1, 800);
+        let upstream = pos(3, 200);
+        // Missing file 2 size
+        let sizes = HashMap::from([(1, 1000)]);
+        assert!(readyset.try_byte_lag_behind(&upstream, &sizes).is_err());
+    }
+
+    #[test]
+    fn test_mysql_position_roundtrip() {
+        let p = pos(3, 154);
+        let s = p.to_string();
+        let parsed: MySqlPosition = s.parse().unwrap();
+        assert_eq!(parsed, p);
     }
 }

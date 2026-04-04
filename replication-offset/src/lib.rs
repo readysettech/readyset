@@ -5,6 +5,7 @@ pub mod mysql_gtid;
 pub mod postgres;
 
 pub use mysql_gtid::{GtidEvent, GtidRange, GtidSet, GtidSource, looks_like_gtid};
+use strum::IntoStaticStr;
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -29,10 +30,13 @@ use serde::{Deserialize, Serialize};
 ///
 /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state) for
 /// more information about how replication offsets are used and persisted
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize, IntoStaticStr)]
 pub enum ReplicationOffset {
+    #[strum(serialize = "mysql_file")]
     MySql(MySqlPosition),
+    #[strum(serialize = "mysql_gtid")]
     Gtid(GtidSet),
+    #[strum(serialize = "postgres")]
     Postgres(PostgresPosition),
 }
 
@@ -341,6 +345,30 @@ impl ReplicationOffsets {
             match (res, offset) {
                 (Some(off1), off2) => {
                     res = Some(ReplicationOffset::try_min(off1, off2)?);
+                }
+                (None, off) => {
+                    res = Some(off);
+                }
+            }
+        }
+        Ok(res)
+    }
+
+    /// Returns the maximum offset *from those present* within the set of replication offsets.
+    ///
+    /// Unlike [`max_offset`][], this does not require all offsets to be present — it returns
+    /// the maximum of whichever offsets exist. Returns [`None`] only if no offset is present
+    /// at all.
+    ///
+    /// [`max_offset`]: Self::max_offset
+    pub fn max_present_offset(&self) -> ReadySetResult<Option<&ReplicationOffset>> {
+        let mut res: Option<&ReplicationOffset> = None;
+        for offset in self.schema.iter().chain(self.tables.values().flatten()) {
+            match (res, offset) {
+                (Some(off1), off2) => {
+                    if off2.try_partial_cmp(off1)?.is_gt() {
+                        res = Some(off2);
+                    }
                 }
                 (None, off) => {
                     res = Some(off);

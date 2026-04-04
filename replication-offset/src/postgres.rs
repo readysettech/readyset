@@ -56,6 +56,21 @@ impl PostgresPosition {
     }
 }
 
+impl PostgresPosition {
+    /// Computes the byte lag between `self` (ReadySet's position) and `upstream`.
+    ///
+    /// Returns the number of WAL bytes `self` is behind `upstream`, using `commit_lsn`
+    /// (the last fully committed transaction position).
+    /// Returns 0 if `self` is at or ahead of `upstream`.
+    pub fn byte_lag_behind(&self, upstream: &PostgresPosition) -> u64 {
+        upstream
+            .commit_lsn
+            .as_i64()
+            .saturating_sub(self.commit_lsn.as_i64())
+            .max(0) as u64
+    }
+}
+
 impl From<PostgresPosition> for ReplicationOffset {
     fn from(value: PostgresPosition) -> Self {
         Self::Postgres(value)
@@ -126,6 +141,13 @@ macro_rules! impl_lsn_traits {
         impl From<i64> for $t {
             fn from(i: i64) -> Self {
                 Self(i)
+            }
+        }
+
+        impl $t {
+            /// Returns the inner byte offset as an `i64`.
+            pub fn as_i64(&self) -> i64 {
+                self.0
             }
         }
 
@@ -256,5 +278,43 @@ mod tests {
                 lsn: Lsn(9001)
             })
         );
+    }
+
+    fn pg_pos(lsn: i64) -> PostgresPosition {
+        PostgresPosition {
+            commit_lsn: CommitLsn::from(lsn),
+            lsn: Lsn::from(lsn),
+        }
+    }
+
+    #[test]
+    fn test_byte_lag_behind_upstream_ahead() {
+        assert_eq!(pg_pos(100).byte_lag_behind(&pg_pos(200)), 100);
+    }
+
+    #[test]
+    fn test_byte_lag_behind_same_position() {
+        assert_eq!(pg_pos(500).byte_lag_behind(&pg_pos(500)), 0);
+    }
+
+    #[test]
+    fn test_byte_lag_behind_readyset_ahead() {
+        assert_eq!(pg_pos(300).byte_lag_behind(&pg_pos(100)), 0);
+    }
+
+    #[test]
+    fn test_byte_lag_behind_realistic_lsns() {
+        let readyset_lsn = Lsn::from_str("16/17DD38B8").unwrap();
+        let upstream_lsn = Lsn::from_str("16/27DD38B8").unwrap();
+        let readyset = PostgresPosition {
+            commit_lsn: CommitLsn::from(readyset_lsn.as_i64()),
+            lsn: readyset_lsn,
+        };
+        let upstream = PostgresPosition {
+            commit_lsn: CommitLsn::from(upstream_lsn.as_i64()),
+            lsn: upstream_lsn,
+        };
+        // 0x27DD38B8 - 0x17DD38B8 = 0x10000000 = 268435456
+        assert_eq!(readyset.byte_lag_behind(&upstream), 268435456);
     }
 }

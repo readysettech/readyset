@@ -6703,6 +6703,7 @@ dependencies = [
  "readyset-util",
  "serde",
  "serde_json",
+ "strum",
  "uuid 0.8.2",
 ]
 

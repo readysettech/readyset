@@ -675,6 +675,36 @@ impl GtidSet {
 
         result
     }
+
+    /// Computes the transaction lag between `self` (ReadySet) and `upstream`.
+    ///
+    /// Only counts committed GTIDs. A long-running transaction with many row events
+    /// accumulates in the pending buffer and will appear as at most 1 transaction
+    /// behind here until it commits.
+    ///
+    /// For each source in `upstream`, counts the total transactions in the upstream's
+    /// ranges and subtracts the total in `self`'s ranges for the same source. Sources
+    /// present in `self` but not in `upstream` are ignored (they don't represent lag).
+    pub fn transaction_lag(&self, upstream: &GtidSet) -> u64 {
+        let mut lag: u64 = 0;
+        for (source, upstream_ranges) in upstream.iter() {
+            let upstream_count = Self::count_transactions(upstream_ranges);
+            let readyset_count = self
+                .get(source)
+                .map(|ranges| Self::count_transactions(ranges))
+                .unwrap_or(0);
+            lag = lag.saturating_add(upstream_count.saturating_sub(readyset_count));
+        }
+        lag
+    }
+
+    /// Counts the total number of transactions across a slice of ranges.
+    fn count_transactions(ranges: &[GtidRange]) -> u64 {
+        ranges
+            .iter()
+            .map(|r| r.end - r.start + 1)
+            .fold(0u64, |acc, c| acc.saturating_add(c))
+    }
 }
 
 impl FromStr for GtidSet {
@@ -1836,6 +1866,76 @@ mod tests {
                 })
                 .expect("tagged key should exist");
             assert_eq!(tagged.len(), 2, "tagged should have 2 ranges");
+        }
+    }
+
+    mod transaction_lag {
+        use super::*;
+
+        /// Build a GtidSet via the public parse() API rather than internal methods.
+        fn parse_set(spec: &str) -> GtidSet {
+            GtidSet::parse(spec).unwrap()
+        }
+
+        #[test]
+        fn both_empty() {
+            let upstream = GtidSet::new();
+            let readyset = GtidSet::new();
+            assert_eq!(readyset.transaction_lag(&upstream), 0);
+        }
+
+        #[test]
+        fn identical_sets() {
+            let set = parse_set(&format!("{}:1-100", uuid()));
+            assert_eq!(set.transaction_lag(&set), 0);
+        }
+
+        #[test]
+        fn readyset_behind() {
+            let upstream = parse_set(&format!("{}:1-100", uuid()));
+            let readyset = parse_set(&format!("{}:1-50", uuid()));
+            assert_eq!(readyset.transaction_lag(&upstream), 50);
+        }
+
+        #[test]
+        fn readyset_empty() {
+            let upstream = parse_set(&format!("{}:1-100", uuid()));
+            let readyset = GtidSet::new();
+            assert_eq!(readyset.transaction_lag(&upstream), 100);
+        }
+
+        #[test]
+        fn multiple_sources() {
+            let upstream = parse_set(&format!("{}:1-100,{}:1-200", uuid(), other_uuid()));
+            let readyset = parse_set(&format!("{}:1-80,{}:1-150", uuid(), other_uuid()));
+            // 20 behind on first source + 50 behind on second = 70
+            assert_eq!(readyset.transaction_lag(&upstream), 70);
+        }
+
+        #[test]
+        fn gaps_in_ranges() {
+            // upstream: [1-5, 10-15] = 11 transactions
+            // readyset: [1-5] = 5 transactions
+            // lag = 6
+            let upstream = parse_set(&format!("{}:1-5:10-15", uuid()));
+            let readyset = parse_set(&format!("{}:1-5", uuid()));
+            assert_eq!(readyset.transaction_lag(&upstream), 6);
+        }
+
+        #[test]
+        fn readyset_has_extra_source() {
+            // ReadySet has a source not in upstream — should be ignored
+            let upstream = parse_set(&format!("{}:1-50", uuid()));
+            let readyset = parse_set(&format!("{}:1-50,{}:1-100", uuid(), other_uuid()));
+            assert_eq!(readyset.transaction_lag(&upstream), 0);
+        }
+
+        #[test]
+        fn upstream_has_source_readyset_missing() {
+            let upstream = parse_set(&format!("{}:1-50,{}:1-100", uuid(), other_uuid()));
+            let readyset = parse_set(&format!("{}:1-50", uuid()));
+            // 0 for first source + 100 for missing second source
+            assert_eq!(readyset.transaction_lag(&upstream), 100);
         }
     }
 }
