@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
@@ -15,6 +17,7 @@ use tokio_postgres::SimpleQueryMessage;
 async fn setup_mysql(
     db_name: &str,
     require_gtid: bool,
+    heartbeat: bool,
 ) -> (mysql_async::Conn, Box<dyn std::any::Any>, ShutdownSender) {
     mysql_helpers::recreate_database(db_name).await;
 
@@ -29,13 +32,16 @@ async fn setup_mysql(
         .await
         .unwrap();
 
-    let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
+    let mut builder = TestBuilder::default()
         .recreate_database(false)
         .replicate_db(db_name)
         .fallback(true)
         .require_gtid(require_gtid)
-        .build::<MySQLAdapter>()
-        .await;
+        .replication_heartbeat(heartbeat);
+    if heartbeat {
+        builder = builder.replication_lag_interval(2);
+    }
+    let (rs_opts, handle, shutdown_tx) = builder.build::<MySQLAdapter>().await;
 
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
@@ -59,6 +65,7 @@ async fn setup_mysql(
 /// The `_handle` field keeps the ReadySet server alive for the test's duration.
 async fn setup_psql(
     db_name: &str,
+    heartbeat: bool,
 ) -> (tokio_postgres::Client, Box<dyn std::any::Any>, ShutdownSender) {
     PostgreSQLAdapter::recreate_database(db_name).await;
 
@@ -75,12 +82,15 @@ async fn setup_psql(
         .await
         .unwrap();
 
-    let (rs_config, handle, shutdown_tx) = TestBuilder::default()
+    let mut builder = TestBuilder::default()
         .recreate_database(false)
         .replicate_db(db_name)
         .fallback(true)
-        .build::<PostgreSQLAdapter>()
-        .await;
+        .replication_heartbeat(heartbeat);
+    if heartbeat {
+        builder = builder.replication_lag_interval(2);
+    }
+    let (rs_config, handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
 
     let mut rs_cfg = rs_config.clone();
     rs_cfg.dbname(db_name);
@@ -145,13 +155,29 @@ async fn psql_replication_status_row(
         .unwrap()
 }
 
+/// Read heartbeat_staleness_seconds from the Postgres replication_status vrel.
+async fn psql_staleness(conn: &tokio_postgres::Client) -> Option<f64> {
+    let rows = conn
+        .simple_query("SELECT * FROM readyset.replication_status")
+        .await
+        .unwrap();
+    rows.iter().find_map(|msg| {
+        if let SimpleQueryMessage::Row(row) = msg {
+            // Column index 6 = heartbeat_staleness_seconds
+            row.get(6).map(|s| s.parse::<f64>().expect("staleness should be a float"))
+        } else {
+            None
+        }
+    })
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(mysql)]
 async fn mysql_replication_status_vrel() {
     readyset_tracing::init_test_logging();
     let (mut rs_conn, _handle, shutdown_tx) =
-        setup_mysql("replication_lag_mysql_vrel", false).await;
+        setup_mysql("replication_lag_mysql_vrel", false, false).await;
 
     let row = mysql_replication_status_row(&mut rs_conn).await;
 
@@ -175,6 +201,14 @@ async fn mysql_replication_status_vrel() {
     assert!(consume_lag < 10_000_000, "consume_lag unexpectedly large: {consume_lag}");
     assert!(persist_lag < 10_000_000, "persist_lag unexpectedly large: {persist_lag}");
 
+    // Without --replication-heartbeat, staleness should be NULL.
+    // Double-Option: outer = column existence, inner = SQL NULL.
+    let staleness: Option<Option<f64>> = row.get("heartbeat_staleness_seconds");
+    assert!(
+        staleness == Some(None),
+        "staleness should be NULL without heartbeat, got: {staleness:?}"
+    );
+
     shutdown_tx.shutdown().await;
 }
 
@@ -184,7 +218,7 @@ async fn mysql_replication_status_vrel() {
 async fn mysql_gtid_replication_status_vrel() {
     readyset_tracing::init_test_logging();
     let (mut rs_conn, _handle, shutdown_tx) =
-        setup_mysql("replication_lag_mysql_gtid_vrel", true).await;
+        setup_mysql("replication_lag_mysql_gtid_vrel", true, false).await;
 
     let row = mysql_replication_status_row(&mut rs_conn).await;
 
@@ -207,8 +241,7 @@ async fn mysql_gtid_replication_status_vrel() {
 #[upstream(postgres)]
 async fn psql_replication_status_vrel() {
     readyset_tracing::init_test_logging();
-    let (rs_conn, _handle, shutdown_tx) =
-        setup_psql("replication_lag_psql_vrel").await;
+    let (rs_conn, _handle, shutdown_tx) = setup_psql("replication_lag_psql_vrel", false).await;
 
     let rows = psql_replication_status_row(&rs_conn).await;
     let row = rows
@@ -232,6 +265,140 @@ async fn psql_replication_status_vrel() {
 
     let persisted_offset = row.get(3).expect("persisted_offset");
     assert!(!persisted_offset.is_empty(), "persisted_offset should not be empty");
+
+    // Column index 6 = heartbeat_staleness_seconds
+    let staleness = row.get(6);
+    assert!(
+        staleness.is_none(),
+        "staleness should be NULL without heartbeat, got: {staleness:?}"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn mysql_heartbeat_staleness() {
+    readyset_tracing::init_test_logging();
+    let (mut rs_conn, _handle, shutdown_tx) =
+        setup_mysql("replication_lag_mysql_heartbeat", false, true).await;
+
+    // With a 2s poll interval, staleness should populate after ~4s (2 cycles).
+    eventually!(
+        attempts: 20,
+        sleep: Duration::from_secs(1),
+        run_test: {
+            let rows: Vec<Row> = rs_conn
+                .query("SELECT * FROM readyset.replication_status")
+                .await
+                .unwrap();
+            rows.first()
+                .and_then(|r| r.get::<Option<f64>, _>("heartbeat_staleness_seconds"))
+                .flatten()
+        },
+        then_assert: |staleness| {
+            let staleness = staleness.expect("staleness should be Some after 2+ poll cycles");
+            assert!(staleness >= 0.0, "staleness should be non-negative, got: {staleness}");
+            assert!(staleness < 60.0, "staleness unexpectedly large: {staleness}");
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql, modern, gtid)]
+async fn mysql_gtid_heartbeat_staleness() {
+    readyset_tracing::init_test_logging();
+    let (mut rs_conn, _handle, shutdown_tx) =
+        setup_mysql("replication_lag_mysql_gtid_heartbeat", true, true).await;
+
+    eventually!(
+        attempts: 20,
+        sleep: Duration::from_secs(1),
+        run_test: {
+            let rows: Vec<Row> = rs_conn
+                .query("SELECT * FROM readyset.replication_status")
+                .await
+                .unwrap();
+            rows.first()
+                .and_then(|r| r.get::<Option<f64>, _>("heartbeat_staleness_seconds"))
+                .flatten()
+        },
+        then_assert: |staleness| {
+            let staleness = staleness.expect("staleness should be Some after 2+ poll cycles");
+            assert!(staleness >= 0.0, "staleness should be non-negative, got: {staleness}");
+            assert!(staleness < 60.0, "staleness unexpectedly large: {staleness}");
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn psql_heartbeat_staleness() {
+    readyset_tracing::init_test_logging();
+    let (rs_conn, _handle, shutdown_tx) =
+        setup_psql("replication_lag_psql_heartbeat", true).await;
+
+    // With a 2s poll interval, staleness should populate after ~4s (2 cycles).
+    eventually!(
+        attempts: 20,
+        sleep: Duration::from_secs(1),
+        run_test: {
+            psql_staleness(&rs_conn).await
+        },
+        then_assert: |staleness| {
+            let staleness = staleness.expect("staleness should be Some after 2+ poll cycles");
+            assert!(staleness >= 0.0, "staleness should be non-negative, got: {staleness}");
+            assert!(staleness < 60.0, "staleness unexpectedly large: {staleness}");
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Verify that heartbeat staleness stays bounded on a quiescent Postgres database.
+///
+/// Regression test: the WAL reader's table filter was cloned before the heartbeat table
+/// was added, so heartbeat WAL events were silently dropped and staleness grew forever.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn psql_heartbeat_staleness_stays_bounded() {
+    readyset_tracing::init_test_logging();
+    let (rs_conn, _handle, shutdown_tx) =
+        setup_psql("replication_lag_psql_hb_bounded", true).await;
+
+    // Wait for staleness to appear (2 poll cycles at 2s each).
+    eventually!(
+        attempts: 20,
+        sleep: Duration::from_secs(1),
+        run_test: {
+            psql_staleness(&rs_conn).await
+        },
+        then_assert: |staleness| {
+            assert!(staleness.is_some(), "staleness should be non-NULL after 2+ polls");
+        }
+    );
+
+    // Now let several more poll cycles elapse on a completely quiescent database.
+    // With a 2s interval this is 3+ additional heartbeat writes.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+
+    // Staleness should still be small — bounded by the poll interval plus some slack
+    // for scheduling jitter, not growing unboundedly.
+    let staleness = psql_staleness(&rs_conn)
+        .await
+        .expect("staleness should still be non-NULL");
+    assert!(
+        staleness < 10.0,
+        "staleness should stay bounded on a quiescent database, got: {staleness}"
+    );
 
     shutdown_tx.shutdown().await;
 }
