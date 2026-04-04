@@ -34,7 +34,7 @@ use crate::internal::{DomainIndex, ReplicaAddress};
 use crate::query::QueryId;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{CacheExpr, ExprInfo, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
-use crate::status::ReadySetControllerStatus;
+use crate::status::{ReadySetControllerStatus, ReplicationLagStatus};
 use crate::table::{PersistencePoint, Table, TableBuilder, TableRpc};
 use crate::view::{View, ViewBuilder, ViewRpc};
 use crate::{
@@ -1050,6 +1050,15 @@ impl ReadySetHandle {
         /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
         /// for more information about replication offsets.
         min_persisted_replication_offset() -> PersistencePoint
+    );
+
+    simple_request!(
+        /// Returns the current replication lag status, if available.
+        ///
+        /// The lag reporter runs as a background task in the replicator and periodically
+        /// updates the status. Returns `None` if the lag reporter has not yet produced
+        /// a result (e.g. replication hasn't started).
+        replication_lag_status() -> Option<ReplicationLagStatus>
     );
 
     /// Poll in a loop to wait for all tables to finish compacting

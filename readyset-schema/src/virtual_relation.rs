@@ -27,6 +27,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::Dialect;
 
+use crate::replication_lag_vrel::ReplicationLagInfo;
 use crate::shallow_vrels::ShallowInfo;
 
 /// The rows yielded by a vrel read.
@@ -39,6 +40,7 @@ pub type VrelRead = Pin<Box<dyn Future<Output = ReadySetResult<VrelRows>> + Send
 pub struct VrelContext {
     pub dialect: Dialect,
     pub shallow: Arc<dyn ShallowInfo>,
+    pub repl_lag: Arc<dyn ReplicationLagInfo>,
 }
 
 /// A function that produces a new vrel read.
@@ -672,7 +674,8 @@ mod tests {
         }
 
         let shallow = Arc::new(NoopShallow);
-        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow)
+        let no_lag = Arc::new(crate::replication_lag_vrel::NoReplicationLag);
+        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow, &no_lag)
             .expect("init succeeds");
 
         let session = schema.session();

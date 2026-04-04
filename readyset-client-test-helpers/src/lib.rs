@@ -27,6 +27,7 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
+use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
 use readyset_server::{
     Builder, DurabilityMode, Handle, LocalAuthority, PrometheusBuilder, ReadySetHandle,
@@ -517,9 +518,15 @@ impl TestBuilder {
         };
         let schema_catalog_clone = schema_catalog.clone();
 
-        let readyset_schema = ReadysetSchema::init("readyset", A::DIALECT, &shallow).unwrap();
+        let shallow_for_schema = Arc::clone(&shallow);
 
         tokio::spawn(async move {
+            let repl_lag_handle = ReadySetHandle::new(authority.clone()).await;
+            let repl_lag: Arc<ControllerReplicationLag> =
+                Arc::new(ControllerReplicationLag::new(repl_lag_handle));
+            let readyset_schema =
+                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, &repl_lag)
+                    .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
                 loop {

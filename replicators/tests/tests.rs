@@ -1,7 +1,7 @@
 use std::env;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
@@ -464,6 +464,7 @@ impl TestHandle {
                 false, // disable statement logging in tests
                 parsing_preset,
                 tokio::sync::mpsc::unbounded_channel().0, // sink; we don't care
+                Arc::new(RwLock::new(None)),
             )
             .await;
             error!(%error, "Error in replicator");

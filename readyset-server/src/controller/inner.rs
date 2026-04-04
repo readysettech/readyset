@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use database_utils::{DatabaseURL, UpstreamConfig};
@@ -40,6 +40,7 @@ use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::time_scope;
 use readyset_version::RELEASE_VERSION;
 use replication_offset::ReplicationOffset;
+use replicators::replication_lag_reporter::SharedLagStatus;
 use replicators::table_filter::TableFilter;
 use replicators::{ControllerMessage, ReplicatorMessage};
 use reqwest::Url;
@@ -118,6 +119,8 @@ pub struct Leader {
     pub(super) replicator_handle: Option<JoinHandle<()>>,
     /// Dedicated stop signal for the replicator task (separate from process shutdown).
     pub(super) replicator_stop_tx: Option<tokio::sync::watch::Sender<bool>>,
+    /// Shared replication lag status, written by the replicator's background task.
+    pub(super) replication_lag_status: SharedLagStatus,
 }
 
 impl Leader {
@@ -230,6 +233,7 @@ impl Leader {
         let replicator_statement_logging = self.replicator_statement_logging;
         let parsing_preset = self.parsing_preset;
         let table_status_tx = self.table_status_tx.clone();
+        let replication_lag_status = self.replication_lag_status.clone();
 
         let (stop_tx, mut stop_rx) = watch::channel(false);
 
@@ -262,6 +266,7 @@ impl Leader {
                         replicator_statement_logging,
                         parsing_preset,
                         table_status_tx.clone(),
+                        replication_lag_status.clone(),
                     )
                     .await
                     {
@@ -582,6 +587,18 @@ impl Leader {
                     ds.min_persisted_replication_offset().await
                 }?;
                 return_serialized!(res);
+            }
+            (&Method::POST, "/replication_lag_status") => {
+                let status = self
+                    .replication_lag_status
+                    .read()
+                    .map_err(|e| {
+                        ReadySetError::Internal(format!(
+                            "Failed to read replication lag status: {e}"
+                        ))
+                    })?
+                    .clone();
+                return_serialized!(status);
             }
             (&Method::POST, "/replication_offsets") => {
                 // During recovery, domains are not yet placed so we can't query replication
@@ -1183,6 +1200,7 @@ impl Leader {
             table_status_tx,
             replicator_handle: None,
             replicator_stop_tx: None,
+            replication_lag_status: Arc::new(RwLock::new(None)),
         }
     }
 }

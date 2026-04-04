@@ -38,8 +38,12 @@ use crate::postgres_connector::{
     drop_publication, drop_readyset_schema, drop_replication_slot, PostgresReplicator,
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
+use crate::replication_lag_reporter::{
+    spawn_lag_reporter, SharedLagStatus, SharedReplicatorPosition, UpstreamLagConfig,
+};
 use crate::table_filter::TableFilter;
 use crate::{ControllerMessage, ReplicatorMessage};
+use tokio_util::sync::CancellationToken;
 
 /// Time to wait for requests to coalesce between snapshotting. Useful for preventing a series of
 /// DDL changes from thrashing snapshotting
@@ -150,6 +154,16 @@ pub struct NoriaAdapter<'a> {
     supports_resnapshot: bool,
     /// Any TableStatus updates sent here will update this controller's state machine.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+    /// Shared replicator stream position, updated on each event for the lag reporter.
+    shared_position: SharedReplicatorPosition,
+    /// Cancellation token for the lag reporter background task.
+    lag_reporter_cancel: CancellationToken,
+}
+
+impl Drop for NoriaAdapter<'_> {
+    fn drop(&mut self) {
+        self.lag_reporter_cancel.cancel();
+    }
 }
 
 impl<'a> NoriaAdapter<'a> {
@@ -166,6 +180,7 @@ impl<'a> NoriaAdapter<'a> {
         enable_statement_logging: bool,
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+        lag_status: SharedLagStatus,
     ) -> ReadySetResult<std::convert::Infallible> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -193,6 +208,7 @@ impl<'a> NoriaAdapter<'a> {
                         table_filter,
                         parsing_preset,
                         table_status_tx.clone(),
+                        lag_status.clone(),
                     )
                     .await
                 }
@@ -247,6 +263,7 @@ impl<'a> NoriaAdapter<'a> {
                         table_filter,
                         parsing_preset,
                         table_status_tx.clone(),
+                        lag_status.clone(),
                     )
                     .await
                 }
@@ -304,6 +321,7 @@ impl<'a> NoriaAdapter<'a> {
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+        lag_status: SharedLagStatus,
     ) -> ReadySetResult<std::convert::Infallible> {
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
@@ -485,6 +503,8 @@ impl<'a> NoriaAdapter<'a> {
             (Some(pos), _) => pos.clone(),
         };
 
+        let lag_opts: mysql_async::Opts = mysql_opts_builder.clone().into();
+
         let connector = Box::new(
             MySqlBinlogConnector::connect(
                 noria.clone(),
@@ -497,6 +517,20 @@ impl<'a> NoriaAdapter<'a> {
             )
             .await?,
         );
+        let upstream_lag_config = if gtid_mode {
+            UpstreamLagConfig::MysqlGtid { opts: lag_opts }
+        } else {
+            UpstreamLagConfig::MysqlFile { opts: lag_opts }
+        };
+        let cancel = CancellationToken::new();
+        let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
+        let (_, shared_position) = spawn_lag_reporter(
+            upstream_lag_config,
+            noria.clone(),
+            cancel.clone(),
+            lag_status,
+            poll_interval,
+        );
 
         let mut adapter = NoriaAdapter {
             noria: noria.clone(),
@@ -508,9 +542,18 @@ impl<'a> NoriaAdapter<'a> {
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_MYSQL,
             table_status_tx,
+            shared_position,
+            lag_reporter_cancel: cancel,
         };
 
         let mut current_pos: ReplicationOffset = pos;
+
+        // Initialize shared position so the lag reporter can start immediately,
+        // even if no replication events arrive (quiescent database).
+        match adapter.shared_position.write() {
+            Ok(mut guard) => *guard = Some(current_pos.clone()),
+            Err(e) => warn!(error = %e, "Failed to initialize shared position (lock poisoned)"),
+        }
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.
@@ -567,6 +610,7 @@ impl<'a> NoriaAdapter<'a> {
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
+        lag_status: SharedLagStatus,
     ) -> ReadySetResult<std::convert::Infallible> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
@@ -785,6 +829,19 @@ impl<'a> NoriaAdapter<'a> {
             }
         };
 
+        let cancel = CancellationToken::new();
+        let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
+        let (_, shared_position) = spawn_lag_reporter(
+            UpstreamLagConfig::Postgres {
+                config: Box::new(pgsql_opts.clone()),
+                tls: tls_connector.clone(),
+            },
+            noria.clone(),
+            cancel.clone(),
+            lag_status,
+            poll_interval,
+        );
+
         let mut adapter = NoriaAdapter {
             noria,
             connector,
@@ -795,7 +852,16 @@ impl<'a> NoriaAdapter<'a> {
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_POSTGRESQL,
             table_status_tx,
+            shared_position,
+            lag_reporter_cancel: cancel,
         };
+
+        // Initialize shared position so the lag reporter can start immediately,
+        // even if no replication events arrive (quiescent database).
+        match adapter.shared_position.write() {
+            Ok(mut guard) => *guard = Some(min_pos.clone()),
+            Err(e) => warn!(error = %e, "Failed to initialize shared position (lock poisoned)"),
+        }
 
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
@@ -1215,6 +1281,11 @@ impl<'a> NoriaAdapter<'a> {
                 next_actions = self.connector.next_action(position, until.as_ref()).fuse() => match next_actions {
                     Ok((actions, pos)) => {
                         *position = pos.clone();
+                        // Update shared position for the lag reporter
+                        match self.shared_position.write() {
+                            Ok(mut guard) => *guard = Some(pos.clone()),
+                            Err(e) => warn!(error = %e, "Failed to update shared position (lock poisoned)"),
+                        }
                         debug!(%position, "Received replication action");
 
                         trace!(?actions);

@@ -51,6 +51,7 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
+use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::{PrometheusBuilder, WorkerOptions};
@@ -1444,8 +1445,14 @@ where
             options.shallow_refresh_workers,
         );
 
-        let readyset_schema =
-            ReadysetSchema::init(&options.readyset_schema, self.parse_dialect, &shallow)?;
+        let repl_lag: Arc<ControllerReplicationLag> =
+            Arc::new(ControllerReplicationLag::new(rh.clone()));
+        let readyset_schema = ReadysetSchema::init(
+            &options.readyset_schema,
+            self.parse_dialect,
+            &shallow,
+            &repl_lag,
+        )?;
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;

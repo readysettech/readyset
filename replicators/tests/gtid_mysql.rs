@@ -26,7 +26,7 @@
 //! ```
 
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 #[cfg(feature = "failure_injection")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -281,6 +281,7 @@ impl TestHandle {
                 false, // enable_statement_logging
                 parsing_preset,
                 tokio::sync::mpsc::unbounded_channel().0, // table_status_tx sink
+                Arc::new(RwLock::new(None)),
             )
             .await;
             error!(%error, "Error in replicator");
