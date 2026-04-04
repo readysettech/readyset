@@ -1,6 +1,6 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::mem;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
@@ -20,8 +20,8 @@ use database_utils::{DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
 use readyset_client::recipe::changelist::{Change, ChangeList};
-use readyset_client::{ReadySetHandle, Table, TableOperation, TableStatus};
-use readyset_data::Dialect;
+use readyset_client::{Modification, ReadySetHandle, Table, TableOperation, TableStatus};
+use readyset_data::{DfValue, Dialect, SqlEngine};
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
@@ -39,7 +39,8 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::replication_lag_reporter::{
-    spawn_lag_reporter, SharedLagStatus, SharedReplicatorPosition, UpstreamLagConfig,
+    spawn_lag_reporter, SharedHeartbeatTimestamp, SharedLagStatus, SharedReplicatorPosition,
+    UpstreamLagConfig, MYSQL_HEARTBEAT_TABLE, PG_HEARTBEAT_SCHEMA, PG_HEARTBEAT_TABLE_NAME,
 };
 use crate::table_filter::TableFilter;
 use crate::{ControllerMessage, ReplicatorMessage};
@@ -156,6 +157,12 @@ pub struct NoriaAdapter<'a> {
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
     /// Shared replicator stream position, updated on each event for the lag reporter.
     shared_position: SharedReplicatorPosition,
+    /// Shared heartbeat timestamp, updated when we intercept a heartbeat table write.
+    heartbeat_ts: SharedHeartbeatTimestamp,
+    /// Whether heartbeat-based staleness measurement is enabled.
+    heartbeat_enabled: bool,
+    /// Instance ID for heartbeat row filtering (UUID, identifies this ReadySet instance).
+    heartbeat_instance_id: String,
     /// Cancellation token for the lag reporter background task.
     lag_reporter_cancel: CancellationToken,
 }
@@ -517,19 +524,35 @@ impl<'a> NoriaAdapter<'a> {
             )
             .await?,
         );
+        let heartbeat = config.replication_heartbeat;
+        // Allow the heartbeat table through the binlog connector's table filter
+        // so events reach handle_action where we intercept them.
+        if heartbeat {
+            if let Some(db) = lag_opts.db_name() {
+                table_filter.allow_replication(db, MYSQL_HEARTBEAT_TABLE);
+            }
+        }
         let upstream_lag_config = if gtid_mode {
-            UpstreamLagConfig::MysqlGtid { opts: lag_opts }
+            UpstreamLagConfig::MysqlGtid {
+                opts: lag_opts,
+                heartbeat,
+            }
         } else {
-            UpstreamLagConfig::MysqlFile { opts: lag_opts }
+            UpstreamLagConfig::MysqlFile {
+                opts: lag_opts,
+                heartbeat,
+            }
         };
+
         let cancel = CancellationToken::new();
         let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
-        let (_, shared_position) = spawn_lag_reporter(
+        let (_, shared_position, heartbeat_ts, instance_id) = spawn_lag_reporter(
             upstream_lag_config,
             noria.clone(),
             cancel.clone(),
             lag_status,
             poll_interval,
+            config.replication_server_uuid,
         );
 
         let mut adapter = NoriaAdapter {
@@ -543,6 +566,9 @@ impl<'a> NoriaAdapter<'a> {
             dialect: Dialect::DEFAULT_MYSQL,
             table_status_tx,
             shared_position,
+            heartbeat_ts,
+            heartbeat_enabled: heartbeat,
+            heartbeat_instance_id: instance_id,
             lag_reporter_cancel: cancel,
         };
 
@@ -656,6 +682,15 @@ impl<'a> NoriaAdapter<'a> {
             })?;
 
         let max_parallel_snapshot_tables = config.max_parallel_snapshot_tables();
+
+        // Allow the heartbeat table through the table filter so the WAL reader
+        // doesn't drop heartbeat events before they reach handle_action.
+        // This must happen before the connector is created, because the connector
+        // clones the table_filter and later passes that clone to the WalReader.
+        if config.replication_heartbeat {
+            table_filter.allow_replication(PG_HEARTBEAT_SCHEMA, PG_HEARTBEAT_TABLE_NAME);
+        }
+
         let mut connector = Box::new(
             PostgresWalConnector::connect(
                 pgsql_opts.clone(),
@@ -831,15 +866,17 @@ impl<'a> NoriaAdapter<'a> {
 
         let cancel = CancellationToken::new();
         let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
-        let (_, shared_position) = spawn_lag_reporter(
+        let (_, shared_position, heartbeat_ts, instance_id) = spawn_lag_reporter(
             UpstreamLagConfig::Postgres {
                 config: Box::new(pgsql_opts.clone()),
                 tls: tls_connector.clone(),
+                heartbeat: config.replication_heartbeat,
             },
             noria.clone(),
             cancel.clone(),
             lag_status,
             poll_interval,
+            config.replication_server_uuid,
         );
 
         let mut adapter = NoriaAdapter {
@@ -853,6 +890,9 @@ impl<'a> NoriaAdapter<'a> {
             dialect: Dialect::DEFAULT_POSTGRESQL,
             table_status_tx,
             shared_position,
+            heartbeat_ts,
+            heartbeat_enabled: config.replication_heartbeat,
+            heartbeat_instance_id: instance_id,
             lag_reporter_cancel: cancel,
         };
 
@@ -1174,6 +1214,8 @@ impl<'a> NoriaAdapter<'a> {
         // First check if we should skip this action due to insufficient log position or lack of
         // interest
         let mut actionables: Vec<ReplicationAction> = Vec::new();
+        let mut had_heartbeat = false;
+        let mut had_real_table_action = false;
         for action in actions {
             match action {
                 ReplicationAction::DdlChange { .. } | ReplicationAction::LogPosition => {
@@ -1191,6 +1233,18 @@ impl<'a> NoriaAdapter<'a> {
                     }
                 }
                 ReplicationAction::TableAction { table, actions } => {
+                    // Intercept heartbeat table writes: extract the timestamp
+                    // and drop the event so it never reaches the dataflow.
+                    // We extract the timestamp even during catch-up because the lag
+                    // reporter is writing fresh heartbeats concurrently — the 2-poll
+                    // startup guard in the lag reporter handles stale data from
+                    // previous sessions.
+                    if self.heartbeat_enabled && self.is_heartbeat_table(&table) {
+                        self.extract_heartbeat_timestamp(&actions);
+                        had_heartbeat = true;
+                        continue;
+                    }
+
                     let already_applied = match self.replication_offsets.tables.get(&table) {
                         Some(Some(cur)) => {
                             let ord = pos.try_partial_cmp(cur)?;
@@ -1226,11 +1280,19 @@ impl<'a> NoriaAdapter<'a> {
                         &table.name,
                     ) {
                         actionables.push(ReplicationAction::TableAction { table, actions });
+                        had_real_table_action = true;
                     }
                 }
                 ReplicationAction::Empty => {}
             }
         }
+
+        // If the only table actions in this batch were heartbeats (all intercepted),
+        // skip any LogPosition so the persisted offset reflects real dataflow state,
+        // not heartbeat bookkeeping. This matters for MySQL, whose connector emits
+        // LogPosition alongside table actions; the Postgres connector doesn't emit
+        // LogPosition for table-action-only batches so this is a no-op there.
+        let skip_log_position = had_heartbeat && !had_real_table_action;
 
         for action in actionables {
             match action {
@@ -1240,7 +1302,11 @@ impl<'a> NoriaAdapter<'a> {
                 ReplicationAction::TableAction { table, actions } => {
                     self.handle_table_actions(table, actions, &pos).await?
                 }
-                ReplicationAction::LogPosition => self.handle_log_position(&pos).await?,
+                ReplicationAction::LogPosition => {
+                    if !skip_log_position {
+                        self.handle_log_position(&pos).await?;
+                    }
+                }
                 ReplicationAction::Empty => unreachable!("Should not have an empty action"),
             }
         }
@@ -1340,6 +1406,75 @@ impl<'a> NoriaAdapter<'a> {
     /// and we need to drop them all
     fn clear_mutator_cache(&mut self) {
         self.mutator_map.clear()
+    }
+
+    /// Check if the given table is the heartbeat table.
+    fn is_heartbeat_table(&self, table: &Relation) -> bool {
+        match self.dialect.engine() {
+            SqlEngine::PostgreSQL => {
+                table.schema.as_deref() == Some(PG_HEARTBEAT_SCHEMA)
+                    && table.name == PG_HEARTBEAT_TABLE_NAME
+            }
+            // MySQL doesn't use a separate schema for the heartbeat table — it lives
+            // in the replicated database. Match on name only; the _readyset_ prefix
+            // avoids collisions with user tables.
+            SqlEngine::MySQL => table.name == MYSQL_HEARTBEAT_TABLE,
+        }
+    }
+
+    /// Extract the heartbeat timestamp from a set of table operations and store it
+    /// in the shared heartbeat timestamp. Only processes rows matching this instance's
+    /// UUID to avoid reading another ReadySet instance's heartbeat.
+    fn extract_heartbeat_timestamp(&self, actions: &[TableOperation]) {
+        for action in actions {
+            // The heartbeat table has columns (id TEXT, ts TIMESTAMPTZ).
+            // Extract both: id at index 0, ts at index 1.
+            let (id_value, ts_value): (Option<&DfValue>, Option<&DfValue>) = match action {
+                TableOperation::Insert(row) => (row.first(), row.get(1)),
+                TableOperation::InsertOrUpdate { row, .. } => (row.first(), row.get(1)),
+                TableOperation::Update { key, update } => {
+                    // Postgres ON CONFLICT DO UPDATE delivers subsequent heartbeat
+                    // writes as WAL UPDATE records. The id is in the key (primary
+                    // key) and the ts is in the update modifications (column index 1).
+                    let ts = match update.get(1) {
+                        Some(Modification::Set(v)) => Some(v),
+                        _ => None,
+                    };
+                    (key.first(), ts)
+                }
+                _ => continue,
+            };
+
+            // Filter: only process rows matching this instance's UUID.
+            let matches = match id_value {
+                Some(DfValue::Text(id)) => id.as_str() == self.heartbeat_instance_id,
+                Some(DfValue::TinyText(id)) => id.as_str() == self.heartbeat_instance_id,
+                _ => false,
+            };
+            if !matches {
+                continue;
+            }
+
+            let Some(ts_value) = ts_value else {
+                continue;
+            };
+
+            let system_time: Option<SystemTime> = match ts_value {
+                DfValue::TimestampTz(ts) => Some(ts.to_chrono().into()),
+                _ => {
+                    warn!(?ts_value, "Unexpected heartbeat timestamp type");
+                    None
+                }
+            };
+            if let Some(st) = system_time {
+                match self.heartbeat_ts.write() {
+                    Ok(mut guard) => *guard = Some(st),
+                    Err(e) => {
+                        warn!(error = %e, "Failed to update heartbeat timestamp (lock poisoned)")
+                    }
+                }
+            }
+        }
     }
 
     /// Get a mutator for a noria table from the cache if available, or fetch a new one

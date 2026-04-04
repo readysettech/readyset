@@ -273,6 +273,17 @@ pub struct UpstreamConfig {
     )]
     #[serde(default = "default_replication_lag_interval")]
     pub replication_lag_interval: u16,
+
+    /// Enable pt-heartbeat-style time-based replication lag measurement. When enabled,
+    /// ReadySet writes a timestamp to a heartbeat table in the upstream database and
+    /// measures the delay before seeing it through replication. Requires write access
+    /// to the upstream.
+    ///
+    /// If the heartbeat table cannot be created (e.g. no write permission), a warning
+    /// is logged and heartbeat is disabled — byte/transaction lag still works.
+    #[arg(long, env = "REPLICATION_HEARTBEAT")]
+    #[serde(default)]
+    pub replication_heartbeat: bool,
 }
 
 impl UpstreamConfig {
@@ -461,6 +472,7 @@ impl Default for UpstreamConfig {
             max_parallel_snapshot_tables: default_max_parallel_snapshot_tables(),
             snapshot_query_comment: Default::default(),
             replication_lag_interval: 1,
+            replication_heartbeat: false,
         }
     }
 }

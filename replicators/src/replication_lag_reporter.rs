@@ -3,10 +3,15 @@
 //!
 //! The task uses connect-query-disconnect on each poll to avoid holding an idle connection
 //! to the upstream database.
+//!
+//! When heartbeat is enabled, the task also writes a timestamp to a heartbeat table in the
+//! upstream. The replicator intercepts the replicated row and stores the timestamp in
+//! `SharedHeartbeatTimestamp`. The lag reporter reads it back and computes time-based
+//! staleness as `now() - heartbeat_timestamp`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use metrics::{counter, gauge};
 use readyset_client::metrics::recorded;
@@ -19,6 +24,9 @@ use replication_offset::postgres::{Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
+use uuid::Uuid;
+
+use mysql_async::prelude::*;
 
 use crate::mysql_connector::get_mysql_version;
 
@@ -29,35 +37,92 @@ pub type SharedLagStatus = Arc<RwLock<Option<ReplicationLagStatus>>>;
 /// Written by the main replication loop, read by the lag reporter.
 pub type SharedReplicatorPosition = Arc<RwLock<Option<ReplicationOffset>>>;
 
+/// Shared state for the heartbeat timestamp received through replication.
+/// Written by the replicator when it intercepts a heartbeat row, read by the lag reporter.
+pub type SharedHeartbeatTimestamp = Arc<RwLock<Option<SystemTime>>>;
+
+/// Heartbeat table name for Postgres (schema-qualified).
+pub const PG_HEARTBEAT_TABLE: &str = "readyset._heartbeat";
+/// Heartbeat schema for Postgres.
+pub const PG_HEARTBEAT_SCHEMA: &str = "readyset";
+/// Heartbeat table name (unqualified) for Postgres.
+pub const PG_HEARTBEAT_TABLE_NAME: &str = "_heartbeat";
+
+/// Heartbeat table name for MySQL.
+pub const MYSQL_HEARTBEAT_TABLE: &str = "_readyset_heartbeat";
+
 /// Configuration for the upstream connection used by the lag reporter.
 pub enum UpstreamLagConfig {
     Postgres {
         config: Box<tokio_postgres::Config>,
         tls: postgres_native_tls::MakeTlsConnector,
+        heartbeat: bool,
     },
     MysqlFile {
         opts: mysql_async::Opts,
+        heartbeat: bool,
     },
     MysqlGtid {
         opts: mysql_async::Opts,
+        heartbeat: bool,
     },
+}
+
+impl UpstreamLagConfig {
+    fn heartbeat_enabled(&self) -> bool {
+        match self {
+            UpstreamLagConfig::Postgres { heartbeat, .. } => *heartbeat,
+            UpstreamLagConfig::MysqlFile { heartbeat, .. } => *heartbeat,
+            UpstreamLagConfig::MysqlGtid { heartbeat, .. } => *heartbeat,
+        }
+    }
+}
+
+/// Reporter-level configuration (not upstream-specific).
+struct ReporterConfig {
+    poll_interval: Duration,
+    instance_id: String,
+}
+
+/// Groups heartbeat-related parameters for `poll_lag`.
+struct HeartbeatContext<'a> {
+    ts: &'a SharedHeartbeatTimestamp,
+    active: bool,
+    report_staleness: bool,
+    reporter: &'a ReporterConfig,
 }
 
 /// Spawns the replication lag reporter as a background task.
 ///
 /// `lag_status` is the shared state that the controller reads via RPC.
-/// Returns a tuple of (the same lag_status, shared replicator position for main_loop to write).
+/// `server_uuid` is used as the heartbeat instance ID if set (from
+/// `--replication-server-uuid`); otherwise a random UUID is generated.
+/// Returns (lag_status, shared replicator position, shared heartbeat timestamp,
+/// heartbeat instance ID).
 pub fn spawn_lag_reporter(
     upstream_config: UpstreamLagConfig,
     noria: ReadySetHandle,
     cancel: CancellationToken,
     lag_status: SharedLagStatus,
     poll_interval: Duration,
-) -> (SharedLagStatus, SharedReplicatorPosition) {
+    server_uuid: Option<Uuid>,
+) -> (
+    SharedLagStatus,
+    SharedReplicatorPosition,
+    SharedHeartbeatTimestamp,
+    String,
+) {
     let replicator_position: SharedReplicatorPosition = Arc::new(RwLock::new(None));
+    let heartbeat_ts: SharedHeartbeatTimestamp = Arc::new(RwLock::new(None));
+    let instance_id = server_uuid.unwrap_or_else(Uuid::new_v4).to_string();
 
     let lag_status_clone = Arc::clone(&lag_status);
     let replicator_pos_clone = Arc::clone(&replicator_position);
+    let heartbeat_ts_clone = Arc::clone(&heartbeat_ts);
+    let reporter_config = ReporterConfig {
+        poll_interval,
+        instance_id: instance_id.clone(),
+    };
 
     tokio::spawn(async move {
         lag_reporter_loop(
@@ -65,13 +130,14 @@ pub fn spawn_lag_reporter(
             noria,
             lag_status_clone,
             replicator_pos_clone,
+            heartbeat_ts_clone,
             cancel,
-            poll_interval,
+            reporter_config,
         )
         .await;
     });
 
-    (lag_status, replicator_position)
+    (lag_status, replicator_position, heartbeat_ts, instance_id)
 }
 
 async fn lag_reporter_loop(
@@ -79,28 +145,62 @@ async fn lag_reporter_loop(
     mut noria: ReadySetHandle,
     lag_status: SharedLagStatus,
     replicator_position: SharedReplicatorPosition,
+    heartbeat_ts: SharedHeartbeatTimestamp,
     cancel: CancellationToken,
-    poll_interval: Duration,
+    reporter: ReporterConfig,
 ) {
-    let mut interval = tokio::time::interval(poll_interval);
+    // Attempt heartbeat table setup if enabled.
+    let mut heartbeat_active = upstream_config.heartbeat_enabled();
+    if heartbeat_active {
+        match setup_heartbeat_table(&upstream_config, &reporter.instance_id).await {
+            Ok(()) => debug!("Heartbeat table created/verified"),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to create heartbeat table — disabling heartbeat. \
+                     Byte/transaction lag will still be reported."
+                );
+                heartbeat_active = false;
+            }
+        }
+    }
+
+    let mut interval = tokio::time::interval(reporter.poll_interval);
     // Prevent burst reconnection after a network hiccup: if the upstream was unreachable
     // for N*10s, Skip avoids N rapid back-to-back polls.
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // The entire poll (connect, query, disconnect, optional heartbeat write) must
     // complete within this budget. If the upstream is slow or unreachable, the poll
     // times out cleanly instead of hanging until TCP keepalive kills the connection.
-    let poll_budget = poll_interval * 3 / 4;
+    let poll_budget = reporter.poll_interval * 3 / 4;
+    // Track how many heartbeat polls have completed. We need at least 2 polls
+    // before staleness is meaningful: the first writes the heartbeat, the second
+    // reads the replicated value. Without this, a restart shows stale data from
+    // the previous session's heartbeat row.
+    let mut heartbeat_polls: u32 = 0;
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                let report_staleness = heartbeat_active && heartbeat_polls >= 2;
+                let hb_ctx = HeartbeatContext {
+                    ts: &heartbeat_ts,
+                    active: heartbeat_active,
+                    report_staleness,
+                    reporter: &reporter,
+                };
                 match tokio::time::timeout(poll_budget, poll_lag(
                     &upstream_config,
                     &mut noria,
                     &lag_status,
                     &replicator_position,
+                    &hb_ctx,
                 )).await {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(())) => {
+                        if heartbeat_active {
+                            heartbeat_polls = heartbeat_polls.saturating_add(1);
+                        }
+                    }
                     Ok(Err(e)) => {
                         warn!(error = %e, "Failed to poll replication lag");
                         counter!(recorded::REPLICATOR_LAG_POLL_FAILURE).increment(1);
@@ -122,11 +222,75 @@ async fn lag_reporter_loop(
     }
 }
 
+async fn setup_heartbeat_table(
+    config: &UpstreamLagConfig,
+    instance_id: &str,
+) -> ReadySetResult<()> {
+    match config {
+        UpstreamLagConfig::Postgres { config, tls, .. } => {
+            let (client, connection) = config.connect(tls.clone()).await.map_err(|e| {
+                readyset_errors::internal_err!("Failed to connect for heartbeat setup: {e}")
+            })?;
+            let connection_handle = tokio::spawn(connection);
+
+            client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA IF NOT EXISTS {PG_HEARTBEAT_SCHEMA}; \
+                     CREATE TABLE IF NOT EXISTS {PG_HEARTBEAT_TABLE} (\
+                         id TEXT PRIMARY KEY, \
+                         ts TIMESTAMPTZ NOT NULL DEFAULT now()\
+                     ); \
+                     DELETE FROM {PG_HEARTBEAT_TABLE} \
+                         WHERE ts < now() - INTERVAL '7 days'"
+                ))
+                .await
+                .map_err(|e| {
+                    readyset_errors::internal_err!("Failed to create heartbeat table: {e}")
+                })?;
+
+            debug!(instance_id, "Heartbeat table ready (stale rows cleaned)");
+            drop(client);
+            connection_handle.abort();
+            Ok(())
+        }
+        UpstreamLagConfig::MysqlFile { opts, .. } | UpstreamLagConfig::MysqlGtid { opts, .. } => {
+            let mut conn = mysql_async::Conn::new(opts.clone()).await.map_err(|e| {
+                readyset_errors::internal_err!("Failed to connect for heartbeat setup: {e}")
+            })?;
+
+            conn.query_drop(format!(
+                "CREATE TABLE IF NOT EXISTS {MYSQL_HEARTBEAT_TABLE} (\
+                     id VARCHAR(36) PRIMARY KEY, \
+                     ts TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)\
+                 )"
+            ))
+            .await
+            .map_err(|e| readyset_errors::internal_err!("Failed to create heartbeat table: {e}"))?;
+
+            conn.query_drop(format!(
+                "DELETE FROM {MYSQL_HEARTBEAT_TABLE} \
+                 WHERE ts < NOW(6) - INTERVAL 7 DAY"
+            ))
+            .await
+            .map_err(|e| {
+                readyset_errors::internal_err!("Failed to clean stale heartbeat rows: {e}")
+            })?;
+
+            debug!(instance_id, "Heartbeat table ready (stale rows cleaned)");
+            conn.disconnect().await.map_err(|e| {
+                readyset_errors::internal_err!("Failed to disconnect after heartbeat setup: {e}")
+            })?;
+            Ok(())
+        }
+    }
+}
+
 async fn poll_lag(
     upstream_config: &UpstreamLagConfig,
     noria: &mut ReadySetHandle,
     lag_status: &SharedLagStatus,
     replicator_position: &SharedReplicatorPosition,
+    hb: &HeartbeatContext<'_>,
 ) -> ReadySetResult<()> {
     let replicator_offset = {
         replicator_position
@@ -147,17 +311,65 @@ async fn poll_lag(
         None => replicator_offset.clone(),
     };
 
-    let status = match upstream_config {
-        UpstreamLagConfig::Postgres { config, tls } => {
-            poll_postgres_lag(config, tls, &replicator_offset, &persisted_offset_for_lag).await?
+    let mut status = match upstream_config {
+        UpstreamLagConfig::Postgres { config, tls, .. } => {
+            poll_postgres_lag(
+                config,
+                tls,
+                &replicator_offset,
+                &persisted_offset_for_lag,
+                hb.active,
+                hb.reporter.instance_id.as_str(),
+            )
+            .await?
         }
-        UpstreamLagConfig::MysqlFile { opts } => {
-            poll_mysql_file_lag(opts, &replicator_offset, &persisted_offset_for_lag).await?
+        UpstreamLagConfig::MysqlFile { opts, .. } => {
+            poll_mysql_file_lag(
+                opts,
+                &replicator_offset,
+                &persisted_offset_for_lag,
+                hb.active,
+                hb.reporter.instance_id.as_str(),
+            )
+            .await?
         }
-        UpstreamLagConfig::MysqlGtid { opts } => {
-            poll_mysql_gtid_lag(opts, &replicator_offset, &persisted_offset_for_lag).await?
+        UpstreamLagConfig::MysqlGtid { opts, .. } => {
+            poll_mysql_gtid_lag(
+                opts,
+                &replicator_offset,
+                &persisted_offset_for_lag,
+                hb.active,
+                hb.reporter.instance_id.as_str(),
+            )
+            .await?
         }
     };
+
+    // Compute staleness from the heartbeat timestamp.
+    // Subtract the poll interval since the heartbeat was written one poll cycle ago
+    // and replicated nearly instantly — the interval itself is measurement overhead,
+    // not real lag. Floor at zero to handle timing jitter.
+    // Only report after 2+ polls so we don't show stale data from a previous session.
+    if hb.report_staleness {
+        match hb.ts.read() {
+            Ok(guard) => {
+                if let Some(ts) = *guard {
+                    match ts.elapsed() {
+                        Ok(elapsed) => {
+                            let adjusted = elapsed.saturating_sub(hb.reporter.poll_interval);
+                            // Round to millisecond precision (3 decimal places)
+                            status.staleness_seconds =
+                                Some((adjusted.as_secs_f64() * 1000.0).round() / 1000.0);
+                        }
+                        Err(_) => {
+                            warn!("Heartbeat timestamp is in the future — possible clock skew between upstream and ReadySet");
+                        }
+                    }
+                }
+            }
+            Err(e) => warn!(error = %e, "Failed to read heartbeat timestamp (lock poisoned)"),
+        }
+    }
 
     // Update Prometheus gauges
     gauge!(
@@ -174,10 +386,15 @@ async fn poll_lag(
     )
     .set(status.persist_lag as f64);
 
+    if let Some(staleness) = status.staleness_seconds {
+        gauge!(recorded::REPLICATOR_REPLICATION_STALENESS).set(staleness);
+    }
+
     debug!(
         mode = %status.mode,
         consume_lag = status.consume_lag,
         persist_lag = status.persist_lag,
+        staleness_seconds = ?status.staleness_seconds,
         "Replication lag updated"
     );
 
@@ -195,6 +412,8 @@ async fn poll_postgres_lag(
     tls: &postgres_native_tls::MakeTlsConnector,
     replicator_offset: &ReplicationOffset,
     persisted_offset: &ReplicationOffset,
+    heartbeat_active: bool,
+    instance_id: &str,
 ) -> ReadySetResult<ReplicationLagStatus> {
     // Connect-query-disconnect
     let (client, connection) = config
@@ -211,6 +430,12 @@ async fn poll_postgres_lag(
     let lsn_str: String = row
         .try_get(0)
         .map_err(|e| internal_err!("Failed to get LSN from pg_current_wal_flush_lsn(): {e}"))?;
+
+    // Write heartbeat if enabled
+    if heartbeat_active {
+        write_postgres_heartbeat(&client, instance_id).await;
+    }
+
     drop(client);
     // Abort the connection driver task. We don't send a Terminate message since this is a
     // short-lived polling connection and the Postgres server handles the dropped TCP connection.
@@ -234,7 +459,37 @@ async fn poll_postgres_lag(
         persisted_offset: persisted_pos.to_string(),
         consume_lag: replicator_pos.byte_lag_behind(&upstream_pos),
         persist_lag: persisted_pos.byte_lag_behind(&upstream_pos),
+        staleness_seconds: None, // Filled in by poll_lag from shared heartbeat timestamp
     })
+}
+
+/// Writes a heartbeat timestamp to the Postgres upstream.
+async fn write_postgres_heartbeat(client: &tokio_postgres::Client, instance_id: &str) {
+    if let Err(e) = client
+        .execute(
+            &format!(
+                "INSERT INTO {PG_HEARTBEAT_TABLE} (id, ts) VALUES ('{instance_id}', now()) \
+                 ON CONFLICT (id) DO UPDATE SET ts = EXCLUDED.ts"
+            ),
+            &[],
+        )
+        .await
+    {
+        warn!(error = %e, "Failed to write heartbeat");
+    }
+}
+
+/// Writes a heartbeat timestamp to the MySQL upstream.
+async fn write_mysql_heartbeat(conn: &mut mysql_async::Conn, instance_id: &str) {
+    if let Err(e) = conn
+        .query_drop(format!(
+            "INSERT INTO {MYSQL_HEARTBEAT_TABLE} (id, ts) VALUES ('{instance_id}', NOW(6)) \
+             ON DUPLICATE KEY UPDATE ts = NOW(6)"
+        ))
+        .await
+    {
+        warn!(error = %e, "Failed to write heartbeat");
+    }
 }
 
 /// Queries the upstream MySQL status and returns the result row.
@@ -243,8 +498,6 @@ async fn poll_postgres_lag(
 async fn query_mysql_upstream_status(
     conn: &mut mysql_async::Conn,
 ) -> ReadySetResult<mysql_async::Row> {
-    use mysql_async::prelude::*;
-
     let version = get_mysql_version(conn)
         .await
         .map_err(|e| internal_err!("Failed to get MySQL version: {e}"))?;
@@ -264,6 +517,8 @@ async fn poll_mysql_file_lag(
     opts: &mysql_async::Opts,
     replicator_offset: &ReplicationOffset,
     persisted_offset: &ReplicationOffset,
+    heartbeat_active: bool,
+    instance_id: &str,
 ) -> ReadySetResult<ReplicationLagStatus> {
     // Connect-query-disconnect
     let mut conn = mysql_async::Conn::new(opts.clone())
@@ -283,6 +538,10 @@ async fn poll_mysql_file_lag(
     // Query binlog file sizes for cross-file lag calculation
     let binlog_file_sizes = query_binlog_file_sizes(&mut conn).await?;
 
+    if heartbeat_active {
+        write_mysql_heartbeat(&mut conn, instance_id).await;
+    }
+
     conn.disconnect()
         .await
         .map_err(|e| internal_err!("Failed to disconnect: {e}"))?;
@@ -300,6 +559,7 @@ async fn poll_mysql_file_lag(
         persisted_offset: persisted_pos.to_string(),
         consume_lag,
         persist_lag,
+        staleness_seconds: None, // Filled in by poll_lag from shared heartbeat timestamp
     })
 }
 
@@ -307,6 +567,8 @@ async fn poll_mysql_gtid_lag(
     opts: &mysql_async::Opts,
     replicator_offset: &ReplicationOffset,
     persisted_offset: &ReplicationOffset,
+    heartbeat_active: bool,
+    instance_id: &str,
 ) -> ReadySetResult<ReplicationLagStatus> {
     // Connect-query-disconnect
     let mut conn = mysql_async::Conn::new(opts.clone())
@@ -318,6 +580,10 @@ async fn poll_mysql_gtid_lag(
     let gtid_set_str: String = row
         .get(4)
         .ok_or_else(|| internal_err!("Executed_Gtid_Set missing"))?;
+
+    if heartbeat_active {
+        write_mysql_heartbeat(&mut conn, instance_id).await;
+    }
 
     conn.disconnect()
         .await
@@ -344,6 +610,7 @@ async fn poll_mysql_gtid_lag(
         persisted_offset: persisted_gtid.to_mysql_string(),
         consume_lag: replicator_gtid.transaction_lag(&upstream_gtid),
         persist_lag: persisted_gtid.transaction_lag(&upstream_gtid),
+        staleness_seconds: None, // Filled in by poll_lag from shared heartbeat timestamp
     })
 }
 
@@ -351,8 +618,6 @@ async fn poll_mysql_gtid_lag(
 async fn query_binlog_file_sizes(
     conn: &mut mysql_async::Conn,
 ) -> ReadySetResult<HashMap<u32, u64>> {
-    use mysql_async::prelude::*;
-
     let rows: Vec<mysql_async::Row> = conn
         .query("SHOW BINARY LOGS")
         .await

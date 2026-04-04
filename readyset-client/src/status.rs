@@ -137,6 +137,9 @@ pub struct ReplicationLagStatus {
     pub consume_lag: u64,
     /// Lag between upstream and max persisted offset (bytes or transactions).
     pub persist_lag: u64,
+    /// Time-based staleness in fractional seconds, measured via pt-heartbeat.
+    /// `None` when heartbeat is disabled.
+    pub staleness_seconds: Option<f64>,
 }
 
 #[derive(Debug)]

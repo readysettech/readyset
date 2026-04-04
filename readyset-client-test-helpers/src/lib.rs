@@ -227,6 +227,8 @@ pub struct TestBuilder {
     parsing_preset: ParsingPreset,
     replication_tables: Option<String>,
     require_gtid: bool,
+    replication_lag_interval: Option<u16>,
+    replication_heartbeat: bool,
 }
 
 impl Default for TestBuilder {
@@ -267,6 +269,8 @@ impl TestBuilder {
             parsing_preset: ParsingPreset::for_tests(),
             replication_tables: None,
             require_gtid: false,
+            replication_lag_interval: None,
+            replication_heartbeat: false,
         }
     }
 
@@ -381,6 +385,16 @@ impl TestBuilder {
         self
     }
 
+    pub fn replication_lag_interval(mut self, seconds: u16) -> Self {
+        self.replication_lag_interval = Some(seconds);
+        self
+    }
+
+    pub fn replication_heartbeat(mut self, heartbeat: bool) -> Self {
+        self.replication_heartbeat = heartbeat;
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -454,6 +468,10 @@ impl TestBuilder {
 
         builder.set_replication_tables(self.replication_tables);
         builder.set_require_gtid(self.require_gtid);
+        if let Some(interval) = self.replication_lag_interval {
+            builder.set_replication_lag_interval(interval);
+        }
+        builder.set_replication_heartbeat(self.replication_heartbeat);
 
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
         if self.wait_for_backend {
@@ -504,11 +522,12 @@ impl TestBuilder {
 
         // backend either has upstream or noria writer
         let cdc_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
-        let cdc_upstream_config = if let Some(f) = &cdc_url {
+        let mut cdc_upstream_config = if let Some(f) = &cdc_url {
             UpstreamConfig::from_url(f)
         } else {
             UpstreamConfig::default()
         };
+        cdc_upstream_config.replication_heartbeat = self.replication_heartbeat;
         let shallow = Arc::new(CacheManager::new(None));
         let shared_upstream_config = self
             .backend_builder

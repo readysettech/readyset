@@ -259,6 +259,16 @@ impl Builder {
         self.config.replicator_config = config;
     }
 
+    /// Enable or disable pt-heartbeat-style replication lag measurement.
+    pub fn set_replication_heartbeat(&mut self, enabled: bool) {
+        self.config.replicator_config.replication_heartbeat = enabled;
+    }
+
+    /// Set the replication lag polling interval in seconds.
+    pub fn set_replication_lag_interval(&mut self, seconds: u16) {
+        self.config.replicator_config.replication_lag_interval = seconds;
+    }
+
     /// Set the replication tables filter (allowlist).
     ///
     /// Format: comma-separated `schema.table` patterns (e.g., `"mydb.t1, mydb.t2"`).

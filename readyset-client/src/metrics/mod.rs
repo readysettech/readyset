@@ -377,6 +377,16 @@ pub mod recorded {
 
     /// Counter: Number of failed replication lag poll attempts.
     pub const REPLICATOR_LAG_POLL_FAILURE: &str = "readyset_replicator.lag_poll_failure";
+
+    /// Gauge: Time-based replication staleness in seconds, measured via pt-heartbeat.
+    /// Only emitted when `--replication-heartbeat` is enabled.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | mode | postgres, mysql_file, or mysql_gtid |
+    pub const REPLICATOR_REPLICATION_STALENESS: &str =
+        "readyset_replicator.replication_staleness_seconds";
+
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";

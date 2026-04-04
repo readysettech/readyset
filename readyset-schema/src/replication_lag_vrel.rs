@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use readyset_client::ReadySetHandle;
 use readyset_client::status::ReplicationLagStatus;
-use readyset_data::DfType;
+use readyset_data::{DfType, DfValue};
 
 use crate::bind_vrel;
 use crate::virtual_relation::{VrelContext, VrelRead, VrelRows};
@@ -54,6 +54,7 @@ const REPLICATION_STATUS_SCHEMA: &[(&str, DfType)] = &[
     ("persisted_offset", DfType::DEFAULT_TEXT),
     ("consume_lag", DfType::UnsignedBigInt),
     ("persist_lag", DfType::UnsignedBigInt),
+    ("heartbeat_staleness_seconds", DfType::Double),
 ];
 
 fn replication_status_read(ctx: &VrelContext) -> VrelRead {
@@ -68,6 +69,9 @@ fn replication_status_read(ctx: &VrelContext) -> VrelRead {
                 s.persisted_offset.into(),
                 (s.consume_lag).into(),
                 (s.persist_lag).into(),
+                s.staleness_seconds
+                    .map(DfValue::Double)
+                    .unwrap_or(DfValue::None),
             ])),
             None => Box::new(std::iter::empty()),
         };
