@@ -713,7 +713,7 @@ fn is_expected_error(msg: &str) -> bool {
     lower.contains("doesn't exist")
         || lower.contains("does not exist")
         || lower.contains("unknown table")
-        || lower.contains("not replicated")
+        || lower.contains("not being replicated")
         || lower.contains("no cache named")
         || lower.contains("no query found")
         || lower.contains("table already exists")
