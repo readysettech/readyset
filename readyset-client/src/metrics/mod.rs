@@ -365,6 +365,18 @@ pub mod recorded {
     /// Measures elapsed time from the first commit (leader) to the flush.
     pub const REPLICATOR_GROUP_COMMIT_DURATION: &str =
         "readyset_replicator.group_commit_duration_us";
+
+    /// Gauge: Replication lag between upstream and ReadySet.
+    /// Unit depends on mode: bytes for postgres/mysql_file, transactions for mysql_gtid.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | mode | postgres, mysql_file, or mysql_gtid |
+    /// | kind | consume (stream position) or persist (min persisted offset) |
+    pub const REPLICATOR_REPLICATION_LAG: &str = "readyset_replicator.replication_lag";
+
+    /// Counter: Number of failed replication lag poll attempts.
+    pub const REPLICATOR_LAG_POLL_FAILURE: &str = "readyset_replicator.lag_poll_failure";
     /// Gauge: Indicates whether a server is the leader. Set to 1 when the
     /// server is leader, 0 for follower.
     pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";

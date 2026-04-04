@@ -261,6 +261,18 @@ pub struct UpstreamConfig {
     #[arg(long, env = "SNAPSHOT_QUERY_COMMENT", default_value = "")]
     #[serde(default)]
     pub snapshot_query_comment: Option<String>,
+
+    /// Polling interval in seconds for the replication lag reporter. Controls how
+    /// often ReadySet queries the upstream's replication position and (if heartbeat
+    /// is enabled) writes a heartbeat timestamp.
+    #[arg(
+        long,
+        env = "REPLICATION_LAG_INTERVAL",
+        default_value = "1",
+        value_parser = clap::value_parser!(u16).range(1..=30)
+    )]
+    #[serde(default = "default_replication_lag_interval")]
+    pub replication_lag_interval: u16,
 }
 
 impl UpstreamConfig {
@@ -394,6 +406,10 @@ fn default_status_update_interval_secs() -> u16 {
     UpstreamConfig::default().status_update_interval_secs
 }
 
+fn default_replication_lag_interval() -> u16 {
+    UpstreamConfig::default().replication_lag_interval
+}
+
 fn default_max_gtid_rows_to_skip() -> u64 {
     10_000
 }
@@ -444,6 +460,7 @@ impl Default for UpstreamConfig {
             status_update_interval_secs: 10,
             max_parallel_snapshot_tables: default_max_parallel_snapshot_tables(),
             snapshot_query_comment: Default::default(),
+            replication_lag_interval: 1,
         }
     }
 }
