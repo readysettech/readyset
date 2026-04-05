@@ -426,6 +426,13 @@ pub trait Visitor<'ast>: Sized {
         Ok(())
     }
 
+    fn visit_flush_all_shallow_caches_statement(
+        &mut self,
+        _flush_all_shallow_caches_statement: &'ast FlushAllShallowCachesStatement,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     fn visit_drop_view_statement(
         &mut self,
         drop_view_statement: &'ast DropViewStatement,
@@ -1464,6 +1471,9 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::CreateCache(statement) => visitor.visit_create_cache_statement(statement),
         SqlQuery::DropCache(statement) => visitor.visit_drop_cache_statement(statement),
         SqlQuery::DropAllCaches(statement) => visitor.visit_drop_all_caches_statement(statement),
+        SqlQuery::FlushAllShallowCaches(statement) => {
+            visitor.visit_flush_all_shallow_caches_statement(statement)
+        }
         SqlQuery::DropAllProxiedQueries(statement) => {
             visitor.visit_drop_all_proxied_queries_statement(statement)
         }

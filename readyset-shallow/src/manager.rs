@@ -226,6 +226,20 @@ where
         self.query_ids.pin().clear();
     }
 
+    /// Flush all shallow caches: clears all Moka entries but preserves cache
+    /// definitions, schedulers, name/query_id mappings, and all metadata.
+    /// A no-op if no caches exist.
+    pub async fn flush_all_caches(&self) {
+        // invalidate_all() schedules all entries for removal (sync).
+        // run_pending_tasks() ensures they are fully evicted before returning.
+        self.inner.invalidate_all();
+        self.inner.run_pending_tasks().await;
+        info!(
+            num_caches = self.caches.pin().len(),
+            "Flushed all shallow caches"
+        );
+    }
+
     /// List the current shallow caches.
     ///
     /// Optionally, query_id and name can be passed to filter the results.  Passing both will

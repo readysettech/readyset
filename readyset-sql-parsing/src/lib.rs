@@ -8,8 +8,9 @@ use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr,
-    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SetEviction,
-    SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
+    FlushAllShallowCachesStatement, ReadysetHintDirective, ResnapshotTableStatement,
+    SelectStatement, SetEviction, SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery,
+    SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -1063,6 +1064,28 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
     }
 }
 
+/// Expects `FLUSH` was already consumed. Parses a Readyset-specific flush statement.
+///
+/// FLUSH ALL SHALLOW CACHES
+fn parse_flush(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+    if parse_readyset_keywords(
+        parser,
+        &[
+            ReadysetKeyword::Standard(Keyword::ALL),
+            ReadysetKeyword::SHALLOW,
+            ReadysetKeyword::CACHES,
+        ],
+    ) {
+        Ok(SqlQuery::FlushAllShallowCaches(
+            FlushAllShallowCachesStatement,
+        ))
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(
+            "expected ALL SHALLOW CACHES after FLUSH".into(),
+        ))
+    }
+}
+
 /// Parse a SQL statement as a bare sqlparser AST [`sqlparser::ast::Query`],
 /// without converting to the Readyset AST, extracting and stripping any
 /// `/*rs+ ... */` hint directive.
@@ -1124,6 +1147,8 @@ fn parse_readyset_query(
         parse_explain(parser, dialect, input)
     } else if parser.parse_keyword(Keyword::SHOW) {
         parse_show(parser, dialect)
+    } else if parser.parse_keyword(Keyword::FLUSH) {
+        parse_flush(parser)
     } else {
         Ok(parser.parse_statement()?.try_into_dialect(dialect)?)
     }

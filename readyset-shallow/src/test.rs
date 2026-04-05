@@ -987,3 +987,32 @@ async fn test_slow_refresh_serves_stale_data() {
 
     updater.abort();
 }
+
+#[tokio::test]
+async fn test_flush_all_caches_clears_entries_preserves_definitions() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
+    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
+
+    create_test_cache(&manager, None, Some(query_id_1), test_policy()).unwrap();
+    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value1".to_string()]).await;
+
+    let result = manager
+        .get_or_start_insert(&query_id_2, "key2".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value2".to_string()]).await;
+
+    assert_eq!(manager.list_entries(None, None).len(), 2);
+
+    manager.flush_all_caches().await;
+
+    assert!(manager.list_entries(None, None).is_empty());
+    assert_eq!(manager.list_caches(None, None).len(), 2);
+    check_miss(&manager, &query_id_1, "key1".to_string()).await;
+    check_miss(&manager, &query_id_2, "key2".to_string()).await;
+}

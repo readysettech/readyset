@@ -17,6 +17,7 @@ use crate::deallocate::deallocate;
 use crate::delete::deletion;
 use crate::drop::{
     drop_all_caches, drop_all_proxied_queries, drop_cached_query, drop_table, drop_view,
+    flush_all_shallow_caches,
 };
 use crate::explain::explain_statement;
 use crate::expression::expression;
@@ -88,6 +89,7 @@ fn sql_query_part2(
     move |i| {
         alt((
             map(truncate(dialect), SqlQuery::Truncate),
+            map(flush_all_shallow_caches, SqlQuery::FlushAllShallowCaches),
             map(alter_readyset_statement(dialect), SqlQuery::AlterReadySet),
             // This does a more expensive clone of `i`, so process it last.
             map(create_cached_query(dialect), SqlQuery::CreateCache),

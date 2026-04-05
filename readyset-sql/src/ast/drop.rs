@@ -97,6 +97,15 @@ impl fmt::Display for DropAllCachesStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct FlushAllShallowCachesStatement;
+
+impl fmt::Display for FlushAllShallowCachesStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FLUSH ALL SHALLOW CACHES")
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropAllProxiedQueriesStatement;
 
 impl DialectDisplay for DropAllProxiedQueriesStatement {

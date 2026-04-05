@@ -45,6 +45,9 @@ pub enum TelemetryEvent {
     /// SHOW CACHES statement was executed
     ShowCaches,
 
+    /// FLUSH ALL SHALLOW CACHES statement was executed
+    FlushAllShallowCaches,
+
     /// SHOW PROXIED QUERIES statement was executed
     ShowProxiedQueries,
 

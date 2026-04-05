@@ -99,6 +99,19 @@ pub fn drop_view(
     }
 }
 
+pub fn flush_all_shallow_caches(
+    i: LocatedSpan<&[u8]>,
+) -> NomSqlResult<&[u8], FlushAllShallowCachesStatement> {
+    let (i, _) = tag_no_case("flush")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("all")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("shallow")(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, _) = tag_no_case("caches")(i)?;
+    Ok((i, FlushAllShallowCachesStatement))
+}
+
 pub fn drop_all_caches(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DropAllCachesStatement> {
     let (i, _) = tag_no_case("drop")(i)?;
     let (i, _) = whitespace1(i)?;

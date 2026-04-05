@@ -958,6 +958,11 @@ fn drop_all_caches() {
 }
 
 #[test]
+fn flush_all_shallow_caches() {
+    check_parse_both!("FLUSH ALL SHALLOW CACHES");
+}
+
+#[test]
 fn explain_create_cache() {
     check_parse_mysql!("EXPLAIN CREATE CACHE FROM SELECT * FROM users WHERE id = ?");
     check_parse_mysql!("EXPLAIN\nCREATE CACHE FROM SELECT * FROM users WHERE id = ?");

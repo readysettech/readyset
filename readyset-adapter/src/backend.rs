@@ -3613,6 +3613,21 @@ where
         })
     }
 
+    /// Flush all shallow caches: clears cached data but preserves cache definitions,
+    /// schedulers, query_id mappings, and all metadata. Deep caches, query status,
+    /// and prepared statements are not affected.
+    async fn flush_all_shallow_caches(
+        state: &mut BackendState<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        state.shallow.flush_all_caches().await;
+        if let Some(ref telemetry_sender) = state.telemetry_sender
+            && let Err(e) = telemetry_sender.send_event(TelemetryEvent::FlushAllShallowCaches)
+        {
+            warn!(error = %e, "Failed to send FLUSH ALL SHALLOW CACHES telemetry");
+        }
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
     /// Forwards a `DROP ALL CACHES` request to noria
     async fn drop_all_caches(
         connectors: &mut BackendConnectors<DB>,
@@ -4140,6 +4155,12 @@ where
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
                 Self::drop_all_caches(connectors, state, *cache_type).await
+            }
+            SqlQuery::FlushAllShallowCaches(_) => {
+                if !settings.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                }
+                Self::flush_all_shallow_caches(state).await
             }
             SqlQuery::DropAllProxiedQueries(_) => {
                 if !settings.allow_cache_ddl {
@@ -5017,6 +5038,7 @@ where
                     | SqlQuery::Deallocate(_)
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
+                    | SqlQuery::FlushAllShallowCaches(_)
                     | SqlQuery::DropAllProxiedQueries(_)
                     | SqlQuery::AlterReadySet(_)
                     | SqlQuery::Explain(_)
