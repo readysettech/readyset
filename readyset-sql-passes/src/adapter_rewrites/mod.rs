@@ -415,7 +415,10 @@ pub fn rewrite_for_readyset(
     // decompose before it reaches MIR. Decomposition is safe even without PLA:
     // SUM(x)/COUNT(x) == AVG(x) for a single result set.
     let needs_pla = !rewritten_in_conditions.is_empty() || has_range_condition(query);
-    let post_lookup_decompositions = if needs_pla {
+    // Skip decomposition for SELECT DISTINCT: DISTINCT deduplication semantics
+    // would change if applied to decomposed SUM/COUNT columns instead of the
+    // original AVG result. The un-decomposed AVG will be rejected by MIR.
+    let post_lookup_decompositions = if needs_pla && !query.distinct {
         let d = decompose_aggregates_for_post_lookup(query, dialect)?;
         if !d.is_empty() {
             trace!(parent: &span, pass="decompose_aggregates_for_post_lookup", query = %query.display(flags.dialect), decompositions=?d);

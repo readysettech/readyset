@@ -1548,10 +1548,19 @@ impl NoriaConnector {
 
             params.extend(limit_columns);
 
-            PreparedSelectTypes::Schema(SelectPrepareResultInner {
-                params,
-                schema: getter_schema.schema(SchemaType::ReturnedSchema).to_vec(),
-            })
+            let mut schema = getter_schema.schema(SchemaType::ReturnedSchema).to_vec();
+
+            // Apply PostLookupPlan type transformations so the prepared-statement
+            // RowDescription matches what postprocess_decompositions returns at
+            // execute time. Without this, decomposed AVG columns would be
+            // described as INT8 (the SUM column type) but sent as NUMERIC.
+            let plan = statement.processed_query_params.post_lookup_plan();
+            if !plan.is_empty() {
+                apply_post_lookup_type_transforms(&mut schema, plan, self.dialect);
+                remove_post_lookup_columns(&mut schema, plan);
+            }
+
+            PreparedSelectTypes::Schema(SelectPrepareResultInner { params, schema })
         } else {
             PreparedSelectTypes::NoSchema
         };
@@ -1691,6 +1700,47 @@ impl NoriaConnector {
     }
 }
 
+/// Update result column types in the schema for post-lookup decompositions.
+///
+/// For each decomposition, computes the correct result type (e.g. AVG of
+/// integer columns → Numeric) and updates the schema entry. This must be
+/// called BEFORE column removal since `result_index` refers to positions
+/// in the original schema.
+///
+/// Shared between prepare (RowDescription) and execute
+/// (postprocess_decompositions) so they always declare the same types.
+fn apply_post_lookup_type_transforms(
+    schema: &mut [ColumnSchema],
+    plan: &PostLookupPlan,
+    dialect: Dialect,
+) {
+    for d in plan.decompositions() {
+        if d.result_index < schema.len() {
+            let source_types: Vec<&DfType> = d
+                .source_columns
+                .iter()
+                .map(|s| {
+                    schema
+                        .get(s.field_index)
+                        .map(|cs| &cs.column_type)
+                        .unwrap_or(&DfType::Unknown)
+                })
+                .collect();
+            schema[d.result_index].column_type = d.kind.result_type(&source_types, dialect);
+        }
+    }
+}
+
+/// Remove added helper columns (e.g. COUNT, MIN) from the schema in
+/// reverse index order to preserve earlier indices.
+fn remove_post_lookup_columns(schema: &mut Vec<ColumnSchema>, plan: &PostLookupPlan) {
+    for &idx in plan.columns_to_remove().iter().rev() {
+        if idx < schema.len() {
+            schema.remove(idx);
+        }
+    }
+}
+
 /// Apply post-lookup decompositions to transform result rows and schema.
 ///
 /// For each decomposed aggregate (e.g. AVG decomposed into SUM + COUNT), this:
@@ -1765,33 +1815,46 @@ fn postprocess_decompositions<'a>(
     let mut new_schema_vec = schema.schema.into_owned();
     let mut new_columns_vec = schema.columns.into_owned();
 
-    // Update the type and alias for computed result columns.
-    // IMPORTANT: This must happen BEFORE the removal loop below, because
-    // `result_index` refers to positions in the original (pre-removal) schema.
+    // Update aliases for computed result columns.
     for d in decompositions {
-        if d.result_index < new_schema_vec.len() {
-            let source_types: Vec<&DfType> = d
-                .source_columns
-                .iter()
-                .map(|s| {
-                    new_schema_vec
-                        .get(s.field_index)
-                        .map(|cs| &cs.column_type)
-                        .unwrap_or(&DfType::Unknown)
-                })
-                .collect();
-            new_schema_vec[d.result_index].column_type = d.kind.result_type(&source_types, dialect);
-        }
         if d.result_index < new_columns_vec.len() {
             new_columns_vec[d.result_index] = d.original_alias.clone();
         }
     }
 
-    // Remove added columns in reverse order to preserve indices
-    for &idx in columns_to_remove.iter().rev() {
-        if idx < new_schema_vec.len() {
-            new_schema_vec.remove(idx);
+    // Update schema types (e.g. BigInt → Numeric for AVG of integers).
+    // Must happen before coercion so target types are correct, and before
+    // column removal since result_index refers to pre-removal positions.
+    apply_post_lookup_type_transforms(&mut new_schema_vec, plan, dialect);
+
+    for d in decompositions {
+        if d.result_index < new_schema_vec.len() {
+            let target_type = &new_schema_vec[d.result_index].column_type;
+            for row in &mut transformed_rows {
+                if let Some(val) = row.get(d.result_index)
+                    && *val != DfValue::None
+                {
+                    match val.coerce_to(target_type, &DfType::Double) {
+                        Ok(coerced) => row[d.result_index] = coerced,
+                        Err(e) => {
+                            warn!(
+                                %e,
+                                ?val,
+                                ?target_type,
+                                result_index = d.result_index,
+                                "post-lookup decomposition: coercion failed, replacing with NULL"
+                            );
+                            row[d.result_index] = DfValue::None;
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Remove added helper columns from schema and column names
+    remove_post_lookup_columns(&mut new_schema_vec, plan);
+    for &idx in columns_to_remove.iter().rev() {
         if idx < new_columns_vec.len() {
             new_columns_vec.remove(idx);
         }
@@ -2285,19 +2348,107 @@ mod tests {
                 let data = rows.into_vec();
                 assert_eq!(data.len(), 1);
                 assert_eq!(data[0].len(), 2); // COUNT and MIN columns removed
-                assert_eq!(data[0][0], DfValue::try_from(5.0_f64).unwrap());
+                // AVG(x) = 20/4 = 5.0, coerced to Numeric (int input)
+                assert!(matches!(&data[0][0], DfValue::Numeric(_)));
+                // AVG(y) = 90/3 = 30.0, stays Double (float input)
                 assert_eq!(data[0][1], DfValue::try_from(30.0_f64).unwrap());
 
                 assert_eq!(schema.columns.len(), 2);
                 assert_eq!(schema.columns[0], SqlIdentifier::from("avg_x"));
                 assert_eq!(schema.columns[1], SqlIdentifier::from("avg_y"));
-                // MySQL AVG(int) → Numeric{14,4}
+                // MySQL AVG(int) → Numeric{14,4}, AVG(float) → Double
                 assert_eq!(
                     schema.schema[0].column_type,
                     DfType::Numeric { prec: 14, scale: 4 }
                 );
-                // MySQL AVG(float) → Double
                 assert_eq!(schema.schema[1].column_type, DfType::Double);
+            }
+            _ => panic!("expected Select"),
+        }
+    }
+
+    /// The execute path (postprocess_decompositions) fixes the schema type for
+    /// decomposed AVG from BigInt (SUM column) to NUMERIC. The prepare path
+    /// must apply the same fix, otherwise RowDescription says INT8 but DataRow
+    /// sends NUMERIC, causing "invalid buffer size" in the PostgreSQL binary
+    /// protocol.
+    #[test]
+    fn postprocess_decompositions_changes_avg_type_from_view_schema() {
+        // View returns: [SUM(x) BigInt, COUNT(x) BigInt, MIN(x) Int]
+        let view_schema = vec![
+            ColumnSchema {
+                column: ast::Column {
+                    name: "sum_x".into(),
+                    table: None,
+                },
+                column_type: DfType::BigInt,
+                base: None,
+            },
+            ColumnSchema {
+                column: ast::Column {
+                    name: "count_x".into(),
+                    table: None,
+                },
+                column_type: DfType::BigInt,
+                base: None,
+            },
+            ColumnSchema {
+                column: ast::Column {
+                    name: "min_x".into(),
+                    table: None,
+                },
+                column_type: DfType::Int,
+                base: None,
+            },
+        ];
+
+        let plan = PostLookupPlan::new(
+            vec![PostLookupDecomposition {
+                kind: PostLookupAggregateKind::Avg,
+                result_index: 0,
+                source_columns: Box::new([
+                    SourceColumn {
+                        field_index: 0,
+                        added: false,
+                    },
+                    SourceColumn {
+                        field_index: 1,
+                        added: true,
+                    },
+                    SourceColumn {
+                        field_index: 2,
+                        added: true,
+                    },
+                ]),
+                original_alias: SqlIdentifier::from("avg_x"),
+            }],
+            3,
+        );
+
+        // Raw view schema at result_index 0 is BigInt (the SUM column).
+        // This is what prepare_select would return WITHOUT the fix.
+        assert_eq!(view_schema[0].column_type, DfType::BigInt);
+
+        // postprocess_decompositions changes it to NUMERIC.
+        let exec_result = QueryResult::Select {
+            rows: ResultIterator::owned(vec![Results::new(vec![vec![
+                DfValue::Int(10),
+                DfValue::Int(2),
+                DfValue::Int(3),
+            ]])]),
+            schema: SelectSchema {
+                schema: Cow::Owned(view_schema),
+                columns: Cow::Owned(vec!["sum_x".into(), "count_x".into(), "min_x".into()]),
+            },
+        };
+        let exec_result =
+            postprocess_decompositions(exec_result, &plan, Dialect::DEFAULT_POSTGRESQL);
+        match exec_result {
+            QueryResult::Select { schema, .. } => {
+                assert_eq!(schema.schema.len(), 1);
+                // PostgreSQL AVG(int) -> NUMERIC, not BigInt.
+                // prepare_select must return this same type in RowDescription.
+                assert_eq!(schema.schema[0].column_type, DfType::DEFAULT_NUMERIC);
             }
             _ => panic!("expected Select"),
         }
