@@ -2,7 +2,7 @@ use std::env;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
 #[cfg(feature = "failure_injection")]
@@ -5612,3 +5612,535 @@ async fn mysql_invisible_column_inner() {
 async fn mysql_invisible_column() {
     mysql_invisible_column_inner().await;
 }
+/// Test that group commit coalesces multiple transactions into a single
+/// batch. With `group_commit_max_trx = 3` and a long wait window, three
+/// autocommit INSERTs should all arrive together after the third commit
+/// triggers the group flush.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_group_commit_coalesces_transactions() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_coal_test CASCADE;
+             CREATE TABLE gc_coal_test (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_coal_test VALUES (0, 0);",
+        )
+        .await
+        .unwrap();
+
+    // Long wait window so the timeout never fires during the test.
+    // max_trx = 3 so the group flushes after exactly 3 committed
+    // transactions.
+    let config = Config {
+        group_commit_wait_us: 30_000_000, // 30 seconds
+        group_commit_max_trx: 3,
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot row
+    check_results!(
+        ctx,
+        "gc_coal_test",
+        "Snapshot",
+        &[&[DfValue::Int(0), DfValue::Int(0)]]
+    );
+
+    // Trx 1: autocommit INSERT — coalesces, group not full.
+    client
+        .query("INSERT INTO gc_coal_test VALUES (1, 10)")
+        .await
+        .unwrap();
+
+    // Trx 2: autocommit INSERT — coalesces, group not full.
+    client
+        .query("INSERT INTO gc_coal_test VALUES (2, 20)")
+        .await
+        .unwrap();
+
+    // Verify data is NOT visible during the group commit window. Poll
+    // repeatedly so we actively assert the snapshot count stays stable —
+    // if any new row appears, group commit is not coalescing as expected.
+    // The poll window is well below `group_commit_wait_us` (30s) so the
+    // timeout cannot fire and confound the test.
+    let poll_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < poll_deadline {
+        if let Ok(rows) = ctx.get_results_inner("gc_coal_test").await {
+            assert_eq!(
+                rows.len(),
+                1,
+                "expected only snapshot row before group commit flush, got: {rows:?}"
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // Trx 3: autocommit INSERT — reaches max_trx, triggers flush.
+    client
+        .query("INSERT INTO gc_coal_test VALUES (3, 30)")
+        .await
+        .unwrap();
+
+    // All three should appear together.
+    check_results!(
+        ctx,
+        "gc_coal_test",
+        "AfterFlush",
+        &[
+            &[DfValue::Int(0), DfValue::Int(0)],
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+            &[DfValue::Int(3), DfValue::Int(30)],
+        ]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that a single transaction is flushed after the group commit
+/// timeout expires, even if max_trx is not reached.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_group_commit_timeout_flush() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_timeout_test CASCADE;
+             CREATE TABLE gc_timeout_test (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_timeout_test VALUES (0, 0);",
+        )
+        .await
+        .unwrap();
+
+    // Short timeout, high max_trx so the timeout fires before max_trx.
+    // 50ms is short enough to keep the test fast but long enough that the
+    // WAL event reliably arrives and the COMMIT is processed before the
+    // group commit deadline expires — otherwise the timeout would fire
+    // with nothing pending and the test wouldn't actually exercise the
+    // timeout-based flush path.
+    let config = Config {
+        group_commit_wait_us: 50_000, // 50ms
+        group_commit_max_trx: 10_000, // effectively never by count
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "gc_timeout_test",
+        "Snapshot",
+        &[&[DfValue::Int(0), DfValue::Int(0)]]
+    );
+
+    // Single INSERT — should appear after timeout flush.
+    client
+        .query("INSERT INTO gc_timeout_test VALUES (1, 10)")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "gc_timeout_test",
+        "AfterTimeout",
+        &[
+            &[DfValue::Int(0), DfValue::Int(0)],
+            &[DfValue::Int(1), DfValue::Int(10)],
+        ]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that TRUNCATE arriving during group commit is deferred and
+/// processed separately from the pending row actions. An INSERT into
+/// table A sits in the group commit buffer, then a TRUNCATE on table B
+/// arrives. Both must be applied correctly.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_truncate_during_group_commit() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Snapshot: two tables, one row each.
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_trunc_a CASCADE;
+             DROP TABLE IF EXISTS gc_trunc_b CASCADE;
+             CREATE TABLE gc_trunc_a (id INT PRIMARY KEY, val INT);
+             CREATE TABLE gc_trunc_b (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_trunc_a VALUES (1, 10);
+             INSERT INTO gc_trunc_b VALUES (1, 100);",
+        )
+        .await
+        .unwrap();
+
+    let config = Config {
+        group_commit_wait_us: 10_000_000, // 10 seconds
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Verify snapshot.
+    check_results!(
+        ctx,
+        "gc_trunc_a",
+        "SnapshotA",
+        &[&[DfValue::Int(1), DfValue::Int(10)]]
+    );
+    check_results!(
+        ctx,
+        "gc_trunc_b",
+        "SnapshotB",
+        &[&[DfValue::Int(1), DfValue::Int(100)]]
+    );
+
+    // INSERT into table A (sits in group commit), then TRUNCATE table B.
+    client
+        .query("INSERT INTO gc_trunc_a VALUES (2, 20)")
+        .await
+        .unwrap();
+    client
+        .query("TRUNCATE TABLE gc_trunc_b")
+        .await
+        .unwrap();
+
+    // Table A should have both rows (original + new insert).
+    check_results!(
+        ctx,
+        "gc_trunc_a",
+        "AfterInsert",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+        ]
+    );
+
+    // Table B should be empty after truncate.
+    check_results!(ctx, "gc_trunc_b", "AfterTruncate", &[]);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Test that a CREATE TABLE (DDL) arriving during group commit is deferred
+/// and processed separately. Pending row actions are flushed first, then
+/// the DDL is applied.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_ddl_during_group_commit() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_ddl_src CASCADE;
+             DROP TABLE IF EXISTS gc_ddl_new CASCADE;
+             CREATE TABLE gc_ddl_src (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_ddl_src VALUES (1, 10);",
+        )
+        .await
+        .unwrap();
+
+    // Use a large group commit window so the INSERT rows are guaranteed to
+    // still be pending when the CREATE TABLE DDL arrives.
+    let config = Config {
+        group_commit_wait_us: 10_000_000, // 10 seconds
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "gc_ddl_src",
+        "Snapshot",
+        &[&[DfValue::Int(1), DfValue::Int(10)]]
+    );
+
+    // INSERT into source table (sits in group commit buffer), then DDL.
+    client
+        .query("INSERT INTO gc_ddl_src VALUES (2, 20)")
+        .await
+        .unwrap();
+    client
+        .query("CREATE TABLE gc_ddl_new (id INT PRIMARY KEY, val INT)")
+        .await
+        .unwrap();
+
+    // Source table should have both rows.
+    check_results!(
+        ctx,
+        "gc_ddl_src",
+        "AfterDDL",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+        ]
+    );
+
+    // Insert into the new table and verify it's replicated.
+    client
+        .query("INSERT INTO gc_ddl_new VALUES (1, 100)")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "gc_ddl_new",
+        "NewTableAfterDDL",
+        &[&[DfValue::Int(1), DfValue::Int(100)]]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Regression test for a position-tracking bug in the PG group commit state
+/// machine. When a row-producing transaction is coalesced (`should_flush_group`
+/// returns false, `next_action` keeps looping without flushing), and the next
+/// transaction begins with `WalEvent::Begin`, `cur_pos` is clobbered to
+/// `(T_next.final_lsn, 0)` by `PostgresPosition::commit_start`. If that next
+/// transaction is a `TRUNCATE` on a *different* table, the `WalEvent::Truncate`
+/// arm of `next_action` flushes the pending row actions and returns them
+/// tagged with the clobbered `cur_pos` — leaving the base table holding
+/// those rows with a replication offset whose `lsn` component is the `0`
+/// sentinel.
+///
+/// The correct behavior is for the flushed rows to carry the position of the
+/// last fully-processed COMMIT (non-zero `lsn`), not the sentinel start
+/// position of an in-progress transaction. A non-zero `lsn` is what the
+/// connector subsequently propagates into standby status updates, so the bug
+/// can cause `Lsn(0)` to be ACKed to the upstream WAL slot.
+///
+/// A plain end-to-end check doesn't catch the bug because the buggy offset
+/// is transient: T_trunc's subsequent COMMIT returns a `LogPosition` action,
+/// and `handle_log_position` advances *every* table whose offset is behind
+/// the COMMIT's position — including `gc_pos_a` with its bogus
+/// `(T_trunc.final_lsn, 0)` — masking the violation before it can be
+/// observed. This test uses a failpoint at `POSTGRES_NEXT_WAL_EVENT` to
+/// crash the replicator after the Truncate event has been processed but
+/// before the COMMIT of the truncate transaction arrives, preserving the
+/// buggy offset for inspection.
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_group_commit_truncate_preserves_pending_position() {
+    readyset_tracing::init_test_logging();
+    let _fail_scenario = FailScenario::setup();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    // Snapshot phase: both tables start with one row.
+    client
+        .query(
+            "DROP TABLE IF EXISTS gc_pos_a CASCADE;
+             DROP TABLE IF EXISTS gc_pos_b CASCADE;
+             CREATE TABLE gc_pos_a (id INT PRIMARY KEY, val INT);
+             CREATE TABLE gc_pos_b (id INT PRIMARY KEY, val INT);
+             INSERT INTO gc_pos_a VALUES (1, 10);
+             INSERT INTO gc_pos_b VALUES (1, 100);",
+        )
+        .await
+        .unwrap();
+
+    // Long wait window: the INSERT into gc_pos_a must stay in the group
+    // commit buffer until the TRUNCATE on gc_pos_b arrives, so we actually
+    // reach the Truncate-with-pending-rows branch in `next_action` rather
+    // than flushing at the earlier COMMIT.
+    let config = Config {
+        group_commit_wait_us: 10_000_000, // 10 seconds
+        group_commit_max_trx: 20,
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // Sanity-check the snapshot landed.
+    check_results!(
+        ctx,
+        "gc_pos_a",
+        "SnapshotA",
+        &[&[DfValue::Int(1), DfValue::Int(10)]]
+    );
+    check_results!(
+        ctx,
+        "gc_pos_b",
+        "SnapshotB",
+        &[&[DfValue::Int(1), DfValue::Int(100)]]
+    );
+
+    // Capture the snapshot offset for gc_pos_a so we can verify later
+    // that the test actually exercised the post-INSERT flush path (i.e.
+    // that the offset advanced beyond the snapshot state).
+    let table_a = Relation {
+        schema: Some("public".into()),
+        name: "gc_pos_a".into(),
+    };
+    let snapshot_a_pos = {
+        let offsets = ctx
+            .controller()
+            .await
+            .replication_offsets()
+            .await
+            .expect("replication_offsets RPC");
+        let a_offset = offsets
+            .tables
+            .get(&table_a)
+            .and_then(|o| o.as_ref())
+            .cloned()
+            .expect("gc_pos_a has a snapshot offset");
+        replication_offset::postgres::PostgresPosition::try_from(&a_offset)
+            .expect("gc_pos_a snapshot offset is a postgres position")
+    };
+
+    // Install a failpoint on WAL event fetch that panics after 4 events
+    // have been fetched post-install. The replicator has already consumed
+    // an empty startup transaction (the readyset_snapshot_done marker) and
+    // the `BEGIN` of our INSERT transaction by the time the failpoint is
+    // armed, so the 4 events we actually count are:
+    //   1. Insert row for gc_pos_a
+    //   2. COMMIT of the INSERT transaction (coalesced, not flushed)
+    //   3. BEGIN of the TRUNCATE transaction (clobbers cur_pos.lsn to 0)
+    //   4. Truncate event (pending > 0 → flush, return bogus position
+    //      `(T2.final_lsn, 0)`; the Truncate is stashed in `peek` and
+    //      processed on the next `next_action` call, which updates
+    //      gc_pos_b's offset separately)
+    //
+    // Panicking on the 5th callback (before the COMMIT of the TRUNCATE
+    // transaction is fetched) prevents the Commit arm from returning a
+    // `LogPosition` action that would otherwise mask the bug by advancing
+    // gc_pos_a's offset to the COMMIT position.
+    static WAL_EVENT_COUNT: AtomicUsize = AtomicUsize::new(0);
+    WAL_EVENT_COUNT.store(0, Ordering::SeqCst);
+    fail::cfg_callback(failpoints::POSTGRES_NEXT_WAL_EVENT, move || {
+        let count = WAL_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
+        info!(
+            "FAILPOINT: pgsql_group_commit_truncate wal event, count={}",
+            count + 1,
+        );
+        if count >= 4 {
+            panic!(
+                "Injected crash after {} wal events (preventing the \
+                 truncate-transaction COMMIT's LogPosition from masking \
+                 gc_pos_a's buggy offset)",
+                count + 1,
+            );
+        }
+    })
+    .unwrap();
+
+    // Trx 1: INSERT into gc_pos_a — coalesced in the group commit buffer
+    // because max_trx=20 and wait=10s are both far from being reached.
+    client
+        .query("INSERT INTO gc_pos_a VALUES (2, 20)")
+        .await
+        .unwrap();
+
+    // Trx 2: TRUNCATE gc_pos_b — this forces the Truncate arm of
+    // `next_action` to flush gc_pos_a's pending row before processing the
+    // TRUNCATE. The flush is the critical code path exercised by this
+    // test: BEGIN of this transaction clobbers `cur_pos` to
+    // `(T2.final_lsn, 0)` before the Truncate arm is reached.
+    client
+        .query("TRUNCATE TABLE gc_pos_b")
+        .await
+        .unwrap();
+
+    // Wait for the replicator to hit the failpoint and panic, then stop
+    // the replicator task so we can inspect the controller state without
+    // further mutations.
+    sleep(Duration::from_secs(2)).await;
+    ctx.stop_repl().await;
+
+    // Clear the failpoint so we don't leak it to other tests.
+    fail::cfg(failpoints::POSTGRES_NEXT_WAL_EVENT, "off").unwrap();
+
+    // Assert the invariant: gc_pos_a's replication offset must have
+    // advanced past the snapshot (i.e. the INSERT was actually flushed,
+    // so this test did exercise the bug path) AND the offset's `lsn`
+    // component must not be the `0` sentinel. With the bug present, the
+    // INSERT flush returned a position whose `lsn` is `0` from
+    // `PostgresPosition::commit_start(T_trunc.final_lsn)`, and this
+    // assertion fails.
+    let offsets = ctx
+        .controller()
+        .await
+        .replication_offsets()
+        .await
+        .expect("replication_offsets RPC");
+    let a_offset = offsets
+        .tables
+        .get(&table_a)
+        .expect("gc_pos_a is present in the offsets map")
+        .as_ref()
+        .expect("gc_pos_a has a non-None offset after INSERT applied");
+    let a_pos = replication_offset::postgres::PostgresPosition::try_from(a_offset)
+        .expect("gc_pos_a offset is a postgres position");
+    assert!(
+        a_pos > snapshot_a_pos,
+        "gc_pos_a offset did not advance past the snapshot \
+         ({snapshot_a_pos:?}); the test did not actually exercise the \
+         group commit flush path. Got {a_pos:?}.",
+    );
+    assert_ne!(
+        a_pos.lsn,
+        replication_offset::postgres::Lsn::default(),
+        "gc_pos_a replication offset has lsn=0 after INSERT-then-TRUNCATE; \
+         the group commit Truncate-flush path returned a `cur_pos` that \
+         was clobbered by BEGIN of the truncate transaction. Expected a \
+         non-zero lsn from the last fully-processed COMMIT, got {a_pos:?}",
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
