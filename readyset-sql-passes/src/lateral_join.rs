@@ -48,40 +48,66 @@ fn split_correlated_expr(
     })
 }
 
-/// Checks if a column does not belong to any of the specified FROM items.
-/// Used to detect correlation or projection requirements.
-fn column_does_not_belong_from_items(col: &Column, from_items: &HashSet<Relation>) -> bool {
-    if let Some(table) = &col.table {
-        !from_items.contains(table)
-    } else {
-        false
-    }
+/// Checks if a column belongs to any of the specified FROM items.
+/// Returns `false` for unqualified columns (`table: None`).
+fn column_belongs_to(col: &Column, from_items: &HashSet<Relation>) -> bool {
+    col.table.as_ref().is_some_and(|t| from_items.contains(t))
 }
 
-/// Updates local column references in an expression to use a given table alias,
-/// if they do not belong to any outer FROM items. Used during projection hoisting.
+/// Checks if a qualified column references a table NOT in the given set.
+/// Returns `false` for unqualified columns — absence of a table qualifier
+/// is not evidence of correlation.
+fn is_correlated_column(col: &Column, local_from_items: &HashSet<Relation>) -> bool {
+    col.table
+        .as_ref()
+        .is_some_and(|t| !local_from_items.contains(t))
+}
+
+/// Determines whether a column should be treated as local (requiring
+/// projection through or replacement with the subquery alias).
+///
+/// Returns `true` when:
+///   (a) the column explicitly belongs to `local_from_items` — this
+///       handles shadowing, where the same table name appears in both
+///       inner and outer scopes (inner scope wins per SQL semantics), OR
+///   (b) the column does not belong to `outer_from_items` — the
+///       fallback for columns from nested subquery aliases or other
+///       non-outer sources.
+fn is_local_column(
+    col: &Column,
+    local_from_items: &HashSet<Relation>,
+    outer_from_items: &HashSet<Relation>,
+) -> bool {
+    column_belongs_to(col, local_from_items) || !column_belongs_to(col, outer_from_items)
+}
+
+/// Updates local column references in an expression to use a given
+/// table alias. See [`is_local_column`] for the locality classification.
 fn replace_local_columns_table(
     expr: &mut Expr,
     from_item: Relation,
+    local_from_items: &HashSet<Relation>,
     outer_from_items: &HashSet<Relation>,
 ) {
     columns_iter_mut(expr).for_each(|col| {
-        if column_does_not_belong_from_items(col, outer_from_items) {
+        if is_local_column(col, local_from_items, outer_from_items) {
             col.table = Some(from_item.clone());
         }
     });
 }
 
-/// For a given subquery, ensures all columns from that subquery referenced in an outer expression
-/// are present in its SELECT projection. Updates references in the outer expression to use the subquery’s alias.
-/// Essential for flattening correlated subqueries while preserving column visibility.
+/// For a given subquery, ensures all local columns referenced in an outer
+/// expression are present in its SELECT projection and rewrites them to
+/// use the subquery’s alias. See [`is_local_column`] for the locality
+/// classification.
 fn project_local_columns(
     tab_expr: &mut TableExpr,
     expr: &mut Expr,
+    local_from_items: &HashSet<Relation>,
     outer_from_items: &HashSet<Relation>,
 ) -> ReadySetResult<()> {
     project_columns_if(tab_expr, expr, |col| {
-        column_does_not_belong_from_items(col, outer_from_items)
+        is_local_column(col, local_from_items, outer_from_items)
     })
 }
 
@@ -122,7 +148,7 @@ fn extract_correlated_subquery(
     let where_clause = mem::take(&mut stmt.where_clause);
     let has_unsupported_correlation = stmt
         .outermost_referred_columns()
-        .any(|col| column_does_not_belong_from_items(col, &local_from_items));
+        .any(|col| is_correlated_column(col, &local_from_items));
     let _ = mem::replace(&mut stmt.where_clause, where_clause);
 
     if has_unsupported_correlation {
@@ -140,8 +166,7 @@ fn extract_correlated_subquery(
         // Verify the remaining expression has no correlation.
         // **NOTE**: We are visiting the outermost columns only, w/o walking into sub-queries.
         if let Some(remaining_expr) = &remaining_expr
-            && columns_iter(remaining_expr)
-                .any(|col| column_does_not_belong_from_items(col, &local_from_items))
+            && columns_iter(remaining_expr).any(|col| is_correlated_column(col, &local_from_items))
         {
             unsupported!(
                 "Statement: {}. Unsupported correlation in subquery: {}",
@@ -166,7 +191,12 @@ fn extract_correlated_subquery(
                 column_aliases: vec![],
             };
 
-            project_local_columns(&mut tab_expr, &mut correlated_expr, outer_from_items)?;
+            project_local_columns(
+                &mut tab_expr,
+                &mut correlated_expr,
+                &local_from_items,
+                outer_from_items,
+            )?;
 
             Ok(Some((tab_expr, correlated_expr)))
         } else {
@@ -216,7 +246,12 @@ fn try_extract_correlated_subquery(
                 &extract_correlation_keys(&outer_join_on, &local_from_items)?,
             )?;
 
-            project_local_columns(tab_expr, &mut outer_join_on, outer_tables)?;
+            project_local_columns(
+                tab_expr,
+                &mut outer_join_on,
+                &local_from_items,
+                outer_tables,
+            )?;
             return Ok(Some((subquery_ref_name, outer_join_on)));
         }
     }
@@ -285,9 +320,11 @@ fn try_resolve_as_lateral_subquery(
         if contain_subqueries_with_limit_clause(stmt)? {
             unsupported!("LATERAL sub-queries with LIMIT clause")
         }
+        let local_from_items = collect_local_from_items(stmt)?;
         replace_local_columns_table(
             &mut lateral_join_on,
             stmt_alias.into(),
+            &local_from_items,
             preceding_from_items,
         );
         Ok((true, Some((from_item.clone(), lateral_join_on))))
