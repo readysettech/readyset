@@ -800,45 +800,55 @@ pub(crate) fn find_group_by_key(
 
 /// Resolve concrete expressions used in GROUP BY, replacing alias/positional
 /// references with their underlying SELECT expressions when possible.
-pub(crate) fn resolve_group_by_exprs(stmt: &SelectStatement) -> ReadySetResult<Vec<Expr>> {
-    let mut out = Vec::new();
-    let Some(group_by) = &stmt.group_by else {
-        return Ok(out);
-    };
-
-    // If `expr` is an unqualified column that actually refers to a SELECT alias, resolve it.
-    let resolve_alias_or_self = |expr: &Expr| -> ReadySetResult<Expr> {
-        if let Expr::Column(Column { table: None, name }) = expr {
-            for fe in &stmt.fields {
-                if let FieldDefinitionExpr::Expr {
-                    expr: fe_expr,
-                    alias: Some(a),
-                } = fe
-                    && a.eq(name)
-                {
-                    return Ok(fe_expr.clone());
-                }
+/// Resolve a single `FieldReference` — numeric position or unqualified alias —
+/// against a SELECT field list, returning the underlying expression.
+/// Qualified columns and expressions that don't match any explicit alias
+/// pass through unchanged.
+pub(crate) fn resolve_field_reference(
+    fields: &[FieldDefinitionExpr],
+    fr: &FieldReference,
+) -> ReadySetResult<Expr> {
+    match fr {
+        FieldReference::Numeric(pos) => {
+            if *pos < 1 || *pos > fields.len() as u64 {
+                return Err(invalid_query_err!(
+                    "Out-of-bounds index {} in numeric field reference",
+                    *pos
+                ));
             }
+            let (expr, _) = expect_field_as_expr(&fields[(*pos - 1) as usize]);
+            Ok(expr.clone())
         }
-        Ok(expr.clone())
-    };
-
-    for g in &group_by.fields {
-        match g {
-            FieldReference::Expr(e) => out.push(resolve_alias_or_self(e)?),
-            FieldReference::Numeric(pos) => {
-                if *pos < 1 || *pos > stmt.fields.len() as u64 {
-                    return Err(invalid_query_err!(
-                        "GROUP BY position {} is not in select list",
-                        *pos
-                    ));
+        FieldReference::Expr(e) => {
+            // If the expression is an unqualified column that matches an
+            // explicit SELECT-list alias (`AS name`), resolve to the
+            // underlying expression. Otherwise pass through unchanged.
+            if let Expr::Column(Column { table: None, name }) = e {
+                for fe in fields {
+                    if let FieldDefinitionExpr::Expr {
+                        expr: fe_expr,
+                        alias: Some(a),
+                    } = fe
+                        && a.eq(name)
+                    {
+                        return Ok(fe_expr.clone());
+                    }
                 }
-                let (e, _) = expect_field_as_expr(&stmt.fields[(*pos - 1) as usize]);
-                out.push(e.clone());
             }
+            Ok(e.clone())
         }
     }
-    Ok(out)
+}
+
+pub(crate) fn resolve_group_by_exprs(stmt: &SelectStatement) -> ReadySetResult<Vec<Expr>> {
+    let Some(group_by) = &stmt.group_by else {
+        return Ok(Vec::new());
+    };
+    group_by
+        .fields
+        .iter()
+        .map(|g| resolve_field_reference(&stmt.fields, g))
+        .collect()
 }
 
 /// Add a grouping expression if it's not already in GROUP BY.

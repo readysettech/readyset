@@ -3786,3 +3786,101 @@ fn test_aggregated_subquery_with_joins_blocked() {
         INNER JOIN "t2" ON ("sq"."a" = "t2"."a")"#;
     test_it("aggregated_subquery_with_joins_blocked", sql, expected);
 }
+
+// ─── Numeric GROUP BY resolution during inlining ─────────────────────────────
+
+/// QA regression: window function over grouped subquery.
+/// Inlining is blocked because the outer SELECT has a window function —
+/// splicing GROUP BY into the outer statement would produce an invalid
+/// "GROUP BY without aggregates" shape. The subquery survives with
+/// GROUP BY rewritten to DISTINCT by fix_groupby_without_aggregates.
+#[test]
+fn numeric_group_by_resolved_before_inline_window() {
+    let sql = r#"
+        SELECT COUNT(*) OVER ()
+        FROM (SELECT "t1"."a", "t1"."b" FROM "t1" GROUP BY 1, 2) AS "t0"
+    "#;
+    let expected = r#"
+        SELECT count(*) OVER() FROM (SELECT DISTINCT "t1"."a", "t1"."b" FROM "t1") AS "t0"
+    "#;
+    test_it(
+        "numeric_group_by_resolved_before_inline_window",
+        sql,
+        expected,
+    );
+}
+
+/// Numeric GROUP BY in inlineable aggregated subquery (no window function).
+/// GROUP BY 1 references the subquery's first field, not the outer's.
+#[test]
+fn numeric_group_by_resolved_before_inline_agg() {
+    let sql = r#"
+        SELECT "t0"."a"
+        FROM (SELECT "t1"."a", count(*) AS "cnt" FROM "t1" GROUP BY 1) AS "t0"
+    "#;
+    let expected = r#"
+        SELECT DISTINCT "t1"."a" FROM "t1"
+    "#;
+    test_it("numeric_group_by_resolved_before_inline_agg", sql, expected);
+}
+
+/// Mixed numeric and expression GROUP BY in non-aggregated subquery with
+/// unreferenced GROUP BY key — inlining blocked, subquery survives with
+/// GROUP BY rewritten to DISTINCT.
+#[test]
+fn numeric_group_by_mixed_resolved_before_inline() {
+    let sql = r#"
+        SELECT "t0"."x"
+        FROM (SELECT "t1"."a" AS "x", "t1"."b" FROM "t1" GROUP BY 1, "t1"."b") AS "t0"
+    "#;
+    let expected = r#"
+        SELECT "t0"."x"
+        FROM (SELECT DISTINCT "t1"."a" AS "x", "t1"."b" FROM "t1") AS "t0"
+    "#;
+    test_it(
+        "numeric_group_by_mixed_resolved_before_inline",
+        sql,
+        expected,
+    );
+}
+
+/// Numeric GROUP BY with WHERE filter on aggregated column.
+#[test]
+fn numeric_group_by_with_having_after_inline() {
+    let sql = r#"
+        SELECT "t0"."cnt"
+        FROM (SELECT "t1"."a", count(*) AS "cnt" FROM "t1" GROUP BY 1) AS "t0"
+        WHERE "t0"."cnt" > 1
+    "#;
+    let expected = r#"
+        SELECT count(*) AS "cnt" FROM "t1" GROUP BY "t1"."a" HAVING ("cnt" > 1)
+    "#;
+    test_it("numeric_group_by_with_having_after_inline", sql, expected);
+}
+
+/// Numeric ORDER BY in inlineable subquery — same class of bug as GROUP BY.
+#[test]
+fn numeric_order_by_resolved_before_inline() {
+    let sql = r#"
+        SELECT "t0"."a"
+        FROM (SELECT "t1"."a", "t1"."b" FROM "t1" ORDER BY 2) AS "t0"
+    "#;
+    let expected = r#"
+        SELECT "t1"."a" FROM "t1" ORDER BY "t1"."b" NULLS LAST
+    "#;
+    test_it("numeric_order_by_resolved_before_inline", sql, expected);
+}
+
+/// Alias ORDER BY in inlineable subquery — alias must be resolved to
+/// the underlying expression before transfer, since the alias disappears.
+#[test]
+fn alias_order_by_resolved_before_inline() {
+    let sql = r#"
+        SELECT "t0"."x"
+        FROM (SELECT "t1"."a" AS "x", "t1"."b" AS "y" FROM "t1" ORDER BY "y") AS "t0"
+    "#;
+    let expected = r#"
+        SELECT "t1"."a" AS "x" FROM "t1" ORDER BY "t1"."b" NULLS LAST
+    "#;
+    test_it("alias_order_by_resolved_before_inline", sql, expected);
+}

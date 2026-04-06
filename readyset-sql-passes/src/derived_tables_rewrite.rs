@@ -11,7 +11,8 @@ use crate::rewrite_utils::{
     expect_sub_query_with_alias, expect_sub_query_with_alias_mut, find_rhs_join_clause,
     fix_groupby_without_aggregates, for_each_window_function, is_aggregated_expr,
     is_aggregation_or_grouped, make_aliases_distinct_from_base_statement,
-    normalize_having_and_group_by, outermost_expression, split_expr,
+    normalize_having_and_group_by, outermost_expression, resolve_field_reference,
+    resolve_group_by_exprs, split_expr,
 };
 use crate::unnest_subqueries::{
     NonNullSchema, agg_only_no_gby_cardinality, is_supported_join_condition,
@@ -25,8 +26,8 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, inv
 use readyset_sql::analysis::visit::Visitor;
 use readyset_sql::ast::JoinOperator::InnerJoin;
 use readyset_sql::ast::{
-    Column, Expr, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, Relation,
-    SelectStatement, TableExpr, TableExprInner,
+    Column, Expr, FieldReference, GroupByClause, JoinClause, JoinConstraint, JoinOperator,
+    JoinRightSide, Literal, Relation, SelectStatement, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::{HashMap, HashSet};
@@ -298,6 +299,34 @@ fn can_inline_from_item(
     for (col, expr) in &ext_to_int_fields {
         if base_columns_for_alias.contains(col) && is_window_function_expr!(expr) {
             return Ok(false);
+        }
+    }
+
+    // === Reject inlining a grouped subquery when unreferenced GROUP BY
+    // keys would produce an invalid "GROUP BY without aggregates" shape.
+    // After inlining, the GROUP BY is spliced into the outer statement.
+    // If any GROUP BY key is not referenced by the outer SELECT, that's
+    // only safe when at least one referenced inner field is an aggregate
+    // (SUM, COUNT, etc.) — the aggregate justifies the GROUP BY.
+    // Otherwise, the result has bare GROUP BY keys with no aggregates,
+    // which downstream passes reject.
+    if let Some(group_by) = &inl_stmt.group_by {
+        let referenced_inner: Vec<&Expr> = ext_to_int_fields
+            .iter()
+            .filter(|(col, _)| base_columns_for_alias.contains(col))
+            .map(|(_, expr)| expr)
+            .collect();
+        let has_unreferenced_gb_key = group_by.fields.iter().any(|gf| {
+            resolve_field_reference(&inl_stmt.fields, gf)
+                .map_or(true, |e| !referenced_inner.contains(&&e))
+        });
+        if has_unreferenced_gb_key {
+            let has_referenced_aggregate = referenced_inner
+                .iter()
+                .any(|e| is_aggregated_expr(e).unwrap_or(false));
+            if !has_referenced_aggregate {
+                return Ok(false);
+            }
         }
     }
 
@@ -639,7 +668,17 @@ fn inline_from_item_in_place(
             );
         }
         base_stmt.where_clause = mem::take(&mut inl_stmt.where_clause);
-        base_stmt.group_by = mem::take(&mut inl_stmt.group_by);
+        // Resolve numeric/alias GROUP BY references against the inlined
+        // subquery's own SELECT fields before transferring to the outer
+        // statement, whose field list may differ in length or order.
+        let resolved_gb = resolve_group_by_exprs(&inl_stmt)?;
+        base_stmt.group_by = if resolved_gb.is_empty() {
+            None
+        } else {
+            Some(GroupByClause {
+                fields: resolved_gb.into_iter().map(FieldReference::Expr).collect(),
+            })
+        };
     } else if let Some(inl_where_expr) = mem::take(&mut inl_stmt.where_clause) {
         if inl_from_item_ord_idx >= base_stmt.tables.len() {
             // For RHS: incorporate inlined WHERE clause into ON condition.
@@ -671,6 +710,15 @@ fn inline_from_item_in_place(
         && base_stmt.order.is_none()
         && base_stmt.limit_clause.is_empty()
     {
+        // Resolve numeric and alias ORDER BY references against the
+        // inlined subquery's own SELECT fields before transferring,
+        // same rationale as GROUP BY above.
+        if let Some(order) = &mut inl_stmt.order {
+            for ord_by in &mut order.order_by {
+                ord_by.field =
+                    FieldReference::Expr(resolve_field_reference(&inl_stmt.fields, &ord_by.field)?);
+            }
+        }
         base_stmt.order = mem::take(&mut inl_stmt.order);
     }
 
