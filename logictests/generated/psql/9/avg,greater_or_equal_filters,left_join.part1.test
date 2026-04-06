@@ -323,14 +323,14 @@ SELECT avg(table_2.column_2) AS alias_1, table_2.column_2 AS alias_2 FROM table_
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_2) AS alias_1, table_2.column_2 AS alias_2 FROM table_2 WHERE (table_2.column_2 >= 1) GROUP BY table_2.column_2
 ----
 1.0
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_2) AS alias_1, table_2.column_2 AS alias_2 FROM table_2 WHERE (table_2.column_2 >= 1) GROUP BY table_2.column_2
 ----
 1.0
@@ -455,7 +455,7 @@ SELECT avg(table_7.column_1) AS alias_1, table_7.column_1 AS alias_2, table_7.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_7.column_1) AS alias_1, table_7.column_1 AS alias_2, table_7.column_1 AS alias_3 FROM table_7 WHERE ((table_7.column_1 >= table_7.column_1) AND (table_7.column_1 >= 1)) GROUP BY table_7.column_1, table_7.column_1
 ----
 1.0
@@ -478,7 +478,7 @@ SELECT avg(table_7.column_1) AS alias_1, table_7.column_1 AS alias_2, table_7.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_5.column_2) AS alias_1, table_5.column_2 AS alias_2, table_5.column_2 AS alias_3 FROM table_5 WHERE ((table_5.column_2 >= table_5.column_2) AND (table_5.column_2 >= 1)) GROUP BY table_5.column_2, table_5.column_2
 ----
 1.0
@@ -508,7 +508,7 @@ SELECT avg(table_5.column_2) AS alias_1, table_5.column_2 AS alias_2, table_5.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_5.column_2) AS alias_1, table_5.column_2 AS alias_2, table_5.column_4 AS alias_3, table_10.column_2 AS alias_4 FROM table_5 LEFT JOIN table_10 ON (table_5.column_2 = table_10.column_1) WHERE (table_5.column_2 >= 1) GROUP BY table_5.column_2, table_5.column_4, table_10.column_2
 ----
 1.0
@@ -517,7 +517,7 @@ SELECT avg(table_5.column_2) AS alias_1, table_5.column_2 AS alias_2, table_5.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_5.column_2) AS alias_1, table_5.column_2 AS alias_2, table_5.column_5 AS alias_3, table_11.column_2 AS alias_4 FROM table_5 LEFT JOIN table_11 ON (table_5.column_2 = table_11.column_1) WHERE (table_5.column_2 >= 1) GROUP BY table_5.column_2, table_5.column_5, table_11.column_2
 ----
 1.0
@@ -632,7 +632,7 @@ SELECT table_2.column_5 AS alias_1, table_2.column_5 AS alias_2, table_2.column_
 100 values hashing to 2bd4fea509b32167eb41d148e293355c
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.column_5 AS alias_3, table_2.column_5 AS alias_4 FROM table_2 WHERE (((table_2.column_5 >= table_2.column_5) OR (table_2.column_5 >= table_2.column_5)) AND (table_2.column_5 >= 1)) GROUP BY table_2.column_5, table_2.column_5, table_2.column_5
 ----
 1.0
@@ -666,7 +666,7 @@ SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.column_5 AS alias_3, table_2.column_11 AS alias_4, table_19.column_2 AS alias_5 FROM table_2 LEFT JOIN table_19 ON (table_2.column_5 = table_19.column_1) WHERE ((table_2.column_5 >= table_2.column_5) AND (table_2.column_5 >= 1)) GROUP BY table_2.column_5, table_2.column_5, table_2.column_11, table_19.column_2
 ----
 1.0
@@ -693,7 +693,7 @@ SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.column_5 AS alias_3, table_2.column_13 AS alias_4, table_21.column_2 AS alias_5 FROM table_2 LEFT JOIN table_21 ON (table_2.column_5 = table_21.column_1) WHERE ((table_2.column_5 >= table_2.column_5) AND (table_2.column_5 >= 1)) GROUP BY table_2.column_5, table_2.column_5, table_2.column_13, table_21.column_2
 ----
 1.0
@@ -774,7 +774,7 @@ SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.co
 1
 
 # REA-6472
-query  nosort error: ERROR:\ unknown:\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_2.column_5) AS alias_1, table_2.column_5 AS alias_2, table_2.column_5 AS alias_3, table_2.column_5 AS alias_4, table_2.column_20 AS alias_5, table_28.column_2 AS alias_6 FROM table_2 LEFT JOIN table_28 ON (table_2.column_5 = table_28.column_1) WHERE (((table_2.column_5 >= table_2.column_5) OR (table_2.column_5 >= table_2.column_5)) AND (table_2.column_5 >= 1)) GROUP BY table_2.column_5, table_2.column_5, table_2.column_5, table_2.column_20, table_28.column_2
 ----
 1.0
