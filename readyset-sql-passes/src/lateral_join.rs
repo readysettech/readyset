@@ -282,6 +282,7 @@ fn resolve_lateral_subquery(
 fn try_resolve_as_lateral_subquery(
     from_item: &mut TableExpr,
     preceding_from_items: &HashSet<Relation>,
+    preceding_to_rhs: &[Relation],
     ctx: &mut UnnestContext,
 ) -> ReadySetResult<(bool, Option<(TableExpr, Expr)>)> {
     let mut has_transformed;
@@ -291,7 +292,21 @@ fn try_resolve_as_lateral_subquery(
         return Ok((false, None));
     };
 
+    // Push current preceding items into ancestor scope so nested
+    // LATERALs inside this subquery can correlate with them.
+    let saved_scope = ctx.ancestor_scope.clone();
+    let saved_ordered = ctx.ancestor_scope_ordered.clone();
+    ctx.ancestor_scope
+        .extend(preceding_from_items.iter().cloned());
+    ctx.ancestor_scope_ordered
+        .extend(preceding_to_rhs.iter().cloned());
+
     has_transformed = unnest_all_subqueries(stmt, ctx)?.has_rewrites();
+
+    // Restore ancestor scope after recursion.
+    ctx.ancestor_scope = saved_scope;
+    ctx.ancestor_scope_ordered = saved_ordered;
+
     if stmt.lateral {
         stmt.lateral = false;
     } else {
@@ -551,10 +566,10 @@ fn resolve_lateral_subqueries(
     // The LATERAL subqueries can be correlated with the preceding FROM items only,
     // As we are moving along the FROM items, the number of preceding FROM items might increase.
     // This HashSet maintains the current set of items, the remaining LATERAL subqueries can be correlated with.
-    let mut preceding_from_items = HashSet::new();
+    let mut preceding_from_items = ctx.ancestor_scope.clone();
 
     // Ordered FROM items, preceding current RHS. Maintained as we advance over the `stmt` FROM items.
-    let mut preceding_to_rhs = Vec::new();
+    let mut preceding_to_rhs = ctx.ancestor_scope_ordered.clone();
 
     // Build new comma separated tables/sub-queries and joins
     let mut new_tables = Vec::new();
@@ -643,8 +658,12 @@ fn resolve_lateral_subqueries(
         let mut from_item = stmt_from_item.clone();
         let from_item_rel = get_from_item_reference_name(&from_item)?;
 
-        let (transformed, resolved_option) =
-            try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items, ctx)?;
+        let (transformed, resolved_option) = try_resolve_as_lateral_subquery(
+            &mut from_item,
+            &preceding_from_items,
+            &preceding_to_rhs,
+            ctx,
+        )?;
 
         preceding_from_items.insert(from_item_rel.clone());
 
@@ -725,8 +744,12 @@ fn resolve_lateral_subqueries(
             let mut from_item = rhs_from_item.clone();
             let from_item_rel = get_from_item_reference_name(&from_item)?;
 
-            let (transformed, resolved_option) =
-                try_resolve_as_lateral_subquery(&mut from_item, &preceding_from_items, ctx)?;
+            let (transformed, resolved_option) = try_resolve_as_lateral_subquery(
+                &mut from_item,
+                &preceding_from_items,
+                &preceding_to_rhs,
+                ctx,
+            )?;
 
             preceding_from_items.insert(from_item_rel.clone());
 
@@ -878,6 +901,8 @@ mod tests {
                 probes: ProbeRegistry::new(),
                 pre_hoist_lateral_exactly_one: HashSet::new(),
                 lateral_trivial_on: HashSet::new(),
+                ancestor_scope: HashSet::new(),
+                ancestor_scope_ordered: Vec::new(),
             },
         ) {
             Ok(_) => {
@@ -1536,5 +1561,88 @@ FROM
         // Join condition references a column that would require COALESCE mapping => unsupported.
         let expected_text = r#""#;
         test_it("test30", original_text, expected_text);
+    }
+
+    /// Nested LATERAL: inner INNER JOIN correlates with grandparent scope.
+    /// The inner LATERAL produces an INNER JOIN (not aggregate), so the
+    /// correlation predicate lands in WHERE and can be extracted by the
+    /// outer LATERAL.
+    #[test]
+    fn nested_lateral_grandparent_correlation() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."pn" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT "spj"."pn"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+              ) AS "l"
+        "#;
+        let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN (SELECT "spj"."pn", "spj"."sn" AS "sn" FROM "spj") AS "l1") AS "l" ON ("l"."sn" = "s"."sn")"#;
+        test_it(
+            "nested_lateral_grandparent_correlation",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: nested LATERAL with aggregate (COUNT) + grandparent
+    /// correlation. The inner LATERAL becomes a LEFT JOIN (to preserve
+    /// COUNT=0 semantics), placing the correlation in ON. The outer
+    /// LATERAL can't extract correlation from a LEFT JOIN ON, so this
+    /// is currently unsupported.
+    #[test]
+    fn nested_lateral_grandparent_agg_unsupported() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+              ) AS "l"
+        "#;
+        // Empty expected = expect error
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_grandparent_agg_unsupported",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Nested LATERAL: inner correlates with BOTH parent and grandparent.
+    /// This is the most common real-world pattern — e.g. a subquery that
+    /// filters on a grandparent key AND joins with a parent-scope table.
+    #[test]
+    fn nested_lateral_parent_and_grandparent_correlation() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."pn" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT "spj"."pn"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                      AND "spj"."jn" = "j"."jn"
+                  ) AS "l1"
+              ) AS "l"
+        "#;
+        let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN (SELECT "spj"."pn", "spj"."jn" AS "jn", "spj"."sn" AS "sn" FROM "spj") AS "l1" ON ("l1"."jn" = "j"."jn")) AS "l" ON ("l"."sn" = "s"."sn")"#;
+        test_it(
+            "nested_lateral_parent_and_grandparent_correlation",
+            original_text,
+            expected_text,
+        );
     }
 }

@@ -114,6 +114,15 @@ pub(crate) struct UnnestContext<'a> {
     // Pre-hoist hints keyed by LATERAL alias (as Relations)
     pub(crate) pre_hoist_lateral_exactly_one: HashSet<Relation>,
     pub(crate) lateral_trivial_on: HashSet<Relation>,
+    /// Relations from ancestor LATERAL scopes, for correlation
+    /// detection. Maintained as a stack: each nesting level
+    /// pushes its preceding items before recursing, pops on
+    /// return.
+    pub(crate) ancestor_scope: HashSet<Relation>,
+    /// Same relations in left-to-right FROM order, for ON
+    /// normalization LHS selection via
+    /// `split_on_for_rhs_against_preceding_lhs`.
+    pub(crate) ancestor_scope_ordered: Vec<Relation>,
 }
 
 pub trait UnnestSubqueries: Sized {
@@ -145,6 +154,8 @@ pub(crate) fn unnest_subqueries_main(
         probes: ProbeRegistry::new(),
         pre_hoist_lateral_exactly_one: HashSet::new(),
         lateral_trivial_on: HashSet::new(),
+        ancestor_scope: HashSet::new(),
+        ancestor_scope_ordered: Vec::new(),
     };
 
     let mut rewrite_status = RewriteStatus::default();
