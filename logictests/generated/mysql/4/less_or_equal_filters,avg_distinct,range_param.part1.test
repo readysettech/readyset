@@ -214,6 +214,7 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM
 1
 
 # REA-6472
+# REA-6557
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, round(avg(distinct `table_1`.`column_6`), 4) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= 1) GROUP BY `table_1`.`column_3`
 ----
@@ -224,6 +225,7 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 ----
 
 # REA-6472
+# REA-6557
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, round(avg(distinct `table_1`.`column_7`), 4) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= 1) GROUP BY `table_1`.`column_3`
 ----
@@ -286,6 +288,7 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `ta
 24 values hashing to 894f330285f9a3906b3589b81e0e743d
 
 # REA-6472
+# REA-6557
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, round(avg(distinct `table_1`.`column_10`), 4) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_9`) AND (`table_1`.`column_3` <= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
@@ -328,6 +331,7 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `ta
 24 values hashing to 894f330285f9a3906b3589b81e0e743d
 
 # REA-6472
+# REA-6557
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, round(avg(distinct `table_1`.`column_13`), 4) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_9`) AND (`table_1`.`column_3` <= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
@@ -407,6 +411,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 32 values hashing to 5b4bef5fc2ca81bddc2566a2e7444b5e
 
 # REA-6472
+# REA-6557
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, round(avg(distinct `table_1`.`column_19`), 4) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` <= `table_1`.`column_15`) OR (`table_1`.`column_13` <= `table_1`.`column_15`)) AND (`table_1`.`column_13` <= 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
 ----

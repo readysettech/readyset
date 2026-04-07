@@ -14,6 +14,7 @@ SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN
 ----
 NULL
 
+# REA-6557
 query  rowsort
 SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_2` = `alias_3`.`alias_2`)
 ----
@@ -93,6 +94,7 @@ SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN
 ----
 NULL
 
+# REA-6557
 query  rowsort
 SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_2` = `alias_3`.`alias_2`)
 ----
