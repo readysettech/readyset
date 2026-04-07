@@ -334,6 +334,8 @@ impl GroupedOperation for Aggregator {
 
 #[cfg(test)]
 mod tests {
+    use readyset_decimal::Decimal;
+
     use super::*;
     use crate::{ops, LookupIndex};
 
@@ -1322,6 +1324,36 @@ mod tests {
             }
             other => panic!("expected Positive, got {other:?}"),
         }
+    }
+
+    /// AVG that produces a repeating decimal should be rounded to 4 decimal places
+    /// (MySQL DECIMAL(14,4) for integer inputs).
+    #[test]
+    fn avg_of_integers_mysql_rounds_repeating_decimal() {
+        let mut c = setup_int_column(Aggregation::Avg, true);
+
+        // Insert 7 values into group 1 that sum to 249440
+        // 249440 / 7 = 35634.285714... which should round to scale 4
+        let values: Vec<i32> = vec![35000, 35100, 35200, 35300, 35400, 35500, 37940];
+        let mut last_rs = Records::default();
+        for v in values {
+            let u: Record = vec![1.into(), v.into()].into();
+            last_rs = c.narrow_one(u, true);
+        }
+
+        let positive = Vec::from(last_rs)
+            .into_iter()
+            .find_map(|r| match r {
+                Record::Positive(r) => Some(r),
+                _ => None,
+            })
+            .expect("expected Positive record");
+
+        let expected = Decimal::from(249440_i64)
+            .checked_div(&Decimal::from(7_i64))
+            .unwrap()
+            .round_dp(4);
+        assert_eq!(positive[1], DfValue::from(expected));
     }
 
     #[test]

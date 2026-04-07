@@ -5965,6 +5965,7 @@ dependencies = [
  "readyset-client",
  "readyset-common",
  "readyset-data",
+ "readyset-decimal",
  "readyset-errors",
  "readyset-sql",
  "readyset-util",
