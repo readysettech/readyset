@@ -12,6 +12,7 @@ members = [
     "benchmarks",
     "catalog-tables",
     "concrete-iter",
+    "readyset-dante-oracle",
     "data-generator",
     "database-utils",
     "ddl-stress",

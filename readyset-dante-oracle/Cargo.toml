@@ -1,0 +1,43 @@
+[package]
+name = "readyset-dante-oracle"
+publish = false
+version = "0.1.0"
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[features]
+# Activates the antithesis_sdk's `full` feature, which compiles in the real
+# (non-noop) assertion implementation along with libloading/linkme glue. Off
+# by default so `cargo test -p readyset-dante-oracle` (and feature-unified
+# workspace builds) don't drag those deps into unrelated crates. The
+# Antithesis container build invokes `cargo build --features antithesis-full`.
+antithesis-full = ["antithesis_sdk/full"]
+
+[dependencies]
+antithesis_sdk = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+bit-vec = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+itertools = { workspace = true }
+mysql_async = { workspace = true }
+mysql_common = { workspace = true, features = ["chrono"] }
+rand = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres = { workspace = true }
+tracing = { workspace = true }
+
+data-generator = { path = "../data-generator" }
+database-utils = { path = "../database-utils" }
+mysql-time = { path = "../mysql-time" }
+readyset-data = { path = "../readyset-data" }
+readyset-decimal = { path = "../readyset-decimal" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-tracing = { path = "../readyset-tracing" }
+dante = { path = "../dante" }
+
+[lints]
+workspace = true

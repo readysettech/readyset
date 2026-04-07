@@ -89,6 +89,33 @@ impl Pattern {
             primary_table: VarId(self.primary_table.0 + var_offset),
         }
     }
+
+    /// Whether a (possibly composed) pattern name should be driven through
+    /// the literal-substitution code path rather than parameter autobinding.
+    /// A small set of patterns interact poorly with autoparameterization;
+    /// listing them here, alongside the patterns themselves, keeps the
+    /// knowledge in the dante crate so renames cannot silently disable the
+    /// probe in distant callers.
+    ///
+    /// Accepts a string so that composed pattern names (e.g.
+    /// `aggregated_join_subquery_eq_filter+like`) can be tested without
+    /// keeping the constituent `Pattern` objects around.
+    pub fn name_needs_literal_mode(name: &str) -> bool {
+        const NAMES: &[&str] = &[
+            "aggregated_join_subquery_eq_filter",
+            "aggregated_join_subquery_having_filter",
+            "having_to_where_promotion",
+            "from_subquery_filter",
+            "left_join_with_rhs_filter",
+        ];
+        if NAMES.contains(&name) {
+            return true;
+        }
+        if name.contains('+') {
+            return name.split('+').any(|part| NAMES.contains(&part.trim()));
+        }
+        false
+    }
 }
 
 /// The flattened, renumbered form of one or more composed patterns, ready
