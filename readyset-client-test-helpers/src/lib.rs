@@ -226,6 +226,7 @@ pub struct TestBuilder {
     straddled_joins: bool,
     parsing_preset: ParsingPreset,
     replication_tables: Option<String>,
+    require_gtid: bool,
 }
 
 impl Default for TestBuilder {
@@ -265,6 +266,7 @@ impl TestBuilder {
             straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
             replication_tables: None,
+            require_gtid: false,
         }
     }
 
@@ -374,6 +376,11 @@ impl TestBuilder {
         self
     }
 
+    pub fn require_gtid(mut self, require: bool) -> Self {
+        self.require_gtid = require;
+        self
+    }
+
     pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -446,6 +453,7 @@ impl TestBuilder {
         }
 
         builder.set_replication_tables(self.replication_tables);
+        builder.set_require_gtid(self.require_gtid);
 
         let (mut handle, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
         if self.wait_for_backend {

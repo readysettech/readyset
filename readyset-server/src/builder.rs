@@ -267,6 +267,11 @@ impl Builder {
         self.config.replicator_config.replication_tables = tables;
     }
 
+    /// Require GTID-based replication for MySQL.
+    pub fn set_require_gtid(&mut self, require: bool) {
+        self.config.replicator_config.require_gtid = require;
+    }
+
     /// Set the server ID for replication
     pub fn set_replicator_server_id(&mut self, server_id: ReplicationServerId) {
         self.config.replicator_config.replication_server_id = Some(server_id);
