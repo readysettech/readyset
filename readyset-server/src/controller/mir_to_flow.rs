@@ -36,6 +36,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{self, ColumnSpecification, Expr, NullOrder, OrderType, Relation};
 use readyset_sql::TryIntoDialect as _;
+use tracing::warn;
 
 /// Check whether a MIR node is backed by a Constant, looking through AliasTable wrappers.
 fn is_constant_backed(graph: &MirGraph, node: MirNodeIndex) -> bool {
@@ -917,6 +918,16 @@ fn make_grouped_node(
         .get(over_col_indx)
         .ok_or_else(|| internal_err!("Invalid index"))?
         .ty();
+    if matches!(over_col_ty, DfType::Unknown)
+        && matches!(kind, GroupedNodeType::Aggregation(Aggregation::Avg))
+    {
+        warn!(
+            ?name,
+            over_col_indx,
+            ?over_col_ty,
+            "AVG aggregation has Unknown over column type; decimal precision may be incorrect"
+        );
+    }
     let over_col_name = &columns
         .last()
         .ok_or_else(|| internal_err!("Grouped has no projections"))?
