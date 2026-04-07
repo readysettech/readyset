@@ -200,8 +200,20 @@ impl fmt::Display for DfValue {
             }
             DfValue::Int(n) => write!(f, "{n}"),
             DfValue::UnsignedInt(n) => write!(f, "{n}"),
-            DfValue::Float(n) => write!(f, "{n}"),
-            DfValue::Double(n) => write!(f, "{n}"),
+            DfValue::Float(n) => {
+                if let Some(prec) = f.precision() {
+                    write!(f, "{n:.prec$}")
+                } else {
+                    write!(f, "{n}")
+                }
+            }
+            DfValue::Double(n) => {
+                if let Some(prec) = f.precision() {
+                    write!(f, "{n:.prec$}")
+                } else {
+                    write!(f, "{n}")
+                }
+            }
             DfValue::TimestampTz(ref ts) => write!(f, "{ts}"),
             DfValue::Time(ref t) => write!(f, "{t}"),
             DfValue::ByteArray(ref array) => {
@@ -4602,5 +4614,21 @@ mod tests {
             );
             check_comparison!(point_bytes.clone(), DfType::PostgisPolygon, point_bytes);
         }
+    }
+
+    #[test]
+    fn display_double_with_precision() {
+        let v = DfValue::Double(35634.28571428572);
+        assert_eq!(format!("{v:.4}"), "35634.2857");
+        assert_eq!(format!("{v:.0}"), "35634");
+        // Without precision, full f64 representation
+        assert_eq!(format!("{v}"), "35634.28571428572");
+    }
+
+    #[test]
+    fn display_float_with_precision() {
+        let v = DfValue::Float(1.23456);
+        assert_eq!(format!("{v:.2}"), "1.23");
+        assert_eq!(format!("{v}"), "1.23456");
     }
 }
