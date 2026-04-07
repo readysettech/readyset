@@ -39,12 +39,12 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 632260098
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_3`)) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
 ----
--250239769.7143
+-250239770.0000
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
@@ -61,20 +61,20 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 632260098
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
-109095673.1429
+109095673.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
 ? = 10
 ----
-83355519.8571
+83355520.0000
 
 statement ok
 DELETE FROM `table_1` WHERE (`column_6` = 0)
@@ -118,12 +118,12 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 632260098
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_3`)) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
 ----
--1849892504.6667
+-1849892505.0000
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
@@ -136,17 +136,17 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 632260098
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
-1334985270.3333
+1334985270.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
 ? = 10
 ----
-69202407.6667
+69202408.0000

@@ -53,15 +53,13 @@ SELECT DISTINCT table_1.column_3 AS alias_1 FROM table_1
 ----
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_5) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
 1.0000
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_6) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
 1.0000
@@ -171,8 +169,7 @@ SELECT avg(table_1.column_20) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_21) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_22)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -186,14 +183,13 @@ SELECT avg(table_1.column_23) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_25`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_25) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
 1.0000
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_26) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_27)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -207,7 +203,7 @@ SELECT avg(table_1.column_28) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_30`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
 1.0000
@@ -351,7 +347,7 @@ SELECT avg(table_1.column_55) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_58`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_58) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_59)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -373,7 +369,7 @@ SELECT avg(table_1.column_62) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_65`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_65) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_66)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000

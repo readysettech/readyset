@@ -35,13 +35,11 @@ SELECT DISTINCT table_1.column_4 AS alias_1 FROM table_1
 ----
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_5) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > 1) GROUP BY table_1.column_2
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_6) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > 1) GROUP BY table_1.column_2
 ----
 
@@ -102,8 +100,7 @@ query  nosort
 SELECT avg(table_1.column_20) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_21) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_22)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -111,12 +108,12 @@ query  nosort
 SELECT avg(table_1.column_23) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > table_1.column_24)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+# REA-6472
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_25`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_25) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > 1) GROUP BY table_1.column_2
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_26) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_27)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -124,7 +121,8 @@ query  nosort
 SELECT avg(table_1.column_28) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > table_1.column_29)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+# REA-6472
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_30`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > 1) GROUP BY table_1.column_2
 ----
 
@@ -132,10 +130,12 @@ query  nosort
 SELECT avg(table_1.column_31) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > table_1.column_32) OR (table_1.column_2 > table_1.column_33)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_34) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > table_1.column_35) GROUP BY table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_36) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 > table_1.column_37) GROUP BY table_1.column_2
 ----
@@ -188,6 +188,7 @@ query  nosort
 SELECT avg(table_1.column_52) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) OR (table_1.column_2 > 1)) OR (table_1.column_2 > table_1.column_53)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_54) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
@@ -196,10 +197,12 @@ query  nosort
 SELECT avg(table_1.column_55) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_56)) OR (table_1.column_2 > table_1.column_57)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+# REA-6472
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_58`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_58) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_59)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_60) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > table_1.column_61)) GROUP BY table_1.column_2, table_1.column_2
 ----
@@ -208,14 +211,17 @@ query  nosort
 SELECT avg(table_1.column_62) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_63)) OR (table_1.column_2 > table_1.column_64)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+# REA-6472
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_65`\)\ in\ q_[a-f0-9]+_[a-z0-9]+
 SELECT DISTINCT avg(table_1.column_65) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_66)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_67) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > 1) OR (table_1.column_2 > table_1.column_68)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_69) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 > table_1.column_70) OR (table_1.column_2 > table_1.column_71)) GROUP BY table_1.column_2, table_1.column_2
 ----
@@ -244,18 +250,22 @@ query  nosort
 SELECT avg(table_1.column_80) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE ((((table_1.column_2 > 1) OR (table_1.column_2 > 1)) AND (table_1.column_2 > table_1.column_81)) OR (table_1.column_2 > table_1.column_82)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_83) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) OR (table_1.column_2 > 1)) AND (table_1.column_2 > table_1.column_84)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_85) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) OR (table_1.column_2 > 1)) OR (table_1.column_2 > table_1.column_86)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_87) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_88)) OR (table_1.column_2 > table_1.column_89)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_90) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 > 1) AND (table_1.column_2 > table_1.column_91)) OR (table_1.column_2 > table_1.column_92)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
@@ -264,6 +274,7 @@ query  nosort
 SELECT DISTINCT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 > 1) OR (table_1.column_2 > 1)) AND (table_1.column_2 > table_1.column_93)) OR (table_1.column_2 > table_1.column_94))
 ----
 
+# REA-6472
 query  nosort
 SELECT DISTINCT avg(table_1.column_95) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE ((((table_1.column_2 > 1) OR (table_1.column_2 > 1)) AND (table_1.column_2 > table_1.column_96)) OR (table_1.column_2 > table_1.column_97)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ----

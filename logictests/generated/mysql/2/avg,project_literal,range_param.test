@@ -37,11 +37,11 @@ SELECT avg(`table_1`.`column_2`) AS `alias_1`, 1 AS `alias_2` FROM `table_1`
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_3`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
-135295155.6667
+135295156.0000
 
 query  rowsort
 SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -52,11 +52,11 @@ SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1`, 1 AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1`, 1 AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
-670058525.2500
+670058525.0000
 1
 
 statement ok
@@ -103,8 +103,8 @@ SELECT avg(`table_1`.`column_2`) AS `alias_1`, 1 AS `alias_2` FROM `table_1`
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_3`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 NULL
@@ -116,9 +116,9 @@ SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1`, 1 AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1`, 1 AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
-757089504.5000
+757089505.0000
 1

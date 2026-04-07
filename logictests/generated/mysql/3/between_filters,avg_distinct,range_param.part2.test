@@ -185,7 +185,7 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -299,7 +299,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM
 1995445334
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, avg(distinct `table_1`.`column_11`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` NOT BETWEEN 1 AND 5 AND (`table_1`.`column_11` > ?)) GROUP BY `table_1`.`column_6`
 ? = 10
 ----
@@ -373,7 +373,7 @@ SELECT `table_1`.`column_11` AS `alias_1`, `table_1`.`column_11` AS `alias_2` FR
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_11` AS `alias_1`, avg(distinct `table_1`.`column_14`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_11` BETWEEN 1 AND 5 AND (`table_1`.`column_11` > ?)) GROUP BY `table_1`.`column_11`
 ? = 10
 ----
@@ -407,7 +407,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM
 1995445334
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, avg(distinct `table_1`.`column_16`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` NOT BETWEEN 1 AND 5 AND (`table_1`.`column_6` > ?)) GROUP BY `table_1`.`column_6`
 ? = 10
 ----
@@ -417,7 +417,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, avg(distinct `table_1`.`column_16`) AS
 -418079093.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, avg(distinct `table_1`.`column_17`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` BETWEEN 1 AND 5 AND (`table_1`.`column_6` > ?)) GROUP BY `table_1`.`column_6`
 ? = 10
 ----
@@ -491,7 +491,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `ta
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(distinct `table_1`.`column_20`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 AND `table_1`.`column_6` BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ? = 10
 ----
@@ -532,7 +532,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `ta
 1995445334
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(distinct `table_1`.`column_22`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ? = 10
 ----
@@ -544,7 +544,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg
 -188307635.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(distinct `table_1`.`column_23`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ? = 10
 ----
@@ -597,7 +597,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `
 917488580
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, avg(distinct `table_1`.`column_25`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_24` BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
@@ -615,13 +615,13 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, a
 -938088179.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, avg(distinct `table_1`.`column_26`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_24` BETWEEN 1 AND 5 OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, avg(distinct `table_1`.`column_27`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_24` NOT BETWEEN 1 AND 5 OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_27` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
@@ -651,7 +651,7 @@ SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `
 852541404
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, avg(distinct `table_1`.`column_29`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`
 ? = 10
 ----
@@ -673,13 +673,13 @@ SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `
 -1783298802.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, avg(distinct `table_1`.`column_30`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_24` NOT BETWEEN 1 AND 5 AND `table_1`.`column_24` BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, avg(distinct `table_1`.`column_31`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_24` NOT BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
@@ -701,7 +701,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `
 42192114.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, avg(distinct `table_1`.`column_32`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_24` BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
@@ -723,7 +723,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `
 1875448150.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, `table_1`.`column_24` AS `alias_4`, avg(distinct `table_1`.`column_33`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_24` NOT BETWEEN 1 AND 5 AND `table_1`.`column_24` BETWEEN 1 AND 5) OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----

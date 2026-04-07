@@ -506,13 +506,11 @@ SELECT table_1.column_5 AS alias_1, table_2.column_2 AS alias_2 FROM table_1 LEF
 1
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_6) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_1.column_7) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 < 1) GROUP BY table_1.column_2
 ----
 
@@ -575,8 +573,7 @@ query  nosort
 SELECT avg(table_4.column_13) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3 FROM table_4 WHERE ((table_4.column_3 < 1) OR (table_4.column_3 < 1)) GROUP BY table_4.column_3, table_4.column_3
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_14) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3 FROM table_4 WHERE ((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_15)) GROUP BY table_4.column_3, table_4.column_3
 ----
 
@@ -584,13 +581,11 @@ query  nosort
 SELECT avg(table_4.column_16) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3 FROM table_4 WHERE ((table_4.column_3 < 1) OR (table_4.column_3 < table_4.column_17)) GROUP BY table_4.column_3, table_4.column_3
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_18) AS alias_1, table_4.column_3 AS alias_2, table_4.column_19 AS alias_3, table_8.column_2 AS alias_4 FROM table_4 LEFT JOIN table_8 ON (table_4.column_5 = table_8.column_1) WHERE (table_4.column_3 < 1) GROUP BY table_4.column_3, table_4.column_19, table_8.column_2
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_20) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3 FROM table_4 WHERE ((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_21)) GROUP BY table_4.column_3, table_4.column_3
 ----
 
@@ -598,8 +593,7 @@ query  nosort
 SELECT avg(table_4.column_22) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3 FROM table_4 WHERE ((table_4.column_3 < 1) OR (table_4.column_3 < table_4.column_23)) GROUP BY table_4.column_3, table_4.column_3
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_24) AS alias_1, table_4.column_3 AS alias_2, table_4.column_25 AS alias_3, table_9.column_2 AS alias_4 FROM table_4 LEFT JOIN table_9 ON (table_4.column_5 = table_9.column_1) WHERE (table_4.column_3 < 1) GROUP BY table_4.column_3, table_4.column_25, table_9.column_2
 ----
 
@@ -671,8 +665,7 @@ query  nosort
 SELECT avg(table_4.column_59) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3, table_4.column_3 AS alias_4 FROM table_4 WHERE (((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_60)) OR (table_4.column_3 < table_4.column_61)) GROUP BY table_4.column_3, table_4.column_3, table_4.column_3
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_62) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3, table_4.column_64 AS alias_4, table_19.column_2 AS alias_5 FROM table_4 LEFT JOIN table_19 ON (table_4.column_5 = table_19.column_1) WHERE ((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_63)) GROUP BY table_4.column_3, table_4.column_3, table_4.column_64, table_19.column_2
 ----
 
@@ -684,8 +677,7 @@ query  nosort
 SELECT avg(table_4.column_68) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3, table_4.column_3 AS alias_4 FROM table_4 WHERE (((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_69)) OR (table_4.column_3 < table_4.column_70)) GROUP BY table_4.column_3, table_4.column_3, table_4.column_3
 ----
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort
 SELECT avg(table_4.column_71) AS alias_1, table_4.column_3 AS alias_2, table_4.column_3 AS alias_3, table_4.column_73 AS alias_4, table_21.column_2 AS alias_5 FROM table_4 LEFT JOIN table_21 ON (table_4.column_5 = table_21.column_1) WHERE ((table_4.column_3 < 1) AND (table_4.column_3 < table_4.column_72)) GROUP BY table_4.column_3, table_4.column_3, table_4.column_73, table_21.column_2
 ----
 

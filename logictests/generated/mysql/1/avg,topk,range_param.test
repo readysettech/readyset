@@ -82,11 +82,11 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.
 800941000.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--1275427646.5714
+-1275427647.0000
 
 query  nosort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_3` DESC LIMIT 10
@@ -141,8 +141,8 @@ SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.
 638389343.0000
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_6`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
 -38431686.0000
@@ -154,8 +154,8 @@ SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 -109258426.0000
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
 2140589378.0000
@@ -173,8 +173,8 @@ SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 175039353
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_8`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
 -1489805124.0000
@@ -252,11 +252,11 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.
 70492245.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
+query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--1248869427.3333
+-1248869427.0000
 
 query  nosort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_3` DESC LIMIT 10
@@ -293,8 +293,8 @@ SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.
 638389343.0000
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_6`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
 -1525728460.0000
@@ -302,8 +302,8 @@ SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 -1432651255.0000
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
 1748209894.0000
@@ -317,8 +317,8 @@ SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 175039353
 
 # REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
-SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
+query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
+SELECT ROUND(avg(`table_1`.`column_8`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
 -1271909918.0000
