@@ -6484,6 +6484,7 @@ dependencies = [
  "itertools 0.14.0",
  "pretty_assertions",
  "readyset-data",
+ "readyset-decimal",
  "readyset-errors",
  "readyset-sql",
  "readyset-sql-parsing",

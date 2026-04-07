@@ -7,6 +7,7 @@
 //! [`postprocess_decompositions`](crate::adapter_rewrites::postprocess_decompositions).
 
 use readyset_data::{DfType, DfValue};
+use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetResult, unsupported};
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
@@ -182,34 +183,38 @@ impl PostLookupAggregateKind {
         }
     }
 
-    /// AVG = SUM / COUNT, producing a `Double`.
+    /// AVG = SUM / COUNT, producing a `Numeric` (Decimal).
     ///
     /// Returns `None` (SQL NULL) when either input is NULL or count is zero.
     fn compute_avg(sum: &DfValue, count: &DfValue) -> DfValue {
         if *sum == DfValue::None || *count == DfValue::None {
             return DfValue::None;
         }
-        let sum_f = match sum.coerce_to(&DfType::Double, &DfType::Unknown) {
+        let sum_d = match Decimal::try_from(sum) {
             Ok(v) => v,
             Err(e) => {
-                warn!(%e, ?sum, "post-lookup AVG: failed to coerce SUM to Double");
+                warn!(%e, ?sum, "post-lookup AVG: failed to convert SUM to Decimal");
                 return DfValue::None;
             }
         };
-        let count_f = match count.coerce_to(&DfType::Double, &DfType::Unknown) {
+        let count_d = match Decimal::try_from(count) {
             Ok(v) => v,
             Err(e) => {
-                warn!(%e, ?count, "post-lookup AVG: failed to coerce COUNT to Double");
+                warn!(%e, ?count, "post-lookup AVG: failed to convert COUNT to Decimal");
                 return DfValue::None;
             }
         };
-        if count_f == DfValue::Double(0.0) {
+        if count_d == Decimal::zero() {
             return DfValue::None;
         }
-        match &sum_f / &count_f {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(%e, ?sum_f, ?count_f, "post-lookup AVG: SUM/COUNT division failed");
+        match sum_d.checked_div(&count_d) {
+            Some(result) => DfValue::from(result),
+            None => {
+                warn!(
+                    ?sum_d,
+                    ?count_d,
+                    "post-lookup AVG: SUM/COUNT division failed"
+                );
                 DfValue::None
             }
         }
