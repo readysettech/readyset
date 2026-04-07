@@ -87,7 +87,7 @@ SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`
 30 values hashing to 9f6b607f4996ebbcadf956e3f3b5164a
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
@@ -111,7 +111,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
@@ -264,7 +264,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
@@ -282,7 +282,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----

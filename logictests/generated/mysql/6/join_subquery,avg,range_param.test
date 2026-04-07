@@ -49,7 +49,7 @@ SELECT `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(`
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -61,7 +61,7 @@ SELECT avg(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT
 ----
 -351505115.3333
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -123,7 +123,7 @@ SELECT `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(`
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -135,7 +135,7 @@ SELECT avg(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT
 ----
 -1264748815.5000
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----

@@ -73,14 +73,14 @@ SELECT `table_3`.`column_3` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM
 
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_4`.`column_3`) AS `alias_1` FROM `table_4` WHERE (`table_4`.`column_1` > ?)
 ? = 10
 ----
 -339024976.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_4`.`column_4` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, avg(`table_4`.`column_5`) AS `alias_3` FROM `table_4` INNER JOIN `table_5` ON (`table_4`.`column_1` = `table_5`.`column_1`) WHERE (`table_4`.`column_2` > ?) GROUP BY `table_4`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
@@ -216,15 +216,14 @@ SELECT `table_3`.`column_3` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM
 
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_4`.`column_3`) AS `alias_1` FROM `table_4` WHERE (`table_4`.`column_1` > ?)
 ? = 10
 ----
 -621968598.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_4`.`column_4` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, avg(`table_4`.`column_5`) AS `alias_3` FROM `table_4` INNER JOIN `table_5` ON (`table_4`.`column_1` = `table_5`.`column_1`) WHERE (`table_4`.`column_2` > ?) GROUP BY `table_4`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
-
