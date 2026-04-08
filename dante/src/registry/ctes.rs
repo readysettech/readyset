@@ -1,5 +1,8 @@
-//! CTE patterns: simple_cte, cte_with_join.
+//! CTE patterns: simple_cte, cte_with_join, cte_with_param.
 
+use readyset_sql::ast::BinaryOperator;
+
+use crate::constraint::Constraint;
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// WITH cte0 AS (SELECT t.c FROM t) SELECT cte0.c FROM cte0
@@ -53,6 +56,39 @@ pub fn cte_with_join() -> Pattern {
     );
 
     b.tags(&["cte", "join"]);
+    b.build()
+}
+
+/// WITH cte0 AS (SELECT t.c0 FROM t WHERE t.c1 = ?) SELECT cte0.c0 FROM cte0
+///
+/// The CTE body contains a parameterized filter. When Readyset compiles this,
+/// the CTE is compiled with `LeafBehavior::Anonymous`, producing a `ViewKey`
+/// MIR node that is then pushed down to the outer query's `Leaf` by the
+/// `pull_view_keys_to_leaf` rewrite pass. This exercises the ViewKey creation
+/// code path that plain cached SELECTs (which use `LeafBehavior::Leaf`) never
+/// reach.
+pub fn cte_with_param() -> Pattern {
+    let mut b = PatternBuilder::new("cte_with_param");
+
+    let mut sq = b.subquery();
+    let t = sq.table();
+    let c_proj = sq.column(t);
+    let c_filter = sq.column(t);
+    sq.constraint(Constraint::NotEq(c_proj, c_filter));
+    sq.from(t);
+    sq.project_column(c_proj, t);
+    sq.constraint(Constraint::WhereParam {
+        col: c_filter,
+        table: t,
+        op: BinaryOperator::Equal,
+    });
+    let cte_alias = sq.commit_as_cte();
+
+    // Outer query selects from the CTE alias.
+    b.from(cte_alias);
+    b.project_column(c_proj, cte_alias);
+
+    b.tags(&["cte", "parameter"]);
     b.build()
 }
 
@@ -125,5 +161,30 @@ mod tests {
             sql.contains("FROM `cte0`"),
             "outer FROM should use CTE alias: {sql}"
         );
+    }
+
+    #[test]
+    fn cte_with_param_builds() {
+        let p = cte_with_param();
+        assert_eq!(p.name, "cte_with_param");
+        assert!(p.tags.contains(&"cte"));
+        assert!(p.tags.contains(&"parameter"));
+
+        // Should have a SubqueryRelation { kind: Cte } constraint
+        assert!(p.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::SubqueryRelation {
+                kind: crate::constraint::SubqueryRelationKind::Cte,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn cte_with_param_resolves() {
+        let p = cte_with_param();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(sql.contains("WITH"), "sql: {sql}");
+        assert!(sql.contains("= ?"), "expected parameter in sql: {sql}");
     }
 }
