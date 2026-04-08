@@ -63,7 +63,7 @@ SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`tabl
 1595889525.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_5`\)\ in\ q_[a-f0-9]+_project_reorder
+query  rowsort error: The\ number\ of\ values\ returned\ does\ not\ match
 SELECT DISTINCT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -132,7 +132,7 @@ SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`tabl
 1430314811.0000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ MIR\ node\ '[0-9]+'\ couldn't\ be\ lowered\ to\ dataflow:\ Could\ not\ look\ up\ non-existent\ column\ count\(`table_1`\.`column_5`\)\ in\ q_[a-f0-9]+_project_reorder
+query  rowsort error: The\ number\ of\ values\ returned\ does\ not\ match
 SELECT DISTINCT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----

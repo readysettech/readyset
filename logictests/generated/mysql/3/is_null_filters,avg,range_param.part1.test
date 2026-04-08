@@ -228,8 +228,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 501612697
 911337870
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
@@ -333,8 +332,7 @@ SELECT `table_1`.`column_9` AS `alias_1`, `table_1`.`column_9` AS `alias_2` FROM
 1985922622
 1985922622
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_9` AS `alias_1`, avg(`table_1`.`column_11`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_9` IS NULL) AND (`table_1`.`column_9` > ?)) GROUP BY `table_1`.`column_9`
 ? = 10
 ----
@@ -407,8 +405,7 @@ SELECT `table_1`.`column_9` AS `alias_1`, `table_1`.`column_9` AS `alias_2` FROM
 1985922622
 1985922622
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_9` AS `alias_1`, avg(`table_1`.`column_14`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_9` IS NOT NULL) AND (`table_1`.`column_9` > ?)) GROUP BY `table_1`.`column_9`
 ? = 10
 ----
@@ -455,14 +452,12 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2` FROM
 800535389
 800535389
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, avg(`table_1`.`column_16`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`
 ? = 10
 ----
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, avg(`table_1`.`column_17`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_5` IS NOT NULL) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`
 ? = 10
 ----
@@ -535,8 +530,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 800535389
 800535389
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_20`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
@@ -563,14 +557,12 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 800535389
 800535389
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_22`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_23`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
@@ -609,8 +601,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 800535389
 800535389
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_25`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
@@ -627,8 +618,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 800535389
 2129007357.0000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_26`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
@@ -645,8 +635,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 800535389
 1551085433.0000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg(`table_1`.`column_27`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
@@ -689,14 +678,12 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 800535389
 800535389
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, avg(`table_1`.`column_29`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_23` > ?)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`
 ? = 10
 ----
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `table_1`.`column_23` AS `alias_3`, avg(`table_1`.`column_30`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_23` IS NULL) AND (`table_1`.`column_23` IS NOT NULL)) OR (`table_1`.`column_23` IS NOT NULL)) AND (`table_1`.`column_23` > ?)) GROUP BY `table_1`.`column_23`, `table_1`.`column_23`, `table_1`.`column_23`
 ? = 10
 ----
@@ -709,8 +696,7 @@ SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `
 772976072
 1200016526.0000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `table_1`.`column_23` AS `alias_3`, avg(`table_1`.`column_31`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_23` IS NULL) OR (`table_1`.`column_23` IS NULL)) OR (`table_1`.`column_23` IS NOT NULL)) AND (`table_1`.`column_23` > ?)) GROUP BY `table_1`.`column_23`, `table_1`.`column_23`, `table_1`.`column_23`
 ? = 10
 ----
@@ -723,8 +709,7 @@ SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `
 772976072
 511685539.0000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `table_1`.`column_23` AS `alias_3`, avg(`table_1`.`column_32`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_23` IS NOT NULL) OR (`table_1`.`column_23` IS NULL)) OR (`table_1`.`column_23` IS NOT NULL)) AND (`table_1`.`column_23` > ?)) GROUP BY `table_1`.`column_23`, `table_1`.`column_23`, `table_1`.`column_23`
 ? = 10
 ----
@@ -737,8 +722,7 @@ SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `
 772976072
 1804158740.0000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Average\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort
 SELECT `table_1`.`column_23` AS `alias_1`, `table_1`.`column_23` AS `alias_2`, `table_1`.`column_23` AS `alias_3`, `table_1`.`column_23` AS `alias_4`, avg(`table_1`.`column_33`) AS `alias_5` FROM `table_1` WHERE (((((`table_1`.`column_23` IS NULL) AND (`table_1`.`column_23` IS NOT NULL)) OR (`table_1`.`column_23` IS NULL)) OR (`table_1`.`column_23` IS NOT NULL)) AND (`table_1`.`column_23` > ?)) GROUP BY `table_1`.`column_23`, `table_1`.`column_23`, `table_1`.`column_23`, `table_1`.`column_23`
 ? = 10
 ----

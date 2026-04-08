@@ -652,8 +652,7 @@ SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `
 630057314
 630057314
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT avg(`table_1`.`column_27`) AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `table_1`.`column_14` AS `alias_3`, `table_1`.`column_14` AS `alias_4`, `table_1`.`column_14` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_14` NOT BETWEEN 1 AND 5 AND `table_1`.`column_14` BETWEEN 1 AND 5) OR `table_1`.`column_14` NOT BETWEEN 1 AND 5) OR `table_1`.`column_14` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_14`, `table_1`.`column_14`, `table_1`.`column_14`, `table_1`.`column_14`
 ----
 25 values hashing to 731cc9a0be89d1384b892d5ce92635c3
