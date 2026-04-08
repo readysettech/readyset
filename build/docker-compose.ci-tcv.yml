@@ -4,12 +4,14 @@
 services:
   tcv:
     # tcv pinned version should match public/build/Dockerfile
-    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG:-87c75e439d6169669fd06f036c328e8df873cbee}"
+    image: "305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG:-44a5c1d09f0361015bc9540d5b5438b1d4f5c5fb}"
     stop_grace_period: 60s
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
     environment:
       - TCV_NETWORK=tcv-test-network
+      - TCV_MIN_CONTAINERS_PER_GROUP=0
+      - TCV_CLEANUP_RECOVERED=true
     healthcheck:
       test: ["CMD", "tcv", "health"]
       interval: 1s
