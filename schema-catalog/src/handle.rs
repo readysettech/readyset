@@ -147,6 +147,10 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                             reconnect_delay =
                                 (reconnect_delay * 2).min(MAX_RECONNECT_DELAY);
                             updates_stream = self.controller.schema_catalog_update_stream();
+                            antithesis_sdk::assert_reachable!(
+                                "Schema catalog stream recovered after disconnect",
+                                &serde_json::json!({})
+                            );
                         }
                     }
                 }
@@ -190,7 +194,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 current_generation = %current,
                 "Schema update had unexpected generation"
             );
-            antithesis_sdk::assert_unreachable!(
+            antithesis_sdk::assert_reachable!(
                 "Schema catalog received unexpected generation",
                 &serde_json::json!({
                     "new_generation": catalog.generation.get(),

@@ -530,7 +530,7 @@ fn schema_catalog_stream_from_broadcast(
                     .increment(1);
                 ::metrics::counter!(crate::metrics::recorded::SCHEMA_CATALOG_BROADCAST_SKIPPED)
                     .increment(skipped);
-                antithesis_sdk::assert_unreachable!(
+                antithesis_sdk::assert_reachable!(
                     "Schema catalog broadcast receiver lagged",
                     &serde_json::json!({"skipped": skipped})
                 );
