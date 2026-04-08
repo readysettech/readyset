@@ -99,6 +99,18 @@ impl fmt::Display for DropAllCachesStatement {
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct FlushAllShallowCachesStatement;
 
+/// `FLUSH CACHE <name>`
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct FlushCacheStatement {
+    pub name: Relation,
+}
+
+impl DialectDisplay for FlushCacheStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| write!(f, "FLUSH CACHE {}", self.name.display(dialect)))
+    }
+}
+
 impl fmt::Display for FlushAllShallowCachesStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FLUSH ALL SHALLOW CACHES")

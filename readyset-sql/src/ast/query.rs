@@ -20,6 +20,7 @@ pub enum SqlQuery {
     DropCache(DropCacheStatement),
     DropAllCaches(DropAllCachesStatement),
     FlushAllShallowCaches(FlushAllShallowCachesStatement),
+    FlushCache(FlushCacheStatement),
     DropAllProxiedQueries(DropAllProxiedQueriesStatement),
     AlterTable(AlterTableStatement),
     AlterReadySet(AlterReadysetStatement),
@@ -69,6 +70,7 @@ impl DialectDisplay for SqlQuery {
             Self::DropCache(drop) => write!(f, "{}", drop.display(dialect)),
             Self::DropAllCaches(drop) => write!(f, "{drop}"),
             Self::FlushAllShallowCaches(flush) => write!(f, "{flush}"),
+            Self::FlushCache(flush) => write!(f, "{}", flush.display(dialect)),
             Self::Delete(delete) => write!(f, "{}", delete.display(dialect)),
             Self::DropTable(drop) => write!(f, "{}", drop.display(dialect)),
             Self::DropView(drop) => write!(f, "{}", drop.display(dialect)),
@@ -284,6 +286,7 @@ impl SqlQuery {
             Self::DropCache(_) => "DROP CACHE",
             Self::DropAllCaches(_) => "DROP ALL CACHES",
             Self::FlushAllShallowCaches(_) => "FLUSH ALL SHALLOW CACHES",
+            Self::FlushCache(_) => "FLUSH CACHE",
             Self::DropAllProxiedQueries(_) => "DROP ALL PROXIED QUERIES",
             Self::Delete(_) => "DELETE",
             Self::DropTable(_) => "DROP TABLE",
@@ -329,6 +332,7 @@ impl SqlQuery {
             | SqlQuery::DropCache(_)
             | SqlQuery::DropAllCaches(_)
             | SqlQuery::FlushAllShallowCaches(_)
+            | SqlQuery::FlushCache(_)
             | SqlQuery::AlterReadySet(_)
             | SqlQuery::DropAllProxiedQueries(_) => true,
             SqlQuery::Show(show_stmt) => match show_stmt {

@@ -1016,3 +1016,66 @@ async fn test_flush_all_caches_clears_entries_preserves_definitions() {
     check_miss(&manager, &query_id_1, "key1".to_string()).await;
     check_miss(&manager, &query_id_2, "key2".to_string()).await;
 }
+
+#[tokio::test]
+async fn test_flush_cache_clears_entries_preserves_definition() {
+    let manager = CacheManager::<String, String>::new(None);
+    let relation = test_relation("my_cache");
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    create_test_cache(
+        &manager,
+        Some(relation.clone()),
+        Some(query_id),
+        test_policy(),
+    )
+    .unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value1".to_string()]).await;
+
+    check_hit(&manager, &query_id, "key1".to_string()).await;
+    assert_eq!(manager.list_entries(None, None).len(), 1);
+
+    manager.flush_cache(Some(&relation), None).await.unwrap();
+
+    assert!(manager.list_entries(None, None).is_empty());
+    assert!(manager.exists(Some(&relation), None));
+    check_miss(&manager, &query_id, "key1".to_string()).await;
+}
+
+#[tokio::test]
+async fn test_flush_cache_only_affects_target() {
+    let manager = CacheManager::<String, String>::new(None);
+    let relation_1 = test_relation("cache_1");
+    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
+    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
+
+    create_test_cache(
+        &manager,
+        Some(relation_1.clone()),
+        Some(query_id_1),
+        test_policy(),
+    )
+    .unwrap();
+    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value1".to_string()]).await;
+
+    let result = manager
+        .get_or_start_insert(&query_id_2, "key2".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value2".to_string()]).await;
+
+    manager.flush_cache(Some(&relation_1), None).await.unwrap();
+
+    check_miss(&manager, &query_id_1, "key1".to_string()).await;
+    check_hit(&manager, &query_id_2, "key2".to_string()).await;
+    assert!(manager.exists(Some(&relation_1), None));
+    assert!(manager.exists(None, Some(&query_id_2)));
+}

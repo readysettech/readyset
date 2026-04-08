@@ -8,9 +8,9 @@ use readyset_sql::ast::{
     AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr,
-    FlushAllShallowCachesStatement, ReadysetHintDirective, ResnapshotTableStatement,
-    SelectStatement, SetEviction, SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery,
-    SqlType, TableKey,
+    FlushAllShallowCachesStatement, FlushCacheStatement, ReadysetHintDirective,
+    ResnapshotTableStatement, SelectStatement, SetEviction, SetReplicationPositionStatement,
+    ShallowCacheQuery, SqlQuery, SqlType, TableKey,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -1094,7 +1094,8 @@ fn parse_drop(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
 /// Expects `FLUSH` was already consumed. Parses a Readyset-specific flush statement.
 ///
 /// FLUSH ALL SHALLOW CACHES
-fn parse_flush(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
+/// FLUSH CACHE <name>
+fn parse_flush(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keywords(
         parser,
         &[
@@ -1106,9 +1107,12 @@ fn parse_flush(parser: &mut Parser) -> Result<SqlQuery, ReadysetParsingError> {
         Ok(SqlQuery::FlushAllShallowCaches(
             FlushAllShallowCachesStatement,
         ))
+    } else if parser.parse_keyword(Keyword::CACHE) {
+        let name = parser.parse_object_name(false)?.try_into_dialect(dialect)?;
+        Ok(SqlQuery::FlushCache(FlushCacheStatement { name }))
     } else {
         Err(ReadysetParsingError::ReadysetParsingError(
-            "expected ALL SHALLOW CACHES after FLUSH".into(),
+            "expected ALL SHALLOW CACHES or CACHE after FLUSH".into(),
         ))
     }
 }
@@ -1175,7 +1179,7 @@ fn parse_readyset_query(
     } else if parser.parse_keyword(Keyword::SHOW) {
         parse_show(parser, dialect)
     } else if parser.parse_keyword(Keyword::FLUSH) {
-        parse_flush(parser)
+        parse_flush(parser, dialect)
     } else {
         Ok(parser.parse_statement()?.try_into_dialect(dialect)?)
     }

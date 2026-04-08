@@ -99,6 +99,20 @@ pub fn drop_view(
     }
 }
 
+pub fn flush_cache(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], FlushCacheStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("flush")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("cache")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, name) = relation(dialect)(i)?;
+        let (i, _) = statement_terminator(i)?;
+        Ok((i, FlushCacheStatement { name }))
+    }
+}
+
 pub fn flush_all_shallow_caches(
     i: LocatedSpan<&[u8]>,
 ) -> NomSqlResult<&[u8], FlushAllShallowCachesStatement> {

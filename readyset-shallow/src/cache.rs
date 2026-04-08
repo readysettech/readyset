@@ -675,6 +675,13 @@ where
         self.scheduler.is_some()
     }
 
+    pub(crate) async fn flush(&self) -> Result<(), moka::PredicateError> {
+        let id = self.id;
+        self.inner.invalidate_entries_if(move |k, _| k.0 == id)?;
+        self.inner.run_pending_tasks().await;
+        Ok(())
+    }
+
     pub(crate) async fn count(&self) -> usize {
         self.inner.run_pending_tasks().await;
         self.inner.entry_count().try_into().unwrap_or(usize::MAX)

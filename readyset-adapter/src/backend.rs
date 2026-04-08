@@ -105,9 +105,9 @@ use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterReadysetStatement, CacheInner, CacheType, ChangeCdcStatement,
     ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement, DeallocateStatement,
-    DropAllCachesStatement, DropCacheStatement, ExplainStatement, ProxiedQueriesOptions,
-    ReadysetHintDirective, Relation, SelectStatement, SetStatement, ShallowCacheQuery,
-    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
+    DropAllCachesStatement, DropCacheStatement, ExplainStatement, FlushCacheStatement,
+    ProxiedQueriesOptions, ReadysetHintDirective, Relation, SelectStatement, SetStatement,
+    ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -3626,6 +3626,15 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Flush a single shallow cache by name.
+    async fn flush_shallow_cache(
+        state: &mut BackendState<DB>,
+        stmt: &FlushCacheStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        state.shallow.flush_cache(Some(&stmt.name), None).await?;
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
     /// Forwards a `DROP ALL CACHES` request to noria
     async fn drop_all_caches(
         connectors: &mut BackendConnectors<DB>,
@@ -4167,6 +4176,12 @@ where
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
                 }
                 Self::flush_all_shallow_caches(state).await
+            }
+            SqlQuery::FlushCache(stmt) => {
+                if !settings.allow_cache_ddl {
+                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                }
+                Self::flush_shallow_cache(state, stmt).await
             }
             SqlQuery::DropAllProxiedQueries(_) => {
                 if !settings.allow_cache_ddl {
@@ -5071,6 +5086,7 @@ where
                     | SqlQuery::DropCache(_)
                     | SqlQuery::DropAllCaches(_)
                     | SqlQuery::FlushAllShallowCaches(_)
+                    | SqlQuery::FlushCache(_)
                     | SqlQuery::DropAllProxiedQueries(_)
                     | SqlQuery::AlterReadySet(_)
                     | SqlQuery::Explain(_)

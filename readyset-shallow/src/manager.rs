@@ -15,7 +15,7 @@ use tracing::info;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
-use readyset_errors::{ReadySetError, ReadySetResult, internal};
+use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier};
 use readyset_util::SizeOf;
 
@@ -60,6 +60,7 @@ where
 {
     pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
         let mut builder = MokaCache::builder()
+            .support_invalidation_closures()
             .expire_after(CacheExpiration)
             .weigher(weight)
             .eviction_listener(|_, _, cause| {
@@ -224,6 +225,26 @@ where
         caches.clear();
         self.names.pin().clear();
         self.query_ids.pin().clear();
+    }
+
+    /// Flush a single shallow cache by name or query_id: clears cached entries
+    /// but preserves the cache definition, scheduler, and all metadata.
+    pub async fn flush_cache(
+        &self,
+        name: Option<&Relation>,
+        query_id: Option<&QueryId>,
+    ) -> ReadySetResult<()> {
+        Self::check_identifiers(name, query_id)?;
+        let display_name = Self::format_name(name, query_id);
+        let cache = self
+            .get(name, query_id)
+            .ok_or_else(|| ReadySetError::ViewNotFound(display_name.clone()))?;
+        cache
+            .flush()
+            .await
+            .map_err(|e| internal_err!("failed to flush shallow cache {display_name}: {e}"))?;
+        info!("flushed shallow cache {display_name}");
+        Ok(())
     }
 
     /// Flush all shallow caches: clears all Moka entries but preserves cache
