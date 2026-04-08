@@ -3,7 +3,7 @@ use std::{cmp, iter};
 use chrono_tz::Tz;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::upstream_system_props::get_system_timezone;
-use readyset_data::{Collation, DfType, DfValue};
+use readyset_data::{CharsetFamily, Collation, DfType, DfValue};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
     ReadySetError, ReadySetResult,
@@ -29,6 +29,48 @@ pub trait LowerContext: Clone {
 
     /// Look up a named custom type in the schema.
     fn resolve_type(&self, ty: Relation) -> Option<DfType>;
+}
+
+/// Resolve the output collation for CONCAT/CONCAT_WS by approximating MySQL's coercibility rules.
+///
+/// Column references have stronger collation affinity than literals or function results.
+/// When two args share the same affinity but differ in character set, UTF-8 wins as a superset.
+/// Non-text args are ignored for collation selection.
+fn resolve_concat_collation(args: &[&Expr], dialect: Dialect) -> Collation {
+    // Lower = stronger affinity. Columns beat everything else.
+    const COLUMN: u8 = 0;
+    const OTHER: u8 = 1;
+
+    let mut best_collation: Option<Collation> = None;
+    let mut best_affinity: u8 = u8::MAX;
+
+    for arg in args {
+        let collation = match arg.ty() {
+            DfType::Text(c) | DfType::Char(_, c) | DfType::VarChar(_, c) => *c,
+            _ => continue,
+        };
+
+        let affinity = match arg {
+            Expr::Column { .. } => COLUMN,
+            _ => OTHER,
+        };
+
+        if affinity < best_affinity {
+            best_affinity = affinity;
+            best_collation = Some(collation);
+        } else if affinity == best_affinity {
+            if let Some(current) = best_collation {
+                // Same affinity, different charset → prefer UTF-8 as superset of Latin-1.
+                if current.charset_family() != collation.charset_family()
+                    && collation.charset_family() == CharsetFamily::Utf8
+                {
+                    best_collation = Some(collation);
+                }
+            }
+        }
+    }
+
+    Collation::unwrap_or_default(best_collation, dialect)
 }
 
 /// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
@@ -514,15 +556,8 @@ impl BuiltinFunction {
                 );
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
-                let collation = Collation::unwrap_or_default(
-                    iter::once(&arg1)
-                        .chain(&rest_args)
-                        .find_map(|expr| match expr.ty() {
-                            DfType::Text(c) => Some(*c),
-                            _ => None,
-                        }),
-                    dialect,
-                );
+                let all_args: Vec<&Expr> = iter::once(&arg1).chain(&rest_args).collect();
+                let collation = resolve_concat_collation(&all_args, dialect);
                 let ty = DfType::Text(collation);
                 (
                     Self::Concat(
@@ -542,15 +577,11 @@ impl BuiltinFunction {
                 let arg1 = next_arg()?;
                 let arg2 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
-                let collation = Collation::unwrap_or_default(
-                    iter::once(&arg1)
-                        .chain(&rest_args)
-                        .find_map(|expr| match expr.ty() {
-                            DfType::Text(c) => Some(*c),
-                            _ => None,
-                        }),
-                    dialect,
-                );
+                let all_args: Vec<&Expr> = iter::once(&arg1)
+                    .chain(iter::once(&arg2))
+                    .chain(&rest_args)
+                    .collect();
+                let collation = resolve_concat_collation(&all_args, dialect);
                 let ty = DfType::Text(collation);
                 (
                     Self::ConcatWs(
@@ -3329,5 +3360,106 @@ pub(crate) mod tests {
         let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, 1.5]").unwrap();
         let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
         assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+    }
+
+    /// REA-6500: CONCAT(int_col, utf8mb4_literal, latin1_col) should resolve to the latin1
+    /// column's collation (IMPLICIT beats COERCIBLE and NUMERIC).
+    #[test]
+    fn concat_mixed_collation_int_utf8_literal_latin1_col() {
+        let input = parse_expr(ParserDialect::MySQL, "concat(t1.id, 'sep', t1.name)").unwrap();
+        let res = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            &resolve_columns(|c| {
+                if c.name == "id" {
+                    Ok((0, DfType::Int))
+                } else if c.name == "name" {
+                    Ok((1, DfType::VarChar(50, Collation::Latin1SwedishCi)))
+                } else {
+                    internal!("unexpected column: {c:?}")
+                }
+            }),
+        )
+        .unwrap();
+        // The column's collation (Latin1SwedishCi, IMPLICIT) should win over the literal's
+        // collation (Utf8AiCi, COERCIBLE).
+        assert_eq!(
+            *res.ty(),
+            DfType::Text(Collation::Latin1SwedishCi),
+            "CONCAT result collation should be latin1_swedish_ci from the column, not utf8"
+        );
+    }
+
+    /// CONCAT(utf8_literal, latin1_col) should resolve to latin1 column's collation.
+    #[test]
+    fn concat_utf8_literal_latin1_col() {
+        let input = parse_expr(ParserDialect::MySQL, "concat('hello', t1.name)").unwrap();
+        let res = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            &resolve_columns(|c| {
+                if c.name == "name" {
+                    Ok((0, DfType::VarChar(50, Collation::Latin1SwedishCi)))
+                } else {
+                    internal!("unexpected column: {c:?}")
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            *res.ty(),
+            DfType::Text(Collation::Latin1SwedishCi),
+            "column collation (IMPLICIT) should beat literal collation (COERCIBLE)"
+        );
+    }
+
+    /// CONCAT(latin1_col, utf8_col) — both IMPLICIT, different charsets — should promote to UTF8.
+    #[test]
+    fn concat_latin1_col_utf8_col_promotes_to_utf8() {
+        let input = parse_expr(ParserDialect::MySQL, "concat(t1.a, t1.b)").unwrap();
+        let res = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            &resolve_columns(|c| {
+                if c.name == "a" {
+                    Ok((0, DfType::VarChar(50, Collation::Latin1SwedishCi)))
+                } else if c.name == "b" {
+                    Ok((1, DfType::VarChar(50, Collation::Utf8AiCi)))
+                } else {
+                    internal!("unexpected column: {c:?}")
+                }
+            }),
+        )
+        .unwrap();
+        // UTF8 is a superset of Latin1, so it should win when both are IMPLICIT.
+        // The result should be some UTF8 collation, not Latin1.
+        assert!(
+            !matches!(res.ty(), DfType::Text(Collation::Latin1SwedishCi)),
+            "when both columns are IMPLICIT but different charsets, UTF8 should win; got {:?}",
+            res.ty()
+        );
+    }
+
+    /// CONCAT(int_col) with no text args should use dialect default collation.
+    #[test]
+    fn concat_int_only_uses_dialect_default() {
+        let input = parse_expr(ParserDialect::MySQL, "concat(t1.id)").unwrap();
+        let res = Expr::lower(
+            input,
+            Dialect::DEFAULT_MYSQL,
+            &resolve_columns(|c| {
+                if c.name == "id" {
+                    Ok((0, DfType::Int))
+                } else {
+                    internal!("unexpected column: {c:?}")
+                }
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            *res.ty(),
+            MYSQL_TEXT,
+            "no text args should fall back to dialect default"
+        );
     }
 }

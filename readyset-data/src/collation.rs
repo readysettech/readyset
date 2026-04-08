@@ -311,6 +311,25 @@ impl Collation {
     pub fn unwrap_or_default(collation: Option<Collation>, dialect: Dialect) -> Collation {
         collation.unwrap_or_else(|| Self::default_for(dialect))
     }
+
+    /// Returns the character set family for this collation.
+    pub fn charset_family(&self) -> CharsetFamily {
+        match self {
+            Self::Latin1SwedishCi => CharsetFamily::Latin1,
+            Self::Binary => CharsetFamily::Binary,
+            Self::Utf8 | Self::Utf8Ci | Self::Utf8AiCi | Self::Utf8Binary | Self::Utf8AiCiPad => {
+                CharsetFamily::Utf8
+            }
+        }
+    }
+}
+
+/// The character set family of a [`Collation`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharsetFamily {
+    Latin1,
+    Utf8,
+    Binary,
 }
 
 fn collator_options(strength: Option<Strength>) -> CollatorOptions {
