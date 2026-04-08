@@ -27,6 +27,7 @@ use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::ParsingPreset;
+#[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidSet, ReplicationOffset, ReplicationOffsets};

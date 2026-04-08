@@ -4481,7 +4481,7 @@ async fn alter_table_add_key_mysql() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn mysql_transaction_batch_crash_recovery() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -4637,7 +4637,7 @@ async fn mysql_transaction_batch_crash_recovery() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn mysql_batch_replication_then_crash_recovery() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -4822,7 +4822,7 @@ async fn mysql_batch_replication_then_crash_recovery() {
 #[cfg(feature = "failure_injection")]
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn mysql_group_commit_crash_recovery() {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
@@ -5140,7 +5140,7 @@ async fn alter_table_add_key_postgres() {
 /// and be negatively cached — silently discarding the rows.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mysql_insert_select_after_create_table() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -5225,7 +5225,7 @@ async fn mysql_insert_select_after_create_table() {
 ///    → Verify all three rows appear promptly
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql80, mysql84)]
+#[upstream(mysql, modern)]
 async fn mysql_compressed_transaction_flushes_group_commit() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
@@ -5316,7 +5316,7 @@ async fn mysql_compressed_transaction_flushes_group_commit() {
 /// TableAction as "already processed".
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql57, mysql80, mysql84)]
+#[upstream(mysql)]
 async fn mysql_truncate_during_group_commit() {
     readyset_tracing::init_test_logging();
     let url = mysql_url();
