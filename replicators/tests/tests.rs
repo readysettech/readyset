@@ -5314,6 +5314,7 @@ async fn mysql_compressed_transaction_flushes_group_commit() {
 /// arrives. The TRUNCATE must not be bundled with the flushed INSERT — they
 /// share the same offset, and the storage layer would drop the second
 /// TableAction as "already processed".
+/// placeholder to trigger build
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(mysql)]
@@ -5388,3 +5389,4 @@ async fn mysql_truncate_during_group_commit() {
 
     shutdown_tx.shutdown().await;
 }
+
