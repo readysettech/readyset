@@ -9,8 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_4`, `column_1`, `column_3`, `column_5`, `column_2`) VALUES (1988780896, -234267318, 1108830236, 0, 2009507816), (312808888, -780507151, -980755037, 1, -1817201082), (1468085938, -1719944773, -2125919558, 2, -234326745), (-2088690154, 1469172029, 1664929002, 3, 972354677), (-193380487, 1979196663, -839604964, 4, -1698211178), (252057641, -1518305628, 778370314, 5, 513302468), (534828745, 1577750513, -529162292, 6, -987342432), (-1124896637, -2136420852, -391348421, 7, -363725513), (-260881578, 48258074, 1218421831, 8, -876350174), (-2122469315, -633876048, -622450730, 9, -412208023)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported
 SELECT 1 AS `alias_1`
 ----
 1
@@ -44,15 +43,13 @@ SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 1
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 1514583577
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT 1 AS `alias_1`, sum(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -79,8 +76,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_5` = 4)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported
 SELECT 1 AS `alias_1`
 ----
 1
@@ -110,15 +106,13 @@ SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 1
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 689259539
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT 1 AS `alias_1`, sum(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----

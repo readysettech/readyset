@@ -9,7 +9,7 @@ CREATE TABLE table_1 (column_451 INT(32), column_5 INT(32), column_108 INT(32), 
 statement ok
 INSERT INTO table_1 (column_130, column_720, column_399, column_151, column_117, column_753, column_203, column_629, column_358, column_495, column_769, column_721, column_589, column_107, column_735, column_604, column_712, column_167, column_181, column_126, column_403, column_584, column_67, column_702, column_129, column_465, column_659, column_469, column_744, column_686, column_651, column_133, column_19, column_436, column_356, column_267, column_298, column_652, column_627, column_546, column_634, column_183, column_611, column_380, column_601, column_755, column_508, column_559, column_304, column_765, column_302, column_748, column_272, column_363, column_530, column_155, column_110, column_88, column_529, column_468, column_49, column_564, column_519, column_328, column_448, column_370, column_144, column_475, column_61, column_709, column_218, column_383, column_577, column_692, column_511, column_594, column_698, column_145, column_255, column_539, column_455, column_362, column_570, column_470, column_330, column_758, column_294, column_340, column_708, column_25, column_628, column_572, column_565, column_128, column_477, column_646, column_23, column_265, column_225, column_623, column_653, column_202, column_614, column_21, column_502, column_473, column_394, column_388, column_431, column_239, column_727, column_111, column_124, column_553, column_289, column_217, column_768, column_490, column_414, column_766, column_523, column_148, column_703, column_170, column_180, column_305, column_209, column_318, column_461, column_413, column_621, column_527, column_488, column_97, column_346, column_724, column_113, column_555, column_164, column_194, column_741, column_452, column_147, column_575, column_561, column_536, column_430, column_447, column_573, column_82, column_156, column_406, column_201, column_81, column_288, column_581, column_55, column_513, column_569, column_240, column_8, column_562, column_359, column_279, column_176, column_159, column_228, column_417, column_752, column_483, column_224, column_381, column_28, column_706, column_512, column_42, column_241, column_645, column_739, column_494, column_51, column_269, column_591, column_661, column_757, column_397, column_759, column_188, column_531, column_244, column_162, column_367, column_429, column_371, column_313, column_486, column_172, column_152, column_12, column_751, column_24, column_749, column_210, column_4, column_312, column_87, column_141, column_382, column_99, column_656, column_606, column_501, column_424, column_319, column_301, column_458, column_278, column_53, column_684, column_582, column_420, column_139, column_31, column_442, column_605, column_104, column_93, column_105, column_699, column_563, column_568, column_497, column_682, column_169, column_672, column_198, column_585, column_690, column_150, column_256, column_115, column_643, column_695, column_283, column_135, column_722, column_574, column_192, column_767, column_208, column_200, column_103, column_48, column_547, column_262, column_389, column_756, column_503, column_596, column_593, column_344, column_178, column_597, column_463, column_5, column_290, column_664, column_676, column_745, column_631, column_632, column_687, column_422, column_216, column_677, column_410, column_106, column_197, column_528, column_641, column_472, column_428, column_616, column_506, column_648, column_275, column_166, column_642, column_729, column_307, column_220, column_254, column_456, column_466, column_245, column_69, column_668, column_407, column_34, column_571, column_342, column_56, column_377, column_259, column_419, column_231, column_234, column_333, column_3, column_297, column_650, column_347, column_229, column_754, column_251, column_492, column_146, column_620, column_689, column_232, column_734, column_680, column_728, column_451, column_761, column_193, column_101, column_160, column_131, column_323, column_154, column_158, column_62, column_242, column_85, column_270, column_462, column_450, column_165, column_600, column_578, column_567, column_22, column_543, column_386, column_43, column_471, column_516, column_204, column_211, column_537, column_353, column_123, column_459, column_599, column_433, column_685, column_598, column_238, column_223, column_273, column_308, column_45, column_715, column_770, column_348, column_134, column_260, column_738, column_719, column_16, column_250, column_295, column_80, column_671, column_11, column_622, column_444, column_445, column_317, column_549, column_408, column_14, column_625, column_586, column_177, column_357, column_437, column_316, column_206, column_500, column_326, column_400, column_119, column_440, column_191, column_618, column_701, column_325, column_493, column_746, column_343, column_602, column_320, column_552, column_40, column_378, column_696, column_6, column_361, column_369, column_725, column_660, column_226, column_640, column_27, column_619, column_215, column_281, column_678, column_168, column_277, column_221, column_579, column_137, column_398, column_199, column_655, column_395, column_454, column_246, column_587, column_518, column_125, column_59, column_236, column_750, column_13, column_520, column_271, column_15, column_285, column_138, column_736, column_588, column_669, column_610, column_9, column_86, column_29, column_425, column_2, column_489, column_184, column_711, column_109, column_266, column_303, column_710, column_504, column_136, column_633, column_515, column_261, column_737, column_38, column_384, column_72, column_247, column_314, column_222, column_760, column_560, column_638, column_731, column_37, column_243, column_36, column_35, column_98, column_26, column_368, column_140, column_253, column_747, column_132, column_705, column_576, column_78, column_683, column_1, column_230, column_58, column_644, column_412, column_10, column_161, column_675, column_311, column_441, column_446, column_258, column_467, column_309, column_274, column_514, column_335, column_717, column_556, column_41, column_252, column_464, column_212, column_350, column_615, column_693, column_396, column_423, column_674, column_47, column_732, column_322, column_730, column_195, column_485, column_415, column_762, column_487, column_142, column_331, column_248, column_607, column_214, column_364, column_54, column_46, column_716, column_499, column_324, column_679, column_337, column_7, column_505, column_174, column_700, column_723, column_52, column_114, column_608, column_207, column_592, column_491, column_375, column_740, column_443, column_626, column_524, column_525, column_603, column_354, column_32, column_219, column_624, column_393, column_681, column_550, column_718, column_551, column_327, column_306, column_438, column_498, column_185, column_268, column_405, column_75, column_609, column_60, column_385, column_205, column_763, column_654, column_566, column_182, column_697, column_233, column_482, column_300, column_287, column_149, column_476, column_235, column_280, column_71, column_404, column_90, column_662, column_257, column_391, column_276, column_457, column_713, column_20, column_196, column_63, column_612, column_538, column_392, column_345, column_526, column_249, column_557, column_533, column_321, column_707, column_296, column_534, column_372, column_667, column_351, column_613, column_481, column_376, column_33, column_439, column_73, column_76, column_540, column_484, column_658, column_291, column_541, column_480, column_639, column_264, column_409, column_310, column_17, column_691, column_544, column_68, column_95, column_360, column_426, column_743, column_77, column_189, column_673, column_379, column_92, column_120, column_122, column_532, column_449, column_453, column_479, column_284, column_509, column_163, column_418, column_649, column_349, column_427, column_94, column_292, column_143, column_636, column_70, column_432, column_44, column_401, column_179, column_387, column_336, column_116, column_175, column_171, column_548, column_630, column_522, column_434, column_733, column_84, column_121, column_390, column_100, column_460, column_666, column_83, column_18, column_66, column_373, column_153, column_30, column_352, column_315, column_517, column_726, column_496, column_50, column_263, column_507, column_554, column_580, column_341, column_187, column_421, column_213, column_688, column_657, column_590, column_157, column_57, column_96, column_39, column_617, column_65, column_339, column_332, column_416, column_293, column_374, column_108, column_365, column_74, column_286, column_338, column_237, column_355, column_186, column_535, column_112, column_89, column_635, column_334, column_190, column_595, column_521, column_79, column_704, column_64, column_663, column_227, column_411, column_127, column_647, column_510, column_402, column_435, column_91, column_282, column_670, column_299, column_665, column_173, column_637, column_478, column_764, column_542, column_558, column_545, column_714, column_694, column_366, column_102, column_583, column_118, column_474, column_329, column_742) VALUES (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1)
 
-query  nosort
+query R nosort
 SELECT avg(table_1.column_1) AS alias_1 FROM table_1
 ----
 1.0000
@@ -76,43 +76,45 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 IS NOT N
 1
 1
 
-# REA-6472
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_5) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
+1.0000
+1
 
-# REA-6472
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_6) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= 1) GROUP BY table_1.column_2
 ----
+1.0000
+1
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_7) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= table_1.column_8) GROUP BY table_1.column_2
 ----
 1.0000
 1
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_9) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 <= table_1.column_10) GROUP BY table_1.column_2
 ----
 1.0000
 1
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_11) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 IS NULL) GROUP BY table_1.column_2
 ----
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_12) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 IS NOT NULL) GROUP BY table_1.column_2
 ----
 1.0000
 1
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_13) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 IS NULL) GROUP BY table_1.column_2
 ----
 
-query  nosort
+query RI nosort
 SELECT avg(table_1.column_14) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 IS NOT NULL) GROUP BY table_1.column_2
 ----
 1.0000
@@ -450,172 +452,179 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_29) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_31)) GROUP BY table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_32) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_33)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_34) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_35) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_36) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_37) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_38) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_39)) GROUP BY table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_40) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_41)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_42) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
 # REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_43) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_44) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_45) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= 1) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_46) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_47) OR (table_1.column_2 <= table_1.column_48)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_49) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_50) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_51) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_52) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_53) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_54) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_55) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_56) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_57) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_58) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_59) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_60) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_61) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_62) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_63) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 <= table_1.column_64) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_65) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_66) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_67) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_68) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_69) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_1.column_70) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000

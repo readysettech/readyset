@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_5`, `column_1`, `column_2`, `column_3`, `column_4`) VALUES (0, -335891318, 983041141, 141653526, 1770909523), (1, 1392125100, 1383618718, 1332548189, -134831888), (2, 1065884686, 492727207, -1393018294, 211013342), (3, 1545572400, 1779622970, 184674793, -2142234813), (4, 1288393183, 1392838322, -298246133, -696464829), (5, -1258023972, 1314670832, -1657605496, 828628792), (6, -931001220, -233947260, -1721459845, 2036360870), (7, -1068452491, 51674910, 549324735, -313177376), (8, 827918125, 620572049, -807831974, 1660766869), (9, -946400364, 1449697542, -1322698431, -1687271008)
 
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 158012412.9000
@@ -31,15 +31,14 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1545572400
 827918125
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` = ?) AND (`table_1`.`column_2` = ?))
 ? = 1
 ? = 1
 ----
 NULL
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
@@ -53,8 +52,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 ----
 
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_1` = ?) AND (`table_1`.`column_1` = ?)) AND (`table_1`.`column_1` > ?))
 ? = 1
 ? = 1
@@ -101,15 +99,14 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 ----
 827918125
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` = ?) AND (`table_1`.`column_2` = ?))
 ? = 1
 ? = 1
 ----
 NULL
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
@@ -123,8 +120,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 ----
 
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_1` = ?) AND (`table_1`.`column_1` = ?)) AND (`table_1`.`column_1` > ?))
 ? = 1
 ? = 1

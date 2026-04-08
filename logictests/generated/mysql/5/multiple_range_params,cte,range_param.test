@@ -9,8 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_1`, `column_2`) VALUES (430219102, 0), (1099216132, 1), (-974897010, 2), (1806038596, 3), (-2087012872, 4), (770104161, 5), (913223032, 6), (-425170386, 7), (-799707327, 8), (-1619298816, 9)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -21,8 +20,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -33,8 +31,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -45,8 +42,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -56,8 +52,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -67,8 +62,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -78,8 +72,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -91,8 +84,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -104,8 +96,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -137,8 +128,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -146,8 +136,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -155,8 +144,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE ((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -164,32 +152,28 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -198,8 +182,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10
@@ -208,8 +191,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 770104161
 913223032
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (((`table_1`.`column_1` > ?) AND (`table_1`.`column_1` > ?)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ? = 10

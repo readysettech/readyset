@@ -41,7 +41,7 @@ statement ok
 INSERT INTO `table_5` (`column_1`, `column_2`, `column_3`) VALUES (-651232890, 1665092179, 0), (-1997741525, -207981746, 1), (1281092866, -1139925297, 2), (-2119428511, 1694221682, 3), (-1820928981, 648862115, 4), (-406112756, 1875075075, 5), (851143144, 339449266, 6), (1101219568, 2049998251, 7), (1955056829, -1765127784, 8), (1974882037, 27812925, 9)
 
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 580098449.2000
@@ -81,13 +81,13 @@ SELECT `table_2`.`column_2` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 1882391624
 776903179
 
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_2` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
-30 values hashing to 9f6b607f4996ebbcadf956e3f3b5164a
+30 values hashing to e13a86bd6b85638f5d9bc30bea6cfff6
 
 # REA-6472
-query  rowsort
+query  rowsort error: Incorrect\ values\ returned
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
@@ -111,11 +111,11 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort
+query RII rowsort
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
-21 values hashing to cd1e7c63521b9c9b0d80ccadf19b80f5
+21 values hashing to 8a6b309f90ac374c00106077fde0f34c
 
 statement ok
 DELETE FROM `table_3` WHERE (`column_5` = 0)
@@ -244,7 +244,7 @@ SELECT `table_2`.`column_2` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 1359648048
 1527534891
 
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_2` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
 -1704205715.0000
@@ -263,8 +263,7 @@ NULL
 -773574785
 NULL
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
@@ -282,7 +281,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort
+query RII rowsort
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----

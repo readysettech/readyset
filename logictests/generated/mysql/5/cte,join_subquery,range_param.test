@@ -9,8 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_1`, `column_2`) VALUES (-1079008451, 0), (-2057399431, 1), (-741785383, 2), (-210330647, 3), (-958285350, 4), (651950436, 5), (-572338063, 6), (1839910300, 7), (2125297954, 8), (-1020608332, 9)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -38,8 +37,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----

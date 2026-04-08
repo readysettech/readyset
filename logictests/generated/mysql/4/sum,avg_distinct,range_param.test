@@ -42,15 +42,13 @@ SELECT sum(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 ----
 4867978469
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 830649293.5714
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(`table_1`.`column_7`) AS `alias_1`, avg(distinct `table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -107,15 +105,13 @@ SELECT sum(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 ----
 1261427125
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 993490450.7500
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(`table_1`.`column_7`) AS `alias_1`, avg(distinct `table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----

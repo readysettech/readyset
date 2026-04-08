@@ -86,8 +86,7 @@ SELECT sum(distinct `table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS 
 ----
 30 values hashing to 808276fe8a11222d8e8f6e8c591a28b3
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_5` > ?)
 ? = 10
 ----
@@ -104,8 +103,7 @@ NULL
 1927819190
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_7`) AS `alias_1`, `table_2`.`column_8` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_5` = `table_5`.`column_1`) WHERE (`table_2`.`column_8` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----
@@ -257,8 +255,7 @@ NULL
 -1871210904
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_5` > ?)
 ? = 10
 ----
@@ -271,8 +268,7 @@ SELECT `table_2`.`column_6` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM
 1927819190
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_7`) AS `alias_1`, `table_2`.`column_8` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_5` = `table_5`.`column_1`) WHERE (`table_2`.`column_8` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----

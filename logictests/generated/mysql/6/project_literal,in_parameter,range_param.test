@@ -9,8 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_1`, `column_2`) VALUES (0, 0), (1480292858, 1), (2, 2), (-841353311, 3), (1, 4), (-1415201258, 5), (0, 6), (876467680, 7), (2, 8), (420996247, 9)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported
 SELECT 1 AS `alias_1`
 ----
 1
@@ -93,8 +92,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported
 SELECT 1 AS `alias_1`
 ----
 1

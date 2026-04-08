@@ -41,7 +41,7 @@ statement ok
 INSERT INTO `table_1` (`column_2`, `column_1`, `column_3`) VALUES (-764915158, 502065453, 0), (3983607, 762045893, 1), (-107668003, -755062506, 2), (2142956241, 1942948970, 3), (947558874, -274513824, 4), (1013953701, 935971544, 5), (109512789, 1173033301, 6), (403892327, -597552196, 7), (1443289123, 43777432, 8), (1127751696, 1433989464, 9)
 
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 516670353.1000
@@ -63,13 +63,12 @@ SELECT `table_2`.`column_1` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 830564564
 915806037
 
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` INNER JOIN `table_3` ON (`table_2`.`column_1` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
 
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_1` > ?)
 ? = 10
 ----
@@ -81,8 +80,7 @@ SELECT `table_2`.`column_6` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM
 ----
 
 
-# REA-6472
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_7`) AS `alias_1`, `table_2`.`column_8` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_2` INNER JOIN `table_5` ON (`table_2`.`column_1` = `table_5`.`column_1`) WHERE (`table_2`.`column_6` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----
@@ -188,7 +186,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_3` = 4)
 
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 597843909.0000
@@ -206,13 +204,12 @@ SELECT `table_2`.`column_1` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 830564564
 915806037
 
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` INNER JOIN `table_3` ON (`table_2`.`column_1` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
 
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_1` > ?)
 ? = 10
 ----
@@ -224,8 +221,7 @@ SELECT `table_2`.`column_6` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM
 ----
 
 
-# REA-6472
-query  rowsort
+query RII rowsort
 SELECT avg(`table_2`.`column_7`) AS `alias_1`, `table_2`.`column_8` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_2` INNER JOIN `table_5` ON (`table_2`.`column_1` = `table_5`.`column_1`) WHERE (`table_2`.`column_6` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----

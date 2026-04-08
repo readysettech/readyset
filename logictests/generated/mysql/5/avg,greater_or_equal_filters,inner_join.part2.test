@@ -463,7 +463,7 @@ DELETE FROM table_5 WHERE (column_32 = 2)
 statement ok
 DELETE FROM table_5 WHERE (column_32 = 3)
 
-query  nosort
+query R nosort
 SELECT avg(table_1.column_1) AS alias_1 FROM table_1
 ----
 1.0000
@@ -518,33 +518,31 @@ SELECT table_1.column_5 AS alias_1, table_2.column_2 AS alias_2 FROM table_1 INN
 1
 1
 
-# REA-6472
-query  nosort
+query RI nosort
 SELECT avg(table_2.column_3) AS alias_1, table_2.column_4 AS alias_2 FROM table_2 WHERE (table_2.column_4 >= 1) GROUP BY table_2.column_4
 ----
 1.0000
 1
 
-# REA-6472
-query  nosort
+query RI nosort
 SELECT avg(table_2.column_5) AS alias_1, table_2.column_4 AS alias_2 FROM table_2 WHERE (table_2.column_4 >= 1) GROUP BY table_2.column_4
 ----
 1.0000
 1
 
-query  nosort
+query RI nosort
 SELECT avg(table_2.column_6) AS alias_1, table_2.column_4 AS alias_2 FROM table_2 WHERE (table_2.column_4 >= table_2.column_7) GROUP BY table_2.column_4
 ----
 1.0000
 1
 
-query  nosort
+query RI nosort
 SELECT avg(table_2.column_8) AS alias_1, table_2.column_4 AS alias_2 FROM table_2 WHERE (table_2.column_4 >= table_2.column_9) GROUP BY table_2.column_4
 ----
 1.0000
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_2.column_10) AS alias_1, table_2.column_11 AS alias_2, table_3.column_2 AS alias_3 FROM table_2 INNER JOIN table_3 ON (table_2.column_9 = table_3.column_1) GROUP BY table_2.column_11, table_3.column_2
 ----
 1.0000
@@ -631,30 +629,28 @@ SELECT table_3.column_3 AS alias_1, table_3.column_12 AS alias_2, table_7.column
 ----
 27 values hashing to da8a72a7967c0c73d91239275230aed9
 
-query  nosort
+query RII nosort
 SELECT avg(table_3.column_13) AS alias_1, table_3.column_3 AS alias_2, table_3.column_3 AS alias_3 FROM table_3 WHERE ((table_3.column_3 >= 1) OR (table_3.column_3 >= 1)) GROUP BY table_3.column_3, table_3.column_3
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_3.column_14) AS alias_1, table_3.column_3 AS alias_2, table_3.column_3 AS alias_3 FROM table_3 WHERE ((table_3.column_3 >= 1) AND (table_3.column_3 >= table_3.column_15)) GROUP BY table_3.column_3, table_3.column_3
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_3.column_16) AS alias_1, table_3.column_3 AS alias_2, table_3.column_3 AS alias_3 FROM table_3 WHERE ((table_3.column_3 >= 1) OR (table_3.column_3 >= table_3.column_17)) GROUP BY table_3.column_3, table_3.column_3
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_3.column_18) AS alias_1, table_3.column_3 AS alias_2, table_3.column_19 AS alias_3, table_8.column_2 AS alias_4 FROM table_3 INNER JOIN table_8 ON (table_3.column_14 = table_8.column_1) WHERE (table_3.column_3 >= 1) GROUP BY table_3.column_3, table_3.column_19, table_8.column_2
 ----
 1.0000
@@ -662,23 +658,21 @@ SELECT avg(table_3.column_18) AS alias_1, table_3.column_3 AS alias_2, table_3.c
 1
 1
 
-# REA-6472
-query  nosort
+query RII nosort
 SELECT avg(table_5.column_3) AS alias_1, table_5.column_4 AS alias_2, table_5.column_4 AS alias_3 FROM table_5 WHERE ((table_5.column_4 >= 1) AND (table_5.column_4 >= table_5.column_5)) GROUP BY table_5.column_4, table_5.column_4
 ----
 1.0000
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_5.column_6) AS alias_1, table_5.column_4 AS alias_2, table_5.column_4 AS alias_3 FROM table_5 WHERE ((table_5.column_4 >= 1) OR (table_5.column_4 >= table_5.column_7)) GROUP BY table_5.column_4, table_5.column_4
 ----
 1.0000
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_5.column_8) AS alias_1, table_5.column_4 AS alias_2, table_5.column_9 AS alias_3, table_9.column_2 AS alias_4 FROM table_5 INNER JOIN table_9 ON (table_5.column_8 = table_9.column_1) WHERE (table_5.column_4 >= 1) GROUP BY table_5.column_4, table_5.column_9, table_9.column_2
 ----
 1.0000
@@ -686,14 +680,14 @@ SELECT avg(table_5.column_8) AS alias_1, table_5.column_4 AS alias_2, table_5.co
 1
 1
 
-query  nosort
+query RII nosort
 SELECT avg(table_5.column_10) AS alias_1, table_5.column_4 AS alias_2, table_5.column_4 AS alias_3 FROM table_5 WHERE ((table_5.column_4 >= table_5.column_11) OR (table_5.column_4 >= table_5.column_12)) GROUP BY table_5.column_4, table_5.column_4
 ----
 1.0000
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_5.column_13) AS alias_1, table_5.column_4 AS alias_2, table_5.column_15 AS alias_3, table_10.column_2 AS alias_4 FROM table_5 INNER JOIN table_10 ON (table_5.column_8 = table_10.column_1) WHERE (table_5.column_4 >= table_5.column_14) GROUP BY table_5.column_4, table_5.column_15, table_10.column_2
 ----
 1.0000
@@ -701,7 +695,7 @@ SELECT avg(table_5.column_13) AS alias_1, table_5.column_4 AS alias_2, table_5.c
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_5.column_16) AS alias_1, table_5.column_4 AS alias_2, table_5.column_18 AS alias_3, table_11.column_2 AS alias_4 FROM table_5 INNER JOIN table_11 ON (table_5.column_11 = table_11.column_1) WHERE (table_5.column_4 >= table_5.column_17) GROUP BY table_5.column_4, table_5.column_18, table_11.column_2
 ----
 1.0000
@@ -791,7 +785,7 @@ SELECT table_10.column_3 AS alias_1, table_10.column_3 AS alias_2, table_10.colu
 ----
 36 values hashing to 00004f87f1a5ef9c1ae8120ee074bb84
 
-query  nosort
+query RIII nosort
 SELECT avg(table_17.column_3) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4 FROM table_17 WHERE (((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) AND (table_17.column_4 >= table_17.column_5)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4
 ----
 1.0000
@@ -799,7 +793,7 @@ SELECT avg(table_17.column_3) AS alias_1, table_17.column_4 AS alias_2, table_17
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_17.column_6) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4 FROM table_17 WHERE (((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) OR (table_17.column_4 >= table_17.column_7)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4
 ----
 1.0000
@@ -807,7 +801,7 @@ SELECT avg(table_17.column_6) AS alias_1, table_17.column_4 AS alias_2, table_17
 1
 1
 
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_8) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_9 AS alias_4, table_18.column_2 AS alias_5 FROM table_17 INNER JOIN table_18 ON (table_17.column_3 = table_18.column_1) WHERE ((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_9, table_18.column_2
 ----
 1.0000
@@ -816,7 +810,7 @@ SELECT avg(table_17.column_8) AS alias_1, table_17.column_4 AS alias_2, table_17
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_17.column_10) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4 FROM table_17 WHERE (((table_17.column_4 >= 1) AND (table_17.column_4 >= table_17.column_11)) OR (table_17.column_4 >= table_17.column_12)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4
 ----
 1.0000
@@ -825,11 +819,16 @@ SELECT avg(table_17.column_10) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 
 # REA-6472
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_13) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_15 AS alias_4, table_19.column_2 AS alias_5 FROM table_17 INNER JOIN table_19 ON (table_17.column_3 = table_19.column_1) WHERE ((table_17.column_4 >= 1) AND (table_17.column_4 >= table_17.column_14)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_15, table_19.column_2
 ----
+1.0000
+1
+1
+1
+1
 
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_16) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_18 AS alias_4, table_20.column_2 AS alias_5 FROM table_17 INNER JOIN table_20 ON (table_17.column_3 = table_20.column_1) WHERE ((table_17.column_4 >= 1) OR (table_17.column_4 >= table_17.column_17)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_18, table_20.column_2
 ----
 1.0000
@@ -838,7 +837,7 @@ SELECT avg(table_17.column_16) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_17.column_19) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4 FROM table_17 WHERE (((table_17.column_4 >= 1) AND (table_17.column_4 >= table_17.column_20)) OR (table_17.column_4 >= table_17.column_21)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4
 ----
 1.0000
@@ -847,11 +846,16 @@ SELECT avg(table_17.column_19) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 
 # REA-6472
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_22) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_24 AS alias_4, table_21.column_2 AS alias_5 FROM table_17 INNER JOIN table_21 ON (table_17.column_3 = table_21.column_1) WHERE ((table_17.column_4 >= 1) AND (table_17.column_4 >= table_17.column_23)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_24, table_21.column_2
 ----
+1.0000
+1
+1
+1
+1
 
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_25) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_27 AS alias_4, table_22.column_2 AS alias_5 FROM table_17 INNER JOIN table_22 ON (table_17.column_3 = table_22.column_1) WHERE ((table_17.column_4 >= 1) OR (table_17.column_4 >= table_17.column_26)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_27, table_22.column_2
 ----
 1.0000
@@ -860,7 +864,7 @@ SELECT avg(table_17.column_25) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 1
 
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_28) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_31 AS alias_4, table_23.column_2 AS alias_5 FROM table_17 INNER JOIN table_23 ON (table_17.column_27 = table_23.column_1) WHERE ((table_17.column_4 >= table_17.column_29) OR (table_17.column_4 >= table_17.column_30)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_31, table_23.column_2
 ----
 1.0000
@@ -905,7 +909,7 @@ SELECT table_17.column_4 AS alias_1, table_17.column_4 AS alias_2, table_17.colu
 ----
 45 values hashing to 930323d678b557f397333f1dc2efed79
 
-query  nosort
+query RIIII nosort
 SELECT avg(table_17.column_44) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4, table_17.column_4 AS alias_5 FROM table_17 WHERE ((((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) AND (table_17.column_4 >= table_17.column_45)) OR (table_17.column_4 >= table_17.column_46)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4, table_17.column_4
 ----
 1.0000
@@ -914,7 +918,7 @@ SELECT avg(table_17.column_44) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 1
 
-query  nosort
+query RIIIII nosort
 SELECT avg(table_17.column_47) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4, table_17.column_49 AS alias_5, table_28.column_2 AS alias_6 FROM table_17 INNER JOIN table_28 ON (table_17.column_35 = table_28.column_1) WHERE (((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) AND (table_17.column_4 >= table_17.column_48)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4, table_17.column_49, table_28.column_2
 ----
 1.0000
@@ -924,7 +928,7 @@ SELECT avg(table_17.column_47) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 1
 
-query  nosort
+query RIIIII nosort
 SELECT avg(table_17.column_50) AS alias_1, table_17.column_4 AS alias_2, table_17.column_4 AS alias_3, table_17.column_4 AS alias_4, table_17.column_52 AS alias_5, table_29.column_2 AS alias_6 FROM table_17 INNER JOIN table_29 ON (table_17.column_35 = table_29.column_1) WHERE (((table_17.column_4 >= 1) OR (table_17.column_4 >= 1)) OR (table_17.column_4 >= table_17.column_51)) GROUP BY table_17.column_4, table_17.column_4, table_17.column_4, table_17.column_52, table_29.column_2
 ----
 1.0000
@@ -934,7 +938,7 @@ SELECT avg(table_17.column_50) AS alias_1, table_17.column_4 AS alias_2, table_1
 1
 1
 
-query  nosort
+query RIIIII nosort
 SELECT avg(table_10.column_9) AS alias_1, table_10.column_3 AS alias_2, table_10.column_3 AS alias_3, table_10.column_3 AS alias_4, table_10.column_12 AS alias_5, table_30.column_2 AS alias_6 FROM table_10 INNER JOIN table_30 ON (table_10.column_2 = table_30.column_1) WHERE (((table_10.column_3 >= 1) AND (table_10.column_3 >= table_10.column_10)) OR (table_10.column_3 >= table_10.column_11)) GROUP BY table_10.column_3, table_10.column_3, table_10.column_3, table_10.column_12, table_30.column_2
 ----
 1.0000
@@ -944,7 +948,7 @@ SELECT avg(table_10.column_9) AS alias_1, table_10.column_3 AS alias_2, table_10
 1
 1
 
-query  nosort
+query RIIIII nosort
 SELECT avg(table_30.column_3) AS alias_1, table_30.column_4 AS alias_2, table_30.column_4 AS alias_3, table_30.column_4 AS alias_4, table_30.column_7 AS alias_5, table_31.column_2 AS alias_6 FROM table_30 INNER JOIN table_31 ON (table_30.column_1 = table_31.column_1) WHERE (((table_30.column_4 >= 1) AND (table_30.column_4 >= table_30.column_5)) OR (table_30.column_4 >= table_30.column_6)) GROUP BY table_30.column_4, table_30.column_4, table_30.column_4, table_30.column_7, table_31.column_2
 ----
 1.0000
@@ -959,7 +963,7 @@ SELECT table_30.column_4 AS alias_1, table_30.column_4 AS alias_2, table_30.colu
 ----
 54 values hashing to ad3049ffb0fc76f4c8b8a6e301076ea3
 
-query  nosort
+query RIIIIII nosort
 SELECT avg(table_30.column_11) AS alias_1, table_30.column_4 AS alias_2, table_30.column_4 AS alias_3, table_30.column_4 AS alias_4, table_30.column_4 AS alias_5, table_30.column_14 AS alias_6, table_33.column_2 AS alias_7 FROM table_30 INNER JOIN table_33 ON (table_30.column_1 = table_33.column_1) WHERE ((((table_30.column_4 >= 1) OR (table_30.column_4 >= 1)) AND (table_30.column_4 >= table_30.column_12)) OR (table_30.column_4 >= table_30.column_13)) GROUP BY table_30.column_4, table_30.column_4, table_30.column_4, table_30.column_4, table_30.column_14, table_33.column_2
 ----
 1.0000

@@ -440,7 +440,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_113) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) AND (table_1.column_2 <= table_1.column_114)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -448,7 +448,7 @@ SELECT avg(table_1.column_113) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_115) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) OR (table_1.column_2 <= table_1.column_116)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -456,11 +456,11 @@ SELECT avg(table_1.column_115) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_117) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_118) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -468,7 +468,7 @@ SELECT avg(table_1.column_118) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_119) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -476,7 +476,7 @@ SELECT avg(table_1.column_119) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_120) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= 1)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -484,7 +484,7 @@ SELECT avg(table_1.column_120) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_121) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_122)) OR (table_1.column_2 <= table_1.column_123)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -492,17 +492,19 @@ SELECT avg(table_1.column_121) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_124) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_125)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_126) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_127)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
+1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_128) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_129)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -510,7 +512,7 @@ SELECT avg(table_1.column_128) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_130) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_131)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -518,11 +520,11 @@ SELECT avg(table_1.column_130) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_132) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_133)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_134) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_135)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -530,7 +532,7 @@ SELECT avg(table_1.column_134) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_136) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_137)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -538,7 +540,7 @@ SELECT avg(table_1.column_136) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_138) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_139)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -546,16 +548,15 @@ SELECT avg(table_1.column_138) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_140) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_141) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_142) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -563,7 +564,7 @@ SELECT avg(table_1.column_142) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_143) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -571,7 +572,7 @@ SELECT avg(table_1.column_143) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_144) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -579,7 +580,7 @@ SELECT avg(table_1.column_144) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_145) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -587,7 +588,7 @@ SELECT avg(table_1.column_145) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_146) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_147)) OR (table_1.column_2 <= table_1.column_148)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -595,17 +596,19 @@ SELECT avg(table_1.column_146) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_149) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_150)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_151) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_152)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
+1.0000
+1
+1
+1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_153) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_154)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -613,7 +616,7 @@ SELECT avg(table_1.column_153) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_155) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 <= table_1.column_156)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -621,11 +624,11 @@ SELECT avg(table_1.column_155) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_157) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_158)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_159) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_160)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -633,7 +636,7 @@ SELECT avg(table_1.column_159) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_161) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_162)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -641,7 +644,7 @@ SELECT avg(table_1.column_161) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_163) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 <= table_1.column_164)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -649,16 +652,15 @@ SELECT avg(table_1.column_163) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-# REA-6472
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_165) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_166) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_167) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -666,7 +668,7 @@ SELECT avg(table_1.column_167) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_168) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -674,7 +676,7 @@ SELECT avg(table_1.column_168) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_169) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -682,7 +684,7 @@ SELECT avg(table_1.column_169) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_170) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= 1) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -690,11 +692,11 @@ SELECT avg(table_1.column_170) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_171) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_172) OR (table_1.column_2 <= table_1.column_173)) AND (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_174) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_175) OR (table_1.column_2 <= table_1.column_176)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -702,7 +704,7 @@ SELECT avg(table_1.column_174) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_177) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_178) OR (table_1.column_2 <= table_1.column_179)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -710,7 +712,7 @@ SELECT avg(table_1.column_177) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_180) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_181) OR (table_1.column_2 <= table_1.column_182)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -718,15 +720,15 @@ SELECT avg(table_1.column_180) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_183) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_184) AND (table_1.column_2 IS NULL)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_185) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_186) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_187) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_188) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -734,7 +736,7 @@ SELECT avg(table_1.column_187) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_189) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_190) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -742,7 +744,7 @@ SELECT avg(table_1.column_189) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_191) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_192) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -750,7 +752,7 @@ SELECT avg(table_1.column_191) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_193) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_194) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -758,15 +760,15 @@ SELECT avg(table_1.column_193) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_195) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_196) AND (table_1.column_2 IS NULL)) AND (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_197) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_198) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_199) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_200) AND (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -774,7 +776,7 @@ SELECT avg(table_1.column_199) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_201) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_202) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -782,7 +784,7 @@ SELECT avg(table_1.column_201) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_203) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_204) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -790,7 +792,7 @@ SELECT avg(table_1.column_203) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_205) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 <= table_1.column_206) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -798,11 +800,11 @@ SELECT avg(table_1.column_205) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_207) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_208) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -810,7 +812,7 @@ SELECT avg(table_1.column_208) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_209) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -818,7 +820,7 @@ SELECT avg(table_1.column_209) AS alias_1, table_1.column_2 AS alias_2, table_1.
 1
 1
 
-query  nosort
+query RIII nosort
 SELECT avg(table_1.column_210) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000

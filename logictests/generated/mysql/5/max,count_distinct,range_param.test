@@ -40,15 +40,13 @@ SELECT max(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 ----
 1180725887
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
 3
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT max(`table_1`.`column_7`) AS `alias_1`, count(distinct `table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -105,15 +103,13 @@ SELECT max(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 ----
 -74528318
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT max(`table_1`.`column_7`) AS `alias_1`, count(distinct `table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----

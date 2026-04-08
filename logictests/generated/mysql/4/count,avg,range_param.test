@@ -14,7 +14,7 @@ SELECT count(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 10
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 113839399.0000
@@ -29,7 +29,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 521957865
 59841264
 
-query  rowsort
+query IR rowsort
 SELECT count(`table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 10
@@ -41,15 +41,13 @@ SELECT count(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.
 ----
 6
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 -639324190.1667
 
-# REA-6472
-query  rowsort
+query IR rowsort
 SELECT count(`table_1`.`column_7`) AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -81,7 +79,7 @@ SELECT count(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 5
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 166003597.0000
@@ -93,7 +91,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1013007376
 2096215082
 
-query  rowsort
+query IR rowsort
 SELECT count(`table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 5
@@ -105,15 +103,13 @@ SELECT count(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.
 ----
 3
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 124664078.6667
 
-# REA-6472
-query  rowsort
+query IR rowsort
 SELECT count(`table_1`.`column_7`) AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----

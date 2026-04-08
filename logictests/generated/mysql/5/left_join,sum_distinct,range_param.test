@@ -100,15 +100,13 @@ NULL
 774905686
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_7`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_6` > ?)
 ? = 10
 ----
 1763288933
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_2`.`column_8` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, sum(distinct `table_2`.`column_9`) AS `alias_3` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_6` = `table_5`.`column_1`) WHERE (`table_2`.`column_1` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----
@@ -273,15 +271,13 @@ NULL
 774905686
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_2`.`column_7`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_6` > ?)
 ? = 10
 ----
 1400860248
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_2`.`column_8` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, sum(distinct `table_2`.`column_9`) AS `alias_3` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_6` = `table_5`.`column_1`) WHERE (`table_2`.`column_1` > ?) GROUP BY `table_2`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----

@@ -105,8 +105,7 @@ statement ok
 INSERT INTO `table_3` (`column_3`, `column_2`, `column_1`) VALUES (0, 1300272764, -48967852), (1, -1854998224, 1823970637), (2, 452866382, 679170505), (3, 1381876487, -505424594), (4, 361838356, -758393123), (5, -759745617, -1954164575), (6, 1239868616, 2075807798), (7, 1338365776, -1892215708), (8, 1794174097, -1994455703), (9, -594168541, 192551109)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_5` AS (SELECT `table_1`.`column_3` AS `alias_3`, `table_3`.`column_2` AS `alias_4` FROM `table_1` LEFT JOIN `table_3` ON (`table_1`.`column_1` = `table_3`.`column_1`)) SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`) INNER JOIN `alias_5` ON (`table_1`.`column_3` = `alias_5`.`alias_3`)
 ----
 -270441754
@@ -140,8 +139,7 @@ WITH `alias_5` AS (SELECT `table_1`.`column_6` AS `alias_3`, `table_6`.`column_2
 ----
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_3` AS (SELECT `table_1`.`column_7` AS `alias_1`, `table_7`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_7` ON (`table_1`.`column_4` = `table_7`.`column_1`)) SELECT `table_1`.`column_7` AS `alias_4` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_7` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -154,8 +152,7 @@ WITH `alias_3` AS (SELECT `table_1`.`column_7` AS `alias_1`, `table_7`.`column_2
 -643723678
 169339757
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
@@ -174,8 +171,7 @@ WITH `alias_5` AS (SELECT `table_9`.`column_3` AS `alias_3`, `table_10`.`column_
 ----
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_4` AS (SELECT `table_4`.`column_2` AS `alias_3` FROM `table_4`) SELECT `table_4`.`column_4` AS `alias_1`, `table_11`.`column_2` AS `alias_2` FROM `table_4` LEFT JOIN `table_11` ON (`table_4`.`column_3` = `table_11`.`column_1`) INNER JOIN `alias_4` ON (`table_4`.`column_2` = `alias_4`.`alias_3`) WHERE (`table_4`.`column_2` > ?)
 ? = 10
 ----
@@ -452,8 +448,7 @@ statement ok
 DELETE FROM `table_3` WHERE (`column_3` = 4)
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_5` AS (SELECT `table_1`.`column_3` AS `alias_3`, `table_3`.`column_2` AS `alias_4` FROM `table_1` LEFT JOIN `table_3` ON (`table_1`.`column_1` = `table_3`.`column_1`)) SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`) INNER JOIN `alias_5` ON (`table_1`.`column_3` = `alias_5`.`alias_3`)
 ----
 -270441754
@@ -477,8 +472,7 @@ WITH `alias_5` AS (SELECT `table_1`.`column_6` AS `alias_3`, `table_6`.`column_2
 ----
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_3` AS (SELECT `table_1`.`column_7` AS `alias_1`, `table_7`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_7` ON (`table_1`.`column_4` = `table_7`.`column_1`)) SELECT `table_1`.`column_7` AS `alias_4` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_7` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -488,8 +482,7 @@ WITH `alias_3` AS (SELECT `table_1`.`column_7` AS `alias_1`, `table_7`.`column_2
 -249788754
 -322039093
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_2` AS (SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
@@ -507,8 +500,7 @@ WITH `alias_5` AS (SELECT `table_9`.`column_3` AS `alias_3`, `table_10`.`column_
 ----
 
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 WITH `alias_4` AS (SELECT `table_4`.`column_2` AS `alias_3` FROM `table_4`) SELECT `table_4`.`column_4` AS `alias_1`, `table_11`.`column_2` AS `alias_2` FROM `table_4` LEFT JOIN `table_11` ON (`table_4`.`column_3` = `table_11`.`column_1`) INNER JOIN `alias_4` ON (`table_4`.`column_2` = `alias_4`.`alias_3`) WHERE (`table_4`.`column_2` > ?)
 ? = 10
 ----

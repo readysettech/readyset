@@ -37,7 +37,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`colu
 -1836334485
 -2144231981
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 529134847.1000
@@ -67,7 +67,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`colu
 -1836334485
 -2144231981
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -651400330.0000
@@ -92,7 +92,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 2019958742
 2052811060
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 871227781.0000
@@ -117,14 +117,13 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 710427253
 629936266
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 -673807711.5000
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 -1777461740.0000
@@ -149,8 +148,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 710427253
 629936266
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?) GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -161,8 +159,7 @@ SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 1586875315.0000
 -1904145821.0000
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_8` > ?) GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -171,8 +168,7 @@ SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 1542103631.0000
 710511266.0000
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_9`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_8` > ?) GROUP BY `table_1`.`column_8` ORDER BY `table_1`.`column_8` DESC LIMIT 10
 ? = 10
 ----
@@ -219,7 +215,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`colu
 -822848234
 -1560574510
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 584619741.6000
@@ -241,7 +237,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`colu
 -822848234
 -1560574510
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -548658993.0000
@@ -258,7 +254,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1172979694
 2052811060
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 871227781.0000
@@ -275,14 +271,13 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1172979694
 710427253
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 -922316652.3333
 
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 -1777461740.0000
@@ -299,8 +294,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1172979694
 710427253
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?) GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -308,8 +302,7 @@ SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 -333524396.0000
 -1904145821.0000
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_8` > ?) GROUP BY `table_1`.`column_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -318,8 +311,7 @@ SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 1542103631.0000
 710511266.0000
 
-# REA-6472
-query  nosort
+query R nosort
 SELECT avg(`table_1`.`column_9`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_8` > ?) GROUP BY `table_1`.`column_8` ORDER BY `table_1`.`column_8` DESC LIMIT 10
 ? = 10
 ----

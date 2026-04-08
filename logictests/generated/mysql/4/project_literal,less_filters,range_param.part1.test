@@ -8,8 +8,7 @@ CREATE TABLE `table_1` (`column_2` INT, `column_1` INT, `column_3` INT, PRIMARY 
 statement ok
 INSERT INTO `table_1` (`column_2`, `column_1`, `column_3`) VALUES (1, -352748636, 0), (-1144166299, 1871394568, 1), (1, 120291823, 2), (-620106426, -807563967, 3), (1, 1801343542, 4), (-943895665, -2053684351, 5), (1, 2000563812, 6), (1759732738, 265909046, 7), (1, 2109126474, 8), (319056682, -45245815, 9)
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported
 SELECT 1 AS `alias_1`
 ----
 1

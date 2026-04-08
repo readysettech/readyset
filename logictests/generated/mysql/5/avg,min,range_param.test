@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_9`, `column_5`, `column_3`, `column_8`, `column_1`, `column_4`, `column_6`, `column_7`, `column_2`) VALUES (0, 1117701116, -2004868430, -1280253093, 2120867055, 1571379396, 395767502, -1746818203, -1479365329), (1, 255502157, -1411354336, 1512234571, 1298098769, 964507451, -1844910430, 696500517, -907351910), (2, -2061262636, -812904446, -1420108466, -819662201, 315920888, -1197519406, 313511229, 986333210), (3, 1435282413, -189440279, -859235645, -1663378660, 986323083, -1860108739, -1662308766, 1158039933), (4, -531675926, 1004019551, -1468246025, 998054554, -441099925, -1516780574, -1689679823, -2012983553), (5, -893736614, -2022708377, -994400823, -1367712662, 1455725882, 720330425, 407958342, -511272596), (6, 1932769243, 1707993256, -796150213, 1415261140, -1107527967, -1351756198, -2033185521, 78315478), (7, 1930935414, -1503138251, -1147523527, -1701313058, 287197902, 1575315892, -1319404987, -94323745), (8, 953073705, 1451444441, 844508837, 488302021, -2027641982, -1297247771, 1767351984, 1726576122), (9, -600957208, -926188527, -1557257449, 777168787, 878352864, -732312938, 2011944863, -2025007312)
 
 
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 154568574.5000
@@ -35,8 +35,7 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1`, min(`table_1`.`column_4`) AS `ali
 -470714539.8000
 -2027641982
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -49,7 +48,7 @@ SELECT min(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 395767502
 
 # REA-6472
-query  rowsort
+query  rowsort error: Incorrect\ values\ returned
 SELECT avg(`table_1`.`column_7`) AS `alias_1`, min(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -101,8 +100,7 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1`, min(`table_1`.`column_4`) AS `ali
 -258519491.6000
 -2027641982
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -115,7 +113,7 @@ SELECT min(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 720330425
 
 # REA-6472
-query  rowsort
+query  rowsort error: Incorrect\ values\ returned
 SELECT avg(`table_1`.`column_7`) AS `alias_1`, min(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----

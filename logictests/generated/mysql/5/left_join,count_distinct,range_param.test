@@ -102,15 +102,13 @@ NULL
 935114773
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
 6
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_8` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, count(distinct `table_1`.`column_9`) AS `alias_3` FROM `table_1` LEFT JOIN `table_5` ON (`table_1`.`column_2` = `table_5`.`column_1`) WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----
@@ -286,15 +284,13 @@ NULL
 1932829067
 NULL
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
 3
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_8` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, count(distinct `table_1`.`column_9`) AS `alias_3` FROM `table_1` LEFT JOIN `table_5` ON (`table_1`.`column_2` = `table_5`.`column_1`) WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_8`, `table_5`.`column_2`
 ? = 10
 ----

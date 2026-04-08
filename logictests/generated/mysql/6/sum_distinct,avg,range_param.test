@@ -38,22 +38,19 @@ SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`
 3169667993
 -385563530.7000
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 3821960840
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 -540699624.1667
 
-# REA-6472
-query  rowsort
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_7`) AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
@@ -108,21 +105,20 @@ SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`
 -343495489.4000
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 -89029703
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
 -277339801.3333
 
 # REA-6472
-query  rowsort
+query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_7`) AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----

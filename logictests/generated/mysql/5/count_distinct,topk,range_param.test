@@ -79,8 +79,7 @@ SELECT count(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY
 1
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -132,8 +131,7 @@ SELECT count(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` GROUP BY
 1
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
@@ -142,8 +140,7 @@ SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`
 1
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` DESC LIMIT 10
 ? = 10
 ----
@@ -161,8 +158,7 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 424951613
 69676490
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` DESC LIMIT 10
 ? = 10
 ----
@@ -239,8 +235,7 @@ SELECT count(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` GROUP BY
 1
 1
 
-# REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -276,15 +271,13 @@ SELECT count(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` GROUP BY
 1
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
 1
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` DESC LIMIT 10
 ? = 10
 ----
@@ -296,8 +289,7 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 ----
 69676490
 
-# REA-6472
-query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  nosort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` DESC LIMIT 10
 ? = 10
 ----

@@ -32,8 +32,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1805122233
 684435408
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
@@ -41,7 +40,7 @@ SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`
 1176991589.0000
 
 # REA-6472
-query  rowsort
+query  rowsort error: Incorrect\ values\ returned
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
@@ -59,8 +58,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 309460304
 876952483
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
@@ -107,16 +105,14 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 ----
 684435408
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10
 ----
 1023742502.0000
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
@@ -131,8 +127,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`colu
 1738024700
 309460304
 
-# REA-6472
-query  rowsort
+query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` > ?) AND (`table_1`.`column_2` > ?)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ? = 10

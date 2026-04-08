@@ -14,7 +14,7 @@ SELECT group_concat(`table_1`.`column_1` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_3` separator ', ') AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -24,13 +24,13 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Internal\ error:\ Column\ table_1\.column_6\ not\ found
+query  rowsort error: Column\ table_1\.column_6\ not\ found
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_6` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -46,13 +46,13 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_9` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_10` separator ', ') AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_10` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_11` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_10` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_10` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -89,7 +89,7 @@ SELECT group_concat(`table_1`.`column_1` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_3` separator ', ') AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -99,13 +99,13 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Internal\ error:\ Column\ table_1\.column_6\ not\ found
+query  rowsort error: Column\ table_1\.column_6\ not\ found
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_6` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -118,13 +118,13 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_9` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_10` separator ', ') AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_10` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_11` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_10` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_10` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
