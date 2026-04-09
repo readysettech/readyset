@@ -11,6 +11,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::future::Future;
 use std::io::Write;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -400,6 +401,7 @@ async fn run_queries(
     upstream: &mut DatabaseConnection,
     readyset: &mut DatabaseConnection,
     stats: &mut PatternStats,
+    repro: &mut ReproLog,
 ) -> anyhow::Result<(usize, usize)> {
     let config = GeneratorConfig {
         readyset_compatible: true,
@@ -459,6 +461,9 @@ async fn run_queries(
                     let create_stmt = table_schema_to_create_table(schema);
                     let sql = create_stmt.display(dialect).to_string();
                     debug!(%sql, "executing CREATE TABLE on upstream");
+                    // `drop_sql` deliberately NOT recorded: it's cross-run
+                    // startup hygiene that would wipe seed data on replay.
+                    repro.record_ddl(query_idx, &sql);
                     with_reconnect_on_drop(
                         upstream,
                         upstream_url,
@@ -477,6 +482,7 @@ async fn run_queries(
                         let insert = build_insert(schema, &rows)?;
                         let insert_sql = insert.display(dialect).to_string();
                         debug!(table = %name, rows = rows.len(), "inserting seed data");
+                        repro.record_ddl(query_idx, &insert_sql);
                         with_reconnect_on_drop(
                             upstream,
                             upstream_url,
@@ -511,6 +517,7 @@ async fn run_queries(
                         meta.sql_type.display(dialect)
                     );
                     debug!(%sql, "executing ALTER TABLE on upstream");
+                    repro.record_ddl(query_idx, &sql);
                     with_reconnect_on_drop(
                         upstream,
                         upstream_url,
@@ -533,6 +540,7 @@ async fn run_queries(
                         Expr::Literal(lit).display(dialect)
                     );
                     debug!(%update_sql, "backfilling new column");
+                    repro.record_ddl(query_idx, &update_sql);
                     with_reconnect_on_drop(
                         upstream,
                         upstream_url,
@@ -589,6 +597,7 @@ async fn run_queries(
             .with_context(|| format!("converting params for: {select_sql}"))?;
 
         debug!(%select_sql, param_count = params.len(), "executing SELECT on both");
+        repro.record_select(query_idx, &pattern_name, &select_sql, &params);
 
         // Execute on upstream (deterministic source of truth).
         let upstream_results = match with_reconnect_on_drop(
@@ -1901,6 +1910,15 @@ struct ConstraintFuzz {
     /// drops, syscall stalls) cannot stall a run forever.
     #[arg(long, default_value = "30")]
     db_op_timeout_secs: u64,
+
+    /// Write a SQL reproduction script to this path.
+    ///
+    /// The file is written on error, or at the end of every run if this flag is
+    /// set.  It contains all DDL, INSERT, and SELECT statements in execution
+    /// order, forming a self-contained script that reproduces the database state
+    /// at the point of failure.
+    #[arg(long)]
+    dump_repro: Option<PathBuf>,
 }
 
 impl ConstraintFuzz {
@@ -1976,7 +1994,9 @@ impl ConstraintFuzz {
                 .context("connecting to readyset")?;
         assert_reachable!("Connected to both upstream and Readyset", &json!({}));
 
-        let (matched, mismatched) = run_queries(
+        let mut repro = ReproLog::new(dialect, seed_display.clone());
+
+        let result = run_queries(
             dialect,
             self.num_queries,
             self.rows_per_table,
@@ -1986,8 +2006,55 @@ impl ConstraintFuzz {
             &mut upstream,
             &mut readyset,
             &mut stats,
+            &mut repro,
         )
-        .await?;
+        .await;
+
+        // Two write paths with different failure semantics:
+        //  - Explicit (`--dump-repro`): user asked for the artifact; a write
+        //    error is fatal so we don't exit 0 with the artifact silently
+        //    lost. Always also dump to stderr so the artifact is captured in
+        //    Antithesis container snapshots even if the tmpfs path vanishes.
+        //  - Fallback (on-error): best-effort to a temp dir; on write error
+        //    fall back to stderr but don't change the original exit status.
+        match (&self.dump_repro, result.is_err()) {
+            (Some(path), _) => {
+                let dump_result = repro.write_to(path);
+                repro.dump_to_stderr();
+                let n = dump_result.with_context(|| {
+                    format!(
+                        "writing requested reproduction script to {}",
+                        path.display()
+                    )
+                })?;
+                info!(
+                    path = %path.display(),
+                    statements = n,
+                    "wrote reproduction script"
+                );
+            }
+            (None, true) => {
+                let path = std::env::temp_dir().join("readyset-dante-oracle-repro.sql");
+                match repro.write_to(&path) {
+                    Ok(n) => info!(
+                        path = %path.display(),
+                        statements = n,
+                        "wrote reproduction script (fallback)"
+                    ),
+                    Err(e) => {
+                        error!(
+                            path = %path.display(),
+                            err = %e,
+                            "failed to write reproduction script — dumping to stderr"
+                        );
+                        repro.dump_to_stderr();
+                    }
+                }
+            }
+            (None, false) => {}
+        }
+
+        let (matched, mismatched) = result?;
 
         assert_sometimes!(
             matched > 0,
@@ -2393,6 +2460,7 @@ mod tests {
             compare_to: "mysql://root:noria@localhost/test".to_string(),
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
+            dump_repro: None,
         };
         assert_eq!(fuzz.dialect().expect("valid mysql url"), Dialect::MySQL);
     }
@@ -2407,6 +2475,7 @@ mod tests {
             compare_to: "postgresql://postgres:noria@localhost/test".to_string(),
             readyset_url: "postgresql://postgres:noria@localhost:5433/test".to_string(),
             db_op_timeout_secs: 30,
+            dump_repro: None,
         };
         assert_eq!(
             fuzz.dialect().expect("valid postgres url"),
@@ -2424,6 +2493,7 @@ mod tests {
             compare_to: "mysql://root:noria@localhost/test".to_string(),
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
+            dump_repro: None,
         };
         let mut rng1 = fuzz.make_rng();
         let mut rng2 = fuzz.make_rng();
@@ -2440,6 +2510,7 @@ mod tests {
             compare_to: "mysql://root:noria@localhost/test".to_string(),
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
+            dump_repro: None,
         };
         let mut rng = fuzz.make_rng();
         let _ = rng.next_u64();
@@ -2848,5 +2919,82 @@ mod tests {
     fn is_permanent_connection_error_unrelated_text_is_not_permanent() {
         let err = anyhow::anyhow!("temporary network failure");
         assert!(!is_permanent_connection_error(&err));
+    }
+
+    #[test]
+    fn repro_select_inlines_params_and_keeps_raw_form() {
+        let mut log = ReproLog::new(Dialect::MySQL, "42".to_string());
+        log.record_select(
+            0,
+            "single_parameter",
+            "SELECT * FROM t WHERE c = ?",
+            &[Value::Integer(99)],
+        );
+        let body = log.statements.join("\n");
+        // Inlined form must be present so the script is replayable as-is.
+        assert!(
+            body.contains("WHERE c = 99"),
+            "expected inlined param value: {body}"
+        );
+        // Raw placeholder form preserved as comment for cross-checking.
+        assert!(
+            body.contains("-- raw: SELECT * FROM t WHERE c = ?"),
+            "expected raw form comment: {body}"
+        );
+    }
+
+    #[test]
+    fn repro_header_records_seed_and_dialect() {
+        let log = ReproLog::new(Dialect::PostgreSQL, "12345".to_string());
+        let header = log.header();
+        assert!(header.contains("seed: 12345"), "expected seed: {header}");
+        assert!(
+            header.contains("dialect: PostgreSQL"),
+            "expected dialect: {header}"
+        );
+        assert!(
+            header.contains("not server-side\n-- nondeterminism"),
+            "expected scope-disclosure: {header}"
+        );
+    }
+
+    #[test]
+    fn repro_does_not_record_drop_table_through_record_ddl_alone() {
+        // Sanity that the run_queries call site is the only producer of DROP
+        // TABLE recording. record_ddl unconditionally records anything passed
+        // to it; it's the call site that must NOT pass `drop_sql`. This test
+        // documents the invariant: anything containing "DROP TABLE IF EXISTS"
+        // would replay as a destructive statement.
+        let mut log = ReproLog::new(Dialect::MySQL, "0".to_string());
+        log.record_ddl(0, "CREATE TABLE t (id INT)");
+        let body = log.statements.join("\n");
+        assert!(
+            !body.contains("DROP TABLE"),
+            "record_ddl was passed CREATE only — must not contain DROP: {body}"
+        );
+    }
+
+    #[test]
+    fn repro_write_to_emits_self_consistent_script() {
+        let mut log = ReproLog::new(Dialect::MySQL, "7".to_string());
+        log.record_ddl(0, "CREATE TABLE t (a INT)");
+        log.record_ddl(0, "INSERT INTO t (a) VALUES (1)");
+        log.record_select(1, "single_table", "SELECT a FROM t", &[]);
+
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("dante-repro-test-{}.sql", std::process::id()));
+        let n = log.write_to(&path).expect("write succeeds");
+        assert_eq!(n, 3);
+
+        let contents = std::fs::read_to_string(&path).expect("read succeeds");
+        assert!(contents.contains("CREATE TABLE t"));
+        assert!(contents.contains("INSERT INTO t"));
+        assert!(contents.contains("SELECT a FROM t"));
+        // Header must precede statements.
+        let header_pos = contents.find("dialect").expect("header dialect");
+        let create_pos = contents.find("CREATE TABLE").expect("create");
+        assert!(header_pos < create_pos);
+
+        std::fs::remove_file(&path).ok();
     }
 }
