@@ -37,6 +37,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-tracing = { path = "../readyset-tracing" }
+readyset-util = { path = "../readyset-util" }
 dante = { path = "../dante" }
 
 [lints]

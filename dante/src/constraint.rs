@@ -5,7 +5,9 @@
 //! generated. Constraints are the primitive building blocks that patterns
 //! are composed from.
 
-use readyset_sql::ast::{BinaryOperator, JoinOperator, NullOrder, OrderType, SqlType};
+use readyset_sql::ast::{
+    BinaryOperator, CompoundSelectOperator, JoinOperator, NullOrder, OrderType, SqlType,
+};
 
 use crate::var::VarId;
 
@@ -289,6 +291,16 @@ pub enum Constraint {
         shared_vars: Vec<VarId>,
     },
 
+    /// A compound SELECT (UNION ALL, UNION DISTINCT, INTERSECT, EXCEPT).
+    /// Each branch is a self-contained set of constraints that resolves to
+    /// an independent SelectStatement; the branches are combined with the
+    /// given operator. ORDER BY and LIMIT constraints alongside this one
+    /// in the outer list apply to the compound result.
+    CompoundSelect {
+        operator: CompoundSelectOperator,
+        branches: Vec<Vec<Constraint>>,
+    },
+
     // --- Disjunctive ---
     /// Disjunctive constraint: if all constraints in the first branch are
     /// satisfied, nothing happens. If any constraint in the first branch
@@ -356,6 +368,7 @@ impl Constraint {
             Constraint::OrderBy { col, table, .. } => vec![*col, *table],
             Constraint::SubqueryExpr { .. } => vec![],
             Constraint::SubqueryRelation { alias, .. } => vec![*alias],
+            Constraint::CompoundSelect { .. } => vec![],
             Constraint::Or(preferred, fallback) => {
                 let mut ids: Vec<VarId> = preferred.iter().flat_map(|c| c.var_ids()).collect();
                 ids.extend(fallback.iter().flat_map(|c| c.var_ids()));
@@ -543,6 +556,13 @@ impl Constraint {
                 alias: f(*alias),
                 constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
                 shared_vars: shared_vars.iter().copied().map(&f).collect(),
+            },
+            Constraint::CompoundSelect { operator, branches } => Constraint::CompoundSelect {
+                operator: operator.clone(),
+                branches: branches
+                    .iter()
+                    .map(|branch| branch.iter().map(|c| c.map_var_ids(f)).collect())
+                    .collect(),
             },
             Constraint::Or(preferred, fallback) => Constraint::Or(
                 preferred.iter().map(|c| c.map_var_ids(f)).collect(),

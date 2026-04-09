@@ -86,6 +86,53 @@ pub fn has_constraint(constraints: &[Constraint], pred: fn(&Constraint) -> bool)
     constraints.iter().any(pred)
 }
 
+/// True for any constraint that the compound-SELECT outer scope can't host.
+/// `CompoundSelect` is a complete query shape; only `OrderBy` / `Limit` and
+/// schema/unification metadata are valid alongside it at the outer level.
+///
+/// Exhaustive match over [`Constraint`] (no `_` arm) so adding a new variant
+/// forces an explicit decision. **Adding a new `Constraint` variant?**
+/// Update this match.
+fn forbids_compound_compose(c: &Constraint) -> bool {
+    match c {
+        // OK alongside a CompoundSelect at outer level.
+        Constraint::CompoundSelect { .. }
+        | Constraint::OrderBy { .. }
+        | Constraint::Limit { .. }
+        | Constraint::BaseTable(_)
+        | Constraint::AliasOf { .. }
+        | Constraint::ColumnExists { .. }
+        | Constraint::ColumnTypeClass { .. }
+        | Constraint::TypeCompatible(_, _)
+        | Constraint::Eq(_, _)
+        | Constraint::NotEq(_, _) => false,
+        // Anything else is a structural/projection/filter that would need a
+        // wrapper SELECT around the compound, which we don't emit.
+        Constraint::From(_)
+        | Constraint::Join { .. }
+        | Constraint::ProjectColumn { .. }
+        | Constraint::ProjectAggregate { .. }
+        | Constraint::ProjectFunction { .. }
+        | Constraint::ProjectLiteral { .. }
+        | Constraint::SubqueryExpr { .. }
+        | Constraint::SubqueryRelation { .. }
+        | Constraint::Or(_, _)
+        | Constraint::WhereParam { .. }
+        | Constraint::WhereInParam { .. }
+        | Constraint::WhereRangeParam { .. }
+        | Constraint::WhereLike { .. }
+        | Constraint::WhereIsNull { .. }
+        | Constraint::WhereBetweenParam { .. }
+        | Constraint::WhereColumnCompare { .. }
+        | Constraint::WhereOr { .. }
+        | Constraint::GroupBy { .. }
+        | Constraint::Having { .. }
+        | Constraint::HavingKeyFilter { .. }
+        | Constraint::Distinct
+        | Constraint::WindowFunction { .. } => true,
+    }
+}
+
 /// Check if any subquery or CTE nested within these constraints
 /// contains a constraint matching the predicate. Recurses into all nested scopes.
 pub fn any_nested_contains(constraints: &[Constraint], pred: fn(&Constraint) -> bool) -> bool {
@@ -292,6 +339,23 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                 })
             }),
             reason: "DISTINCT with ORDER BY on unprojected column (MySQL error 3065)",
+        },
+        // Compound patterns (UNION ALL, etc.) are complete query shapes that
+        // cannot be composed with other patterns. Forbidden set is
+        // `forbids_compound_compose` (exhaustive match) so it can't drift
+        // as new variants are added.
+        CompatibilityRule {
+            name: "compound_select_no_compose",
+            condition: CompatCondition::Custom(|constraints| {
+                let has_compound = has_constraint(constraints, |c| {
+                    matches!(c, Constraint::CompoundSelect { .. })
+                });
+                if !has_compound {
+                    return false;
+                }
+                has_constraint(constraints, forbids_compound_compose)
+            }),
+            reason: "compound SELECT cannot be composed with other patterns",
         },
         // `HavingKeyFilter { col }` only makes sense when `col` is a
         // GROUP BY key — otherwise MySQL `only_full_group_by` rejects the
@@ -747,6 +811,104 @@ mod tests {
         assert!(
             result.is_none(),
             "DISTINCT + ORDER BY with projected column should be allowed"
+        );
+    }
+
+    #[test]
+    fn having_key_filter_without_matching_group_by_is_rejected() {
+        // HavingKeyFilter on a column NOT in GROUP BY would trigger MySQL
+        // `only_full_group_by` at runtime; reject it locally instead.
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::HavingKeyFilter {
+                col: VarId(1),
+                table: VarId(0),
+                op: readyset_sql::ast::BinaryOperator::Equal,
+            },
+            // Different column in GROUP BY — does NOT match the key filter.
+            Constraint::GroupBy {
+                col: VarId(2),
+                table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "HavingKeyFilter without matching GroupBy must be rejected"
+        );
+    }
+
+    #[test]
+    fn having_key_filter_with_matching_group_by_is_allowed() {
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::HavingKeyFilter {
+                col: VarId(1),
+                table: VarId(0),
+                op: readyset_sql::ast::BinaryOperator::Equal,
+            },
+            // Same column appears in GROUP BY → key filter is well-formed.
+            Constraint::GroupBy {
+                col: VarId(1),
+                table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_none(),
+            "HavingKeyFilter on a GROUP BY column must be allowed"
+        );
+    }
+
+    #[test]
+    fn forbids_compound_compose_fires_on_outer_filter() {
+        // CompoundSelect + outer WhereColumnCompare → reject. This variant
+        // was missing from the old hand-listed allowlist and would have
+        // been silently dropped.
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::CompoundSelect {
+                operator: readyset_sql::ast::CompoundSelectOperator::UnionAll,
+                branches: vec![vec![Constraint::From(VarId(0))]],
+            },
+            Constraint::WhereColumnCompare {
+                left_col: VarId(0),
+                left_table: VarId(0),
+                op: readyset_sql::ast::BinaryOperator::Equal,
+                right_col: VarId(0),
+                right_table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "CompoundSelect + WhereColumnCompare should be rejected (was a \
+             gap in the old hand-listed allowlist)"
+        );
+    }
+
+    #[test]
+    fn forbids_compound_compose_allows_order_by_and_limit() {
+        // CompoundSelect + outer ORDER BY / LIMIT is supported by the
+        // resolver and must NOT trigger the rule.
+        use readyset_sql::ast::OrderType;
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::CompoundSelect {
+                operator: readyset_sql::ast::CompoundSelectOperator::UnionAll,
+                branches: vec![vec![Constraint::From(VarId(0))]],
+            },
+            Constraint::OrderBy {
+                col: VarId(0),
+                table: VarId(0),
+                direction: OrderType::OrderAscending,
+                null_order: None,
+            },
+            Constraint::Limit {
+                limit: 10,
+                offset: None,
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_none(),
+            "CompoundSelect + outer ORDER BY / LIMIT must be allowed"
         );
     }
 

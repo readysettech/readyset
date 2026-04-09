@@ -30,13 +30,23 @@ use rand::{Rng, SeedableRng};
 use readyset_data::DfValue;
 use readyset_sql::ast::{
     Column, ColumnConstraint, ColumnSpecification, CreateTableBody, CreateTableStatement, Expr,
-    IndexKeyPart, InsertStatement, Literal, Relation, SqlIdentifier, TableKey,
+    IndexKeyPart, InsertStatement, Literal, Relation, SelectSpecification, SqlIdentifier, TableKey,
 };
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_util::retry_with_exponential_backoff;
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::value::{QueryParams, Value};
+
+/// `CREATE DEEP CACHE` retry policy. The schedule (5 attempts ×
+/// 500ms/1s/2s/4s/8s ≈ 15.5s sleep budget) must keep a stuck Readyset
+/// from stalling the harness on a cache that will never come up. With
+/// backoff: 2 each delay doubles, so adding retries grows the worst case
+/// fast — `cache_create_retry_budget_under_30s` guards regressions.
+const CACHE_CREATE_RETRIES: u32 = 5;
+const CACHE_CREATE_BASE_DELAY_MS: u64 = 500;
+const CACHE_CREATE_BACKOFF: u64 = 2;
 
 /// Accumulates the SQL workload executed during a fuzz run so it can be
 /// replayed for debugging. The artifact reconstructs the *workload*, not
@@ -442,6 +452,7 @@ async fn run_queries(
     // recreate). Linear-Vec growth would be unbounded across long Antithesis
     // runs.
     let mut created_tables: HashSet<SqlIdentifier> = HashSet::new();
+    let mut created_views: Vec<String> = Vec::new();
     let mut matched_count = 0usize;
     let mut mismatched_count = 0usize;
 
@@ -615,14 +626,75 @@ async fn run_queries(
 
         // Render SELECT and materialize params.
         let select_sql = output.query.display(dialect).to_string();
-        let has_order_by = output.query.order.is_some();
-        let has_limit = !output.query.limit_clause.is_empty();
+        let has_order_by = output.query.has_order_by();
+        let has_limit = output.query.has_limit();
         let concrete_params = materialize_params(&output.params, &mut entropy);
         let params: Vec<Value> = concrete_params
             .into_iter()
             .map(Value::try_from)
             .collect::<Result<_, _>>()
             .with_context(|| format!("converting params for: {select_sql}"))?;
+
+        // Compound SELECTs can't go through readyset's ad-hoc cache path; route
+        // them through a VIEW + deep cache so the compound MIR path is
+        // exercised. Upstream still runs the original UNION (so we compare
+        // readyset's view-of-UNION to upstream's direct UNION rather than to
+        // upstream's view-of-UNION, which would hide upstream optimizer
+        // divergence around view materialization).
+        let readyset_select_sql = if matches!(output.query, SelectSpecification::Compound(_)) {
+            let vname = SqlIdentifier::from(format!("v_union_{query_idx}"));
+            let vname_sql = Relation {
+                schema: None,
+                name: vname.clone(),
+            }
+            .display(dialect)
+            .to_string();
+            let drop_view = format!("DROP VIEW IF EXISTS {vname_sql}");
+            let create_view = format!("CREATE VIEW {vname_sql} AS {select_sql}");
+            debug!(%drop_view, %create_view, "recreating view for compound SELECT");
+            repro.record_ddl(query_idx, &drop_view);
+            upstream
+                .query_drop(&drop_view)
+                .await
+                .with_context(|| format!("DROP VIEW on upstream: {drop_view}"))?;
+            repro.record_ddl(query_idx, &create_view);
+            upstream
+                .query_drop(&create_view)
+                .await
+                .with_context(|| format!("CREATE VIEW on upstream: {create_view}"))?;
+            created_views.push(vname_sql.clone());
+
+            let view_select = format!("SELECT * FROM {vname_sql}");
+            let create_cache = format!("CREATE DEEP CACHE FROM {view_select}");
+            // Bounded retry budget so a stuck Readyset skips this view's
+            // comparison instead of stalling the run on multi-minute
+            // exponential backoff.
+            let cache_result: Result<_, _> = retry_with_exponential_backoff!(
+                { readyset.query_drop(&create_cache).await },
+                retries: CACHE_CREATE_RETRIES,
+                delay: CACHE_CREATE_BASE_DELAY_MS,
+                backoff: CACHE_CREATE_BACKOFF,
+            );
+            // Don't proceed-anyway: the previous behavior ran the SELECT
+            // against Readyset without a deep cache, creating a shallow
+            // cache and mixing performance with correctness signal. Skip
+            // the comparison instead so the run continues without a false
+            // mismatch from cache-mode divergence.
+            if let Err(err) = cache_result {
+                warn!(
+                    %vname_sql,
+                    %err,
+                    query_idx,
+                    "timed out creating deep cache for compound view; skipping comparison"
+                );
+                stats.entry(&pattern_name).skipped += 1;
+                continue 'query;
+            }
+
+            view_select
+        } else {
+            select_sql.clone()
+        };
 
         debug!(%select_sql, param_count = params.len(), "executing SELECT on both");
         repro.record_select(query_idx, &pattern_name, &select_sql, &params);
@@ -692,7 +764,9 @@ async fn run_queries(
                 readyset,
                 readyset_url,
                 "SELECT readyset (warmup)",
-                async |c: &mut DatabaseConnection| execute_select(c, &select_sql, &params).await,
+                async |c: &mut DatabaseConnection| {
+                    execute_select(c, &readyset_select_sql, &params).await
+                },
             )
             .await;
             stats.entry(&pattern_name).skipped += 1;
@@ -706,48 +780,49 @@ async fn run_queries(
         let mut matched = false;
 
         for attempt in 0..RETRY_DELAYS_MS.len() + 1 {
-            let readyset_results = match execute_select(readyset, &select_sql, &params).await {
-                Ok(r) => r,
-                Err(err) if is_connection_drop(&err) => {
-                    warn!(
-                        attempt,
-                        query_idx,
-                        err = %format!("{err:#}"),
-                        "readyset connection dropped during retry, reconnecting"
-                    );
-                    *readyset = reconnect(readyset_url).await?;
-                    if let Some(&delay_ms) = RETRY_DELAYS_MS.get(attempt) {
-                        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-                    }
-                    continue;
-                }
-                Err(err) => match classify_error(&err, &pattern_name) {
-                    ErrorClass::ReadysetTransient => {
-                        debug!(
+            let readyset_results =
+                match execute_select(readyset, &readyset_select_sql, &params).await {
+                    Ok(r) => r,
+                    Err(err) if is_connection_drop(&err) => {
+                        warn!(
                             attempt,
                             query_idx,
                             err = %format!("{err:#}"),
-                            "transient readyset error, retrying"
+                            "readyset connection dropped during retry, reconnecting"
                         );
+                        *readyset = reconnect(readyset_url).await?;
                         if let Some(&delay_ms) = RETRY_DELAYS_MS.get(attempt) {
                             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                         }
                         continue;
                     }
-                    ErrorClass::ReadysetKnownBug { ticket } => {
-                        warn!(
-                            query_idx,
-                            %select_sql,
-                            %ticket,
-                            err = %format!("{err:#}"),
-                            "skipping query due to known readyset bug"
-                        );
-                        stats.entry(&pattern_name).skipped += 1;
-                        continue 'query;
-                    }
-                    _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
-                },
-            };
+                    Err(err) => match classify_error(&err, &pattern_name) {
+                        ErrorClass::ReadysetTransient => {
+                            debug!(
+                                attempt,
+                                query_idx,
+                                err = %format!("{err:#}"),
+                                "transient readyset error, retrying"
+                            );
+                            if let Some(&delay_ms) = RETRY_DELAYS_MS.get(attempt) {
+                                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                            }
+                            continue;
+                        }
+                        ErrorClass::ReadysetKnownBug { ticket } => {
+                            warn!(
+                                query_idx,
+                                %select_sql,
+                                %ticket,
+                                err = %format!("{err:#}"),
+                                "skipping query due to known readyset bug"
+                            );
+                            stats.entry(&pattern_name).skipped += 1;
+                            continue 'query;
+                        }
+                        _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
+                    },
+                };
             let readyset_rows: Vec<Vec<Value>> = readyset_results;
 
             match compare_results(&upstream_rows, &readyset_rows, has_order_by) {
@@ -875,11 +950,30 @@ async fn run_queries(
                     let literal_sql_1 = inline_params(&select_sql, &params, dialect);
 
                     let new_concrete = materialize_params(&output.params, &mut entropy);
-                    let new_params: Vec<Value> = new_concrete
-                        .into_iter()
-                        .map(Value::try_from)
-                        .collect::<Result<_, _>>()
-                        .unwrap_or_default();
+                    let new_params: Result<Vec<Value>, _> =
+                        new_concrete.into_iter().map(Value::try_from).collect();
+                    let new_params = match new_params {
+                        Ok(v) => v,
+                        Err(err) => {
+                            // Old code swallowed this with `unwrap_or_default`,
+                            // turning a generator/conversion bug into a
+                            // silent skip. Surface it as an Antithesis
+                            // assertion and skip the probe explicitly.
+                            warn!(
+                                query_idx,
+                                %pattern_name,
+                                err = %format!("{err:#}"),
+                                "skipping autoparam sentinel probe: param materialization failed"
+                            );
+                            assert_unreachable!(
+                                "Param materialization failed during sentinel probe",
+                                &json!({
+                                    "pattern": &pattern_name,
+                                })
+                            );
+                            Vec::new()
+                        }
+                    };
 
                     if !new_params.is_empty() {
                         let literal_sql_2 = inline_params(&select_sql, &new_params, dialect);
@@ -1049,6 +1143,13 @@ async fn run_queries(
         })
     );
 
+    for vname in &created_views {
+        let drop_view = format!("DROP VIEW IF EXISTS {vname}");
+        if let Err(err) = upstream.query_drop(&drop_view).await {
+            warn!(%vname, %err, "failed to drop compound-SELECT view on exit");
+        }
+    }
+
     info!(
         matched_count,
         mismatched_count,
@@ -1056,6 +1157,7 @@ async fn run_queries(
         hoisting_matched,
         hoisting_autoparam,
         tables = created_tables.len(),
+        views = created_views.len(),
         deep_caches = deep_count,
         shallow_caches = shallow_count,
         "run completed"
@@ -2141,6 +2243,25 @@ mod tests {
         );
         schema.primary_key = Some(SqlIdentifier::from("id"));
         schema
+    }
+
+    #[test]
+    fn cache_create_retry_budget_under_30s() {
+        // Worst-case sleep budget for the CREATE DEEP CACHE retry loop.
+        // Mirrors the schedule the macro performs: on each failed attempt
+        // sleep `delay`, then `delay *= backoff`. Final attempt does not
+        // sleep (loop breaks before sleep).
+        const BUDGET_MS: u64 = 30_000;
+        let mut total: u64 = 0;
+        let mut delay = CACHE_CREATE_BASE_DELAY_MS;
+        for _ in 0..CACHE_CREATE_RETRIES {
+            total += delay;
+            delay = delay.saturating_mul(CACHE_CREATE_BACKOFF);
+        }
+        assert!(
+            total <= BUDGET_MS,
+            "cache create retry sleep budget {total}ms exceeds {BUDGET_MS}ms",
+        );
     }
 
     #[test]

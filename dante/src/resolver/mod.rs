@@ -7,7 +7,7 @@ mod ast_builder;
 pub(crate) mod schema;
 
 use data_generator::ColumnGenerationSpec;
-use readyset_sql::ast::{SelectStatement, SqlIdentifier, SqlType};
+use readyset_sql::ast::{SelectSpecification, SqlIdentifier, SqlType};
 
 use crate::constraint::Constraint;
 use crate::entropy::Entropy;
@@ -224,8 +224,8 @@ pub enum ResolveError {
 /// Output of the full resolution pipeline.
 #[derive(Debug)]
 pub struct ResolverOutput {
-    /// The constructed SELECT statement.
-    pub query: SelectStatement,
+    /// The generated query (simple SELECT or compound SELECT).
+    pub query: SelectSpecification,
     /// DDL steps needed before executing the query.
     pub ddl: Vec<DdlStep>,
     /// Parameter metadata for data generation.
@@ -240,8 +240,23 @@ pub fn resolve(
     entropy: &mut Entropy<'_>,
 ) -> Result<ResolverOutput, ResolveError> {
     let (mut env, expanded) = resolve_schema(constraints, var_kinds, state, entropy)?;
-    let (query, params) =
-        ast_builder::build_select(&mut env, &expanded, var_kinds, state, entropy)?;
+
+    // Check if any constraint is a CompoundSelect — if so, use the compound path.
+    let compound = expanded.iter().find_map(|c| match c {
+        Constraint::CompoundSelect { operator, branches } => Some((operator, branches)),
+        _ => None,
+    });
+
+    let (query, params) = if let Some((operator, branches)) = compound {
+        ast_builder::build_compound_select(
+            &mut env, &expanded, var_kinds, operator, branches, state, entropy,
+        )?
+    } else {
+        let (stmt, params) =
+            ast_builder::build_select(&mut env, &expanded, var_kinds, state, entropy)?;
+        (stmt.into(), params)
+    };
+
     let ddl = env.into_ddl_steps(state)?;
     Ok(ResolverOutput { query, ddl, params })
 }

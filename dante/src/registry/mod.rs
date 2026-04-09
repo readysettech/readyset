@@ -3,6 +3,7 @@
 pub mod advanced;
 pub mod aggregates;
 pub mod basic;
+pub mod compound;
 pub mod ctes;
 pub mod filters;
 pub mod functions;

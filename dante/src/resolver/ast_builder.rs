@@ -1,10 +1,11 @@
 use data_generator::ColumnGenerationSpec;
 use readyset_sql::Dialect;
 use readyset_sql::ast::{
-    BinaryOperator, Column, CommonTableExpr, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, GroupByClause, InValue, ItemPlaceholder, JoinClause, JoinConstraint,
-    JoinRightSide, LimitClause, LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType,
-    Relation, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableExprInner,
+    BinaryOperator, Column, CommonTableExpr, CompoundSelectOperator, CompoundSelectStatement, Expr,
+    FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, ItemPlaceholder,
+    JoinClause, JoinConstraint, JoinRightSide, LimitClause, LimitValue, Literal, NullOrder,
+    OrderBy, OrderClause, OrderType, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
+    SqlType, TableExpr, TableExprInner,
 };
 
 use super::{Binding, DdlStep, Env, ParamMeta, ResolveError};
@@ -692,6 +693,8 @@ fn build_select_inner(
                     alias: None,
                 });
             }
+            // CompoundSelect is handled at the resolve() level, not here.
+            Constraint::CompoundSelect { .. } => {}
             // Schema and unification constraints don't produce AST nodes
             // (they were resolved in `resolve_schema`).
             Constraint::BaseTable(_)
@@ -776,6 +779,110 @@ fn build_select_inner(
     };
 
     Ok((query, params))
+}
+
+/// Build a CompoundSelectStatement from constraints containing a CompoundSelect variant.
+///
+/// Each branch's constraints are built against the already-resolved outer env
+/// (schema bindings are shared). Any ORDER BY / LIMIT constraints alongside
+/// the CompoundSelect in the outer list apply to the compound result.
+pub(super) fn build_compound_select(
+    env: &mut Env,
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    operator: &CompoundSelectOperator,
+    branches: &[Vec<Constraint>],
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+) -> Result<(SelectSpecification, Vec<ParamMeta>), ResolveError> {
+    let mut all_params = Vec::new();
+    let mut selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)> = Vec::new();
+
+    for (i, branch) in branches.iter().enumerate() {
+        // Snapshot env before each branch so sibling branches resolve from
+        // the same outer-schema state and don't observe one another's
+        // local bindings (CTEs, subquery vars). DDL added by the branch
+        // is preserved across the boundary so the outer caller sees every
+        // statement the compound depends on.
+        let pre = env.checkpoint();
+        let (stmt, branch_params) = build_select(env, branch, var_kinds, state, entropy)?;
+        let new_ddl: Vec<_> = env.ddl_steps[pre.ddl_steps.len()..].to_vec();
+        let new_tables: Vec<_> = env.new_tables[pre.new_tables.len()..].to_vec();
+        env.restore(pre);
+        env.ddl_steps.extend(new_ddl);
+        env.new_tables.extend(new_tables);
+        all_params.extend(branch_params);
+
+        let op = if i == 0 { None } else { Some(operator.clone()) };
+        selects.push((op, stmt));
+    }
+
+    // Collect outer ORDER BY / LIMIT from the non-CompoundSelect constraints.
+    let mut order_bys = Vec::new();
+    let mut limit_clause = LimitClause::LimitOffset {
+        limit: None,
+        offset: None,
+    };
+    for c in constraints {
+        match c {
+            Constraint::OrderBy {
+                col,
+                table,
+                direction,
+                null_order,
+            } => {
+                let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                order_bys.push(OrderBy {
+                    field: FieldReference::Expr(make_column_expr(&col_name, &table_name)),
+                    order_type: Some(*direction),
+                    null_order: null_order.unwrap_or(NullOrder::NullsLast),
+                });
+            }
+            Constraint::Limit { limit, offset } => {
+                limit_clause = LimitClause::LimitOffset {
+                    limit: Some(LimitValue::Literal(Literal::Integer(*limit as i64))),
+                    offset: offset.map(|o| Literal::Integer(o as i64)),
+                };
+            }
+            // CompoundSelect itself is consumed by the dispatch in
+            // `resolve()`; schema/unification constraints don't produce AST
+            // at the outer level either.
+            Constraint::CompoundSelect { .. }
+            | Constraint::BaseTable(_)
+            | Constraint::AliasOf { .. }
+            | Constraint::ColumnExists { .. }
+            | Constraint::ColumnTypeClass { .. }
+            | Constraint::TypeCompatible(_, _)
+            | Constraint::Eq(_, _)
+            | Constraint::NotEq(_, _) => {}
+            // Anything else — outer-level predicates, projections, joins —
+            // would need a wrapper SELECT around the compound that we don't
+            // yet emit. Old code silently dropped them and produced SQL
+            // missing the user-intended clauses; fail loudly instead.
+            _ => {
+                return Err(ResolveError::Unsupported {
+                    variant: "non-OrderBy/Limit/schema constraint",
+                    location: "outer compound SELECT",
+                });
+            }
+        }
+    }
+
+    let order = if order_bys.is_empty() {
+        None
+    } else {
+        Some(OrderClause {
+            order_by: order_bys,
+        })
+    };
+
+    let compound = CompoundSelectStatement {
+        selects,
+        order,
+        limit_clause,
+    };
+
+    Ok((SelectSpecification::Compound(compound), all_params))
 }
 
 /// Get the effective name from a Table binding (alias if present, else table name).
@@ -1137,8 +1244,6 @@ fn default_literal_for(ty: &SqlType) -> Literal {
         Blob | LongBlob | MediumBlob | TinyBlob | Binary(_) | VarBinary(_) | ByteArray => {
             Literal::ByteArray(Vec::new())
         }
-        // Bit-string literals can't be empty; NULL is well-defined for our
-        // COALESCE/IFNULL/NULLIF fallback uses.
         Bit(_) | VarBit(_) => Literal::Null,
         Enum(_)
         | Interval { .. }
@@ -1298,7 +1403,9 @@ mod tests {
     use readyset_sql::ast::BinaryOperator;
     use readyset_sql::{Dialect, DialectDisplay};
 
-    use crate::constraint::{AggregateFn, Constraint, SubqueryExprKind, TypeClass};
+    use readyset_sql::ast::CompoundSelectOperator;
+
+    use crate::constraint::{AggregateFn, Constraint, ScalarFn, SubqueryExprKind, TypeClass};
     use crate::entropy::Entropy;
     use crate::resolver::{ResolveError, ResolverOutput, resolve};
     use crate::state::{GenerationState, GeneratorConfig};
@@ -1332,6 +1439,287 @@ mod tests {
             resolve(&constraints, &var_kinds, &mut state, &mut entropy).expect("should resolve");
         let sql = output.query.display(dialect).to_string();
         (sql, output)
+    }
+
+    /// Variant of `resolve_to_sql` that returns the `ResolveError` for tests
+    /// that assert on a typed failure rather than successful resolution.
+    fn resolve_to_err(
+        constraints: Vec<Constraint>,
+        var_kinds: Vec<VarKind>,
+        dialect: Dialect,
+    ) -> ResolveError {
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(dialect, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        resolve(&constraints, &var_kinds, &mut state, &mut entropy).expect_err("expected Err")
+    }
+
+    #[test]
+    fn having_then_having_key_filter_emits_both_via_and_merge() {
+        // Order A → B: Having first, HavingKeyFilter second.
+        use crate::constraint::AggregateFn;
+        let t = VarId(0);
+        let c_grp = VarId(1);
+        let c_agg = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::ColumnExists {
+                col: c_agg,
+                table: t,
+            },
+            Constraint::From(t),
+            Constraint::ProjectColumn {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: c_agg,
+                table: t,
+            },
+            Constraint::GroupBy {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::Having {
+                function: AggregateFn::Count { distinct: false },
+                col: c_agg,
+                table: t,
+                op: BinaryOperator::Greater,
+            },
+            Constraint::HavingKeyFilter {
+                col: c_grp,
+                table: t,
+                op: BinaryOperator::Equal,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+        let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
+        assert!(
+            sql.contains("HAVING") && sql.contains("AND"),
+            "must AND-merge both into a single HAVING clause; sql: {sql}"
+        );
+        assert!(
+            sql.to_lowercase().contains("count("),
+            "Having (COUNT) must be present; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn having_key_filter_then_having_emits_both_via_and_merge() {
+        // Order B → A: HavingKeyFilter first, Having second. The old
+        // resolver would overwrite having_expr in this order.
+        use crate::constraint::AggregateFn;
+        let t = VarId(0);
+        let c_grp = VarId(1);
+        let c_agg = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::ColumnExists {
+                col: c_agg,
+                table: t,
+            },
+            Constraint::From(t),
+            Constraint::ProjectColumn {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: c_agg,
+                table: t,
+            },
+            Constraint::GroupBy {
+                col: c_grp,
+                table: t,
+            },
+            Constraint::HavingKeyFilter {
+                col: c_grp,
+                table: t,
+                op: BinaryOperator::Equal,
+            },
+            Constraint::Having {
+                function: AggregateFn::Count { distinct: false },
+                col: c_agg,
+                table: t,
+                op: BinaryOperator::Greater,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+        let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
+        assert!(
+            sql.contains("HAVING") && sql.contains("AND"),
+            "must AND-merge both into a single HAVING clause; sql: {sql}"
+        );
+        assert!(
+            sql.to_lowercase().contains("count("),
+            "Having (COUNT) must be present; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn coalesce_default_literal_matches_text_column_type() {
+        // Postgres rejects `COALESCE(text_col, 0)` at parse time and MySQL
+        // silently coerces. The default literal must match the column type.
+        let t = VarId(0);
+        let c = VarId(1);
+        let mut state = GenerationState::new(
+            Dialect::PostgreSQL,
+            GeneratorConfig {
+                reuse_preference: 0.0,
+                ..Default::default()
+            },
+        );
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // Force the column to be Text type.
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::ColumnTypeClass {
+                col: c,
+                type_class: TypeClass::String,
+            },
+            Constraint::From(t),
+            Constraint::ProjectFunction {
+                function: ScalarFn::Coalesce,
+                args: vec![(c, t)],
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let output =
+            resolve(&constraints, &var_kinds, &mut state, &mut entropy).expect("should resolve");
+        let sql = output.query.display(Dialect::PostgreSQL).to_string();
+        assert!(
+            sql.contains("''") || sql.contains("\"\""),
+            "expected an empty-string default in COALESCE on a text column; sql: {sql}"
+        );
+        assert!(
+            !sql.contains("COALESCE(\"t0\".\"c0\", 0)"),
+            "must not inject Integer(0) on text column; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn nullif_default_literal_matches_integer_column_type() {
+        // Integer columns continue to get Integer(0) — no regression.
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::ColumnTypeClass {
+                col: c,
+                type_class: TypeClass::Numeric,
+            },
+            Constraint::From(t),
+            Constraint::ProjectFunction {
+                function: ScalarFn::NullIf,
+                args: vec![(c, t)],
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
+        assert!(
+            sql.contains(", 0)"),
+            "expected Integer(0) for numeric column; sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn where_or_with_unsupported_inner_constraint_returns_typed_error() {
+        // Plain `Eq` is a unification constraint and should never appear
+        // inside a `WhereOr`; the old `_ => {}` arm silently dropped it and
+        // emitted a partial OR. The fix should surface a typed error.
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::From(t),
+            Constraint::ProjectColumn { col: c, table: t },
+            Constraint::WhereOr {
+                conditions: vec![
+                    Constraint::WhereParam {
+                        col: c,
+                        table: t,
+                        op: BinaryOperator::Equal,
+                    },
+                    Constraint::Eq(c, c),
+                ],
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let err = resolve_to_err(constraints, var_kinds, Dialect::MySQL);
+        assert!(
+            matches!(err, ResolveError::Unsupported { location, .. } if location == "WhereOr"),
+            "expected Unsupported{{location: WhereOr}}, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn compound_select_with_outer_predicate_returns_typed_error() {
+        // The compound resolver only honors outer ORDER BY / LIMIT plus
+        // schema metadata; an outer-level WhereParam used to be silently
+        // dropped, producing SQL missing the user-intended filter.
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::CompoundSelect {
+                operator: CompoundSelectOperator::UnionAll,
+                branches: vec![
+                    vec![
+                        Constraint::From(t),
+                        Constraint::ProjectColumn { col: c, table: t },
+                    ],
+                    vec![
+                        Constraint::From(t),
+                        Constraint::ProjectColumn { col: c, table: t },
+                    ],
+                ],
+            },
+            // Predicates at the outer level have no place to land — would
+            // require a wrapper SELECT around the compound.
+            Constraint::WhereParam {
+                col: c,
+                table: t,
+                op: BinaryOperator::Equal,
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let err = resolve_to_err(constraints, var_kinds, Dialect::MySQL);
+        assert!(
+            matches!(
+                err,
+                ResolveError::Unsupported { location, .. }
+                    if location == "outer compound SELECT"
+            ),
+            "expected Unsupported{{location: outer compound SELECT}}, got {err:?}"
+        );
     }
 
     #[test]
@@ -2020,5 +2408,49 @@ mod tests {
         ];
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
         assert!(sql.contains("OR"), "expected OR in: {sql}");
+    }
+
+    #[test]
+    fn ast_compound_select_union_all() {
+        // Two branches: SELECT t0.c0 FROM t0 UNION ALL SELECT t1.c1 FROM t1
+        let t0 = VarId(0);
+        let c0 = VarId(1);
+        let t1 = VarId(2);
+        let c1 = VarId(3);
+
+        let constraints = vec![
+            Constraint::BaseTable(t0),
+            Constraint::ColumnExists { col: c0, table: t0 },
+            Constraint::BaseTable(t1),
+            Constraint::ColumnExists { col: c1, table: t1 },
+            Constraint::CompoundSelect {
+                operator: CompoundSelectOperator::UnionAll,
+                branches: vec![
+                    vec![
+                        Constraint::From(t0),
+                        Constraint::ProjectColumn { col: c0, table: t0 },
+                    ],
+                    vec![
+                        Constraint::From(t1),
+                        Constraint::ProjectColumn { col: c1, table: t1 },
+                    ],
+                ],
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t0 },
+            VarKind::Relation,
+            VarKind::Column { table: t1 },
+        ];
+        let (sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
+        assert!(sql.contains("UNION ALL"), "expected UNION ALL in: {sql}");
+        assert!(
+            matches!(
+                output.query,
+                readyset_sql::ast::SelectSpecification::Compound(_)
+            ),
+            "expected Compound variant, got Simple"
+        );
     }
 }

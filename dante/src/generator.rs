@@ -31,8 +31,8 @@ pub enum GenerateError {
 /// The output of a successful query generation.
 #[derive(Debug)]
 pub struct QueryOutput {
-    /// The generated SELECT statement.
-    pub query: readyset_sql::ast::SelectStatement,
+    /// The generated query (simple SELECT or compound SELECT).
+    pub query: readyset_sql::ast::SelectSpecification,
     /// DDL steps needed before executing the query.
     pub ddl: Vec<resolver::DdlStep>,
     /// Parameter metadata for data generation.
@@ -241,6 +241,16 @@ impl ConstraintRegistry {
         reg.register(hoisting::having_to_where_promotion());
         reg.register(hoisting::from_subquery_filter());
 
+        // Compound patterns
+        reg.register(compound::union_all_same_table());
+        for class in [
+            crate::constraint::TypeClass::Integer,
+            crate::constraint::TypeClass::String,
+            crate::constraint::TypeClass::DateTime,
+        ] {
+            reg.register(compound::union_all_two_tables(class));
+        }
+
         // Advanced patterns
         reg.register(advanced::window_function());
         reg.register(advanced::distinct());
@@ -376,7 +386,13 @@ impl Generator {
             // compose with. The target depth is drawn from a geometric
             // distribution (no artificial ceiling). Bare queries only happen
             // when the target is 0 or all partners fail compatibility.
-            if !pattern.vars.is_empty() {
+            // Compound SELECT patterns (UNION ALL, etc.) are complete query
+            // shapes that cannot be composed with other patterns; the
+            // structural check (Constraint::CompoundSelect) avoids
+            // accidentally excluding filter patterns like `compound_where`
+            // that share the descriptive "compound" tag but are not
+            // compound SELECTs.
+            if !pattern.vars.is_empty() && !pattern.is_compound() {
                 let partners = self.pick_composition_partners(entropy, pattern);
                 for partner in &partners {
                     recipe = recipe.compose(partner);
@@ -1650,6 +1666,35 @@ mod tests {
             saw_function_composed,
             "expected at least one function pattern composed in 200 queries"
         );
+    }
+
+    #[test]
+    fn generator_is_deterministic_under_fixed_seed() {
+        // Determinism regression test: two Generators seeded identically
+        // must produce byte-equal SQL streams. This catches accidental
+        // dependence on `rand::rng()` (non-deterministic) or on iteration
+        // order of unstable collections, which earlier tests would have
+        // missed because they only asserted shape/counts.
+        fn run_n(seed: u64, n: usize) -> Vec<String> {
+            let config = GeneratorConfig {
+                reuse_preference: 0.0,
+                ..Default::default()
+            };
+            let mut generator = Generator::new(Dialect::MySQL, config);
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut entropy = Entropy::new(&mut rng);
+            let mut sql = Vec::with_capacity(n);
+            for _ in 0..n {
+                if let Ok(output) = generator.generate_with_ddl(&mut entropy) {
+                    sql.push(output.query.display(Dialect::MySQL).to_string());
+                }
+            }
+            sql
+        }
+        let a = run_n(2024, 30);
+        let b = run_n(2024, 30);
+        assert!(!a.is_empty(), "generator should produce at least one query");
+        assert_eq!(a, b, "same seed must produce byte-equal SQL stream");
     }
 
     #[test]

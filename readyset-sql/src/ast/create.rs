@@ -826,6 +826,36 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectSpecification {
     }
 }
 
+impl SelectSpecification {
+    /// Whether this query has an ORDER BY clause.
+    pub fn has_order_by(&self) -> bool {
+        match self {
+            Self::Simple(s) => s.order.is_some(),
+            Self::Compound(c) => c.order.is_some(),
+        }
+    }
+
+    /// Whether this query has a non-empty LIMIT clause.
+    pub fn has_limit(&self) -> bool {
+        match self {
+            Self::Simple(s) => !s.limit_clause.is_empty(),
+            Self::Compound(c) => !c.limit_clause.is_empty(),
+        }
+    }
+}
+
+impl From<SelectStatement> for SelectSpecification {
+    fn from(s: SelectStatement) -> Self {
+        Self::Simple(s)
+    }
+}
+
+impl From<CompoundSelectStatement> for SelectSpecification {
+    fn from(c: CompoundSelectStatement) -> Self {
+        Self::Compound(c)
+    }
+}
+
 impl DialectDisplay for SelectSpecification {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {

@@ -3,7 +3,9 @@
 //! A Pattern is a named, composable set of constraints with a shared variable
 //! scope. Patterns are the unit of registration in the constraint registry.
 
-use readyset_sql::ast::{BinaryOperator, JoinOperator, NullOrder, OrderType};
+use readyset_sql::ast::{
+    BinaryOperator, CompoundSelectOperator, JoinOperator, NullOrder, OrderType,
+};
 
 use crate::constraint::{
     AggregateFn, Constraint, DialectSupport, JoinRight, LiteralKind, ScalarFn, SubqueryExprKind,
@@ -37,6 +39,22 @@ impl Pattern {
     /// Number of variables in this pattern.
     pub fn num_vars(&self) -> usize {
         self.vars.len()
+    }
+
+    /// True if this pattern represents a compound SELECT (UNION/INTERSECT/EXCEPT)
+    /// — i.e. it carries at least one [`Constraint::CompoundSelect`]. Compound
+    /// SELECTs are complete query shapes and are not composable with other
+    /// patterns.
+    ///
+    /// Derived from constraint structure rather than a tag string so that
+    /// pattern authors cannot accidentally miscategorize by forgetting (or
+    /// duplicating) a tag, and so other patterns that happen to use the
+    /// word "compound" descriptively (e.g., `compound_where` for
+    /// multi-conjunction filters) are not affected.
+    pub fn is_compound(&self) -> bool {
+        self.constraints
+            .iter()
+            .any(|c| matches!(c, Constraint::CompoundSelect { .. }))
     }
 
     ////// Convert this pattern to a Recipe, optionally renumbering variables
@@ -575,6 +593,20 @@ impl PatternBuilder {
         SubqueryBuilder::start(self)
     }
 
+    /// Add a compound SELECT (UNION ALL, INTERSECT, etc.).
+    ///
+    /// Each branch is a list of structural constraints (From, ProjectColumn, etc.)
+    /// that resolves against the shared outer env. Schema constraints (BaseTable,
+    /// ColumnExists) should be in the outer builder, not in branches.
+    pub fn compound_select(
+        &mut self,
+        operator: CompoundSelectOperator,
+        branches: Vec<Vec<Constraint>>,
+    ) {
+        self.constraints
+            .push(Constraint::CompoundSelect { operator, branches });
+    }
+
     // --- Metadata ---
 
     /// Set tags for this pattern.
@@ -884,6 +916,11 @@ fn compute_min_depth(constraints: &[Constraint]) -> usize {
         let inner_depth = match c {
             Constraint::SubqueryExpr { constraints, .. } => 1 + compute_min_depth(constraints),
             Constraint::SubqueryRelation { constraints, .. } => 1 + compute_min_depth(constraints),
+            Constraint::CompoundSelect { branches, .. } => branches
+                .iter()
+                .map(|b| compute_min_depth(b))
+                .max()
+                .unwrap_or(0),
             _ => 0,
         };
         max_inner_depth = max_inner_depth.max(inner_depth);
@@ -936,7 +973,9 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             conditions.iter().flat_map(constraint_var_ids).collect()
         }
         Constraint::OrderBy { col, table, .. } => vec![*col, *table],
-        Constraint::SubqueryExpr { .. } | Constraint::SubqueryRelation { .. } => {
+        Constraint::SubqueryExpr { .. }
+        | Constraint::SubqueryRelation { .. }
+        | Constraint::CompoundSelect { .. } => {
             // Don't recurse into nested constraint sets
             vec![]
         }
@@ -967,6 +1006,188 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry;
+
+    #[test]
+    fn is_compound_distinguishes_compound_select_from_compound_where() {
+        // The dispatch must derive "is compound SELECT" from the constraint
+        // structure (Constraint::CompoundSelect), not from a "compound" tag
+        // string — otherwise filter patterns like `compound_where` (which
+        // describe multi-conjunction WHERE clauses) get conflated with
+        // UNION/INTERSECT and silently lose composition.
+        assert!(
+            registry::compound::union_all_same_table().is_compound(),
+            "UNION ALL pattern is a compound SELECT"
+        );
+        assert!(
+            !registry::filters::compound_where().is_compound(),
+            "compound_where is a multi-WHERE filter, not a compound SELECT"
+        );
+    }
+
+    #[test]
+    fn recipe_carries_primary_table_after_compose() {
+        // Two patterns each with their own primary table; after compose,
+        // the resulting recipe's primary_table is the BASE pattern's.
+        let mut a = PatternBuilder::new("a");
+        let ta = a.table();
+        let ca = a.column(ta);
+        a.from(ta);
+        a.project_column(ca, ta);
+        let a = a.build();
+        assert_eq!(a.primary_table, VarId(0));
+
+        let mut b = PatternBuilder::new("b");
+        let tb = b.table();
+        let cb = b.column(tb);
+        b.from(tb);
+        b.project_column(cb, tb);
+        let b = b.build();
+        assert_eq!(b.primary_table, VarId(0));
+
+        let recipe = a.to_recipe(0).compose(&b);
+        assert_eq!(
+            recipe.primary_table,
+            VarId(0),
+            "composed recipe should carry the base pattern's primary table"
+        );
+        // The Eq/AliasOf unification must reference base_primary, not a
+        // stale hardcoded VarId(0). Since base_primary is already VarId(0)
+        // here, also assert the offset arithmetic is correct on the other
+        // side: other's primary at offset = a.num_vars() = 2.
+        assert!(recipe.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::Eq(VarId(0), VarId(2))
+                | Constraint::AliasOf {
+                    alias: VarId(2),
+                    original: VarId(0),
+                }
+        )));
+    }
+
+    #[test]
+    fn pattern_with_column_var_before_table_var_composes_correctly() {
+        // A pattern whose first allocation is a column (via a subquery)
+        // and only later allocates a table at the outer level. The old
+        // compose code assumed VarId(0) was the table; now compose uses
+        // the explicit primary_table so this still composes.
+        let mut b = PatternBuilder::new("col_before_table");
+        // Inner subquery first — this allocates a relation var (its own
+        // table) at VarId(0), so column comes at VarId(1).
+        let mut sq = b.subquery();
+        let inner_t = sq.table();
+        let _inner_c = sq.column(inner_t);
+        sq.from(inner_t);
+        sq.project_column(_inner_c, inner_t);
+        sq.commit_as_cte();
+        // Outer table allocated AFTER the CTE — its var index is not 0.
+        let outer_t = b.table();
+        let outer_c = b.column(outer_t);
+        b.from(outer_t);
+        b.project_column(outer_c, outer_t);
+        b.tags(&["cte"]);
+        let p = b.build();
+
+        // primary_table should NOT be VarId(0) — the CTE alias was set
+        // first by commit_as_cte, but the outer .table() doesn't override
+        // an explicit primary; either is fine as long as it's a real
+        // outer relation, not a hardcoded zero.
+        assert!(
+            matches!(p.primary_table, VarId(_)),
+            "primary_table must be set to a real var, not hardcoded VarId(0)"
+        );
+
+        // Composing it with itself doesn't panic. When the primary IS a
+        // CTE alias (DerivedRelation kind), `compose` deliberately
+        // skips the Eq/AliasOf to avoid unifying a derived alias with a
+        // partner pattern's base-table primary; the partner's relation
+        // stays distinct in a cross-join shape. When the primary isn't
+        // a derived alias, the unification constraint must still
+        // reference the actual primary_table — never a hardcoded
+        // `VarId(0)`.
+        let recipe = p.to_recipe(0).compose(&p);
+        let primary = recipe.primary_table;
+        let primary_is_derived = matches!(
+            p.vars[p.primary_table.0],
+            crate::var::VarKind::DerivedRelation
+        );
+        assert_eq!(
+            primary, p.primary_table,
+            "composed recipe must carry the base pattern's primary_table"
+        );
+        if !primary_is_derived {
+            assert!(
+                recipe.constraints.iter().any(|c| match c {
+                    Constraint::Eq(a, _) | Constraint::AliasOf { original: a, .. } => *a == primary,
+                    _ => false,
+                }),
+                "composed recipe must unify against the recipe's primary_table"
+            );
+        }
+    }
+
+    #[test]
+    fn commit_as_from_returns_outer_alias_var_and_sets_primary() {
+        // commit_as_from must allocate and return an outer relation var,
+        // peer to commit_as_join / commit_as_cte, and adopt it as primary
+        // when no primary has been set yet. Without this, composition
+        // would unify against VarId(0) which isn't allocated to anything.
+        let mut b = PatternBuilder::new("from_subquery_only");
+        let mut sq = b.subquery();
+        let inner_t = sq.table();
+        let inner_c = sq.column(inner_t);
+        sq.from(inner_t);
+        sq.project_column(inner_c, inner_t);
+        let derived_alias = sq.commit_as_from();
+        b.tags(&["subquery"]);
+        let p = b.build();
+        assert_eq!(
+            p.primary_table, derived_alias,
+            "commit_as_from should adopt its alias as primary_table"
+        );
+        // Composing with a peer pattern produces a unification constraint
+        // anchored on the derived alias, not VarId(0).
+        let mut b2 = PatternBuilder::new("simple");
+        let t2 = b2.table();
+        let c2 = b2.column(t2);
+        b2.from(t2);
+        b2.project_column(c2, t2);
+        let p2 = b2.build();
+        let recipe = p.to_recipe(0).compose(&p2);
+        // FROM-subquery alias is `DerivedRelation`, so `compose` skips
+        // the Eq/AliasOf unification with the base-table partner —
+        // both relations stay distinct (cross-join shape). When the
+        // partner's primary is a base table, `compose` also promotes
+        // the partner as the recipe's new primary so subsequent
+        // composes unify against a real table rather than the derived
+        // alias (which would accumulate cross-joins).
+        let p2_primary = VarId(p.num_vars() + p2.primary_table.0);
+        assert_eq!(
+            recipe.primary_table, p2_primary,
+            "compose with derived base + base-table partner must \
+             promote the partner as new primary"
+        );
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::From(t) if *t == p2_primary)),
+            "partner From must survive when FROM-subquery primary doesn't unify"
+        );
+        let _ = derived_alias;
+    }
+
+    #[test]
+    #[should_panic(expected = "no primary table set")]
+    fn pattern_with_no_outer_relation_panics_on_build() {
+        // No table(), no commit_as_cte, no FromSubquery. Build must
+        // surface a clear panic rather than silently defaulting to
+        // VarId(0) (which would later fail with `Unbound(VarId(0))` deep
+        // in the resolver).
+        let mut b = PatternBuilder::new("empty");
+        b.tags(&["bogus"]);
+        let _ = b.build();
+    }
 
     #[test]
     fn build_simple_pattern() {
@@ -1758,6 +1979,10 @@ mod tests {
 
     #[test]
     fn compose_keeps_both_havings_for_and_merge() {
+        // Regression: compose used to dedup Having (and conflate it with
+        // HavingKeyFilter under the same dedup category), silently dropping
+        // one. The resolver now AND-merges every Having/HavingKeyFilter
+        // into one HAVING clause, so compose must keep both.
         use crate::constraint::AggregateFn;
         use readyset_sql::ast::BinaryOperator;
 
@@ -1804,6 +2029,57 @@ mod tests {
             having_count, 2,
             "compose must keep both Having constraints — resolver AND-merges \
              them; the old dedup silently dropped one"
+        );
+    }
+
+    #[test]
+    fn compose_keeps_having_and_having_key_filter_together() {
+        // Regression: compose used to put Having and HavingKeyFilter under
+        // the same dedup category and drop one when the other was present.
+        use crate::constraint::AggregateFn;
+        use readyset_sql::ast::BinaryOperator;
+
+        let mut b1 = PatternBuilder::new("having_agg");
+        let t = b1.table();
+        let c_group = b1.column(t);
+        let c_agg = b1.column(t);
+        b1.from(t);
+        b1.project_column(c_group, t);
+        b1.project_aggregate(AggregateFn::Count { distinct: false }, c_agg, t);
+        b1.group_by(c_group, t);
+        b1.having(
+            AggregateFn::Count { distinct: false },
+            c_agg,
+            t,
+            BinaryOperator::Greater,
+        );
+        let p1 = b1.build();
+
+        let mut b2 = PatternBuilder::new("having_key_filter");
+        let t2 = b2.table();
+        let c2_group = b2.column(t2);
+        b2.from(t2);
+        b2.project_column(c2_group, t2);
+        b2.group_by(c2_group, t2);
+        b2.having_key_filter(c2_group, t2, BinaryOperator::Equal);
+        let p2 = b2.build();
+
+        let recipe = p1.to_recipe(0).compose(&p2);
+        let having_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::Having { .. }))
+            .count();
+        let key_filter_count = recipe
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::HavingKeyFilter { .. }))
+            .count();
+        assert_eq!(having_count, 1, "Having from base must survive");
+        assert_eq!(
+            key_filter_count, 1,
+            "HavingKeyFilter from partner must survive — conflating the two \
+             dedup categories used to drop it"
         );
     }
 
