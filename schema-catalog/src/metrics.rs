@@ -1,9 +1,7 @@
 //! Documents the set of metrics that are currently being recorded within
 //! the schema-catalog crate.
 
-/// Counter: The number of schema catalog updates received with a generation that does not follow
-/// the expected monotonic sequence (i.e., the new generation does not directly succeed the current
-/// one).
+/// Counter: Incremented when the schema catalog content changes without the generation advancing.
 pub const SCHEMA_CATALOG_UNEXPECTED_GENERATION: &str =
     "readyset_schema_catalog_unexpected_generation";
 

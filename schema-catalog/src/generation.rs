@@ -5,7 +5,7 @@ use std::num::NonZeroU64;
 ///
 /// Valid generations are 1 to u64::MAX. Use `Option<SchemaGeneration>` where
 /// "unset" semantics are needed - `None` indicates no valid generation.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[repr(transparent)]
 pub struct SchemaGeneration(NonZeroU64);
 
@@ -25,11 +25,6 @@ impl SchemaGeneration {
     /// Get the underlying u64 value.
     pub const fn get(self) -> u64 {
         self.0.get()
-    }
-
-    /// Check if this generation is immediately followed by `other`, allowing for wraparound.
-    pub fn precedes(self, other: Self) -> bool {
-        self.next() == other
     }
 
     /// Create a new generation from a non-zero u64.
@@ -81,25 +76,14 @@ mod tests {
     }
 
     #[test]
-    fn precedes_works() {
-        let g1 = SchemaGeneration::INITIAL;
-        let g2 = g1.next();
-        assert!(g1.precedes(g2));
-        assert!(!g2.precedes(g1));
-        assert!(!g1.precedes(g1));
-    }
-
-    #[test]
-    fn next_wraps_at_max() {
-        let max = SchemaGeneration::new(u64::MAX).unwrap();
-        assert_eq!(max.next(), SchemaGeneration::INITIAL);
-    }
-
-    #[test]
-    fn precedes_across_wraparound() {
-        let max = SchemaGeneration::new(u64::MAX).unwrap();
-        assert!(max.precedes(SchemaGeneration::INITIAL));
-        assert!(!SchemaGeneration::INITIAL.precedes(max));
+    fn ordering() {
+        let g1 = SchemaGeneration::new(1).unwrap();
+        let g2 = SchemaGeneration::new(2).unwrap();
+        let g5 = SchemaGeneration::new(5).unwrap();
+        assert!(g1 < g2);
+        assert!(g2 < g5);
+        assert!(g1 < g5);
+        assert!(g1 <= g2);
     }
 
     #[test]

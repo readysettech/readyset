@@ -173,36 +173,6 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
             "Received schema catalog from server"
         );
 
-        // Generation validation is purely diagnostic (warn + antithesis assertion). It uses a
-        // separate read lock so it doesn't hold the write lock longer than necessary. If this
-        // ever needs to take action based on the generation (e.g. reject out-of-order updates),
-        // it should be moved inside the write lock below to avoid a TOCTOU race.
-        //
-        // Validate generation ordering against the current cached catalog.
-        let current_generation = {
-            let cache = self.handle.inner.read().await;
-            cache.as_ref().map(|c| c.generation)
-        };
-
-        if let Some(current) = current_generation
-            && current != catalog.generation
-            && !current.precedes(catalog.generation)
-        {
-            metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
-            warn!(
-                new_generation = %catalog.generation,
-                current_generation = %current,
-                "Schema update had unexpected generation"
-            );
-            antithesis_sdk::assert_reachable!(
-                "Schema catalog received unexpected generation",
-                &serde_json::json!({
-                    "new_generation": catalog.generation.get(),
-                    "current_generation": current.get(),
-                })
-            );
-        }
-
         debug!(
             generation = %catalog.generation,
             base_tables = catalog.base_schemas.len(),
@@ -222,13 +192,24 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
 
         let mut cache = self.handle.inner.write().await;
         if cache.as_deref() != Some(&catalog) {
-            if let Some(ref current) = *cache
-                && current.generation == catalog.generation
-            {
-                warn!(
-                    generation = %catalog.generation,
-                    "Schema catalog content changed without generation advancing"
+            if let Some(ref current) = *cache {
+                let generation_advanced = current.generation < catalog.generation;
+                antithesis_sdk::assert_always!(
+                    generation_advanced,
+                    "Schema catalog content changed with generation advance",
+                    &serde_json::json!({
+                        "current_generation": current.generation.get(),
+                        "new_generation": catalog.generation.get(),
+                    })
                 );
+                if !generation_advanced {
+                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION)
+                        .increment(1);
+                    warn!(
+                        generation = %catalog.generation,
+                        "Schema catalog content changed without generation advancing"
+                    );
+                }
             }
 
             metrics::counter!(crate::metrics::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
