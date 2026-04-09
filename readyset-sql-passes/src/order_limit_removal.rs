@@ -179,6 +179,7 @@ mod tests {
             generated: None,
             constraints: vec![],
             comment: None,
+            invisible: false,
         };
         let col2 = ColumnSpecification {
             column: Column {
@@ -189,6 +190,7 @@ mod tests {
             generated: None,
             constraints: vec![ColumnConstraint::Unique],
             comment: None,
+            invisible: false,
         };
         let col3 = ColumnSpecification {
             column: Column {
@@ -199,6 +201,7 @@ mod tests {
             generated: None,
             constraints: vec![],
             comment: None,
+            invisible: false,
         };
         let col4 = ColumnSpecification {
             column: Column {
@@ -209,6 +212,7 @@ mod tests {
             generated: None,
             constraints: vec![],
             comment: None,
+            invisible: false,
         };
 
         let fields = vec![col1.clone(), col2, col3, col4.clone()];

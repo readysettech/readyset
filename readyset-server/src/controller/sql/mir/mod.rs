@@ -3160,6 +3160,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: Column::from("topk_test.b"),
@@ -3167,6 +3168,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: Column::from("topk_test.c"),
@@ -3174,6 +3176,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                 ];
 
@@ -3341,6 +3344,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("topk_test.b"),
@@ -3348,6 +3352,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("topk_test.c"),
@@ -3355,6 +3360,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
 
@@ -3416,6 +3422,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: Column::from("test_table.b"),
@@ -3423,6 +3430,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: Column::from("test_table.c"),
@@ -3430,6 +3438,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                 ];
 
@@ -3570,6 +3579,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.c"),
@@ -3577,6 +3587,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
 
@@ -3610,6 +3621,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.b"),
@@ -3617,6 +3629,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
 
@@ -3650,6 +3663,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.b"),
@@ -3657,6 +3671,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
 
@@ -3690,6 +3705,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.b"),
@@ -3697,6 +3713,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
 
@@ -3805,6 +3822,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("t.grp"),
@@ -3812,6 +3830,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("t.val"),
@@ -3819,6 +3838,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ]
     }
@@ -3972,6 +3992,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.email"),
@@ -3979,6 +4000,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.name"),
@@ -3986,6 +4008,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
         let keys = vec![
@@ -4063,6 +4086,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("test_table.email"),
@@ -4070,6 +4094,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
         let keys = vec![TableKey::PrimaryKey {
@@ -4124,6 +4149,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("t.k"),
@@ -4131,6 +4157,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
             ColumnSpecification {
                 column: Column::from("t.v"),
@@ -4138,6 +4165,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             },
         ];
         let mut query = parse_select(

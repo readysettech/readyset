@@ -180,6 +180,7 @@ impl DdlEvent {
                                 vec![]
                             },
                             comment: None,
+                            invisible: false,
                         })
                     })
                     .collect::<Result<_, _>>()

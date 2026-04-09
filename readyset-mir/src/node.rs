@@ -144,6 +144,7 @@ mod tests {
                             generated: None,
                             constraints: vec![],
                             comment: None,
+                            invisible: false,
                         },
                         ColumnSpecification {
                             column: "base.b".into(),
@@ -151,6 +152,7 @@ mod tests {
                             generated: None,
                             constraints: vec![],
                             comment: None,
+                            invisible: false,
                         },
                     ],
                     primary_key: None,
@@ -170,6 +172,7 @@ mod tests {
                             generated: None,
                             constraints: vec![],
                             comment: None,
+                            invisible: false,
                         },
                         ColumnSpecification {
                             column: "base2.b".into(),
@@ -177,6 +180,7 @@ mod tests {
                             generated: None,
                             constraints: vec![],
                             comment: None,
+                            invisible: false,
                         },
                     ],
                     primary_key: None,

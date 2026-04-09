@@ -231,6 +231,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             }],
             keys: None,
         }

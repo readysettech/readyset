@@ -448,6 +448,7 @@ mod tests {
                     constraints: constraints.clone(),
                     generated: None,
                     comment: None,
+                    invisible: false,
                 })
                 .collect(),
             keys: if keys.is_empty() { None } else { Some(keys) },

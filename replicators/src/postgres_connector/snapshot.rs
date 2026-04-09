@@ -527,6 +527,7 @@ impl TableDescription {
                                     vec![]
                                 },
                                 comment: None,
+                                invisible: false,
                             })
                         })
                         .collect::<ReadySetResult<_>>()?,

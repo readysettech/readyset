@@ -633,6 +633,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             }],
             keys: None,
         };
@@ -646,6 +647,7 @@ mod tests {
                 generated: None,
                 constraints: vec![],
                 comment: None,
+                invisible: false,
             }],
             keys: None,
         };

@@ -141,6 +141,7 @@ mod tests {
                     generated: None,
                     constraints: vec![],
                     comment: None,
+                    invisible: false,
                 }],
                 primary_key: None,
                 unique_keys: Default::default(),

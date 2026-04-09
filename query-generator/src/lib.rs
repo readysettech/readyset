@@ -397,6 +397,7 @@ impl From<TableSpec> for CreateTableStatement {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     })
                     .collect(),
                 keys: spec.primary_key.map(|cn| {

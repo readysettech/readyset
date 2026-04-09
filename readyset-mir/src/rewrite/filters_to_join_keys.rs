@@ -389,6 +389,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: ast::Column::from("t1.b"),
@@ -396,6 +397,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: ast::Column::from("t1.c"),
@@ -403,6 +405,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                 ],
                 primary_key: Some([Column::new(Some("t1"), "a")].into()),
@@ -428,6 +431,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                     ColumnSpecification {
                         column: ast::Column::from("t2.b"),
@@ -435,6 +439,7 @@ mod tests {
                         generated: None,
                         constraints: vec![],
                         comment: None,
+                        invisible: false,
                     },
                 ],
                 primary_key: Some([Column::new(Some("t2"), "a")].into()),

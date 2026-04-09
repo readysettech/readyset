@@ -356,6 +356,10 @@ pub struct ColumnSpecification {
     pub generated: Option<GeneratedColumn>,
     pub constraints: Vec<ColumnConstraint>,
     pub comment: Option<String>,
+    /// Whether this column is INVISIBLE (MySQL 8.0.23+). Invisible columns are excluded from
+    /// `SELECT *` but can still be referenced explicitly.
+    #[serde(default)]
+    pub invisible: bool,
 }
 
 impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
@@ -371,6 +375,7 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
         let mut comment = None;
         let mut constraints = vec![];
         let mut generated = None;
+        let mut invisible = false;
         for option in value.options {
             match option.option {
                 sqlparser::ast::ColumnOption::Null => constraints.push(ColumnConstraint::Null),
@@ -484,9 +489,11 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                 | sqlparser::ast::ColumnOption::OnConflict(_)
                 | sqlparser::ast::ColumnOption::Policy(_)
                 | sqlparser::ast::ColumnOption::Srid(_)
-                | sqlparser::ast::ColumnOption::Tags(_)
-                | sqlparser::ast::ColumnOption::Invisible => {
+                | sqlparser::ast::ColumnOption::Tags(_) => {
                     // Don't care about these options
+                }
+                sqlparser::ast::ColumnOption::Invisible => {
+                    invisible = true;
                 }
             }
         }
@@ -496,6 +503,7 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
             constraints,
             comment,
             generated,
+            invisible,
         })
     }
 }
@@ -508,6 +516,7 @@ impl ColumnSpecification {
             generated: None,
             constraints: vec![],
             comment: None,
+            invisible: false,
         }
     }
 
@@ -522,6 +531,7 @@ impl ColumnSpecification {
             generated: None,
             constraints,
             comment: None,
+            invisible: false,
         }
     }
 
@@ -587,6 +597,10 @@ impl DialectDisplay for ColumnSpecification {
 
             if let Some(ref comment) = self.comment {
                 write!(f, " COMMENT '{comment}'")?;
+            }
+
+            if self.invisible {
+                write!(f, " INVISIBLE")?;
             }
 
             Ok(())
