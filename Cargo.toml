@@ -301,6 +301,14 @@ xxhash-rust = { version = "0.8.10", features = ["xxh3"] }
 jobserver = "0.1.32"
 yore = "1.1.0"
 
+[profile.ci]
+inherits = "dev"
+split-debuginfo = "unpacked"  # skip merging debug info into binaries (faster linking)
+debug = 1                      # line tables only — backtraces work, far less DWARF to generate/link
+
+[profile.ci.package."*"]
+opt-level = 2  # optimize deps (compiled once, cached by sccache) for faster test execution
+
 [profile.release]
 debug = true
 lto = "thin"

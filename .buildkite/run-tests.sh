@@ -46,6 +46,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     NEXTEST_ARGS=(
         --config-file ../hacks/nextest-tcv/nextest.toml
         --profile "$NEXTEST_PROFILE"
+        --cargo-profile ci
         --hide-progress-bar
         --timings
         --workspace --features failure_injection
@@ -84,7 +85,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     echo "+++ :rust: Run tests (doctest)"
     set -x
-    cargo --locked test --doc \
+    cargo --locked test --doc --profile ci \
         --workspace --features failure_injection \
         || upload_artifacts
     set +x
