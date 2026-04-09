@@ -23,8 +23,9 @@ use dante::pattern::Pattern;
 use dante::resolver::{DdlStep, ParamMeta};
 use dante::state::TableSchema;
 use dante::{Generator, GeneratorConfig};
+use data_generator::ColumnGenerator;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
-use rand::rngs::{StdRng, SysRng};
+use rand::rngs::{SmallRng, StdRng, SysRng};
 use rand::{Rng, SeedableRng};
 use readyset_data::DfValue;
 use readyset_sql::ast::{
@@ -208,15 +209,39 @@ fn table_schema_to_create_table(schema: &TableSchema) -> CreateTableStatement {
 
 /// Generate `rows_per_table` rows of data for a table, returning each row as a
 /// `Vec<DfValue>` with columns in schema order.
-fn generate_rows(schema: &TableSchema, rows: usize) -> Vec<Vec<DfValue>> {
-    let mut generators: Vec<_> = schema
+///
+/// Each column gets its own sub-RNG seeded from `(parent_seed, column_name)` so
+/// the per-column data depends only on the seed and the column name, not on
+/// iteration order. Reordering schema columns must not change the rows
+/// produced for a given seed.
+fn generate_rows<R: Rng>(schema: &TableSchema, rows: usize, rng: &mut R) -> Vec<Vec<DfValue>> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let parent_seed = rng.next_u64();
+    let mut generators: Vec<(ColumnGenerator, SmallRng)> = schema
         .columns
-        .values()
-        .map(|meta| meta.gen_spec.generator_for_col(meta.sql_type.clone()))
+        .iter()
+        .map(|(name, meta)| {
+            let mut hasher = DefaultHasher::new();
+            parent_seed.hash(&mut hasher);
+            name.as_str().hash(&mut hasher);
+            let sub_seed = hasher.finish();
+            let mut sub_rng = SmallRng::seed_from_u64(sub_seed);
+            let generator = meta
+                .gen_spec
+                .generator_for_col(meta.sql_type.clone(), &mut sub_rng);
+            (generator, sub_rng)
+        })
         .collect();
 
     (0..rows)
-        .map(|_| generators.iter_mut().map(|g| g.r#gen()).collect())
+        .map(|_| {
+            generators
+                .iter_mut()
+                .map(|(g, sub_rng)| g.r#gen(sub_rng))
+                .collect()
+        })
         .collect()
 }
 
@@ -256,14 +281,15 @@ fn build_insert(schema: &TableSchema, data: &[Vec<DfValue>]) -> anyhow::Result<I
 }
 
 /// Materialize concrete parameter values from [`ParamMeta`] descriptors.
-fn materialize_params(params: &[ParamMeta]) -> Vec<DfValue> {
-    params
-        .iter()
-        .flat_map(|pm| {
-            let mut generator = pm.gen_spec.generator_for_col(pm.sql_type.clone());
-            (0..pm.count).map(move |_| generator.r#gen())
-        })
-        .collect()
+fn materialize_params<R: Rng>(params: &[ParamMeta], rng: &mut R) -> Vec<DfValue> {
+    let mut result = Vec::new();
+    for pm in params {
+        let mut generator = pm.gen_spec.generator_for_col(pm.sql_type.clone(), rng);
+        for _ in 0..pm.count {
+            result.push(generator.r#gen(rng));
+        }
+    }
+    result
 }
 
 /// Tracks per-pattern generation and comparison outcomes across iterations.
@@ -477,7 +503,7 @@ async fn run_queries(
                     .await?;
 
                     // Insert seed data.
-                    let rows = generate_rows(schema, rows_per_table);
+                    let rows = generate_rows(schema, rows_per_table, &mut entropy);
                     if !rows.is_empty() {
                         let insert = build_insert(schema, &rows)?;
                         let insert_sql = insert.display(dialect).to_string();
@@ -530,8 +556,10 @@ async fn run_queries(
                     )
                     .await?;
 
-                    let mut generator = meta.gen_spec.generator_for_col(meta.sql_type.clone());
-                    let value = generator.r#gen();
+                    let mut generator = meta
+                        .gen_spec
+                        .generator_for_col(meta.sql_type.clone(), &mut entropy);
+                    let value = generator.r#gen(&mut entropy);
                     let lit: Literal = value.try_into().unwrap_or(Literal::Null);
                     let update_sql = format!(
                         "UPDATE {} SET {} = {}",
@@ -589,7 +617,7 @@ async fn run_queries(
         let select_sql = output.query.display(dialect).to_string();
         let has_order_by = output.query.order.is_some();
         let has_limit = !output.query.limit_clause.is_empty();
-        let concrete_params = materialize_params(&output.params);
+        let concrete_params = materialize_params(&output.params, &mut entropy);
         let params: Vec<Value> = concrete_params
             .into_iter()
             .map(Value::try_from)
@@ -846,7 +874,7 @@ async fn run_queries(
                     // literals are normalized to the same cache entry.
                     let literal_sql_1 = inline_params(&select_sql, &params, dialect);
 
-                    let new_concrete = materialize_params(&output.params);
+                    let new_concrete = materialize_params(&output.params, &mut entropy);
                     let new_params: Vec<Value> = new_concrete
                         .into_iter()
                         .map(Value::try_from)
@@ -2158,7 +2186,8 @@ mod tests {
     #[test]
     fn generate_rows_produces_correct_count() {
         let schema = sample_table();
-        let rows = generate_rows(&schema, 50);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let rows = generate_rows(&schema, 50, &mut rng);
         assert_eq!(rows.len(), 50);
         for row in &rows {
             assert_eq!(row.len(), 3, "row: {row:?}");
@@ -2168,7 +2197,8 @@ mod tests {
     #[test]
     fn generate_rows_unique_column_produces_unique_values() {
         let schema = sample_table();
-        let rows = generate_rows(&schema, 100);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let rows = generate_rows(&schema, 100, &mut rng);
         let ids: Vec<&DfValue> = rows.iter().map(|r| &r[0]).collect();
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(
@@ -2179,9 +2209,47 @@ mod tests {
     }
 
     #[test]
+    fn generate_rows_independent_of_column_order() {
+        // Reordering schema columns must not change the per-column rows
+        // produced for a given seed. This is a determinism property:
+        // replay-by-seed should be stable under column reordering. The
+        // mechanism is per-column sub-seeding keyed by column name, so
+        // each column's data depends only on (parent_seed, name).
+        let mk_col = || ColumnMeta {
+            sql_type: SqlType::Int(None),
+            gen_spec: ColumnGenerationSpec::Uniform(DfValue::Int(0), DfValue::Int(1_000_000)),
+        };
+        let mut schema_ab = TableSchema::new(SqlIdentifier::from("t"));
+        schema_ab.add_column(SqlIdentifier::from("a"), mk_col());
+        schema_ab.add_column(SqlIdentifier::from("b"), mk_col());
+
+        let mut schema_ba = TableSchema::new(SqlIdentifier::from("t"));
+        schema_ba.add_column(SqlIdentifier::from("b"), mk_col());
+        schema_ba.add_column(SqlIdentifier::from("a"), mk_col());
+
+        let mut rng_ab = SmallRng::seed_from_u64(42);
+        let mut rng_ba = SmallRng::seed_from_u64(42);
+        let rows_ab = generate_rows(&schema_ab, 5, &mut rng_ab);
+        let rows_ba = generate_rows(&schema_ba, 5, &mut rng_ba);
+
+        for (row_ab, row_ba) in rows_ab.iter().zip(rows_ba.iter()) {
+            // schema_ab positions: [a, b]; schema_ba positions: [b, a]
+            assert_eq!(
+                row_ab[0], row_ba[1],
+                "column 'a' should match across orderings"
+            );
+            assert_eq!(
+                row_ab[1], row_ba[0],
+                "column 'b' should match across orderings"
+            );
+        }
+    }
+
+    #[test]
     fn build_insert_produces_valid_sql() {
         let schema = sample_table();
-        let rows = generate_rows(&schema, 5);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let rows = generate_rows(&schema, 5, &mut rng);
         let insert = build_insert(&schema, &rows).expect("should build insert");
         let sql = insert.display(Dialect::MySQL).to_string();
 
@@ -2204,20 +2272,23 @@ mod tests {
             },
         ];
 
-        let values = materialize_params(&params);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let values = materialize_params(&params, &mut rng);
         assert_eq!(values.len(), 4, "3 + 1 = 4 total params");
     }
 
     #[test]
     fn materialize_params_empty() {
-        let values = materialize_params(&[]);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let values = materialize_params(&[], &mut rng);
         assert!(values.is_empty());
     }
 
     #[test]
     fn dfvalue_to_value_conversion() {
         let schema = sample_table();
-        let rows = generate_rows(&schema, 10);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let rows = generate_rows(&schema, 10, &mut rng);
         for row in &rows {
             for val in row {
                 let result = Value::try_from(val.clone());
@@ -2251,7 +2322,7 @@ mod tests {
                         "expected CREATE TABLE, got: {sql}"
                     );
 
-                    let rows = generate_rows(schema, 10);
+                    let rows = generate_rows(schema, 10, &mut entropy);
                     assert_eq!(rows.len(), 10);
                     let insert = build_insert(schema, &rows).expect("should build insert");
                     let insert_sql = insert.display(Dialect::MySQL).to_string();
@@ -2276,7 +2347,7 @@ mod tests {
             }
         }
 
-        let params = materialize_params(&output.params);
+        let params = materialize_params(&output.params, &mut entropy);
         for p in &params {
             let _v: Value = Value::try_from(p.clone()).expect("should convert to Value");
         }

@@ -369,7 +369,9 @@ impl From<CreateTableStatement> for TableSpec {
                     .get_mut(&ColumnName::from(field.column.name.as_str()))
                     .unwrap();
 
-                let generator = d.spec.generator_for_col(field.sql_type.clone());
+                let generator = d
+                    .spec
+                    .generator_for_col(field.sql_type.clone(), &mut rand::rng());
                 col_spec.gen_spec.lock().generator = if d.unique {
                     generator.into_unique()
                 } else {
@@ -543,7 +545,7 @@ impl TableSpec {
             .unwrap()
             .gen_spec
             .lock()
-            .generator = spec.generator_for_col(col_spec.sql_type.clone());
+            .generator = spec.generator_for_col(col_spec.sql_type.clone(), &mut rand::rng());
     }
 
     /// Overrides the existing `gen_spec` for a set of columns..
@@ -582,12 +584,12 @@ impl TableSpec {
                         }
                         _ if random => random_value_of_type(col_type, &mut rand::rng()),
                         ColumnGenerator::Constant(c) => c.gen(),
-                        ColumnGenerator::Uniform(u) => u.gen(),
-                        ColumnGenerator::Random(r) => r.gen(),
-                        ColumnGenerator::RandomString(r) => r.gen(),
-                        ColumnGenerator::RandomChars(r) => r.gen(),
-                        ColumnGenerator::Zipfian(z) => z.gen(),
-                        ColumnGenerator::NonRepeating(r) => r.gen(),
+                        ColumnGenerator::Uniform(u) => u.gen(&mut rand::rng()),
+                        ColumnGenerator::Random(r) => r.gen(&mut rand::rng()),
+                        ColumnGenerator::RandomString(r) => r.gen(&mut rand::rng()),
+                        ColumnGenerator::RandomChars(r) => r.gen(&mut rand::rng()),
+                        ColumnGenerator::Zipfian(z) => z.gen(&mut rand::rng()),
+                        ColumnGenerator::NonRepeating(r) => r.gen(&mut rand::rng()),
                     };
 
                     (col_name.clone(), value)
@@ -1018,7 +1020,7 @@ impl<'a> QueryState<'a> {
                     let sql_type = &self.gen.tables[table_name].columns[column_name].sql_type;
                     match index {
                         Some(idx) => unique_value_of_type(sql_type, *idx),
-                        None => generator.lock().gen(),
+                        None => generator.lock().gen(&mut rand::rng()),
                     }
                 },
             )
