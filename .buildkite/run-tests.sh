@@ -18,8 +18,16 @@ upload_junit() {
     done
 }
 
+upload_timings() {
+    echo "--- Uploading build timings"
+    if [[ -f target/cargo-timings/cargo-timing.html ]]; then
+        buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
+    fi
+}
+
 upload_artifacts() {
     upload_junit
+    upload_timings
 
     echo "--- Uploading proptest-regressions to buildkite artifacts"
     buildkite-agent artifact upload '**/proptest-regressions/*.txt'
@@ -39,6 +47,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
         --config-file ../hacks/nextest-tcv/nextest.toml
         --profile "$NEXTEST_PROFILE"
         --hide-progress-bar
+        --timings
         --workspace --features failure_injection
     )
 
@@ -70,6 +79,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     set +x
 
     upload_junit
+    upload_timings
 
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     echo "+++ :rust: Run tests (doctest)"
