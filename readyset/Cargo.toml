@@ -5,6 +5,7 @@ publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 license = "BSL 1.1"
+autotests = false
 description = """\
 A real-time SQL caching engine for Postgres and MySQL."""
 
@@ -64,6 +65,9 @@ replicators = { path = "../replicators" }
 schema-catalog = { path = "../schema-catalog" }
 
 
+[build-dependencies]
+test-discovery = { path = "../test-discovery" }
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true }
@@ -71,6 +75,10 @@ pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 temp-dir = { workspace = true }
 test-utils = { path = "../test-utils" }
+
+[[test]]
+name = "tests"
+path = "tests.rs"
 
 [[bench]]
 name = "query_logger"

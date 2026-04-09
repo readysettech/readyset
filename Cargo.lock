@@ -5646,6 +5646,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "temp-dir",
+ "test-discovery",
  "test-utils",
  "thiserror 2.0.18",
  "tokio",
