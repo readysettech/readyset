@@ -763,4 +763,22 @@ mod tests {
         assert_eq!(gc.kind, GeneratedKind::Always);
         assert!(!gc.stored);
     }
+
+    #[test]
+    fn mysql_invisible_column() {
+        let cols = parse_columns(Dialect::MySQL, "CREATE TABLE foo (a INT, b INT INVISIBLE)");
+        assert_eq!(cols.len(), 2);
+        assert!(!cols[0].invisible, "column 'a' should be visible");
+        assert!(cols[1].invisible, "column 'b' should be invisible");
+    }
+
+    #[test]
+    fn mysql_invisible_column_round_trip() {
+        let cols = parse_columns(Dialect::MySQL, "CREATE TABLE foo (a INT, b INT INVISIBLE)");
+        let displayed = cols[1].display(Dialect::MySQL).to_string();
+        assert!(
+            displayed.contains("INVISIBLE"),
+            "DialectDisplay should emit INVISIBLE, got: {displayed}"
+        );
+    }
 }

@@ -331,4 +331,34 @@ mod tests {
         );
         assert_eq!(bound_based_query, initial_query);
     }
+
+    #[test]
+    fn snapshot_query_with_explicit_columns() {
+        let columns = vec![SqlIdentifier::from("a"), SqlIdentifier::from("b")];
+
+        let snapshot_type = SnapshotType::KeyBased {
+            name: Some(SqlIdentifier::from("PRIMARY")),
+            keys: vec![Column::from(SqlIdentifier::from("a"))],
+            column_indices: vec![0],
+        };
+        let table_name = Relation {
+            schema: Some(SqlIdentifier::from("db")),
+            name: SqlIdentifier::from("foo"),
+        };
+        let (_count_query, initial_query, bound_based_query, _collation_query) =
+            snapshot_type.get_queries(&table_name, None, Some(&columns));
+        assert_eq!(
+            initial_query,
+            "SELECT `a`, `b` FROM `db`.`foo` FORCE INDEX (`PRIMARY`) ORDER BY `a` ASC LIMIT 100000"
+        );
+        assert_eq!(
+            bound_based_query,
+            "SELECT `a`, `b` FROM `db`.`foo` FORCE INDEX (`PRIMARY`) WHERE ((`a` > ?)) ORDER BY `a` ASC LIMIT 100000"
+        );
+
+        let snapshot_type = SnapshotType::FullTableScan;
+        let (_count_query, initial_query, _bound_based_query, _collation_query) =
+            snapshot_type.get_queries(&table_name, None, Some(&columns));
+        assert_eq!(initial_query, "SELECT `a`, `b` FROM `db`.`foo`");
+    }
 }

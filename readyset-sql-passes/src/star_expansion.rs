@@ -188,9 +188,9 @@ mod tests {
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_query;
 
-    use std::collections::HashSet;
-
     use super::*;
+
+    use std::collections::HashSet;
 
     struct TestSchemaContext {
         schema: HashMap<Relation, Vec<SqlIdentifier>>,
@@ -385,6 +385,63 @@ mod tests {
                 ("t1".into(), vec!["a".into()]),
                 ("t2".into(), vec!["b".into()]),
             ]),
+        );
+    }
+
+    /// Helper for tests that need invisible column support.
+    #[track_caller]
+    fn expands_stars_with_invisible(
+        source: &str,
+        expected: &str,
+        schema: HashMap<Relation, Vec<SqlIdentifier>>,
+        invisible_columns: HashSet<(Relation, SqlIdentifier)>,
+    ) {
+        let mut q = parse_query(Dialect::MySQL, source).unwrap();
+        let expected = parse_query(Dialect::MySQL, expected).unwrap();
+        q.expand_stars(TestSchemaContext {
+            schema,
+            invisible_columns,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "{} != {}",
+            q.display(readyset_sql::Dialect::MySQL),
+            expected.display(readyset_sql::Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn invisible_column_excluded_from_star() {
+        expands_stars_with_invisible(
+            "SELECT * FROM foo",
+            "SELECT foo.a FROM foo",
+            HashMap::from([("foo".into(), vec!["a".into(), "b".into()])]),
+            HashSet::from([("foo".into(), "b".into())]),
+        );
+    }
+
+    #[test]
+    fn invisible_column_excluded_from_table_star() {
+        expands_stars_with_invisible(
+            "SELECT foo.* FROM foo",
+            "SELECT foo.a FROM foo",
+            HashMap::from([("foo".into(), vec!["a".into(), "b".into()])]),
+            HashSet::from([("foo".into(), "b".into())]),
+        );
+    }
+
+    #[test]
+    fn invisible_column_join() {
+        expands_stars_with_invisible(
+            "SELECT * FROM t1 JOIN t2 on t1.a = t2.c",
+            "SELECT t1.a, t2.c FROM t1 JOIN t2 on t1.a = t2.c",
+            HashMap::from([
+                ("t1".into(), vec!["a".into(), "b".into()]),
+                ("t2".into(), vec!["c".into()]),
+            ]),
+            HashSet::from([("t1".into(), "b".into())]),
         );
     }
 }

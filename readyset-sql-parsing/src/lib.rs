@@ -1590,3 +1590,25 @@ export_parser!(
     key_specification,
     TableKey
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use readyset_sql::Dialect;
+
+    #[test]
+    fn mysql_invisible_column_parsed() {
+        // INVISIBLE is only supported by the sqlparser path; nom-sql strips versioned
+        // comments and does not recognize the bare INVISIBLE keyword.
+        let stmt = parse_create_table_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::MySQL,
+            "CREATE TABLE foo (a INT, b INT INVISIBLE)",
+        )
+        .expect("failed to parse CREATE TABLE with INVISIBLE column");
+        let body = stmt.body.expect("CREATE TABLE body should be Ok");
+        assert_eq!(body.fields.len(), 2);
+        assert!(!body.fields[0].invisible, "column 'a' should be visible");
+        assert!(body.fields[1].invisible, "column 'b' should be invisible");
+    }
+}

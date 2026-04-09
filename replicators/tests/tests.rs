@@ -5391,3 +5391,224 @@ async fn mysql_truncate_during_group_commit() {
     shutdown_tx.shutdown().await;
 }
 
+/// Helper to create a cache for a given SELECT statement and read the results.
+async fn get_results_for_query(
+    ctx: &mut TestHandle,
+    cache_name: &str,
+    select_stmt: &str,
+    expected_results: &[&[DfValue]],
+) {
+    let cache_name = cache_name.to_string();
+    let select_stmt = select_stmt.to_string();
+    let _: ReadySetResult<Vec<Vec<DfValue>>> = eventually! {
+        attempts: 40,
+        sleep: Duration::from_millis(500),
+        run_test: {
+            get_results_for_query_inner(ctx, &cache_name, &select_stmt).await
+        },
+        then_assert: |res| {
+            let res = res.unwrap();
+            assert_eq!(res, expected_results);
+            Ok(res)
+        }
+    };
+}
+
+async fn get_results_for_query_inner(
+    ctx: &mut TestHandle,
+    cache_name: &str,
+    select_stmt: &str,
+) -> ReadySetResult<Vec<Vec<DfValue>>> {
+    ctx.controller()
+        .await
+        .extend_recipe(ChangeList::from_changes(
+            vec![
+                Change::Drop {
+                    name: Relation {
+                        schema: Some("public".into()),
+                        name: cache_name.into(),
+                    },
+                    if_exists: true,
+                },
+                Change::CreateCache(CreateCache {
+                    name: Some(Relation {
+                        schema: Some("public".into()),
+                        name: cache_name.into(),
+                    }),
+                    statement: Box::new(
+                        parse_select(readyset_sql::Dialect::MySQL, select_stmt).unwrap(),
+                    ),
+                    always: false,
+                    schema_generation_used: None,
+                }),
+            ],
+            Dialect::DEFAULT_MYSQL,
+        ))
+        .await?;
+    let mut getter = ctx
+        .controller()
+        .await
+        .view(Relation {
+            schema: Some("public".into()),
+            name: cache_name.into(),
+        })
+        .await?
+        .into_reader_handle()
+        .unwrap();
+    let results = getter.lookup(&[0.into()], true).await?;
+    let mut results = results.into_vec();
+    results.sort();
+    Ok(results)
+}
+
+/// Tests MySQL INVISIBLE column support end-to-end:
+/// 1. Snapshot: table with invisible column is snapshotted with all data
+/// 2. Caches: SELECT * excludes invisible column; explicit columns include it
+/// 3. Replication: INSERT via binlog reflects in both caches
+/// 4. DDL replication: a new table created after snapshot also works
+async fn mysql_invisible_column_inner() {
+    let url = &mysql_url();
+    let mut client = DbConnection::connect(url).await.unwrap();
+
+    // Set up initial table before starting replication
+    client
+        .query(
+            "
+            DROP TABLE IF EXISTS `invisible_col` CASCADE;
+            DROP TABLE IF EXISTS `invisible_col2` CASCADE;
+            CREATE TABLE `invisible_col` (
+                id int NOT NULL PRIMARY KEY,
+                visible_col int DEFAULT NULL,
+                hidden_col int DEFAULT NULL INVISIBLE
+            );
+            INSERT INTO `invisible_col` (id, visible_col, hidden_col) VALUES (1, 10, 100);
+            INSERT INTO `invisible_col` (id, visible_col, hidden_col) VALUES (2, 20, 200);",
+        )
+        .await
+        .unwrap();
+
+    // Use OnlySqlparser because nom-sql does not yet parse the INVISIBLE keyword
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(sql_dialect_from_url(url));
+    builder.set_parsing_preset(ParsingPreset::OnlySqlparser);
+    let (mut ctx, shutdown_tx) =
+        TestHandle::start_noria_with_builder(url.to_string(), None, builder)
+            .await
+            .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    // 1) Snapshot: SELECT * via check_results! excludes the invisible column
+    check_results!(
+        ctx,
+        "invisible_col",
+        "Snapshot",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+        ]
+    );
+
+    // 2a) Cache with SELECT * should exclude the invisible column
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible_star",
+        "SELECT * FROM `public`.`invisible_col`",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+        ],
+    )
+    .await;
+
+    // 2b) Cache with explicit columns should include the invisible column
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible_all",
+        "SELECT `id`, `visible_col`, `hidden_col` FROM `public`.`invisible_col`",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10), DfValue::Int(100)],
+            &[DfValue::Int(2), DfValue::Int(20), DfValue::Int(200)],
+        ],
+    )
+    .await;
+
+    // 3) Replication: insert a new row via binlog and verify both caches update
+    client
+        .query(
+            "INSERT INTO `invisible_col` (id, visible_col, hidden_col) VALUES (3, 30, 300);",
+        )
+        .await
+        .unwrap();
+
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible_star",
+        "SELECT * FROM `public`.`invisible_col`",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10)],
+            &[DfValue::Int(2), DfValue::Int(20)],
+            &[DfValue::Int(3), DfValue::Int(30)],
+        ],
+    )
+    .await;
+
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible_all",
+        "SELECT `id`, `visible_col`, `hidden_col` FROM `public`.`invisible_col`",
+        &[
+            &[DfValue::Int(1), DfValue::Int(10), DfValue::Int(100)],
+            &[DfValue::Int(2), DfValue::Int(20), DfValue::Int(200)],
+            &[DfValue::Int(3), DfValue::Int(30), DfValue::Int(300)],
+        ],
+    )
+    .await;
+
+    // 4) DDL replication: create a new table with invisible column after snapshot
+    client
+        .query(
+            "
+            CREATE TABLE `invisible_col2` (
+                id int NOT NULL PRIMARY KEY,
+                a int DEFAULT NULL,
+                b int DEFAULT NULL INVISIBLE
+            );
+            INSERT INTO `invisible_col2` (id, a, b) VALUES (1, 11, 111);",
+        )
+        .await
+        .unwrap();
+
+    // Verify the replicated table's SELECT * excludes invisible column
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible2_star",
+        "SELECT * FROM `public`.`invisible_col2`",
+        &[&[DfValue::Int(1), DfValue::Int(11)]],
+    )
+    .await;
+
+    // Verify explicit columns include invisible column
+    get_results_for_query(
+        &mut ctx,
+        "q_invisible2_all",
+        "SELECT `id`, `a`, `b` FROM `public`.`invisible_col2`",
+        &[&[DfValue::Int(1), DfValue::Int(11), DfValue::Int(111)]],
+    )
+    .await;
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn mysql_invisible_column() {
+    mysql_invisible_column_inner().await;
+}
