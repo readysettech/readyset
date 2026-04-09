@@ -111,7 +111,7 @@ NULL
 NULL
 
 # REA-6472
-query RII rowsort
+query RII rowsort error: Wrong\ number\ of\ results\ returned
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
@@ -281,7 +281,7 @@ NULL
 NULL
 
 # REA-6472
-query RII rowsort
+query RII rowsort error: The\ number\ of\ values\ returned\ does\ not\ match
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
