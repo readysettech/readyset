@@ -490,8 +490,17 @@ impl MySqlReplicator<'_> {
         // in the table_mutator.schema().fields, but current version of mysql_common
         // don't have support to lookup a collation from its name. Temporally get the
         // collation ID from querying IS. Later we can avoid the extra query.
-        let (count_query, initial_query, bound_base_query, collation_query) =
-            snapshot_type.get_queries(table_mutator.table_name(), snapshot_query_comment);
+        // Build an explicit column list from the schema so that MySQL includes invisible
+        // columns (which are excluded from SELECT *).
+        let columns: Option<Vec<_>> = table_mutator
+            .schema()
+            .map(|s| s.fields.iter().map(|f| f.column.name.clone()).collect());
+        let (count_query, initial_query, bound_base_query, collation_query) = snapshot_type
+            .get_queries(
+                table_mutator.table_name(),
+                snapshot_query_comment,
+                columns.as_deref(),
+            );
 
         let collations = trx
             .query(collation_query)

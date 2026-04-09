@@ -1696,12 +1696,29 @@ impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
         &self,
         relation: &Relation,
     ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
-        self.this.view_schemas.get(relation).cloned().or_else(|| {
-            self.this
-                .uncompiled_views
-                .get(relation)
-                .map(|view| view.schema.clone())
-        })
+        self.this
+            .view_schemas
+            .get(relation)
+            .cloned()
+            .map(|cols| {
+                // Filter out invisible columns for base tables during SELECT * expansion.
+                // Views cannot have invisible columns, so only base tables need filtering.
+                if let Some(body) = self.base_schemas.get(relation) {
+                    cols.into_iter()
+                        .zip(body.fields.iter())
+                        .filter(|(_, spec)| !spec.invisible)
+                        .map(|(name, _)| name)
+                        .collect::<Vec<_>>()
+                } else {
+                    cols
+                }
+            })
+            .or_else(|| {
+                self.this
+                    .uncompiled_views
+                    .get(relation)
+                    .map(|view| view.schema.clone())
+            })
     }
 
     fn is_relation_non_replicated(&self, relation: &Relation) -> bool {

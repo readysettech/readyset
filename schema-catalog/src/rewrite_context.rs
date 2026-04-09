@@ -134,8 +134,21 @@ impl StarExpansionContext for RewriteContext {
         self.schema_catalog
             .view_schemas
             .get(relation)
-            .or_else(|| self.schema_catalog.uncompiled_views.get(relation))
             .cloned()
+            .map(|cols| {
+                // Filter out invisible columns for base tables during SELECT * expansion.
+                // Views cannot have invisible columns, so only base tables need filtering.
+                if let Some(body) = self.schema_catalog.base_schemas.get(relation) {
+                    cols.into_iter()
+                        .zip(body.fields.iter())
+                        .filter(|(_, spec)| !spec.invisible)
+                        .map(|(name, _)| name)
+                        .collect::<Vec<_>>()
+                } else {
+                    cols
+                }
+            })
+            .or_else(|| self.schema_catalog.uncompiled_views.get(relation).cloned())
     }
 
     fn is_relation_non_replicated(&self, relation: &Relation) -> bool {

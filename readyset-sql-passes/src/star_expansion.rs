@@ -188,10 +188,14 @@ mod tests {
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_query;
 
+    use std::collections::HashSet;
+
     use super::*;
 
     struct TestSchemaContext {
         schema: HashMap<Relation, Vec<SqlIdentifier>>,
+        /// Columns that are invisible and should be excluded from SELECT * expansion.
+        invisible_columns: HashSet<(Relation, SqlIdentifier)>,
     }
 
     impl RewriteDialectContext for TestSchemaContext {
@@ -205,7 +209,15 @@ mod tests {
             &self,
             table: &Relation,
         ) -> Option<impl IntoIterator<Item = SqlIdentifier>> {
-            self.schema.get(table).cloned()
+            self.schema.get(table).cloned().map(|cols| {
+                cols.into_iter()
+                    .filter(|col| {
+                        !self
+                            .invisible_columns
+                            .contains(&(table.clone(), col.clone()))
+                    })
+                    .collect::<Vec<_>>()
+            })
         }
 
         fn is_relation_non_replicated(&self, _relation: &Relation) -> bool {
@@ -218,7 +230,11 @@ mod tests {
     fn expands_stars(source: &str, expected: &str, schema: HashMap<Relation, Vec<SqlIdentifier>>) {
         let mut q = parse_query(Dialect::MySQL, source).unwrap();
         let expected = parse_query(Dialect::MySQL, expected).unwrap();
-        q.expand_stars(TestSchemaContext { schema }).unwrap();
+        q.expand_stars(TestSchemaContext {
+            schema,
+            invisible_columns: HashSet::new(),
+        })
+        .unwrap();
         assert_eq!(
             q,
             expected,
