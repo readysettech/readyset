@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use metrics::{counter, gauge, histogram, Counter, SharedString};
-use readyset_client::query::QueryId;
 use readyset_client_metrics::{
-    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode,
-    ReadysetExecutionEvent,
+    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
 };
 use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 
@@ -67,11 +65,10 @@ impl QueryLogger {
 
     fn process_query(
         query: &SqlQuery,
-        query_id_wrapper: &QueryIdWrapper,
         rewrite_params: AdapterRewriteParams,
         dialect: Dialect,
         rewrite_context: RewriteContext,
-    ) -> (SharedString, Option<SharedString>) {
+    ) -> Option<SharedString> {
         match query {
             SqlQuery::Select(stmt) => {
                 let mut stmt = stmt.clone();
@@ -79,24 +76,12 @@ impl QueryLogger {
                     .is_ok()
                 {
                     anonymize_literals(&mut stmt);
-                    let query_string = stmt.display(dialect).to_string();
-
-                    let query_id = match query_id_wrapper {
-                        QueryIdWrapper::Uncalculated(schema_search_path) => Some(
-                            QueryId::from_select(&stmt, schema_search_path)
-                                .to_string()
-                                .into(),
-                        ),
-                        QueryIdWrapper::Calculated(qid) => Some(qid.to_string().into()),
-                        QueryIdWrapper::None => None,
-                    };
-
-                    (SharedString::from(query_string), query_id)
+                    Some(SharedString::from(stmt.display(dialect).to_string()))
                 } else {
-                    (SharedString::from(""), None)
+                    None
                 }
             }
-            _ => (SharedString::from(""), None),
+            _ => None,
         }
     }
 
@@ -197,18 +182,19 @@ impl QueryLogger {
             None => return,
         };
 
-        let (query_string, query_id) = Self::process_query(
+        let query_string = Self::process_query(
             query,
-            &event.query_id,
             self.rewrite_params,
             self.dialect,
             self.rewrite_context().await,
         );
 
+        let query_id = event.query_id.map(|id| SharedString::from(id.to_string()));
+
         if let Some(duration) = event.parse_duration {
             let mut labels = Self::create_labels(
                 DatabaseType::ReadySet,
-                Some(query_string.clone()),
+                query_string.clone(),
                 query_id.clone(),
             );
             labels.push(("event_type", SharedString::from(event.event)));
@@ -216,7 +202,7 @@ impl QueryLogger {
             histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
         }
 
-        self.record_query_metrics(event, Some(query_string), query_id);
+        self.record_query_metrics(event, query_string, query_id);
     }
 
     /// Async task that logs query stats.

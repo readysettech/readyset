@@ -95,8 +95,7 @@ use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest
 use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
-    EventType, QueryExecutionEvent, QueryIdWrapper, QueryLogMode, ReadysetExecutionEvent,
-    SqlQueryType, recorded,
+    EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType, recorded,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
@@ -2349,7 +2348,7 @@ where
             }
         }
 
-        event.query_id = prepared_statement.query_id.into();
+        event.query_id = prepared_statement.query_id;
         log_query(
             self.state.query_log_sender.as_ref(),
             event,
@@ -2656,7 +2655,7 @@ where
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
         event.query.clone_from(&cached_statement.parsed_query);
-        event.query_id = cached_statement.query_id.into();
+        event.query_id = cached_statement.query_id;
 
         let upstream = &mut self.connectors.upstream;
         let noria = &mut self.connectors.noria;
@@ -4443,7 +4442,7 @@ where
         params: ShallowQueryParameters,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let query_id = QueryId::from(req);
-        event.query_id = Some(query_id).into();
+        event.query_id = Some(query_id);
         let key = params.make_keys(&[])?;
         let res = state
             .shallow
@@ -5139,7 +5138,7 @@ where
                     Self::query_shallow(connectors, state, &shallow, query, event, params).await;
 
                 event.sql_type = SqlQueryType::Read;
-                event.query_id = QueryIdWrapper::Calculated(query_id);
+                event.query_id = Some(query_id);
                 if let Err(e) = &result {
                     event.set_noria_error(&internal_err!("{e}"));
                 }
@@ -5230,7 +5229,7 @@ where
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
-                        event.query_id = QueryIdWrapper::Calculated(QueryId::from_select(
+                        event.query_id = Some(QueryId::from_select(
                             stmt,
                             connectors.noria.schema_search_path(),
                         ));
@@ -5272,10 +5271,7 @@ where
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
 
-                // force the QueryLogger to recalculate the query_id, instead of doing it
-                // here on the hot path as it will execute a rewrite pass over the query.
-                event.query_id =
-                    QueryIdWrapper::Uncalculated(connectors.noria.schema_search_path().into());
+                event.query_id = Some(QueryId::from(&view_request));
 
                 Self::try_noria_adhoc_select(
                     connectors,

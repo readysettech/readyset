@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use metrics::SharedString;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, internal};
-use readyset_sql::ast::{Relation, SqlIdentifier, SqlQuery};
+use readyset_sql::ast::{Relation, SqlQuery};
 use serde::Serialize;
 
 pub mod recorded;
@@ -40,26 +40,6 @@ impl QueryLogMode {
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub enum QueryIdWrapper {
-    /// Caller is providing an already-calculated `QueryId`.
-    Calculated(QueryId),
-
-    /// Caller wants the `QueryId` to be recalculated by the logger engine
-    /// (outside of the hot path). Must send along the schema search path
-    /// for the `query` associated with this event.
-    Uncalculated(Vec<SqlIdentifier>),
-
-    #[default]
-    None,
-}
-
-impl From<Option<QueryId>> for QueryIdWrapper {
-    fn from(query_id: Option<QueryId>) -> Self {
-        query_id.map(Self::Calculated).unwrap_or_default()
-    }
-}
-
 #[derive(Debug, Clone)]
 /// Event logging for the execution of a single query in the adapter. Durations
 /// logged should be mirrored by an update to `QueryExecutionTimerHandle`.
@@ -71,7 +51,7 @@ pub struct QueryExecutionEvent {
     pub query: Option<Arc<SqlQuery>>,
 
     /// If query has an assigned readyset id
-    pub query_id: QueryIdWrapper,
+    pub query_id: Option<QueryId>,
 
     /// How long the request spent in parsing.
     pub parse_duration: Option<Duration>,
@@ -239,7 +219,7 @@ impl QueryExecutionEvent {
             event: t,
             sql_type: SqlQueryType::Other,
             query: None,
-            query_id: QueryIdWrapper::None,
+            query_id: None,
             parse_duration: None,
             upstream_duration: None,
             readyset_event: None,
