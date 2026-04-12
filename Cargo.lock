@@ -528,7 +528,7 @@ dependencies = [
  "nom_locate",
  "proptest",
  "query-generator",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_distr",
  "readyset-client",
  "readyset-data",
@@ -1296,7 +1296,7 @@ dependencies = [
  "growable-bloom-filter",
  "mysql_async",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_distr",
  "rand_regex",
  "readyset-data",
@@ -1402,7 +1402,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-stateful",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rayon",
  "readyset-alloc",
  "readyset-client",
@@ -1467,7 +1467,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "rand 0.9.2",
+ "rand 0.9.3",
  "regex",
  "sqlparser 0.59.0",
  "tempfile",
@@ -1582,7 +1582,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "object_store",
- "rand 0.9.2",
+ "rand 0.9.3",
  "tokio",
  "url",
 ]
@@ -1678,7 +1678,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "rand 0.9.2",
+ "rand 0.9.3",
  "tempfile",
  "url",
 ]
@@ -1740,7 +1740,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.9.3",
  "regex",
  "unicode-segmentation",
  "uuid 1.20.0",
@@ -2042,7 +2042,7 @@ dependencies = [
  "clap",
  "failpoint-client",
  "mysql_async",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-tracing",
  "readyset-util",
  "serde_json",
@@ -4108,7 +4108,7 @@ dependencies = [
  "ordered-float",
  "quanta",
  "radix_trie",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_xoshiro",
  "sketches-ddsketch",
 ]
@@ -4242,7 +4242,7 @@ dependencies = [
  "native-tls",
  "pem",
  "percent-encoding",
- "rand 0.9.2",
+ "rand 0.9.3",
  "serde",
  "serde_json",
  "socket2 0.5.10",
@@ -4731,7 +4731,7 @@ dependencies = [
  "futures-util",
  "opentelemetry",
  "percent-encoding",
- "rand 0.9.2",
+ "rand 0.9.3",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -5198,7 +5198,7 @@ dependencies = [
  "bit-vec 0.8.0",
  "bitflags 2.10.0",
  "num-traits",
- "rand 0.9.2",
+ "rand 0.9.3",
  "rand_chacha 0.9.0",
  "rand_xorshift",
  "regex-syntax",
@@ -5213,7 +5213,7 @@ version = "0.1.3"
 dependencies = [
  "async-trait",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "tokio",
  "tracing",
 ]
@@ -5294,7 +5294,7 @@ dependencies = [
  "postgres-native-tls",
  "postgres-protocol",
  "postgres-types",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-adapter-types",
  "readyset-data",
  "readyset-decimal",
@@ -5375,7 +5375,7 @@ dependencies = [
  "mysql_async",
  "parking_lot",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-data",
  "readyset-sql",
  "readyset-sql-passes",
@@ -5454,9 +5454,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
+checksum = "7ec095654a25171c2124e9e3393a930bddbffdc939556c914957a4c3e0a87166"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.5",
@@ -5507,7 +5507,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
 dependencies = [
  "num-traits",
- "rand 0.9.2",
+ "rand 0.9.3",
 ]
 
 [[package]]
@@ -5516,7 +5516,7 @@ version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04db2e382d13679a1e42400e90e306cdbb79dc5cd41bb035ba4eae72e78cdf37"
 dependencies = [
- "rand 0.9.2",
+ "rand 0.9.3",
  "regex-syntax",
 ]
 
@@ -5587,7 +5587,7 @@ dependencies = [
  "petgraph 0.6.5",
  "proptest",
  "quanta",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-client",
  "readyset-util",
  "smallvec",
@@ -5687,7 +5687,7 @@ dependencies = [
  "mysql_common",
  "parking_lot",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-adapter-types",
  "readyset-alloc",
  "readyset-client",
@@ -5780,7 +5780,7 @@ dependencies = [
  "parking_lot",
  "petgraph 0.6.5",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
@@ -5961,7 +5961,7 @@ dependencies = [
  "petgraph 0.6.5",
  "pin-project",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "reader-map",
  "readyset-alloc",
  "readyset-client",
@@ -6343,7 +6343,7 @@ dependencies = [
  "pin-project",
  "quanta",
  "querystring",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-alloc",
  "readyset-alloc-metrics",
  "readyset-client",
@@ -6404,7 +6404,7 @@ dependencies = [
  "papaya",
  "proptest",
  "psql-srv",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-client",
  "readyset-data",
  "readyset-errors",
@@ -6575,7 +6575,7 @@ dependencies = [
  "postgres",
  "pprof",
  "proptest",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-decimal",
  "readyset-spatial",
  "serde",
@@ -6746,7 +6746,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-stateful",
- "rand 0.9.2",
+ "rand 0.9.3",
  "readyset-client",
  "readyset-client-metrics",
  "readyset-client-test-helpers",
