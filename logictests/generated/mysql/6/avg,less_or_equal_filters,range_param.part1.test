@@ -274,7 +274,7 @@ SELECT round(avg(`table_1`.`column_12`), 4) AS `alias_1`, `table_1`.`column_6` A
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(`table_1`.`column_13`) AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` <= `table_1`.`column_7`) OR (`table_1`.`column_6` <= 1)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ----
 -267770368.6000
@@ -298,7 +298,7 @@ SELECT avg(`table_1`.`column_14`) AS `alias_1`, `table_1`.`column_6` AS `alias_2
 1070721091
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(`table_1`.`column_15`) AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_6` <= 1) OR (`table_1`.`column_6` <= 1)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ----
 -542762319.4000
@@ -511,7 +511,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `ta
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIIII rowsort
 SELECT avg(`table_1`.`column_28`) AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3`, `table_1`.`column_6` AS `alias_4`, `table_1`.`column_6` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_6` <= `table_1`.`column_7`) OR (`table_1`.`column_6` <= `table_1`.`column_7`)) AND (`table_1`.`column_6` <= 1)) OR (`table_1`.`column_6` <= 1)) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`, `table_1`.`column_6`, `table_1`.`column_6`
 ----
 -555666697.8000

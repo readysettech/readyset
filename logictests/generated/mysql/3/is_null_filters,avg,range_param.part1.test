@@ -415,7 +415,7 @@ SELECT `table_1`.`column_9` AS `alias_1`, avg(`table_1`.`column_14`) AS `alias_2
 1367350133.0000
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIR rowsort
 SELECT `table_1`.`column_9` AS `alias_1`, `table_1`.`column_9` AS `alias_2`, avg(`table_1`.`column_15`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_9` IS NULL) OR (`table_1`.`column_9` IS NOT NULL)) GROUP BY `table_1`.`column_9`, `table_1`.`column_9`
 ----
 -2054592479
@@ -474,7 +474,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 40 values hashing to 33999298b4df7e43425392915d9426c3
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIR rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, avg(`table_1`.`column_18`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`
 ----
 NULL

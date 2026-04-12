@@ -55,7 +55,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
 -218163556.2000
@@ -208,7 +208,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 1
 1
 
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` <= 1) GROUP BY `table_1`.`column_1`
 ----
 -1207538305
@@ -227,7 +227,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 ? = 10
 ----
 
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_7`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` <= 1) GROUP BY `table_1`.`column_1`
 ----
 -1207538305
@@ -412,7 +412,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_15`) AS `alias_2
 1000256674.0000
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIR rowsort
 SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, avg(`table_1`.`column_16`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_14` <= 1) OR (`table_1`.`column_14` <= 1)) GROUP BY `table_1`.`column_14`, `table_1`.`column_14`
 ----
 -147078110
@@ -459,7 +459,7 @@ SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIR rowsort
 SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `table_1`.`column_14` AS `alias_3`, avg(`table_1`.`column_20`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_14` <= `table_1`.`column_6`) OR (`table_1`.`column_14` <= `table_1`.`column_6`)) OR (`table_1`.`column_14` <= 1)) GROUP BY `table_1`.`column_14`, `table_1`.`column_14`, `table_1`.`column_14`
 ----
 -147078110

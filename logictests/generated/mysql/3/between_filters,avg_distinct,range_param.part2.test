@@ -50,7 +50,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -1121434713.6000

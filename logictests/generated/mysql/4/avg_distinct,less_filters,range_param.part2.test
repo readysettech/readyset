@@ -24,7 +24,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_34` = 4)
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -407804396.5000

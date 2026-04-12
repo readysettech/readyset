@@ -15,7 +15,7 @@ SELECT min(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 -1797078399
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -13214325.7000

@@ -15,7 +15,7 @@ SELECT max(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 1934077136
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -495680833.5000
@@ -96,7 +96,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 874191589
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT max(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 784994926

@@ -10,7 +10,7 @@ INSERT INTO `table_1` (`column_3`, `column_4`, `column_1`, `column_6`, `column_8
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -684482810.2000
@@ -77,7 +77,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -1417716516.4000

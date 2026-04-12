@@ -59,7 +59,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 63757974
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RI rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` = `table_1`.`column_2`) GROUP BY `table_1`.`column_1`
 ----
 -811982453.4000
@@ -209,7 +209,7 @@ SELECT avg(distinct `table_1`.`column_9`) AS `alias_1`, `table_1`.`column_8` AS 
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1`, `table_1`.`column_8` AS `alias_2`, `table_1`.`column_8` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_8` = `table_1`.`column_2`) OR (`table_1`.`column_8` = 1)) GROUP BY `table_1`.`column_8`, `table_1`.`column_8`
 ----
 -4486750.6000
@@ -376,7 +376,7 @@ SELECT avg(distinct `table_1`.`column_18`) AS `alias_1`, `table_1`.`column_4` AS
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIII rowsort
 SELECT avg(distinct `table_1`.`column_19`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` = `table_1`.`column_5`) OR (`table_1`.`column_4` = `table_1`.`column_5`)) OR (`table_1`.`column_4` = 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
 -102826149.4000
@@ -481,7 +481,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIIII rowsort
 SELECT avg(distinct `table_1`.`column_28`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4`, `table_1`.`column_4` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_4` = `table_1`.`column_5`) OR (`table_1`.`column_4` = `table_1`.`column_5`)) AND (`table_1`.`column_4` = 1)) OR (`table_1`.`column_4` = 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
 -78003900.2000

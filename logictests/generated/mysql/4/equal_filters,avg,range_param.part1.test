@@ -45,7 +45,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
 -255484686.3000
@@ -102,7 +102,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` = `table_1`.`column_3`) GROUP BY `table_1`.`column_2`
 ----
 1
@@ -155,7 +155,7 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, avg(`table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` = 1) GROUP BY `table_1`.`column_3`
 ----
 1
@@ -306,7 +306,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_15`) AS `alias_2
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIR rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, avg(`table_1`.`column_16`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_13` = 1) OR (`table_1`.`column_13` = 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`
 ----
 1
@@ -362,7 +362,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIR rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, avg(`table_1`.`column_20`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` = `table_1`.`column_15`) OR (`table_1`.`column_13` = `table_1`.`column_15`)) OR (`table_1`.`column_13` = 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
 ----
 1
@@ -432,7 +432,7 @@ SELECT `table_1`.`column_25` AS `alias_1`, `table_1`.`column_25` AS `alias_2`, a
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIIR rowsort
 SELECT `table_1`.`column_25` AS `alias_1`, `table_1`.`column_25` AS `alias_2`, `table_1`.`column_25` AS `alias_3`, `table_1`.`column_25` AS `alias_4`, avg(`table_1`.`column_29`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_25` = `table_1`.`column_28`) OR (`table_1`.`column_25` = `table_1`.`column_28`)) AND (`table_1`.`column_25` = 1)) OR (`table_1`.`column_25` = 1)) GROUP BY `table_1`.`column_25`, `table_1`.`column_25`, `table_1`.`column_25`, `table_1`.`column_25`
 ----
 1

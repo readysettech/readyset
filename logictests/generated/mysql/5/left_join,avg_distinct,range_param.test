@@ -66,7 +66,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_2`.`column_3`) AS `alias_1` FROM `table_2`
 ----
 -17420085.7000

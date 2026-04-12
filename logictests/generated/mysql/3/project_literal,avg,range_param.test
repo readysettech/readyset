@@ -48,13 +48,13 @@ SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 1
 1
 
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 -257379231.5000
 
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT 1 AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -101,7 +101,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 920066340
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT 1 AS `alias_1`, avg(`table_1`.`column_2`) AS `alias_2` FROM `table_1`
 ----
 1
@@ -121,7 +121,7 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`c
 ----
 437431977.0000
 
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT 1 AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----

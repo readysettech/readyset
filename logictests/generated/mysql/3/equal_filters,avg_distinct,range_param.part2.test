@@ -48,7 +48,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
 -206485680.4000
@@ -296,7 +296,7 @@ SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, `
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIR rowsort
 SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, `table_1`.`column_18` AS `alias_3`, avg(distinct `table_1`.`column_20`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_18` = `table_1`.`column_8`) OR (`table_1`.`column_18` = `table_1`.`column_8`)) OR (`table_1`.`column_18` = 1)) GROUP BY `table_1`.`column_18`, `table_1`.`column_18`, `table_1`.`column_18`
 ----
 1
@@ -372,7 +372,7 @@ SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, a
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIIR rowsort
 SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, `table_1`.`column_18` AS `alias_3`, `table_1`.`column_18` AS `alias_4`, avg(distinct `table_1`.`column_29`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_18` = `table_1`.`column_22`) OR (`table_1`.`column_18` = `table_1`.`column_22`)) AND (`table_1`.`column_18` = 1)) OR (`table_1`.`column_18` = 1)) GROUP BY `table_1`.`column_18`, `table_1`.`column_18`, `table_1`.`column_18`, `table_1`.`column_18`
 ----
 1

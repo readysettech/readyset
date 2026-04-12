@@ -10,7 +10,7 @@ INSERT INTO `table_1` (`column_9`, `column_7`, `column_5`, `column_8`, `column_1
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -469290355.9000
@@ -43,7 +43,7 @@ SELECT avg(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`ta
 -427426582.8333
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -78,7 +78,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -101217217.4000
@@ -98,7 +98,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 7110589
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RR rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 -53778942.6000
@@ -112,7 +112,7 @@ SELECT avg(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`ta
 -523630100.0000
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----

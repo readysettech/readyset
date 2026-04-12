@@ -80,7 +80,7 @@ SELECT avg(`table_1`.`column_3`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`
 1038308338
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RI rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` IS NULL) GROUP BY `table_1`.`column_3`
 ----
 -864163561.8000
@@ -487,7 +487,7 @@ SELECT `table_1`.`column_15` AS `alias_1`, `table_1`.`column_15` AS `alias_2` FR
 976738091
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIII rowsort
 SELECT avg(`table_1`.`column_17`) AS `alias_1`, `table_1`.`column_15` AS `alias_2`, `table_1`.`column_15` AS `alias_3`, `table_1`.`column_15` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_15` IS NULL) AND (`table_1`.`column_15` IS NOT NULL)) OR (`table_1`.`column_15` IS NULL)) GROUP BY `table_1`.`column_15`, `table_1`.`column_15`, `table_1`.`column_15`
 ----
 -278047536.6000

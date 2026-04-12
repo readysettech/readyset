@@ -77,7 +77,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -293199591.6000

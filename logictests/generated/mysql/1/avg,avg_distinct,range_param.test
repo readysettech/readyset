@@ -28,7 +28,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 1943748528
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RR rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 426160909.2000

@@ -183,7 +183,7 @@ SELECT avg(`table_1`.`column_12`) AS `alias_1`, `table_1`.`column_4` AS `alias_2
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(`table_1`.`column_13`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` = `table_1`.`column_10`) OR (`table_1`.`column_4` = 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
 -60772164.5000

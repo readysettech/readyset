@@ -15,7 +15,7 @@ SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 -2157923502
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -620210630.4000
@@ -30,7 +30,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 59811671
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 1620865933
@@ -81,7 +81,7 @@ SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 697808675
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -1017563826.2000
@@ -93,7 +93,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 15233316
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 2017831247

@@ -236,7 +236,7 @@ SELECT avg(distinct `table_1`.`column_7`) AS `alias_1`, `table_1`.`column_2` AS 
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_8`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
 -263346124.4000
@@ -244,7 +244,7 @@ NULL
 NULL
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_9`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
 -104263003.6000
@@ -272,7 +272,7 @@ SELECT avg(distinct `table_1`.`column_10`) AS `alias_1`, `table_1`.`column_5` AS
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_11`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
 -1255721463.0000
@@ -321,7 +321,7 @@ SELECT avg(distinct `table_1`.`column_13`) AS `alias_1`, `table_1`.`column_5` AS
 372303574
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_14`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
 -119352097.8000
@@ -462,7 +462,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 745320957
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIII rowsort
 SELECT avg(distinct `table_1`.`column_17`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ----
 -118387368.4000

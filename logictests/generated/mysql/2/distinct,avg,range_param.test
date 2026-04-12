@@ -24,7 +24,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`
 608669020
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
 -68285514.1000
@@ -40,7 +40,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 878993214
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT DISTINCT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
 -211152682.4000

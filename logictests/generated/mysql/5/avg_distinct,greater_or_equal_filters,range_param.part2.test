@@ -245,7 +245,7 @@ SELECT avg(distinct `table_1`.`column_14`) AS `alias_1`, `table_1`.`column_1` AS
 679670832
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RII rowsort
 SELECT avg(distinct `table_1`.`column_15`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` >= 1) OR (`table_1`.`column_1` >= 1)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`
 ----
 -332957379.5000
@@ -394,7 +394,7 @@ SELECT avg(distinct `table_1`.`column_20`) AS `alias_1`, `table_1`.`column_1` AS
 679670832
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIII rowsort
 SELECT avg(distinct `table_1`.`column_21`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` >= `table_1`.`column_4`) AND (`table_1`.`column_1` >= 1)) OR (`table_1`.`column_1` >= 1)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ----
 -102815888.5000
@@ -423,7 +423,7 @@ SELECT avg(distinct `table_1`.`column_23`) AS `alias_1`, `table_1`.`column_1` AS
 679670832
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query RIII rowsort
 SELECT avg(distinct `table_1`.`column_24`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` >= `table_1`.`column_4`) AND (`table_1`.`column_1` >= 1)) OR (`table_1`.`column_1` >= 1)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ----
 -1892642072.5000

@@ -87,7 +87,7 @@ SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`
 30 values hashing to e13a86bd6b85638f5d9bc30bea6cfff6
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
@@ -218,7 +218,7 @@ DELETE FROM `table_5` WHERE (`column_3` = 4)
 
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
 -16993334.8000

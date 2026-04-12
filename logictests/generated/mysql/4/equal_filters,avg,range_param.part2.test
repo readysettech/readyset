@@ -85,7 +85,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 1
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IR rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` = `table_1`.`column_3`) GROUP BY `table_1`.`column_2`
 ----
 1
@@ -234,7 +234,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, avg(`table_1`.`column_14`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` = `table_1`.`column_10`) OR (`table_1`.`column_1` = 1)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`
 ----
 1
@@ -253,7 +253,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_15`) AS `alias_2
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIR rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, avg(`table_1`.`column_16`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_13` = 1) OR (`table_1`.`column_13` = 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`
 ----
 1
@@ -299,7 +299,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 ----
 
 # REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query IIIR rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, avg(`table_1`.`column_20`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` = `table_1`.`column_15`) OR (`table_1`.`column_13` = `table_1`.`column_15`)) OR (`table_1`.`column_13` = 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
 ----
 1
