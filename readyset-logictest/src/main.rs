@@ -321,7 +321,7 @@ struct Verify {
 
     /// Continue running after query failures, reporting all failures at the end.
     /// Statement failures still bail immediately since subsequent records depend on them.
-    #[arg(long, alias = "nff")]
+    #[arg(long, alias = "nff", env = "LOGICTEST_NO_FAIL_FAST")]
     no_fail_fast: bool,
 
     /// Per-query timeout in seconds. If a single query or statement execution takes longer than
