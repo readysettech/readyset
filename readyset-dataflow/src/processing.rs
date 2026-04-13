@@ -8,7 +8,7 @@ use crate::node::Column;
 use dataflow_state::PointKey;
 use derive_more::From;
 use readyset_client::KeyComparison;
-use readyset_data::{Bound, DfType};
+use readyset_data::DfType;
 use readyset_errors::ReadySetResult;
 use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
@@ -19,38 +19,8 @@ use crate::prelude::*;
 
 // TODO: make a Key type that is an ArrayVec<DfValue>
 
-/// Indication, for a [`Miss`], for how to derive the replay key that was being processed during
-/// that miss
-#[derive(PartialEq, Eq, Debug, Clone, From)]
-pub(crate) enum MissReplayKey {
-    /// A point replay was being performed, meaning we can get the values for the key out of the
-    /// miss record with these column indices
-    ///
-    /// # Invariants
-    ///
-    /// * The column indices here must be in-bounds for the miss's [`record`][Miss::record]
-    /// * The column indices cannot be empty
-    RecordColumns(Vec<usize>),
-
-    /// A range replay was being performed, with the given range key
-    ///
-    /// # Invariants
-    ///
-    /// * The endpoints of the range must be the same length
-    /// * The endpoints of the range may not be empty
-    Range((Bound<Vec1<DfValue>>, Bound<Vec1<DfValue>>)),
-
-    /// An explicit point key for replays that span multiple sources (e.g., straddled joins)
-    /// where the key cannot be extracted from a single record
-    ///
-    /// # Invariants
-    ///
-    /// * The values cannot be empty
-    Explicit(Vec1<DfValue>),
-}
-
-/// Indication, for a [`Miss`], for how to derive the key that was used for the lookup that resulted
-/// in the miss.
+/// Indication, for a [`MissBuilder`], for how to derive the key that was used for the lookup that
+/// resulted in the miss. Resolved eagerly to a [`KeyComparison`] in [`MissBuilder::build`].
 #[derive(PartialEq, Eq, Debug, Clone, From)]
 pub(crate) enum MissLookupKey {
     /// The columns of the miss's [`record`][] we were using for a point lookup
@@ -101,10 +71,12 @@ pub(crate) struct Miss {
     pub(crate) on: LocalNodeIndex,
     /// The columns of `on` we were looking up on.
     pub(crate) lookup_idx: Vec<usize>,
-    /// The key that we used to do the lookup that resulted in this miss
-    pub(crate) lookup_key: MissLookupKey,
-    /// The replay key that was being processed during the lookup (if any)
-    pub(crate) replay_key: Option<MissReplayKey>,
+    /// The key that we used to do the lookup that resulted in this miss, eagerly resolved at build
+    /// time.
+    pub(crate) lookup_key: KeyComparison,
+    /// The replay key that was being processed during the lookup (if any), eagerly resolved at
+    /// build time.
+    pub(crate) replay_key: Option<KeyComparison>,
     /// The record we were processing when we missed.
     pub(crate) record: Vec<DfValue>,
 }
@@ -204,18 +176,43 @@ impl<'a> MissBuilder<'a> {
                                 },
                             ))
                     });
+                // Eagerly resolve the replay key to a KeyComparison so that replay_key() is a
+                // trivial accessor and never re-derives from the record.
                 Some(match range {
-                    Some(k) => MissReplayKey::Range(k.clone()),
-                    None => MissReplayKey::RecordColumns(replay_key_cols.to_vec()),
+                    Some(k) => KeyComparison::Range(k.clone()),
+                    None => {
+                        let values = record_key_memo.unwrap_or_else(|| {
+                            record
+                                .cloned_indices(replay_key_cols.iter().copied())
+                                .expect("replay key columns must be in-bounds for record")
+                        });
+                        KeyComparison::Equal(
+                            values
+                                .try_into()
+                                .expect("replay key columns must not be empty"),
+                        )
+                    }
                 })
             }
             _ => None,
         };
 
+        // Eagerly resolve lookup_key so that lookup_key() is a trivial accessor.
+        let lookup_key = match self.lookup_key.take().unwrap() {
+            MissLookupKey::RecordColumns(cols) => KeyComparison::Equal(
+                record
+                    .cloned_indices(cols.iter().copied())
+                    .expect("lookup key columns must be in-bounds for record")
+                    .try_into()
+                    .expect("lookup key columns must not be empty"),
+            ),
+            MissLookupKey::Key(kc) => kc,
+        };
+
         Miss {
             on: self.on.take().unwrap(),
             lookup_idx: self.lookup_idx.take().unwrap(),
-            lookup_key: self.lookup_key.take().unwrap(),
+            lookup_key,
             replay_key,
             record,
         }
@@ -228,37 +225,16 @@ impl Miss {
         MissBuilder::default()
     }
 
-    /// Return a reference to the keys for the replay that were being performed during the miss, if
-    /// any
-    #[allow(clippy::unwrap_used)] // invariants on the fields
-    pub(crate) fn replay_key(&self) -> Option<KeyComparison> {
-        self.replay_key.as_ref().map(|rk| match rk {
-            MissReplayKey::RecordColumns(cols) => self
-                .record
-                .cloned_indices(cols.iter().copied())
-                .unwrap()
-                .try_into()
-                .unwrap(),
-            MissReplayKey::Range((lower, upper)) => {
-                KeyComparison::Range((lower.clone(), upper.clone()))
-            }
-            MissReplayKey::Explicit(values) => KeyComparison::Equal(values.clone()),
-        })
+    /// Return a reference to the replay key that was being processed during the miss, if any.
+    /// The key is eagerly resolved at build time, so this is a trivial accessor.
+    pub(crate) fn replay_key(&self) -> Option<&KeyComparison> {
+        self.replay_key.as_ref()
     }
 
-    /// Return a reference to the key used to perform the lookup that resulted in this miss
-    #[allow(clippy::unwrap_used)] // invariants on the fields
-    pub(crate) fn lookup_key(&self) -> Cow<'_, KeyComparison> {
-        match &self.lookup_key {
-            MissLookupKey::Key(lk) => Cow::Borrowed(lk),
-            MissLookupKey::RecordColumns(cols) => Cow::Owned(
-                self.record
-                    .cloned_indices(cols.iter().copied())
-                    .unwrap()
-                    .try_into()
-                    .unwrap(),
-            ),
-        }
+    /// Return a reference to the lookup key that resulted in this miss.
+    /// The key is eagerly resolved at build time, so this is a trivial accessor.
+    pub(crate) fn lookup_key(&self) -> &KeyComparison {
+        &self.lookup_key
     }
 }
 

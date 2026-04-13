@@ -261,17 +261,17 @@ impl ReplayMissCollector {
         idx
     }
 
-    fn group(columns: &mut Vec<Vec<usize>>, miss: &Miss) -> (KeyComparison, ReplayMissGroup) {
+    fn make_group(
+        columns: &mut Vec<Vec<usize>>,
+        miss: &Miss,
+        replay_key: &KeyComparison,
+    ) -> ReplayMissGroup {
         let cols_idx = Self::intern_columns(columns, &miss.lookup_idx);
-        let replay_key = miss
-            .replay_key()
-            .expect("miss must have replay key in partial replay");
-        let group = ReplayMissGroup {
+        ReplayMissGroup {
             idx: miss.on,
             lookup_columns: cols_idx,
             is_range: replay_key.is_range(),
-        };
-        (replay_key, group)
+        }
     }
 
     /// Add a batch of misses to the collector. We know this is a partial replay.
@@ -285,7 +285,10 @@ impl ReplayMissCollector {
         let Some(mut miss) = misses.next() else {
             return;
         };
-        let (mut replay_key, mut group) = Self::group(columns, miss);
+        let mut replay_key = miss
+            .replay_key()
+            .expect("miss must have replay key in partial replay");
+        let mut group = Self::make_group(columns, miss, replay_key);
 
         'outer: loop {
             let entry = groups
@@ -293,13 +296,16 @@ impl ReplayMissCollector {
                 .or_insert_with(|| HashSet::with_capacity(len));
 
             loop {
-                entry.insert((replay_key, miss.lookup_key().into_owned()));
+                entry.insert((replay_key.clone(), miss.lookup_key().clone()));
 
                 let Some(next) = misses.next() else {
                     break 'outer;
                 };
                 miss = next;
-                let (rk, g) = Self::group(columns, miss);
+                let rk = miss
+                    .replay_key()
+                    .expect("miss must have replay key in partial replay");
+                let g = Self::make_group(columns, miss, rk);
                 replay_key = rk;
                 if group != g {
                     group = g;
@@ -3718,12 +3724,11 @@ impl Domain {
 
                 let misses = &process_result.misses;
 
-                let missed_on = if backfill_keys.is_some() {
-                    let mut missed_on = HashSet::with_capacity(misses.len());
-                    for miss in misses {
-                        missed_on.insert(miss.replay_key().unwrap());
-                    }
-                    missed_on
+                let missed_on: HashSet<&KeyComparison> = if backfill_keys.is_some() {
+                    misses
+                        .iter()
+                        .map(|m| m.replay_key().expect("no replay key"))
+                        .collect()
                 } else {
                     HashSet::new()
                 };
@@ -3867,7 +3872,7 @@ impl Domain {
                         // bunch here? what if two key columns are reordered?
                         // XXX: this clone and collect here is *really* sad
                         let r = r.rec();
-                        !missed_on.iter().any(|miss| {
+                        !missed_on.iter().any(|&miss| {
                             miss.contains(partial_index.columns.iter().map(|&c| {
                                 // record came from processing, which means it
                                 // must have the right number of columns
