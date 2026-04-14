@@ -320,6 +320,19 @@ impl ReplayMissCollector {
     }
 }
 
+/// Tracks a replay that needs to be re-issued once the holes that originally
+/// caused it to miss have been filled.
+///
+/// # Invariant
+///
+/// **Every field MUST participate in `Hash` and `Eq`.** `Domain::handle_replay`
+/// dispatches via `waiting.holes.entry(redo).remove_entry()` and then reads
+/// `tag`, `replay_key`, `unishard`, `requesting_shard`, and
+/// `requesting_replica` from the key that `remove_entry` returns — which is
+/// the *stored* key, not the lookup key. If any field is excluded from
+/// `Hash`/`Eq` (manual impl, `derivative(Hash = "ignore")`, etc.), those reads
+/// will silently return values from a different in-flight request, mis-routing
+/// replays. If you need to ignore a field, audit `Domain::handle_replay` first.
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct Redo {
     tag: Tag,
@@ -4202,55 +4215,68 @@ impl Domain {
                         );
                     }
                 };
-                for key in for_keys.unwrap() {
-                    let replay = match inner.remove(&key) {
-                        Some(x) => x,
-                        None => {
-                            if !waiting.holes.is_empty() {
-                                self.waiting.insert(dst, waiting);
+                // Collect redo sets for all completed keys. When all pending keys
+                // are being resolved (common case), drain the map sequentially
+                // instead of doing per-key hash lookups.
+                let for_keys = for_keys.unwrap();
+                let redo_sets: Vec<HashSet<Redo>> = if for_keys.len() == inner.len() {
+                    inner.drain().map(|(_, redos)| redos).collect()
+                } else {
+                    let mut sets = Vec::with_capacity(for_keys.len());
+                    for key in for_keys {
+                        match inner.remove(&key) {
+                            Some(x) => sets.push(x),
+                            None => {
+                                if !waiting.holes.is_empty() {
+                                    self.waiting.insert(dst, waiting);
+                                }
+                                internal!(
+                                    "backfill for unnecessary hole key {:?}, tag {:?} (for node {})",
+                                    Sensitive(&key),
+                                    tag,
+                                    dst
+                                );
                             }
-                            internal!(
-                                "backfill for unnecessary hole key {:?}, tag {:?} (for node {})",
-                                Sensitive(&key),
-                                tag,
-                                dst
-                            );
                         }
-                    };
+                    }
+                    sets
+                };
 
-                    // we may need more holes to fill before some replays should be re-attempted
-                    let replay = replay.into_iter().filter(|tagged_replay_key| {
-                        let left = waiting.holes.get_mut(tagged_replay_key).unwrap();
-                        *left -= 1;
-
-                        if *left == 0 {
-                            trace!(k = ?tagged_replay_key, "filled last hole, replaying");
-
-                            // we've filled all holes that prevented the replay previously!
-                            waiting.holes.remove(tagged_replay_key);
-                            true
-                        } else {
-                            trace!(
-                                k = ?tagged_replay_key,
-                                left = *left,
-                                "filled hole for key, not triggering replay"
-                            );
-                            false
+                // Process each redo: decrement hole counts and dispatch those
+                // with all holes filled. Uses entry API to avoid double-hashing
+                // each Redo (one hash for entry() vs two for get_mut + remove).
+                for redos in redo_sets {
+                    for redo in redos {
+                        match waiting.holes.entry(redo) {
+                            Entry::Occupied(mut e) => {
+                                *e.get_mut() -= 1;
+                                if *e.get() == 0 {
+                                    // Every field of `Redo` must participate in Hash/Eq (see
+                                    // `Redo`'s doc comment), so the stored key returned here is
+                                    // field-equal to the `redo` that was passed to `entry()`.
+                                    let (redo, _) = e.remove_entry();
+                                    trace!(k = ?redo, "filled last hole, replaying");
+                                    replay_sets
+                                        .entry((
+                                            redo.tag,
+                                            redo.unishard,
+                                            redo.requesting_shard,
+                                            redo.requesting_replica,
+                                        ))
+                                        .or_default()
+                                        .push(redo.replay_key);
+                                } else {
+                                    trace!(
+                                        left = *e.get(),
+                                        k = ?e.key(),
+                                        "filled hole for key, not triggering replay"
+                                    );
+                                }
+                            }
+                            Entry::Vacant(_) => {
+                                unreachable!("redo in redos set but not in holes map")
+                            }
                         }
-                    });
-
-                    for Redo {
-                        tag,
-                        replay_key,
-                        unishard,
-                        requesting_shard,
-                        requesting_replica,
-                    } in replay
-                    {
-                        replay_sets
-                            .entry((tag, unishard, requesting_shard, requesting_replica))
-                            .or_default()
-                            .push(replay_key);
                     }
                 }
                 // Clean up empty inner map to maintain redos.is_empty() invariant
