@@ -115,72 +115,22 @@ impl ToSql for Decimal {
                 Ok(IsNull::No)
             }
             Decimal::Number(big_decimal) => {
-                // Much of this is due to `diesel`'s implementation.
-                let (mut bigint, scale) = big_decimal.as_bigint_and_exponent();
+                let components = bigdecimal_to_pg_numeric(big_decimal)
+                    .ok_or("numeric value out of range for Postgres wire format")?;
 
-                let scale_u16 = u16::try_from(scale);
-
-                // Special case to match Postgres to the byte: for zero values, Postgres doesn't
-                // send a weight, but does send a scale. The normal path will normalize the weight
-                // and end up with no scale.
-                if big_decimal.is_zero() && scale_u16.is_ok() {
-                    let dscale = scale_u16?;
-                    out.reserve(8);
-                    out.put_u16(0); // ndigits
-                    out.put_i16(0); // weight
-                    out.put_u16(0);
-                    out.put_u16(dscale);
-                    return Ok(IsNull::No);
-                }
-
-                // `BigDecimal` supports negative sign (trailing zeroes), but Postgres does not:
-                // normalize to 0 scale in that case.
-                let dscale: u16 = if scale < 0 {
-                    for _ in 0..(-scale) {
-                        bigint *= 10;
-                    }
-                    0
-                } else {
-                    scale_u16?
-                };
-
-                // Ensure decimal point will be between one of the base-10000 digits.
-                for _ in 0..(4 - dscale % 4) {
-                    bigint *= 10;
-                }
-
-                let (sign, mut biguint) = bigint.into_parts();
-
-                let mut digits = Vec::new();
-                let base = 10_000u16.into();
-                while !biguint.is_zero() {
-                    let (div, rem) = biguint.div_rem(&base);
-                    digits.push(rem.to_i16().expect("remainder should always be < 2**16"));
-                    biguint = div;
-                }
-
-                let digits_after_decimal_point = dscale / 4 + 1;
-                let weight =
-                    i16::try_from(digits.len())? - i16::try_from(digits_after_decimal_point)? - 1;
-
-                let trailing_zeroes = digits.iter().take_while(|i| i.is_zero()).count();
-                digits.reverse();
-                digits.truncate(digits.len() - trailing_zeroes);
-
-                let ndigits = u16::try_from(digits.len())?;
-                let sign_flags = match sign {
+                let ndigits = u16::try_from(components.digits.len())?;
+                let sign_flags = match components.sign {
                     Sign::Minus => NEGATIVE_SIGN,
                     _ => 0,
                 };
 
-                // Actually write out the value
-                out.reserve(8 + 2 * digits.len());
+                out.reserve(8 + 2 * components.digits.len());
                 out.put_u16(ndigits);
-                out.put_i16(weight);
+                out.put_i16(components.weight);
                 out.put_u16(sign_flags);
-                out.put_u16(dscale);
-                for digit in digits {
-                    out.put_i16(digit);
+                out.put_u16(components.dscale);
+                for digit in &components.digits {
+                    out.put_i16(*digit);
                 }
                 Ok(IsNull::No)
             }
@@ -207,4 +157,295 @@ fn write_special(
     out.put_u16(sign_flags);
     out.put_u16(0); // dscale
     Ok(())
+}
+
+struct PgNumericComponents {
+    digits: Vec<i16>,
+    weight: i16,
+    dscale: u16,
+    sign: Sign,
+}
+
+fn bigdecimal_to_pg_numeric(big_decimal: &BigDecimal) -> Option<PgNumericComponents> {
+    let (mut bigint, scale) = big_decimal.as_bigint_and_exponent();
+
+    if big_decimal.is_zero() {
+        let dscale = u16::try_from(scale).unwrap_or(0);
+        return Some(PgNumericComponents {
+            digits: vec![],
+            weight: 0,
+            dscale,
+            sign: Sign::Plus,
+        });
+    }
+
+    let dscale: u16 = if scale < 0 {
+        for _ in 0..(-scale) {
+            bigint *= 10;
+        }
+        0
+    } else {
+        u16::try_from(scale).ok()?
+    };
+
+    for _ in 0..(4 - dscale % 4) {
+        bigint *= 10;
+    }
+
+    let (sign, mut biguint) = bigint.into_parts();
+
+    let mut digits = Vec::new();
+    let base: BigUint = 10_000u16.into();
+    while !biguint.is_zero() {
+        let (div, rem) = biguint.div_rem(&base);
+        digits.push(rem.to_i16()?);
+        biguint = div;
+    }
+
+    let digits_after_decimal_point = dscale / 4 + 1;
+    let weight =
+        i16::try_from(digits.len()).ok()? - i16::try_from(digits_after_decimal_point).ok()? - 1;
+
+    let trailing_zeroes = digits.iter().take_while(|i| **i == 0).count();
+    digits.reverse();
+    digits.truncate(digits.len() - trailing_zeroes);
+
+    Some(PgNumericComponents {
+        digits,
+        weight,
+        dscale,
+        sign,
+    })
+}
+
+/// Postgres-style base-10000 numeric summary (magnitude only; sign is not included).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PgWeightInfo {
+    pub weight: i16,
+    pub first_digit: u16,
+    pub dscale: u16,
+}
+
+impl Decimal {
+    /// Compute the Postgres-style base-10000 weight and first non-zero digit.
+    ///
+    /// Returns weight, first_digit, and dscale matching PostgreSQL's `NumericVar`
+    /// representation. Sign is ignored; negative values produce the same result
+    /// as their absolute value. For special values (NaN, Infinity), all fields
+    /// are zero. For zero, weight and first_digit are zero but dscale is preserved.
+    // TODO: This computes the full base-10000 digit vector just to read the first
+    // element. A zero-allocation fast path would be more efficient for callers
+    // that only need weight/first_digit.
+    pub fn pg_weight_and_first_digit(&self) -> PgWeightInfo {
+        match self {
+            Decimal::Number(big_decimal) => {
+                let Some(components) = bigdecimal_to_pg_numeric(big_decimal) else {
+                    return PgWeightInfo {
+                        weight: 0,
+                        first_digit: 0,
+                        dscale: 0,
+                    };
+                };
+                if components.digits.is_empty() {
+                    return PgWeightInfo {
+                        weight: 0,
+                        first_digit: 0,
+                        dscale: components.dscale,
+                    };
+                }
+                let first = components.digits[0];
+                debug_assert!(
+                    first >= 0,
+                    "base-10000 digit from BigUint cannot be negative"
+                );
+                PgWeightInfo {
+                    weight: components.weight,
+                    first_digit: first as u16,
+                    dscale: components.dscale,
+                }
+            }
+            _ => PgWeightInfo {
+                weight: 0,
+                first_digit: 0,
+                dscale: 0,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use bytes::BytesMut;
+    use postgres_types::{FromSql, ToSql, Type};
+
+    use super::PgWeightInfo;
+    use crate::Decimal;
+
+    fn info(weight: i16, first_digit: u16, dscale: u16) -> PgWeightInfo {
+        PgWeightInfo {
+            weight,
+            first_digit,
+            dscale,
+        }
+    }
+
+    #[test]
+    fn pg_weight_integers() {
+        assert_eq!(
+            Decimal::from_str("1").unwrap().pg_weight_and_first_digit(),
+            info(0, 1, 0)
+        );
+        assert_eq!(
+            Decimal::from_str("42").unwrap().pg_weight_and_first_digit(),
+            info(0, 42, 0)
+        );
+        assert_eq!(
+            Decimal::from_str("40000")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(1, 4, 0)
+        );
+        assert_eq!(
+            Decimal::from_str("100000")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(1, 10, 0)
+        );
+    }
+
+    #[test]
+    fn pg_weight_fractional_lt_one() {
+        assert_eq!(
+            Decimal::from_str("0.01")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 100, 2)
+        );
+        assert_eq!(
+            Decimal::from_str("0.123")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 1230, 3)
+        );
+        assert_eq!(
+            Decimal::from_str("0.0001")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 1, 4)
+        );
+        assert_eq!(
+            Decimal::from_str("0.00001")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-2, 1000, 5)
+        );
+        assert_eq!(
+            Decimal::from_str("0.000000001")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-3, 1000, 9)
+        );
+        assert_eq!(
+            Decimal::from_str("0.9999")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 9999, 4)
+        );
+    }
+
+    #[test]
+    fn pg_weight_mixed() {
+        assert_eq!(
+            Decimal::from_str("33437.314618")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(1, 3, 6)
+        );
+    }
+
+    #[test]
+    fn pg_weight_dscale_multiple_of_4() {
+        assert_eq!(
+            Decimal::from_str("1.2345")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(0, 1, 4)
+        );
+        assert_eq!(
+            Decimal::from_str("1.23456789")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(0, 1, 8)
+        );
+        assert_eq!(
+            Decimal::from_str("0.12345678")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 1234, 8)
+        );
+    }
+
+    #[test]
+    fn pg_weight_zero() {
+        assert_eq!(
+            Decimal::from_str("0").unwrap().pg_weight_and_first_digit(),
+            info(0, 0, 0)
+        );
+        assert_eq!(
+            Decimal::from_str("0.000")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(0, 0, 3)
+        );
+    }
+
+    #[test]
+    fn pg_weight_special() {
+        assert_eq!(Decimal::NaN.pg_weight_and_first_digit(), info(0, 0, 0));
+        assert_eq!(Decimal::Infinity.pg_weight_and_first_digit(), info(0, 0, 0));
+        assert_eq!(
+            Decimal::NegativeInfinity.pg_weight_and_first_digit(),
+            info(0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn pg_weight_negative() {
+        assert_eq!(
+            Decimal::from_str("-42")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(0, 42, 0)
+        );
+        assert_eq!(
+            Decimal::from_str("-0.01")
+                .unwrap()
+                .pg_weight_and_first_digit(),
+            info(-1, 100, 2)
+        );
+    }
+
+    #[test]
+    fn pg_weight_large_value_exceeding_i128() {
+        let large = Decimal::from_str("1234567890123456789012345678901234567890").unwrap();
+        assert!(large.mantissa_and_scale().is_none());
+        assert_eq!(large.pg_weight_and_first_digit(), info(9, 1234, 0));
+    }
+
+    #[test]
+    fn to_sql_round_trip() {
+        for val in ["0", "1", "42", "0.01", "33437.314618", "-42", "0.000"] {
+            let dec = Decimal::from_str(val).unwrap();
+            let mut buf = BytesMut::new();
+            dec.to_sql(&Type::NUMERIC, &mut buf).unwrap();
+            let result = Decimal::from_sql(&Type::NUMERIC, &buf).unwrap();
+            assert_eq!(
+                dec.to_string(),
+                result.to_string(),
+                "round-trip failed for {val}"
+            );
+        }
+    }
 }

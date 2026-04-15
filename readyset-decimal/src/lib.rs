@@ -16,6 +16,8 @@ use strum::{EnumDiscriminants, FromRepr, IntoStaticStr, VariantNames};
 mod mysql;
 mod postgres;
 
+pub use postgres::PgWeightInfo;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ReadysetDecimalError {
     #[error("Invalid decimal format: {0}")]
