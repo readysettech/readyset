@@ -271,6 +271,47 @@ impl Decimal {
             },
         }
     }
+
+    /// Compute display scale for Postgres numeric division, matching `select_div_scale`
+    /// from PostgreSQL's `numeric.c`.
+    ///
+    /// Both inputs must be finite `Decimal::Number` values, and the denominator must be
+    /// non-zero. Returns `Err(InvalidDivisionScale)` otherwise.
+    pub fn select_div_scale(
+        numerator: &Decimal,
+        denominator: &Decimal,
+    ) -> Result<i64, crate::ReadysetDecimalError> {
+        const NUMERIC_MIN_SIG_DIGITS: i64 = 16;
+        const DEC_DIGITS: i64 = 4;
+        const MAX_DISPLAY_SCALE: i64 = 1000;
+
+        let (Decimal::Number(_), Decimal::Number(den)) = (numerator, denominator) else {
+            return Err(crate::ReadysetDecimalError::InvalidDivisionScale);
+        };
+        if den.is_zero() {
+            return Err(crate::ReadysetDecimalError::InvalidDivisionScale);
+        }
+
+        // TODO: Each `pg_weight_and_first_digit` call computes the full
+        // base-10000 digit vector just to read weight + first_digit. For
+        // integer denominators (e.g. AVG row count), a fast path with
+        // simple integer arithmetic would avoid BigInt allocation overhead.
+        let n = numerator.pg_weight_and_first_digit();
+        let d = denominator.pg_weight_and_first_digit();
+
+        let mut qweight = i64::from(n.weight) - i64::from(d.weight);
+        if n.first_digit <= d.first_digit {
+            qweight -= 1;
+        }
+
+        let mut rscale = NUMERIC_MIN_SIG_DIGITS - qweight * DEC_DIGITS;
+        rscale = rscale.max(i64::from(n.dscale));
+        rscale = rscale.max(i64::from(d.dscale));
+        rscale = rscale.max(0);
+        rscale = rscale.min(MAX_DISPLAY_SCALE);
+
+        Ok(rscale)
+    }
 }
 
 #[cfg(test)]
@@ -447,5 +488,74 @@ mod tests {
                 "round-trip failed for {val}"
             );
         }
+    }
+
+    fn dec(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn select_div_scale_basic() {
+        // Small fraction / 1: quotient weight is negative → more fractional digits
+        assert_eq!(
+            Decimal::select_div_scale(&dec("0.01"), &dec("1")).unwrap(),
+            20
+        );
+        // Large integer / small integer: quotient weight positive → fewer fractional digits
+        assert_eq!(
+            Decimal::select_div_scale(&dec("40000"), &dec("2")).unwrap(),
+            12
+        );
+        // Same-magnitude integers: quotient weight 0 → 16 sig digits
+        assert_eq!(Decimal::select_div_scale(&dec("8"), &dec("2")).unwrap(), 16);
+        // numerator < denominator → quotient weight decremented
+        assert_eq!(Decimal::select_div_scale(&dec("1"), &dec("3")).unwrap(), 20);
+    }
+
+    #[test]
+    fn select_div_scale_dscale_floor() {
+        assert_eq!(
+            Decimal::select_div_scale(&dec("100.12345678901234567890"), &dec("1")).unwrap(),
+            20
+        );
+    }
+
+    #[test]
+    fn select_div_scale_zero_numerator() {
+        assert_eq!(Decimal::select_div_scale(&dec("0"), &dec("1")).unwrap(), 20);
+    }
+
+    #[test]
+    fn select_div_scale_large_quotient() {
+        assert_eq!(
+            Decimal::select_div_scale(&dec("1000000"), &dec("1")).unwrap(),
+            12
+        );
+    }
+
+    #[test]
+    fn select_div_scale_negative_inputs() {
+        assert_eq!(
+            Decimal::select_div_scale(&dec("-40000"), &dec("2")).unwrap(),
+            Decimal::select_div_scale(&dec("40000"), &dec("2")).unwrap()
+        );
+        assert_eq!(
+            Decimal::select_div_scale(&dec("1"), &dec("-3")).unwrap(),
+            Decimal::select_div_scale(&dec("1"), &dec("3")).unwrap()
+        );
+    }
+
+    #[test]
+    fn select_div_scale_zero_denominator() {
+        assert!(Decimal::select_div_scale(&dec("1"), &dec("0")).is_err());
+    }
+
+    #[test]
+    fn select_div_scale_special_values() {
+        assert!(Decimal::select_div_scale(&Decimal::NaN, &dec("1")).is_err());
+        assert!(Decimal::select_div_scale(&dec("1"), &Decimal::NaN).is_err());
+        assert!(Decimal::select_div_scale(&Decimal::Infinity, &dec("1")).is_err());
+        assert!(Decimal::select_div_scale(&dec("1"), &Decimal::Infinity).is_err());
+        assert!(Decimal::select_div_scale(&Decimal::NegativeInfinity, &dec("1")).is_err());
     }
 }

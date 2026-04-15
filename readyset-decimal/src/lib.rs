@@ -28,6 +28,8 @@ pub enum ReadysetDecimalError {
         to_ty: &'static str,
         value: String,
     },
+    #[error("Division scale requires finite, non-zero inputs")]
+    InvalidDivisionScale,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants)]
