@@ -373,6 +373,13 @@ test_window_aggregation_type!(
     ["5188155168561903705"]
 );
 
+// Postgres AVG of small/fractional NUMERIC values — regression tests for select_div_scale
+test_aggregation_type!(postgres, avg_numeric_small_fraction, "avg(x)", SqlType::Numeric(None), ["0.01", "0.02"]);
+test_aggregation_type!(postgres, avg_numeric_tiny_fraction, "avg(x)", SqlType::Numeric(None), ["0.0001", "0.0002"]);
+test_aggregation_type!(postgres, avg_numeric_mixed_fraction, "avg(x)", SqlType::Numeric(None), ["33437.314618", "12345.678901"]);
+test_aggregation_type!(postgres, avg_numeric_single_small, "avg(x)", SqlType::Numeric(None), ["0.01"]);
+test_aggregation_type!(postgres, avg_numeric_negative_fraction, "avg(x)", SqlType::Numeric(None), ["-0.01", "0.03"]);
+
 // SUM/AVG on all-NULL input should return NULL, not 0
 test_aggregation_type!(mysql, sum_all_null_int, "sum(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
 test_aggregation_type!(mysql, avg_all_null_int, "avg(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);

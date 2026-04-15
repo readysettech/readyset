@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{DfType, Dialect};
+use readyset_decimal::Decimal;
 use readyset_errors::{invariant, ReadySetResult};
 pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
 use serde::{Deserialize, Serialize};
@@ -205,95 +206,6 @@ fn default_avg_empty_value() -> DfValue {
     DfValue::None
 }
 
-/// Computes display scale for Postgres numeric division, matching PostgreSQL behavior.
-///
-/// Returns the number of digits after the decimal point for a numeric division
-/// result, targeting ~16 significant digits.
-///
-/// The algorithm operates on base-10000 digit weights:
-/// - Estimate the quotient's weight (number of base-10000 groups before the decimal)
-/// - Set scale = 16 - weight * 4 (more integer digits → fewer fractional digits)
-/// - Ensure at least as many decimal places as either input has
-/// - Clamp to [0, 1000]
-fn postgres_select_div_scale(sum: &DfValue, count: &DfValue) -> i64 {
-    const NUMERIC_MIN_SIG_DIGITS: i64 = 16;
-    const DEC_DIGITS: i64 = 4;
-    const MAX_DISPLAY_SCALE: i64 = 1000;
-
-    /// Compute the base-10000 weight and first base-10000 digit of an integer value.
-    fn weight_and_first_int(val: u128) -> (i64, u16) {
-        if val == 0 {
-            return (0, 0);
-        }
-        let digits = (val as f64).log10().floor() as i64 + 1;
-        let weight = (digits - 1) / DEC_DIGITS;
-        let first_group_digits = ((digits - 1) % DEC_DIGITS) + 1;
-        let divisor = 10u128.pow((digits - first_group_digits) as u32);
-        let first = val / divisor;
-        (weight, first.max(1) as u16)
-    }
-
-    /// Compute weight/first-digit and display scale from a DfValue.
-    fn decompose(val: &DfValue) -> (i64, u16, i64) {
-        match val {
-            DfValue::Numeric(dec) => {
-                let (mantissa, scale) = match dec.mantissa_and_scale() {
-                    Some(ms) => ms,
-                    None => return (0, 0, 0),
-                };
-                if mantissa == 0 {
-                    return (0, 0, scale);
-                }
-                let abs = mantissa.unsigned_abs();
-                let total_digits = (abs as f64).log10().floor() as i64 + 1;
-                let int_digits = total_digits - scale;
-
-                let (weight, first) = if int_digits <= 0 {
-                    // Value < 1
-                    let leading_zeros = (-int_digits) / DEC_DIGITS;
-                    let w = -(leading_zeros + 1);
-                    // First non-zero base-10000 digit
-                    let frac_offset = ((-int_digits) % DEC_DIGITS) as u32;
-                    let f = (abs / 10u128.pow(total_digits as u32 - 1 - frac_offset)) % 10000;
-                    (w, f.max(1) as u16)
-                } else {
-                    let w = (int_digits - 1) / DEC_DIGITS;
-                    let first_group = ((int_digits - 1) % DEC_DIGITS) + 1;
-                    let divisor = 10u128.pow((int_digits - first_group) as u32);
-                    let int_part = abs / 10u128.pow(scale as u32);
-                    let f = int_part / divisor;
-                    (w, f.max(1) as u16)
-                };
-                (weight, first, scale)
-            }
-            DfValue::Int(n) => {
-                let (w, f) = weight_and_first_int(n.unsigned_abs() as u128);
-                (w, f, 0)
-            }
-            DfValue::UnsignedInt(n) => {
-                let (w, f) = weight_and_first_int(*n as u128);
-                (w, f, 0)
-            }
-            _ => (0, 1, 0),
-        }
-    }
-
-    let (weight1, first1, sum_dscale) = decompose(sum);
-    let (weight2, first2, count_dscale) = decompose(count);
-
-    let mut qweight = weight1 - weight2;
-    if first1 <= first2 {
-        qweight -= 1;
-    }
-
-    let mut rscale = NUMERIC_MIN_SIG_DIGITS - qweight * DEC_DIGITS;
-    rscale = rscale.max(sum_dscale);
-    rscale = rscale.max(count_dscale);
-    rscale = rscale.max(0);
-    rscale = rscale.min(MAX_DISPLAY_SCALE);
-
-    rscale
-}
 impl AverageDataPair {
     fn apply_diff(&mut self, d: NumericalDiff) -> ReadySetResult<DfValue> {
         if d.positive {
@@ -311,7 +223,16 @@ impl AverageDataPair {
                     Ok(DfValue::from(dec.round_dp(*scale)))
                 }
                 (DfValue::Numeric(dec), AvgScaleMode::PostgresComputed) => {
-                    let scale = postgres_select_div_scale(&self.sum, &self.count);
+                    let sum_dec = match &self.sum {
+                        DfValue::Numeric(d) => d.as_ref(),
+                        _ => internal!("PostgresComputed avg: sum is not Numeric"),
+                    };
+                    let count_i64 = match &self.count {
+                        DfValue::Int(n) => *n,
+                        _ => internal!("PostgresComputed avg: count is not Int"),
+                    };
+                    let count_dec = Decimal::from(count_i64);
+                    let scale = Decimal::select_div_scale(sum_dec, &count_dec)?;
                     Ok(DfValue::from(dec.round_dp(scale)))
                 }
                 _ => Ok(result),
@@ -1703,6 +1624,35 @@ mod tests {
         assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
     }
 
+    /// Postgres AVG on small NUMERIC fractions (< 1) should not panic and
+    /// should produce correct display scale. Regression test for u32
+    /// underflow in the old `postgres_select_div_scale`.
+    #[test]
+    fn avg_postgres_fractional_numeric_scale() {
+        let mut c = setup_pg(
+            Aggregation::Avg,
+            &DfType::Numeric { prec: 10, scale: 2 },
+            true,
+        );
+
+        // Insert group=1, value=0.01
+        let v1 = DfValue::from(readyset_decimal::Decimal::new(1, 2));
+        let u: Record = vec![1.into(), v1].into();
+        c.narrow_one(u, true);
+
+        // Insert group=1, value=0.02 → AVG = 0.015
+        let v2 = DfValue::from(readyset_decimal::Decimal::new(2, 2));
+        let u: Record = vec![1.into(), v2].into();
+        let rs = c.narrow_one(u, true);
+        let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
+            unreachable!()
+        };
+        // sum=0.03 (weight -1, first 300), count=2 (weight 0, first 2)
+        // qweight = -1 - 0 = -1 (no decrement since 300 > 2)
+        // rscale = 16 - (-1)*4 = 20
+        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(20)));
+    }
+
     /// MySQL AVG output type varies by integer subtype.
     #[test]
     fn avg_mysql_per_type_precision() {
@@ -1802,7 +1752,7 @@ mod tests {
         let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
             unreachable!()
         };
-        // postgres_select_div_scale for sum≈66874.6 (weight 1, first 6),
+        // Decimal::select_div_scale for sum≈66874.6 (weight 1, first 6),
         // count=2 (weight 0, first 2) yields rscale = 16 - 1*4 = 12.
         assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
     }
