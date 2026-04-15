@@ -383,19 +383,19 @@ impl Waiting {
         node: LocalNodeIndex,
         column_indices: Arc<[usize]>,
         key: KeyComparison,
-        redo: Redo,
+        redo: &Redo,
     ) -> bool {
         let inner = self.redos.entry((node, column_indices)).or_default();
         match inner.entry(key) {
             Entry::Occupied(e) => {
                 if e.into_mut().insert(redo.clone()) {
-                    *self.holes.entry(redo).or_default() += 1;
+                    *self.holes.entry(redo.clone()).or_default() += 1;
                 }
                 false
             }
             Entry::Vacant(e) => {
                 e.insert(HashSet::from([redo.clone()]));
-                *self.holes.entry(redo).or_default() += 1;
+                *self.holes.entry(redo.clone()).or_default() += 1;
                 true
             }
         }
@@ -1043,7 +1043,7 @@ impl Domain {
         w: &mut Waiting,
         needed_replays: &mut HashMap<(Target, Arc<[usize]>), Vec<KeyComparison>>,
         misses: Vec<ColumnMiss>,
-        redo: Redo,
+        redo: &Redo,
     ) {
         for ColumnMiss {
             node,
@@ -1055,12 +1055,7 @@ impl Domain {
                 .entry((Target(node), Arc::clone(&column_indices)))
                 .or_default();
             for miss_key in missed_keys {
-                if w.record_miss(
-                    node,
-                    Arc::clone(&column_indices),
-                    miss_key.clone(),
-                    redo.clone(),
-                ) {
+                if w.record_miss(node, Arc::clone(&column_indices), miss_key.clone(), redo) {
                     replays.push(miss_key);
                 }
             }
@@ -1121,7 +1116,7 @@ impl Domain {
                 requesting_shard,
                 requesting_replica,
             };
-            Self::record_column_misses(&mut w, &mut needed_replays, misses, redo);
+            Self::record_column_misses(&mut w, &mut needed_replays, misses, &redo);
         }
 
         self.waiting.insert(miss_in, w);
