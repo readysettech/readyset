@@ -1,0 +1,18 @@
+statement ok
+create table datatypes (id int, rownum int)
+
+statement ok
+insert into datatypes (id, rownum) values (1, 10), (2, 20), (3, 30)
+
+query I valuesort
+SELECT sq.renamed FROM datatypes CROSS JOIN (SELECT rownum AS renamed FROM datatypes) AS sq
+----
+10
+10
+10
+20
+20
+20
+30
+30
+30

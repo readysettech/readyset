@@ -81,9 +81,14 @@ fn fuse_nodes(
             continue;
         }
 
-        // When fusing through AliasTable, don't fuse if a child's table-qualified
-        // Column would match a parent Expr — inlining would lose the table qualifier,
-        // breaking downstream column resolution.
+        // When fusing through AliasTable, don't fuse if:
+        // 1. A child's table-qualified Column would match a parent Expr —
+        //    inlining would lose the table qualifier, breaking downstream
+        //    column resolution.
+        // 2. A child's table-qualified Column would match a parent Column
+        //    that has aliases (i.e., is a rename) — removing the parent
+        //    project would lose the rename, and the child's reference
+        //    would no longer resolve against the grandparent's parent.
         if intermediate.is_some() {
             if let (
                 MirNodeInner::Project { emit: parent_emit },
@@ -99,9 +104,13 @@ fn fuse_nodes(
                         ..
                     }) = ce
                     {
-                        parent_emit.iter().any(
-                            |pe| matches!(pe, ProjectExpr::Expr { alias, .. } if alias == name),
-                        )
+                        parent_emit.iter().any(|pe| match pe {
+                            ProjectExpr::Expr { alias, .. } if alias == name => true,
+                            ProjectExpr::Column(c) if c.name == *name && !c.aliases.is_empty() => {
+                                true
+                            }
+                            _ => false,
+                        })
                     } else {
                         false
                     }
@@ -453,5 +462,35 @@ mod tests {
 
         assert!(!fuse(&mut g, &[base, p1, alias, p2, other, leaf], leaf));
         assert!(g.node_weight(p1).is_some());
+    }
+
+    #[test]
+    fn no_fuse_through_alias_when_column_rename_would_be_lost() {
+        // base(a, b) → p1(Column{name:"renamed", aliases:[Column{name:"a"}]})
+        //            → alias("sq") → p2(Column{table:"sq", name:"renamed"}) → leaf
+        // Fusion must NOT happen: p1 renames "a" to "renamed". Removing p1
+        // would leave alias("sq") directly on base, so p2's reference to
+        // sq.renamed would not resolve (base has "a", not "renamed").
+        let mut g = MirGraph::new();
+        let base = base_node(&mut g, &["a", "b"]);
+        let p1 = project_node(
+            &mut g,
+            vec![ProjectExpr::Column(
+                Column::named("a").aliased_as("renamed".into()),
+            )],
+        );
+        let alias = alias_node(&mut g, "sq");
+        let p2 = project_node(
+            &mut g,
+            vec![ProjectExpr::Column(Column::new(Some("sq"), "renamed"))],
+        );
+        let leaf = leaf_node(&mut g, "renamed");
+        chain(&mut g, &[base, p1, alias, p2, leaf]);
+
+        assert!(!fuse(&mut g, &[base, p1, alias, p2, leaf], leaf));
+        assert!(
+            g.node_weight(p1).is_some(),
+            "p1 should NOT be removed — it renames a column"
+        );
     }
 }
