@@ -11,6 +11,7 @@ use datafusion::common::DFSchema;
 use datafusion::config::ConfigOptions;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use datafusion::execution::{SessionState, SessionStateBuilder};
+use datafusion::functions::all_default_functions;
 use datafusion::functions::utils::make_scalar_function;
 use datafusion::logical_expr::{ScalarUDF, Volatility};
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext, create_udf};
@@ -95,7 +96,9 @@ impl ReadysetSchema {
     /// Create some additional functions we want available in the Readyset schema.
     fn init_functions(schema_name: &str) -> Vec<Arc<ScalarUDF>> {
         let database = schema_name.to_string();
-        vec![Arc::new(create_udf(
+
+        let mut funcs = all_default_functions();
+        funcs.extend([Arc::new(create_udf(
             "database",
             vec![],
             DataType::Utf8,
@@ -104,7 +107,8 @@ impl ReadysetSchema {
                 move |_| Ok(Arc::new(StringArray::from(vec![database.as_ref()]))),
                 vec![],
             )),
-        ))]
+        ))]);
+        funcs
     }
 
     /// The name of the Readyset schema.
