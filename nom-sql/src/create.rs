@@ -883,6 +883,34 @@ pub fn view_creation(
     }
 }
 
+/// Parse a duration unit keyword (`SECONDS`, `MILLISECONDS`, or `MS`) and return a function
+/// that converts an integer value to the corresponding [`Duration`].
+fn duration_unit(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], fn(u64) -> Duration> {
+    alt((
+        // Try longer tags before shorter ones to avoid `MS` matching the `M` in `MILLISECONDS`.
+        map(tag_no_case("milliseconds"), |_| {
+            Duration::from_millis as fn(u64) -> Duration
+        }),
+        map(tag_no_case("seconds"), |_| {
+            Duration::from_secs as fn(u64) -> Duration
+        }),
+        map(tag_no_case("ms"), |_| {
+            Duration::from_millis as fn(u64) -> Duration
+        }),
+    ))(i)
+}
+
+/// Parse `<uint> (SECONDS | MILLISECONDS | MS)` and return the resulting [`Duration`].
+fn uint_with_duration_unit(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Duration> {
+    let (i, value) = map_res(
+        map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
+        u64::from_str,
+    )(i)?;
+    let (i, _) = whitespace1(i)?;
+    let (i, to_duration) = duration_unit(i)?;
+    Ok((i, to_duration(value)))
+}
+
 /// Extract the [`CreateCacheOption`] from a `CREATE CACHE statement.
 fn cached_query_options(
     mut i: LocatedSpan<&[u8]>,
@@ -917,37 +945,25 @@ fn cached_query_options(
                 whitespace1,
                 tag_no_case("ttl"),
                 whitespace1,
-                map_res(
-                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                    u64::from_str,
-                ),
-                whitespace1,
-                tag_no_case("seconds"),
+                uint_with_duration_unit,
                 whitespace1,
                 opt(tuple((
                     tag_no_case("refresh"),
                     whitespace1,
                     opt(tuple((tag_no_case("every"), whitespace1))),
-                    map_res(
-                        map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                        u64::from_str,
-                    ),
-                    whitespace1,
-                    tag_no_case("seconds"),
+                    uint_with_duration_unit,
                     whitespace1,
                 ))),
             )),
-            |(_, _, _, _, ttl_secs, _, _, _, refresh_opt)| {
-                if let Some((_, _, every_opt, refresh_secs, _, _, _)) = refresh_opt {
+            |(_, _, _, _, ttl, _, refresh_opt)| {
+                if let Some((_, _, every_opt, refresh, _)) = refresh_opt {
                     Option::Policy(EvictionPolicy::TtlAndPeriod {
-                        ttl: Duration::from_secs(ttl_secs),
-                        refresh: Duration::from_secs(refresh_secs),
+                        ttl,
+                        refresh,
                         schedule: every_opt.is_some(),
                     })
                 } else {
-                    Option::Policy(EvictionPolicy::Ttl {
-                        ttl: Duration::from_secs(ttl_secs),
-                    })
+                    Option::Policy(EvictionPolicy::Ttl { ttl })
                 }
             },
         ),
@@ -955,15 +971,10 @@ fn cached_query_options(
             tuple((
                 tag_no_case("coalesce"),
                 whitespace1,
-                map_res(
-                    map_res(digit1, |i: LocatedSpan<&[u8]>| str::from_utf8(&i)),
-                    u64::from_str,
-                ),
-                whitespace1,
-                tag_no_case("seconds"),
+                uint_with_duration_unit,
                 whitespace1,
             )),
-            |(_, _, secs, _, _, _)| Option::Coalesce(Duration::from_secs(secs)),
+            |(_, _, duration, _)| Option::Coalesce(duration),
         ),
     ))(i)
     {
@@ -1972,6 +1983,69 @@ mod tests {
                 b"CREATE CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
             ));
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_shallow_cache_millisecond_units() {
+            for (input, expected) in [
+                (
+                    "CREATE SHALLOW CACHE POLICY TTL 500 MILLISECONDS FROM SELECT id FROM t",
+                    EvictionPolicy::Ttl {
+                        ttl: Duration::from_millis(500),
+                    },
+                ),
+                (
+                    "CREATE SHALLOW CACHE POLICY TTL 500 MS FROM SELECT id FROM t",
+                    EvictionPolicy::Ttl {
+                        ttl: Duration::from_millis(500),
+                    },
+                ),
+                (
+                    "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS REFRESH 500 MS FROM SELECT id FROM t",
+                    EvictionPolicy::TtlAndPeriod {
+                        ttl: Duration::from_secs(5),
+                        refresh: Duration::from_millis(500),
+                        schedule: false,
+                    },
+                ),
+            ] {
+                let stmt = test_parse!(create_cached_query(Dialect::MySQL), input.as_bytes());
+                assert_eq!(stmt.policy, Some(expected), "for input {input}");
+            }
+        }
+
+        #[test]
+        fn create_shallow_cache_coalesce_milliseconds() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE COALESCE 250 MS FROM SELECT id FROM t"
+            );
+            assert_eq!(stmt.coalesce_ms, Some(Duration::from_millis(250)));
+        }
+
+        #[test]
+        fn display_shallow_cache_subsecond_roundtrip() {
+            // Sub-second durations should display as MILLISECONDS; whole-second durations stay
+            // as SECONDS (backward compatible).
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE POLICY TTL 500 MS FROM SELECT id FROM t"
+            );
+            let displayed = stmt.display(Dialect::MySQL).to_string();
+            assert!(
+                displayed.contains("POLICY TTL 500 MILLISECONDS"),
+                "expected MILLISECONDS in display, got: {displayed}"
+            );
+
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE POLICY TTL 10 SECONDS FROM SELECT id FROM t"
+            );
+            let displayed = stmt.display(Dialect::MySQL).to_string();
+            assert!(
+                displayed.contains("POLICY TTL 10 SECONDS"),
+                "expected SECONDS in display, got: {displayed}"
+            );
         }
 
         #[test]

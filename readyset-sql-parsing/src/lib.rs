@@ -215,6 +215,7 @@ enum ReadysetKeyword {
     MATERIALIZATIONS,
     MEMORY,
     MIGRATION,
+    MS,
     PERIOD,
     PATHS,
     POLICY,
@@ -250,6 +251,7 @@ impl ReadysetKeyword {
             Self::MATERIALIZATIONS => "MATERIALIZATIONS",
             Self::MEMORY => "MEMORY",
             Self::MIGRATION => "MIGRATION",
+            Self::MS => "MS",
             Self::PERIOD => "PERIOD",
             Self::PATHS => "PATHS",
             Self::POLICY => "POLICY",
@@ -491,12 +493,46 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
     }
 }
 
+/// Consume a duration unit keyword (`SECONDS`, `MILLISECONDS`, or `MS`) and turn `value` into a
+/// [`Duration`]. `context` names the preceding clause for error messages (e.g. `"TTL"`,
+/// `"REFRESH"`, `"COALESCE"`).
+fn parse_duration_unit(
+    parser: &mut Parser,
+    value: u64,
+    context: &str,
+) -> Result<Duration, ReadysetParsingError> {
+    if parser.parse_keyword(Keyword::SECONDS) {
+        Ok(Duration::from_secs(value))
+    } else if parser.parse_keyword(Keyword::MILLISECONDS)
+        || parse_readyset_keyword(parser, ReadysetKeyword::MS)
+    {
+        Ok(Duration::from_millis(value))
+    } else {
+        Err(ReadysetParsingError::ReadysetParsingError(format!(
+            "Expected SECONDS, MILLISECONDS, or MS after {context} duration"
+        )))
+    }
+}
+
+/// Parse `<uint> (SECONDS | MILLISECONDS | MS)` and return the corresponding [`Duration`].
+fn parse_duration_with_unit(
+    parser: &mut Parser,
+    context: &str,
+) -> Result<Duration, ReadysetParsingError> {
+    let value = parser.parse_literal_uint().map_err(|_| {
+        ReadysetParsingError::ReadysetParsingError(format!("couldn't parse {context} duration"))
+    })?;
+    parse_duration_unit(parser, value, context)
+}
+
 /// Parse cache options (POLICY, TTL, REFRESH, COALESCE, ALWAYS, CONCURRENTLY) from the token
 /// stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must already be consumed.
 ///
 /// This is shared between `CREATE CACHE` DDL parsing and hint directive parsing.
 /// Syntax is identical in both contexts:
-///     `POLICY TTL <n> SECONDS [REFRESH [EVERY] <n> SECONDS] [COALESCE <n> SECONDS]`
+///     POLICY TTL <n> {SECONDS | MILLISECONDS | MS}
+///       [REFRESH [EVERY] <n> {SECONDS | MILLISECONDS | MS}]
+///       [COALESCE <n> {SECONDS | MILLISECONDS | MS}]
 fn parse_cache_options(
     parser: &mut Parser,
     cache_type: Option<CacheType>,
@@ -512,47 +548,32 @@ fn parse_cache_options(
                 "Expected TTL after POLICY".into(),
             ));
         }
-        let ttl_secs = parser.parse_literal_uint().map_err(|_| {
-            ReadysetParsingError::ReadysetParsingError("couldn't parse TTL duration".into())
-        })?;
-        if !parser.parse_keyword(Keyword::SECONDS) {
-            return Err(ReadysetParsingError::ReadysetParsingError(
-                "Expected SECONDS after TTL duration".into(),
-            ));
-        }
+        let ttl = parse_duration_with_unit(parser, "TTL")?;
 
         let policy = if parse_readyset_keyword(parser, ReadysetKeyword::REFRESH) {
             let scheduled_refresh = parser.parse_keyword(Keyword::EVERY);
             match parser.parse_literal_uint() {
-                Ok(refresh_secs) => {
-                    if !parser.parse_keyword(Keyword::SECONDS) {
-                        return Err(ReadysetParsingError::ReadysetParsingError(
-                            "Expected SECONDS after REFRESH duration".into(),
-                        ));
-                    }
-                    if refresh_secs >= ttl_secs {
+                Ok(value) => {
+                    let refresh = parse_duration_unit(parser, value, "REFRESH")?;
+                    if refresh >= ttl {
                         return Err(ReadysetParsingError::ReadysetParsingError(
                             "REFRESH period must be less than TTL".into(),
                         ));
                     }
 
                     EvictionPolicy::TtlAndPeriod {
-                        ttl: Duration::from_secs(ttl_secs),
-                        refresh: Duration::from_secs(refresh_secs),
+                        ttl,
+                        refresh,
                         schedule: scheduled_refresh,
                     }
                 }
                 _ => {
                     parser.prev_token();
-                    EvictionPolicy::Ttl {
-                        ttl: Duration::from_secs(ttl_secs),
-                    }
+                    EvictionPolicy::Ttl { ttl }
                 }
             }
         } else {
-            EvictionPolicy::Ttl {
-                ttl: Duration::from_secs(ttl_secs),
-            }
+            EvictionPolicy::Ttl { ttl }
         };
 
         Some(policy)
@@ -566,15 +587,7 @@ fn parse_cache_options(
                 "COALESCE is only supported for SHALLOW caches".into(),
             ));
         }
-        let coalesce_secs = parser.parse_literal_uint().map_err(|_| {
-            ReadysetParsingError::ReadysetParsingError("Expected number after COALESCE".into())
-        })?;
-        if !parser.parse_keyword(Keyword::SECONDS) {
-            return Err(ReadysetParsingError::ReadysetParsingError(
-                "Expected SECONDS after COALESCE duration".into(),
-            ));
-        }
-        Some(Duration::from_secs(coalesce_secs))
+        Some(parse_duration_with_unit(parser, "COALESCE")?)
     } else {
         None
     };

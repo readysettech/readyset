@@ -552,3 +552,76 @@ fn parse_hint_ddl_syntax_also_works() {
         })
     );
 }
+
+#[test]
+fn parse_create_cache_hint_ttl_milliseconds() {
+    for text in [
+        "CREATE SHALLOW CACHE POLICY TTL 500 MILLISECONDS",
+        "CREATE SHALLOW CACHE POLICY TTL 500 MS",
+        "create shallow cache policy ttl 500 ms",
+    ] {
+        let result = parse_hint_directive(Dialect::MySQL, text).expect("should parse");
+        let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+            panic!("Expected CreateCache directive for {text}");
+        };
+        assert_eq!(
+            opts.policy,
+            Some(EvictionPolicy::Ttl {
+                ttl: Duration::from_millis(500)
+            }),
+            "for input {text}"
+        );
+    }
+}
+
+#[test]
+fn parse_create_cache_hint_mixed_units() {
+    // TTL in seconds, REFRESH in milliseconds.
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS REFRESH 500 MS",
+    )
+    .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(
+        opts.policy,
+        Some(EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(5),
+            refresh: Duration::from_millis(500),
+            schedule: false,
+        })
+    );
+}
+
+#[test]
+fn parse_create_cache_hint_coalesce_milliseconds() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE COALESCE 250 MS")
+            .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.coalesce_ms, Some(Duration::from_millis(250)));
+}
+
+#[test]
+fn parse_refresh_not_less_than_ttl_with_mixed_units() {
+    // 1 SECOND >= 500 MS, so this should fail.
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL 500 MS REFRESH 1 SECONDS",
+    );
+    assert!(
+        result.is_err(),
+        "REFRESH >= TTL across mixed units should fail"
+    );
+}
+
+#[test]
+fn parse_unknown_duration_unit_fails() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 10 MINUTES");
+    assert!(result.is_err(), "unknown unit should fail");
+}

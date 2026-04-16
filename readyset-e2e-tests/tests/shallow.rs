@@ -342,6 +342,67 @@ async fn show_shallow_caches() {
     shutdown_tx.shutdown().await;
 }
 
+/// Sub-second units (`MILLISECONDS`, `MS`) and mixed units should propagate to the cache
+/// manager at millisecond resolution.
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn shallow_cache_millisecond_units() {
+    init_test_logging();
+
+    let test_name = derive_test_name!();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    // Mix SECONDS, MILLISECONDS, and MS in a single statement; use a sub-second REFRESH.
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY
+               TTL 5 SECONDS
+               REFRESH 500 MILLISECONDS
+               COALESCE 250 MS
+             ms_cache FROM SELECT * FROM foo WHERE a = ?",
+        )
+        .await
+        .unwrap();
+
+    let rows: Vec<(String, u64, u64, u64)> = readyset
+        .query("SELECT name, ttl_ms, refresh_ms, coalesce_ms FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+
+    let (name, ttl_ms, refresh_ms, coalesce_ms) = &rows[0];
+    assert_eq!(name, "ms_cache");
+    assert_eq!(*ttl_ms, 5000, "TTL should be 5000 ms");
+    assert_eq!(*refresh_ms, 500, "REFRESH should be 500 ms");
+    assert_eq!(*coalesce_ms, 250, "COALESCE should be 250 ms");
+
+    shutdown_tx.shutdown().await;
+}
+
 #[test]
 #[tags(serial)]
 #[upstream(mysql)]

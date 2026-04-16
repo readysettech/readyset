@@ -951,6 +951,38 @@ fn create_deep_cache_policy_fails() {
 }
 
 #[test]
+fn create_shallow_cache_seconds_regression() {
+    // Existing SECONDS-only syntax must not regress.
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 10 SECONDS REFRESH 2 SECONDS FROM SELECT RAND()"
+    );
+    // Mixed: MS for TTL, SECONDS for REFRESH.
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 15000 MS REFRESH 2 SECONDS FROM SELECT RAND()"
+    );
+}
+
+#[test]
+fn create_shallow_cache_milliseconds() {
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 500 MILLISECONDS FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 500 MS FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 500 MS REFRESH 100 MS FROM SELECT * FROM t WHERE id = $1"
+    );
+    // Mixed units
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS REFRESH 500 MS FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE COALESCE 250 MS FROM SELECT * FROM t WHERE id = $1"
+    );
+}
+
+#[test]
 fn drop_all_caches() {
     check_parse_both!("DROP ALL CACHES");
     check_parse_both!("DROP ALL DEEP CACHES");

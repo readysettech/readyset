@@ -939,20 +939,35 @@ pub enum EvictionPolicy {
     },
 }
 
+/// Format a [`Duration`] as `N SECONDS` when it's a whole number of seconds, else
+/// `M MILLISECONDS`. Sub-millisecond precision is truncated.
+fn format_duration(f: &mut fmt::Formatter<'_>, d: &Duration) -> fmt::Result {
+    if d.subsec_millis() == 0 {
+        write!(f, "{} SECONDS", d.as_secs())
+    } else {
+        write!(f, "{} MILLISECONDS", d.as_millis())
+    }
+}
+
 impl DialectDisplay for EvictionPolicy {
     fn display(&self, _dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            Self::Ttl { ttl } => write!(f, "POLICY TTL {} SECONDS", ttl.as_secs()),
+            Self::Ttl { ttl } => {
+                write!(f, "POLICY TTL ")?;
+                format_duration(f, ttl)
+            }
             Self::TtlAndPeriod {
                 ttl,
                 refresh,
                 schedule,
             } => {
-                write!(f, "POLICY TTL {} SECONDS REFRESH ", ttl.as_secs())?;
+                write!(f, "POLICY TTL ")?;
+                format_duration(f, ttl)?;
+                write!(f, " REFRESH ")?;
                 if *schedule {
                     write!(f, "EVERY ")?;
                 }
-                write!(f, "{} SECONDS", refresh.as_secs())
+                format_duration(f, refresh)
             }
         })
     }
@@ -1121,7 +1136,9 @@ impl DialectDisplay for CreateCacheStatement {
                 write!(f, "{} ", policy.display(dialect))?;
             }
             if let Some(duration) = &self.coalesce_ms {
-                write!(f, "COALESCE {} SECONDS ", duration.as_secs())?;
+                write!(f, "COALESCE ")?;
+                format_duration(f, duration)?;
+                write!(f, " ")?;
             }
             if self.concurrently {
                 write!(f, "CONCURRENTLY ")?;
