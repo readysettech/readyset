@@ -455,16 +455,16 @@ impl VisitorMut for AnonymizeVisitor<'_> {
         ControlFlow::Continue(())
     }
 
-    fn post_visit_value(&mut self, value: &mut Value) -> ControlFlow<Self::Break> {
+    fn post_visit_value(&mut self, value: &mut ValueWithSpan) -> ControlFlow<Self::Break> {
         // Preserve placeholders, booleans, and NULL
         if matches!(
-            value,
+            value.value,
             Value::Placeholder(_) | Value::Boolean(_) | Value::Null
         ) {
             return ControlFlow::Continue(());
         }
 
-        *value = Value::SingleQuotedString("<anonymized>".to_owned());
+        value.value = Value::SingleQuotedString("<anonymized>".to_owned());
         ControlFlow::Continue(())
     }
 }

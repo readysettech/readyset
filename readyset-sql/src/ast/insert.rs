@@ -5,10 +5,7 @@ use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
 
-use crate::{
-    AstConversionError, Dialect, DialectDisplay, IntoDialect, TryFromDialect, TryIntoDialect,
-    ast::*,
-};
+use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect, ast::*};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct InsertStatement {
@@ -34,7 +31,7 @@ impl TryFromDialect<sqlparser::ast::Insert> for InsertStatement {
         {
             Ok(Self {
                 table: name.try_into_dialect(dialect)?,
-                fields: columns.into_dialect(dialect),
+                fields: columns.try_into_dialect(dialect)?,
                 data: if let Some(query) = source {
                     match *query.body {
                         sqlparser::ast::SetExpr::Values(values) => {

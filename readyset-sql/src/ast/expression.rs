@@ -2859,7 +2859,7 @@ impl TryFromDialect<sqlparser::ast::Function> for Expr {
         let find_separator = || {
             clauses.iter().find_map(|clause| match clause {
                 sqlparser::ast::FunctionArgumentClause::Separator(separator) => {
-                    Some(sqlparser_value_into_string(separator.clone()))
+                    Some(sqlparser_value_into_string(separator.value.clone()))
                 }
                 _ => None,
             })
@@ -3171,6 +3171,9 @@ impl TryFromDialect<sqlparser::ast::FunctionArgExpr> for Expr {
                 Ok(Self::Column(object_name.try_into_dialect(dialect)?))
             }
             Wildcard => not_yet_implemented!("wildcard expression in function argument"),
+            WildcardWithOptions(_) => {
+                unsupported!("wildcard with options in function argument is not supported")
+            }
         }
     }
 }

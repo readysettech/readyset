@@ -32,6 +32,8 @@ impl TryFromDialect<sqlparser::ast::Statement> for UpdateStatement {
                 or: _,
                 limit: _,
                 optimizer_hints: _,
+                output: _,
+                order_by: _,
             }) => {
                 let table = table.try_into_dialect(dialect)?;
                 let fields: Vec<(Column, Expr)> = assignments.try_into_dialect(dialect)?;

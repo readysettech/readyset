@@ -440,7 +440,8 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
                             .map(|arg| match arg {
                                 FunctionArgExpr::Expr(expr) => expr.try_into_dialect(dialect),
                                 FunctionArgExpr::QualifiedWildcard(_)
-                                | FunctionArgExpr::Wildcard => {
+                                | FunctionArgExpr::Wildcard
+                                | FunctionArgExpr::WildcardWithOptions(_) => {
                                     failed!("Unexpected wildcard arg to CURRENT_TIMESTAMP()")
                                 }
                             })

@@ -386,6 +386,9 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                     },
                 })
             }
+            PrimaryKeyUsingIndex(_) | UniqueUsingIndex(_) => {
+                unsupported!("PRIMARY KEY/UNIQUE USING INDEX constraints are not supported")
+            }
         }
     }
 }
@@ -828,6 +831,9 @@ impl TryFromDialect<sqlparser::ast::SelectItem> for FieldDefinitionExpr {
                 unsupported!("struct wildcard expansion is not supported by MySQL or Postgres")
             }
             Wildcard(_options) => Ok(FieldDefinitionExpr::All),
+            ExprWithAliases { .. } => {
+                unsupported!("multi-column aliases are not supported by MySQL or Postgres")
+            }
         }
     }
 }

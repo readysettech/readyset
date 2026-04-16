@@ -1160,14 +1160,12 @@ fn create_with_index_type() {
 }
 
 #[test]
-#[ignore = "REA-5841"]
 fn create_with_unique_key_on_column() {
     check_parse_mysql!("CREATE TABLE foo (x int UNIQUE)");
     check_parse_mysql!("CREATE TABLE foo (x int UNIQUE KEY)");
 }
 
 #[test]
-#[ignore = "REA-5842"]
 fn create_with_unique_key_using_suffix() {
     check_parse_mysql!("CREATE TABLE users (id int, UNIQUE KEY id_k (id) USING HASH);");
     check_parse_mysql!("CREATE TABLE users (id int, UNIQUE KEY id_k (id) USING BTREE);");
