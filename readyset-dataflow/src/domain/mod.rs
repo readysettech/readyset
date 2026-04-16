@@ -377,8 +377,12 @@ impl Waiting {
         column_indices: Arc<[usize]>,
         key: KeyComparison,
         redo: &Redo,
+        reserve: Option<usize>,
     ) -> bool {
-        let inner = self.redos.entry((node, column_indices)).or_default();
+        let inner = self
+            .redos
+            .entry((node, column_indices))
+            .or_insert_with(|| HashMap::with_capacity(reserve.unwrap_or_default()));
         match inner.entry(key) {
             Entry::Occupied(e) => {
                 if e.into_mut().insert(redo.clone()) {
@@ -1037,6 +1041,7 @@ impl Domain {
         needed_replays: &mut HashMap<(Target, Arc<[usize]>), Vec<KeyComparison>>,
         miss: ColumnMiss,
         redo: &Redo,
+        reserve: Option<usize>,
     ) {
         let ColumnMiss {
             node,
@@ -1045,9 +1050,15 @@ impl Domain {
         } = miss;
         let replays = needed_replays
             .entry((Target(node), Arc::clone(&column_indices)))
-            .or_default();
+            .or_insert_with(|| Vec::with_capacity(reserve.unwrap_or_default()));
         for miss_key in missed_keys {
-            if w.record_miss(node, Arc::clone(&column_indices), miss_key.clone(), redo) {
+            if w.record_miss(
+                node,
+                Arc::clone(&column_indices),
+                miss_key.clone(),
+                redo,
+                reserve,
+            ) {
                 replays.push(miss_key);
             }
         }
@@ -1064,11 +1075,13 @@ impl Domain {
         needed_for: Tag,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
+        let num_keys = missed_keys.len();
+
         // when the replay eventually succeeds, we want to re-do the replay.
         let mut w = self.waiting.remove(miss_in).unwrap_or_default();
+        w.holes.reserve(num_keys);
 
-        self.metrics
-            .inc_replay_misses(&cache_name, missed_keys.len());
+        self.metrics.inc_replay_misses(&cache_name, num_keys);
 
         let is_generated = self
             .replay_paths
@@ -1097,7 +1110,7 @@ impl Domain {
                     miss_key,
                 )?;
                 for miss in misses {
-                    Self::record_column_miss(&mut w, &mut needed_replays, miss, &redo);
+                    Self::record_column_miss(&mut w, &mut needed_replays, miss, &redo, None);
                 }
             } else {
                 Self::record_column_miss(
@@ -1109,6 +1122,7 @@ impl Domain {
                         missed_keys: vec1![miss_key],
                     },
                     &redo,
+                    Some(num_keys),
                 );
             }
         }
