@@ -2110,16 +2110,16 @@ impl ConstraintFuzz {
             }
         }
 
-        // Retry policy: real exponential backoff, per-attempt logging, and
-        // fast-fail on auth/permission errors. retries=0 here means "try
-        // once" — long-startup-race tolerance is added by xkkxlony, which
-        // bumps retries upstream of the descendant compose-time stack.
+        // 5 retries × exponential backoff (1s, 2s, 4s, 8s, 16s ≈ 31s budget)
+        // through the shared helper introduced in uuszulpw, so upstream and
+        // Readyset use one policy. Auth/permission errors bypass retries via
+        // is_permanent_connection_error.
         let mut upstream =
-            connect_and_setup_with_retry(&upstream_url, 0, Duration::from_secs(1), 2)
+            connect_and_setup_with_retry(&upstream_url, 5, Duration::from_secs(1), 2)
                 .await
                 .context("connecting to upstream")?;
         let mut readyset =
-            connect_and_setup_with_retry(&readyset_url, 0, Duration::from_secs(1), 2)
+            connect_and_setup_with_retry(&readyset_url, 5, Duration::from_secs(1), 2)
                 .await
                 .context("connecting to readyset")?;
         assert_reachable!("Connected to both upstream and Readyset", &json!({}));
