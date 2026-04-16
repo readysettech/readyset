@@ -172,8 +172,10 @@ impl QueryLogger {
             EventType::Execute => self.execute_count.increment(1),
         }
 
+        let query_id = event.query_id.map(|id| SharedString::from(id.to_string()));
+
         if !self.log_mode.is_verbose() {
-            self.record_query_metrics(event, None, None);
+            self.record_query_metrics(event, None, query_id);
             return;
         }
 
@@ -188,8 +190,6 @@ impl QueryLogger {
             self.dialect,
             self.rewrite_context().await,
         );
-
-        let query_id = event.query_id.map(|id| SharedString::from(id.to_string()));
 
         if let Some(duration) = event.parse_duration {
             let mut labels = Self::create_labels(
@@ -255,5 +255,166 @@ impl QueryLogger {
             schema_catalog,
             self.search_path.clone(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use metrics::Key;
+    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_util::MetricKind;
+    use readyset_client::query::QueryId;
+    use readyset_client_metrics::{
+        recorded, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
+        SqlQueryType,
+    };
+    use readyset_sql::Dialect;
+    use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+    use schema_catalog::SchemaCatalogHandle;
+
+    use super::QueryLogger;
+
+    const DIALECT: Dialect = Dialect::PostgreSQL;
+
+    fn new_logger(mode: QueryLogMode) -> QueryLogger {
+        QueryLogger::new(
+            mode,
+            AdapterRewriteParams::new(DIALECT),
+            DIALECT,
+            vec!["public".into()],
+            SchemaCatalogHandle::new(),
+        )
+    }
+
+    fn label_map(key: &Key) -> std::collections::HashMap<&str, &str> {
+        key.labels().map(|l| (l.key(), l.value())).collect()
+    }
+
+    fn find_execution_count_labels(
+        snapshotter: &Snapshotter,
+    ) -> Vec<std::collections::HashMap<String, String>> {
+        snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .filter_map(|(ck, _unit, _desc, _val)| {
+                let (kind, key) = ck.into_parts();
+                if kind == MetricKind::Counter && key.name() == recorded::QUERY_LOG_EXECUTION_COUNT
+                {
+                    Some(
+                        label_map(&key)
+                            .into_iter()
+                            .map(|(k, v)| (k.to_string(), v.to_string()))
+                            .collect(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn cache_read_event(query_id: Option<QueryId>) -> QueryExecutionEvent {
+        QueryExecutionEvent {
+            event: EventType::Query,
+            sql_type: SqlQueryType::Read,
+            query: None,
+            query_id,
+            parse_duration: None,
+            upstream_duration: None,
+            readyset_event: Some(ReadysetExecutionEvent::Other {
+                duration: Duration::from_micros(100),
+            }),
+            noria_error: None,
+            destination: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn non_verbose_mode_includes_query_id_label() {
+        let qid = QueryId::from_unparsed_select("select 1");
+        let qid_str = qid.to_string();
+        let event = cache_read_event(Some(qid));
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let guard = metrics::set_default_local_recorder(&recorder);
+        new_logger(QueryLogMode::Enabled).handle_event(&event).await;
+        drop(guard);
+
+        let label_sets = find_execution_count_labels(&snapshotter);
+        assert!(
+            !label_sets.is_empty(),
+            "expected at least one execution_count emission"
+        );
+        for labels in &label_sets {
+            assert_eq!(
+                labels.get("query_id").map(String::as_str),
+                Some(qid_str.as_str()),
+                "query_id label missing in non-verbose mode: {labels:?}"
+            );
+            assert!(
+                !labels.contains_key("query"),
+                "query label should only appear in verbose mode: {labels:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn non_verbose_mode_omits_query_id_when_absent() {
+        let event = cache_read_event(None);
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let guard = metrics::set_default_local_recorder(&recorder);
+        new_logger(QueryLogMode::Enabled).handle_event(&event).await;
+        drop(guard);
+
+        let label_sets = find_execution_count_labels(&snapshotter);
+        assert!(
+            !label_sets.is_empty(),
+            "expected at least one execution_count emission"
+        );
+        for labels in &label_sets {
+            assert!(
+                !labels.contains_key("query_id"),
+                "query_id label should be absent when event.query_id is None: {labels:?}"
+            );
+            assert!(
+                !labels.contains_key("query"),
+                "query label should only appear in verbose mode: {labels:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn verbose_mode_includes_query_id_label() {
+        let stmt = "select 1";
+        let sql_query =
+            readyset_sql_parsing::parse_query(DIALECT, stmt).expect("failed to parse test query");
+        let qid = QueryId::from_unparsed_select("select 1 as a");
+        let qid_str = qid.to_string();
+        let mut event = cache_read_event(Some(qid));
+        event.query = Some(Arc::new(sql_query));
+
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let guard = metrics::set_default_local_recorder(&recorder);
+        new_logger(QueryLogMode::Verbose).handle_event(&event).await;
+        drop(guard);
+
+        let label_sets = find_execution_count_labels(&snapshotter);
+        assert!(
+            !label_sets.is_empty(),
+            "expected at least one execution_count emission"
+        );
+        for labels in &label_sets {
+            assert_eq!(
+                labels.get("query_id").map(String::as_str),
+                Some(qid_str.as_str()),
+                "query_id label missing in verbose mode: {labels:?}"
+            );
+        }
     }
 }

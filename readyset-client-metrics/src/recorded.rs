@@ -5,13 +5,17 @@
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
-/// | query | The query text being executed. |
 /// | database_type | The database type being executed. Must be a [`DatabaseType`] |
-/// | query_d | The hashed ID of the query. |
+/// | query_id | The hashed ID of the query. Emitted whenever the adapter has an ID for the query (both default and verbose query-log modes). |
+/// | query | The query text being executed. Verbose query-log mode only. |
 /// | cache_name | Optional. The cache name if the query is cached. |
 ///
 /// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time_us";
+
+/// Counter: The number of times the database executed a query.
+///
+/// See [`QUERY_LOG_EXECUTION_TIME`] for the set of labels.
 pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count";
 
 /// Histogram: The time in microseconds that the database spent executing a

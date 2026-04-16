@@ -88,11 +88,11 @@ impl MetricsHandle {
     ///
     /// NOTE: Values are queried from the last snapshot obtained by calling
     /// [`Self::snapshot_counters`]
-    pub fn metrics_summary(&self, query_id: String) -> Option<MetricsSummary> {
+    pub fn metrics_summary(&self, query_id: &str) -> Option<MetricsSummary> {
         let label = format!(
             "{}=\"{}\"",
             sanitize_label_key("query_id"),
-            sanitize_label_value(&query_id)
+            sanitize_label_value(query_id)
         );
         let summary = self.snapshot.as_ref()?.get(&label).or(Some(&0))?;
 

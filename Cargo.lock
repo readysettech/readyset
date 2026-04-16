@@ -5615,6 +5615,7 @@ dependencies = [
  "futures-util",
  "health-reporter",
  "metrics",
+ "metrics-util",
  "mysql-srv",
  "mysql_common",
  "pprof",

@@ -207,11 +207,12 @@ enum PrepareMeta {
 #[derive(Debug)]
 struct PrepareSelectMeta {
     stmt: SelectStatement,
-    rewritten: SelectStatement,
+    view_request: ViewCreateRequest,
+    query_id: Option<QueryId>,
+    migration_state: MigrationState,
     must_migrate: bool,
     should_do_noria: bool,
     always: bool,
-    schema_generation: SchemaGeneration,
 }
 
 #[derive(Debug)]
@@ -1819,10 +1820,7 @@ where
         match &noria_res {
             Some(Ok(noria_connector::PrepareResult::Select { .. })) => {
                 self.state.query_status_cache.update_query_migration_state(
-                    &ViewCreateRequest::new(
-                        select_meta.rewritten.clone(),
-                        self.connectors.noria.schema_search_path().to_owned(),
-                    ),
+                    &select_meta.view_request,
                     MigrationState::Successful(CacheType::Deep),
                     None,
                 );
@@ -1830,18 +1828,12 @@ where
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
                     debug!(error = %e, "View not found during mirror_prepare()");
-                    self.state.query_status_cache.view_not_found_for_query(
-                        &ViewCreateRequest::new(
-                            select_meta.rewritten.clone(),
-                            self.connectors.noria.schema_search_path().to_owned(),
-                        ),
-                    );
+                    self.state
+                        .query_status_cache
+                        .view_not_found_for_query(&select_meta.view_request);
                 } else if e.caused_by_unsupported() {
                     self.state.query_status_cache.update_query_migration_state(
-                        &ViewCreateRequest::new(
-                            select_meta.rewritten.clone(),
-                            self.connectors.noria.schema_search_path().to_owned(),
-                        ),
+                        &select_meta.view_request,
                         MigrationState::Unsupported(e.unsupported_cause().unwrap_or_default()),
                         None,
                     );
@@ -1977,6 +1969,7 @@ where
         &mut self,
         stmt: SelectStatement,
         is_skip_cache: bool,
+        shallow_query_id: Option<QueryId>,
     ) -> ReadySetResult<PrepareMeta> {
         let rewrite_context =
             Self::rewrite_context(&self.connectors, &self.settings, &self.state, None).await?;
@@ -1997,28 +1990,35 @@ where
             return Ok(PrepareMeta::Proxy);
         }
 
-        let status = self
-            .state
-            .query_status_cache
-            .query_status(&ViewCreateRequest::new(
-                rewritten.clone(),
-                self.connectors.noria.schema_search_path().to_owned(),
-            ));
+        let view_request = ViewCreateRequest::new(
+            rewritten,
+            self.connectors.noria.schema_search_path().to_owned(),
+        );
+        let status = self.state.query_status_cache.query_status(&view_request);
         if self.state.proxy_state.is_proxy_always() && !status.always {
             Ok(PrepareMeta::Proxy)
         } else {
             let should_do_readyset =
                 !matches!(status.migration_state, MigrationState::Unsupported(_));
+            let query_id = if self.settings.cache_mode.is_shallow() {
+                shallow_query_id
+            } else {
+                Some(QueryId::from(&view_request))
+            };
+            self.state
+                .query_status_cache
+                .update_schema_generation(&view_request, rewrite_context.schema_generation());
             Ok(PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
-                rewritten,
+                view_request,
+                query_id,
+                migration_state: status.migration_state,
                 // For select statements only InRequestPath should trigger migrations
                 // synchronously, or if no upstream is present.
                 must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
                     || !self.connectors.has_fallback(),
                 should_do_noria: should_do_readyset,
                 always: status.always,
-                schema_generation: rewrite_context.schema_generation(),
             }))
         }
     }
@@ -2081,7 +2081,11 @@ where
         }
 
         let meta = match parsed {
-            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await?,
+            Ok(SqlQuery::Select(stmt)) => {
+                let shallow_query_id = query_shallow.as_ref().map(QueryId::from);
+                self.plan_prepare_select(stmt, is_skip_cache, shallow_query_id)
+                    .await?
+            }
             Ok(
                 query @ SqlQuery::Insert(_)
                 | query @ SqlQuery::Update(_)
@@ -2216,35 +2220,23 @@ where
             },
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
-                rewritten,
+                view_request,
+                query_id,
+                migration_state,
                 always,
-                schema_generation,
                 ..
-            }) => {
-                let request = ViewCreateRequest::new(
-                    rewritten,
-                    self.connectors.noria.schema_search_path().to_owned(),
-                );
-                let migration_state = self
-                    .state
-                    .query_status_cache
-                    .query_migration_state(&request);
-                self.state
-                    .query_status_cache
-                    .update_schema_generation(&request, schema_generation);
-                PreparedStatement {
-                    query_id: Some(migration_state.0),
-                    prep: PrepareResult::new(statement_id, prep),
-                    migration_state: migration_state.1,
-                    execution_info: None,
-                    parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
-                    view_request: Some(request),
-                    shallow: None,
-                    always,
-                    params: None,
-                    is_skip_cache,
-                }
-            }
+            }) => PreparedStatement {
+                query_id,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state,
+                execution_info: None,
+                parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
+                view_request: Some(view_request),
+                shallow: None,
+                always,
+                params: None,
+                is_skip_cache,
+            },
             PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
                 query_id,
                 stmt,
@@ -2440,16 +2432,23 @@ where
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
         let key = query_params.make_keys_from_merged(&merged)?;
+        let start = Instant::now();
         let res = shallow
             .get_or_start_insert(query_id, key, DB::is_meta_compatible)
             .await;
 
         match res {
             CacheResult::Hit(values) => {
+                event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                    duration: start.elapsed(),
+                });
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::HitAndRefresh(values, cache) => {
+                event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                    duration: start.elapsed(),
+                });
                 if let Some(refresh) = refresh {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let query =
@@ -3785,7 +3784,7 @@ where
                 // Append metrics if we have them
                 if let Some(handle) = state.metrics_handle.as_ref() {
                     let MetricsSummary { sample_count } =
-                        handle.metrics_summary(id.to_string()).unwrap_or_default();
+                        handle.metrics_summary(&id.to_string()).unwrap_or_default();
                     row.push(DfValue::UnsignedInt(sample_count));
                 }
 
@@ -3874,7 +3873,7 @@ where
 
         if matches!(cache_type, Some(CacheType::Deep) | None) {
             for view in connectors.noria.verbose_views(query_id, None).await? {
-                let query_id = view.query_id.to_string().into();
+                let query_id = view.query_id.to_string();
                 let name = view.name.display_unquoted().to_string().into();
                 let query =
                     Self::format_query_text(view.statement.display(DB::SQL_DIALECT).to_string())
@@ -3885,12 +3884,13 @@ where
                     properties.to_string().into()
                 };
                 let count = state.metrics_handle.as_ref().map(|h| {
-                    h.metrics_summary(view.query_id.to_string())
+                    h.metrics_summary(&query_id)
                         .unwrap_or_default()
                         .sample_count
                         .to_string()
                         .into()
                 });
+                let query_id = query_id.into();
 
                 push_row(query_id, name, query, properties, count);
             }
@@ -3908,9 +3908,7 @@ where
                 ..
             } in state.shallow.list_caches(query_id, None)
             {
-                let query_id = query_id
-                    .map(|id| id.to_string().into())
-                    .unwrap_or("".into());
+                let query_id = query_id.map(|id| id.to_string());
                 let name = name
                     .map(|n| n.display_unquoted().to_string().into())
                     .unwrap_or("".into());
@@ -3930,7 +3928,16 @@ where
                     properties.set_schedule(schedule);
                     properties.to_string().into()
                 };
-                let count = state.metrics_handle.as_ref().map(|_| 0.to_string().into());
+                let count = state.metrics_handle.as_ref().map(|h| {
+                    query_id
+                        .as_ref()
+                        .and_then(|id| h.metrics_summary(id))
+                        .unwrap_or_default()
+                        .sample_count
+                        .to_string()
+                        .into()
+                });
+                let query_id = query_id.unwrap_or_default().into();
 
                 push_row(query_id, name, query, properties, count);
             }
@@ -4452,14 +4459,13 @@ where
     async fn query_shallow<'a>(
         connectors: &'a mut BackendConnectors<DB>,
         state: &BackendState<DB>,
-        req: &ShallowViewRequest,
         query: &'a str,
+        query_id: QueryId,
         event: &mut QueryExecutionEvent,
         params: ShallowQueryParameters,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let query_id = QueryId::from(req);
-        event.query_id = Some(query_id);
         let key = params.make_keys(&[])?;
+        let start = Instant::now();
         let res = state
             .shallow
             .get_or_start_insert(&query_id, key, |_| true)
@@ -4467,6 +4473,9 @@ where
 
         match res {
             CacheResult::Hit(values) => {
+                event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                    duration: start.elapsed(),
+                });
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
@@ -4482,6 +4491,9 @@ where
                     refresh.send(request).await;
                 }
 
+                event.readyset_event = Some(ReadysetExecutionEvent::Other {
+                    duration: start.elapsed(),
+                });
                 event.destination = Some(QueryDestination::ReadysetShallow);
                 Ok(QueryResult::Shallow(values))
             }
@@ -5151,7 +5163,7 @@ where
                 Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
             {
                 let result =
-                    Self::query_shallow(connectors, state, &shallow, query, event, params).await;
+                    Self::query_shallow(connectors, state, query, query_id, event, params).await;
 
                 event.sql_type = SqlQueryType::Read;
                 event.query_id = Some(query_id);
@@ -5262,6 +5274,11 @@ where
                 }
             }
             Ok(SqlQuery::Select(mut stmt)) => {
+                event.sql_type = SqlQueryType::Read;
+                if settings.cache_mode.is_shallow() {
+                    event.query_id = query_shallow.as_ref().map(QueryId::from);
+                }
+
                 let rewrite_context =
                     Self::rewrite_context(connectors, settings, state, None).await?;
                 let params = match adapter_rewrites::rewrite_equivalent_deep(
@@ -5282,12 +5299,10 @@ where
                 let view_request =
                     ViewCreateRequest::new(stmt, connectors.noria.schema_search_path().to_owned());
 
-                event.sql_type = SqlQueryType::Read;
                 if let Some(QueryLogMode::Verbose) = state.query_log_mode {
                     event.query = Some(Arc::new(SqlQuery::Select(view_request.statement.clone())));
                 }
-
-                event.query_id = Some(QueryId::from(&view_request));
+                event.query_id = event.query_id.or(Some(QueryId::from(&view_request)));
 
                 Self::try_noria_adhoc_select(
                     connectors,

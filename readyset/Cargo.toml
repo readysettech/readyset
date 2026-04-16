@@ -71,6 +71,7 @@ test-discovery = { path = "../test-discovery" }
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
 futures = { workspace = true }
+metrics-util = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 temp-dir = { workspace = true }
