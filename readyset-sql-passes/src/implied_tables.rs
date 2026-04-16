@@ -37,12 +37,15 @@ pub trait ImpliedTableExpansion: Sized {
 #[derive(Debug)]
 struct ExpandImpliedTablesVisitor<I: ImpliedTablesContext> {
     context: I,
-    /// Map from aliases for subqueries that are in scope, to a list of that subquery's projected
-    /// fields
-    subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
-    /// All the tables which are currently in scope for the query, represented as a map from the
-    /// name of the table to its alias (or name, if unaliased)
-    tables: HashMap<Relation, Relation>,
+    /// Stack of subquery-schema scopes (parallel to `tables`). Each scope maps
+    /// subquery aliases to their projected column lists.
+    subquery_schemas: Vec<HashMap<SqlIdentifier, Vec<SqlIdentifier>>>,
+    /// Stack of table scopes, where each scope is a map from table name to its alias
+    /// (or name, if unaliased). The last element is the innermost (current) scope.
+    /// Scope hierarchy is maintained for proper SQL precedence resolution: unqualified
+    /// names are resolved innermost-first, and correlated references to outer scopes
+    /// are found by walking outward.
+    tables: Vec<HashMap<Relation, Relation>>,
     /// The set of aliases for projected fields that are currently in-scope
     aliases: HashSet<SqlIdentifier>,
     // Are we currently in a position in the query that can reference aliases in the projected
@@ -50,28 +53,23 @@ struct ExpandImpliedTablesVisitor<I: ImpliedTablesContext> {
     can_reference_aliases: bool,
     /// SQL dialect to use for expression display
     dialect: Dialect,
-    /// Tables from outer scopes that are visible inside LATERAL subqueries.
-    /// Accumulated when entering a LATERAL subquery; cleared for non-LATERAL subqueries.
-    outer_tables: HashMap<Relation, Relation>,
-    /// Subquery schemas from outer scopes that are visible inside LATERAL subqueries.
-    outer_subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
 }
 
 impl<I: ImpliedTablesContext> ExpandImpliedTablesVisitor<I> {
-    /// Resolve an unqualified column name to its table. Checks the current scope first;
-    /// if no match is found and outer-scope tables are visible (LATERAL), checks those.
+    /// Resolve an unqualified column name to its table. Searches scopes from
+    /// innermost to outermost, returning the first match. This correctly handles
+    /// both local column resolution and correlated references to outer scopes
+    /// (the outermost match for a non-local column is the correlated table).
     fn find_table(&self, column_name: &str) -> Option<Relation> {
-        if let Some(t) = self.find_table_in_scope(&self.tables, &self.subquery_schemas, column_name)
+        for (scope_tables, scope_sq) in self
+            .tables
+            .iter()
+            .rev()
+            .zip(self.subquery_schemas.iter().rev())
         {
-            return Some(t);
-        }
-        // Fall back to outer scope (populated only inside LATERAL subqueries).
-        if !self.outer_tables.is_empty() {
-            return self.find_table_in_scope(
-                &self.outer_tables,
-                &self.outer_subquery_schemas,
-                column_name,
-            );
+            if let Some(t) = self.find_table_in_scope(scope_tables, scope_sq, column_name) {
+                return Some(t);
+            }
         }
         None
     }
@@ -140,50 +138,32 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
             }
         }
 
-        // For LATERAL subqueries, accumulate the current scope into outer_tables
-        // so that correlated column references can resolve against the outer scope.
-        // For non-LATERAL subqueries, clear outer scope (they cannot see outer tables).
-        let orig_outer_tables;
-        let orig_outer_subquery_schemas;
-        if select_statement.lateral {
-            let mut new_outer_tables: HashMap<Relation, Relation> = self.outer_tables.clone();
-            new_outer_tables.extend(self.tables.iter().map(|(k, v)| (k.clone(), v.clone())));
-            orig_outer_tables = mem::replace(&mut self.outer_tables, new_outer_tables);
-
-            let mut new_outer_sq: HashMap<SqlIdentifier, Vec<SqlIdentifier>> =
-                self.outer_subquery_schemas.clone();
-            new_outer_sq.extend(
-                self.subquery_schemas
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone())),
-            );
-            orig_outer_subquery_schemas =
-                mem::replace(&mut self.outer_subquery_schemas, new_outer_sq);
-        } else {
-            orig_outer_tables = mem::take(&mut self.outer_tables);
-            orig_outer_subquery_schemas = mem::take(&mut self.outer_subquery_schemas);
+        // Visit CTEs with the current scope stack BEFORE pushing local scope.
+        // CTEs are logically defined before the SELECT's FROM clause, so their
+        // bodies should see parent scopes but NOT the current SELECT's tables.
+        for cte in &mut select_statement.ctes {
+            self.visit_common_table_expr(cte)?;
         }
 
-        let orig_tables = mem::replace(
-            &mut self.tables,
-            outermost_table_exprs(select_statement)
-                .filter_map(|tbl| {
-                    Some((
-                        match &tbl.inner {
-                            TableExprInner::Table(t) => t.clone(),
-                            TableExprInner::Subquery(_) => tbl.alias.clone()?.into(),
-                            TableExprInner::Values { .. } => tbl.alias.clone()?.into(),
-                        },
-                        tbl.alias
-                            .clone()
-                            .map(Relation::from)
-                            .or_else(|| tbl.inner.as_table().cloned())?,
-                    ))
-                })
-                .collect(),
-        );
-        let orig_subquery_schemas = mem::replace(
-            &mut self.subquery_schemas,
+        // Collect local tables for this SELECT statement and push a new scope.
+        let local_tables: HashMap<Relation, Relation> = outermost_table_exprs(select_statement)
+            .filter_map(|tbl| {
+                Some((
+                    match &tbl.inner {
+                        TableExprInner::Table(t) => t.clone(),
+                        TableExprInner::Subquery(_) => tbl.alias.clone()?.into(),
+                        TableExprInner::Values { .. } => tbl.alias.clone()?.into(),
+                    },
+                    tbl.alias
+                        .clone()
+                        .map(Relation::from)
+                        .or_else(|| tbl.inner.as_table().cloned())?,
+                ))
+            })
+            .collect();
+        self.tables.push(local_tables);
+
+        let local_subquery_schemas: HashMap<SqlIdentifier, Vec<SqlIdentifier>> =
             util::subquery_schemas(
                 &mut select_statement.tables,
                 &mut select_statement.ctes,
@@ -192,8 +172,9 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
             )?
             .into_iter()
             .map(|(k, v)| (k.into(), v.into_iter().cloned().collect()))
-            .collect(),
-        );
+            .collect();
+        self.subquery_schemas.push(local_subquery_schemas);
+
         let orig_aliases = mem::replace(
             &mut self.aliases,
             select_statement
@@ -208,13 +189,16 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
                 .collect(),
         );
 
+        // Temporarily remove CTEs so walk_select_statement won't visit them again
+        // (we already visited them above with the correct parent scope).
+        let ctes = mem::take(&mut select_statement.ctes);
         walk_select_statement(self, select_statement)?;
+        select_statement.ctes = ctes;
 
-        self.tables = orig_tables;
-        self.subquery_schemas = orig_subquery_schemas;
+        // Pop the scope level we pushed.
+        self.tables.pop();
+        self.subquery_schemas.pop();
         self.aliases = orig_aliases;
-        self.outer_tables = orig_outer_tables;
-        self.outer_subquery_schemas = orig_outer_subquery_schemas;
 
         Ok(())
     }
@@ -303,41 +287,25 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
                 return Ok(());
             }
 
-            // Check current scope, then fall back to outer scope (LATERAL).
-            let matches = self
-                .tables
-                .iter()
-                .filter(|(t, _alias)| t.name == table.name)
-                .map(|(_t, alias)| alias)
-                .collect::<Vec<_>>();
-
-            if matches.len() > 1 {
-                invalid_query!(
-                    "Table reference {} is ambiguous",
-                    table.display(self.dialect)
-                );
-            }
-
-            if let Some(t) = matches.first() {
-                table.schema.clone_from(&t.schema);
-            } else if !self.outer_tables.is_empty() {
-                let outer_matches = self
-                    .outer_tables
+            // Search scopes from innermost to outermost for the table reference.
+            // First match wins (local scope shadows outer scopes).
+            for scope in self.tables.iter().rev() {
+                let matches: Vec<_> = scope
                     .iter()
                     .filter(|(t, _alias)| t.name == table.name)
                     .map(|(_t, alias)| alias)
-                    .collect::<Vec<_>>();
+                    .collect();
 
-                if outer_matches.len() > 1 {
+                if matches.len() > 1 {
                     invalid_query!(
                         "Table reference {} is ambiguous",
                         table.display(self.dialect)
                     );
+                } else if let Some(resolved) = matches.first() {
+                    table.schema.clone_from(&resolved.schema);
+                    return Ok(());
                 }
-
-                if let Some(t) = outer_matches.first() {
-                    table.schema.clone_from(&t.schema);
-                }
+                // Not found at this scope level, continue to outer scope.
             }
         } else {
             column.table = self.find_table(&column.name);
@@ -354,13 +322,11 @@ fn rewrite_select<S: ImpliedTablesContext>(
     let dialect = context.dialect().into();
     let mut visitor = ExpandImpliedTablesVisitor {
         context,
-        subquery_schemas: Default::default(),
-        tables: Default::default(),
+        subquery_schemas: Vec::new(),
+        tables: Vec::new(),
         aliases: Default::default(),
         can_reference_aliases: false,
         dialect,
-        outer_tables: Default::default(),
-        outer_subquery_schemas: Default::default(),
     };
 
     visitor.visit_select_statement(select_statement)?;
@@ -1001,6 +967,284 @@ mod tests {
             "\n left: {}\nright: {}",
             q.display(Dialect::PostgreSQL),
             expected.display(Dialect::PostgreSQL)
+        );
+    }
+
+    #[test]
+    fn correlated_subquery_column_qualification() {
+        // Correlated columns in non-LATERAL subqueries are properly qualified
+        // with the outer query's table name.
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM users WHERE id IN (
+                SELECT user_id FROM posts WHERE author = name
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM users WHERE users.id IN (
+                SELECT posts.user_id FROM posts WHERE posts.author = users.name
+            )",
+        )
+        .unwrap();
+        let schema = [
+            (
+                Relation::from("users"),
+                vec!["id".into(), "name".into(), "email".into()],
+            ),
+            (
+                Relation::from("posts"),
+                vec!["id".into(), "user_id".into(), "author".into()],
+            ),
+        ]
+        .into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn correlated_subquery_nested_deep() {
+        // Deeply nested: innermost correlates with the outermost (skipping t2).
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE id IN (
+                SELECT t1_id FROM t2 WHERE value IN (
+                    SELECT val FROM t3 WHERE ref_col = name
+                )
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE t1.id IN (
+                SELECT t2.t1_id FROM t2 WHERE t2.value IN (
+                    SELECT t3.val FROM t3 WHERE t3.ref_col = t1.name
+                )
+            )",
+        )
+        .unwrap();
+        let schema = [
+            (Relation::from("t1"), vec!["id".into(), "name".into()]),
+            (Relation::from("t2"), vec!["t1_id".into(), "value".into()]),
+            (Relation::from("t3"), vec!["val".into(), "ref_col".into()]),
+        ]
+        .into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn scope_local_shadows_outer() {
+        // Local table with same name shadows outer. Both `id` references
+        // resolve to the inner `t1`, not the outer.
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE EXISTS (
+                SELECT * FROM t1 WHERE t1.id = id
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE EXISTS (
+                SELECT * FROM t1 WHERE t1.id = t1.id
+            )",
+        )
+        .unwrap();
+        let schema = [(Relation::from("t1"), vec!["id".into(), "name".into()])].into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn scope_precedence_local_wins_all_levels() {
+        // 5 levels deep: all tables have 'id' and 'val' columns.
+        // At each level, unqualified columns resolve to the LOCAL scope.
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE id IN (
+                SELECT * FROM t2 WHERE id IN (
+                    SELECT * FROM t3 WHERE id IN (
+                        SELECT * FROM t4 WHERE id IN (
+                            SELECT * FROM t5 WHERE val = id
+                        )
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE t1.id IN (
+                SELECT * FROM t2 WHERE t2.id IN (
+                    SELECT * FROM t3 WHERE t3.id IN (
+                        SELECT * FROM t4 WHERE t4.id IN (
+                            SELECT * FROM t5 WHERE t5.val = t5.id
+                        )
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let schema = [
+            (Relation::from("t1"), vec!["id".into(), "val".into()]),
+            (Relation::from("t2"), vec!["id".into(), "val".into()]),
+            (Relation::from("t3"), vec!["id".into(), "val".into()]),
+            (Relation::from("t4"), vec!["id".into(), "val".into()]),
+            (Relation::from("t5"), vec!["id".into(), "val".into()]),
+        ]
+        .into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn scope_precedence_skip_intermediate_levels() {
+        // Correlation can skip intermediate levels:
+        // - t1 has: id, a, b, c  |  t2 has: id, b  |  t3 has: id, c  |  t4 has: id
+        // In t4: 'a' correlates from t1 (skips t2, t3), 'b' from t2 (skips t3), 'c' from t3.
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE id IN (
+                SELECT * FROM t2 WHERE id IN (
+                    SELECT * FROM t3 WHERE id IN (
+                        SELECT * FROM t4 WHERE a = b AND b = c
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE t1.id IN (
+                SELECT * FROM t2 WHERE t2.id IN (
+                    SELECT * FROM t3 WHERE t3.id IN (
+                        SELECT * FROM t4 WHERE t1.a = t2.b AND t2.b = t3.c
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let schema = [
+            (
+                Relation::from("t1"),
+                vec!["id".into(), "a".into(), "b".into(), "c".into()],
+            ),
+            (Relation::from("t2"), vec!["id".into(), "b".into()]),
+            (Relation::from("t3"), vec!["id".into(), "c".into()]),
+            (Relation::from("t4"), vec!["id".into()]),
+        ]
+        .into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
+        );
+    }
+
+    #[test]
+    fn scope_precedence_mixed_local_and_correlation() {
+        // 4 levels with mixed scenarios:
+        // t1: id, name, x  |  t2: id, y  |  t3: id, z  |  t4: id
+        // At t4: 'id' is local, 'x' correlates from t1, 'name' correlates from t1,
+        //        'z' correlates from t3.
+        let mut q = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE id IN (
+                SELECT * FROM t2 WHERE id IN (
+                    SELECT * FROM t3 WHERE id IN (
+                        SELECT * FROM t4 WHERE id = x AND name = z
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let expected = parse_query(
+            Dialect::MySQL,
+            "SELECT * FROM t1 WHERE t1.id IN (
+                SELECT * FROM t2 WHERE t2.id IN (
+                    SELECT * FROM t3 WHERE t3.id IN (
+                        SELECT * FROM t4 WHERE t4.id = t1.x AND t1.name = t3.z
+                    )
+                )
+            )",
+        )
+        .unwrap();
+        let schema = [
+            (
+                Relation::from("t1"),
+                vec!["id".into(), "name".into(), "x".into()],
+            ),
+            (Relation::from("t2"), vec!["id".into(), "y".into()]),
+            (Relation::from("t3"), vec!["id".into(), "z".into()]),
+            (Relation::from("t4"), vec!["id".into()]),
+        ]
+        .into();
+
+        q.expand_implied_tables(TestImpliedTablesContext {
+            schema,
+            dialect: Dialect::MySQL,
+        })
+        .unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "\n left: {}\nright: {}",
+            q.display(Dialect::MySQL),
+            expected.display(Dialect::MySQL)
         );
     }
 }
