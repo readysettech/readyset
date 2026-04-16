@@ -29,6 +29,9 @@ tracing = { workspace = true, features = ["release_max_level_debug"] }
 triomphe = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { workspace = true }
+
 [dev-dependencies]
 criterion = { workspace = true }
 test-strategy = { workspace = true }

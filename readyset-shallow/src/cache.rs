@@ -6,8 +6,6 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
-#[cfg(not(target_os = "linux"))]
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
@@ -23,6 +21,7 @@ use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
 };
 use readyset_util::SizeOf;
+use readyset_util::timestamp::current_timestamp_ms;
 
 use crate::{CacheInsertGuard, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh};
 
@@ -59,21 +58,6 @@ where
 }
 
 type Scheduler<K, V> = Arc<Mutex<RefreshScheduler<K, V>>>;
-
-#[cfg(target_os = "linux")]
-fn current_timestamp_ms() -> u64 {
-    use rustix::time::{ClockId, clock_gettime};
-    let ts = clock_gettime(ClockId::RealtimeCoarse);
-    (ts.tv_sec as u64) * 1000 + (ts.tv_nsec as u64) / 1_000_000
-}
-
-#[cfg(not(target_os = "linux"))]
-fn current_timestamp_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_millis() as u64
-}
 
 #[derive(Debug)]
 pub(crate) struct CacheValues<V> {

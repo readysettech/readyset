@@ -28,6 +28,7 @@ pub mod ranges;
 pub mod redacted;
 pub mod shared_cache;
 pub mod shutdown;
+pub mod timestamp;
 
 mod time_scope;
 pub use time_scope::time_scope;
