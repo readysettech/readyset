@@ -10,6 +10,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams};
 use readyset_sql_passes::anonymize::anonymize_literals;
 use readyset_util::shutdown::ShutdownReceiver;
+use readyset_util::timestamp::current_timestamp_ms;
 use schema_catalog::{RewriteContext, SchemaCatalog, SchemaCatalogHandle};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -106,6 +107,8 @@ impl QueryLogger {
         query_string: Option<SharedString>,
         query_id: Option<SharedString>,
     ) {
+        let now_s = (current_timestamp_ms() / 1000) as f64;
+
         if let Some(duration) = event.upstream_duration {
             let upstream_labels = Self::create_labels(
                 DatabaseType::Upstream,
@@ -115,6 +118,7 @@ impl QueryLogger {
             histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &upstream_labels)
                 .record(duration.as_micros() as f64);
             counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &upstream_labels).increment(1);
+            gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &upstream_labels).set(now_s);
         }
 
         let labels = Self::create_labels(DatabaseType::ReadySet, query_string, query_id);
@@ -143,11 +147,13 @@ impl QueryLogger {
                 histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &cached_labels)
                     .record(duration.as_micros() as f64);
                 counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &cached_labels).increment(1);
+                gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &cached_labels).set(now_s);
             }
             Some(ReadysetExecutionEvent::Other { duration }) => {
                 histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
                     .record(duration.as_micros() as f64);
                 counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
+                gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &labels).set(now_s);
             }
             None => (),
         }

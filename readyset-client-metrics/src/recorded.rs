@@ -18,6 +18,11 @@ pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time_us
 /// See [`QUERY_LOG_EXECUTION_TIME`] for the set of labels.
 pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count";
 
+/// Gauge: The last execution timestamp for a query, in seconds since the UTC epoch.
+///
+/// See [`QUERY_LOG_EXECUTION_TIME`] for the set of labels.
+pub const QUERY_LOG_LAST_EXECUTION_EPOCH_S: &str = "readyset_query_log_last_execution_epoch_s";
+
 /// Histogram: The time in microseconds that the database spent executing a
 /// query.
 ///
