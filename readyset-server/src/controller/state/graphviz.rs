@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Write};
 
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
-use dataflow_expression::{PostLookup, PostLookupAggregateFunction};
+use dataflow_expression::{PostLookup, PostLookupAggregateFunction, PostLookupDistinct};
 use petgraph::Direction;
 use readyset_client::debug::info::NodeSize;
 
@@ -99,6 +99,7 @@ impl Display for Graphviz<'_> {
                     ref order_by,
                     limit,
                     ref aggregates,
+                    ref distinct,
                     // Column projection and default rows are omitted from the
                     // pseudo-node as they are less interesting for dataflow debugging.
                     returned_cols: _,
@@ -107,7 +108,8 @@ impl Display for Graphviz<'_> {
                 let has_aggregates = aggregates
                     .as_ref()
                     .is_some_and(|a| !a.group_by.is_empty() || !a.aggregates.is_empty());
-                if order_by.is_none() && limit.is_none() && !has_aggregates {
+                let has_distinct = !matches!(distinct, PostLookupDistinct::None);
+                if order_by.is_none() && limit.is_none() && !has_aggregates && !has_distinct {
                     continue;
                 }
                 let id = index.index();
@@ -117,6 +119,7 @@ impl Display for Graphviz<'_> {
                     order_by.as_deref(),
                     limit,
                     aggregates.as_ref(),
+                    distinct,
                 )
                 .expect("write to String is infallible");
                 out!(
@@ -192,7 +195,13 @@ fn write_reader_processing(
     >,
     limit: Option<usize>,
     aggregates: Option<&dataflow_expression::PostLookupAggregates>,
+    distinct: &PostLookupDistinct,
 ) -> fmt::Result {
+    match distinct {
+        PostLookupDistinct::None => {}
+        PostLookupDistinct::Sorted { .. } => write!(w, "<br/>DISTINCT (sorted)")?,
+        PostLookupDistinct::HashBased => write!(w, "<br/>DISTINCT (hash)")?,
+    }
     if let Some(order_by) = order_by {
         if !order_by.is_empty() {
             write!(w, "<br/>ORDER BY ")?;

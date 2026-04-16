@@ -369,6 +369,8 @@ pub enum MirNodeInner {
         default_row: Option<Vec<DfValue>>,
         /// Aggregates to perform in the reader on result sets for keys after performing the lookup
         aggregates: Option<PostLookupAggregates<Column>>,
+        /// Whether to deduplicate result rows after aggregation (SELECT DISTINCT with post-lookup)
+        distinct: bool,
     },
 }
 
@@ -385,6 +387,7 @@ impl MirNodeInner {
             returned_cols: None,
             default_row: None,
             aggregates: None,
+            distinct: false,
         }
     }
 

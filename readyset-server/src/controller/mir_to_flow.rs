@@ -18,7 +18,9 @@ use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
 use dataflow::ops::window::{Window, WindowOperation, WindowOperationKind};
 use dataflow::ops::Side;
-use dataflow::{node, ops, Expr as DfExpr, PostLookupAggregates, ReaderProcessing};
+use dataflow::{
+    node, ops, Expr as DfExpr, PostLookupAggregates, PostLookupDistinct, ReaderProcessing,
+};
 use itertools::Itertools;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -268,6 +270,7 @@ pub(super) fn mir_node_to_flow_parts(
                     returned_cols,
                     default_row,
                     aggregates,
+                    distinct,
                     ..
                 } => {
                     if !*lowered_to_df {
@@ -281,6 +284,7 @@ pub(super) fn mir_node_to_flow_parts(
                             returned_cols,
                             default_row.clone(),
                             aggregates,
+                            *distinct,
                         )?;
                         materialize_leaf_node(
                             graph,
@@ -1602,6 +1606,7 @@ fn make_reader_processing(
     returned_cols: &Option<Vec<Column>>,
     default_row: Option<Vec<DfValue>>,
     aggregates: &Option<PostLookupAggregates<Column>>,
+    distinct: bool,
 ) -> ReadySetResult<ReaderProcessing> {
     let order_by = if let Some(order) = order_by.as_ref() {
         Some(
@@ -1624,7 +1629,41 @@ fn make_reader_processing(
         .map(|aggs| aggs.map_columns(|col| graph.column_id_for_column(*parent, &col)))
         .transpose()?;
 
-    ReaderProcessing::new(order_by, limit, returned_cols, default_row, aggregates)
+    let distinct = if distinct {
+        if aggregates.is_some() {
+            // Post-aggregation output is sorted by GROUP BY columns, not all projected
+            // columns, so non-adjacent duplicates are possible. Use HashSet dedup.
+            PostLookupDistinct::HashBased
+        } else {
+            // No aggregates: input can be merge-sorted by all projected columns for
+            // streaming O(1)-memory dedup.
+            let num_cols = returned_cols
+                .as_ref()
+                .map(|c: &Vec<usize>| c.len())
+                .ok_or_else(|| {
+                    internal_err!(
+                        "Sorted DISTINCT requires returned_cols to determine dedup columns"
+                    )
+                })?;
+            PostLookupDistinct::Sorted {
+                dedup_aggregates: PostLookupAggregates {
+                    group_by: (0..num_cols).collect(),
+                    aggregates: vec![],
+                },
+            }
+        }
+    } else {
+        PostLookupDistinct::None
+    };
+
+    ReaderProcessing::new(
+        order_by,
+        limit,
+        returned_cols,
+        default_row,
+        aggregates,
+        distinct,
+    )
 }
 
 fn materialize_leaf_node(

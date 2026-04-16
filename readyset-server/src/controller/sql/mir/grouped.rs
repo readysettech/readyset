@@ -5,7 +5,7 @@ use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
 use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
-use readyset_sql::ast::{self, Expr, FieldDefinitionExpr, FunctionExpr, Relation, SqlIdentifier};
+use readyset_sql::ast::{self, Expr, FunctionExpr, Relation, SqlIdentifier};
 use readyset_sql::{
     analysis::{is_aggregate, ReferredColumns},
     DialectDisplay,
@@ -376,33 +376,8 @@ pub(super) fn post_lookup_aggregates(
     query_name: &Relation,
     dialect: readyset_data::Dialect,
 ) -> ReadySetResult<Option<PostLookupAggregates<Column>>> {
-    if query_graph.distinct {
-        // DISTINCT is the equivalent of grouping by all projected columns but not actually doing
-        // any aggregation function
-        return Ok(Some(PostLookupAggregates {
-            group_by: query_graph
-                .fields
-                .iter()
-                .filter_map(|expr| match expr {
-                    FieldDefinitionExpr::Expr {
-                        alias: Some(alias), ..
-                    } => Some(Column::named(alias.clone()).aliased_as_table(query_name.clone())),
-                    FieldDefinitionExpr::Expr {
-                        expr: Expr::Column(col),
-                        ..
-                    } => Some(Column::from(col).aliased_as_table(query_name.clone())),
-                    FieldDefinitionExpr::Expr { expr, .. } => Some(
-                        Column::named(expr.display(dialect.into()).to_string())
-                            .aliased_as_table(query_name.clone()),
-                    ),
-                    _ => None,
-                })
-                .collect(),
-            aggregates: vec![],
-        }));
-    }
-
     if query_graph.aggregates.is_empty() {
+        // No aggregates — DISTINCT (if any) is handled by PostLookup.distinct
         return Ok(None);
     }
 

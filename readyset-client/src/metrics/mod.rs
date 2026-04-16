@@ -517,4 +517,10 @@ pub mod recorded {
 
     /// Counter: Incremented by the number of events skipped when broadcast lag is detected.
     pub const SCHEMA_CATALOG_BROADCAST_SKIPPED: &str = "readyset_schema_catalog_broadcast_skipped";
+
+    /// Histogram: The number of unique rows stored in the HashSet-based DISTINCT dedup during
+    /// post-lookup processing. Recorded once per query that uses `PostLookupDistinct::HashBased`.
+    /// Monitor this to detect queries with high-cardinality DISTINCT that may use excessive memory.
+    pub const POST_LOOKUP_DISTINCT_HASH_SET_SIZE: &str =
+        "readyset_post_lookup_distinct_hash_set_size";
 }

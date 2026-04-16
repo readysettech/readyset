@@ -150,6 +150,7 @@ fn make_post_lookup(
                 raw_values,
             }],
         }),
+        distinct: Default::default(),
     }
 }
 

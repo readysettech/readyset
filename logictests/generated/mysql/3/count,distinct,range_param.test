@@ -60,8 +60,7 @@ SELECT DISTINCT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1
 3868747
 421094140
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT DISTINCT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -126,8 +125,7 @@ SELECT DISTINCT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1
 1717690090
 1784574386
 
-# REA-6472
-query  rowsort error: Incorrect\ values\ returned
+query  rowsort
 SELECT DISTINCT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
