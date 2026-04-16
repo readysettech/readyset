@@ -1038,26 +1038,24 @@ impl Domain {
         Ok(lhs_misses)
     }
 
-    /// Record a batch of column misses into `Waiting` and collect the keys that need replays.
-    fn record_column_misses(
+    /// Record a single column miss into `Waiting` and collect keys that need replays.
+    fn record_column_miss(
         w: &mut Waiting,
         needed_replays: &mut HashMap<(Target, Arc<[usize]>), Vec<KeyComparison>>,
-        misses: Vec<ColumnMiss>,
+        miss: ColumnMiss,
         redo: &Redo,
     ) {
-        for ColumnMiss {
+        let ColumnMiss {
             node,
             column_indices,
             missed_keys,
-        } in misses
-        {
-            let replays = needed_replays
-                .entry((Target(node), Arc::clone(&column_indices)))
-                .or_default();
-            for miss_key in missed_keys {
-                if w.record_miss(node, Arc::clone(&column_indices), miss_key.clone(), redo) {
-                    replays.push(miss_key);
-                }
+        } = miss;
+        let replays = needed_replays
+            .entry((Target(node), Arc::clone(&column_indices)))
+            .or_default();
+        for miss_key in missed_keys {
+            if w.record_miss(node, Arc::clone(&column_indices), miss_key.clone(), redo) {
+                replays.push(miss_key);
             }
         }
     }
@@ -1094,21 +1092,6 @@ impl Domain {
         let miss_columns_arc: Arc<[usize]> = Arc::from(miss_columns);
 
         for (replay_key, miss_key) in missed_keys {
-            let misses = if is_generated {
-                self.remap_generated_miss(
-                    miss_in,
-                    Arc::clone(&miss_columns_arc),
-                    &replay_key,
-                    miss_key,
-                )?
-            } else {
-                vec![ColumnMiss {
-                    node: miss_in,
-                    column_indices: Arc::clone(&miss_columns_arc),
-                    missed_keys: vec1![miss_key],
-                }]
-            };
-
             let redo = Redo {
                 tag: needed_for,
                 replay_key,
@@ -1116,7 +1099,29 @@ impl Domain {
                 requesting_shard,
                 requesting_replica,
             };
-            Self::record_column_misses(&mut w, &mut needed_replays, misses, &redo);
+
+            if is_generated {
+                let misses = self.remap_generated_miss(
+                    miss_in,
+                    Arc::clone(&miss_columns_arc),
+                    &redo.replay_key,
+                    miss_key,
+                )?;
+                for miss in misses {
+                    Self::record_column_miss(&mut w, &mut needed_replays, miss, &redo);
+                }
+            } else {
+                Self::record_column_miss(
+                    &mut w,
+                    &mut needed_replays,
+                    ColumnMiss {
+                        node: miss_in,
+                        column_indices: Arc::clone(&miss_columns_arc),
+                        missed_keys: vec1![miss_key],
+                    },
+                    &redo,
+                );
+            }
         }
 
         self.waiting.insert(miss_in, w);
