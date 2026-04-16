@@ -110,7 +110,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM
 ----
 
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_2`.`column_4` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_4` ON (`table_2`.`column_3` = `table_4`.`column_1`) INNER JOIN (SELECT `table_2`.`column_3` AS `alias_3` FROM `table_2`) AS alias_4 ON (`table_2`.`column_3` = `alias_4`.`alias_3`)
 ----
 -1807234864
@@ -456,7 +456,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM
 ----
 
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_2`.`column_4` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_4` ON (`table_2`.`column_3` = `table_4`.`column_1`) INNER JOIN (SELECT `table_2`.`column_3` AS `alias_3` FROM `table_2`) AS alias_4 ON (`table_2`.`column_3` = `alias_4`.`alias_3`)
 ----
 -459744858

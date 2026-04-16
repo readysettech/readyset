@@ -23,7 +23,7 @@ DELETE FROM `table_1` WHERE (`column_2` = 3)
 statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -37,7 +37,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -51,11 +51,11 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -69,7 +69,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -83,7 +83,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -97,11 +97,11 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -115,7 +115,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -129,7 +129,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -143,7 +143,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -151,7 +151,7 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -159,31 +159,31 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -191,11 +191,11 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -203,67 +203,67 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -422,7 +422,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 ? = 10
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -440,7 +440,7 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -458,7 +458,7 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -472,11 +472,11 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -490,7 +490,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -504,7 +504,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -518,7 +518,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -532,7 +532,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
@@ -540,7 +540,7 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -554,7 +554,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -572,7 +572,7 @@ query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -586,15 +586,15 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -608,7 +608,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -622,7 +622,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -636,7 +636,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -650,7 +650,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -664,11 +664,11 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -682,7 +682,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -696,7 +696,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
 -1791447446
@@ -710,6 +710,6 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 625332648
 625332648
 
-query  rowsort error: could\ not\ find\ source\ for\ child\ column
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ----
