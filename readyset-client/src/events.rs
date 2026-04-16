@@ -379,6 +379,8 @@ impl ControllerEventsClient {
                 &events_tx,
                 &leader_url,
                 buffer_limit,
+                SSE_RESPONSE_TIMEOUT,
+                SSE_BODY_CHUNK_TIMEOUT,
             )
             .await
             {
@@ -421,6 +423,8 @@ impl ControllerEventsClient {
         events_tx: &broadcast::Sender<ControllerEvent>,
         leader_url: &LeaderUrlSource,
         buffer_limit: usize,
+        response_timeout: Duration,
+        body_chunk_timeout: Duration,
     ) -> ReadySetResult<bool> {
         tracing::debug!(url = %events_url, "Connecting to SSE endpoint");
 
@@ -432,12 +436,12 @@ impl ControllerEventsClient {
             .body(Body::empty())
             .map_err(|e| internal_err!("Failed to build request: {e}"))?;
 
-        let mut res = timeout(SSE_RESPONSE_TIMEOUT, client.request(req))
+        let mut res = timeout(response_timeout, client.request(req))
             .await
             .map_err(|_| {
                 internal_err!(
                     "HTTP request to {events_url} timed out waiting for response headers ({}s)",
-                    SSE_RESPONSE_TIMEOUT.as_secs()
+                    response_timeout.as_secs()
                 )
             })?
             .map_err(|e| internal_err!("Failed to send request: {e}"))?;
@@ -461,12 +465,12 @@ impl ControllerEventsClient {
 
         let mut body_stream = res.into_body();
 
-        while let Some(chunk_result) = timeout(SSE_BODY_CHUNK_TIMEOUT, body_stream.next())
+        while let Some(chunk_result) = timeout(body_chunk_timeout, body_stream.next())
             .await
             .map_err(|_| {
                 internal_err!(
                     "SSE body stream to {events_url} timed out: no data received within {}s",
-                    SSE_BODY_CHUNK_TIMEOUT.as_secs()
+                    body_chunk_timeout.as_secs()
                 )
             })?
         {
@@ -594,8 +598,12 @@ mod tests {
             .build(http_connector)
     }
 
-    /// SSE_RESPONSE_TIMEOUT fires when the server accepts TCP but never sends headers.
-    #[tokio::test(start_paused = true)]
+    /// response_timeout fires when the server accepts TCP but never sends headers.
+    ///
+    /// Uses real (not paused) time with a short timeout so we don't have to fight
+    /// `start_paused = true` auto-advancing past the TCP connect deadline before
+    /// the real hyper I/O completes.
+    #[tokio::test]
     async fn test_response_timeout_on_silent_server() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -606,7 +614,7 @@ mod tests {
         tokio::spawn(async move {
             let (_socket, _) = listener.accept().await.expect("accept");
             // Hold socket open long enough for the response timeout to fire.
-            tokio::time::sleep(SSE_RESPONSE_TIMEOUT * 2).await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
         });
 
         let url = Url::parse(&format!("http://{addr}/events/stream")).expect("url");
@@ -621,6 +629,8 @@ mod tests {
             &events_tx,
             &leader_url,
             DEFAULT_SSE_BUFFER_LIMIT,
+            Duration::from_millis(200),
+            SSE_BODY_CHUNK_TIMEOUT,
         )
         .await;
 
@@ -631,47 +641,35 @@ mod tests {
         );
     }
 
-    /// SSE_BODY_CHUNK_TIMEOUT fires when the server sends headers + one chunk then stalls.
-    #[tokio::test(start_paused = true)]
+    /// body_chunk_timeout fires when the server sends headers + one chunk then stalls.
+    ///
+    /// Uses real (not paused) time with a short timeout so we don't have to fight
+    /// `start_paused = true` auto-advancing past the TCP connect deadline before
+    /// the real hyper I/O completes.
+    #[tokio::test]
     async fn test_body_chunk_timeout_on_stalled_stream() {
         use hyper::service::{make_service_fn, service_fn};
         use hyper::{Response, Server};
-        use tokio::sync::oneshot;
 
-        // Channel to signal the server to stall after sending one event.
-        let (stall_tx, stall_rx) = oneshot::channel::<()>();
-        let stall_rx = Arc::new(tokio::sync::Mutex::new(Some(stall_rx)));
+        let make_svc = make_service_fn(move |_| async move {
+            Ok::<_, hyper::Error>(service_fn(move |_req| async move {
+                // Build a streaming body: one SSE heartbeat, then stall forever.
+                let (mut body_tx, body) = Body::channel();
+                tokio::spawn(async move {
+                    let event = "event: Heartbeat\ndata: \"Heartbeat\"\n\n";
+                    body_tx.send_data(event.into()).await.ok();
+                    // Hold body_tx open so the stream stays alive but idle.
+                    futures_util::future::pending::<()>().await;
+                });
 
-        let make_svc = make_service_fn(move |_| {
-            let stall_rx = stall_rx.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |_req| {
-                    let stall_rx = stall_rx.clone();
-                    async move {
-                        // Build a streaming body: one SSE heartbeat, then stall.
-                        let (mut body_tx, body) = Body::channel();
-                        tokio::spawn(async move {
-                            let event = "event: Heartbeat\ndata: \"Heartbeat\"\n\n";
-                            body_tx.send_data(event.into()).await.ok();
-
-                            // Wait forever (simulates stalled connection).
-                            if let Some(rx) = stall_rx.lock().await.take() {
-                                let _ = rx.await;
-                            } else {
-                                futures_util::future::pending::<()>().await;
-                            }
-                        });
-
-                        Ok::<_, hyper::Error>(
-                            Response::builder()
-                                .status(200)
-                                .header("Content-Type", "text/event-stream")
-                                .body(body)
-                                .expect("response"),
-                        )
-                    }
-                }))
-            }
+                Ok::<_, hyper::Error>(
+                    Response::builder()
+                        .status(200)
+                        .header("Content-Type", "text/event-stream")
+                        .body(body)
+                        .expect("response"),
+                )
+            }))
         });
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -695,11 +693,10 @@ mod tests {
             &events_tx,
             &leader_url,
             DEFAULT_SSE_BUFFER_LIMIT,
+            SSE_RESPONSE_TIMEOUT,
+            Duration::from_millis(200),
         )
         .await;
-
-        // Clean up the stall signal so the server task can exit.
-        drop(stall_tx);
 
         let err = result.expect_err("expected timeout error").to_string();
         assert!(err.contains("SSE body stream"), "unexpected error: {err}");
@@ -779,6 +776,8 @@ mod tests {
             &events_tx,
             &leader_url,
             DEFAULT_SSE_BUFFER_LIMIT,
+            SSE_RESPONSE_TIMEOUT,
+            SSE_BODY_CHUNK_TIMEOUT,
         )
         .await;
 
@@ -844,6 +843,8 @@ mod tests {
             &events_tx,
             &leader_url,
             DEFAULT_SSE_BUFFER_LIMIT,
+            SSE_RESPONSE_TIMEOUT,
+            SSE_BODY_CHUNK_TIMEOUT,
         )
         .await;
 
