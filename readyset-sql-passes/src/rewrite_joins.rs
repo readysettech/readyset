@@ -1026,17 +1026,15 @@ fn add_to_statement_join(stmt: &mut SelectStatement, eq_constraint: Expr) -> Rea
     }
 
     match contain_lhs_rhs(&stmt.tables, &lhs, &rhs)? {
-        Some(EitherOrBoth::Both(_, rhs_idx)) => {
-            if is_filter_pushable_from_join_clause(stmt, 0) {
-                let rhs = stmt.tables.remove(rhs_idx);
-                return Ok(if insert_new_join_at(stmt, 0, rhs, eq_constraint) {
-                    true
-                } else {
-                    let rhs = remove_new_join_at(stmt, 0)?;
-                    stmt.tables.insert(rhs_idx, rhs);
-                    false
-                });
-            }
+        Some(EitherOrBoth::Both(_, rhs_idx)) if is_filter_pushable_from_join_clause(stmt, 0) => {
+            let rhs = stmt.tables.remove(rhs_idx);
+            return Ok(if insert_new_join_at(stmt, 0, rhs, eq_constraint) {
+                true
+            } else {
+                let rhs = remove_new_join_at(stmt, 0)?;
+                stmt.tables.insert(rhs_idx, rhs);
+                false
+            });
         }
         Some(EitherOrBoth::Left(_)) => {
             if let Some(jc_idx) = find_join_candidate_for_rhs(stmt, &rhs)? {
@@ -1052,7 +1050,7 @@ fn add_to_statement_join(stmt: &mut SelectStatement, eq_constraint: Expr) -> Rea
                 ));
             }
         }
-        None => {}
+        Some(EitherOrBoth::Both(..)) | None => {}
     }
 
     let mut join_to_insert = None;

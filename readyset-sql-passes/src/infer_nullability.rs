@@ -245,11 +245,9 @@ fn derive_from_expr(predicate: &Expr, non_null_columns: &mut HashSet<Column>) {
             derive_from_expr(expr.as_ref(), non_null_columns);
         }
         // Function calls
-        Expr::Call(func_expr) => {
-            if is_null_rejecting_call(func_expr) {
-                for arg in func_expr.arguments() {
-                    derive_from_expr(arg, non_null_columns);
-                }
+        Expr::Call(func_expr) if is_null_rejecting_call(func_expr) => {
+            for arg in func_expr.arguments() {
+                derive_from_expr(arg, non_null_columns);
             }
         }
         // Unknown
@@ -491,12 +489,8 @@ pub(crate) fn is_expr_null_preserving(expr: &Expr) -> bool {
                     !matches!(e, Expr::Literal(lit) if !matches!(lit, Literal::Null))
                         && is_expr_null_preserving_inner(e)
                 }),
-            Expr::Call(func_expr) => {
-                if is_null_preserving_call(func_expr) {
-                    func_expr.arguments().all(is_expr_null_preserving_inner)
-                } else {
-                    false
-                }
+            Expr::Call(func_expr) if is_null_preserving_call(func_expr) => {
+                func_expr.arguments().all(is_expr_null_preserving_inner)
             }
             _ => false,
         }
