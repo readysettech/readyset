@@ -1484,6 +1484,14 @@ macro_rules! export_parser {
 /// This is a custom implementation (rather than using `export_parser!`) because we need to merge
 /// `shallow_ast` from the sqlparser result into the nom result for `CreateCacheStatement` when
 /// both parsers succeed. This ensures `shallow_ast` is available even when nom is preferred.
+///
+/// We similarly adopt sqlparser's `deep` AST into the nom result when nom failed to parse the
+/// inner SELECT of a `CREATE DEEP CACHE` but sqlparser succeeded. Unlike `shallow` (which is
+/// always produced by sqlparser and so overwrites unconditionally), `deep` is genuinely parsed
+/// by both sides, so we only upgrade on asymmetric failure — this preserves the parity harness's
+/// ability to catch real `Ok`-vs-`Ok` disagreements on `SelectStatement`. The upgrade is further
+/// gated on `config.prefer_sqlparser` to match the top-level `(Err nom, Ok sqlparser)` branch in
+/// [`parse_both_inner`], which only returns sqlparser's result when sqlparser is preferred.
 pub fn parse_query_with_config(
     config: impl Into<ParsingConfig>,
     dialect: Dialect,
@@ -1511,6 +1519,18 @@ pub fn parse_query_with_config(
         _ => None,
     };
 
+    let sqlparser_deep_ok = match &sqlparser_result {
+        Ok(SqlQuery::CreateCache(cc)) => match &cc.inner {
+            CacheInner::Statement { deep: Ok(d), .. } => Some(d.clone()),
+            _ => None,
+        },
+        Ok(SqlQuery::Explain(readyset_sql::ast::ExplainStatement::CreateCache {
+            inner: CacheInner::Statement { deep: Ok(d), .. },
+            ..
+        })) => Some(d.clone()),
+        _ => None,
+    };
+
     let mut nom_result = nom_sql::parse_query(dialect, input.as_ref());
 
     if let Some(shallow_ast_val) = shallow_ast {
@@ -1527,6 +1547,30 @@ pub fn parse_query_with_config(
         };
         if let Some(target) = target {
             *target = shallow_ast_val;
+        }
+    }
+
+    if config.prefer_sqlparser
+        && let Some(sqlparser_deep) = sqlparser_deep_ok
+    {
+        let target = match nom_result.as_mut() {
+            Ok(SqlQuery::CreateCache(cc)) => match &mut cc.inner {
+                CacheInner::Statement { deep, .. } => Some(deep),
+                _ => None,
+            },
+            Ok(SqlQuery::Explain(readyset_sql::ast::ExplainStatement::CreateCache {
+                inner: CacheInner::Statement { deep, .. },
+                ..
+            })) => Some(deep),
+            _ => None,
+        };
+        if let Some(target @ Err(_)) = target {
+            tracing::debug!(
+                ?dialect,
+                input = %input.as_ref(),
+                "nom-sql failed to parse DEEP CACHE inner SELECT; adopting sqlparser-rs result"
+            );
+            *target = Ok(sqlparser_deep);
         }
     }
 

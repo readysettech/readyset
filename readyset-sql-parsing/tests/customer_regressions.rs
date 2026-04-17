@@ -102,7 +102,13 @@ fn split_queries(content: &str) -> Vec<(usize, String)> {
 }
 
 fn check_query(dialect: Dialect, sql: &str) -> Result<(), String> {
-    let config = ParsingPreset::BothErrorOnMismatch.into_config();
+    // `prefer_sqlparser` matches prod tie-breaking (see `ParsingPreset::for_prod`), which lets
+    // `parse_query_with_config` adopt sqlparser's parse on asymmetric nom failures (e.g.
+    // `CREATE DEEP CACHE` inner SELECTs that nom can't parse). `error_on_mismatch` still fires
+    // for genuine `Ok`/`Ok` AST disagreements between the two parsers.
+    let config = ParsingPreset::BothErrorOnMismatch
+        .into_config()
+        .prefer_sqlparser(true);
     let ast =
         parse_query_with_config(config, dialect, sql).map_err(|e| format!("parse failed: {e}"))?;
     let displayed = ast.display(dialect).to_string();
