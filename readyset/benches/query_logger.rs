@@ -1,9 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
-use readyset::query_logger::QueryLogger;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::ReadysetExecutionEvent;
 use readyset_client_metrics::{EventType, QueryExecutionEvent, QueryLogMode, SqlQueryType};
+use readyset_query_logger::QueryLogger;
 use readyset_server::PrometheusBuilder;
 use readyset_sql::ast::SqlQuery;
 use readyset_sql::Dialect;

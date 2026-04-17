@@ -11,7 +11,7 @@ use futures_util::future::{self, Either};
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
 use readyset_server::consensus::AuthorityType;
-use readyset_server::metrics::{install_global_recorder, PrometheusBuilder};
+use readyset_server::metrics::get_or_init_global_recorder;
 use readyset_server::{resolve_addr, Builder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
@@ -191,11 +191,7 @@ fn main() -> anyhow::Result<()> {
         // `PrometheusBuilder::build_recorder` spawns an upkeep task, so we need to execute it in
         // the context of the runtime
         rt.block_on(async {
-            install_global_recorder(
-                PrometheusBuilder::new()
-                    .add_global_label("deployment", &opts.deployment)
-                    .build_recorder(),
-            );
+            get_or_init_global_recorder(&[("deployment", opts.deployment.as_str())]);
         });
     }
 

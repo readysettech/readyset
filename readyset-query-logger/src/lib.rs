@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use metrics::{counter, gauge, histogram, Counter, SharedString};
+use metrics::{Counter, SharedString, counter, gauge, histogram};
 use readyset_client_metrics::{
-    recorded, DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
+    DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, recorded,
 };
 use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 
@@ -212,7 +212,7 @@ impl QueryLogger {
     }
 
     /// Async task that logs query stats.
-    pub(crate) async fn run(
+    pub async fn run(
         &mut self,
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
@@ -270,12 +270,12 @@ mod tests {
     use std::time::Duration;
 
     use metrics::Key;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use metrics_util::MetricKind;
+    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use readyset_client::query::QueryId;
     use readyset_client_metrics::{
-        recorded, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
-        SqlQueryType,
+        EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
+        recorded,
     };
     use readyset_sql::Dialect;
     use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;

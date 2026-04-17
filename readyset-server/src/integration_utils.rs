@@ -9,8 +9,8 @@ use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_util::shutdown::ShutdownSender;
 
-use crate::metrics::{get_global_recorder, install_global_recorder};
-use crate::{Builder, Handle, PrometheusBuilder, ReuseConfigType};
+use crate::metrics::get_or_init_global_recorder;
+use crate::{Builder, Handle, ReuseConfigType};
 
 pub const DEFAULT_SHARDING: usize = 2;
 
@@ -124,9 +124,7 @@ pub async fn build_custom(
 /// must be called before the server is started, otherwise it will fail to
 /// register its metrics with the correct recorder, and none will be recorded
 pub fn register_metric_recorder() {
-    if get_global_recorder().is_none() {
-        install_global_recorder(PrometheusBuilder::new().build_recorder());
-    }
+    get_or_init_global_recorder(&[]);
 }
 
 // TODO: schema

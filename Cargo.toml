@@ -49,6 +49,7 @@ members = [
     "readyset-mir",
     "readyset-mysql",
     "readyset-psql",
+    "readyset-query-logger",
     "readyset-repl",
     "readyset-schema",
     "readyset-server",

@@ -23,23 +23,25 @@ use readyset_adapter::{
     ViewsSynchronizer,
 };
 use readyset_client::consensus::{Authority, LocalAuthorityStore};
+use readyset_client_metrics::QueryLogMode;
 use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
+use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
-use readyset_server::{
-    Builder, DurabilityMode, Handle, LocalAuthority, PrometheusBuilder, ReadySetHandle,
-};
+use readyset_server::metrics::get_or_init_global_recorder;
+use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
+use readyset_sql_passes::adapter_rewrites;
 use readyset_util::eventually;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
-use schema_catalog::{SchemaCatalogSynchronizer, SchemaGeneration};
+use schema_catalog::{SchemaCatalogHandle, SchemaCatalogSynchronizer, SchemaGeneration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
@@ -246,15 +248,9 @@ impl Default for TestBuilder {
 
 impl TestBuilder {
     pub fn new(backend_builder: BackendBuilder) -> Self {
-        let backend_builder = backend_builder.metrics_handle(Some(MetricsHandle::new(
-            PrometheusBuilder::new()
-                .with_push_gateway("http://example.com", Duration::default(), None, None)
-                .unwrap()
-                .build()
-                .unwrap()
-                .0
-                .handle(),
-        )));
+        let recorder_handle = get_or_init_global_recorder(&[]).handle();
+        let backend_builder =
+            backend_builder.metrics_handle(Some(MetricsHandle::new(recorder_handle)));
         Self {
             backend_builder,
             replicate: Default::default(),
@@ -411,7 +407,7 @@ impl TestBuilder {
         self
     }
 
-    pub async fn build<A>(self) -> (A::ConnectionOpts, Handle, ShutdownSender)
+    pub async fn build<A>(mut self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
     {
@@ -419,6 +415,24 @@ impl TestBuilder {
         if env::var("VERBOSE").is_ok() {
             readyset_tracing::init_test_logging();
         }
+
+        let (query_log_tx, mut query_log_rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut logger = QueryLogger::new(
+                QueryLogMode::Enabled,
+                adapter_rewrites::AdapterRewriteParams::new(A::DIALECT),
+                A::DIALECT,
+                vec![],
+                SchemaCatalogHandle::new(),
+            );
+            while let Some(event) = query_log_rx.recv().await {
+                logger.handle_event(&event).await;
+            }
+        });
+        self.backend_builder = self
+            .backend_builder
+            .query_log_sender(Some(query_log_tx))
+            .query_log_mode(Some(QueryLogMode::Enabled));
 
         let cdc_url_and_db_name = match self.replicate {
             ReplicationBehavior::None => None,

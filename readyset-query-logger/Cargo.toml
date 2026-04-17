@@ -1,0 +1,26 @@
+[package]
+name = "readyset-query-logger"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+metrics = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros"] }
+tracing = { workspace = true, features = ["release_max_level_debug"] }
+
+readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-sql = { path = "../readyset-sql" }
+readyset-sql-passes = { path = "../readyset-sql-passes" }
+readyset-util = { path = "../readyset-util" }
+schema-catalog = { path = "../schema-catalog" }
+
+[dev-dependencies]
+metrics-util = { workspace = true }
+readyset-client = { path = "../readyset-client" }
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+tokio = { workspace = true, features = ["full"] }
+
+[lints]
+workspace = true

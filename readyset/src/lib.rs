@@ -2,7 +2,6 @@
 
 pub mod mysql;
 pub mod psql;
-pub mod query_logger;
 pub mod verify;
 
 use std::cell::OnceCell;
@@ -51,10 +50,12 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
+use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
+use readyset_server::metrics::get_or_init_global_recorder;
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
-use readyset_server::{PrometheusBuilder, WorkerOptions};
+use readyset_server::WorkerOptions;
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
@@ -1045,14 +1046,11 @@ where
                 DatabaseType::PostgreSQL => "psql",
             };
 
-            let recorder = PrometheusBuilder::new()
-                .add_global_label("upstream_db_type", database_label)
-                .add_global_label("deployment", &options.deployment)
-                .build_recorder();
-
-            let handle = recorder.handle();
-            readyset_server::metrics::install_global_recorder(recorder);
-            Some(handle)
+            let recorder = get_or_init_global_recorder(&[
+                ("upstream_db_type", database_label),
+                ("deployment", &options.deployment),
+            ]);
+            Some(recorder.handle())
         } else {
             None
         };
@@ -1277,7 +1275,7 @@ where
                 .name("Query logger".to_string())
                 .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                 .spawn_wrapper(move || {
-                    let mut logger = query_logger::QueryLogger::new(
+                    let mut logger = QueryLogger::new(
                         query_log_mode,
                         rewrite_params,
                         dialect,

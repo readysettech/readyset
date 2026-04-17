@@ -11,17 +11,21 @@ mod recorders;
 type GlobalRecorder = PrometheusRecorder;
 static METRICS_RECORDER: OnceLock<&'static GlobalRecorder> = OnceLock::new();
 
-/// Installs a new global recorder
-pub fn install_global_recorder(rec: GlobalRecorder) {
-    let rec = Box::leak(Box::new(rec));
-    METRICS_RECORDER
-        .set(rec)
-        .unwrap_or_else(|_| panic!("metrics already initialized"));
-    metrics::set_global_recorder(&*rec).expect("Would fail on OnceCell");
+/// Returns the global recorder, initializing it on first call.
+/// `global_labels` are added to every metric; pass `&[]` if none are needed.
+pub fn get_or_init_global_recorder(global_labels: &[(&str, &str)]) -> &'static GlobalRecorder {
+    METRICS_RECORDER.get_or_init(|| {
+        let mut builder = PrometheusBuilder::new();
+        for &(k, v) in global_labels {
+            builder = builder.add_global_label(k, v);
+        }
+        let rec = Box::leak(Box::new(builder.build_recorder()));
+        metrics::set_global_recorder(&*rec).ok();
+        rec
+    })
 }
 
-/// Gets an [`Option`] with the static reference to the installed metrics recorder.
-/// This method returns [`None`] if `install()` has not been called yet.
+/// Gets the global recorder, if one has been initialized.
 pub fn get_global_recorder() -> Option<&'static GlobalRecorder> {
     METRICS_RECORDER.get().cloned()
 }

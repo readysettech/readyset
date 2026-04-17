@@ -5721,6 +5721,7 @@ dependencies = [
  "readyset-errors",
  "readyset-mysql",
  "readyset-psql",
+ "readyset-query-logger",
  "readyset-schema",
  "readyset-server",
  "readyset-shallow",
@@ -5936,10 +5937,12 @@ dependencies = [
  "psql-srv",
  "readyset-adapter",
  "readyset-client",
+ "readyset-client-metrics",
  "readyset-data",
  "readyset-errors",
  "readyset-mysql",
  "readyset-psql",
+ "readyset-query-logger",
  "readyset-schema",
  "readyset-server",
  "readyset-shallow",
@@ -6357,6 +6360,23 @@ dependencies = [
  "tracing",
  "tracing-futures",
  "uuid 0.8.2",
+]
+
+[[package]]
+name = "readyset-query-logger"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "metrics-util",
+ "readyset-client",
+ "readyset-client-metrics",
+ "readyset-sql",
+ "readyset-sql-parsing",
+ "readyset-sql-passes",
+ "readyset-util",
+ "schema-catalog",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
