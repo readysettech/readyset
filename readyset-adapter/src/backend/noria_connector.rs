@@ -17,7 +17,7 @@ use readyset_client::{
 };
 use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
-use readyset_data::{Collation, DfType, DfValue, Dialect};
+use readyset_data::{AvgScaleMode, Collation, DfType, DfValue, Dialect};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invariant_eq, table_err, unsupported,
     unsupported_err,
@@ -30,7 +30,8 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::adapter_rewrites::{
-    self, AdapterRewriteParams, DfQueryParameters, PostLookupColumn, PostLookupPlan,
+    self, AdapterRewriteParams, DfQueryParameters, PostLookupColumn, PostLookupDecomposition,
+    PostLookupPlan,
 };
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
@@ -1571,7 +1572,7 @@ impl NoriaConnector {
             // described as INT8 (the SUM column type) but sent as NUMERIC.
             let plan = statement.processed_query_params.post_lookup_plan();
             if !plan.is_empty() {
-                apply_post_lookup_type_transforms(&mut schema, plan, self.dialect);
+                apply_post_lookup_type_transforms(&mut schema, plan, self.dialect)?;
                 remove_post_lookup_columns(&mut schema, plan);
             }
 
@@ -1715,6 +1716,35 @@ impl NoriaConnector {
     }
 }
 
+/// Result type and AVG scale-mode policy per decomposition (positional).
+fn compute_result_types(
+    decompositions: &[PostLookupDecomposition],
+    schema: &[ColumnSchema],
+    dialect: Dialect,
+) -> ReadySetResult<Vec<(DfType, AvgScaleMode)>> {
+    decompositions
+        .iter()
+        .map(|d| {
+            let source_types: Vec<&DfType> = d
+                .source_columns
+                .iter()
+                .map(|s| {
+                    schema.get(s.field_index).map(|cs| &cs.column_type).ok_or_else(|| {
+                        internal_err!(
+                            "post-lookup decomposition: schema missing source column {} (schema has {} cols)",
+                            s.field_index,
+                            schema.len()
+                        )
+                    })
+                })
+                .collect::<ReadySetResult<Vec<_>>>()?;
+            let result_type = d.kind.result_type(&source_types, dialect)?;
+            let scale_mode = AvgScaleMode::for_avg(dialect, &result_type)?;
+            Ok((result_type, scale_mode))
+        })
+        .collect()
+}
+
 /// Update result column types in the schema for post-lookup decompositions.
 ///
 /// For each decomposition, computes the correct result type (e.g. AVG of
@@ -1728,22 +1758,15 @@ fn apply_post_lookup_type_transforms(
     schema: &mut [ColumnSchema],
     plan: &PostLookupPlan,
     dialect: Dialect,
-) {
-    for d in plan.decompositions() {
+) -> ReadySetResult<()> {
+    let decompositions = plan.decompositions();
+    let result_types = compute_result_types(decompositions, schema, dialect)?;
+    for (d, (ty, _scale_mode)) in decompositions.iter().zip(result_types) {
         if d.result_index < schema.len() {
-            let source_types: Vec<&DfType> = d
-                .source_columns
-                .iter()
-                .map(|s| {
-                    schema
-                        .get(s.field_index)
-                        .map(|cs| &cs.column_type)
-                        .unwrap_or(&DfType::Unknown)
-                })
-                .collect();
-            schema[d.result_index].column_type = d.kind.result_type(&source_types, dialect);
+            schema[d.result_index].column_type = ty;
         }
     }
+    Ok(())
 }
 
 /// Remove added helper columns (e.g. COUNT, MIN) from the schema in
@@ -1767,19 +1790,21 @@ fn postprocess_decompositions<'a>(
     result: QueryResult<'a>,
     plan: &PostLookupPlan,
     dialect: Dialect,
-) -> QueryResult<'a> {
+) -> ReadySetResult<QueryResult<'a>> {
     if plan.is_empty() {
-        return result;
+        return Ok(result);
     }
 
     let (rows, schema) = match result {
         QueryResult::Select { rows, schema } => (rows, schema),
-        other => return other,
+        other => return Ok(other),
     };
 
     let decompositions = plan.decompositions();
     let column_plan = plan.column_plan();
     let columns_to_remove = plan.columns_to_remove();
+
+    let result_types = compute_result_types(decompositions, &schema.schema, dialect)?;
 
     let mut transformed_rows: Vec<Vec<DfValue>> = Vec::new();
     let mut computed: Vec<DfValue> = Vec::with_capacity(decompositions.len());
@@ -1792,7 +1817,7 @@ fn postprocess_decompositions<'a>(
         // the first decomposition; subsequent ones reuse or grow as needed.
         let mut sources: Vec<&DfValue> =
             Vec::with_capacity(decompositions.first().map_or(0, |d| d.source_columns.len()));
-        for d in decompositions {
+        for (d, (result_type, scale_mode)) in decompositions.iter().zip(&result_types) {
             sources.clear();
             for s in d.source_columns.iter() {
                 sources.push(row.get(s.field_index).unwrap_or_else(|| {
@@ -1804,7 +1829,7 @@ fn postprocess_decompositions<'a>(
                     &DfValue::None
                 }));
             }
-            computed.push(d.kind.compute(&sources));
+            computed.push(d.kind.compute(&sources, result_type, *scale_mode)?);
         }
 
         let mut out_row: Vec<DfValue> = Vec::with_capacity(column_plan.len());
@@ -1826,21 +1851,19 @@ fn postprocess_decompositions<'a>(
         transformed_rows.push(out_row);
     }
 
-    // Update schema: remove added columns and fix types for computed columns
+    // Build output schema/aliases. Schema types must be set before
+    // coercion below and before column removal (`result_index` is
+    // pre-removal).
     let mut new_schema_vec = schema.schema.into_owned();
     let mut new_columns_vec = schema.columns.into_owned();
-
-    // Update aliases for computed result columns.
-    for d in decompositions {
+    for (d, (ty, _)) in decompositions.iter().zip(result_types) {
+        if d.result_index < new_schema_vec.len() {
+            new_schema_vec[d.result_index].column_type = ty;
+        }
         if d.result_index < new_columns_vec.len() {
             new_columns_vec[d.result_index] = d.original_alias.clone();
         }
     }
-
-    // Update schema types (e.g. BigInt → Numeric for AVG of integers).
-    // Must happen before coercion so target types are correct, and before
-    // column removal since result_index refers to pre-removal positions.
-    apply_post_lookup_type_transforms(&mut new_schema_vec, plan, dialect);
 
     for d in decompositions {
         if d.result_index < new_schema_vec.len() {
@@ -1875,13 +1898,13 @@ fn postprocess_decompositions<'a>(
         }
     }
 
-    QueryResult::Select {
+    Ok(QueryResult::Select {
         rows: ResultIterator::owned(vec![Results::new(transformed_rows)]),
         schema: SelectSchema {
             schema: Cow::Owned(new_schema_vec),
             columns: Cow::Owned(new_columns_vec),
         },
-    }
+    })
 }
 
 /// Creates keys from processed query params, gets the select statement binops, and calls
@@ -1990,7 +2013,7 @@ async fn do_read<'a>(
     );
 
     let plan = processed_query_params.post_lookup_plan();
-    let result = postprocess_decompositions(result, plan, dialect);
+    let result = postprocess_decompositions(result, plan, dialect)?;
 
     Ok(ReadResult {
         result,
@@ -2026,7 +2049,8 @@ mod tests {
 
         // No decompositions means pass-through
         let empty_plan = PostLookupPlan::new(vec![], 0);
-        let result = postprocess_decompositions(result, &empty_plan, Dialect::DEFAULT_MYSQL);
+        let result =
+            postprocess_decompositions(result, &empty_plan, Dialect::DEFAULT_MYSQL).unwrap();
         match result {
             QueryResult::Select { rows, .. } => {
                 assert!(rows.into_vec().is_empty());
@@ -2099,7 +2123,7 @@ mod tests {
             3,
         );
 
-        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         match result {
             QueryResult::Select { rows, schema } => {
                 let data = rows.into_vec();
@@ -2212,7 +2236,7 @@ mod tests {
             5,
         );
 
-        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         match result {
             QueryResult::Select { rows, schema } => {
                 let data = rows.into_vec();
@@ -2357,7 +2381,7 @@ mod tests {
             6,
         );
 
-        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL);
+        let result = postprocess_decompositions(result, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         match result {
             QueryResult::Select { rows, schema } => {
                 let data = rows.into_vec();
@@ -2457,7 +2481,7 @@ mod tests {
             },
         };
         let exec_result =
-            postprocess_decompositions(exec_result, &plan, Dialect::DEFAULT_POSTGRESQL);
+            postprocess_decompositions(exec_result, &plan, Dialect::DEFAULT_POSTGRESQL).unwrap();
         match exec_result {
             QueryResult::Select { schema, .. } => {
                 assert_eq!(schema.schema.len(), 1);

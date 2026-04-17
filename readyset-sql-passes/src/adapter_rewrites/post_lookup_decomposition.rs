@@ -6,15 +6,13 @@
 //! that *can* be re-aggregated, then recomputes the original value in
 //! [`postprocess_decompositions`](crate::adapter_rewrites::postprocess_decompositions).
 
-use readyset_data::{DfType, DfValue};
-use readyset_decimal::Decimal;
-use readyset_errors::{ReadySetResult, unsupported};
+use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, DfValue, Dialect as DataDialect};
+use readyset_errors::{ReadySetResult, internal, unsupported};
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     Expr, FieldDefinitionExpr, FunctionExpr, Literal, SelectStatement, SqlIdentifier,
 };
 use readyset_sql::{Dialect, DialectDisplay};
-use tracing::{error, warn};
 
 /// Identifies which aggregate function was decomposed for post-lookup
 /// recomputation.
@@ -140,19 +138,18 @@ impl PostLookupAggregateKind {
     pub fn result_type(
         &self,
         source_col_types: &[&DfType],
-        dialect: readyset_data::Dialect,
-    ) -> DfType {
+        dialect: DataDialect,
+    ) -> ReadySetResult<DfType> {
         match self {
             Self::Avg => {
                 // Uses the third col (MIN) to recover the type, since MIN is type-preserving.
-                let expr_type = source_col_types.get(2).copied().unwrap_or_else(|| {
-                    warn!(
-                        actual = source_col_types.len(),
-                        "post-lookup AVG result_type: expected 3 source columns (SUM, COUNT, MIN)"
+                let Some(expr_type) = source_col_types.get(2).copied() else {
+                    internal!(
+                        "post-lookup AVG result_type: expected 3 source columns (SUM, COUNT, MIN), got {}",
+                        source_col_types.len()
                     );
-                    &DfType::Unknown
-                });
-                match dialect.engine() {
+                };
+                Ok(match dialect.engine() {
                     readyset_data::SqlEngine::MySQL => DfType::mysql_avg_output_type(expr_type),
                     readyset_data::SqlEngine::PostgreSQL => {
                         if expr_type.is_any_float() {
@@ -161,63 +158,51 @@ impl PostLookupAggregateKind {
                             DfType::DEFAULT_NUMERIC
                         }
                     }
-                }
+                })
             }
         }
     }
 
-    /// Compute the final value from source values (in kind-specific order).
-    pub fn compute(&self, sources: &[&DfValue]) -> DfValue {
+    /// Compute the final value from source values (in kind-specific
+    /// order). `scale_mode` is pre-derived via [`AvgScaleMode::for_avg`].
+    pub fn compute(
+        &self,
+        sources: &[&DfValue],
+        result_type: &DfType,
+        scale_mode: AvgScaleMode,
+    ) -> ReadySetResult<DfValue> {
         match self {
             Self::Avg => {
                 if sources.len() < 2 {
-                    error!(
-                        expected = ">=2",
-                        actual = sources.len(),
-                        "post-lookup AVG: wrong number of source columns"
+                    internal!(
+                        "post-lookup AVG: wrong number of source columns (expected >=2, got {})",
+                        sources.len()
                     );
-                    return DfValue::None;
                 }
-                Self::compute_avg(sources[0], sources[1])
+                Self::compute_avg(sources[0], sources[1], result_type, scale_mode)
             }
         }
     }
 
-    /// AVG = SUM / COUNT, producing a `Numeric` (Decimal).
-    ///
-    /// Returns `None` (SQL NULL) when either input is NULL or count is zero.
-    fn compute_avg(sum: &DfValue, count: &DfValue) -> DfValue {
-        if *sum == DfValue::None || *count == DfValue::None {
-            return DfValue::None;
+    /// AVG = SUM / COUNT rounded per `scale_mode`. Returns NULL when
+    /// either input is NULL, count is zero, or the COUNT cannot be
+    /// converted to `i64`.
+    fn compute_avg(
+        sum: &DfValue,
+        count: &DfValue,
+        result_type: &DfType,
+        scale_mode: AvgScaleMode,
+    ) -> ReadySetResult<DfValue> {
+        if sum.is_none() || count.is_none() {
+            return Ok(DfValue::None);
         }
-        let sum_d = match Decimal::try_from(sum) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(%e, ?sum, "post-lookup AVG: failed to convert SUM to Decimal");
-                return DfValue::None;
-            }
+        let Ok(count_i64) = i64::try_from(count) else {
+            return Ok(DfValue::None);
         };
-        let count_d = match Decimal::try_from(count) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(%e, ?count, "post-lookup AVG: failed to convert COUNT to Decimal");
-                return DfValue::None;
-            }
-        };
-        if count_d == Decimal::zero() {
-            return DfValue::None;
+        if count_i64 == 0 {
+            return Ok(DfValue::None);
         }
-        match sum_d.checked_div(&count_d) {
-            Some(result) => DfValue::from(result),
-            None => {
-                warn!(
-                    ?sum_d,
-                    ?count_d,
-                    "post-lookup AVG: SUM/COUNT division failed"
-                );
-                DfValue::None
-            }
-        }
+        AverageAccumulator::from_totals(result_type, scale_mode, sum, count_i64)?.result()
     }
 }
 
@@ -549,12 +534,20 @@ mod tests {
         assert!(matches!(plan.column_plan()[2], PostLookupColumn::Direct(2)));
     }
 
+    fn avg_compute(sources: &[&DfValue]) -> ReadySetResult<DfValue> {
+        PostLookupAggregateKind::Avg.compute(
+            sources,
+            &DfType::Numeric { prec: 14, scale: 4 },
+            AvgScaleMode::Fixed(4),
+        )
+    }
+
     #[test]
     fn compute_avg_basic() {
         let sum = DfValue::Int(100);
         let count = DfValue::Int(4);
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&sum, &count]),
+            avg_compute(&[&sum, &count]).unwrap(),
             DfValue::try_from(25.0_f64).unwrap()
         );
     }
@@ -562,11 +555,11 @@ mod tests {
     #[test]
     fn compute_avg_null_inputs() {
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&DfValue::None, &DfValue::Int(1)]),
+            avg_compute(&[&DfValue::None, &DfValue::Int(1)]).unwrap(),
             DfValue::None
         );
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&DfValue::Int(1), &DfValue::None]),
+            avg_compute(&[&DfValue::Int(1), &DfValue::None]).unwrap(),
             DfValue::None
         );
     }
@@ -574,7 +567,7 @@ mod tests {
     #[test]
     fn compute_avg_zero_count() {
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&DfValue::Int(100), &DfValue::Int(0)]),
+            avg_compute(&[&DfValue::Int(100), &DfValue::Int(0)]).unwrap(),
             DfValue::None
         );
     }
@@ -582,68 +575,84 @@ mod tests {
     #[test]
     fn compute_avg_wrong_source_count() {
         let val = DfValue::Int(42);
-        assert_eq!(PostLookupAggregateKind::Avg.compute(&[&val]), DfValue::None);
-        assert_eq!(PostLookupAggregateKind::Avg.compute(&[]), DfValue::None);
+        assert!(avg_compute(&[&val]).is_err());
+        assert!(avg_compute(&[]).is_err());
     }
 
     #[test]
     fn result_type_avg_mysql_int() {
-        let mysql = readyset_data::Dialect::DEFAULT_MYSQL;
         let types: Vec<&DfType> = vec![&DfType::BigInt, &DfType::BigInt, &DfType::Int];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, mysql),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_MYSQL)
+                .unwrap(),
             DfType::Numeric { prec: 14, scale: 4 },
         );
     }
 
     #[test]
     fn result_type_avg_mysql_float() {
-        let mysql = readyset_data::Dialect::DEFAULT_MYSQL;
         let types: Vec<&DfType> = vec![&DfType::Double, &DfType::BigInt, &DfType::Float];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, mysql),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_MYSQL)
+                .unwrap(),
             DfType::Double,
         );
     }
 
     #[test]
     fn result_type_avg_pg_int() {
-        let pg = readyset_data::Dialect::DEFAULT_POSTGRESQL;
         let types: Vec<&DfType> = vec![&DfType::BigInt, &DfType::BigInt, &DfType::Int];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, pg),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_POSTGRESQL)
+                .unwrap(),
             DfType::DEFAULT_NUMERIC,
         );
     }
 
     #[test]
     fn result_type_avg_pg_float() {
-        let pg = readyset_data::Dialect::DEFAULT_POSTGRESQL;
         let types: Vec<&DfType> = vec![&DfType::Double, &DfType::BigInt, &DfType::Double];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, pg),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_POSTGRESQL)
+                .unwrap(),
             DfType::Double,
         );
     }
 
     #[test]
     fn result_type_avg_mysql_bigint() {
-        let mysql = readyset_data::Dialect::DEFAULT_MYSQL;
         let types: Vec<&DfType> = vec![&DfType::BigInt, &DfType::BigInt, &DfType::BigInt];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, mysql),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_MYSQL)
+                .unwrap(),
             DfType::Numeric { prec: 23, scale: 4 },
         );
     }
 
     #[test]
     fn result_type_avg_mysql_decimal() {
-        let mysql = readyset_data::Dialect::DEFAULT_MYSQL;
         let dec_type = DfType::Numeric { prec: 10, scale: 2 };
         let types: Vec<&DfType> = vec![&DfType::DEFAULT_NUMERIC, &DfType::BigInt, &dec_type];
         assert_eq!(
-            PostLookupAggregateKind::Avg.result_type(&types, mysql),
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_MYSQL)
+                .unwrap(),
             DfType::Numeric { prec: 14, scale: 6 },
+        );
+    }
+
+    #[test]
+    fn result_type_avg_fewer_than_three_sources_errors() {
+        let types: Vec<&DfType> = vec![&DfType::BigInt, &DfType::BigInt];
+        assert!(
+            PostLookupAggregateKind::Avg
+                .result_type(&types, DataDialect::DEFAULT_MYSQL)
+                .is_err()
         );
     }
 
@@ -651,7 +660,7 @@ mod tests {
     fn compute_avg_float_zero_count() {
         // Ensure zero-count guard works for Float type, not just Int.
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&DfValue::Float(100.0), &DfValue::Float(0.0)]),
+            avg_compute(&[&DfValue::Float(100.0), &DfValue::Float(0.0)]).unwrap(),
             DfValue::None,
         );
     }
@@ -661,7 +670,7 @@ mod tests {
         // 3 sources is valid (SUM, COUNT, MIN) — the third is ignored.
         let val = DfValue::Int(42);
         assert_eq!(
-            PostLookupAggregateKind::Avg.compute(&[&val, &val, &val]),
+            avg_compute(&[&val, &val, &val]).unwrap(),
             DfValue::try_from(1.0_f64).unwrap(),
         );
     }
