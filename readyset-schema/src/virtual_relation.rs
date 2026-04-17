@@ -37,10 +37,14 @@ pub type VrelRows = Box<dyn Iterator<Item = Vec<DfValue>> + Send>;
 pub type VrelRead = Pin<Box<dyn Future<Output = ReadySetResult<VrelRows>> + Send>>;
 
 /// Context passed into the function that starts a vrel read.
+//
+// NOTE: This struct must remain concrete (not generic) so that static references to it may be
+// included in the function pointers handed to the bind_vrel! macro.
 pub struct VrelContext {
     pub dialect: Dialect,
     pub shallow: Arc<dyn ShallowInfo>,
     pub repl_lag: Arc<dyn ReplicationLagInfo>,
+    pub query_status_cache: &'static (dyn std::any::Any + Send + Sync),
 }
 
 /// A function that produces a new vrel read.
@@ -675,7 +679,7 @@ mod tests {
 
         let shallow = Arc::new(NoopShallow);
         let no_lag = Arc::new(crate::replication_lag_vrel::NoReplicationLag);
-        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow, &no_lag)
+        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow, &no_lag, &())
             .expect("init succeeds");
 
         let session = schema.session();

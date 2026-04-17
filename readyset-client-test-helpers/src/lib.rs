@@ -570,7 +570,7 @@ impl TestBuilder {
             let repl_lag: Arc<ControllerReplicationLag> =
                 Arc::new(ControllerReplicationLag::new(repl_lag_handle));
             let readyset_schema =
-                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, &repl_lag)
+                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, &repl_lag, &())
                     .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {

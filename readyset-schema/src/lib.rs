@@ -38,15 +38,17 @@ pub struct ReadysetSchema {
 }
 
 impl ReadysetSchema {
-    pub fn init<S, R>(
+    pub fn init<S, R, Q>(
         name: &str,
         dialect: Dialect,
         shallow: &Arc<S>,
         repl_lag: &Arc<R>,
+        query_status_cache: &'static Q,
     ) -> ReadySetResult<Arc<Self>>
     where
         S: ShallowInfo + 'static,
         R: ReplicationLagInfo + 'static,
+        Q: std::any::Any + Send + Sync,
     {
         let runtime = Arc::new(RuntimeEnv::default());
         let catalog = Arc::new(MemoryCatalogProvider::new());
@@ -81,6 +83,7 @@ impl ReadysetSchema {
             dialect,
             shallow: Arc::clone(shallow) as Arc<dyn ShallowInfo>,
             repl_lag: Arc::clone(repl_lag) as Arc<dyn ReplicationLagInfo>,
+            query_status_cache,
         });
         for (name, provider) in init_vrels(&vrel_ctx) {
             schema.register_table(name.into(), provider)?;

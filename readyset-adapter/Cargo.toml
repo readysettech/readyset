@@ -21,11 +21,13 @@ futures-util = { workspace = true }
 hyper = { workspace = true, features = ["stream", "server", "http1"] }
 indexmap = { workspace = true }
 itertools = { workspace = true }
+linkme = { workspace = true }
 lru = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 mysql_common = { workspace = true }
 parking_lot = { workspace = true }
+quanta = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

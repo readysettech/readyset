@@ -1458,6 +1458,7 @@ where
             self.parse_dialect,
             &shallow,
             &repl_lag,
+            query_status_cache,
         )?;
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {

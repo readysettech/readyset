@@ -5,6 +5,7 @@ pub mod metrics_handle;
 pub mod migration_handler;
 pub mod proxied_queries_reporter;
 mod query_handler;
+mod query_stats_vrel;
 pub mod query_status_cache;
 pub mod sampler;
 pub mod shallow_refresh_pool;
