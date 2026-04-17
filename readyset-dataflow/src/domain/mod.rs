@@ -205,16 +205,30 @@ impl Debug for TriggerEndpoint {
     }
 }
 
+/// A missed key from a partial-state lookup, pairing the replay key (sent upstream)
+/// with the miss key (the specific key that missed locally).
+///
+/// For point lookups in `do_lookup_iter` these are always identical, so `Point` stores
+/// the key once. In all other cases (range lookups, or misses during replay processing
+/// where a node may transform the key), replay key and miss key can differ.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ReplayMiss {
+    Point(KeyComparison),
+    Distinct {
+        replay_key: KeyComparison,
+        miss_key: KeyComparison,
+    },
+}
+
 /// The result of do_lookup, consists of the vector of the found records
-/// the hashset of the fulfilled keys, and a hashset of the missed key/replay key tuples
+/// the hashset of the fulfilled keys, and a hashset of the missed replay keys
 struct StateLookupResult<'a> {
     /// Records returned by the lookup
     records: Vec<RecordResult<'a>>,
     /// Keys for which records were found
     found_keys: HashSet<KeyComparison>,
-    /// Tuples of (replay_key, miss_key) where `replay_key` is the key we're trying to replay
-    /// and `miss_key` is the part of it we missed on.  For non-range queries, they are the same.
-    replay_keys: HashSet<(KeyComparison, KeyComparison)>,
+    /// Keys that missed in partial state, triggering upstream replays.
+    replay_keys: HashSet<ReplayMiss>,
 }
 
 /// Key for grouping replay misses that can be batched into a single `on_replay_misses` call.
@@ -240,7 +254,7 @@ struct ReplayMissCollector {
     /// Deduplicated lookup column lists. Typically 1-3 entries per `handle_replay` call.
     columns: Vec<Vec<usize>>,
     /// Grouped misses keyed by (node, interned column index, is_range).
-    groups: HashMap<ReplayMissGroup, HashSet<(KeyComparison, KeyComparison)>>,
+    groups: HashMap<ReplayMissGroup, HashSet<ReplayMiss>>,
 }
 
 impl ReplayMissCollector {
@@ -291,7 +305,10 @@ impl ReplayMissCollector {
                 .or_insert_with(|| HashSet::with_capacity(len));
 
             loop {
-                entry.insert((replay_key.clone(), miss.lookup_key().clone()));
+                entry.insert(ReplayMiss::Distinct {
+                    replay_key: replay_key.clone(),
+                    miss_key: miss.lookup_key().clone(),
+                });
 
                 let Some(next) = misses.next() else {
                     break 'outer;
@@ -1070,7 +1087,7 @@ impl Domain {
         ex: &mut dyn Executor,
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
-        missed_keys: HashSet<(KeyComparison, KeyComparison)>,
+        missed_keys: HashSet<ReplayMiss>,
         requesting_replica: usize,
         needed_for: Tag,
         cache_name: Relation,
@@ -1095,7 +1112,17 @@ impl Domain {
 
         let miss_columns_arc: Arc<[usize]> = Arc::from(miss_columns);
 
-        for (replay_key, miss_key) in missed_keys {
+        for replay_miss in missed_keys {
+            let (replay_key, miss_key) = match replay_miss {
+                ReplayMiss::Point(key) => {
+                    let miss_key = key.clone();
+                    (key, miss_key)
+                }
+                ReplayMiss::Distinct {
+                    replay_key,
+                    miss_key,
+                } => (replay_key, miss_key),
+            };
             let redo = Redo {
                 tag: needed_for,
                 replay_key,
@@ -3152,7 +3179,7 @@ impl Domain {
                         true
                     }
                     LookupResult::Missing => {
-                        replay_keys.insert((key.clone(), key.clone()));
+                        replay_keys.insert(ReplayMiss::Point(key.clone()));
                         false
                     }
                 }
@@ -3165,10 +3192,9 @@ impl Domain {
                     }
                     RangeLookupResult::Missing(ms) => {
                         // FIXME(eta): error handling impl here adds overhead
-                        let ms = ms.into_iter().map(|m| {
-                            // This is the only point where the replay_key and miss_key are
-                            // different.
-                            (key.clone(), KeyComparison::try_from(m).unwrap())
+                        let ms = ms.into_iter().map(|m| ReplayMiss::Distinct {
+                            replay_key: key.clone(),
+                            miss_key: KeyComparison::try_from(m).unwrap(),
                         });
                         replay_keys.extend(ms);
                         false
@@ -3184,18 +3210,13 @@ impl Domain {
         })
     }
 
-    #[allow(clippy::type_complexity)]
     fn do_lookup(
         &self,
         state: &MaterializedNodeState,
         source: LocalNodeIndex,
         cols: &[usize],
         keys: HashSet<KeyComparison>,
-    ) -> ReadySetResult<(
-        Vec<Record>,
-        HashSet<KeyComparison>,
-        HashSet<(KeyComparison, KeyComparison)>,
-    )> {
+    ) -> ReadySetResult<(Vec<Record>, HashSet<KeyComparison>, HashSet<ReplayMiss>)> {
         let (records, found_keys, replay_keys) = if let Some(state) = state.as_persistent() {
             let records = self.do_lookup_multi(state, cols, &keys);
             (records, keys, HashSet::new()) // can't miss
