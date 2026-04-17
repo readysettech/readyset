@@ -5608,7 +5608,7 @@ async fn mysql_invisible_column_inner() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
-#[upstream(mysql)]
+#[upstream(mysql, modern)]
 async fn mysql_invisible_column() {
     mysql_invisible_column_inner().await;
 }
