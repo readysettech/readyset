@@ -375,25 +375,18 @@ pub struct ReaderProcessing {
 }
 
 impl ReaderProcessing {
-    /// Constructs a new [`ReaderProcessing`]
+    /// Constructs a new [`PostLookup`]
     pub fn new(
         order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
         limit: Option<usize>,
         returned_cols: Option<Vec<usize>>,
         default_row: Option<Vec<DfValue>>,
         aggregates: Option<PostLookupAggregates>,
-        distinct: PostLookupDistinct,
     ) -> ReadySetResult<Self> {
         if let Some(cols) = &returned_cols {
             if cols.iter().enumerate().any(|(i, v)| i != *v) {
                 internal!("Returned columns must be projected in order");
             }
-        }
-
-        if matches!(distinct, PostLookupDistinct::Sorted { .. }) && aggregates.is_some() {
-            internal!(
-                "Sorted DISTINCT must not be combined with real aggregates; use HashBased instead"
-            );
         }
 
         let post_processing = PostLookup {
@@ -402,22 +395,14 @@ impl ReaderProcessing {
             returned_cols,
             default_row: default_row.map(|r| Arc::new(r.into_boxed_slice())),
             aggregates,
-            distinct,
         };
 
         let pre_processing = PreInsertion {
             order_by: post_processing.order_by.clone(),
-            group_by: match &post_processing.distinct {
-                // Sorted dedup needs per-key rows sorted by all projected columns
-                // so the k-way merge produces globally sorted output for dedup.
-                PostLookupDistinct::Sorted { dedup_aggregates } => {
-                    Some(dedup_aggregates.group_by.clone())
-                }
-                _ => post_processing
-                    .aggregates
-                    .as_ref()
-                    .map(|v| v.group_by.clone()),
-            },
+            group_by: post_processing
+                .aggregates
+                .as_ref()
+                .map(|v| v.group_by.clone()),
         };
 
         Ok(ReaderProcessing {
@@ -456,52 +441,6 @@ pub struct PostLookup {
     /// Note that currently these are only performed on each key individually, not the overall
     /// result set returned by all keys in a multi-key lookup
     pub aggregates: Option<PostLookupAggregates>,
-    /// Strategy for deduplicating result rows for `SELECT DISTINCT` in queries that require
-    /// post-lookup processing.
-    #[serde(default)]
-    pub distinct: PostLookupDistinct,
-}
-
-/// Deduplication strategy for `SELECT DISTINCT` with post-lookup processing.
-///
-/// Two strategies exist because the optimal approach depends on the input ordering:
-///
-/// - **Sorted**: When there are no aggregates, input rows can be merge-sorted by all
-///   projected columns. The [`AggregateIterator`] with empty aggregates collapses
-///   consecutive duplicate rows, using O(1) extra memory. This is the preferred strategy
-///   for high-cardinality results (e.g. `SELECT DISTINCT col FROM t WHERE id > ?`).
-///
-/// - **HashBased**: When aggregates are present, post-aggregation output is sorted by
-///   the GROUP BY columns, not by all projected columns. Non-adjacent duplicates
-///   (e.g. two groups with the same count) cannot be caught by sorted dedup, so a
-///   `HashSet` of seen rows is used instead. This costs O(unique_rows) memory but works
-///   regardless of input ordering.
-///
-/// [`AggregateIterator`]: readyset_client::view::results::AggregateIterator
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
-pub enum PostLookupDistinct {
-    /// No deduplication.
-    #[default]
-    None,
-    /// Streaming merge-sort dedup. Merge-sorts input by `group_by` columns and collapses
-    /// consecutive duplicate rows. O(1) extra memory.
-    ///
-    /// Used for `SELECT DISTINCT` without aggregates. The pre-built
-    /// [`PostLookupAggregates`] (with empty aggregates and group_by = all projected
-    /// columns) is injected into the [`AggregateIterator`] at query time to perform
-    /// the merge-sort dedup without per-query allocation.
-    ///
-    /// [`AggregateIterator`]: readyset_client::view::results::AggregateIterator
-    Sorted {
-        /// Pre-built aggregates spec for merge-sort dedup (empty aggregates,
-        /// group_by = all projected columns). Constructed once at lowering time.
-        dedup_aggregates: PostLookupAggregates,
-    },
-    /// HashSet-based dedup on projected columns. O(unique_rows) extra memory.
-    ///
-    /// Used for `SELECT DISTINCT` with aggregates, where post-aggregation output
-    /// is not sorted by all projected columns.
-    HashBased,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]

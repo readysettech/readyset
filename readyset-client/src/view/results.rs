@@ -1,11 +1,9 @@
 use std::cmp;
 use std::cmp::Ordering;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use dataflow_expression::{
     grouped::accumulator::AccumulatorData, Expr, PostLookup, PostLookupAggregates,
-    PostLookupDistinct,
 };
 use readyset_data::DfValue;
 use readyset_sql::ast::{NullOrder, OrderType};
@@ -72,9 +70,6 @@ pub struct ResultIterator {
     filter: Option<Expr>,
     /// How many columns to return
     cols: usize,
-    /// Set of already-emitted rows for DISTINCT deduplication
-    /// Only allocated when needed i.e. when dedup uses Unsorted/Hash-based approach
-    seen: Option<HashSet<Vec<DfValue>>>,
 }
 
 /// A ['StreamingIterator`] over rows of a noria select response
@@ -176,29 +171,12 @@ impl ResultIterator {
             returned_cols,
             aggregates,
             default_row,
-            distinct,
+            ..
         } = post_lookup;
 
         let limit = adapter_limit.or(*limit); // Limit specifies total number of results to return
 
-        // For the Sorted dedup strategy (DISTINCT without aggregates), inject a synthetic
-        // PostLookupAggregates that merge-sorts by all projected columns with no aggregate
-        // functions. The AggregateIterator collapses consecutive duplicate rows, giving
-        // streaming O(1)-memory dedup. See PostLookupDistinct for the full rationale.
-        // Invariant: Sorted DISTINCT is never combined with real aggregates
-        // (enforced by ReaderProcessing::new()).
-        let effective_aggregates = match distinct {
-            PostLookupDistinct::Sorted { dedup_aggregates } => {
-                debug_assert!(aggregates.is_none());
-                debug_assert!(!dedup_aggregates.group_by.is_empty());
-                Some(dedup_aggregates)
-            }
-            _ => aggregates.as_ref(),
-        };
-
-        let use_hash_dedup = matches!(distinct, PostLookupDistinct::HashBased);
-
-        let inner = match (order_by, effective_aggregates) {
+        let inner = match (order_by, aggregates) {
             // No data in the result set, so return as simply as possible.
             (_, _) if data.is_empty() => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
             // No specific order is required, simply iterate over each result set one by one
@@ -220,11 +198,9 @@ impl ResultIterator {
 
                 ResultIteratorInner::MultiKeyMerge(MergeIterator::new(data, comparator))
             }
-            // If there's a real aggregation (not just sorted dedup) and only one key in the
-            // result set, we can skip re-aggregation since the dataflow graph already computed it.
-            // We must NOT skip when aggregates.aggregates is empty — that's the sorted dedup
-            // path, which still needs the AggregateIterator to collapse duplicate rows.
-            (None, Some(aggregates)) if data.len() == 1 && !aggregates.aggregates.is_empty() => {
+            // if there's an aggregation, but only one key in the result set, we can return a
+            // simple iterator as results are already aggregated in the dataflow graph.
+            (None, Some(aggregates)) if data.len() == 1 => {
                 if aggregates.aggregates.iter().any(|a| a.raw_values) {
                     // Raw values need finalization even for single-key lookups
                     let rows: Vec<Vec<DfValue>> = data[0]
@@ -327,37 +303,9 @@ impl ResultIterator {
                     non_empty: false,
                     filter: None,
                     cols: usize::MAX,
-                    seen: None,
                 };
 
                 let mut results = temp_iter.into_vec();
-
-                // HashBased DISTINCT dedup: remove duplicate rows before sorting.
-                // Project to returned_cols before hashing, so rows that differ only
-                // in non-projected columns (e.g. GROUP BY keys not in SELECT) collapse.
-                //
-                // Memory note: the HashSet grows to O(unique_rows). This is acceptable
-                // here because `results` is already fully materialized (the entire
-                // post-aggregation output is in memory), so the HashSet adds at most
-                // a constant factor. The number of unique rows is bounded by the number
-                // of aggregate groups, which is typically much smaller than the raw row
-                // count. For pathological cases, monitor the
-                // POST_LOOKUP_DISTINCT_HASH_SET_SIZE metric.
-                if use_hash_dedup {
-                    let cols = returned_cols
-                        .as_ref()
-                        .map(|r| r.len())
-                        .unwrap_or(usize::MAX);
-                    let mut seen = HashSet::with_capacity(results.len());
-                    results.retain(|row| {
-                        let projected = &row[..cols.min(row.len())];
-                        seen.insert(projected.to_vec())
-                    });
-                    metrics::histogram!(
-                        crate::metrics::recorded::POST_LOOKUP_DISTINCT_HASH_SET_SIZE
-                    )
-                    .record(seen.len() as f64);
-                }
 
                 results.sort_by(|a, b| {
                     order_by
@@ -412,11 +360,6 @@ impl ResultIterator {
                 .as_ref()
                 .map(|r| r.len())
                 .unwrap_or(usize::MAX),
-            seen: if use_hash_dedup {
-                Some(HashSet::new())
-            } else {
-                None
-            },
         }
     }
 
@@ -434,7 +377,6 @@ impl ResultIterator {
             non_empty: false,
             filter: None,
             cols: usize::MAX,
-            seen: None,
         }
     }
 
@@ -456,7 +398,6 @@ impl ResultIterator {
     }
 
     /// Advance the iterator skipping rows which don't pass the filter predicate
-    /// or that have already been emitted (when DISTINCT dedup is active).
     fn advance_filtered(&mut self) {
         loop {
             self.inner.advance();
@@ -466,32 +407,6 @@ impl ResultIterator {
                     if !filter.eval(expr).map(|r| r.is_truthy()).unwrap_or(false) {
                         continue;
                     }
-                }
-            }
-            // HashBased DISTINCT dedup: skip rows we've already emitted. Only consider
-            // the projected columns (first `self.cols`), since column projection
-            // happens later in get() and non-projected columns (e.g. primary key)
-            // would make every row appear unique.
-            //
-            // Memory note: the HashSet grows to O(unique_rows). This is only used
-            // for DISTINCT with aggregates, where the input is post-aggregation
-            // output (bounded by the number of groups). For pathological cases,
-            // monitor the POST_LOOKUP_DISTINCT_HASH_SET_SIZE metric.
-            if let Some(ref mut seen) = self.seen {
-                if let Some(row) = self.inner.get() {
-                    let projected = &row[..self.cols.min(row.len())];
-                    if !seen.insert(projected.to_vec()) {
-                        continue;
-                    }
-                } else {
-                    // End of stream — record the final dedup set size.
-                    // Not recorded when the consumer stops early (e.g. LIMIT),
-                    // but LIMIT bounds the set size so that's not the case we
-                    // need to monitor.
-                    metrics::histogram!(
-                        crate::metrics::recorded::POST_LOOKUP_DISTINCT_HASH_SET_SIZE
-                    )
-                    .record(seen.len() as f64);
                 }
             }
             break;
@@ -905,7 +820,6 @@ mod tests {
             returned_cols: None,
             default_row: None,
             aggregates: Some(aggregates),
-            distinct: PostLookupDistinct::None,
         }
     }
 
@@ -1279,316 +1193,5 @@ mod tests {
             "Expected 3 distinct values (a,b,c), got: {}",
             merged
         );
-    }
-
-    #[test]
-    fn test_distinct_sorted_dedup() {
-        let data = make_shared_results(vec![
-            vec![vec![10.into(), "a".into()]],
-            vec![vec![20.into(), "b".into()]],
-            vec![vec![10.into(), "c".into()]],
-            vec![vec![20.into(), "d".into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: Some(vec![0]),
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 2);
-        let mut vals: Vec<i64> = results
-            .iter()
-            .map(|r| i64::try_from(&r[0]).expect("int"))
-            .collect();
-        vals.sort();
-        assert_eq!(vals, vec![10, 20]);
-    }
-
-    #[test]
-    fn test_distinct_sorted_multi_column() {
-        let data = make_shared_results(vec![
-            vec![vec![1.into(), 10.into()]],
-            vec![vec![2.into(), 20.into()]],
-            vec![vec![1.into(), 10.into()]],
-            vec![vec![2.into(), 20.into()]],
-            vec![vec![3.into(), 30.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: None,
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0, 1],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 3);
-    }
-
-    #[test]
-    fn test_distinct_hash_based_dedup() {
-        // 4 groups after aggregation: (cat1,1), (cat2,3), (cat3,3), (cat4,1)
-        // returned_cols=[0,1] projects both → all 4 unique → no dedup
-        let data = make_shared_results(vec![
-            vec![vec![1.into(), 1.into()]],
-            vec![vec![2.into(), 3.into()]],
-            vec![vec![3.into(), 3.into()]],
-            vec![vec![4.into(), 1.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: Some(vec![0, 1]),
-            default_row: None,
-            aggregates: Some(PostLookupAggregates {
-                group_by: vec![0],
-                aggregates: vec![PostLookupAggregate {
-                    column: 1,
-                    function: PostLookupAggregateFunction::Sum,
-                    raw_values: false,
-                }],
-            }),
-            distinct: PostLookupDistinct::HashBased,
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 4);
-    }
-
-    #[test]
-    fn test_distinct_hash_based_dedup_removes_duplicates() {
-        // Simulate SELECT DISTINCT count FROM t WHERE ... GROUP BY cat
-        // where the count column is col 0 and the group-by key is col 1.
-        // 4 groups: (count=1,cat1), (count=3,cat2), (count=3,cat3), (count=1,cat4)
-        // returned_cols=[0] projects only the count → [1],[3],[3],[1] → dedup → {1,3}
-        let data = make_shared_results(vec![
-            vec![vec![1.into(), 1.into()]],
-            vec![vec![3.into(), 2.into()]],
-            vec![vec![3.into(), 3.into()]],
-            vec![vec![1.into(), 4.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: Some(vec![0]),
-            default_row: None,
-            aggregates: Some(PostLookupAggregates {
-                group_by: vec![1],
-                aggregates: vec![PostLookupAggregate {
-                    column: 0,
-                    function: PostLookupAggregateFunction::Sum,
-                    raw_values: false,
-                }],
-            }),
-            distinct: PostLookupDistinct::HashBased,
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn test_distinct_empty_results() {
-        let data = make_shared_results(vec![]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: None,
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 0);
-    }
-
-    #[test]
-    fn test_distinct_hash_based_single_key() {
-        // Single key — aggregation is skipped (data already aggregated in dataflow).
-        // Pre-aggregated data: one row per group.
-        let data = make_shared_results(vec![vec![vec![42.into()]]]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: None,
-            default_row: None,
-            aggregates: Some(PostLookupAggregates {
-                group_by: vec![],
-                aggregates: vec![PostLookupAggregate {
-                    column: 0,
-                    function: PostLookupAggregateFunction::Sum,
-                    raw_values: false,
-                }],
-            }),
-            distinct: PostLookupDistinct::HashBased,
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 1);
-        assert_eq!(i64::try_from(&results[0][0]).expect("int"), 42);
-    }
-
-    #[test]
-    fn test_distinct_sorted_single_key() {
-        // Single key with duplicate rows — sorted dedup must still work.
-        // Data is pre-sorted by col 0 (as PreInsertion would ensure in production).
-        let data = make_shared_results(vec![vec![
-            vec![10.into()],
-            vec![10.into()],
-            vec![20.into()],
-        ]]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: None,
-            returned_cols: None,
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn test_distinct_hash_based_with_order_by() {
-        let data = make_shared_results(vec![
-            vec![vec![1.into(), 1.into()]],
-            vec![vec![2.into(), 3.into()]],
-            vec![vec![3.into(), 3.into()]],
-            vec![vec![4.into(), 1.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: Some(vec![(1, OrderType::OrderAscending, NullOrder::NullsFirst)]),
-            limit: None,
-            returned_cols: Some(vec![0, 1]),
-            default_row: None,
-            aggregates: Some(PostLookupAggregates {
-                group_by: vec![0],
-                aggregates: vec![PostLookupAggregate {
-                    column: 1,
-                    function: PostLookupAggregateFunction::Sum,
-                    raw_values: false,
-                }],
-            }),
-            distinct: PostLookupDistinct::HashBased,
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 4);
-        let col1_vals: Vec<i64> = results
-            .iter()
-            .map(|r| i64::try_from(&r[1]).expect("int"))
-            .collect();
-        assert_eq!(col1_vals, vec![1, 1, 3, 3]);
-    }
-
-    #[test]
-    fn test_distinct_sorted_with_order_by() {
-        // Sorted dedup through the eager path (order_by + aggregates).
-        // Data: 5 keys, col 0 has duplicates. Pre-sorted per-key by col 0.
-        let data = make_shared_results(vec![
-            vec![vec![10.into()]],
-            vec![vec![20.into()]],
-            vec![vec![10.into()]],
-            vec![vec![30.into()]],
-            vec![vec![20.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: Some(vec![(0, OrderType::OrderAscending, NullOrder::NullsFirst)]),
-            limit: None,
-            returned_cols: None,
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 3);
-        let vals: Vec<i64> = results
-            .iter()
-            .map(|r| i64::try_from(&r[0]).expect("int"))
-            .collect();
-        assert_eq!(vals, vec![10, 20, 30]);
-    }
-
-    #[test]
-    fn test_distinct_sorted_with_limit() {
-        // Sorted dedup + LIMIT: dedup first, then limit.
-        // 5 keys with duplicates → 3 unique after dedup → LIMIT 2 → 2 rows.
-        let data = make_shared_results(vec![
-            vec![vec![10.into()]],
-            vec![vec![20.into()]],
-            vec![vec![10.into()]],
-            vec![vec![30.into()]],
-            vec![vec![20.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: Some(2),
-            returned_cols: None,
-            default_row: None,
-            aggregates: None,
-            distinct: PostLookupDistinct::Sorted {
-                dedup_aggregates: PostLookupAggregates {
-                    group_by: vec![0],
-                    aggregates: vec![],
-                },
-            },
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 2);
-    }
-
-    #[test]
-    fn test_distinct_hash_based_with_limit() {
-        // HashBased dedup + LIMIT: dedup first, then limit.
-        // 4 groups: (1,cat1),(3,cat2),(3,cat3),(1,cat4)
-        // returned_cols=[0] → projected: [1],[3],[3],[1] → dedup → {1,3} → LIMIT 1 → 1 row
-        let data = make_shared_results(vec![
-            vec![vec![1.into(), 1.into()]],
-            vec![vec![3.into(), 2.into()]],
-            vec![vec![3.into(), 3.into()]],
-            vec![vec![1.into(), 4.into()]],
-        ]);
-        let post_lookup = PostLookup {
-            order_by: None,
-            limit: Some(1),
-            returned_cols: Some(vec![0]),
-            default_row: None,
-            aggregates: Some(PostLookupAggregates {
-                group_by: vec![1],
-                aggregates: vec![PostLookupAggregate {
-                    column: 0,
-                    function: PostLookupAggregateFunction::Sum,
-                    raw_values: false,
-                }],
-            }),
-            distinct: PostLookupDistinct::HashBased,
-        };
-        let results = collect_results(data, &post_lookup);
-        assert_eq!(results.len(), 1);
     }
 }

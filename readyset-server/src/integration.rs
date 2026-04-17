@@ -1545,8 +1545,7 @@ async fn mutator_churn() {
             mig.maintain_anonymous_with_reader_processing(
                 vc,
                 &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
+                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
             vote
         })
@@ -2794,8 +2793,7 @@ async fn cascading_replays_with_sharding() {
             mig.maintain_anonymous_with_reader_processing(
                 end,
                 &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
+                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
             (j, end)
         })
@@ -2927,8 +2925,7 @@ async fn full_aggregation_with_bogokey() {
             mig.maintain_anonymous_with_reader_processing(
                 agg,
                 &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
+                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
             agg
         })
@@ -3566,8 +3563,7 @@ async fn live_writes() {
             mig.maintain_anonymous_with_reader_processing(
                 vc,
                 &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
+                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
             (vote, vc)
         })
@@ -3610,8 +3606,7 @@ async fn live_writes() {
             mig.maintain_anonymous_with_reader_processing(
                 vc2,
                 &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
+                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None).unwrap(),
             );
             vc2
         })
@@ -5612,7 +5607,6 @@ async fn post_read_ilike() {
                     None,
                     None,
                     None,
-                    Default::default(),
                 )
                 .unwrap(),
             );

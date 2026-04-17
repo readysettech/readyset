@@ -384,7 +384,6 @@ mod tests {
                 returned_cols: None,
                 default_row: None,
                 aggregates: None,
-                distinct: false,
             })
         }
 

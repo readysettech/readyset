@@ -36,7 +36,7 @@ pub type DomainConfig = domain::Config;
 
 pub use dataflow_expression::{
     BinaryOperator, BuiltinFunction, Expr, LowerContext, PostLookup, PostLookupAggregate,
-    PostLookupAggregateFunction, PostLookupAggregates, PostLookupDistinct, ReaderProcessing,
+    PostLookupAggregateFunction, PostLookupAggregates, ReaderProcessing,
 };
 pub use dataflow_state::{
     BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,

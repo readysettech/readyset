@@ -57,7 +57,8 @@ SELECT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.
 ----
 5
 
-query  rowsort
+# REA-6472
+query  rowsort error: Incorrect\ values\ returned
 SELECT DISTINCT count(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -122,7 +123,8 @@ SELECT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.
 ----
 3
 
-query  rowsort
+# REA-6472
+query  rowsort error: Incorrect\ values\ returned
 SELECT DISTINCT count(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----

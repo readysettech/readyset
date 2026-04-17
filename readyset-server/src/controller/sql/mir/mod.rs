@@ -3030,10 +3030,6 @@ impl SqlToMirConverter {
                             returned_cols: Some(returned_cols),
                             default_row: query_graph.default_row.clone(),
                             aggregates: post_lookup_aggregates,
-                            distinct: are_repeat_reads_required && query_graph.distinct,
-                            // Strategy (Sorted vs HashBased) is decided during
-                            // lowering in make_reader_processing() based on whether
-                            // aggregates are present.
                         },
                     ),
                     &[leaf_project_reorder_node],
