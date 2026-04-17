@@ -4340,8 +4340,8 @@ where
             return None;
         }
         if migration != MigrationState::Successful(CacheType::Shallow) {
-            // No cache yet — try hint-based creation and use the resulting state.
-            let migration = Self::create_shallow_cache_from_hint(
+            // No cache yet — try auto-creation (hint-driven or in-request-path).
+            let migration = Self::try_auto_create_shallow_cache(
                 connectors,
                 settings,
                 state,
@@ -4368,34 +4368,50 @@ where
         Some((query_id, always))
     }
 
-    /// If a `CreateCache` hint directive is present, attempt to create a
-    /// shallow cache via [`create_shallow_cache_core`] and return the
-    /// resulting migration state.
-    async fn create_shallow_cache_from_hint(
+    /// Attempt to auto-create a shallow cache via [`create_shallow_cache_core`]
+    /// and return the resulting migration state. Two triggers are supported:
+    ///
+    /// 1. An explicit `/*rs+ CREATE SHALLOW CACHE */` hint directive.
+    /// 2. Implicit in-request-path auto-creation when the adapter runs with
+    ///    `--query-caching=inrequestpath` and `--cache-mode=shallow`, mirroring
+    ///    the `create_if_missing` behaviour on the deep side.
+    async fn try_auto_create_shallow_cache(
         connectors: &mut BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<MigrationState> {
-        let Some(ReadysetHintDirective::CreateCache(opts)) = hint_directive else {
-            return None;
+        let (opts, trigger) = match hint_directive {
+            Some(ReadysetHintDirective::CreateCache(opts)) => {
+                let wants_shallow = match opts.cache_type {
+                    Some(CacheType::Shallow) => true,
+                    Some(CacheType::Deep) => false,
+                    None => settings.cache_mode.is_shallow(),
+                };
+                if !wants_shallow {
+                    return None;
+                }
+                (opts, "hint")
+            }
+            None if settings.migration_mode == MigrationMode::InRequestPath
+                && settings.cache_mode.is_shallow() =>
+            {
+                (CreateCacheOptions::default(), "in-request-path")
+            }
+            _ => return None,
         };
+
         if !settings.allow_cache_ddl {
-            warn!("Hint-based cache creation skipped: cache DDL is disabled");
-            return None;
-        }
-        let wants_shallow = match opts.cache_type {
-            Some(CacheType::Shallow) => true,
-            Some(CacheType::Deep) => false,
-            None => settings.cache_mode.is_shallow(),
-        };
-        if !wants_shallow {
+            warn!(
+                trigger,
+                "Shallow cache auto-creation skipped: cache DDL is disabled"
+            );
             return None;
         }
 
         if let Err(e) = connectors.upstream_supports(shallow).await {
-            warn!(error = %e, "Hint-based shallow cache creation failed: upstream unsupported");
+            warn!(trigger, error = %e, "Shallow cache auto-creation failed: upstream unsupported");
             return None;
         }
 
@@ -4423,7 +4439,7 @@ where
         {
             Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {}
             Err(e) => {
-                warn!(error = %e, "Hint-based shallow cache creation failed");
+                warn!(trigger, error = %e, "Shallow cache auto-creation failed");
             }
         }
 
