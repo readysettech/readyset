@@ -196,7 +196,7 @@ fn create_table_like() {
 
 // TODO: Fix sqlparser upstream REA-6164
 #[test]
-#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+#[should_panic = "AST mismatch (left = nom-sql, right = sqlparser-rs)"]
 fn create_table_like_parenthesized() {
     check_rt_mysql!("CREATE TABLE a(LIKE b)");
     check_rt_mysql!("CREATE TABLE a (LIKE b)");

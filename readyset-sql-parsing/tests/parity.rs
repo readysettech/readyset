@@ -1099,7 +1099,7 @@ fn negating_large_numeric_literal() {
     check_parse_fails!(
         Dialect::MySQL,
         format!("SELECT -{}", u64::MAX as u128 + 1),
-        "nom-sql AST differs from sqlparser-rs AST"
+        "AST mismatch (left = nom-sql, right = sqlparser-rs)"
     );
 }
 
@@ -1138,17 +1138,17 @@ fn rename_table() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "ALTER TABLE tb1 RENAME TO tb2",
-        "nom-sql AST differs"
+        "AST mismatch"
     );
     check_parse_fails!(
         Dialect::MySQL,
         "ALTER TABLE tb1 RENAME TO tb2",
-        "nom-sql AST differs"
+        "AST mismatch"
     );
     check_parse_fails!(
         Dialect::MySQL,
         "ALTER TABLE tb1 RENAME AS tb2",
-        "nom-sql AST differs"
+        "AST mismatch"
     );
 }
 
@@ -1256,7 +1256,7 @@ fn postgres_bytea_casts() {
         check_parse_fails!(
             Dialect::PostgreSQL,
             sql,
-            "nom-sql AST differs from sqlparser-rs AST"
+            "AST mismatch (left = nom-sql, right = sqlparser-rs)"
         );
     }
     // For some reason nom-sql doesn't do this conversion if the string is not hex
@@ -1411,7 +1411,7 @@ fn create_table_like() {
 
 // TODO: Fix sqlparser upstream REA-6164
 #[test]
-#[should_panic = "nom-sql AST differs from sqlparser-rs AST"]
+#[should_panic = "AST mismatch (left = nom-sql, right = sqlparser-rs)"]
 fn create_table_like_parenthesized() {
     check_parse_mysql!("CREATE TABLE a(LIKE b)");
     check_parse_mysql!("CREATE TABLE a (LIKE b)");

@@ -429,7 +429,7 @@ fn expr_postgres() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "SELECT lhs IN ((rhs1, rhs2))",
-        "nom-sql AST differs from sqlparser-rs AST"
+        "AST mismatch (left = nom-sql, right = sqlparser-rs)"
     );
 }
 
@@ -1375,12 +1375,12 @@ fn select() {
     check_parse_fails!(
         Dialect::PostgreSQL,
         "select * from users limit all\n",
-        "nom-sql AST differs from sqlparser-rs AST"
+        "AST mismatch (left = nom-sql, right = sqlparser-rs)"
     );
     check_parse_fails!(
         Dialect::PostgreSQL,
         "select * from users limit all offset 10\n",
-        "nom-sql AST differs from sqlparser-rs AST"
+        "AST mismatch (left = nom-sql, right = sqlparser-rs)"
     );
 
     check_parse_postgres!("select * from users offset 10\n");

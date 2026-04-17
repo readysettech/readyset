@@ -102,9 +102,7 @@ fn split_queries(content: &str) -> Vec<(usize, String)> {
 }
 
 fn check_query(dialect: Dialect, sql: &str) -> Result<(), String> {
-    let config = ParsingPreset::BothErrorOnMismatch
-        .into_config()
-        .log_on_mismatch(true);
+    let config = ParsingPreset::BothErrorOnMismatch.into_config();
     let ast =
         parse_query_with_config(config, dialect, sql).map_err(|e| format!("parse failed: {e}"))?;
     let displayed = ast.display(dialect).to_string();

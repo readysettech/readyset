@@ -1317,7 +1317,7 @@ where
                     pretty_assertions::assert_eq!(
                         nom_ast,
                         sqlparser_ast,
-                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
+                        "AST mismatch (left = nom-sql, right = sqlparser-rs) for {} input: {:?}",
                         dialect,
                         input.as_ref()
                     );
@@ -1343,9 +1343,10 @@ where
                 }
                 if config.error_on_mismatch {
                     Err(ReadysetParsingError::ReadysetParsingError(format!(
-                        "nom-sql AST differs from sqlparser-rs AST for {} input: {:?}",
+                        "AST mismatch (left = nom-sql, right = sqlparser-rs) for {} input: {:?}\n{}",
                         dialect,
-                        input.as_ref()
+                        input.as_ref(),
+                        pretty_assertions::Comparison::new(&nom_ast, &sqlparser_ast),
                     )))
                 } else if config.prefer_sqlparser {
                     Ok(sqlparser_ast)
