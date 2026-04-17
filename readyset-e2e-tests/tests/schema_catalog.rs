@@ -362,6 +362,10 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
     let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
 
+    // Capture the generation before the CREATE TABLE so replication cannot race ahead
+    // and leave us waiting for an advance that has already happened.
+    let initial_generation = handle.schema_catalog().await.unwrap().generation;
+
     // Create a table and wait for the adapter to pick it up over the healthy SSE stream.
     upstream_conn
         .query_drop("CREATE TABLE sse_disconnect (id INT PRIMARY KEY, value INT)")
@@ -369,7 +373,6 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
         .unwrap();
 
     // Wait for the server to replicate the CREATE TABLE before checking the adapter.
-    let initial_generation = handle.schema_catalog().await.unwrap().generation;
     wait_for_schema_generation_change(&mut handle, initial_generation).await;
 
     // The adapter syncs its schema catalog from the server via SSE, which is asynchronous.
