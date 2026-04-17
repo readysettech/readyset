@@ -35,6 +35,7 @@ use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
 mod array;
+mod average;
 mod collation;
 pub mod dialect;
 pub mod encoding;
@@ -52,6 +53,7 @@ pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;
 
 pub use crate::array::Array;
+pub use crate::average::AvgScaleMode;
 pub use crate::collation::{CharsetFamily, Collation};
 pub use crate::dialect::{Dialect, SqlEngine};
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};

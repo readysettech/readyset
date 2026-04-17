@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{DfType, Dialect};
+use readyset_data::{AvgScaleMode, DfType, Dialect};
 use readyset_decimal::Decimal;
 use readyset_errors::{invariant, ReadySetResult};
 pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
@@ -167,16 +167,6 @@ pub struct NumericalDiff {
     positive: bool,
     /// Hash of the values of the group by columns, needed for AVG
     group_hash: GroupHash,
-}
-
-/// Controls how AVG display scale is computed after division.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-enum AvgScaleMode {
-    /// MySQL: round to a fixed number of decimal places (determined at plan time).
-    Fixed(i64),
-    /// PostgreSQL: dynamically compute display scale targeting ~16 significant digits,
-    /// dependent on the magnitude of sum and count.
-    PostgresComputed,
 }
 
 /// For storing (Count, Sum) in additional state for Average.
