@@ -877,6 +877,7 @@ fn make_window_node(
         function,
         output_col_index,
         output_type,
+        mig.dialect,
     )?;
 
     Ok(DfNodeIndex::new(mig.add_ingredient(name, cols, window)))

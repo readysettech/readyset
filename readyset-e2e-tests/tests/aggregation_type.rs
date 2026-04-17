@@ -373,6 +373,38 @@ test_window_aggregation_type!(
     ["5188155168561903705"]
 );
 
+test_window_aggregation_type!(
+    postgres,
+    avg_numeric_decimal_window,
+    "avg(x)",
+    SqlType::Numeric(Some((20, Some(10)))),
+    [
+        "229999.2299900000",
+        "4224.5559990000",
+        "0.0000000000",
+        "0.0001000000",
+        "-229999.2299900000",
+        "229999.9000000000",
+        "229999.0000000000",
+        "18911999.9119919000",
+        "29.2299000000",
+    ]
+);
+test_window_aggregation_type!(
+    postgres,
+    avg_numeric_simple_window,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["5.5", "3.3"]
+);
+test_window_aggregation_type!(
+    mysql,
+    avg_decimal_window,
+    "avg(x)",
+    SqlType::Decimal(20, 10),
+    ["229999.2299900000", "4224.5559990000", "0.0001000000"]
+);
+
 // Postgres AVG of small/fractional NUMERIC values — regression tests for select_div_scale
 test_aggregation_type!(postgres, avg_numeric_small_fraction, "avg(x)", SqlType::Numeric(None), ["0.01", "0.02"]);
 test_aggregation_type!(postgres, avg_numeric_tiny_fraction, "avg(x)", SqlType::Numeric(None), ["0.0001", "0.0002"]);
