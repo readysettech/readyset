@@ -402,7 +402,9 @@ impl Waiting {
             .or_insert_with(|| HashMap::with_capacity(reserve.unwrap_or_default()));
         match inner.entry(key) {
             Entry::Occupied(e) => {
-                if e.into_mut().insert(redo.clone()) {
+                let redos = e.into_mut();
+                if !redos.contains(redo) {
+                    redos.insert(redo.clone());
                     *self.holes.entry(redo.clone()).or_default() += 1;
                 }
                 false
