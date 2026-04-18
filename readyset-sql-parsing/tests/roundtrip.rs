@@ -334,3 +334,20 @@ fn unqualified_function_still_works() {
     check_rt_postgres_sqlparser!("SELECT myfunc()");
     check_rt_postgres_sqlparser!("SELECT myfunc(1, 2, 3)");
 }
+
+#[test]
+fn window_functions() {
+    // Named WINDOW clause.
+    check_rt_postgres_sqlparser!(
+        "SELECT p.BusinessEntityID, p.LastName, \
+                (SELECT MIN(ListPrice) FROM Production.Product) AS min_list \
+         FROM Person.Person p \
+         WINDOW win AS (PARTITION BY p.BusinessEntityID)"
+    );
+
+    // Aggregate OVER a window spec.
+    check_rt_postgres_sqlparser!(
+        "SELECT MIN(Amount) OVER (PARTITION BY BusinessEntityID ORDER BY OrderDate) \
+         FROM Sales.SalesOrderHeader"
+    );
+}
