@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process::exit;
 
 use clap::Parser;
@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
 
             NoriaAdapter {
                 description: "MySQL adapter for Readyset.",
-                default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 3307),
+                default_addresses: vec![SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 3307)],
                 connection_handler: MySqlHandler {
                     enable_statement_logging: options.tracing.statement_logging,
                     tls_acceptor: options.tls_acceptor()?,
@@ -81,7 +81,10 @@ fn main() -> anyhow::Result<()> {
         }
         DatabaseType::PostgreSQL => NoriaAdapter {
             description: "PostgreSQL adapter for Readyset.",
-            default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 5433),
+            default_addresses: vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5433),
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5433),
+            ],
             connection_handler: PsqlHandler::new(readyset::psql::Config {
                 options: options.psql_options.clone(),
                 enable_statement_logging: options.tracing.statement_logging,

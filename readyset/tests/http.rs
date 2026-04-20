@@ -52,7 +52,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
 
     let mut adapter = NoriaAdapter {
         description: "Readyset test adapter",
-        default_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 54351),
+        default_addresses: vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 54351)],
         connection_handler: PsqlHandler {
             authentication_method: AuthenticationMethod::Cleartext,
             tls_acceptor: None,

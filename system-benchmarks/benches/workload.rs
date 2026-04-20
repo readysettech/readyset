@@ -722,10 +722,10 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
     match database_type {
         DatabaseType::MySQL => NoriaAdapter {
             description: "Readyset benchmark adapter",
-            default_address: SocketAddr::new(
+            default_addresses: vec![SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 BENCHMARK_PORT,
-            ),
+            )],
             connection_handler: MySqlHandler {
                 enable_statement_logging: false,
                 tls_acceptor: None,
@@ -740,10 +740,10 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
         .run(rt, options),
         DatabaseType::PostgreSQL => NoriaAdapter {
             description: "Readyset benchmark adapter",
-            default_address: SocketAddr::new(
+            default_addresses: vec![SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 BENCHMARK_PORT,
-            ),
+            )],
             connection_handler: PsqlHandler {
                 authentication_method: AuthenticationMethod::Cleartext,
                 tls_acceptor: None,

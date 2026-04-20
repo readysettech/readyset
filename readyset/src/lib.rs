@@ -131,8 +131,11 @@ where
     H: ConnectionHandler,
 {
     pub description: &'static str,
-    pub default_address: SocketAddr,
-    /// Address used to listen for incoming connections
+    /// Addresses used to listen for incoming connections when `--address` is
+    /// not set.  A single adapter can bind multiple sockets (e.g. an IPv4 and
+    /// an IPv6 loopback) so clients on either family reach the adapter by
+    /// default.
+    pub default_addresses: Vec<SocketAddr>,
     pub connection_handler: H,
     pub database_type: DatabaseType,
     /// SQL dialect to use when parsing queries
@@ -145,9 +148,14 @@ where
 #[command(version = VERSION_STR_PRETTY)]
 #[group(skip)]
 pub struct Options {
-    /// IP:PORT to listen on
-    #[arg(long, short = 'a', env = "LISTEN_ADDRESS")]
-    address: Option<SocketAddr>,
+    /// IP:PORT to listen on.  May be specified multiple times or as a
+    /// comma-separated list to bind several sockets (e.g. an IPv4 and an
+    /// IPv6 interface).  If unset, the MySQL adapter listens on
+    /// `[::]:3307` (dual-stack, all interfaces) and the PostgreSQL
+    /// adapter listens on `127.0.0.1:5433` and `[::1]:5433` (dual-stack
+    /// loopback).
+    #[arg(long, short = 'a', env = "LISTEN_ADDRESS", value_delimiter = ',')]
+    address: Vec<SocketAddr>,
 
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
     #[arg(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
@@ -920,18 +928,33 @@ where
             )
         }
 
-        let listen_address = options.address.unwrap_or(self.default_address);
-        let listener = rt.block_on(tokio::net::TcpListener::bind(&listen_address))?;
+        let listen_addresses: &[SocketAddr] = if options.address.is_empty() {
+            &self.default_addresses
+        } else {
+            &options.address
+        };
+        ensure!(
+            !listen_addresses.is_empty(),
+            "No listen address configured; pass --address or set a default"
+        );
         let mut all_listeners = SelectAll::new();
-        all_listeners.push(TcpListenerStream::new(listener));
+        for listen_address in listen_addresses {
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind(listen_address))
+                .map_err(|e| anyhow!("Failed to bind listener on {listen_address}: {e}"))?;
+            all_listeners.push(TcpListenerStream::new(listener));
+            info!(%listen_address, "Listening for new connections");
+        }
+        // Safe: ensured non-empty above.  Used as the address the query sampler
+        // reconnects to the adapter on; for multi-listener setups the first
+        // entry is representative.
+        let listen_address = listen_addresses[0];
 
         if let Some(ref ddl_addr) = options.cache_ddl_address {
             info!(%ddl_addr, "Listening for cache ddl connections");
             let cache_ddl_listener = rt.block_on(tokio::net::TcpListener::bind(ddl_addr))?;
             all_listeners.push(TcpListenerStream::new(cache_ddl_listener));
         }
-
-        info!(%listen_address, "Listening for new connections");
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();
