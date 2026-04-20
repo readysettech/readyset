@@ -22,6 +22,9 @@ services:
       # We don't have control over whether users are using a password or not for the
       # demo/quickstart, so use the more permissive mode.
       # UPSTREAM_DB_URL:
+      # Stay on mysql_native_password so MariaDB-flavored mysql clients (which
+      # ship without caching_sha2_password.so) can connect to the quickstart.
+      MYSQL_AUTHENTICATION_METHOD: mysql_native_password
       CONTROLLER_ADDRESS: 0.0.0.0:6033
     volumes:
       - "readyset:/state"
