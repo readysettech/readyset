@@ -1142,8 +1142,11 @@ where
         };
 
         let router_shutdown_rx = shutdown_rx.clone();
+        let metrics_addr = options.metrics_address;
         let fut = async move {
-            let http_listener = http_server.create_listener().await.unwrap();
+            let http_listener = http_server.create_listener().await.map_err(|e| {
+                anyhow!("Failed to bind metrics HTTP listener on {metrics_addr}: {e}")
+            })?;
             NoriaAdapterHttpRouter::route_requests(http_server, http_listener, router_shutdown_rx)
                 .await
         };
