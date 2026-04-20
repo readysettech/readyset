@@ -131,18 +131,22 @@ async fn verify_users(
     .into_iter()
     .collect::<Result<Vec<(String, Result<()>)>>>()?;
 
-    let mut failed: Vec<String> = users
+    let mut failed: Vec<(String, Error)> = users
         .into_iter()
         .filter_map(|(user, res)| match res {
             Ok(()) => None,
-            Err(_) => Some(user),
+            Err(e) => Some((user, e)),
         })
         .collect();
-    failed.sort();
+    failed.sort_by(|a, b| a.0.cmp(&b.0));
 
     if !failed.is_empty() {
         let s = if failed.len() == 1 { "" } else { "s" };
-        let users = failed.join(", ");
+        let users = failed
+            .iter()
+            .map(|(user, err)| format!("{user} ({err})"))
+            .collect::<Vec<_>>()
+            .join(", ");
         bail!("Failed to establish connection for user{s}: {users}");
     }
     Ok(())
