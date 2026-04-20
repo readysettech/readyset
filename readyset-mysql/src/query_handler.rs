@@ -1060,6 +1060,10 @@ const MAX_NEGATIVE_TZ_OFFSET_SECS: i32 = 13 * 3600 + 59 * 60; // -13:59
 
 /// Parse a MySQL timezone string into a [`SessionTimezone`].
 ///
+/// Matches MySQL's `mysql.time_zone_name` lookup: the literal `"SYSTEM"` and IANA names are
+/// matched case-insensitively (e.g. `"system"`, `"us/eastern"`). Fixed offsets are numeric and
+/// therefore unaffected by case.
+///
 /// Returns `Some(SessionTimezone::System)` for `"SYSTEM"`.
 /// Returns `Some(SessionTimezone::FixedOffset(_))` for offsets like `"+05:00"`.
 /// Returns `Some(SessionTimezone::Named(tz))` for IANA names like `"US/Eastern"`.
@@ -1073,11 +1077,15 @@ fn parse_timezone(s: &str) -> Option<SessionTimezone> {
         return Some(SessionTimezone::FixedOffset(offset));
     }
 
-    if let Ok(tz) = s.parse::<chrono_tz::Tz>() {
-        return Some(SessionTimezone::Named(tz));
-    }
-
-    None
+    s.parse::<chrono_tz::Tz>()
+        .ok()
+        .or_else(|| {
+            chrono_tz::TZ_VARIANTS
+                .iter()
+                .find(|tz| tz.name().eq_ignore_ascii_case(s))
+                .copied()
+        })
+        .map(SessionTimezone::Named)
 }
 
 /// Parse a fixed-offset timezone string like `"+05:00"` into a [`FixedOffset`].
@@ -1366,6 +1374,35 @@ mod tests {
         assert_eq!(super::parse_timezone("UTC"), Some(Named(chrono_tz::UTC)));
     }
 
+    /// MySQL's IANA timezone name lookup is case-insensitive; ours must match.
+    #[test]
+    fn parse_timezone_named_case_insensitive() {
+        use super::SessionTimezone::Named;
+        assert_eq!(
+            super::parse_timezone("us/eastern"),
+            Some(Named(chrono_tz::US::Eastern))
+        );
+        assert_eq!(
+            super::parse_timezone("AMERICA/new_york"),
+            Some(Named(chrono_tz::America::New_York))
+        );
+        assert_eq!(
+            super::parse_timezone("Europe/LONDON"),
+            Some(Named(chrono_tz::Europe::London))
+        );
+        assert_eq!(super::parse_timezone("utc"), Some(Named(chrono_tz::UTC)));
+        // Names with digits/punctuation under mixed case
+        assert_eq!(
+            super::parse_timezone("etc/gmt-5"),
+            Some(Named(chrono_tz::Etc::GMTMinus5))
+        );
+        // Underscore-separated multi-word names under mixed case
+        assert_eq!(
+            super::parse_timezone("america/port_of_spain"),
+            Some(Named(chrono_tz::America::Port_of_Spain))
+        );
+    }
+
     #[test]
     fn parse_timezone_invalid() {
         assert_eq!(super::parse_timezone(""), None);
@@ -1376,6 +1413,12 @@ mod tests {
         // MySQL range is -13:59 to +14:00; -14:00 is invalid
         assert_eq!(super::parse_timezone("-14:00"), None);
         assert_eq!(super::parse_timezone("-13:59"), Some(fixed(-50340)));
+        assert_eq!(super::parse_timezone("narnia/cair_paravel"), None);
+        // No whitespace trimming: trailing/leading/internal spaces reject
+        assert_eq!(super::parse_timezone("us/eastern "), None);
+        assert_eq!(super::parse_timezone(" us/eastern"), None);
+        // Embedded NUL must not match a valid zone
+        assert_eq!(super::parse_timezone("utc\0"), None);
     }
 
     #[test]
@@ -1522,6 +1565,25 @@ mod tests {
                     Some(SessionTimezone::Named(_)) => {},
                     other => panic!("expected Named, got {other:?} for {s:?}"),
                 }
+            }
+
+            #[test]
+            fn parse_named_timezone_case_insensitive(
+                canonical in named_timezone_strategy(),
+                flips in any::<u64>(),
+            ) {
+                let variant: String = canonical
+                    .bytes()
+                    .enumerate()
+                    .map(|(i, b)| {
+                        if b.is_ascii_alphabetic() && (flips >> (i % 64)) & 1 == 1 {
+                            (b ^ 0x20) as char
+                        } else {
+                            b as char
+                        }
+                    })
+                    .collect();
+                prop_assert_eq!(parse_timezone(&canonical), parse_timezone(&variant));
             }
 
             #[test]
