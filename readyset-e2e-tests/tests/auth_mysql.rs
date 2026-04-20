@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use mysql_async::prelude::Queryable;
-use mysql_srv::{AuthPlugin, CachingSha2Password};
+use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
@@ -68,7 +68,7 @@ async fn e2e_native_connect_via_readyset() {
     readyset_tracing::init_test_logging();
 
     let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
-        auth_test_builder(AuthPlugin::default())
+        auth_test_builder(AuthPlugin::Native(MysqlNativePassword))
             .build::<MySQLAdapter>()
             .await;
 
