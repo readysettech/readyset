@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
@@ -81,5 +82,9 @@ impl ConnectionHandler for MySqlHandler {
         {
             error!(%error, "Could not send immediate error packet")
         }
+    }
+
+    fn warm_up(&mut self, users: &HashMap<String, String>) {
+        self.auth_cache.populate(users);
     }
 }

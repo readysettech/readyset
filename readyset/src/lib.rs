@@ -102,6 +102,10 @@ pub trait ConnectionHandler {
         stream: net::TcpStream,
         error_message: String,
     ) -> impl Future<Output = ()> + Send;
+
+    /// Warm handler-specific caches from the configured users. Called once
+    /// during adapter startup, after the user list has been resolved.
+    fn warm_up(&mut self, _users: &HashMap<String, String>) {}
 }
 
 /// Parse and normalize the given string as an [`IpAddr`]
@@ -905,6 +909,7 @@ where
         let users = Box::leak(Box::new(
             options.get_allowed_users(options.allow_unauthenticated_connections)?,
         ));
+        self.connection_handler.warm_up(users);
 
         info!(version = %VERSION_STR_ONELINE);
 

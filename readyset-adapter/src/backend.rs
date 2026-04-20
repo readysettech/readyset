@@ -582,6 +582,11 @@ impl BackendBuilder {
         self
     }
 
+    /// Returns the map of users configured on this builder.
+    pub fn get_users(&self) -> &HashMap<String, String> {
+        &self.users
+    }
+
     pub fn require_authentication(mut self, require_authentication: bool) -> Self {
         self.require_authentication = require_authentication;
         self

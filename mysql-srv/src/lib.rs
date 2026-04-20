@@ -141,6 +141,13 @@
 //!     let port = listener.local_addr().unwrap().port();
 //!     let mut rt = tokio::runtime::Runtime::new().unwrap();
 //!
+//!     // Pre-populate the caching_sha2_password fast-auth cache so that
+//!     // clients hit fast-auth on their first connection. The cache is
+//!     // authoritative -- cache-miss denies the connection rather than
+//!     // falling back to the RSA-based full-auth exchange.
+//!     let auth_cache = AuthCache::new();
+//!     auth_cache.insert("root", b"password");
+//!
 //!     let jh = thread::spawn(move || {
 //!         if let Ok((s, _)) = listener.accept() {
 //!             let s = {
@@ -150,7 +157,7 @@
 //!             };
 //!             rt.block_on(MySqlIntermediary::run_on_tcp(
 //!                 Backend, s, false, None, TlsMode::Optional,
-//!                 AuthCache::new(), AuthPlugin::default(),
+//!                 auth_cache, AuthPlugin::default(),
 //!             ))
 //!                 .unwrap();
 //!         }
@@ -209,7 +216,7 @@ use tracing::{debug, info};
 use writers::write_err;
 
 pub use crate::authentication::{
-    AuthCache, AuthContext, AuthKeys, AuthPlugin, CachingSha2Password,
+    AuthCache, AuthContext, AuthKeys, AuthPlugin, CachingSha2Password, MysqlNativePassword,
 };
 use crate::commands::change_user;
 use crate::constants::CONNECT_ATTRS;

@@ -29,6 +29,9 @@ use tokio::net::{TcpListener, TcpStream};
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
+const TEST_USER: &str = "user";
+const TEST_PASSWORD: &str = "password";
+
 struct TestingShim<Q, P, E, I, CU, W> {
     columns: Vec<Column>,
     params: Vec<Column>,
@@ -159,8 +162,8 @@ where
         if let Some(f) = &self.password_fn {
             return f(username);
         }
-        if username == "user" {
-            Some(b"password".to_vec())
+        if username == TEST_USER {
+            Some(TEST_PASSWORD.as_bytes().to_vec())
         } else {
             None
         }
@@ -250,6 +253,12 @@ where
             TcpListener::from_std(listener).unwrap()
         };
 
+        // Pre-populate the auth cache with the default test user so that
+        // every caching_sha2_password client hits fast-auth without needing
+        // the RSA full-auth exchange (gated off by default).
+        let auth_cache = AuthCache::new();
+        auth_cache.insert(TEST_USER, TEST_PASSWORD.as_bytes());
+
         // Spawn the server task
         let server_handle = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
@@ -259,14 +268,14 @@ where
                 false,
                 None,
                 TlsMode::Optional,
-                AuthCache::new(),
+                auth_cache,
                 AuthPlugin::default(),
             )
             .await
         });
 
         // Connect to the server
-        let mut url = format!("mysql://user:password@127.0.0.1:{port}");
+        let mut url = format!("mysql://{TEST_USER}:{TEST_PASSWORD}@127.0.0.1:{port}");
         if !extra_opts.is_empty() {
             url.push('?');
             url.push_str(extra_opts);
@@ -1451,6 +1460,7 @@ async fn sha2_test_server<F, Fut>(
 
 /// T1: Connect with caching_sha2_password over non-TLS (RSA key exchange).
 #[tokio::test]
+#[ignore = "full-auth path disabled to avoid RUSTSEC-2023-0071; see mysql-srv/src/authentication.rs"]
 async fn sha2_rsa_key_exchange() {
     let cache = AuthCache::new();
     sha2_test_server("user", "password", cache, 1, |port, _cache| async move {
@@ -1478,6 +1488,7 @@ async fn sha2_wrong_password_rejected() {
 
 /// T3: First connection populates the cache, second uses fast-auth.
 #[tokio::test]
+#[ignore = "full-auth path disabled to avoid RUSTSEC-2023-0071; see mysql-srv/src/authentication.rs"]
 async fn sha2_cache_population_then_fast_auth() {
     let cache = AuthCache::new();
     sha2_test_server("user", "password", cache, 2, |port, _cache| async move {

@@ -578,6 +578,7 @@ impl TestBuilder {
         let shallow_for_schema = Arc::clone(&shallow);
 
         let auth_cache = AuthCache::new();
+        auth_cache.populate(self.backend_builder.get_users());
 
         tokio::spawn(async move {
             let repl_lag_handle = ReadySetHandle::new(authority.clone()).await;

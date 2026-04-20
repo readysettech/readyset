@@ -129,17 +129,14 @@ async fn e2e_show_rsa_public_key() {
     shutdown_tx.shutdown().await;
 }
 
-/// Connect twice through the same Readyset instance using
-/// `caching_sha2_password`. The first connection primes the auth cache via
-/// full-auth; the second exercises the fast-auth path on cache hit.
-///
-/// Uses failpoints to fail the test if the wrong auth path is taken for a
-/// given connection.
+/// Verify that startup-time auth-cache pre-population makes every
+/// `caching_sha2_password` connection take the fast-auth path, so the
+/// RSA-based full-auth branch is never reached.
 #[cfg(feature = "failure_injection")]
 #[tokio::test]
 #[tags(serial)]
 #[upstream(mysql)]
-async fn e2e_sha2_fast_auth_after_full_auth() {
+async fn e2e_sha2_prepopulated_cache_skips_full_auth() {
     use fail::FailScenario;
     use readyset_util::failpoints;
 
@@ -152,25 +149,17 @@ async fn e2e_sha2_fast_auth_after_full_auth() {
             .await;
     let opts = with_auth(rs_opts);
 
-    // First connection: the cache is empty, so we must take the full-auth
-    // path. Panic if the fast-auth branch is ever reached.
-    fail::cfg(failpoints::CACHING_SHA2_FAST_AUTH_SUCCESS, "panic")
-        .expect("failed to configure fast-auth failpoint");
-    let mut first = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    let row: Option<(u32,)> = first.query_first("SELECT 1").await.unwrap();
-    assert_eq!(row, Some((1,)));
-    first.disconnect().await.unwrap();
-    fail::remove(failpoints::CACHING_SHA2_FAST_AUTH_SUCCESS);
-
-    // Second connection: the cache is primed, so we must take the fast-auth
-    // path. Panic if the full-auth branch is ever reached.
+    // Panic if any connection ever reaches the full-auth branch.
     fail::cfg(failpoints::CACHING_SHA2_FULL_AUTH_BEGIN, "panic")
         .expect("failed to configure full-auth failpoint");
-    let mut second = mysql_async::Conn::new(opts).await.unwrap();
-    let row: Option<(u32,)> = second.query_first("SELECT 1").await.unwrap();
-    assert_eq!(row, Some((1,)));
-    second.disconnect().await.unwrap();
-    fail::remove(failpoints::CACHING_SHA2_FULL_AUTH_BEGIN);
 
+    for _ in 0..2 {
+        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        let row: Option<(u32,)> = conn.query_first("SELECT 1").await.unwrap();
+        assert_eq!(row, Some((1,)));
+        conn.disconnect().await.unwrap();
+    }
+
+    fail::remove(failpoints::CACHING_SHA2_FULL_AUTH_BEGIN);
     shutdown_tx.shutdown().await;
 }

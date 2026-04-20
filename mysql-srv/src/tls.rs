@@ -20,6 +20,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
     }
 
     /// Returns `true` if the connection has been upgraded to TLS.
+    #[allow(dead_code)] // only reachable via the disabled full-auth path.
     pub fn is_secure(&self) -> bool {
         matches!(self.0.as_ref(), Some(Stream::Tls(_)))
     }

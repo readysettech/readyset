@@ -47,10 +47,12 @@ const RSA_PUBLIC_KEY_FILE: &str = "caching_sha2_password_public_key.pem";
 /// Auth "more data" prefix for multi-packet exchanges.
 const AUTH_MORE_DATA: u8 = 0x01;
 /// Client requests the server's RSA public key during full-auth.
+#[allow(dead_code)] // full-auth path is disabled; see handle_authentication.
 pub const RSA_PUBLIC_KEY_REQUEST: u8 = 0x02;
 /// Server indicates fast-auth succeeded (cache hit).
 pub const FAST_AUTH_SUCCESS: u8 = 0x03;
 /// Server requests full authentication (cache miss).
+#[allow(dead_code)] // full-auth path is disabled; see handle_authentication.
 pub const PERFORM_FULL_AUTH: u8 = 0x04;
 /// Auth-switch-request indicator byte.
 pub const AUTH_SWITCH_REQUEST: u8 = 0xfe;
@@ -219,6 +221,32 @@ impl AuthCache {
         match self.cache.write() {
             Ok(mut cache) => {
                 cache.insert(username.to_string(), digest);
+            }
+            Err(e) => {
+                error!("Failed to write to auth cache: {}", e);
+            }
+        }
+    }
+
+    /// Bulk-populate the cache from a map of `username -> plaintext password`.
+    ///
+    /// Intended to be called once at startup with the full set of configured
+    /// users. Every user becomes immediately eligible for fast-auth on their
+    /// first connection, avoiding the RSA-based full-auth round trip that
+    /// would otherwise be needed to warm the cache.
+    pub fn populate(&self, users: &HashMap<String, String>) {
+        let entries: Vec<(String, [u8; 32])> = users
+            .iter()
+            .map(|(user, password)| {
+                (
+                    user.clone(),
+                    CachingSha2Password::generate_fast_digest(password.as_bytes()),
+                )
+            })
+            .collect();
+        match self.cache.write() {
+            Ok(mut cache) => {
+                cache.extend(entries);
             }
             Err(e) => {
                 error!("Failed to write to auth cache: {}", e);
@@ -510,14 +538,28 @@ impl CachingSha2Password {
             return Ok(true);
         }
 
-        // Cache miss -> full authentication
-        self.handle_full_auth(ctx, conn, auth_cache).await
+        // Cache miss -> deny. The fast-auth cache is authoritative; we do
+        // not fall back to the RSA-based full-auth exchange. Bypassing
+        // full-auth sidesteps the Marvin attack on the `rsa` crate
+        // (RUSTSEC-2023-0071), which is the CVE this change exists to
+        // avoid while upstream has no fix.
+        debug!(
+            username = ctx.username,
+            "fast-auth cache miss; denying connection"
+        );
+        Ok(false)
+        // self.handle_full_auth(ctx, conn, auth_cache).await
     }
 
     /// Perform the full authentication exchange (RSA key exchange path).
     ///
     /// Sends `PERFORM_FULL_AUTH` to the client, then reads either a
     /// plaintext password (TLS) or an RSA-encrypted password (non-TLS).
+    ///
+    /// Currently unused: the call site in `handle_authentication` is
+    /// disabled to sidestep RUSTSEC-2023-0071 in the `rsa` crate. Kept
+    /// here for reference while upstream has no fix.
+    #[allow(dead_code)]
     async fn handle_full_auth<S>(
         &self,
         ctx: &AuthContext<'_>,
@@ -605,6 +647,7 @@ impl CachingSha2Password {
 /// Constant-time equality check for byte slices of equal length.
 ///
 /// Used for password verification to prevent timing side-channel attacks.
+#[allow(dead_code)] // only reachable via the disabled full-auth path.
 pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.ct_eq(b).into()
 }
@@ -711,6 +754,31 @@ mod tests {
 
         assert!(auth_cache.check("readyset", &scramble, &auth_data));
         assert!(!auth_cache.check("wrong_user", &scramble, &auth_data));
+    }
+
+    #[test]
+    fn auth_cache_populate_bulk() {
+        let auth_cache = AuthCache::new();
+
+        let mut users = HashMap::new();
+        users.insert("readyset".to_string(), "test".to_string());
+        users.insert("alice".to_string(), "hunter2".to_string());
+        auth_cache.populate(&users);
+
+        // Known-good scramble and auth_data for password "test"
+        let scramble = [
+            0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x09, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
+            0xfa, 0xa6, 0x38, 0x03, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
+            0xf1, 0x31, 0x81, 0x9e,
+        ];
+        let auth_data: AuthData = [
+            0x15, 0x2d, 0x62, 0x01, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
+            0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
+        ];
+
+        assert!(auth_cache.check("readyset", &scramble, &auth_data));
+        assert!(!auth_cache.check("alice", &scramble, &auth_data));
+        assert!(!auth_cache.check("missing", &scramble, &auth_data));
     }
 
     #[test]
