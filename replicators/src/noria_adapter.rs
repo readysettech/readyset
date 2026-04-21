@@ -547,7 +547,6 @@ impl<'a> NoriaAdapter<'a> {
         let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
         let (progress, instance_id) = spawn_lag_reporter(
             upstream_lag_config,
-            noria.clone(),
             cancel.clone(),
             lag_status,
             poll_interval,
@@ -572,9 +571,9 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut current_pos: ReplicationOffset = pos;
 
-        // Initialize stream position so the lag reporter can start immediately,
-        // even if no replication events arrive (quiescent database).
-        adapter.progress.set_stream_position(current_pos.clone());
+        // Seed the shared progress snapshot so the lag reporter can start reporting
+        // immediately, even on a quiescent database with no replication events.
+        adapter.publish_progress_after_apply(current_pos.clone());
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.
@@ -867,7 +866,6 @@ impl<'a> NoriaAdapter<'a> {
                 tls: tls_connector.clone(),
                 heartbeat: config.replication_heartbeat,
             },
-            noria.clone(),
             cancel.clone(),
             lag_status,
             poll_interval,
@@ -890,9 +888,9 @@ impl<'a> NoriaAdapter<'a> {
             lag_reporter_cancel: cancel,
         };
 
-        // Initialize stream position so the lag reporter can start immediately,
-        // even if no replication events arrive (quiescent database).
-        adapter.progress.set_stream_position(min_pos.clone());
+        // Seed the shared progress snapshot so the lag reporter can start reporting
+        // immediately, even on a quiescent database with no replication events.
+        adapter.publish_progress_after_apply(min_pos.clone());
 
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
@@ -1338,12 +1336,10 @@ impl<'a> NoriaAdapter<'a> {
                 next_actions = self.connector.next_action(position, until.as_ref()).fuse() => match next_actions {
                     Ok((actions, pos)) => {
                         *position = pos.clone();
-                        // Publish stream position for the lag reporter.
-                        self.progress.set_stream_position(pos.clone());
                         debug!(%position, "Received replication action");
 
                         trace!(?actions);
-                        if let Err(err) = self.handle_action(actions, pos, until.is_some()).await {
+                        if let Err(err) = self.handle_action(actions, pos.clone(), until.is_some()).await {
                             if matches!(err, ReadySetError::ResnapshotNeeded) {
                                 info!("Change in DDL requires partial resnapshot");
                             } else {
@@ -1359,6 +1355,13 @@ impl<'a> NoriaAdapter<'a> {
                             return Err(err);
                         };
                         counter!(recorded::REPLICATOR_SUCCESS).increment(1u64);
+                        // Publish both the stream position and persist frontier now that
+                        // the action has been applied. Writing these together after apply
+                        // keeps `persisted_offset <= stream_position` visible to the lag
+                        // reporter; a pre-apply write of `stream_position` would expose a
+                        // window where `persist_lag > consume_lag` purely as a write-ordering
+                        // artifact.
+                        self.publish_progress_after_apply(pos);
                         debug!(%position, "Successfully applied replication action");
                     }
                     Err(ReadySetError::TableError { table, source }) => {
@@ -1394,6 +1397,27 @@ impl<'a> NoriaAdapter<'a> {
     /// and we need to drop them all
     fn clear_mutator_cache(&mut self) {
         self.mutator_map.clear()
+    }
+
+    /// Publish the replicator's progress — the stream position just applied and the
+    /// current max-persisted offset — to the shared snapshot read by the lag reporter.
+    /// Called after each successfully applied action and from adapter startup so the
+    /// reporter has something to compare against on a quiescent database.
+    ///
+    /// On the error path from `max_present_offset` (e.g. mixed-log-name tables across
+    /// a binlog rotation), we publish `None` for the persist frontier so the reporter
+    /// falls back to the stream position rather than continuing to surface a stale,
+    /// frozen offset.
+    fn publish_progress_after_apply(&self, stream_position: ReplicationOffset) {
+        let persisted = match self.replication_offsets.max_present_offset() {
+            Ok(off) => off.cloned(),
+            Err(e) => {
+                warn!(error = %e, "Failed to compute max persisted offset");
+                None
+            }
+        };
+        self.progress
+            .publish_after_apply(stream_position, persisted);
     }
 
     /// Check if the given table is the heartbeat table.

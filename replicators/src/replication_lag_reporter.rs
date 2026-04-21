@@ -16,7 +16,6 @@ use std::time::{Duration, SystemTime};
 use metrics::{counter, gauge};
 use readyset_client::metrics::recorded;
 use readyset_client::status::ReplicationLagStatus;
-use readyset_client::ReadySetHandle;
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::mysql_gtid::GtidSet;
@@ -42,6 +41,12 @@ struct ReplicatorProgress {
     /// Last event consumed from the upstream stream, published by the main replication
     /// loop after each action is successfully applied.
     stream_position: Option<ReplicationOffset>,
+    /// Max offset the replicator has successfully applied across all tables (the
+    /// persist frontier). Published by the main replication loop alongside
+    /// `stream_position` after each successfully applied action. This is the
+    /// replicator's in-memory view of applied offsets and lags true on-disk durability
+    /// by the depth of the base-table domain queue plus the RocksDB flush interval.
+    persisted_offset: Option<ReplicationOffset>,
     /// Timestamp from the most recent heartbeat row intercepted in the replication
     /// stream. `None` when heartbeat is disabled or no heartbeat has been seen yet.
     /// Independent of [`stream_position`]; heartbeat rows are filtered before they
@@ -55,6 +60,7 @@ struct ReplicatorProgress {
 #[derive(Debug, Default)]
 pub struct ReplicatorProgressSnapshot {
     pub stream_position: Option<ReplicationOffset>,
+    pub persisted_offset: Option<ReplicationOffset>,
     pub heartbeat_ts: Option<SystemTime>,
 }
 
@@ -77,6 +83,20 @@ impl SharedReplicatorProgress {
         self.0.write().stream_position = Some(pos);
     }
 
+    /// Publish both the last consumed stream position and the current persist frontier
+    /// in one critical section. Called after every successfully applied action so the
+    /// lag reporter always sees `persisted_offset <= stream_position` (required for
+    /// `persist_lag >= consume_lag`).
+    pub fn publish_after_apply(
+        &self,
+        stream_position: ReplicationOffset,
+        persisted_offset: Option<ReplicationOffset>,
+    ) {
+        let mut guard = self.0.write();
+        guard.stream_position = Some(stream_position);
+        guard.persisted_offset = persisted_offset;
+    }
+
     /// Record the timestamp of the most recent heartbeat row intercepted on the
     /// replication stream.
     pub fn set_heartbeat_ts(&self, ts: SystemTime) {
@@ -88,6 +108,7 @@ impl SharedReplicatorProgress {
         let guard = self.0.read();
         ReplicatorProgressSnapshot {
             stream_position: guard.stream_position.clone(),
+            persisted_offset: guard.persisted_offset.clone(),
             heartbeat_ts: guard.heartbeat_ts,
         }
     }
@@ -152,7 +173,6 @@ struct HeartbeatContext<'a> {
 /// adapter so it can publish updates) and the heartbeat instance ID.
 pub fn spawn_lag_reporter(
     upstream_config: UpstreamLagConfig,
-    noria: ReadySetHandle,
     cancel: CancellationToken,
     lag_status: SharedLagStatus,
     poll_interval: Duration,
@@ -170,7 +190,6 @@ pub fn spawn_lag_reporter(
     tokio::spawn(async move {
         lag_reporter_loop(
             upstream_config,
-            noria,
             lag_status,
             progress_clone,
             cancel,
@@ -184,7 +203,6 @@ pub fn spawn_lag_reporter(
 
 async fn lag_reporter_loop(
     upstream_config: UpstreamLagConfig,
-    mut noria: ReadySetHandle,
     lag_status: SharedLagStatus,
     progress: SharedReplicatorProgress,
     cancel: CancellationToken,
@@ -231,7 +249,6 @@ async fn lag_reporter_loop(
                 };
                 match tokio::time::timeout(poll_budget, poll_lag(
                     &upstream_config,
-                    &mut noria,
                     &lag_status,
                     &progress,
                     &hb_ctx,
@@ -327,13 +344,13 @@ async fn setup_heartbeat_table(
 
 async fn poll_lag(
     upstream_config: &UpstreamLagConfig,
-    noria: &mut ReadySetHandle,
     lag_status: &SharedLagStatus,
     progress: &SharedReplicatorProgress,
     hb: &HeartbeatContext<'_>,
 ) -> ReadySetResult<()> {
     let ReplicatorProgressSnapshot {
         stream_position: replicator_offset,
+        persisted_offset,
         heartbeat_ts,
     } = progress.snapshot();
 
@@ -342,12 +359,7 @@ async fn poll_lag(
         return Ok(());
     };
 
-    let offsets = noria.replication_offsets().await?;
-    let persisted_offset_for_lag = match offsets.max_present_offset()? {
-        Some(offset) => offset.clone(),
-        // No tables have persisted yet — use replicator position as fallback.
-        None => replicator_offset.clone(),
-    };
+    let persisted_offset_for_lag = persisted_offset.unwrap_or_else(|| replicator_offset.clone());
 
     let mut status = match upstream_config {
         UpstreamLagConfig::Postgres { config, tls, .. } => {

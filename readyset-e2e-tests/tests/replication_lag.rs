@@ -176,8 +176,8 @@ async fn psql_staleness(conn: &tokio_postgres::Client) -> Option<f64> {
 #[upstream(mysql)]
 async fn mysql_replication_status_vrel() {
     readyset_tracing::init_test_logging();
-    let (mut rs_conn, _handle, shutdown_tx) =
-        setup_mysql("replication_lag_mysql_vrel", false, false).await;
+    let db_name = "replication_lag_mysql_vrel";
+    let (mut rs_conn, _handle, shutdown_tx) = setup_mysql(db_name, false, false).await;
 
     let row = mysql_replication_status_row(&mut rs_conn).await;
 
@@ -200,6 +200,17 @@ async fn mysql_replication_status_vrel() {
     let persist_lag: u64 = row.get("persist_lag").expect("persist_lag");
     assert!(consume_lag < 10_000_000, "consume_lag unexpectedly large: {consume_lag}");
     assert!(persist_lag < 10_000_000, "persist_lag unexpectedly large: {persist_lag}");
+    // Invariant: persist_lag >= consume_lag. The replicator publishes both the stream
+    // position and the persist frontier together after each applied action, and the
+    // persist frontier is always <= the stream position (it's the max offset applied,
+    // where the stream position is the latest one to be applied). Byte-lag behind
+    // upstream therefore satisfies persist_lag >= consume_lag. A write-ordering bug
+    // that published stream_position before the apply completed would produce
+    // persist_lag < consume_lag.
+    assert!(
+        persist_lag >= consume_lag,
+        "persist_lag ({persist_lag}) must be >= consume_lag ({consume_lag})"
+    );
 
     // Without --replication-heartbeat, staleness should be NULL.
     // Double-Option: outer = column existence, inner = SQL NULL.
@@ -208,6 +219,27 @@ async fn mysql_replication_status_vrel() {
         staleness == Some(None),
         "staleness should be NULL without heartbeat, got: {staleness:?}"
     );
+
+    // Prove the replicator publishes progress on the hot path: a write upstream should
+    // advance the persisted_offset column. Without the publish call in main_loop this
+    // column would freeze at its startup value.
+    let initial_persisted = persisted_offset.clone();
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop("INSERT INTO t1 VALUES (2, 20)")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let row = mysql_replication_status_row(&mut rs_conn).await;
+        row.get::<String, _>("persisted_offset").unwrap()
+    }, then_assert: |current_persisted| {
+        assert_ne!(
+            current_persisted, initial_persisted,
+            "persisted_offset should advance after upstream write"
+        );
+    });
 
     shutdown_tx.shutdown().await;
 }
@@ -232,6 +264,10 @@ async fn mysql_gtid_replication_status_vrel() {
     let persist_lag: u64 = row.get("persist_lag").expect("persist_lag");
     assert!(consume_lag < 100, "consume_lag unexpectedly large: {consume_lag}");
     assert!(persist_lag < 100, "persist_lag unexpectedly large: {persist_lag}");
+    assert!(
+        persist_lag >= consume_lag,
+        "persist_lag ({persist_lag}) must be >= consume_lag ({consume_lag})"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -241,7 +277,8 @@ async fn mysql_gtid_replication_status_vrel() {
 #[upstream(postgres)]
 async fn psql_replication_status_vrel() {
     readyset_tracing::init_test_logging();
-    let (rs_conn, _handle, shutdown_tx) = setup_psql("replication_lag_psql_vrel", false).await;
+    let db_name = "replication_lag_psql_vrel";
+    let (rs_conn, _handle, shutdown_tx) = setup_psql(db_name, false).await;
 
     let rows = psql_replication_status_row(&rs_conn).await;
     let row = rows
@@ -266,12 +303,50 @@ async fn psql_replication_status_vrel() {
     let persisted_offset = row.get(3).expect("persisted_offset");
     assert!(!persisted_offset.is_empty(), "persisted_offset should not be empty");
 
+    // Column index 4 = consume_lag, 5 = persist_lag. The replicator publishes
+    // stream_position and persist_frontier together after each applied action, so
+    // persist is always <= stream — i.e. persist_lag >= consume_lag in byte terms.
+    // A write-ordering regression that published the stream position early would
+    // break this invariant.
+    let consume_lag: u64 = row.get(4).expect("consume_lag").parse().unwrap();
+    let persist_lag: u64 = row.get(5).expect("persist_lag").parse().unwrap();
+    assert!(
+        persist_lag >= consume_lag,
+        "persist_lag ({persist_lag}) must be >= consume_lag ({consume_lag})"
+    );
+
     // Column index 6 = heartbeat_staleness_seconds
     let staleness = row.get(6);
     assert!(
         staleness.is_none(),
         "staleness should be NULL without heartbeat, got: {staleness:?}"
     );
+
+    // Prove publish_persisted_offset() runs on the hot path: a write upstream should
+    // advance the persisted_offset column.
+    let initial_persisted = persisted_offset.to_string();
+    let mut writer_config = psql_helpers::upstream_config();
+    writer_config.dbname(db_name);
+    let writer_conn = psql_helpers::connect(writer_config).await;
+    writer_conn
+        .simple_query("INSERT INTO t1 VALUES (2, 20)")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        psql_replication_status_row(&rs_conn).await.into_iter().find_map(|msg| {
+            if let SimpleQueryMessage::Row(row) = msg {
+                row.get(3).map(|s| s.to_string())
+            } else {
+                None
+            }
+        }).unwrap_or_default()
+    }, then_assert: |current_persisted| {
+        assert_ne!(
+            current_persisted, initial_persisted,
+            "persisted_offset should advance after upstream write"
+        );
+    });
 
     shutdown_tx.shutdown().await;
 }
