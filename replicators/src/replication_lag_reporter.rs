@@ -5,9 +5,9 @@
 //! to the upstream database.
 //!
 //! When heartbeat is enabled, the task also writes a timestamp to a heartbeat table in the
-//! upstream. The replicator intercepts the replicated row and stores the timestamp in
-//! `SharedHeartbeatTimestamp`. The lag reporter reads it back and computes time-based
-//! staleness as `now() - heartbeat_timestamp`.
+//! upstream. The replicator intercepts the replicated row and records the timestamp in
+//! the shared [`SharedReplicatorProgress`]. The lag reporter reads it back and computes
+//! time-based staleness as `now() - heartbeat_timestamp`.
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -33,13 +33,65 @@ use crate::mysql_connector::get_mysql_version;
 /// Shared state for replication lag, readable by vrels and other consumers.
 pub type SharedLagStatus = Arc<RwLock<Option<ReplicationLagStatus>>>;
 
-/// Shared state for the replicator's current stream position.
-/// Written by the main replication loop, read by the lag reporter.
-pub type SharedReplicatorPosition = Arc<RwLock<Option<ReplicationOffset>>>;
+/// Internal state published by the main replication loop to the lag reporter. All fields
+/// are private; writers go through [`SharedReplicatorProgress`] methods and the reporter
+/// reads via [`SharedReplicatorProgress::snapshot`] to get a consistent view in one
+/// critical section.
+#[derive(Default, Debug)]
+struct ReplicatorProgress {
+    /// Last event consumed from the upstream stream, published by the main replication
+    /// loop after each action is successfully applied.
+    stream_position: Option<ReplicationOffset>,
+    /// Timestamp from the most recent heartbeat row intercepted in the replication
+    /// stream. `None` when heartbeat is disabled or no heartbeat has been seen yet.
+    /// Independent of [`stream_position`]; heartbeat rows are filtered before they
+    /// reach the dataflow, so this timestamp is not tied to any particular offset.
+    heartbeat_ts: Option<SystemTime>,
+}
 
-/// Shared state for the heartbeat timestamp received through replication.
-/// Written by the replicator when it intercepts a heartbeat row, read by the lag reporter.
-pub type SharedHeartbeatTimestamp = Arc<RwLock<Option<SystemTime>>>;
+/// Point-in-time copy of [`ReplicatorProgress`] returned by
+/// [`SharedReplicatorProgress::snapshot`]. All fields reflect a single consistent moment
+/// because the snapshot is taken under one read lock.
+#[derive(Debug, Default)]
+pub struct ReplicatorProgressSnapshot {
+    pub stream_position: Option<ReplicationOffset>,
+    pub heartbeat_ts: Option<SystemTime>,
+}
+
+/// Handle to the replicator-progress state shared between the replicator and the lag
+/// reporter. Cheaply cloneable (`Arc`-backed). Writers call the setter methods; the
+/// reporter calls [`snapshot`](Self::snapshot) to read all fields atomically.
+///
+/// Uses [`parking_lot::RwLock`] because every critical section is a handful of field
+/// assignments or clones — no I/O, no `.await`. An async lock would add future allocation
+/// and task-wake overhead without solving any problem the sync lock doesn't.
+///
+/// Lock order: this lock is always innermost — callers must not acquire any other lock
+/// while holding it.
+#[derive(Clone, Debug, Default)]
+pub struct SharedReplicatorProgress(Arc<parking_lot::RwLock<ReplicatorProgress>>);
+
+impl SharedReplicatorProgress {
+    /// Publish the latest consumed stream position.
+    pub fn set_stream_position(&self, pos: ReplicationOffset) {
+        self.0.write().stream_position = Some(pos);
+    }
+
+    /// Record the timestamp of the most recent heartbeat row intercepted on the
+    /// replication stream.
+    pub fn set_heartbeat_ts(&self, ts: SystemTime) {
+        self.0.write().heartbeat_ts = Some(ts);
+    }
+
+    /// Take a consistent snapshot of all progress fields in one critical section.
+    pub fn snapshot(&self) -> ReplicatorProgressSnapshot {
+        let guard = self.0.read();
+        ReplicatorProgressSnapshot {
+            stream_position: guard.stream_position.clone(),
+            heartbeat_ts: guard.heartbeat_ts,
+        }
+    }
+}
 
 /// Heartbeat table name for Postgres (schema-qualified).
 pub const PG_HEARTBEAT_TABLE: &str = "readyset._heartbeat";
@@ -86,7 +138,6 @@ struct ReporterConfig {
 
 /// Groups heartbeat-related parameters for `poll_lag`.
 struct HeartbeatContext<'a> {
-    ts: &'a SharedHeartbeatTimestamp,
     active: bool,
     report_staleness: bool,
     reporter: &'a ReporterConfig,
@@ -97,8 +148,8 @@ struct HeartbeatContext<'a> {
 /// `lag_status` is the shared state that the controller reads via RPC.
 /// `server_uuid` is used as the heartbeat instance ID if set (from
 /// `--replication-server-uuid`); otherwise a random UUID is generated.
-/// Returns (lag_status, shared replicator position, shared heartbeat timestamp,
-/// heartbeat instance ID).
+/// Returns the shared replicator-progress handle (which the caller passes back to the
+/// adapter so it can publish updates) and the heartbeat instance ID.
 pub fn spawn_lag_reporter(
     upstream_config: UpstreamLagConfig,
     noria: ReadySetHandle,
@@ -106,19 +157,11 @@ pub fn spawn_lag_reporter(
     lag_status: SharedLagStatus,
     poll_interval: Duration,
     server_uuid: Option<Uuid>,
-) -> (
-    SharedLagStatus,
-    SharedReplicatorPosition,
-    SharedHeartbeatTimestamp,
-    String,
-) {
-    let replicator_position: SharedReplicatorPosition = Arc::new(RwLock::new(None));
-    let heartbeat_ts: SharedHeartbeatTimestamp = Arc::new(RwLock::new(None));
+) -> (SharedReplicatorProgress, String) {
+    let progress = SharedReplicatorProgress::default();
     let instance_id = server_uuid.unwrap_or_else(Uuid::new_v4).to_string();
 
-    let lag_status_clone = Arc::clone(&lag_status);
-    let replicator_pos_clone = Arc::clone(&replicator_position);
-    let heartbeat_ts_clone = Arc::clone(&heartbeat_ts);
+    let progress_clone = progress.clone();
     let reporter_config = ReporterConfig {
         poll_interval,
         instance_id: instance_id.clone(),
@@ -128,24 +171,22 @@ pub fn spawn_lag_reporter(
         lag_reporter_loop(
             upstream_config,
             noria,
-            lag_status_clone,
-            replicator_pos_clone,
-            heartbeat_ts_clone,
+            lag_status,
+            progress_clone,
             cancel,
             reporter_config,
         )
         .await;
     });
 
-    (lag_status, replicator_position, heartbeat_ts, instance_id)
+    (progress, instance_id)
 }
 
 async fn lag_reporter_loop(
     upstream_config: UpstreamLagConfig,
     mut noria: ReadySetHandle,
     lag_status: SharedLagStatus,
-    replicator_position: SharedReplicatorPosition,
-    heartbeat_ts: SharedHeartbeatTimestamp,
+    progress: SharedReplicatorProgress,
     cancel: CancellationToken,
     reporter: ReporterConfig,
 ) {
@@ -184,7 +225,6 @@ async fn lag_reporter_loop(
             _ = interval.tick() => {
                 let report_staleness = heartbeat_active && heartbeat_polls >= 2;
                 let hb_ctx = HeartbeatContext {
-                    ts: &heartbeat_ts,
                     active: heartbeat_active,
                     report_staleness,
                     reporter: &reporter,
@@ -193,7 +233,7 @@ async fn lag_reporter_loop(
                     &upstream_config,
                     &mut noria,
                     &lag_status,
-                    &replicator_position,
+                    &progress,
                     &hb_ctx,
                 )).await {
                     Ok(Ok(())) => {
@@ -289,15 +329,13 @@ async fn poll_lag(
     upstream_config: &UpstreamLagConfig,
     noria: &mut ReadySetHandle,
     lag_status: &SharedLagStatus,
-    replicator_position: &SharedReplicatorPosition,
+    progress: &SharedReplicatorProgress,
     hb: &HeartbeatContext<'_>,
 ) -> ReadySetResult<()> {
-    let replicator_offset = {
-        replicator_position
-            .read()
-            .map_err(|e| internal_err!("Failed to read replicator position: {e}"))?
-            .clone()
-    };
+    let ReplicatorProgressSnapshot {
+        stream_position: replicator_offset,
+        heartbeat_ts,
+    } = progress.snapshot();
 
     let Some(replicator_offset) = replicator_offset else {
         debug!("Replicator position not yet available, skipping lag poll");
@@ -345,29 +383,24 @@ async fn poll_lag(
         }
     };
 
-    // Compute staleness from the heartbeat timestamp.
+    // Compute staleness from the snapshotted heartbeat timestamp.
     // Subtract the poll interval since the heartbeat was written one poll cycle ago
     // and replicated nearly instantly — the interval itself is measurement overhead,
     // not real lag. Floor at zero to handle timing jitter.
     // Only report after 2+ polls so we don't show stale data from a previous session.
     if hb.report_staleness {
-        match hb.ts.read() {
-            Ok(guard) => {
-                if let Some(ts) = *guard {
-                    match ts.elapsed() {
-                        Ok(elapsed) => {
-                            let adjusted = elapsed.saturating_sub(hb.reporter.poll_interval);
-                            // Round to millisecond precision (3 decimal places)
-                            status.staleness_seconds =
-                                Some((adjusted.as_secs_f64() * 1000.0).round() / 1000.0);
-                        }
-                        Err(_) => {
-                            warn!("Heartbeat timestamp is in the future — possible clock skew between upstream and ReadySet");
-                        }
-                    }
+        if let Some(ts) = heartbeat_ts {
+            match ts.elapsed() {
+                Ok(elapsed) => {
+                    let adjusted = elapsed.saturating_sub(hb.reporter.poll_interval);
+                    // Round to millisecond precision (3 decimal places)
+                    status.staleness_seconds =
+                        Some((adjusted.as_secs_f64() * 1000.0).round() / 1000.0);
+                }
+                Err(_) => {
+                    warn!("Heartbeat timestamp is in the future — possible clock skew between upstream and ReadySet");
                 }
             }
-            Err(e) => warn!(error = %e, "Failed to read heartbeat timestamp (lock poisoned)"),
         }
     }
 

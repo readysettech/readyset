@@ -39,8 +39,8 @@ use crate::postgres_connector::{
     PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
 };
 use crate::replication_lag_reporter::{
-    spawn_lag_reporter, SharedHeartbeatTimestamp, SharedLagStatus, SharedReplicatorPosition,
-    UpstreamLagConfig, MYSQL_HEARTBEAT_TABLE, PG_HEARTBEAT_SCHEMA, PG_HEARTBEAT_TABLE_NAME,
+    spawn_lag_reporter, SharedLagStatus, SharedReplicatorProgress, UpstreamLagConfig,
+    MYSQL_HEARTBEAT_TABLE, PG_HEARTBEAT_SCHEMA, PG_HEARTBEAT_TABLE_NAME,
 };
 use crate::table_filter::TableFilter;
 use crate::{ControllerMessage, ReplicatorMessage};
@@ -155,10 +155,9 @@ pub struct NoriaAdapter<'a> {
     supports_resnapshot: bool,
     /// Any TableStatus updates sent here will update this controller's state machine.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
-    /// Shared replicator stream position, updated on each event for the lag reporter.
-    shared_position: SharedReplicatorPosition,
-    /// Shared heartbeat timestamp, updated when we intercept a heartbeat table write.
-    heartbeat_ts: SharedHeartbeatTimestamp,
+    /// Shared replicator-progress snapshot (stream position + last heartbeat timestamp),
+    /// updated by the main replication loop and `handle_action`, read by the lag reporter.
+    progress: SharedReplicatorProgress,
     /// Whether heartbeat-based staleness measurement is enabled.
     heartbeat_enabled: bool,
     /// Instance ID for heartbeat row filtering (UUID, identifies this ReadySet instance).
@@ -546,7 +545,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let cancel = CancellationToken::new();
         let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
-        let (_, shared_position, heartbeat_ts, instance_id) = spawn_lag_reporter(
+        let (progress, instance_id) = spawn_lag_reporter(
             upstream_lag_config,
             noria.clone(),
             cancel.clone(),
@@ -565,8 +564,7 @@ impl<'a> NoriaAdapter<'a> {
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_MYSQL,
             table_status_tx,
-            shared_position,
-            heartbeat_ts,
+            progress,
             heartbeat_enabled: heartbeat,
             heartbeat_instance_id: instance_id,
             lag_reporter_cancel: cancel,
@@ -574,12 +572,9 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut current_pos: ReplicationOffset = pos;
 
-        // Initialize shared position so the lag reporter can start immediately,
+        // Initialize stream position so the lag reporter can start immediately,
         // even if no replication events arrive (quiescent database).
-        match adapter.shared_position.write() {
-            Ok(mut guard) => *guard = Some(current_pos.clone()),
-            Err(e) => warn!(error = %e, "Failed to initialize shared position (lock poisoned)"),
-        }
+        adapter.progress.set_stream_position(current_pos.clone());
 
         // At this point it is possible that we just finished replication, but
         // our schema and our tables are taken at different position in the binlog.
@@ -866,7 +861,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let cancel = CancellationToken::new();
         let poll_interval = Duration::from_secs(config.replication_lag_interval as u64);
-        let (_, shared_position, heartbeat_ts, instance_id) = spawn_lag_reporter(
+        let (progress, instance_id) = spawn_lag_reporter(
             UpstreamLagConfig::Postgres {
                 config: Box::new(pgsql_opts.clone()),
                 tls: tls_connector.clone(),
@@ -889,19 +884,15 @@ impl<'a> NoriaAdapter<'a> {
             supports_resnapshot: true,
             dialect: Dialect::DEFAULT_POSTGRESQL,
             table_status_tx,
-            shared_position,
-            heartbeat_ts,
+            progress,
             heartbeat_enabled: config.replication_heartbeat,
             heartbeat_instance_id: instance_id,
             lag_reporter_cancel: cancel,
         };
 
-        // Initialize shared position so the lag reporter can start immediately,
+        // Initialize stream position so the lag reporter can start immediately,
         // even if no replication events arrive (quiescent database).
-        match adapter.shared_position.write() {
-            Ok(mut guard) => *guard = Some(min_pos.clone()),
-            Err(e) => warn!(error = %e, "Failed to initialize shared position (lock poisoned)"),
-        }
+        adapter.progress.set_stream_position(min_pos.clone());
 
         if min_pos != max_pos {
             info!(start = %min_pos, end = %max_pos, "Catching up");
@@ -1240,7 +1231,7 @@ impl<'a> NoriaAdapter<'a> {
                     // startup guard in the lag reporter handles stale data from
                     // previous sessions.
                     if self.heartbeat_enabled && self.is_heartbeat_table(&table) {
-                        self.extract_heartbeat_timestamp(&actions);
+                        self.extract_heartbeat_timestamp(&actions).await;
                         had_heartbeat = true;
                         continue;
                     }
@@ -1347,11 +1338,8 @@ impl<'a> NoriaAdapter<'a> {
                 next_actions = self.connector.next_action(position, until.as_ref()).fuse() => match next_actions {
                     Ok((actions, pos)) => {
                         *position = pos.clone();
-                        // Update shared position for the lag reporter
-                        match self.shared_position.write() {
-                            Ok(mut guard) => *guard = Some(pos.clone()),
-                            Err(e) => warn!(error = %e, "Failed to update shared position (lock poisoned)"),
-                        }
+                        // Publish stream position for the lag reporter.
+                        self.progress.set_stream_position(pos.clone());
                         debug!(%position, "Received replication action");
 
                         trace!(?actions);
@@ -1425,7 +1413,7 @@ impl<'a> NoriaAdapter<'a> {
     /// Extract the heartbeat timestamp from a set of table operations and store it
     /// in the shared heartbeat timestamp. Only processes rows matching this instance's
     /// UUID to avoid reading another ReadySet instance's heartbeat.
-    fn extract_heartbeat_timestamp(&self, actions: &[TableOperation]) {
+    async fn extract_heartbeat_timestamp(&self, actions: &[TableOperation]) {
         for action in actions {
             // The heartbeat table has columns (id TEXT, ts TIMESTAMPTZ).
             // Extract both: id at index 0, ts at index 1.
@@ -1467,12 +1455,7 @@ impl<'a> NoriaAdapter<'a> {
                 }
             };
             if let Some(st) = system_time {
-                match self.heartbeat_ts.write() {
-                    Ok(mut guard) => *guard = Some(st),
-                    Err(e) => {
-                        warn!(error = %e, "Failed to update heartbeat timestamp (lock poisoned)")
-                    }
-                }
+                self.progress.set_heartbeat_ts(st);
             }
         }
     }

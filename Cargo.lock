@@ -6855,6 +6855,7 @@ dependencies = [
  "native-tls",
  "nom-sql",
  "nom_locate",
+ "parking_lot",
  "paste",
  "pem",
  "postgres-native-tls",

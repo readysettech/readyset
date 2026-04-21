@@ -30,6 +30,7 @@ mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["binlog"] }
 native-tls = { workspace = true }
 nom_locate = { workspace = true }
+parking_lot = { workspace = true }
 paste = { workspace = true }
 pem = { workspace = true }
 postgres-native-tls = { workspace = true }
