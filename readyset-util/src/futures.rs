@@ -21,6 +21,35 @@ macro_rules! select {
     };
 }
 
+/// Unconditionally yield to the Tokio scheduler, giving other tasks on the same worker a chance to
+/// run.
+///
+/// Prefer [`scheduler_potentially_yield!`] inside tight loops when you want the runtime to decide
+/// whether a yield is warranted.  [`scheduler_yield!`] may still be useful in situations where you
+/// know you definitely want to yield or are in the middle of a very low priority task.
+#[macro_export]
+macro_rules! scheduler_yield {
+    () => {
+        ::tokio::task::yield_now().await
+    };
+}
+
+/// Yield to the Tokio scheduler only if the current task has exhausted its cooperative budget.
+///
+/// Intended for long-running, CPU-bound loops inside async functions: placing this at the top of
+/// each iteration lets Tokio conditionally yield the task based on its own accounting without
+/// paying the cost of an unconditional yield every iteration.
+///
+/// Note that calling this macro may be redundant if you are already calling .await on a Tokio
+/// construct such as a channel or mutex in the same section of code, as these structures already
+/// implement this same budget-tracked, conditional yielding.
+#[macro_export]
+macro_rules! scheduler_potentially_yield {
+    () => {
+        ::tokio::task::consume_budget().await
+    };
+}
+
 /// Retries an asynchronous operation with exponential backoff.
 ///
 /// This macro supports both code blocks and async closures as the retryable operation.

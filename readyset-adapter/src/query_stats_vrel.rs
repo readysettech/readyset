@@ -7,6 +7,7 @@ use readyset_schema::bind_vrel;
 use readyset_schema::virtual_relation::{VrelContext, VrelRead, VrelRows};
 use readyset_server::metrics::get_global_recorder;
 use readyset_sql::DialectDisplay;
+use readyset_util::scheduler_potentially_yield;
 
 use crate::query_status_cache::QueryStatusCache;
 
@@ -62,14 +63,17 @@ fn query_stats_read(ctx: &VrelContext, database_type: &'static str) -> VrelRead 
         let exec_times = exec_times.get(recorded::QUERY_LOG_EXECUTION_TIME);
         let last_exec_times = last_exec_times.get(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S);
 
-        let entries: Vec<_> = counts
-            .into_iter()
-            .flat_map(|m| m.iter())
-            .filter(|(labels, _)| {
-                label_value(labels, "database_type").as_deref() == Some(database_type)
-            })
-            .filter_map(|(labels, count)| {
-                let query_id = label_value(labels, "query_id")?;
+        let mut entries: Vec<Vec<DfValue>> = Vec::new();
+        if let Some(counts_map) = counts {
+            for (labels, count) in counts_map.iter() {
+                scheduler_potentially_yield!();
+
+                if label_value(labels, "database_type").as_deref() != Some(database_type) {
+                    continue;
+                }
+                let Some(query_id) = label_value(labels, "query_id") else {
+                    continue;
+                };
                 let query = query_status_cache.and_then(|qs| {
                     let q = qs.query(&query_id)?;
                     Some(q.display(dialect).to_string())
@@ -84,7 +88,7 @@ fn query_stats_read(ctx: &VrelContext, database_type: &'static str) -> VrelRead 
                     .unwrap_or_default();
                 let avg = if *count > 0 { sum / *count as f64 } else { 0.0 };
 
-                Some(vec![
+                entries.push(vec![
                     DfValue::from(query_id),
                     query.map(DfValue::from).unwrap_or(DfValue::None),
                     DfValue::UnsignedInt(*count),
@@ -98,9 +102,9 @@ fn query_stats_read(ctx: &VrelContext, database_type: &'static str) -> VrelRead 
                     DfValue::Double(p99),
                     DfValue::Double(p999),
                     DfValue::UnsignedInt(last_exec_s as u64),
-                ])
-            })
-            .collect();
+                ]);
+            }
+        }
 
         let rows: VrelRows = Box::new(entries.into_iter());
         Ok(rows)

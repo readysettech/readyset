@@ -38,9 +38,9 @@ use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites;
-use readyset_util::eventually;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::ShutdownSender;
+use readyset_util::{eventually, scheduler_yield};
 use schema_catalog::{SchemaCatalogHandle, SchemaCatalogSynchronizer, SchemaGeneration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -521,7 +521,7 @@ impl TestBuilder {
         tokio::spawn(schema_catalog_synchronizer.run(shutdown_tx.subscribe()));
         // Give the synchronizer a chance to subscribe to controller events before tests start
         // issuing DDL/DML against the upstream, otherwise early schema updates can be missed.
-        tokio::task::yield_now().await;
+        scheduler_yield!();
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
         let view_name_cache = SharedCache::new();

@@ -8,7 +8,7 @@ use mysql_async::prelude::*;
 use mysql_async::{Conn, Pool};
 use rand::Rng as _;
 use readyset_tracing::init_test_logging;
-use readyset_util::failpoints;
+use readyset_util::{failpoints, scheduler_potentially_yield};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
@@ -208,8 +208,8 @@ async fn run_ddl(mysql: &MysqlOpts, duration_secs: u64) -> Result<()> {
     let mut iteration: u64 = 0;
 
     while !duration_expired(duration_secs, start) {
-        // Yield briefly to avoid busy-spinning, but go as fast as possible
-        tokio::task::yield_now().await;
+        // Optionally yield to avoid busy-spinning, but go as fast as possible
+        scheduler_potentially_yield!();
 
         iteration += 1;
         let mut conn = match pool.get_conn().await {
