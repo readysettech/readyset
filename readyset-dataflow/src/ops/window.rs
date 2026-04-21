@@ -145,6 +145,31 @@ impl WindowOperation {
         }
     }
 
+    /// Apply AVG to one chunk of `rows`: accumulate non-null values at
+    /// `arg` into `acc`, then write the result to `col_index` of every
+    /// row. `acc` is `&mut` so cumulative windows can carry totals
+    /// across chunks; non-cumulative callers pass a fresh accumulator.
+    fn apply_avg_chunk(
+        rows: &mut [Cow<'_, [DfValue]>],
+        arg: usize,
+        col_index: usize,
+        output_col_type: &DfType,
+        acc: &mut AverageAccumulator,
+    ) -> ReadySetResult<()> {
+        for row in rows.iter() {
+            let arg_value = row.get(arg).unwrap();
+            if !arg_value.is_none() {
+                let coerced = Self::coerce_to_output_type(arg_value, output_col_type)?;
+                acc.delta(&coerced, true)?;
+            }
+        }
+        let avg = acc.result()?;
+        for row in rows.iter_mut() {
+            *row.to_mut().get_mut(col_index).unwrap() = avg.clone();
+        }
+        Ok(())
+    }
+
     /// Optimized implementation of cumulative window functions.
     /// Only processes rows from the offset onwards,
     /// avoiding unnecessary recomputation of unchanged rows.
@@ -301,17 +326,7 @@ impl WindowOperation {
                 });
 
                 for partition in partitions {
-                    for row in partition.iter() {
-                        let arg_value = row.get(*arg).unwrap();
-                        if !arg_value.is_none() {
-                            let coerced = Self::coerce_to_output_type(arg_value, output_col_type)?;
-                            acc.delta(&coerced, true)?;
-                        }
-                    }
-                    let avg = acc.result()?;
-                    for row in partition.iter_mut() {
-                        *row.to_mut().get_mut(col_index).unwrap() = avg.clone();
-                    }
+                    Self::apply_avg_chunk(partition, *arg, col_index, output_col_type, &mut acc)?;
                 }
 
                 Ok(())
@@ -538,20 +553,10 @@ impl WindowOperation {
             WindowOperation::Avg(arg) => {
                 apply_diffs_to_partition(partition, diffs, col_index)?;
 
-                // Can't use the diffs to find the new avg, since we don't
-                // have a sum or count. Two passes over the partition.
+                // Can't use the diffs to find the new avg, since we don't have a
+                // sum or count. Two passes over the partition.
                 let mut acc = AverageAccumulator::for_out_ty(output_col_type, avg_scale_mode);
-                for row in partition.iter() {
-                    let arg_value = row.get(*arg).unwrap();
-                    if !arg_value.is_none() {
-                        let coerced = Self::coerce_to_output_type(arg_value, output_col_type)?;
-                        acc.delta(&coerced, true)?;
-                    }
-                }
-                let avg = acc.result()?;
-                for r in partition.iter_mut() {
-                    *r.to_mut().get_mut(col_index).unwrap() = avg.clone();
-                }
+                Self::apply_avg_chunk(partition, *arg, col_index, output_col_type, &mut acc)?;
 
                 Ok(())
             }
