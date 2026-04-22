@@ -319,7 +319,7 @@ impl FromStr for AuthPlugin {
 
 impl Default for AuthPlugin {
     fn default() -> Self {
-        AuthPlugin::Sha2(CachingSha2Password)
+        AuthPlugin::Native(MysqlNativePassword)
     }
 }
 

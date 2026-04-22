@@ -431,6 +431,9 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     auth_cache: Arc<AuthCache>,
     /// The authentication plugin to advertise during the handshake.
     auth_plugin: AuthPlugin,
+    /// The authentication plugin negotiated for this session, set once the
+    /// initial handshake completes. Reused for `COM_CHANGE_USER`.
+    session_auth_plugin: AuthPlugin,
 }
 
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
@@ -506,6 +509,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             tls_mode,
             auth_cache,
             auth_plugin,
+            session_auth_plugin: auth_plugin,
         };
         if let InitResult {
             auth_success: true,
@@ -659,17 +663,28 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         let database = handshake.database.map(String::from);
         let client_auth_plugin = handshake.auth_plugin_name.map(|s| s.to_owned());
 
-        let client_plugin_matches = client_auth_plugin
+        let client_plugin = client_auth_plugin
             .as_deref()
-            .and_then(|s| s.parse::<AuthPlugin>().ok())
-            .is_some_and(|p| p == self.auth_plugin);
+            .and_then(|s| s.parse::<AuthPlugin>().ok());
 
-        let handshake_password = if !client_plugin_matches
-            // Some clients (at the very least certain versions of PHP's MySQL PDO library) send an
-            // empty password response in the initial handshake, even if the auth plugin is set and
-            // correct. We want to send a switch-authentication request in that case too
-            || password.is_empty()
-        {
+        // If the client offered a plugin we support and sent a non-empty
+        // scramble with it, authenticate using that plugin directly. This
+        // lets MySQL 9.x clients -- which no longer ship
+        // `mysql_native_password.so` -- log in when we advertise the legacy
+        // plugin but they prefer `caching_sha2_password`.
+        //
+        // An empty initial scramble is a known quirk of some PHP PDO and
+        // libmysql versions that expect an auth-switch to produce a fresh
+        // nonce. When that happens we send an AUTH_SWITCH_REQUEST targeting
+        // the plugin the client already picked (rather than our advertised
+        // default) so a MySQL 9.x client isn't asked to load a plugin it
+        // doesn't have.
+        let use_client_plugin = client_plugin.is_some() && !password.is_empty();
+        let switch_plugin = client_plugin.unwrap_or(self.auth_plugin);
+
+        let (session_plugin, handshake_password) = if use_client_plugin {
+            (client_plugin.expect("checked above"), password)
+        } else {
             // Authentication mismatch - try to switch auth plugins
 
             if !handshake
@@ -692,10 +707,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
             debug!(
                 ?client_auth_plugin,
+                %switch_plugin,
                 "Client offered incorrect authentication plugin, sending switch request",
             );
 
-            let auth_switch_request_packet = self.auth_plugin.get_switch_packet(&auth_data);
+            let auth_switch_request_packet = switch_plugin.get_switch_packet(&auth_data);
             self.conn.enqueue_packet(auth_switch_request_packet);
             self.conn.flush().await?;
 
@@ -707,15 +723,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             })?;
             self.conn.set_seq(packet.next_seq());
 
-            packet.data.to_vec()
-        } else {
-            password
+            (switch_plugin, packet.data.to_vec())
         };
+
+        self.session_auth_plugin = session_plugin;
 
         let plain_password = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
-        let auth_success = self
-            .auth_plugin
+        let auth_success = session_plugin
             .handle_authentication(
                 &AuthContext {
                     username: &username,
@@ -799,8 +814,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     // fresh nonce. Without this, the client would hash its
                     // password against the original handshake nonce while we
                     // verify against the fresh one, causing auth failure.
-                    self.conn
-                        .enqueue_packet(self.auth_plugin.get_switch_packet(&change_user_auth_data));
+                    // Target the plugin negotiated during the initial
+                    // handshake -- the client already demonstrated it can
+                    // speak that one.
+                    self.conn.enqueue_packet(
+                        self.session_auth_plugin
+                            .get_switch_packet(&change_user_auth_data),
+                    );
                     self.conn.flush().await?;
 
                     let packet = self.conn.next().await?.ok_or_else(|| {
@@ -815,7 +835,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     let plain_password = self.shim.password_for_username(&username);
                     let require_auth = self.shim.require_authentication();
                     let auth_success = self
-                        .auth_plugin
+                        .session_auth_plugin
                         .handle_authentication(
                             &AuthContext {
                                 username: &username,
