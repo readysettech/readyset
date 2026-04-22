@@ -124,6 +124,37 @@ pub const PG_HEARTBEAT_TABLE_NAME: &str = "_heartbeat";
 /// Heartbeat table name for MySQL.
 pub const MYSQL_HEARTBEAT_TABLE: &str = "_readyset_heartbeat";
 
+/// Default upper bound the lag reporter waits for an upstream TCP connect. The outer
+/// per-poll timeout covers the rest of each poll, but the heartbeat-table setup at
+/// startup runs outside that timeout — a connect timeout here is what bounds it. Sized
+/// to be well above a normal handshake under load and well below any interval the user
+/// can configure. Can be overridden at startup via the
+/// [`LAG_CONNECT_TIMEOUT_ENV`] environment variable; the override exists primarily so
+/// tests can lower the value well below the normal default.
+const DEFAULT_LAG_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Environment variable override for [`DEFAULT_LAG_CONNECT_TIMEOUT`], specified in
+/// milliseconds. Not a user-facing CLI flag — the only production use case is testing.
+pub const LAG_CONNECT_TIMEOUT_ENV: &str = "READYSET_LAG_CONNECT_TIMEOUT_MS";
+
+/// Resolve the current connect-timeout budget, honoring
+/// [`LAG_CONNECT_TIMEOUT_ENV`] if set to a valid millisecond value.
+fn lag_connect_timeout() -> Duration {
+    std::env::var(LAG_CONNECT_TIMEOUT_ENV)
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_LAG_CONNECT_TIMEOUT)
+}
+
+/// Budget for `setup_heartbeat_table`, which runs a CREATE TABLE IF NOT EXISTS + a
+/// housekeeping DELETE after connecting. Gives the DDL a generous window on top of the
+/// connect budget so a metadata-lock stall during the CREATE can't wedge the reporter
+/// task at startup.
+fn heartbeat_setup_timeout() -> Duration {
+    lag_connect_timeout() * 3
+}
+
 /// Configuration for the upstream connection used by the lag reporter.
 pub enum UpstreamLagConfig {
     Postgres {
@@ -148,6 +179,66 @@ impl UpstreamLagConfig {
             UpstreamLagConfig::MysqlFile { heartbeat, .. } => *heartbeat,
             UpstreamLagConfig::MysqlGtid { heartbeat, .. } => *heartbeat,
         }
+    }
+
+    /// Applies the current connect-timeout budget to the embedded Postgres config.
+    /// Called once before the reporter task enters its poll loop, so every subsequent
+    /// PG connect — including the heartbeat-table setup that runs outside the per-poll
+    /// timeout — inherits a bounded handshake. This is a no-op for MySQL variants:
+    /// `mysql_async::Opts` on the readyset fork doesn't expose a connect-timeout
+    /// setter, so MySQL connects are bounded at the call sites via
+    /// [`mysql_connect_bounded`] instead. The MySQL arms are spelled out explicitly
+    /// so that adding a new upstream variant forces an audit.
+    fn with_pg_connect_timeout(self) -> Self {
+        match self {
+            UpstreamLagConfig::Postgres {
+                mut config,
+                tls,
+                heartbeat,
+            } => {
+                config.connect_timeout(lag_connect_timeout());
+                UpstreamLagConfig::Postgres {
+                    config,
+                    tls,
+                    heartbeat,
+                }
+            }
+            UpstreamLagConfig::MysqlFile { .. } | UpstreamLagConfig::MysqlGtid { .. } => self,
+        }
+    }
+}
+
+/// Open a MySQL connection with a bounded handshake. Used by every MySQL connect the
+/// lag reporter makes so neither the heartbeat setup (outside the per-poll timeout)
+/// nor a per-poll connect can hang indefinitely on an unreachable upstream.
+///
+/// Errors are returned without a prefix so call sites add a single layer of context
+/// (e.g. "Failed to connect for heartbeat setup"); wrapping here too would produce
+/// double-layered messages.
+async fn mysql_connect_bounded(opts: &mysql_async::Opts) -> ReadySetResult<mysql_async::Conn> {
+    let budget = lag_connect_timeout();
+    let connect = async {
+        // Use fail::eval rather than set_failpoint! so the injected delay is async
+        // and gets cancelled cleanly by the surrounding timeout. Configured via
+        // `return(delay_ms)`, e.g. `"1*return(60000)"`.
+        #[cfg(feature = "failure_injection")]
+        if let Some(delay_ms) =
+            fail::eval(readyset_util::failpoints::REPLICATION_LAG_CONNECT, |v| {
+                v.and_then(|s| s.parse::<u64>().ok())
+            })
+            .flatten()
+        {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+        mysql_async::Conn::new(opts.clone()).await
+    };
+    match tokio::time::timeout(budget, connect).await {
+        Ok(Ok(conn)) => Ok(conn),
+        Ok(Err(e)) => Err(internal_err!("{e}")),
+        Err(_) => Err(internal_err!(
+            "connect timed out after {}ms",
+            budget.as_millis()
+        )),
     }
 }
 
@@ -208,15 +299,34 @@ async fn lag_reporter_loop(
     cancel: CancellationToken,
     reporter: ReporterConfig,
 ) {
-    // Attempt heartbeat table setup if enabled.
+    // Bound every upstream connect the reporter makes, including the heartbeat-table
+    // setup below (which runs outside the per-poll timeout). Without this an
+    // unreachable upstream at startup would hang the reporter task indefinitely.
+    let upstream_config = upstream_config.with_pg_connect_timeout();
+
+    // Attempt heartbeat table setup if enabled. The connect budget bounds the TCP
+    // handshake; the outer timeout here additionally bounds any DDL that runs after
+    // the connect completes, so a metadata-lock stall on CREATE TABLE can't wedge
+    // the reporter at startup.
     let mut heartbeat_active = upstream_config.heartbeat_enabled();
     if heartbeat_active {
-        match setup_heartbeat_table(&upstream_config, &reporter.instance_id).await {
-            Ok(()) => debug!("Heartbeat table created/verified"),
-            Err(e) => {
+        let setup_budget = heartbeat_setup_timeout();
+        let setup = setup_heartbeat_table(&upstream_config, &reporter.instance_id);
+        let result = tokio::time::timeout(setup_budget, setup).await;
+        match result {
+            Ok(Ok(())) => debug!("Heartbeat table created/verified"),
+            Ok(Err(e)) => {
                 warn!(
                     error = %e,
                     "Failed to create heartbeat table — disabling heartbeat. \
+                     Byte/transaction lag will still be reported."
+                );
+                heartbeat_active = false;
+            }
+            Err(_) => {
+                warn!(
+                    budget_ms = setup_budget.as_millis() as u64,
+                    "Heartbeat table setup timed out — disabling heartbeat. \
                      Byte/transaction lag will still be reported."
                 );
                 heartbeat_active = false;
@@ -311,7 +421,7 @@ async fn setup_heartbeat_table(
             Ok(())
         }
         UpstreamLagConfig::MysqlFile { opts, .. } | UpstreamLagConfig::MysqlGtid { opts, .. } => {
-            let mut conn = mysql_async::Conn::new(opts.clone()).await.map_err(|e| {
+            let mut conn = mysql_connect_bounded(opts).await.map_err(|e| {
                 readyset_errors::internal_err!("Failed to connect for heartbeat setup: {e}")
             })?;
 
@@ -566,7 +676,7 @@ async fn poll_mysql_file_lag(
     instance_id: &str,
 ) -> ReadySetResult<ReplicationLagStatus> {
     // Connect-query-disconnect
-    let mut conn = mysql_async::Conn::new(opts.clone())
+    let mut conn = mysql_connect_bounded(opts)
         .await
         .map_err(|e| internal_err!("Failed to connect for lag query: {e}"))?;
 
@@ -616,7 +726,7 @@ async fn poll_mysql_gtid_lag(
     instance_id: &str,
 ) -> ReadySetResult<ReplicationLagStatus> {
     // Connect-query-disconnect
-    let mut conn = mysql_async::Conn::new(opts.clone())
+    let mut conn = mysql_connect_bounded(opts)
         .await
         .map_err(|e| internal_err!("Failed to connect for lag query: {e}"))?;
 
@@ -681,4 +791,91 @@ async fn query_binlog_file_sizes(
     }
 
     Ok(sizes)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use postgres_native_tls::MakeTlsConnector;
+
+    use super::*;
+
+    fn pg_config() -> UpstreamLagConfig {
+        let connector = native_tls::TlsConnector::builder().build().unwrap();
+        UpstreamLagConfig::Postgres {
+            config: Box::new(tokio_postgres::Config::new()),
+            tls: MakeTlsConnector::new(connector),
+            heartbeat: false,
+        }
+    }
+
+    fn mysql_file_config() -> UpstreamLagConfig {
+        UpstreamLagConfig::MysqlFile {
+            opts: mysql_async::OptsBuilder::default().into(),
+            heartbeat: false,
+        }
+    }
+
+    fn mysql_gtid_config() -> UpstreamLagConfig {
+        UpstreamLagConfig::MysqlGtid {
+            opts: mysql_async::OptsBuilder::default().into(),
+            heartbeat: false,
+        }
+    }
+
+    #[test]
+    fn pg_connect_timeout_applied() {
+        let configured = pg_config().with_pg_connect_timeout();
+        let UpstreamLagConfig::Postgres { config, .. } = configured else {
+            panic!("expected Postgres variant");
+        };
+        assert_eq!(
+            config.get_connect_timeout().copied(),
+            Some(DEFAULT_LAG_CONNECT_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn mysql_variants_pass_through_pg_connect_timeout() {
+        // MySQL connect-timeout is enforced at the call site via `mysql_connect_bounded`,
+        // not on the Opts. `with_pg_connect_timeout` must leave the MySQL variants
+        // untouched; this test guards against a future refactor that expects it to
+        // apply a connect budget uniformly across all variants.
+        assert!(matches!(
+            mysql_file_config().with_pg_connect_timeout(),
+            UpstreamLagConfig::MysqlFile { .. }
+        ));
+        assert!(matches!(
+            mysql_gtid_config().with_pg_connect_timeout(),
+            UpstreamLagConfig::MysqlGtid { .. }
+        ));
+    }
+
+    // Env-var mutation tests share a process-wide lock so the two don't race with
+    // each other (cargo test runs unit tests in parallel by default).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn env_override_changes_connect_timeout() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: ENV_LOCK serializes env-mutating tests in this module; no other
+        // tests here touch LAG_CONNECT_TIMEOUT_ENV.
+        unsafe { std::env::set_var(LAG_CONNECT_TIMEOUT_ENV, "250") };
+        assert_eq!(lag_connect_timeout(), Duration::from_millis(250));
+        assert_eq!(heartbeat_setup_timeout(), Duration::from_millis(250) * 3);
+        // SAFETY: same as above — ENV_LOCK guarantees exclusive access.
+        unsafe { std::env::remove_var(LAG_CONNECT_TIMEOUT_ENV) };
+        assert_eq!(lag_connect_timeout(), DEFAULT_LAG_CONNECT_TIMEOUT);
+    }
+
+    #[test]
+    fn env_override_invalid_falls_back_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: ENV_LOCK serializes env-mutating tests in this module.
+        unsafe { std::env::set_var(LAG_CONNECT_TIMEOUT_ENV, "not a number") };
+        assert_eq!(lag_connect_timeout(), DEFAULT_LAG_CONNECT_TIMEOUT);
+        // SAFETY: same as above.
+        unsafe { std::env::remove_var(LAG_CONNECT_TIMEOUT_ENV) };
+    }
 }

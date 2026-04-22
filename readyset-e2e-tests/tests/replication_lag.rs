@@ -477,3 +477,160 @@ async fn psql_heartbeat_staleness_stays_bounded() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[cfg(feature = "failure_injection")]
+mod failure_injection {
+    use std::time::{Duration, Instant};
+
+    use fail::FailScenario;
+    use mysql_async::Row;
+    use mysql_async::prelude::Queryable;
+    use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+    use readyset_client_test_helpers::{Adapter, TestBuilder};
+    use readyset_util::eventually;
+    use readyset_util::failpoints;
+    use test_utils::{tags, upstream};
+
+    // Connect-timeout override for this test, in milliseconds. Smaller than the
+    // production default (10 s) so the test only waits as long as the behavior
+    // actually requires; the failpoint delay below is sized larger than this so the
+    // timeout is the only thing that can end the stuck connect.
+    const TEST_CONNECT_TIMEOUT_MS: u64 = 1500;
+    // Delay injected on the first MySQL connect attempt; big enough that its natural
+    // completion cannot explain the test finishing quickly — only the connect
+    // timeout firing can.
+    const FAILPOINT_CONNECT_DELAY_MS: u64 = 10_000;
+
+    /// Drop guard that resets process-wide state so a panicking test can't leak
+    /// configuration into subsequent serial tests.
+    struct TestCleanup;
+    impl Drop for TestCleanup {
+        fn drop(&mut self) {
+            let _ = fail::cfg(failpoints::REPLICATION_LAG_CONNECT, "off");
+            // SAFETY: tests are tagged `serial`, so we are the only thread mutating
+            // the environment; no concurrent readers to race with.
+            unsafe {
+                std::env::remove_var("READYSET_LAG_CONNECT_TIMEOUT_MS");
+            }
+        }
+    }
+
+    /// Regression test for a hang in the lag reporter's startup path. The
+    /// heartbeat-table setup runs *outside* the per-poll timeout, so only the
+    /// driver-level connect budget bounds it. If that budget is missing, an
+    /// unreachable upstream wedges the reporter task forever. The
+    /// `replication-lag-connect` failpoint simulates that wedge: a one-shot
+    /// 10 s sleep on the very first connect (the heartbeat setup) which the
+    /// bounded wrapper must cancel.
+    ///
+    /// With the connect timeout lowered via the env override, a working timeout
+    /// lets the reporter give up in ~1.5 s; a broken timeout would let the
+    /// failpoint's 10 s sleep run to completion. Measuring elapsed wall-clock
+    /// time from test start to first populated `upstream_offset` distinguishes
+    /// the two without relying on log text.
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial, slow)]
+    #[upstream(mysql)]
+    async fn mysql_lag_reporter_survives_stuck_connect() {
+        readyset_tracing::init_test_logging();
+        let db_name = "replication_lag_mysql_stuck_connect";
+
+        MySQLAdapter::recreate_database(db_name).await;
+        let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+        let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+        upstream_conn
+            .query_drop("CREATE TABLE t1 (id INT PRIMARY KEY, val INT)")
+            .await
+            .unwrap();
+        upstream_conn
+            .query_drop("INSERT INTO t1 VALUES (1, 10)")
+            .await
+            .unwrap();
+
+        // Arm cleanup *before* any state is mutated so a panic on env::set_var or
+        // TestBuilder::build still resets both the failpoint and the env var.
+        let _cleanup = TestCleanup;
+
+        // Override the connect budget so the test only waits as long as needed to
+        // detect the timeout firing. SAFETY: `serial` test tag prevents concurrent
+        // env access.
+        unsafe {
+            std::env::set_var(
+                "READYSET_LAG_CONNECT_TIMEOUT_MS",
+                TEST_CONNECT_TIMEOUT_MS.to_string(),
+            );
+        }
+
+        let _fail_scenario = FailScenario::setup();
+        fail::cfg(
+            failpoints::REPLICATION_LAG_CONNECT,
+            &format!("1*return({FAILPOINT_CONNECT_DELAY_MS})"),
+        )
+        .expect("failed to configure lag-connect failpoint");
+
+        let test_started = Instant::now();
+        let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+            .recreate_database(false)
+            .replicate_db(db_name)
+            .fallback(true)
+            .replication_heartbeat(true)
+            .replication_lag_interval(2)
+            .build::<MySQLAdapter>()
+            .await;
+
+        let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+        eventually!(
+            attempts: 30,
+            sleep: Duration::from_secs(1),
+            run_test: {
+                let row: Option<Row> = rs_conn
+                    .query_first("SELECT * FROM readyset.replication_status")
+                    .await
+                    .unwrap();
+                row.and_then(|r| r.get::<String, _>("upstream_offset"))
+            },
+            then_assert: |upstream_offset| {
+                assert!(
+                    upstream_offset.is_some_and(|s| !s.is_empty()),
+                    "lag poll should populate upstream_offset once setup times out"
+                );
+            }
+        );
+
+        // Primary assertion: the connect timeout bounded the stuck handshake.
+        // Upper bound is the failpoint sleep minus safety slack; if the timeout
+        // had not fired, we would have waited the full failpoint delay before the
+        // successful connect. Lower bound asserts we actually waited for the
+        // timeout to fire (otherwise the failpoint never triggered).
+        let elapsed = test_started.elapsed();
+        let connect_budget = Duration::from_millis(TEST_CONNECT_TIMEOUT_MS);
+        let failpoint_delay = Duration::from_millis(FAILPOINT_CONNECT_DELAY_MS);
+        assert!(
+            elapsed < failpoint_delay,
+            "connect timeout did not fire: waited {elapsed:?}, \
+             which is >= the failpoint delay {failpoint_delay:?}"
+        );
+        assert!(
+            elapsed >= connect_budget,
+            "test completed too quickly ({elapsed:?} < connect_budget {connect_budget:?}); \
+             failpoint may not have been hit"
+        );
+
+        // Setup timed out, so heartbeat was disabled. Staleness must remain NULL
+        // even though --replication-heartbeat was requested.
+        let row: Row = rs_conn
+            .query_first("SELECT * FROM readyset.replication_status")
+            .await
+            .unwrap()
+            .expect("expected a replication_status row");
+        let staleness: Option<Option<f64>> = row.get("heartbeat_staleness_seconds");
+        assert_eq!(
+            staleness,
+            Some(None),
+            "heartbeat setup should have timed out, leaving staleness NULL"
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+}

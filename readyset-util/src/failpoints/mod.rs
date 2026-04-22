@@ -98,3 +98,10 @@ pub const CACHING_SHA2_FAST_AUTH_SUCCESS: &str = "caching-sha2-fast-auth-success
 /// before any packet is sent. Used to assert that the full-auth path was
 /// (or was not) taken for a given connection.
 pub const CACHING_SHA2_FULL_AUTH_BEGIN: &str = "caching-sha2-full-auth-begin";
+
+/// Injects an async sleep into the replication lag reporter's MySQL upstream
+/// connect. Uses `fail::eval` with `return(delay_ms)`, e.g. `"1*return(10000)"`
+/// to simulate a wedged handshake on the next connect attempt. Used by tests of
+/// the connect-timeout bound around `setup_heartbeat_table` and the per-poll
+/// MySQL connects in `replicators::replication_lag_reporter`.
+pub const REPLICATION_LAG_CONNECT: &str = "replication-lag-connect";
