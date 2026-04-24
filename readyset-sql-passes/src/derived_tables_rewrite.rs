@@ -760,7 +760,16 @@ fn inline_from_item(
         },
     );
 
-    make_aliases_distinct_from_base_statement(base_stmt, &mut inl_from_item, &HashSet::new())?;
+    {
+        let (inl_stmt, inl_alias) = expect_sub_query_with_alias_mut(&mut inl_from_item);
+        let inl_alias = inl_alias.clone();
+        make_aliases_distinct_from_base_statement(
+            base_stmt,
+            &inl_alias,
+            inl_stmt,
+            &HashSet::new(),
+        )?;
+    }
 
     let (inl_stmt, inl_stmt_alias) = expect_sub_query_with_alias(&inl_from_item);
     let ext_to_int_fields = build_ext_to_int_fields_map(inl_stmt, inl_stmt_alias)?;

@@ -1250,7 +1250,6 @@ pub(crate) fn collect_columns_in_expr_mut(expr: &mut Expr) -> Vec<&mut Expr> {
 ///
 /// Walks the expression tree directly via [`collect_columns_in_expr_mut`], replacing each
 /// `Expr::Column` that appears in `ext_to_int_fields` with its mapped expression.
-#[allow(dead_code)] // Used once callers migrate onto `can_inline_subquery` (commits 2-4).
 pub(crate) fn substitute_columns_in_expr(
     expr: &Expr,
     ext_to_int_fields: &HashMap<Column, Expr>,
@@ -1798,25 +1797,32 @@ pub(crate) fn get_unique_alias(from_items: &HashSet<Relation>, base: &str) -> Sq
 ///
 /// # Returns
 /// `Ok(true)` if any aliases were renamed, `Ok(false)` if no collisions were found
+/// Rename any FROM-item alias inside `inl_stmt` that collides with an alias
+/// visible in `base_stmt`'s FROM clause (excluding `inl_alias` itself, which
+/// will be replaced by the inlinable's internal FROM items after splicing) or
+/// with any alias in `reserved_aliases`. Rewrites all column references inside
+/// `inl_stmt` to use the renamed aliases. Returns `true` if any renames happened.
+///
+/// `reserved_aliases` is intended for aliases bound inside downstream subquery
+/// scopes, which would otherwise shadow the newly-hoisted inner aliases.
 pub(crate) fn make_aliases_distinct_from_base_statement(
     base_stmt: &SelectStatement,
-    inl_from_item: &mut TableExpr,
+    inl_alias: &SqlIdentifier,
+    inl_stmt: &mut SelectStatement,
     reserved_aliases: &HashSet<Relation>,
 ) -> ReadySetResult<bool> {
-    // Collect base statement FROM item names, excluding the one we are going to inline.
-    // The inlinable's own external alias is removed because it will be replaced by
-    // the inlinable's internal FROM items after splicing.
+    // Collect base statement FROM item names, excluding the one being inlined.
+    // The inlinable's own external alias is removed because it will be replaced
+    // by the inlinable's internal FROM items after splicing.
     let mut base_locals = get_local_from_items_iter!(base_stmt)
         .map(get_from_item_reference_name)
         .collect::<ReadySetResult<HashSet<Relation>>>()?;
-    base_locals.remove(&get_from_item_reference_name(inl_from_item)?);
+    base_locals.remove(&inl_alias.clone().into());
 
     // Also reserve aliases that appear inside downstream subquery scopes. After hoisting,
     // inlinable FROM-item aliases become visible at the base level; if a downstream subquery
     // already binds the same alias locally, the new base-level alias could be shadowed.
     base_locals.extend(reserved_aliases.iter().cloned());
-
-    let (inl_stmt, _) = expect_sub_query_with_alias_mut(inl_from_item);
 
     // Iterate the inlinable statement FROM clause, detect the collided names and replace it with
     // the new distinct ones.

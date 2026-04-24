@@ -27,11 +27,6 @@
 //! These are consumed by `inline_leading_derived_table`, `derived_tables_rewrite`,
 //! and `lateral_join` (LATERAL flattening).
 
-// Scaffolding commit: the three existing callers have not yet migrated onto
-// this module's helpers, so every item is dead until commits 2-4 wire them in.
-// Removed as each caller migrates.
-#![allow(dead_code)]
-
 use crate::derived_tables_rewrite::{
     can_inline_left_join_rhs_safe, can_move_joins_on_nontrivial_expr_to_where,
 };
@@ -425,6 +420,7 @@ fn window_functions_block_inlining(
 /// Precise: uses `find_rhs_join_clause` for the join-RHS walk rather than
 /// the blanket "all joins" over-approximation previously inlined at the
 /// LATERAL flatten call site.
+#[allow(dead_code)] // Used once lateral_join / DTR migrate (commits 3-4).
 pub(crate) fn compute_downstream_for_position(
     base_stmt: &SelectStatement,
     inl_from_item_ord_idx: usize,
@@ -1237,6 +1233,7 @@ pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Optio
 /// non-INNER first join.  The downstream post-substitution ON and
 /// nontrivial-ON checks also validate this, but checking early avoids
 /// subtle breakage if those guards are ever relaxed.
+#[allow(dead_code)] // Used once DTR migrates (commit 4).
 pub(crate) fn inline_from_item_position_checks(
     base_stmt: &SelectStatement,
     inl_stmt: &SelectStatement,
