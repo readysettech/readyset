@@ -2656,7 +2656,18 @@ pub(crate) fn are_group_by_keys_pinned_by_correlation(
 fn fix_correlated_columns_in_group_by_and_having(
     cols_set: &HashSet<(Column, Column)>,
     stmt: &mut SelectStatement,
-) -> bool {
+) -> ReadySetResult<bool> {
+    // Pre-normalize GROUP BY: resolve every field reference (numeric or
+    // alias-ref) to its underlying expression so the match below is
+    // shape-agnostic. This keeps the unnesting pass independent of whether
+    // `remove_numeric_field_references` has run upstream.
+    let fields_snapshot = stmt.fields.clone();
+    if let Some(group_by) = &mut stmt.group_by {
+        for f in group_by.fields.iter_mut() {
+            *f = FieldReference::Expr(resolve_field_reference(&fields_snapshot, f)?);
+        }
+    }
+
     let are_pinned = if let Some(group_by) = &mut stmt.group_by {
         let mut local_cols: HashSet<_> = cols_set.iter().map(|(l, _)| l).collect();
         let mut constraint_columns_group_by_only = true;
@@ -2703,7 +2714,7 @@ fn fix_correlated_columns_in_group_by_and_having(
         }
     }
 
-    are_pinned
+    Ok(are_pinned)
 }
 
 fn fix_correlated_subquery_with_window_functions(
@@ -2741,7 +2752,7 @@ pub(crate) fn align_group_by_and_windows_with_correlation(
     // Rewrite correlated → local columns in GROUP BY and HAVING, and check
     // whether the GROUP BY keys are exactly pinned by the correlation pairs.
     let are_local_columns_eq_grouping_keys =
-        fix_correlated_columns_in_group_by_and_having(cols_set, stmt);
+        fix_correlated_columns_in_group_by_and_having(cols_set, stmt)?;
 
     // Make the WF, if present, be partitioned by the local columns equated to the correlated keys.
     fix_correlated_subquery_with_window_functions(cols_set, stmt)?;

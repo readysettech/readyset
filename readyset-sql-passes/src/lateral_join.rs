@@ -1,4 +1,8 @@
 use crate::get_local_from_items_iter_mut;
+use crate::inline_subquery::{
+    InlineCandidate, apply_inline, can_inline_subquery, compute_downstream_for_position,
+    prepare_inline,
+};
 use crate::rewrite_utils::{
     RewriteStatus, add_expression_to_join_constraint, align_group_by_and_windows_with_correlation,
     analyse_lone_aggregates_subquery_fields, and_predicates_skip_true, as_sub_query_with_alias,
@@ -6,7 +10,8 @@ use crate::rewrite_utils::{
     columns_iter, columns_iter_mut, contain_subqueries_with_limit_clause,
     default_alias_for_select_item_expression, expect_field_as_expr, expect_field_as_expr_mut,
     expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr, extract_correlation_keys,
-    get_from_item_reference_name, is_column_eq_column, is_filter_pushable_from_item,
+    get_from_item_reference_name, is_aggregation_or_grouped, is_always_true_filter,
+    is_column_eq_column, is_filter_pushable_from_item, make_aliases_distinct_from_base_statement,
     move_correlated_constraints_from_join_to_where, outermost_expression_mut,
     partition_correlated_predicates, project_columns_if, split_expr,
 };
@@ -274,6 +279,128 @@ fn resolve_lateral_subquery(
     Ok(outer_join_on)
 }
 
+/// Result of resolving a single LATERAL subquery.
+enum LateralResolution {
+    /// Standard: rewritten subquery + extracted ON expression.
+    Resolved(TableExpr, Expr),
+    /// Flatten: the wrapper qualifies for inlining into the parent.
+    Flatten(Box<InlineCandidate>),
+}
+
+/// Returns `true` when `stmt` has at least one non-INNER JOIN whose ON
+/// references a column not in `local_tables` (i.e. an outer-scope column).
+fn has_outer_left_join_on(stmt: &SelectStatement, local_tables: &HashSet<Relation>) -> bool {
+    stmt.join.iter().any(|jc| {
+        if jc.operator.is_inner_join() {
+            return false;
+        }
+        if let JoinConstraint::On(on_expr) = &jc.constraint {
+            columns_iter(on_expr).any(|col| {
+                col.table
+                    .as_ref()
+                    .is_some_and(|t| !local_tables.contains(t))
+            })
+        } else {
+            false
+        }
+    })
+}
+
+/// Absorbs a `LateralResolution::Flatten` into the parent scope: runs the
+/// common eligibility check, takes tables/joins from the prepared inline,
+/// updates preceding tracking, and defers `apply_inline`.
+///
+/// `out_joins` is the target for absorbed JoinClauses (`new_joins` or `were_lateral`).
+/// Tables that precede any LATERAL go to `out_tables`; once `had_lateral` is true,
+/// they go to `out_joins` as INNER JOINs with empty constraint.
+/// Parameter `inl_from_item_ord_idx` gives the ordinal position of the LATERAL
+/// wrapper in `outer_stmt`'s outermost table exprs (index into the sequence
+/// produced by `outermost_table_exprs`).
+///
+/// Returns the `InlineCandidate` with its `stmt.tables` and `stmt.join` taken
+/// (absorbed into `out_tables`/`out_joins`); the remaining fields (WHERE,
+/// HAVING, GROUP BY, ORDER, ext_to_int, alias) are intact for deferred
+/// `apply_inline`. The caller pushes the returned value into its deferred
+/// queue.
+fn absorb_flatten(
+    mut prepared: InlineCandidate,
+    outer_stmt: &SelectStatement,
+    inl_from_item_ord_idx: usize,
+    mut out_tables: Option<&mut Vec<TableExpr>>,
+    out_joins: &mut Vec<JoinClause>,
+    preceding_from_items: &mut HashSet<Relation>,
+    preceding_to_rhs: &mut Vec<Relation>,
+) -> ReadySetResult<InlineCandidate> {
+    let (ds_tables, ds_joins) = compute_downstream_for_position(outer_stmt, inl_from_item_ord_idx);
+
+    // Full eligibility check with the outer statement.
+    // `is_top_select = false`: `absorb_flatten` passes a conservative `false`.
+    // In can_inline_subquery, this value is only consumed by
+    // substitute_columns_in_expr (in `check_post_substitution_on_shape`),
+    // whose receiver parameter is currently unused (pre-existing dead
+    // plumbing — see the docstring on can_inline_subquery for details).
+    // Passing `false` matches prior behavior here; revisit if
+    // substitute_columns_in_expr is activated or the parameter is dropped
+    // end-to-end.
+    let ctx = crate::inline_subquery::InliningContext {
+        inner_stmt: &prepared.stmt,
+        outer_stmt,
+        inner_alias: &prepared.alias,
+        ext_to_int: &prepared.ext_to_int,
+        inl_from_item_ord_idx,
+        downstream_tables: ds_tables,
+        downstream_joins: ds_joins,
+        is_top_select: false,
+        skip_unnesting_guard: false,
+        inner_rel: prepared.alias.clone().into(),
+        is_inner_agg: is_aggregation_or_grouped(&prepared.stmt)?,
+        is_outer_agg: is_aggregation_or_grouped(outer_stmt)?,
+    };
+
+    if can_inline_subquery(&ctx)?.is_none() {
+        unsupported!("LATERAL wrapper not eligible for flattening after full eligibility check");
+    }
+
+    // Alias deduplication: rename any inner FROM-item alias that collides
+    // with an outer top-level FROM-item alias. Must run BEFORE tables/joins
+    // are absorbed. The inner `ext_to_int` map was built from the inner's
+    // pre-dedup SELECT fields; since dedup renames FROM-item aliases (not
+    // projected column aliases), `ext_to_int` remains valid.
+    make_aliases_distinct_from_base_statement(
+        outer_stmt,
+        &prepared.alias,
+        &mut prepared.stmt,
+        &HashSet::new(),
+    )?;
+
+    let inner_tables = mem::take(&mut prepared.stmt.tables);
+    let inner_joins = mem::take(&mut prepared.stmt.join);
+
+    for t in inner_tables {
+        let t_rel = get_from_item_reference_name(&t)?;
+        preceding_from_items.insert(t_rel.clone());
+        preceding_to_rhs.push(t_rel);
+        if let Some(ref mut tables) = out_tables {
+            tables.push(t);
+        } else {
+            out_joins.push(JoinClause {
+                operator: JoinOperator::InnerJoin,
+                right: JoinRightSide::Table(t),
+                constraint: JoinConstraint::Empty,
+            });
+        }
+    }
+    for jc in inner_joins {
+        for rhs_te in jc.right.table_exprs() {
+            let rhs_rel = get_from_item_reference_name(rhs_te)?;
+            preceding_from_items.insert(rhs_rel.clone());
+            preceding_to_rhs.push(rhs_rel);
+        }
+        out_joins.push(jc);
+    }
+    Ok(prepared)
+}
+
 /// LATERAL RHS sanitation (before limit/offset guard):
 ///  • LIMIT 0 ⇒ force RHS empty (recursively clear LIMIT/OFFSET/ORDER and set FALSE at the right level).
 ///  • Move RHS-internal correlated atoms from JOIN .. ON to WHERE so TOP‑K partitioning sees correlation.
@@ -284,7 +411,8 @@ fn try_resolve_as_lateral_subquery(
     preceding_from_items: &HashSet<Relation>,
     preceding_to_rhs: &[Relation],
     ctx: &mut UnnestContext,
-) -> ReadySetResult<(bool, Option<(TableExpr, Expr)>)> {
+    allow_flatten: bool,
+) -> ReadySetResult<(bool, Option<LateralResolution>)> {
     let mut has_transformed;
 
     // Descend and resolve inner subqueries first; bail if not actually LATERAL
@@ -306,11 +434,40 @@ fn try_resolve_as_lateral_subquery(
     // Restore ancestor scope after recursion.
     ctx.ancestor_scope = saved_scope;
     ctx.ancestor_scope_ordered = saved_ordered;
-
     if stmt.lateral {
         stmt.lateral = false;
     } else {
         return Ok((has_transformed, None));
+    }
+
+    // --- Attempt flattening for projection-only wrappers with ancestor-scope LEFT JOINs ---
+    // Only allowed when the outer position is a cross-join (comma-join), per the
+    // algebraic identity A × (B ⟕_p C) = (A × B) ⟕_p C.
+    // We use `stmt` (already borrowed mutably from `from_item`) to check the inner
+    // statement's joins; if eligible we drop the mutable borrow before calling
+    // `prepare_inline` on the whole `from_item`.
+    // LATERAL-specific: reject flattening if the wrapper has per-outer-row
+    // semantics that would become global after flattening:
+    //   - LIMIT / OFFSET: applied per outer row in LATERAL, global after flatten.
+    //   - GROUP BY / aggregates: grouped per outer row in LATERAL, globally after.
+    //   - DISTINCT: deduplicated per outer row in LATERAL, globally after.
+    //   - ORDER BY: per-outer ordering is meaningless at outer scope post-flatten.
+    // Note: aggregation of the wrapper's own SELECT (e.g. COUNT(*) directly)
+    // is detected via `is_aggregation_or_grouped(stmt)?`. HAVING is handled
+    // by `apply_inline`: with aggregates/GROUP BY, HAVING is merged into outer
+    // HAVING; without them, HAVING is semantically a WHERE filter and is
+    // merged into outer WHERE.
+    let lateral_flatten_safe = allow_flatten
+        && stmt.limit_clause.is_empty()
+        && stmt.order.is_none()
+        && !stmt.distinct
+        && !is_aggregation_or_grouped(stmt)?;
+    if lateral_flatten_safe {
+        let local_tables = collect_local_from_items(stmt)?;
+        if has_outer_left_join_on(stmt, &local_tables) {
+            let prepared = prepare_inline(from_item.clone())?;
+            return Ok((true, Some(LateralResolution::Flatten(Box::new(prepared)))));
+        }
     }
 
     // --- Sanitize RHS prior to legacy LIMIT/ORDER guard ---
@@ -342,7 +499,13 @@ fn try_resolve_as_lateral_subquery(
             &local_from_items,
             preceding_from_items,
         );
-        Ok((true, Some((from_item.clone(), lateral_join_on))))
+        Ok((
+            true,
+            Some(LateralResolution::Resolved(
+                from_item.clone(),
+                lateral_join_on,
+            )),
+        ))
     } else {
         Ok((has_transformed, None))
     }
@@ -629,9 +792,11 @@ fn resolve_lateral_subqueries(
     // The LATERAL subqueries can be correlated with the preceding FROM items only,
     // As we are moving along the FROM items, the number of preceding FROM items might increase.
     // This HashSet maintains the current set of items, the remaining LATERAL subqueries can be correlated with.
+    // Seeded from ancestor scope so nested LATERALs see grandparent tables.
     let mut preceding_from_items = ctx.ancestor_scope.clone();
 
     // Ordered FROM items, preceding current RHS. Maintained as we advance over the `stmt` FROM items.
+    // Seeded from ancestor scope for ON normalization LHS selection.
     let mut preceding_to_rhs = ctx.ancestor_scope_ordered.clone();
 
     // Build new comma separated tables/sub-queries and joins
@@ -666,6 +831,11 @@ fn resolve_lateral_subqueries(
     // After the first handled `lateral`, all items from `stmt.tables` will be added to `new_joins`,
     // regardless of being `lateral` or not.
     let mut had_lateral = false;
+
+    // Deferred apply_inline calls for flattened LATERAL wrappers.
+    // We cannot mutably borrow `stmt` during iteration, so we collect them
+    // and apply after the loops splice tables/joins into place.
+    let mut deferred_inlines: Vec<InlineCandidate> = Vec::new();
 
     // Normalizes the ON for a rewritten LATERAL:
     // - Keep only atoms over {RHS, chosen LHS} in ON; push the remainder to outer WHERE.
@@ -707,7 +877,7 @@ fn resolve_lateral_subqueries(
     }
 
     // Handle the left-hand side comma separated tables/sub-queries.
-    for stmt_from_item in stmt.tables.iter() {
+    for (stmt_tables_idx, stmt_from_item) in stmt.tables.iter().enumerate() {
         //
         let mut fields_map = HashMap::new();
         let join_operator_for_lateral = get_join_operator_for_lateral(
@@ -721,38 +891,62 @@ fn resolve_lateral_subqueries(
         let mut from_item = stmt_from_item.clone();
         let from_item_rel = get_from_item_reference_name(&from_item)?;
 
+        // Comma-join position is always a cross-join, so flattening is allowed.
         let (transformed, resolved_option) = try_resolve_as_lateral_subquery(
             &mut from_item,
             &preceding_from_items,
             &preceding_to_rhs,
             ctx,
+            true, // allow_flatten
         )?;
 
         preceding_from_items.insert(from_item_rel.clone());
 
-        if let Some((resolved_from_item, lateral_join_on)) = resolved_option {
-            let join_operator = join_operator_for_lateral?;
-            let join_constraint = normalize_lateral_join_constraint!(
-                stmt,
-                from_item_rel.clone(),
-                join_operator,
-                lateral_join_on
-            );
-            new_joins.push(JoinClause {
-                operator: join_operator,
-                right: JoinRightSide::Table(resolved_from_item),
-                constraint: join_constraint,
-            });
-            coalesce_fields_map.extend(fields_map);
-            had_lateral = true;
-        } else if had_lateral {
-            new_joins.push(JoinClause {
-                operator: JoinOperator::InnerJoin,
-                right: JoinRightSide::Table(from_item),
-                constraint: JoinConstraint::Empty,
-            });
-        } else {
-            new_tables.push(from_item);
+        match resolved_option {
+            Some(LateralResolution::Flatten(prepared)) => {
+                deferred_inlines.push(absorb_flatten(
+                    *prepared,
+                    stmt,
+                    stmt_tables_idx,
+                    if had_lateral {
+                        None
+                    } else {
+                        Some(&mut new_tables)
+                    },
+                    &mut new_joins,
+                    &mut preceding_from_items,
+                    &mut preceding_to_rhs,
+                )?);
+                had_lateral = true;
+                rewrite_status.rewrite();
+            }
+            Some(LateralResolution::Resolved(resolved_from_item, lateral_join_on)) => {
+                let join_operator = join_operator_for_lateral?;
+                let join_constraint = normalize_lateral_join_constraint!(
+                    stmt,
+                    from_item_rel.clone(),
+                    join_operator,
+                    lateral_join_on
+                );
+                new_joins.push(JoinClause {
+                    operator: join_operator,
+                    right: JoinRightSide::Table(resolved_from_item),
+                    constraint: join_constraint,
+                });
+                coalesce_fields_map.extend(fields_map);
+                had_lateral = true;
+            }
+            None => {
+                if had_lateral {
+                    new_joins.push(JoinClause {
+                        operator: JoinOperator::InnerJoin,
+                        right: JoinRightSide::Table(from_item),
+                        constraint: JoinConstraint::Empty,
+                    });
+                } else {
+                    new_tables.push(from_item);
+                }
+            }
         }
 
         preceding_to_rhs.push(from_item_rel);
@@ -761,6 +955,11 @@ fn resolve_lateral_subqueries(
             rewrite_status.rewrite();
         }
     }
+
+    // Running absolute position in `outermost_table_exprs(stmt)` for the next
+    // RHS item we will process. Starts AFTER all `stmt.tables` items, then
+    // advances through each join's RHS table exprs.
+    let mut outermost_idx_cursor = stmt.tables.len();
 
     for stmt_jc in stmt.join.iter() {
         // Figure out the RHS item, which is referenced in the join expression
@@ -807,58 +1006,89 @@ fn resolve_lateral_subqueries(
             let mut from_item = rhs_from_item.clone();
             let from_item_rel = get_from_item_reference_name(&from_item)?;
 
+            // Compute allow_flatten: flattening is only valid for cross-join positions,
+            // i.e. when the effective join is INNER with Empty/ON TRUE constraint.
+            let effective_constraint = if is_rhs_from_item {
+                &stmt_jc.constraint
+            } else {
+                &JoinConstraint::Empty
+            };
+            let allow_flatten = stmt_jc.operator.is_inner_join()
+                && match effective_constraint {
+                    JoinConstraint::Empty => true,
+                    JoinConstraint::On(expr) => is_always_true_filter(expr, Dialect::MySQL),
+                    _ => false,
+                };
+
             let (transformed, resolved_option) = try_resolve_as_lateral_subquery(
                 &mut from_item,
                 &preceding_from_items,
                 &preceding_to_rhs,
                 ctx,
+                allow_flatten,
             )?;
 
             preceding_from_items.insert(from_item_rel.clone());
 
-            if let Some((resolved_from_item, lateral_join_on)) = resolved_option {
-                // The current RHS item was LATERAL, generate a join clause for it.
-                // In case it was referenced in the current join condition,
-                // combine `lateral_join_on` with the current join condition, and use it.
-                let join_operator = join_operator_for_lateral?;
-                let join_constraint = if is_rhs_from_item {
-                    if let JoinConstraint::On(join_expr) = add_expression_to_join_constraint(
-                        stmt_jc.constraint.clone(),
-                        lateral_join_on,
-                    ) {
+            match resolved_option {
+                Some(LateralResolution::Flatten(prepared)) => {
+                    deferred_inlines.push(absorb_flatten(
+                        *prepared,
+                        stmt,
+                        outermost_idx_cursor,
+                        None, // JOIN position: always push to out_joins
+                        &mut were_lateral,
+                        &mut preceding_from_items,
+                        &mut preceding_to_rhs,
+                    )?);
+                    rewrite_status.rewrite();
+                }
+                Some(LateralResolution::Resolved(resolved_from_item, lateral_join_on)) => {
+                    // The current RHS item was LATERAL, generate a join clause for it.
+                    // In case it was referenced in the current join condition,
+                    // combine `lateral_join_on` with the current join condition, and use it.
+                    let join_operator = join_operator_for_lateral?;
+                    let join_constraint = if is_rhs_from_item {
+                        if let JoinConstraint::On(join_expr) = add_expression_to_join_constraint(
+                            stmt_jc.constraint.clone(),
+                            lateral_join_on,
+                        ) {
+                            normalize_lateral_join_constraint!(
+                                stmt,
+                                from_item_rel.clone(),
+                                join_operator,
+                                join_expr
+                            )
+                        } else {
+                            JoinConstraint::Empty
+                        }
+                    } else {
                         normalize_lateral_join_constraint!(
                             stmt,
                             from_item_rel.clone(),
                             join_operator,
-                            join_expr
+                            lateral_join_on
                         )
-                    } else {
-                        JoinConstraint::Empty
-                    }
-                } else {
-                    normalize_lateral_join_constraint!(
-                        stmt,
-                        from_item_rel.clone(),
-                        join_operator,
-                        lateral_join_on
-                    )
-                };
-                were_lateral.push(JoinClause {
-                    operator: join_operator,
-                    right: JoinRightSide::Table(resolved_from_item),
-                    constraint: join_constraint,
-                });
-                coalesce_fields_map.extend(fields_map);
-            } else {
-                // Add the regular one to the preceding items, as the later LATERAL subqueries
-                // could be correlated with them.
-                if is_rhs_from_item {
-                    rhs_from_item_is_regular = true;
+                    };
+                    were_lateral.push(JoinClause {
+                        operator: join_operator,
+                        right: JoinRightSide::Table(resolved_from_item),
+                        constraint: join_constraint,
+                    });
+                    coalesce_fields_map.extend(fields_map);
                 }
-                were_regular.push(from_item);
+                None => {
+                    // Add the regular one to the preceding items, as the later LATERAL subqueries
+                    // could be correlated with them.
+                    if is_rhs_from_item {
+                        rhs_from_item_is_regular = true;
+                    }
+                    were_regular.push(from_item);
+                }
             }
 
             preceding_to_rhs.push(from_item_rel);
+            outermost_idx_cursor += 1;
 
             if transformed {
                 rewrite_status.rewrite();
@@ -895,6 +1125,13 @@ fn resolve_lateral_subqueries(
 
     if let Some(to_where) = add_to_where {
         stmt.where_clause = and_predicates_skip_true(stmt.where_clause.take(), to_where);
+    }
+
+    // Apply deferred inlines for flattened LATERAL wrappers.
+    // At this point the absorbed tables/joins are already in place, so
+    // column rebinding can see them.
+    for prepared in deferred_inlines {
+        apply_inline(stmt, prepared, true, vec![])?;
     }
 
     // Apply COUNT→COALESCE mappings throughout the statement (SELECT, WHERE, HAVING,
@@ -1133,7 +1370,7 @@ mod tests {
         let original_stmt = "select T1.i from test T1 left join \
                 LATERAL(select max(T3.i) i, T3.b bb from test3 T3 WHERE T3.b = T1.b group by bb) T2 on T1.i = T2.i WHERE T1.t = 'aa'";
         let expect_stmt = r#"SELECT "t1"."i" FROM "test" AS "t1" LEFT JOIN
-            (SELECT max("t3"."i") AS "i", "t3"."b" AS "bb" FROM "test3" AS "t3" GROUP BY "bb") AS "t2"
+            (SELECT max("t3"."i") AS "i", "t3"."b" AS "bb" FROM "test3" AS "t3" GROUP BY "t3"."b") AS "t2"
             ON (("t1"."i" = "t2"."i") AND ("t2"."bb" = "t1"."b")) WHERE ("t1"."t" = 'aa')"#;
         test_it("test9", original_stmt, expect_stmt);
     }
@@ -1709,6 +1946,194 @@ FROM
         test_it("test34", original_text, expected_text);
     }
 
+    // Grandparent aggregate: nested LATERAL subquery whose inner aggregate correlates
+    // with a grandparent-scope table. The middle wrapper has a LEFT JOIN ON referencing
+    // the grandparent, so it should be flattened into the outer query.
+    #[test]
+    fn nested_lateral_grandparent_agg_flatten() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+              ) AS "l"
+        "#;
+        let expected_text = r#"SELECT "s"."sn", coalesce("l1"."cnt", 0) AS "x" FROM "s", "j" LEFT OUTER JOIN (SELECT count(*) AS "cnt", "spj"."sn" AS "sn" FROM "spj" GROUP BY "spj"."sn") AS "l1" ON ("l1"."sn" = "s"."sn")"#;
+        test_it(
+            "nested_lateral_grandparent_agg_flatten",
+            original_text,
+            expected_text,
+        );
+    }
+
+    // Negative: mixed parent+grandparent aggregate. The inner LATERAL correlates with
+    // BOTH a grandparent ("s") and its immediate parent ("j"). After inner recursion,
+    // the parent-scope correlation (j.jn) is extracted into a LEFT JOIN ON. This ON then
+    // references j (the parent) which is local. But the grandparent-scope correlation
+    // (s.sn) remains in the ON as well — which the outer resolve_lateral_subquery cannot
+    // push to WHERE from a LEFT JOIN ON. This correctly triggers unsupported.
+    #[test]
+    fn nested_lateral_parent_and_grandparent_agg_unsupported() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                      AND "spj"."jn" = "j"."jn"
+                  ) AS "l1"
+              ) AS "l"
+        "#;
+        // Expect error: the LEFT JOIN ON has outer-scope atoms that cannot be moved to WHERE.
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_parent_and_grandparent_agg_unsupported",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Flatten with WHERE in the wrapper — WHERE merges into outer.
+    #[test]
+    fn nested_lateral_grandparent_agg_flatten_with_where() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+                WHERE "j"."jn" = 'J1'
+              ) AS "l"
+        "#;
+        let expected_text = r#"SELECT "s"."sn", coalesce("l1"."cnt", 0) AS "x" FROM "s", "j" LEFT OUTER JOIN (SELECT count(*) AS "cnt", "spj"."sn" AS "sn" FROM "spj" GROUP BY "spj"."sn") AS "l1" ON ("l1"."sn" = "s"."sn") WHERE ("j"."jn" = 'J1')"#;
+        test_it(
+            "nested_lateral_grandparent_agg_flatten_with_where",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: wrapper with LIMIT — LIMIT inside LATERAL operates per-outer-row.
+    /// After flattening it would operate globally, changing semantics.
+    /// `can_inline_subquery` rejects because downstream cardinality check
+    /// fails (outer has `s` which is not ExactlyOne).
+    #[test]
+    fn nested_lateral_grandparent_agg_with_limit_bail() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+                LIMIT 5
+              ) AS "l"
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_grandparent_agg_with_limit_bail",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: wrapper with OFFSET — same reasoning as LIMIT.
+    #[test]
+    fn nested_lateral_grandparent_agg_with_offset_bail() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+                OFFSET 2
+              ) AS "l"
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_grandparent_agg_with_offset_bail",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: wrapper with ORDER BY + LIMIT (Top-K).
+    #[test]
+    fn nested_lateral_grandparent_agg_with_topk_bail() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."x"
+            FROM "s",
+              LATERAL (
+                SELECT "l1"."cnt" AS "x"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+                ORDER BY "l1"."cnt" DESC
+                LIMIT 3
+              ) AS "l"
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_grandparent_agg_with_topk_bail",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: wrapper with GROUP BY — the wrapper itself is aggregated.
+    /// After flattening GROUP BY would move to the outer level where `s`
+    /// changes group membership. Rejected by downstream cardinality check.
+    #[test]
+    fn nested_lateral_grandparent_agg_wrapper_with_group_by_bail() {
+        let original_text = r#"
+            SELECT "s"."sn", "l"."total"
+            FROM "s",
+              LATERAL (
+                SELECT SUM("l1"."cnt") AS "total"
+                FROM "j",
+                  LATERAL (
+                    SELECT COUNT(*) AS "cnt"
+                    FROM "spj"
+                    WHERE "spj"."sn" = "s"."sn"
+                  ) AS "l1"
+                GROUP BY "j"."jn"
+              ) AS "l"
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "nested_lateral_grandparent_agg_wrapper_with_group_by_bail",
+            original_text,
+            expected_text,
+        );
+    }
+
     /// Nested LATERAL: inner INNER JOIN correlates with grandparent scope.
     /// The inner LATERAL produces an INNER JOIN (not aggregate), so the
     /// correlation predicate lands in WHERE and can be extracted by the
@@ -1731,35 +2156,6 @@ FROM
         let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN (SELECT "spj"."pn", "spj"."sn" AS "sn" FROM "spj") AS "l1") AS "l" ON ("l"."sn" = "s"."sn")"#;
         test_it(
             "nested_lateral_grandparent_correlation",
-            original_text,
-            expected_text,
-        );
-    }
-
-    /// Negative: nested LATERAL with aggregate (COUNT) + grandparent
-    /// correlation. The inner LATERAL becomes a LEFT JOIN (to preserve
-    /// COUNT=0 semantics), placing the correlation in ON. The outer
-    /// LATERAL can't extract correlation from a LEFT JOIN ON, so this
-    /// is currently unsupported.
-    #[test]
-    fn nested_lateral_grandparent_agg_unsupported() {
-        let original_text = r#"
-            SELECT "s"."sn", "l"."x"
-            FROM "s",
-              LATERAL (
-                SELECT "l1"."cnt" AS "x"
-                FROM "j",
-                  LATERAL (
-                    SELECT COUNT(*) AS "cnt"
-                    FROM "spj"
-                    WHERE "spj"."sn" = "s"."sn"
-                  ) AS "l1"
-              ) AS "l"
-        "#;
-        // Empty expected = expect error
-        let expected_text = r#""#;
-        test_it(
-            "nested_lateral_grandparent_agg_unsupported",
             original_text,
             expected_text,
         );

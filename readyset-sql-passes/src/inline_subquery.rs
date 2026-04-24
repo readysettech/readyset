@@ -420,7 +420,6 @@ fn window_functions_block_inlining(
 /// Precise: uses `find_rhs_join_clause` for the join-RHS walk rather than
 /// the blanket "all joins" over-approximation previously inlined at the
 /// LATERAL flatten call site.
-#[allow(dead_code)] // Used once lateral_join / DTR migrate (commits 3-4).
 pub(crate) fn compute_downstream_for_position(
     base_stmt: &SelectStatement,
     inl_from_item_ord_idx: usize,
