@@ -115,9 +115,8 @@ pub(crate) struct UnnestContext<'a> {
     pub(crate) pre_hoist_lateral_exactly_one: HashSet<Relation>,
     pub(crate) lateral_trivial_on: HashSet<Relation>,
     /// Relations from ancestor LATERAL scopes, for correlation
-    /// detection. Maintained as a stack: each nesting level
-    /// pushes its preceding items before recursing, pops on
-    /// return.
+    /// detection. Each nesting level pushes its preceding items
+    /// before recursing, pops on return.
     pub(crate) ancestor_scope: HashSet<Relation>,
     /// Same relations in left-to-right FROM order, for ON
     /// normalization LHS selection via

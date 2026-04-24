@@ -268,6 +268,32 @@ pub fn rewrite_equivalent_parameters(
 /// The distinction is basically derived from the fact that there are some schema-aware rewrites
 /// (e.g. resolve schemas) which must happen *before autoparameterization* (e.g. to allow subquery
 /// unnesting), but are not needed for shallow caching.
+///
+/// # Design invariants (see `aidoc/codebase/components/query_rewrite_pipeline.md`)
+///
+/// 1. **Server-side pipeline compensates for adapter omissions.**
+///    `SelectStatement::rewrite` in `lib.rs` runs AFTER this function on
+///    deep-cached queries and covers `rewrite_between`,
+///    `normalize_topk_with_aggregate`, `detect_problematic_self_joins`,
+///    `remove_numeric_field_references`, `rewrite_table_aliases`. Their
+///    omission here is intentional, not a gap.
+///
+/// 2. **`order_limit_removal` must run AFTER the optimization-rewrite
+///    passes.** `inline_leading_derived_table`, `unnest_subqueries`,
+///    `derived_tables_rewrite`, and `query_optimization_rewrite`
+///    (`HoistParametrizableFilters`) all reshape the top-level WHERE —
+///    most notably hoisting `col = ?` predicates to the outermost scope.
+///    `order_limit_removal` uses those WHERE predicates for uniqueness
+///    inference, so running it earlier would miss the predicates those
+///    passes introduce.
+///
+/// 3. **Invariant-failure fallback is intentional.** When
+///    `validate_pipeline_invariants` returns `Err`, the optimization
+///    rewrites are skipped with a `warn!`; the query proceeds with only
+///    the pre-validation normalization and `order_limit_removal`. This
+///    is a deliberate legacy-execution fallback — converting it into a
+///    hard error would break queries that rely on the unoptimized path.
+///    Audit trail: the warning log.
 pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
