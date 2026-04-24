@@ -17,6 +17,7 @@ mod implied_tables;
 mod infer_nullability;
 mod inline_leading_derived_table;
 mod inline_literals;
+pub(crate) mod inline_subquery;
 mod key_def_coalescing;
 mod lateral_join;
 mod normalize_topk_with_aggregate;

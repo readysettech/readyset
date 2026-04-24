@@ -131,7 +131,7 @@ fn move_joins_on_nontrivial_expr_to_where(
 ///   the split would leave an unresolvable ON expression in place.
 /// - A nontrivial predicate belongs to a non-inner (OUTER/LEFT) join — moving it to WHERE
 ///   would change null-extension semantics.
-fn can_move_joins_on_nontrivial_expr_to_where(
+pub(crate) fn can_move_joins_on_nontrivial_expr_to_where(
     stmt: &SelectStatement,
     ext_to_int_fields_map: &HashMap<Column, Expr>,
 ) -> ReadySetResult<bool> {
@@ -186,7 +186,7 @@ fn substitute_columns_in_expr(
 /// 3. Every column in the outermost expressions of `base_stmt` that maps through
 ///    `ext_to_int_fields` is null-preserving — prevents literal or computed projections from
 ///    silently dropping NULL rows that LEFT JOIN semantics requires to propagate.
-fn can_inline_left_join_rhs_safe(
+pub(crate) fn can_inline_left_join_rhs_safe(
     base_stmt: &SelectStatement,
     base_jc: &JoinClause,
     inl_stmt: &SelectStatement,

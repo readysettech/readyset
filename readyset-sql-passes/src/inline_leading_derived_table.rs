@@ -623,14 +623,14 @@ fn is_at_most_one_deep(stmt: &SelectStatement) -> ReadySetResult<bool> {
 
         // GROUP BY pinned by correlation: if all GBY keys are fixed by correlated =-pairs,
         // output is 0..1 per outer row.
-        if let Some(group_by) = &cur.group_by {
+        if cur.group_by.is_some() {
             if let Some(where_expr) = &cur.where_clause {
                 let locals = collect_local_from_items(cur)?;
                 let (maybe_corr, _remaining) =
                     partition_correlated_predicates(where_expr, &|rel| !locals.contains(rel));
                 if let Some(corr) = maybe_corr {
                     let cols_set = extract_correlation_keys(&corr, &locals)?;
-                    if are_group_by_keys_pinned_by_correlation(&cols_set, group_by) {
+                    if are_group_by_keys_pinned_by_correlation(&cols_set, cur)? {
                         return Ok(true);
                     }
                 }

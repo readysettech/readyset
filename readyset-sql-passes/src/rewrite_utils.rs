@@ -1246,6 +1246,27 @@ pub(crate) fn collect_columns_in_expr_mut(expr: &mut Expr) -> Vec<&mut Expr> {
     v.columns
 }
 
+/// Substitutes columns in `expr` using `ext_to_int_fields`, returning the rewritten expression.
+///
+/// Walks the expression tree directly via [`collect_columns_in_expr_mut`], replacing each
+/// `Expr::Column` that appears in `ext_to_int_fields` with its mapped expression.
+#[allow(dead_code)] // Used once callers migrate onto `can_inline_subquery` (commits 2-4).
+pub(crate) fn substitute_columns_in_expr(
+    expr: &Expr,
+    ext_to_int_fields: &HashMap<Column, Expr>,
+    _is_top_select: bool,
+) -> ReadySetResult<Expr> {
+    let mut result = expr.clone();
+    for col_expr in collect_columns_in_expr_mut(&mut result) {
+        if let Expr::Column(col) = col_expr
+            && let Some(inl_expr) = ext_to_int_fields.get(col)
+        {
+            *col_expr = inl_expr.clone();
+        }
+    }
+    Ok(result)
+}
+
 /// Collect immutable references to all `Expr::Column` nodes in a single expression tree,
 /// skipping nested `SelectStatement` subqueries.
 #[allow(dead_code)] // Symmetric counterpart to collect_columns_in_expr_mut; available for future use
@@ -2580,8 +2601,11 @@ pub(crate) fn rewrite_top_k_in_place(stmt: &mut SelectStatement) -> ReadySetResu
 /// [`align_group_by_and_windows_with_correlation`] instead.
 pub(crate) fn are_group_by_keys_pinned_by_correlation(
     cols_set: &HashSet<(Column, Column)>,
-    group_by: &GroupByClause,
-) -> bool {
+    stmt: &SelectStatement,
+) -> ReadySetResult<bool> {
+    let Some(group_by) = &stmt.group_by else {
+        return Ok(true); // no GROUP BY — vacuously pinned
+    };
     let mut local_cols = cols_set
         .iter()
         .map(|(local_col, _)| local_col)
@@ -2589,8 +2613,11 @@ pub(crate) fn are_group_by_keys_pinned_by_correlation(
 
     let mut constraint_columns_group_by_only = true;
     for f in &group_by.fields {
-        match f {
-            FieldReference::Expr(Expr::Column(col)) => {
+        // Resolve to the underlying expression (handles numeric refs and
+        // unqualified alias refs uniformly).
+        let resolved = resolve_field_reference(&stmt.fields, f)?;
+        match &resolved {
+            Expr::Column(col) => {
                 if let Some((local_col, _)) = cols_set
                     .iter()
                     .find(|(local_col, correlated_col)| local_col == col || correlated_col == col)
@@ -2600,12 +2627,12 @@ pub(crate) fn are_group_by_keys_pinned_by_correlation(
                     constraint_columns_group_by_only = false;
                 }
             }
-            FieldReference::Expr(Expr::Literal(_)) => {}
+            Expr::Literal(_) => {}
             _ => constraint_columns_group_by_only = false,
         }
     }
 
-    constraint_columns_group_by_only && local_cols.is_empty()
+    Ok(constraint_columns_group_by_only && local_cols.is_empty())
 }
 
 /// Rewrite correlated (outer) column references to their local equivalents
