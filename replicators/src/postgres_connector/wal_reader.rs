@@ -104,6 +104,23 @@ pub(crate) enum WalEvent {
     },
 }
 
+impl WalEvent {
+    /// Returns the `Lsn` associated with `self` if `self` is an event that includes a data
+    /// modification.
+    pub(crate) fn lsn(&self) -> Option<Lsn> {
+        match self {
+            Self::Insert { lsn, .. }
+            | Self::DeleteRow { lsn, .. }
+            | Self::DeleteByKey { lsn, .. }
+            | Self::UpdateRow { lsn, .. }
+            | Self::UpdateByKey { lsn, .. }
+            | Self::Truncate { lsn, .. }
+            | Self::DdlEvent { lsn, .. } => Some(*lsn),
+            Self::Begin { .. } | Self::Commit { .. } | Self::WantsKeepaliveResponse { .. } => None,
+        }
+    }
+}
+
 impl WalReader {
     pub(crate) fn new(wal: pgsql::client::Responses, table_filter: TableFilter) -> Self {
         WalReader {
