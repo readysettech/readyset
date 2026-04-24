@@ -46,7 +46,10 @@ use crate::unnest_subqueries::{
     is_supported_join_condition, is_supported_subquery_predicate,
 };
 use crate::util::would_create_self_join;
-use crate::{as_column, get_local_from_items_iter, is_column_of, is_single_from_item};
+use crate::{
+    as_column, contains_wf, get_local_from_items_iter, is_column_of, is_single_from_item,
+    is_window_function_expr,
+};
 use itertools::{Either, Itertools};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invalid_query, invalid_query_err,
@@ -452,19 +455,15 @@ pub(crate) fn compute_downstream_for_position(
 /// `is_outer_agg` and `is_inner_agg` are expected to equal
 /// `is_aggregation_or_grouped(...)` for their respective statements; callers
 /// typically already have them computed.
-// TODO(commit-5): replace this stub with the real cardinality-barrier guard.
-// The scaffolding commit keeps the predicate a no-op so behavior is preserved
-// while the three callers retain their bespoke eligibility logic.  The real
-// implementation lands in the "Activate cardinality-barrier guard" commit.
 fn cardinality_barrier_blocks_inlining(
-    _outer_stmt: &SelectStatement,
-    _inner_stmt: &SelectStatement,
-    _is_outer_agg: bool,
-    _is_inner_agg: bool,
+    outer_stmt: &SelectStatement,
+    inner_stmt: &SelectStatement,
+    is_outer_agg: bool,
+    is_inner_agg: bool,
 ) -> bool {
-    // Stub for Commit 1; real implementation lands in Commit 5
-    // ("Activate cardinality-barrier guard").
-    false
+    let inner_is_cardinality_barrier = !inner_stmt.limit_clause.is_empty() || is_inner_agg;
+    let outer_is_cardinality_sensitive = is_outer_agg || contains_wf!(outer_stmt);
+    inner_is_cardinality_barrier && outer_is_cardinality_sensitive
 }
 
 /// Return true if any downstream derived table (other than the inlinable itself)

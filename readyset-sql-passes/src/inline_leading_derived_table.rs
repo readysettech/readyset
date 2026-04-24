@@ -1216,6 +1216,79 @@ mod tests {
         test_it("test36", original, expected);
     }
 
+    // Bail: outer WF + inner (agg) with LIMIT.  Absorbing the inner LIMIT to the
+    // outer would let the WF compute over the full grouped result (N rows) instead
+    // of the bounded 10 rows, producing different ROW_NUMBER() values (§9 — WF
+    // input cardinality must be preserved).
+    #[test]
+    fn test_outer_wf_inner_agg_limit_bails() {
+        let original = r#"
+    SELECT ROW_NUMBER() OVER (), s.rownum, s.test_dec, tags.test_dec
+    FROM (SELECT o.rownum, SUM(o.test_dec) AS test_dec
+       FROM qa.datatypes AS o
+       GROUP BY o.rownum
+       ORDER BY o.rownum
+       LIMIT 10
+    ) AS s
+    CROSS JOIN LATERAL (SELECT ARRAY_AGG(o.test_varchar) AS test_dec
+       FROM qa.datatypes1 AS o
+       WHERE o.rownum = s.rownum
+    ) AS tags
+    ORDER BY s.rownum;
+    "#;
+        let expected = original;
+        test_it("outer_wf_inner_agg_limit_bails", original, expected);
+    }
+
+    // Bail: outer DISTINCT + inner LIMIT.  Absorbing the LIMIT would change the
+    // dedup scope from the bounded 10 rows to the full row set, producing a
+    // different DISTINCT result.
+    #[test]
+    fn test_outer_distinct_inner_limit_bails() {
+        let original = r#"
+            SELECT DISTINCT s.x
+            FROM (SELECT t.x FROM t LIMIT 10) AS s
+        "#;
+        let expected = original;
+        test_it("outer_distinct_inner_limit_bails", original, expected);
+    }
+
+    // Bail: outer aggregate + inner (non-agg) with LIMIT.  Absorbing the LIMIT
+    // would cause SUM to aggregate over the full row set instead of the bounded
+    // 10 rows (e.g., SUM of all x's instead of the first 10 x's).
+    #[test]
+    fn test_outer_agg_inner_limit_bails() {
+        let original = r#"
+            SELECT SUM(s.x) AS total
+            FROM (SELECT t.x FROM t LIMIT 10) AS s
+        "#;
+        let expected = original;
+        test_it("outer_agg_inner_limit_bails", original, expected);
+    }
+
+    // Bail: outer WF + inner (aggregated, no LIMIT).  Absorbing the inner's
+    // GROUP BY into the outer (check-3 path) would produce an outer with
+    // GROUP BY + HAVING + WF — an unsupported WF context (§9), and changes the
+    // engine's WF evaluation position relative to HAVING even though the
+    // standard-SQL semantics happen to align.
+    #[test]
+    fn test_outer_wf_inner_agg_no_limit_bails() {
+        let original = r#"
+    SELECT ROW_NUMBER() OVER(),
+           "INNER"."rownum",
+           "INNER"."test_dec"
+    FROM (SELECT "o"."rownum" AS "rownum",
+                 sum("o"."test_dec") AS "test_dec",
+                 "o"."test_int" AS "__rn"
+          FROM qa.datatypes AS o
+          GROUP BY "o"."rownum", "o"."test_int") AS "INNER"
+    WHERE "INNER"."__rn" <= 10
+    ORDER BY "INNER"."rownum" NULLS LAST
+    "#;
+        let expected = original;
+        test_it("outer_wf_inner_agg_no_limit_bails", original, expected);
+    }
+
     // Bail: LHS inlining of a grouped inner into a non-grouped outer when the
     // outer SELECT neither references an aggregate-derived column nor lists
     // all of the inner's GROUP BY keys as standalone projections.  The

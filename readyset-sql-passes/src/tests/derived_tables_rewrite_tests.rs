@@ -3885,6 +3885,27 @@ fn alias_order_by_resolved_before_inline() {
     test_it("alias_order_by_resolved_before_inline", sql, expected);
 }
 
+/// Bail: outer WF + inner aggregated (GROUP BY) with outer WHERE.  Inlining
+/// would lift GROUP BY to the outer and convert WHERE→HAVING, producing an
+/// outer with GROUP BY + HAVING + WF — an unsupported WF context (§9).
+#[test]
+fn outer_wf_inner_agg_grouped_bails() {
+    let sql = r#"
+    SELECT ROW_NUMBER() OVER(),
+           "INNER"."rownum",
+           "INNER"."test_dec"
+    FROM (SELECT "o"."rownum" AS "rownum",
+                 sum("o"."test_dec") AS "test_dec",
+                 "o"."test_int" AS "__rn"
+          FROM qa.datatypes AS o
+          GROUP BY "o"."rownum", "o"."test_int") AS "INNER"
+    WHERE "INNER"."__rn" <= 10
+    ORDER BY "INNER"."rownum" NULLS LAST
+    "#;
+    let expected = sql;
+    test_it("outer_wf_inner_agg_grouped_bails", sql, expected);
+}
+
 /// No-regression through the thin wrapper: a single-FROM-item base with an
 /// aggregated inner subquery inlines correctly via `can_inline_from_item`'s
 /// thin delegation to `can_inline_subquery` + `inline_from_item_position_checks`.
