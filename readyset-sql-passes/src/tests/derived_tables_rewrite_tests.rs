@@ -3884,3 +3884,109 @@ fn alias_order_by_resolved_before_inline() {
     "#;
     test_it("alias_order_by_resolved_before_inline", sql, expected);
 }
+
+/// No-regression through the thin wrapper: a single-FROM-item base with an
+/// aggregated inner subquery inlines correctly via `can_inline_from_item`'s
+/// thin delegation to `can_inline_subquery` + `inline_from_item_position_checks`.
+/// Previously handled by the old standalone grouped-engine-validation block;
+/// now handled canonically by `check_grouped_engine_validation` inside
+/// `can_inline_subquery`.
+///
+/// Additionally validates that `inline_from_item_position_checks`'s new
+/// aggregated-single-from-item guard correctly BLOCKS inlining when the base
+/// has a downstream join (proving the `invariant!` in `inline_from_item_in_place`
+/// is never reached via the eligibility path).
+#[test]
+fn inner_agg_with_cardinality_preserving_scalar_join_inlines() {
+    // Case A: single-FROM base — inlining works (passes position check)
+    let sql_a = r#"
+        SELECT "s"."k", "s"."sx"
+        FROM (SELECT "t"."k", SUM("t"."x") AS "sx"
+              FROM "t"
+              GROUP BY "t"."k") AS "s"
+    "#;
+    let expected_a = r#"
+        SELECT "t"."k", SUM("t"."x") AS "sx"
+        FROM "t"
+        GROUP BY "t"."k"
+    "#;
+    test_it("inner_agg_single_from_base_inlines", sql_a, expected_a);
+
+    // Case B: base has a downstream INNER JOIN — position check blocks inlining
+    // (agg inner + non-single-from-item base → reject to protect
+    // inline_from_item_in_place's structural invariant).
+    let sql_b = r#"
+        SELECT "s"."k", "s"."sx", "cnt"."c"
+        FROM (SELECT "t"."k", SUM("t"."x") AS "sx"
+              FROM "t"
+              GROUP BY "t"."k") AS "s"
+        INNER JOIN (SELECT COUNT(*) AS "c" FROM "v") AS "cnt" ON TRUE
+    "#;
+    // Neither subquery inlines: `s` is blocked (agg + non-single-from-item
+    // base after cnt is present), and join normalization reorders to
+    // cnt CROSS JOIN s (ON TRUE becomes Empty after normalization).
+    let expected_b = r#"
+        SELECT "s"."k", "s"."sx", "cnt"."c"
+        FROM (SELECT count(*) AS "c" FROM "v") AS "cnt"
+        CROSS JOIN (SELECT "t"."k", SUM("t"."x") AS "sx"
+                    FROM "t"
+                    GROUP BY "t"."k") AS "s"
+    "#;
+    test_it("inner_agg_with_downstream_join_bails", sql_b, expected_b);
+}
+
+/// Non-INNER RHS safety preserved: inlining a subquery on the RHS of a
+/// LEFT OUTER JOIN where `can_inline_left_join_rhs_safe`'s conditions DO
+/// hold (single-table RHS, simple pushable WHERE filter, null-preserving
+/// outer projections) is allowed both pre- and post-convergence.  The P
+/// invariant survived the refactor via `inline_from_item_position_checks`:
+/// the safe-inline path is preserved through the thin wrapper.
+#[test]
+fn non_inner_rhs_safety_preserved_after_convergence() {
+    let sql = r#"
+        SELECT "t1"."a", "sq"."b"
+        FROM "t1"
+        LEFT JOIN (SELECT "t2"."b", "t2"."c" FROM "t2" WHERE "t2"."c" > 5) AS "sq"
+            ON "t1"."a" = "sq"."b"
+    "#;
+    // RHS is single-table, WHERE is a SingleRelFilter, ON is non-trivial,
+    // and the outer SELECT references only null-preserving columns →
+    // can_inline_left_join_rhs_safe admits inlining.  Filter is pushed into ON.
+    let expected = r#"
+        SELECT "t1"."a", "t2"."b"
+        FROM "t1"
+        LEFT OUTER JOIN "t2" ON (("t1"."a" = "t2"."b") AND ("t2"."c" > 5))
+    "#;
+    test_it(
+        "non_inner_rhs_safety_preserved_after_convergence",
+        sql,
+        expected,
+    );
+}
+
+/// Regression test for the `downstream_reference_non_trivial_lhs_output`
+/// alias-collision fix (Commit 7 of the inlining-eligibility-convergence
+/// stack).  Before the fix, the scan iterated ALL FROM items (including
+/// the inlinable itself), so when the outer alias (`t2`) coincided with
+/// an inner base table alias (`test2 AS t2`), the non-trivial expression
+/// `t2.x + 1` inside the inlinable's own body was wrongly flagged as a
+/// downstream reference to a non-column output — rejecting a perfectly
+/// valid inlining.  The fix excludes the inlinable from the scan; this
+/// test pins that behavior.
+#[test]
+fn inlinable_internal_alias_matches_outer_alias_inlines() {
+    let sql = r#"
+        SELECT "t2"."x"
+        FROM (SELECT ("t2"."x" + 1) AS "x" FROM "test2" AS "t2") AS "t2"
+    "#;
+    // The rewriter inlines the derived table and retains the inner alias
+    // (`test2 AS t2`) together with its column reference (`t2.x + 1`).
+    let expected = r#"
+        SELECT ("t2"."x" + 1) AS "x" FROM "test2" AS "t2"
+    "#;
+    test_it(
+        "inlinable_internal_alias_matches_outer_alias_inlines",
+        sql,
+        expected,
+    );
+}

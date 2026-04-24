@@ -1,4 +1,7 @@
 use crate::infer_nullability::{derive_from_stmt, is_expr_null_preserving};
+use crate::inline_subquery::{
+    can_inline_subquery, compute_downstream_for_position, inline_from_item_position_checks,
+};
 use crate::rewrite_joins::{
     get_join_rhs_relations, move_applicable_where_conditions_to_joins,
     normalize_comma_separated_lhs, normalize_joins_shape, try_normalize_joins_conditions,
@@ -6,21 +9,15 @@ use crate::rewrite_joins::{
 use crate::rewrite_utils::{
     OnAtom, add_expression_to_join_constraint, and_predicates_skip_true, as_sub_query_with_alias,
     as_sub_query_with_alias_mut, build_ext_to_int_fields_map, classify_on_atom,
-    collect_columns_in_expr_mut, collect_outermost_columns_mut, columns_iter, conjoin_all_dedup,
-    contains_select, default_alias_for_select_item_expression, expect_field_as_expr_mut,
+    collect_outermost_columns_mut, columns_iter, conjoin_all_dedup,
+    default_alias_for_select_item_expression, expect_field_as_expr_mut,
     expect_sub_query_with_alias, expect_sub_query_with_alias_mut, find_rhs_join_clause,
-    fix_groupby_without_aggregates, for_each_window_function, is_aggregated_expr,
-    is_aggregation_or_grouped, make_aliases_distinct_from_base_statement,
-    normalize_having_and_group_by, outermost_expression, resolve_field_reference,
-    resolve_group_by_exprs, split_expr,
+    fix_groupby_without_aggregates, is_aggregation_or_grouped,
+    make_aliases_distinct_from_base_statement, normalize_having_and_group_by, outermost_expression,
+    resolve_field_reference, resolve_group_by_exprs, split_expr,
 };
-use crate::unnest_subqueries::{
-    NonNullSchema, agg_only_no_gby_cardinality, is_supported_join_condition,
-};
-use crate::{
-    get_local_from_items_iter, get_local_from_items_iter_mut, is_single_from_item,
-    is_window_function_expr,
-};
+use crate::unnest_subqueries::{NonNullSchema, agg_only_no_gby_cardinality};
+use crate::{get_local_from_items_iter, get_local_from_items_iter_mut, is_single_from_item};
 use itertools::Either;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, invariant};
 use readyset_sql::analysis::visit::Visitor;
@@ -155,26 +152,6 @@ pub(crate) fn can_move_joins_on_nontrivial_expr_to_where(
 
     Ok(true)
 }
-/// Substitutes columns in `expr` using `ext_to_int_fields`, returning the rewritten expression.
-///
-/// Walks the expression tree directly via [`collect_columns_in_expr_mut`], replacing each
-/// `Expr::Column` that appears in `ext_to_int_fields` with its mapped expression.
-fn substitute_columns_in_expr(
-    expr: &Expr,
-    ext_to_int_fields: &HashMap<Column, Expr>,
-    _is_top_select: bool,
-) -> ReadySetResult<Expr> {
-    let mut result = expr.clone();
-    for col_expr in collect_columns_in_expr_mut(&mut result) {
-        if let Expr::Column(col) = col_expr
-            && let Some(inl_expr) = ext_to_int_fields.get(col)
-        {
-            *col_expr = inl_expr.clone();
-        }
-    }
-    Ok(result)
-}
-
 /// Returns `true` if inlining `inl_stmt` into the RHS of a non-inner (e.g., LEFT) join is
 /// semantically safe. All three conditions must hold:
 ///
@@ -225,18 +202,21 @@ pub(crate) fn can_inline_left_join_rhs_safe(
     Ok(true)
 }
 
-/// Returns `true` if the FROM item at `inl_from_item_ord_idx` in `base_stmt` can be safely
-/// inlined (flattened into `base_stmt`). Rejects inlining when any of the following hold:
+/// Thin wrapper over [`can_inline_subquery`] + [`inline_from_item_position_checks`]
+/// for the `derived_tables_rewrite` inlining path.
 ///
-/// - The subquery has a LIMIT clause (TopK subqueries cannot be flattened).
-/// - The subquery is aggregated and the base is also aggregated or multi-table.
-/// - The subquery projects a window function column referenced in the outer query.
-/// - The base query has a window function referencing an aggregated inlinable column.
-/// - RHS inlining into a non-inner join is unsafe (delegates to [`can_inline_left_join_rhs_safe`]).
-/// - LHS inlining of a complex subquery (multi-table or with WHERE) when the first base join
-///   is not INNER.
-/// - Post-substitution join ON shapes are unsupported and the join is not INNER.
-/// - Nontrivial ON-clause predicates cannot be safely lifted to WHERE after inlining.
+/// Returns `Ok(None)` if the subquery cannot be inlined.
+/// Returns `Ok(Some(downstream_group_by_additions))` if it can — the vec
+/// contains additional GROUP BY keys needed when hoisting a grouped inner
+/// into a non-grouped outer (passed through from `can_inline_subquery`).
+///
+/// DTR-specific pre-conditions checked here (before delegating to the shared
+/// contract):
+/// - FROM-less subquery reject (pre-condition for `build_ext_to_int_fields_map`).
+/// - LATERAL bail (defensive; `lateral_join` clears the flag in the full
+///   pipeline, but test-harness direct-DTR paths may bypass it).
+/// - LIMIT unconditional reject (`hoist_parametrizable_filters` runs after
+///   DTR and relies on aggregated+LIMIT subqueries surviving this pass).
 ///
 /// `inl_from_item_ord_idx` is a flat ordinal over `base_stmt.tables ++ join_rhs_items`,
 /// computed fresh before each inlining pass and never reused after mutation.
@@ -245,201 +225,90 @@ fn can_inline_from_item(
     inl_from_item: &TableExpr,
     inl_from_item_ord_idx: usize,
     is_top_select: bool,
-) -> ReadySetResult<bool> {
+) -> ReadySetResult<Option<Vec<Expr>>> {
     let Some((inl_stmt, inl_stmt_alias)) = as_sub_query_with_alias(inl_from_item) else {
-        return Ok(false);
+        return Ok(None);
     };
 
-    // === Reject FROM-less subqueries (e.g., SELECT 1 AS alias)
-    // These have no tables to splice into the base join structure.
+    // FROM-less subquery reject — can't splice nothing.  Kept here as a
+    // pre-condition for `build_ext_to_int_fields_map` to succeed.
     if inl_stmt.tables.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
-    // === Reject LIMIT (TopK) subqueries
+    // Reject LATERAL subqueries.  LATERAL bodies have per-outer-row
+    // semantics (LIMIT applies per outer row, not globally).  In the full
+    // pipeline, `lateral_join` runs before `derived_tables_rewrite` and
+    // handles correlation extraction and TOP-K rewriting, clearing the
+    // `lateral` flag.  This defensive bail protects the test harness and
+    // any path that bypasses `lateral_join`.
+    if inl_stmt.lateral {
+        return Ok(None);
+    }
+
+    // Reject LIMIT (TopK) subqueries.  `hoist_parametrizable_filters` —
+    // which runs after `derived_tables_rewrite` — relies on aggregated
+    // subqueries with LIMIT surviving this pass so it can project their
+    // predicates outward.  More broadly, LIMIT changes the row count of
+    // the inner result; inlining it into the outer scope changes when
+    // the LIMIT applies (pre- vs. post-join/filter) in ways that are
+    // hard to reason about generically.  `can_inline_subquery` has
+    // nuanced ORDER/LIMIT composition logic for the inline_leading and
+    // LATERAL paths; DTR conservatively rejects all LIMIT inner
+    // subqueries instead.
     if !inl_stmt.limit_clause.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
 
-    // === Aggregates allowed only if base is single, non-aggregated FROM
-    if is_aggregation_or_grouped(inl_stmt)?
-        && (is_aggregation_or_grouped(base_stmt)?
-            || !base_stmt.join.is_empty()
-            || base_stmt.tables.len() > 1)
-    {
-        return Ok(false);
-    }
-
-    // === Reject if inlining would introduce a self-join (same base table twice)
-    if crate::util::would_create_self_join(base_stmt, inl_stmt, inl_from_item_ord_idx) {
-        return Ok(false);
-    }
-
-    let inl_stmt_rel: Relation = inl_stmt_alias.clone().into();
-    // Duplicate projected names make the ext_to_int mapping ambiguous — skip inlining
-    // and let the subquery survive as a derived table.  The semantic validator handles
-    // the user-facing error if the ambiguous name is externally referenced.
-    let ext_to_int_fields = match build_ext_to_int_fields_map(inl_stmt, inl_stmt_alias) {
+    let ext_to_int = match build_ext_to_int_fields_map(inl_stmt, inl_stmt_alias.clone()) {
         Ok(map) => map,
-        Err(_) => return Ok(false),
+        Err(_) => return Ok(None),
     };
 
-    // === Reject inlining if WF-projected field is referenced in base
-    let base_columns_for_alias: HashSet<Column> = outermost_expression(base_stmt)
-        .flat_map(columns_iter)
-        .filter_map(|c| {
-            if c.table.as_ref() == Some(&inl_stmt_rel) {
-                Some(c.clone())
-            } else {
-                None
-            }
-        })
-        .collect();
+    let (ds_tables, ds_joins) = compute_downstream_for_position(base_stmt, inl_from_item_ord_idx);
 
-    for (col, expr) in &ext_to_int_fields {
-        if base_columns_for_alias.contains(col) && is_window_function_expr!(expr) {
-            return Ok(false);
-        }
+    let ctx = crate::inline_subquery::InliningContext {
+        inner_stmt: inl_stmt,
+        outer_stmt: base_stmt,
+        inner_alias: &inl_stmt_alias,
+        ext_to_int: &ext_to_int,
+        inl_from_item_ord_idx,
+        downstream_tables: ds_tables,
+        downstream_joins: ds_joins,
+        is_top_select,
+        // DTR runs after `unnest_subqueries`; no subquery predicates remain
+        // in expression positions, so `can_inline_subquery`'s
+        // `check_unnesting_guards` cannot help and may false-reject.  Opt out.
+        skip_unnesting_guard: true,
+        inner_rel: inl_stmt_alias.clone().into(),
+        is_inner_agg: is_aggregation_or_grouped(inl_stmt)?,
+        is_outer_agg: is_aggregation_or_grouped(base_stmt)?,
+    };
+
+    // Reject aggregated inlinable + multi-FROM base.  `inline_from_item_in_place`
+    // (the DTR splice path) lifts the inner GROUP BY / HAVING into the base and
+    // requires the base to have exactly one top-level table and no joins — a
+    // structural precondition it enforces via an invariant.  Even when
+    // `can_inline_subquery`'s `check_downstream_joins_cardinality_preserving`
+    // would accept a cardinality-preserving scalar join downstream, the splice
+    // cannot absorb an aggregated inner into a multi-FROM base without
+    // additional support in the splice code.  This guard lives with the other DTR-specific
+    // pre-conditions rather than in `inline_from_item_position_checks`, since
+    // the precondition is tied to DTR's splice path, not to generic
+    // position-dependent eligibility.
+    if ctx.is_inner_agg && !is_single_from_item!(base_stmt) {
+        return Ok(None);
     }
 
-    // === Reject inlining a grouped subquery when unreferenced GROUP BY
-    // keys would produce an invalid "GROUP BY without aggregates" shape.
-    // After inlining, the GROUP BY is spliced into the outer statement.
-    // If any GROUP BY key is not referenced by the outer SELECT, that's
-    // only safe when at least one referenced inner field is an aggregate
-    // (SUM, COUNT, etc.) — the aggregate justifies the GROUP BY.
-    // Otherwise, the result has bare GROUP BY keys with no aggregates,
-    // which downstream passes reject.
-    if let Some(group_by) = &inl_stmt.group_by {
-        let referenced_inner: Vec<&Expr> = ext_to_int_fields
-            .iter()
-            .filter(|(col, _)| base_columns_for_alias.contains(col))
-            .map(|(_, expr)| expr)
-            .collect();
-        let has_unreferenced_gb_key = group_by.fields.iter().any(|gf| {
-            resolve_field_reference(&inl_stmt.fields, gf)
-                .map_or(true, |e| !referenced_inner.contains(&&e))
-        });
-        if has_unreferenced_gb_key {
-            let has_referenced_aggregate = referenced_inner
-                .iter()
-                .any(|e| is_aggregated_expr(e).unwrap_or(false));
-            if !has_referenced_aggregate {
-                return Ok(false);
-            }
-        }
+    let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
+        return Ok(None);
+    };
+
+    if !inline_from_item_position_checks(base_stmt, inl_stmt, inl_from_item_ord_idx, &ext_to_int)? {
+        return Ok(None);
     }
 
-    // === Prevent inlining when base contains WF that references an inlinable aggregate
-    {
-        // Step 1: Collect all columns used inside WFs in the base statement
-        let mut wf_columns = HashSet::new();
-        outermost_expression(base_stmt).for_each(|expr| {
-            let _ = for_each_window_function(expr, &mut |wf_expr: &Expr| {
-                wf_columns.extend(columns_iter(wf_expr).cloned());
-            });
-        });
-
-        // Step 2: For each WF-referenced column, if it points to an inlinable alias
-        // and is mapped to an aggregated expression, block the inlining
-        for col in wf_columns {
-            if col.table.as_ref() == Some(&inl_stmt_rel)
-                && let Some(inl_expr) = ext_to_int_fields.get(&col)
-                && is_aggregated_expr(inl_expr)?
-            {
-                return Ok(false);
-            }
-        }
-    }
-
-    // === Join location and operator safety check
-    //
-    // Inlining a derived table must preserve the semantics of JOINs in the base query.
-    // We distinguish two cases:
-    //
-    // 1. RHS Inlining:
-    //    - If the derived table appears in the right-hand side (RHS) of a JOIN,
-    //      we require *stricter validation* when the join is non-INNER (e.g., LEFT).
-    //    - This prevents semantics-breaking rewrites in anti-join patterns or
-    //      null-extending JOINs.
-    //    - We use `can_inline_left_join_rhs_safe` to ensure:
-    //        a) The RHS is a single-table, non-joined subquery
-    //        b) Its WHERE clause contains only simple, pushable filters
-    //        c) Any non-base projected expressions are NOT used in the outer query
-    //
-    // 2. LHS Inlining:
-    //    - When inlining into the base `FROM` clause (prior to any JOIN),
-    //      we make this distinction:
-    //        a) If the inlinable is simple (no joins, no WHERE), allow unconditionally
-    //        b) If the inlinable is complex (multi-table or with filters), allow *only if the *first* join is INNER*.
-    if inl_from_item_ord_idx >= base_stmt.tables.len() {
-        // RHS inlining
-        let (jc_idx, _) = find_rhs_join_clause(base_stmt, inl_from_item_ord_idx)
-            .ok_or_else(|| internal_err!("Invalid FROM item index"))?;
-        let jc = &base_stmt.join[jc_idx];
-        if !jc.operator.is_inner_join()
-            && !can_inline_left_join_rhs_safe(base_stmt, jc, inl_stmt, &ext_to_int_fields)?
-        {
-            return Ok(false);
-        }
-    } else {
-        // LHS inlining.
-        //
-        // A single-table subquery (no joins) is safe to inline even when the
-        // first base join is LEFT/RIGHT — the inlinable's WHERE only references
-        // its own local columns (derived tables are uncorrelated at this stage),
-        // so absorbing it into the base WHERE is equivalent to pre-filtering
-        // the LHS before the join.  LEFT JOIN never NULL-extends LHS columns,
-        // so the filter position (before vs. after the join) doesn't change
-        // the result.
-        //
-        // Multi-table or multi-join inlinables are still blocked when the first
-        // join is not INNER, because splicing additional join structure into the
-        // LHS could change the join topology unpredictably.
-        let is_safe_lhs = inl_stmt.tables.len() == 1 && inl_stmt.join.is_empty();
-        if !(is_safe_lhs || base_stmt.join.is_empty() || base_stmt.join[0].operator.is_inner_join())
-        {
-            return Ok(false);
-        }
-
-        // Defense-in-depth: when inlining a single-table LHS into a non-inner
-        // join base, verify the adjacent join has a supported ON constraint.
-        // The downstream post-substitution and nontrivial-ON checks also
-        // validate this, but checking early avoids subtle breakage if those
-        // guards are ever relaxed.
-        if is_safe_lhs && !base_stmt.join.is_empty() && !base_stmt.join[0].operator.is_inner_join()
-        {
-            match &base_stmt.join[0].constraint {
-                JoinConstraint::On(expr) if is_supported_join_condition(expr) => {}
-                _ => return Ok(false),
-            }
-        }
-    }
-
-    // === Validate all join ON expressions for supported shape (after substitution)
-    for jc in &base_stmt.join {
-        if let JoinConstraint::On(expr) = &jc.constraint {
-            let substituted = substitute_columns_in_expr(expr, &ext_to_int_fields, is_top_select)?;
-            if !is_supported_join_condition(&substituted) && !jc.operator.is_inner_join() {
-                return Ok(false); // Not repairable for non-inner joins
-            }
-            // Reject subquery expressions in ON for ALL join types —
-            // migrate_and_normalize_joins cannot repair a subquery in ON,
-            // even for INNER joins.  This catches the case where a
-            // subquery from the inlinable's SELECT gets substituted into
-            // a base JOIN ON clause.
-            if contains_select(&substituted) {
-                return Ok(false);
-            }
-        }
-    }
-
-    // === Final ON → WHERE safety check for multi-table ON clauses
-    if !can_move_joins_on_nontrivial_expr_to_where(base_stmt, &ext_to_int_fields)? {
-        return Ok(false);
-    }
-
-    Ok(true)
+    Ok(Some(downstream_group_by_additions))
 }
 
 /// Substitutes all column references that appear in `ext_to_int_fields` with their mapped
@@ -551,6 +420,15 @@ fn inline_from_item_in_place(
     // Get the inlinable FROM item's statement
     let (inl_stmt, _) = expect_sub_query_with_alias_mut(&mut inl_from_item);
     let mut inl_stmt = mem::take(inl_stmt);
+
+    // Normalize HAVING-without-aggregates-or-GROUP-BY to WHERE. When the inner
+    // is not aggregated, HAVING is semantically equivalent to WHERE. Fuse it
+    // into inner WHERE so downstream branches treat it uniformly (the non-
+    // aggregated branch below only migrates WHERE).
+    if !is_inl_aggregated && let Some(having_as_where) = inl_stmt.having.take() {
+        inl_stmt.where_clause =
+            and_predicates_skip_true(inl_stmt.where_clause.take(), having_as_where);
+    }
 
     // Based on the index, locate the item being inlined: `base_stmt.tables` (LHS) or `base_stmt.join` (RHS)
     // Case 1: LHS inlining — the FROM item belongs to the base `tables` list (comma-separated FROM).
@@ -816,7 +694,7 @@ fn try_inline_from_items(
         // 3. No reuse across mutations
         let mut inl_from_item_idx = None;
         for (from_item_idx, from_item) in get_local_from_items_iter!(base_stmt).enumerate() {
-            if can_inline_from_item(base_stmt, from_item, from_item_idx, is_top_select)? {
+            if can_inline_from_item(base_stmt, from_item, from_item_idx, is_top_select)?.is_some() {
                 inl_from_item_idx = Some(from_item_idx);
                 break;
             }

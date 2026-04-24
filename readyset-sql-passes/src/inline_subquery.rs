@@ -1232,7 +1232,6 @@ pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Optio
 /// non-INNER first join.  The downstream post-substitution ON and
 /// nontrivial-ON checks also validate this, but checking early avoids
 /// subtle breakage if those guards are ever relaxed.
-#[allow(dead_code)] // Used once DTR migrates (commit 4).
 pub(crate) fn inline_from_item_position_checks(
     base_stmt: &SelectStatement,
     inl_stmt: &SelectStatement,
