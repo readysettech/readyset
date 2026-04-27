@@ -54,10 +54,12 @@ use itertools::{Either, Itertools};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invalid_query, invalid_query_err,
 };
+use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, FieldReference, InValue, JoinClause, JoinConstraint,
-    JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy, OrderClause, Relation,
-    SelectStatement, SqlIdentifier, TableExpr, TableExprInner, UnaryOperator,
+    Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue, JoinClause,
+    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy,
+    OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    UnaryOperator,
 };
 use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
@@ -787,32 +789,173 @@ fn check_grouped_engine_validation(ctx: &InliningContext) -> ReadySetResult<bool
         })
     });
 
-    if has_select_aggregate {
-        return Ok(true);
+    let select_projection_ok = if has_select_aggregate {
+        true
+    } else {
+        let standalone_select_inner: Vec<&Expr> = ctx
+            .outer_stmt
+            .fields
+            .iter()
+            .filter_map(|f| {
+                let (expr, _) = expect_field_as_expr(f);
+                if let Expr::Column(col) = expr
+                    && col.table.as_ref() == Some(&ctx.inner_rel)
+                {
+                    ctx.ext_to_int.get(col)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        group_by.fields.iter().all(|gf| {
+            resolve_field_reference(&ctx.inner_stmt.fields, gf)
+                .is_ok_and(|e| standalone_select_inner.contains(&&e))
+        })
+    };
+
+    if !select_projection_ok {
+        return Ok(false);
     }
 
-    let standalone_select_inner: Vec<&Expr> = ctx
+    // Anticipate the post-inline aggregating-ORDER-BY invariant enforced by
+    // `normalize_topk_with_aggregate`.  Only relevant when inlining will lift
+    // the inner GROUP BY into a non-aggregating outer (turning the outer into
+    // an aggregating query post-inline).
+    if ctx.is_inner_agg
+        && !ctx.is_outer_agg
+        && !check_outer_order_against_inner_group_by(ctx, group_by)?
+    {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
+
+/// Mirror the aggregating-ORDER-BY invariant enforced by the downstream
+/// [`NormalizeTopKWithAggregate`] pass on the post-inline outer.
+///
+/// When inlining lifts an inner GROUP BY into a non-aggregating outer, the
+/// outer becomes an aggregating query post-inline.  The downstream
+/// [`NormalizeTopKWithAggregate`] pass then requires every ORDER BY field
+/// of such a query to satisfy one of the three accept conditions checked
+/// here, in the same order they appear in that pass:
+///
+///   1. literal-equal to a `GROUP BY` field (compared as
+///      [`FieldReference::Expr`] wrappers, matching that pass's
+///      `order_field == group_by_field` comparison),
+///   2. a reference to an aggregate (numeric SELECT-position, aggregate
+///      expression equality, or aggregate's alias name), or
+///   3. a column whose name matches a SELECT-list aliased expression.
+///
+/// Notably the literal-equality of (1) does NOT recognize expressions over
+/// `GROUP BY` keys (e.g. `o.rownum + o.rownum` does not satisfy
+/// `GROUP BY o.rownum`), so we reject those here at eligibility time
+/// rather than letting the inlining proceed and fail downstream with
+/// `ExprNotInGroupBy`.
+///
+/// Outer ORDER BY items are first substituted via `ctx.ext_to_int` to
+/// rebind references to the inlinable's alias to the corresponding inner
+/// expression — the same form the GROUP BY is already in.
+///
+/// `FieldReference::Numeric(_)` outer ORDER BY items are accepted as-is:
+/// numeric SELECT positions are preserved by the inlining pipeline.
+///
+/// **Conservative scope.** One intentional narrowing vs. the downstream
+/// pass: condition (1) compares only against `inner_stmt.group_by` and
+/// not against the `downstream_group_by_additions` collected by
+/// `check_group_by_compatibility` — bare-column references to non-inner
+/// relations that get appended to the post-inline GROUP BY.  This helper
+/// does not see those additions, so an outer ORDER BY of the form
+/// `other_rel.col` (where `other_rel.col` would be added to the
+/// post-inline GROUP BY by `check_group_by_compatibility`) is rejected
+/// here even though downstream would accept it.  Strictly safe
+/// over-rejection; tightening is a future improvement.
+fn check_outer_order_against_inner_group_by(
+    ctx: &InliningContext,
+    group_by: &GroupByClause,
+) -> ReadySetResult<bool> {
+    let Some(order) = &ctx.outer_stmt.order else {
+        return Ok(true);
+    };
+
+    // Pre-compute the post-inline-form aggregating SELECT fields.  After
+    // substitution via ext_to_int, each outer SELECT field whose expression
+    // contains an aggregate becomes an entry here.  Mirrors the downstream
+    // pass's `aggs` collection over the post-inline statement, so condition
+    // (2) below can do faithful structural matching against the post-inline
+    // SELECT shape.
+    let post_inline_agg_fields: Vec<(Expr, Option<SqlIdentifier>)> = ctx
         .outer_stmt
         .fields
         .iter()
         .filter_map(|f| {
-            let (expr, _) = expect_field_as_expr(f);
-            if let Expr::Column(col) = expr
-                && col.table.as_ref() == Some(&ctx.inner_rel)
-            {
-                ctx.ext_to_int.get(col)
+            let (expr, alias) = expect_field_as_expr(f);
+            let substituted =
+                substitute_columns_in_expr(expr, ctx.ext_to_int, ctx.is_top_select).ok()?;
+            if contains_aggregate(&substituted) {
+                Some((substituted, alias.clone()))
             } else {
                 None
             }
         })
         .collect();
 
-    let all_gb_keys_standalone = group_by.fields.iter().all(|gf| {
-        resolve_field_reference(&ctx.inner_stmt.fields, gf)
-            .is_ok_and(|e| standalone_select_inner.contains(&&e))
-    });
+    for OrderBy {
+        field: order_field, ..
+    } in &order.order_by
+    {
+        // (Numeric refs to SELECT positions): accept; preserved by inlining.
+        let order_expr = match order_field {
+            FieldReference::Numeric(_) => continue,
+            FieldReference::Expr(e) => e,
+        };
 
-    Ok(all_gb_keys_standalone)
+        let substituted_order =
+            substitute_columns_in_expr(order_expr, ctx.ext_to_int, ctx.is_top_select)?;
+        let substituted_field = FieldReference::Expr(substituted_order.clone());
+
+        // (a) literal-equal to a GROUP BY field of the inner.
+        let in_group_by = group_by.fields.contains(&substituted_field);
+
+        // (b) substituted ORDER BY expression matches a post-inline
+        //     aggregate-containing SELECT field — either by structural
+        //     equality against the field's whole expression, or by the
+        //     order column's name matching the field's alias.  Mirrors the
+        //     downstream pass's `*agg == expr || alias-name match` check
+        //     by simulating substitution on outer SELECT items.
+        let references_aggregate =
+            post_inline_agg_fields
+                .iter()
+                .any(|(field_expr, field_alias)| {
+                    field_expr == &substituted_order
+                        || matches!(
+                            &substituted_order,
+                            Expr::Column(col) if field_alias.as_ref() == Some(&col.name)
+                        )
+                });
+
+        // (c) column whose name matches a SELECT-list alias on the outer.
+        let references_select_alias = if let Expr::Column(col) = order_expr {
+            ctx.outer_stmt.fields.iter().any(|f| {
+                matches!(
+                    f,
+                    FieldDefinitionExpr::Expr {
+                        alias: Some(alias),
+                        ..
+                    } if *alias == col.name
+                )
+            })
+        } else {
+            false
+        };
+
+        if !in_group_by && !references_aggregate && !references_select_alias {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 /// Returns `true` if every `lhs_rel` column referenced by `expr` maps to an

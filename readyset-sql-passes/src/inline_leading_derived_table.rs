@@ -1396,4 +1396,70 @@ mod tests {
         "#;
         test_it("empty_result_inner", original, expected);
     }
+
+    /// Step-4 ORDER BY shape: inlinable has GROUP BY; outer ORDER BY contains
+    /// `s.rownum + s.rownum` which post-substitution becomes an expression
+    /// over a GROUP BY key (not a literal GROUP BY reference).
+    /// `normalize_topk_with_aggregate` would reject the post-pipeline result;
+    /// we anticipate by rejecting at eligibility time.  The leading derived
+    /// table stays untouched (rewrite is a no-op).
+    #[test]
+    fn outer_order_expr_over_group_by_key_bails() {
+        let original_text = r#"
+        SELECT s.rownum, s.test_dec + s.test_dec, tags.t
+        FROM (SELECT o.rownum, SUM(o.test_dec) AS test_dec
+             FROM qa.datatypes AS o
+             GROUP BY o.rownum, o.test_dec
+             ORDER BY o.rownum
+        ) AS s
+        CROSS JOIN LATERAL (SELECT ARRAY_AGG(t.test_varchar) AS t
+             FROM qa.datatypes1 AS t
+             WHERE t.rownum = s.rownum
+        ) AS tags
+        ORDER BY s.rownum + s.rownum
+        "#;
+        // No rewrite: leading derived table preserved as-is (eligibility
+        // rejection at step 4's new ORDER-BY-shape sub-check).
+        let expected_text = r#"
+        SELECT "s"."rownum", ("s"."test_dec" + "s"."test_dec"), "tags"."t"
+        FROM (SELECT "o"."rownum", sum("o"."test_dec") AS "test_dec"
+              FROM "qa"."datatypes" AS "o"
+              GROUP BY "o"."rownum", "o"."test_dec"
+              ORDER BY "o"."rownum" NULLS LAST) AS "s"
+        CROSS JOIN LATERAL (SELECT array_agg("t"."test_varchar") AS "t"
+              FROM "qa"."datatypes1" AS "t"
+              WHERE ("t"."rownum" = "s"."rownum")) AS "tags"
+        ORDER BY ("s"."rownum" + "s"."rownum") NULLS LAST
+        "#;
+        test_it(
+            "outer_order_expr_over_group_by_key_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Step-4 ORDER BY shape: outer ORDER BY references only a literal inner
+    /// GROUP BY key.  The new sub-check accepts; inlining proceeds.
+    #[test]
+    fn outer_order_literal_group_by_key_inlines() {
+        let original_text = r#"
+        SELECT s.rownum, s.test_dec
+        FROM (SELECT o.rownum, SUM(o.test_dec) AS test_dec
+             FROM qa.datatypes AS o
+             GROUP BY o.rownum, o.test_dec
+        ) AS s
+        ORDER BY s.rownum
+        "#;
+        let expected_text = r#"
+        SELECT "o"."rownum", sum("o"."test_dec") AS "test_dec"
+        FROM "qa"."datatypes" AS "o"
+        GROUP BY "o"."rownum", "o"."test_dec"
+        ORDER BY "o"."rownum" ASC NULLS LAST
+        "#;
+        test_it(
+            "outer_order_literal_group_by_key_inlines",
+            original_text,
+            expected_text,
+        );
+    }
 }
