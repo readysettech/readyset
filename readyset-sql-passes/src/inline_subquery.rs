@@ -56,9 +56,9 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue, JoinClause,
-    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy,
-    OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue,
+    JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal,
+    OrderBy, OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
     UnaryOperator,
 };
 use std::collections::{HashMap, HashSet};
@@ -101,21 +101,9 @@ pub(crate) struct InliningContext<'a> {
 
     /// LATERAL-scope fields populated by `absorb_flatten`; `None` for
     /// non-LATERAL callers.  Read by the LATERAL-aware downstream-
-    /// cardinality variant (added in the next commit).
-    #[expect(
-        dead_code,
-        reason = "read by LATERAL downstream-cardinality variant in next commit"
-    )]
+    /// cardinality variant.
     pub(crate) pre_hoist_lateral_exactly_one: Option<&'a HashSet<Relation>>,
-    #[expect(
-        dead_code,
-        reason = "read by LATERAL downstream-cardinality variant in next commit"
-    )]
     pub(crate) pre_hoist_lateral_at_most_one: Option<&'a HashSet<Relation>>,
-    #[expect(
-        dead_code,
-        reason = "read by LATERAL downstream-cardinality variant in next commit"
-    )]
     pub(crate) preceding_flattened_lateral_aliases: Option<&'a HashSet<Relation>>,
 }
 
@@ -1202,6 +1190,163 @@ fn check_downstream_joins_cardinality_preserving(ctx: &InliningContext) -> Ready
     downstream_joins_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)
 }
 
+/// Returns `true` if `expr` is an equality `left = right` where at least
+/// one of `left`, `right` is a bare column reference to a relation in
+/// `flattened_aliases`.
+fn is_correlation_equality_referencing_set(
+    expr: &Expr,
+    flattened_aliases: &HashSet<Relation>,
+) -> bool {
+    match expr {
+        Expr::BinaryOp {
+            op: BinaryOperator::Equal,
+            lhs,
+            rhs,
+        } => [lhs.as_ref(), rhs.as_ref()].iter().any(|side| {
+            matches!(side, Expr::Column(Column { table: Some(t), .. })
+                if flattened_aliases.contains(t))
+        }),
+        _ => false,
+    }
+}
+
+/// LATERAL-aware relaxation of `is_on_nonrejecting`.  Accepts canonical
+/// non-rejecting shapes (Empty, ON TRUE) AND conjunctions of equality
+/// predicates whose conjuncts each reference at least one alias in
+/// `flattened_aliases`.
+///
+/// Models the LATERAL sibling-chain shape where a sibling's ON predicate
+/// carries correlation to an already-flattened LATERAL alias.
+fn is_on_nonrejecting_or_lateral_correlation(
+    c: &JoinConstraint,
+    flattened_aliases: &HashSet<Relation>,
+) -> bool {
+    match c {
+        JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => true,
+        JoinConstraint::On(expr) => {
+            let mut conjuncts = Vec::new();
+            let _ = split_expr(expr, &|_| true, &mut conjuncts);
+            conjuncts
+                .iter()
+                .all(|c| is_correlation_equality_referencing_set(c, flattened_aliases))
+        }
+        _ => false,
+    }
+}
+
+/// LATERAL-aware ExactlyOne body-cardinality check.  Unions the canonical
+/// structural check (`is_exactly_one_card`, which detects aggregate-only-
+/// no-GROUP-BY bodies that always yield 1 row) with `exactly_one_set`
+/// membership (the pre-hoist signal collected during LATERAL unnesting).
+///
+/// Does NOT consult the AtMostOne set — INNER-JOIN positions require true
+/// ExactlyOne semantics (1 row per outer regardless of match).  Outer rows
+/// without a match in an AtMostOne RHS would be dropped, changing the
+/// outer's cardinality.
+///
+/// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
+/// considered.
+fn is_lateral_friendly_exactly_one(
+    dt: &TableExpr,
+    exactly_one_set: &HashSet<Relation>,
+) -> ReadySetResult<bool> {
+    let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) else {
+        return Ok(false);
+    };
+    let rel: Relation = alias.into();
+    if exactly_one_set.contains(&rel) {
+        return Ok(true);
+    }
+    is_exactly_one_card(rhs_stmt)
+}
+
+/// LATERAL-aware AtMostOne body-cardinality check.  Unions the canonical
+/// structural AtMostOne check (`is_at_most_one_deep`, which handles LIMIT
+/// 1, aggregate-only-no-GROUP-BY, and correlation-pinned GROUP BY) with
+/// membership in EITHER pre-hoist set (ExactlyOne ⊂ AtMostOne).
+///
+/// Used at LEFT-JOIN-RHS positions where 0..1 rows are tolerable — outer
+/// rows without a body match get NULL on the right side, preserving outer
+/// cardinality.
+///
+/// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
+/// considered.
+fn is_lateral_friendly_at_most_one(
+    dt: &TableExpr,
+    exactly_one_set: &HashSet<Relation>,
+    at_most_one_set: &HashSet<Relation>,
+) -> ReadySetResult<bool> {
+    let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) else {
+        return Ok(false);
+    };
+    let rel: Relation = alias.into();
+    if exactly_one_set.contains(&rel) || at_most_one_set.contains(&rel) {
+        return Ok(true);
+    }
+    is_at_most_one_deep(rhs_stmt)
+}
+
+/// LATERAL-aware downstream-cardinality check.  Used by
+/// `lateral_join::absorb_flatten` in place of the canonical variant to
+/// accept correctly-shaped LATERAL sibling chains and pre-hoist-signal-
+/// confirmed sibling cardinalities that the canonical version rejects.
+///
+/// Two relaxations vs. canonical:
+///   - ON predicate shape: accepts correlation-equality predicates
+///     referencing aliases in `preceding_flattened_lateral_aliases` (in
+///     addition to canonical Empty / ON TRUE).
+///   - Body cardinality signal: unions canonical structural check with
+///     pre-hoist set membership.  ExactlyOne-required positions consult
+///     `pre_hoist_lateral_exactly_one`; AtMostOne positions consult both
+///     pre-hoist sets.
+///
+/// Falls back to canonical behavior when any LATERAL-scope context field
+/// is `None` — `can_inline_subquery` calls this helper unconditionally,
+/// and non-LATERAL callers populate the LATERAL-scope fields with
+/// `None`, which yields the canonical behavior here.
+fn check_downstream_joins_cardinality_preserving_lateral(
+    ctx: &InliningContext,
+) -> ReadySetResult<bool> {
+    let (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) = (
+        ctx.pre_hoist_lateral_exactly_one,
+        ctx.pre_hoist_lateral_at_most_one,
+        ctx.preceding_flattened_lateral_aliases,
+    ) else {
+        return check_downstream_joins_cardinality_preserving(ctx);
+    };
+    if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
+        return Ok(true);
+    }
+    for dt in ctx.downstream_tables {
+        if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+            return Ok(false);
+        }
+    }
+    for jc in ctx.downstream_joins {
+        let Ok(dt) = jc.right.table_exprs().exactly_one() else {
+            return Ok(false);
+        };
+        if !is_on_nonrejecting_or_lateral_correlation(&jc.constraint, flattened_aliases) {
+            return Ok(false);
+        }
+        if jc.operator.is_inner_join() {
+            if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+                return Ok(false);
+            }
+        } else if matches!(
+            jc.operator,
+            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+        ) {
+            if !is_lateral_friendly_at_most_one(dt, exactly_one_set, at_most_one_set)? {
+                return Ok(false);
+            }
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Self-join detection.  Reject if inlining would introduce the same base
 /// table twice in the outer FROM.
 fn check_self_join(ctx: &InliningContext) -> ReadySetResult<bool> {
@@ -1327,7 +1472,7 @@ pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Optio
     if !check_mixed_scope_where_with_agg_limit(ctx)? {
         return Ok(None);
     }
-    if !check_downstream_joins_cardinality_preserving(ctx)? {
+    if !check_downstream_joins_cardinality_preserving_lateral(ctx)? {
         return Ok(None);
     }
     if !check_self_join(ctx)? {
