@@ -31,15 +31,16 @@ use crate::derived_tables_rewrite::{
     can_inline_left_join_rhs_safe, can_move_joins_on_nontrivial_expr_to_where,
 };
 use crate::rewrite_utils::{
-    and_predicates_skip_true, are_group_by_keys_pinned_by_correlation, as_sub_query_with_alias,
-    build_ext_to_int_fields_map, collect_local_from_items, columns_iter, contains_select,
-    deep_columns_expr_visitor, deep_columns_visitor, deep_columns_visitor_mut,
-    default_alias_for_select_item_expression, expect_field_as_expr, expect_field_as_expr_mut,
-    expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
-    extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
-    get_select_item_alias, is_aggregated_expr, is_aggregation_or_grouped,
-    is_simple_parametrizable_filter, outermost_expression, partition_correlated_predicates,
-    resolve_field_reference, split_expr, split_expr_mut, substitute_columns_in_expr,
+    OnAtom, and_predicates_skip_true, are_group_by_keys_pinned_by_correlation,
+    as_sub_query_with_alias, build_ext_to_int_fields_map, classify_on_atom,
+    collect_local_from_items, columns_iter, contains_select, deep_columns_expr_visitor,
+    deep_columns_visitor, deep_columns_visitor_mut, default_alias_for_select_item_expression,
+    expect_field_as_expr, expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
+    expect_sub_query_with_alias_mut, extract_correlation_keys, find_rhs_join_clause,
+    for_each_window_function, get_select_item_alias, is_aggregated_expr, is_aggregation_or_grouped,
+    is_always_true_filter, is_simple_parametrizable_filter, outermost_expression,
+    partition_correlated_predicates, resolve_field_reference, split_expr, split_expr_mut,
+    substitute_columns_in_expr,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -54,11 +55,12 @@ use itertools::{Either, Itertools};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invalid_query, invalid_query_err,
 };
+use readyset_sql::Dialect;
 use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
-    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue,
-    JoinClause, JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal,
-    OrderBy, OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
+    Column, Expr, FieldDefinitionExpr, FieldReference, GroupByClause, InValue, JoinClause,
+    JoinConstraint, JoinOperator, JoinRightSide, LimitClause, LimitValue, Literal, OrderBy,
+    OrderClause, Relation, SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
     UnaryOperator,
 };
 use std::collections::{HashMap, HashSet};
@@ -695,11 +697,25 @@ fn is_at_most_one_deep(stmt: &SelectStatement) -> ReadySetResult<bool> {
     }
 }
 
+/// Returns `true` for join constraints that admit every (left, right) row pair.
+///
+/// An `Empty` constraint (CROSS JOIN / comma-join with no ON) trivially admits all
+/// pairs.  For `On(expr)`, defer to [`is_always_true_filter`] which folds compound
+/// constants (`1 = 1`, `NOT FALSE`, `1`, `true`) and conservatively returns `false`
+/// for any expression containing column references — so correlation predicates
+/// flow to the false branch as expected.
+///
+/// MySQL dialect is hardcoded to obtain the most permissive truthiness recognition
+/// (non-zero integer literals → truthy).  Over-acceptance of MySQL-specific shapes
+/// in non-MySQL contexts is harmless: queries containing `WHERE 1` style filters
+/// are rejected by PostgreSQL upstream of this rewrite, so any rewrite output we
+/// produce on the loose interpretation never reaches a stricter consumer.
 fn is_on_nonrejecting(c: &JoinConstraint) -> bool {
-    matches!(
-        c,
-        JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true)))
-    )
+    match c {
+        JoinConstraint::Empty => true,
+        JoinConstraint::On(expr) => is_always_true_filter(expr, Dialect::MySQL),
+        _ => false,
+    }
 }
 
 /// Verify that downstream joins do not change the row count.
@@ -1190,48 +1206,37 @@ fn check_downstream_joins_cardinality_preserving(ctx: &InliningContext) -> Ready
     downstream_joins_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)
 }
 
-/// Returns `true` if `expr` is an equality `left = right` where at least
-/// one of `left`, `right` is a bare column reference to a relation in
-/// `flattened_aliases`.
-fn is_correlation_equality_referencing_set(
-    expr: &Expr,
-    flattened_aliases: &HashSet<Relation>,
-) -> bool {
-    match expr {
-        Expr::BinaryOp {
-            op: BinaryOperator::Equal,
-            lhs,
-            rhs,
-        } => [lhs.as_ref(), rhs.as_ref()].iter().any(|side| {
-            matches!(side, Expr::Column(Column { table: Some(t), .. })
-                if flattened_aliases.contains(t))
-        }),
-        _ => false,
-    }
-}
-
-/// LATERAL-aware relaxation of `is_on_nonrejecting`.  Accepts canonical
-/// non-rejecting shapes (Empty, ON TRUE) AND conjunctions of equality
-/// predicates whose conjuncts each reference at least one alias in
-/// `flattened_aliases`.
+/// LATERAL-aware relaxation of [`is_on_nonrejecting`].  Accepts everything the
+/// canonical helper accepts (Empty, plus any expression
+/// [`is_always_true_filter`] folds to truthy under MySQL semantics) AND
+/// pure-AND conjunctions whose every atom is a cross-table column equality
+/// touching at least one alias in `flattened_aliases`.
 ///
 /// Models the LATERAL sibling-chain shape where a sibling's ON predicate
-/// carries correlation to an already-flattened LATERAL alias.
+/// carries correlation to an already-flattened LATERAL alias.  Delegates to
+/// [`classify_on_atom`] so each conjunct is judged under the same
+/// supported-join taxonomy used elsewhere: only [`OnAtom::CrossEq`] qualifies,
+/// while [`OnAtom::SingleRelFilter`] (e.g. `lat.col = 5`) and [`OnAtom::Other`]
+/// fall through — both ARE row-rejecting and must be rejected here.
 fn is_on_nonrejecting_or_lateral_correlation(
     c: &JoinConstraint,
     flattened_aliases: &HashSet<Relation>,
 ) -> bool {
-    match c {
-        JoinConstraint::Empty | JoinConstraint::On(Expr::Literal(Literal::Boolean(true))) => true,
-        JoinConstraint::On(expr) => {
-            let mut conjuncts = Vec::new();
-            let _ = split_expr(expr, &|_| true, &mut conjuncts);
-            conjuncts
-                .iter()
-                .all(|c| is_correlation_equality_referencing_set(c, flattened_aliases))
-        }
-        _ => false,
+    if is_on_nonrejecting(c) {
+        return true;
     }
+    let JoinConstraint::On(expr) = c else {
+        return false;
+    };
+    let mut conjuncts = Vec::new();
+    let _ = split_expr(expr, &|_| true, &mut conjuncts);
+    conjuncts.iter().all(|c| {
+        matches!(
+            classify_on_atom(c),
+            OnAtom::CrossEq { lhs, rhs }
+                if flattened_aliases.contains(&lhs) || flattened_aliases.contains(&rhs)
+        )
+    })
 }
 
 /// LATERAL-aware ExactlyOne body-cardinality check.  Unions the canonical
