@@ -726,8 +726,6 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             (switch_plugin, packet.data.to_vec())
         };
 
-        self.session_auth_plugin = session_plugin;
-
         let plain_password = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
         let auth_success = session_plugin
@@ -753,6 +751,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             None
         };
         if auth_success {
+            self.session_auth_plugin = session_plugin;
             debug!(%username, "Successfully authenticated client");
             writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags()).await?;
         } else {
@@ -806,41 +805,60 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     })?;
                     let username = change_user.username.to_owned();
 
-                    // Generate fresh nonce for this exchange (prevents replay attacks)
-                    let change_user_auth_data = AuthPlugin::generate_auth_data()
-                        .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
+                    let client_plugin = change_user
+                        .auth_plugin_name
+                        .and_then(|s| s.parse::<AuthPlugin>().ok());
 
-                    // Always send auth switch to ensure the client uses the
-                    // fresh nonce. Without this, the client would hash its
-                    // password against the original handshake nonce while we
-                    // verify against the fresh one, causing auth failure.
-                    // Target the plugin negotiated during the initial
-                    // handshake -- the client already demonstrated it can
-                    // speak that one.
-                    self.conn.enqueue_packet(
-                        self.session_auth_plugin
-                            .get_switch_packet(&change_user_auth_data),
-                    );
-                    self.conn.flush().await?;
+                    // If the client embedded a non-empty auth response under a
+                    // plugin we support, verify it directly against the
+                    // original handshake nonce. This matches real MySQL's
+                    // COM_CHANGE_USER semantics (the embedded response is
+                    // hashed against the handshake nonce) and is required for
+                    // compatibility with clients like ProxySQL that don't
+                    // recompute the hash in response to an
+                    // AUTH_SWITCH_REQUEST that targets the same plugin.
+                    //
+                    // Otherwise, force an auth-switch round trip with a fresh
+                    // nonce -- targeted at the client's preferred plugin when
+                    // it differs from the session plugin, so MySQL 9.x clients
+                    // that lack `mysql_native_password.so` can still complete.
+                    let use_client_plugin =
+                        client_plugin.is_some() && !change_user.password.is_empty();
 
-                    let packet = self.conn.next().await?.ok_or_else(|| {
-                        io::Error::new(
-                            io::ErrorKind::ConnectionAborted,
-                            "peer terminated connection during change_user auth switch",
-                        )
-                    })?;
-                    self.conn.set_seq(packet.next_seq());
-                    let authpassword = packet.data.to_vec();
+                    let (session_plugin, handshake_password, change_user_auth_data) =
+                        if use_client_plugin {
+                            (
+                                client_plugin.expect("checked above"),
+                                change_user.password.to_vec(),
+                                self.auth_data,
+                            )
+                        } else {
+                            let switch_plugin = client_plugin.unwrap_or(self.session_auth_plugin);
+                            let fresh_nonce = AuthPlugin::generate_auth_data()
+                                .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
+                            self.conn
+                                .enqueue_packet(switch_plugin.get_switch_packet(&fresh_nonce));
+                            self.conn.flush().await?;
+
+                            let packet = self.conn.next().await?.ok_or_else(|| {
+                                io::Error::new(
+                                    io::ErrorKind::ConnectionAborted,
+                                    "peer terminated connection during change_user auth switch",
+                                )
+                            })?;
+                            self.conn.set_seq(packet.next_seq());
+
+                            (switch_plugin, packet.data.to_vec(), fresh_nonce)
+                        };
 
                     let plain_password = self.shim.password_for_username(&username);
                     let require_auth = self.shim.require_authentication();
-                    let auth_success = self
-                        .session_auth_plugin
+                    let auth_success = session_plugin
                         .handle_authentication(
                             &AuthContext {
                                 username: &username,
                                 password: plain_password.as_deref(),
-                                handshake_password: &authpassword,
+                                handshake_password: &handshake_password,
                                 auth_data: &change_user_auth_data,
                                 require_auth,
                             },
@@ -850,6 +868,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         .await?;
 
                     if auth_success {
+                        self.session_auth_plugin = session_plugin;
                         debug!("Successfully authenticated client");
                         match self
                             .shim

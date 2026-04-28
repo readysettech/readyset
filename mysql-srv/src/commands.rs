@@ -22,8 +22,10 @@ pub struct ClientHandshake<'a> {
 #[derive(Debug)]
 pub struct ClientChangeUser<'a> {
     pub username: &'a str,
+    pub password: &'a [u8],
     pub database: Option<&'a str>,
     pub charset: u16,
+    pub auth_plugin_name: Option<&'a str>,
 }
 
 struct PacketParser<'a> {
@@ -164,14 +166,12 @@ pub fn change_user(
     let mut p = PacketParser::new(i);
 
     let username = p.read_null_str()?;
-    // Skip the password: a fresh auth switch exchange will provide the response
-    // hashed against our new nonce, so the packet's password is unused.
-    if client_capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
-        let auth_token_length = p.read_u8()?;
-        p.skip(auth_token_length as usize)?;
+    let password = if client_capability_flags.contains(CapabilityFlags::CLIENT_SECURE_CONNECTION) {
+        let auth_token_length = p.read_u8()? as usize;
+        p.read_bytes(auth_token_length)?
     } else {
-        p.read_null_str()?;
-    }
+        p.read_null_str()?.as_bytes()
+    };
     let database = Some(p.read_null_str()?);
     let charset = if !p.is_empty() {
         if client_capability_flags.contains(CapabilityFlags::CLIENT_PROTOCOL_41) {
@@ -182,11 +182,21 @@ pub fn change_user(
     } else {
         UTF8MB4_GENERAL_CI
     };
+    // A client may set CLIENT_PLUGIN_AUTH but omit the plugin name; treat a
+    // parse failure as "no plugin offered" rather than rejecting the packet.
+    let auth_plugin_name =
+        if client_capability_flags.contains(CapabilityFlags::CLIENT_PLUGIN_AUTH) && !p.is_empty() {
+            p.read_null_str().ok()
+        } else {
+            None
+        };
 
     Ok(ClientChangeUser {
         username,
+        password,
         database,
         charset,
+        auth_plugin_name,
     })
 }
 
@@ -450,8 +460,10 @@ mod tests {
             | CapabilityFlags::CLIENT_PLUGIN_AUTH;
         let changeuser = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
+        assert_eq!(changeuser.password, b"");
         assert_eq!(changeuser.database, Some("test"));
         assert_eq!(changeuser.charset, UTF8MB4_GENERAL_CI);
+        assert_eq!(changeuser.auth_plugin_name, Some("mysql_native_password"));
 
         let mut data = [
             0x38, 0x00, 0x00, 0x00, 0x72, 0x6f, 0x6f, 0x74, 0x00, 0x14, 0x95, 0x16, 0xb1, 0x01,
@@ -465,7 +477,15 @@ mod tests {
         let packet = pr.next().await.unwrap().unwrap();
         let changeuser = change_user(&packet.data, capability_flags).unwrap();
         assert_eq!(changeuser.username, "root");
+        assert_eq!(
+            changeuser.password,
+            &[
+                0x95, 0x16, 0xb1, 0x01, 0x40, 0x6d, 0x7c, 0xc3, 0x17, 0x22, 0xc5, 0x9d, 0x00, 0xf3,
+                0x5d, 0x37, 0xb9, 0xb5, 0x6d, 0x0f,
+            ][..]
+        );
         assert_eq!(changeuser.database, Some("test"));
         assert_eq!(changeuser.charset, UTF8MB4_GENERAL_CI);
+        assert_eq!(changeuser.auth_plugin_name, Some("mysql_native_password"));
     }
 }
