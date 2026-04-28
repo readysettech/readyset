@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use clap::ValueEnum;
 use dashmap::DashMap;
+use dashmap::DashSet;
 use dashmap::mapref::entry::Entry;
 use lru::LruCache;
-use metrics::gauge;
+use metrics::{counter, gauge};
 use parking_lot::RwLock;
 use tracing::warn;
 
@@ -27,6 +28,15 @@ use schema_catalog::{SchemaChangeHandler, SchemaGeneration};
 use crate::table_extraction_visitor::extract_referenced_tables;
 
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
+
+/// Soft cap on the number of [`QueryId`]s the in-request-path shallow auto-
+/// cache filter will remember.  When this is exceeded the set is bulk-cleared
+/// and the overflow counter increments.  A realistic workload's set of
+/// ineligible queries is on the order of hundreds; crossing this cap is a
+/// signal of pathological client behaviour rather than a normal condition.
+/// Memory footprint at the cap is roughly 18 MB (one `u64` per entry plus
+/// `hashbrown` slot + control-byte overhead).
+pub const SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP: usize = 1_000_000;
 
 /// A metadata cache for all queries that have been processed by this
 /// adapter. Thread-safe.
@@ -53,6 +63,18 @@ pub struct QueryStatusCache {
     ///
     /// Currently unused.
     placeholder_inlining: bool,
+
+    /// Set of [`QueryId`]s the in-request-path shallow-cache eligibility
+    /// filter has rejected.  Consulted by `try_auto_create_shallow_cache` so
+    /// the AST walk only runs once per ineligible query.
+    ///
+    /// Strictly an implementation detail of the implicit auto-create path:
+    /// explicit `CREATE SHALLOW CACHE` DDL and `/*rs+ CREATE SHALLOW CACHE */`
+    /// hint flows do not consult it, so a stuck entry never blocks a user
+    /// from creating a cache deliberately.  Bounded by
+    /// [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`]; on overflow the set is bulk-
+    /// cleared and a warning is logged.
+    shallow_auto_create_skip: DashSet<QueryId, ahash::RandomState>,
 }
 
 #[derive(Debug)]
@@ -308,6 +330,7 @@ impl QueryStatusCache {
             persistent_handle: Default::default(),
             style: MigrationStyle::InRequestPath,
             placeholder_inlining: false,
+            shallow_auto_create_skip: Default::default(),
         }
     }
 
@@ -319,7 +342,42 @@ impl QueryStatusCache {
             persistent_handle: PersistentStatusCacheHandle::with_capacity(capacity),
             style: MigrationStyle::InRequestPath,
             placeholder_inlining: false,
+            shallow_auto_create_skip: Default::default(),
         }
+    }
+
+    /// Returns true if the in-request-path shallow auto-create filter has
+    /// previously rejected this query; the caller should skip auto-creation
+    /// without re-walking the AST.
+    pub fn is_shallow_auto_create_skipped(&self, id: QueryId) -> bool {
+        self.shallow_auto_create_skip.contains(&id)
+    }
+
+    /// Record that the in-request-path filter has rejected this query.  When
+    /// the set crosses [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`] it is bulk-
+    /// cleared, the overflow counter increments, and a warning is logged.
+    /// Reaching the cap indicates pathological client traffic (e.g. queries
+    /// with literal-injected unique values) and warrants investigation.
+    pub fn record_shallow_auto_create_skip(&self, id: QueryId) {
+        self.shallow_auto_create_skip.insert(id);
+        let len = self.shallow_auto_create_skip.len();
+        if len >= SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP {
+            // A small race here is benign: concurrent inserts that all
+            // observe `len >= cap` will each clear-and-warn, but the next
+            // refill takes ~SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP inserts, so
+            // duplicate log lines and counter bumps are bounded by thread
+            // count, not request rate.
+            self.shallow_auto_create_skip.clear();
+            counter!(recorded::SHALLOW_AUTO_CREATE_SKIP_OVERFLOW).increment(1);
+            warn!(
+                cap = SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP,
+                "Shallow auto-create skip set exceeded soft cap; bulk-cleared. \
+                 Investigate whether the workload generates pathologically \
+                 unique queries."
+            );
+        }
+        gauge!(recorded::SHALLOW_AUTO_CREATE_SKIP_SET_SIZE)
+            .set(self.shallow_auto_create_skip.len() as f64);
     }
 
     /// Sets [`Self::style`]
@@ -1747,5 +1805,46 @@ mod tests {
         let id = QueryId::from(&q);
         let (_, stored_gen) = cache.query_with_schema_generation(&id.to_string()).unwrap();
         assert_eq!(stored_gen, Some(generation));
+    }
+
+    #[test]
+    fn shallow_auto_create_skip_records_and_recalls() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT 1").unwrap(), vec![]);
+        let id = QueryId::from(&q);
+
+        assert!(!cache.is_shallow_auto_create_skipped(id));
+        cache.record_shallow_auto_create_skip(id);
+        assert!(cache.is_shallow_auto_create_skipped(id));
+
+        // Distinct queries are tracked independently.
+        let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM users").unwrap(), vec![]);
+        let id2 = QueryId::from(&q2);
+        assert!(!cache.is_shallow_auto_create_skipped(id2));
+    }
+
+    #[test]
+    fn shallow_auto_create_skip_bulk_clears_at_soft_cap() {
+        let cache = QueryStatusCache::new();
+        // QueryId has no `From<u64>`, so synthesize ids via FromStr (`q_<hex>`).
+        // Insert directly into the DashSet to avoid driving each one through
+        // `record_shallow_auto_create_skip` and tripping the cap mid-fill.
+        for i in 0..SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP as u64 - 1 {
+            let id = QueryId::from_str(&format!("q_{i:x}")).unwrap();
+            cache.shallow_auto_create_skip.insert(id);
+        }
+        assert_eq!(
+            cache.shallow_auto_create_skip.len(),
+            SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP - 1
+        );
+
+        // Crossing the cap via the public API triggers a bulk clear.
+        let trip = QueryId::from_str("q_ffffffffffffffff").unwrap();
+        cache.record_shallow_auto_create_skip(trip);
+        assert_eq!(
+            cache.shallow_auto_create_skip.len(),
+            0,
+            "skip set should be bulk-cleared after crossing the soft cap"
+        );
     }
 }

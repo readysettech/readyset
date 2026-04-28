@@ -134,6 +134,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
+use crate::auto_cache_eligibility::auto_cache_skip_reason;
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
@@ -1479,6 +1480,27 @@ where
             Self::Parser(r) => f.debug_tuple("Parser").field(r).finish(),
             Self::Shallow(r) => f.debug_tuple("Shallow").field(r).finish(),
             Self::ReadysetSchema(r) => f.debug_tuple("ReadysetSchema").field(r).finish(),
+        }
+    }
+}
+
+/// What caused [`Backend::try_auto_create_shallow_cache`] to fire.  Used both
+/// for log/telemetry labels and to gate the eligibility filter, which only
+/// applies to the implicit in-request-path trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutoCreateTrigger {
+    /// Explicit `/*rs+ CREATE SHALLOW CACHE */` hint — user opt-in.
+    Hint,
+    /// Implicit auto-create driven by `--query-caching=inrequestpath` +
+    /// `--cache-mode=shallow`.
+    InRequestPath,
+}
+
+impl AutoCreateTrigger {
+    fn as_str(self) -> &'static str {
+        match self {
+            AutoCreateTrigger::Hint => "hint",
+            AutoCreateTrigger::InRequestPath => "in-request-path",
         }
     }
 }
@@ -4578,26 +4600,60 @@ where
                 if !wants_shallow {
                     return None;
                 }
-                (opts, "hint")
+                (opts, AutoCreateTrigger::Hint)
             }
             None if settings.migration_mode == MigrationMode::InRequestPath
                 && settings.cache_mode.is_shallow() =>
             {
-                (CreateCacheOptions::default(), "in-request-path")
+                (
+                    CreateCacheOptions::default(),
+                    AutoCreateTrigger::InRequestPath,
+                )
             }
             _ => return None,
         };
 
+        // Filter implicit in-request-path attempts to prevent driver/ORM
+        // bootstrap traffic (system-schema introspection, session variables,
+        // non-deterministic functions) from polluting the cache.  Explicit
+        // hints opt the user in deliberately and bypass the filter.
+        //
+        // The skip set in `query_status_cache` is consulted only here, so a
+        // remembered rejection cannot block an explicit `CREATE SHALLOW
+        // CACHE` DDL or a `/*rs+ CREATE SHALLOW CACHE */` hint.
+        if matches!(trigger, AutoCreateTrigger::InRequestPath) {
+            let query_id = QueryId::from(shallow);
+            if state
+                .query_status_cache
+                .is_shallow_auto_create_skipped(query_id)
+            {
+                debug!(
+                    "Shallow cache auto-creation skipped: previously rejected by eligibility filter"
+                );
+                return None;
+            }
+            if let Some(reason) = auto_cache_skip_reason(&shallow.query, settings.dialect) {
+                state
+                    .query_status_cache
+                    .record_shallow_auto_create_skip(query_id);
+                debug!(
+                    reason,
+                    "Shallow cache auto-creation skipped: query not eligible"
+                );
+                return None;
+            }
+        }
+
         if !settings.allow_cache_ddl {
             warn!(
-                trigger,
+                trigger = trigger.as_str(),
                 "Shallow cache auto-creation skipped: cache DDL is disabled"
             );
             return None;
         }
 
         if let Err(e) = connectors.upstream_supports(shallow).await {
-            warn!(trigger, error = %e, "Shallow cache auto-creation failed: upstream unsupported");
+            warn!(trigger = trigger.as_str(), error = %e, "Shallow cache auto-creation failed: upstream unsupported");
             return None;
         }
 
@@ -4626,7 +4682,7 @@ where
         {
             Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {}
             Err(e) => {
-                warn!(trigger, error = %e, "Shallow cache auto-creation failed");
+                warn!(trigger = trigger.as_str(), error = %e, "Shallow cache auto-creation failed");
             }
         }
 

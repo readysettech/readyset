@@ -445,6 +445,19 @@ pub mod recorded {
     pub const QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE: &str =
         "readyset_query_status_cache.persistent_cache.statuses.size";
 
+    /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility
+    /// filter has rejected and remembered, so subsequent requests for the same
+    /// query short-circuit without re-walking the AST.
+    pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =
+        "readyset_query_status_cache.shallow_auto_create_skip.size";
+
+    /// Counter: Number of times the shallow auto-create skip set crossed its
+    /// soft cap and was bulk-cleared.  A non-zero value indicates either
+    /// pathological client behaviour (queries with literal-injected unique
+    /// values) or that the cap is too low for the workload.
+    pub const SHALLOW_AUTO_CREATE_SKIP_OVERFLOW: &str =
+        "readyset_query_status_cache.shallow_auto_create_skip.overflow";
+
     /// Gauge: The number of queries in the query sampler queue.
     ///
     /// | Tag | Description |
