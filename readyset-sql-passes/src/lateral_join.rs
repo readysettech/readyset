@@ -1200,6 +1200,7 @@ mod tests {
                 schema: &NonNullSchemaMoke {},
                 probes: ProbeRegistry::new(),
                 pre_hoist_lateral_exactly_one: HashSet::new(),
+                pre_hoist_lateral_at_most_one: HashSet::new(),
                 lateral_trivial_on: HashSet::new(),
                 ancestor_scope: HashSet::new(),
                 ancestor_scope_ordered: Vec::new(),

@@ -3,10 +3,10 @@ use crate::lateral_join::unnest_lateral_subqueries;
 use crate::rewrite_utils::{
     NO_REWRITES_STATUS, OnAtom, RewriteStatus, SINGLE_REWRITE_STATUS,
     align_group_by_and_windows_with_correlation, analyse_lone_aggregates_subquery_fields,
-    and_predicates_skip_true, as_sub_query_with_alias, as_sub_query_with_alias_mut,
-    bubble_alias_to_anchor_top, classify_on_atom, collect_local_from_items, columns_iter,
-    conjoin_all_dedup, construct_null_check_expr, construct_projecting_wrapper,
-    construct_scalar_expr, contains_select, decompose_conjuncts,
+    and_predicates_skip_true, are_group_by_keys_pinned_by_correlation, as_sub_query_with_alias,
+    as_sub_query_with_alias_mut, bubble_alias_to_anchor_top, classify_on_atom,
+    collect_local_from_items, columns_iter, conjoin_all_dedup, construct_null_check_expr,
+    construct_projecting_wrapper, construct_scalar_expr, contains_select, decompose_conjuncts,
     default_alias_for_select_item_expression, ensure_first_field_alias, expect_field_as_expr,
     expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
     expect_only_subquery_from_with_alias_mut, expect_sub_query_with_alias,
@@ -113,6 +113,14 @@ pub(crate) struct UnnestContext<'a> {
     pub(crate) probes: ProbeRegistry,
     // Pre-hoist hints keyed by LATERAL alias (as Relations)
     pub(crate) pre_hoist_lateral_exactly_one: HashSet<Relation>,
+    /// LATERAL aliases whose body is correlation-pinned GROUP BY (or
+    /// otherwise AtMostOne per outer row).  Distinct from
+    /// `pre_hoist_lateral_exactly_one` because these bodies produce
+    /// ZERO rows (not "one row with default values") for outer rows
+    /// without a match — so the existing COALESCE-zero / LEFT-OUTER-
+    /// JOIN promotion in `get_join_operator_for_lateral` MUST NOT be
+    /// applied to them.
+    pub(crate) pre_hoist_lateral_at_most_one: HashSet<Relation>,
     pub(crate) lateral_trivial_on: HashSet<Relation>,
     /// Relations from ancestor LATERAL scopes, for correlation
     /// detection. Each nesting level pushes its preceding items
@@ -152,6 +160,7 @@ pub(crate) fn unnest_subqueries_main(
         schema,
         probes: ProbeRegistry::new(),
         pre_hoist_lateral_exactly_one: HashSet::new(),
+        pre_hoist_lateral_at_most_one: HashSet::new(),
         lateral_trivial_on: HashSet::new(),
         ancestor_scope: HashSet::new(),
         ancestor_scope_ordered: Vec::new(),
@@ -2349,9 +2358,49 @@ pub(crate) fn unnest_all_subqueries(
     Ok(status1.combine(status2).combine(status3))
 }
 
-/// Walk the statement and collect, for each LATERAL subquery, two pre-hoist hints:
-///  (1) whether its body is agg-only/no-GBY and **ExactlyOne** (wrapper-aware), and
-///  (2) whether its original ON was trivial (Empty / ON TRUE / comma segment).
+/// Returns `true` if the body's GROUP BY is fully pinned by correlation
+/// predicates referencing relations OUTSIDE the body's local FROM, so each
+/// outer row produces at most one body group.
+///
+/// Adapts the correlation-pinning branch of
+/// `inline_subquery_checks::is_at_most_one_deep` to the per-LATERAL-body
+/// context.  Distinct from `agg_only_no_gby_cardinality(stmt) == ExactlyOne`
+/// (which detects aggregate-only-no-GROUP-BY bodies that always yield 1 row
+/// regardless of match): this function detects bodies that yield 0 OR 1 row
+/// per outer.
+///
+/// Requirements:
+///   - body has a GROUP BY,
+///   - every GROUP BY column is correlation-pinned by at least one WHERE-
+///     clause equality predicate against an outside relation,
+///   - HAVING is absent or always-true (HAVING can drop the single group →
+///     0 rows, which is still AtMostOne, so HAVING is allowed).
+fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<bool> {
+    let Some(_group_by) = &stmt.group_by else {
+        return Ok(false);
+    };
+    let Some(where_expr) = &stmt.where_clause else {
+        return Ok(false);
+    };
+    let locals = collect_local_from_items(stmt)?;
+    let (Some(corr), _remaining) =
+        partition_correlated_predicates(where_expr, &|rel| !locals.contains(rel))
+    else {
+        return Ok(false);
+    };
+    let cols_set = extract_correlation_keys(&corr, &locals)?;
+    are_group_by_keys_pinned_by_correlation(&cols_set, stmt)
+}
+
+/// Walk the statement and collect, for each LATERAL subquery, three pre-hoist hints:
+///  (1) whether its body is agg-only/no-GBY and **ExactlyOne** (wrapper-aware),
+///  (2) whether its body is correlation-pinned **AtMostOne** GROUP BY, and
+///  (3) whether its original ON was trivial (Empty / ON TRUE / comma segment).
+///
+/// Hints (1) and (2) are mutually exclusive: agg-only/no-GBY bodies and
+/// grouped-with-correlation bodies are different shapes, and conflating
+/// them on the ExactlyOne side would silently corrupt the COALESCE-zero
+/// promotion in `get_join_operator_for_lateral`.
 fn collect_pre_hoist_lateral_hints(
     stmt: &SelectStatement,
     ctx: &mut UnnestContext,
@@ -2362,13 +2411,29 @@ fn collect_pre_hoist_lateral_hints(
             collect_pre_hoist_lateral_hints(inner, ctx)?;
 
             if inner.lateral {
+                let alias_rel: Relation = alias.clone().into();
+
+                // Existing ExactlyOne detection (aggregate-only-no-GROUP-BY).
                 if matches!(
                     agg_only_no_gby_cardinality(inner)?,
                     Some(AggNoGbyCardinality::ExactlyOne)
                 ) {
-                    ctx.pre_hoist_lateral_exactly_one
-                        .insert(alias.clone().into());
+                    ctx.pre_hoist_lateral_exactly_one.insert(alias_rel.clone());
                 }
+
+                // AtMostOne via correlation-pinned GROUP BY.
+                // Mutually exclusive with the ExactlyOne set: aggregate-only-
+                // no-GROUP-BY and grouped-with-correlation are different
+                // shapes, and the existing ExactlyOne consumer
+                // (`get_join_operator_for_lateral`) relies on the
+                // ExactlyOne-with-aggregate-empty-defaults contract that
+                // grouped bodies do NOT satisfy.
+                if !ctx.pre_hoist_lateral_exactly_one.contains(&alias_rel)
+                    && is_correlation_pinned_at_most_one(inner)?
+                {
+                    ctx.pre_hoist_lateral_at_most_one.insert(alias_rel.clone());
+                }
+
                 let trivial = if let Some((jc_idx, _)) = find_rhs_join_clause(stmt, tab_expr_idx) {
                     matches!(
                         stmt.join[jc_idx].constraint,
@@ -2379,7 +2444,7 @@ fn collect_pre_hoist_lateral_hints(
                     true // comma/CROSS segment behaves like ON TRUE
                 };
                 if trivial {
-                    ctx.lateral_trivial_on.insert(alias.clone().into());
+                    ctx.lateral_trivial_on.insert(alias_rel);
                 }
             }
         }
