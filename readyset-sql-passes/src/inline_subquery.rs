@@ -98,6 +98,25 @@ pub(crate) struct InliningContext<'a> {
     pub(crate) inner_rel: Relation,
     pub(crate) is_inner_agg: bool,
     pub(crate) is_outer_agg: bool,
+
+    /// LATERAL-scope fields populated by `absorb_flatten`; `None` for
+    /// non-LATERAL callers.  Read by the LATERAL-aware downstream-
+    /// cardinality variant (added in the next commit).
+    #[expect(
+        dead_code,
+        reason = "read by LATERAL downstream-cardinality variant in next commit"
+    )]
+    pub(crate) pre_hoist_lateral_exactly_one: Option<&'a HashSet<Relation>>,
+    #[expect(
+        dead_code,
+        reason = "read by LATERAL downstream-cardinality variant in next commit"
+    )]
+    pub(crate) pre_hoist_lateral_at_most_one: Option<&'a HashSet<Relation>>,
+    #[expect(
+        dead_code,
+        reason = "read by LATERAL downstream-cardinality variant in next commit"
+    )]
+    pub(crate) preceding_flattened_lateral_aliases: Option<&'a HashSet<Relation>>,
 }
 
 /// Extract the inner statement from a `TableExpr` subquery and build the

@@ -341,6 +341,9 @@ fn hoist_lhsmost_derived_table(
         inner_rel: lhs_alias.clone().into(),
         is_inner_agg: is_aggregation_or_grouped(lhs_stmt)?,
         is_outer_agg: is_aggregation_or_grouped(stmt)?,
+        pre_hoist_lateral_exactly_one: None,
+        pre_hoist_lateral_at_most_one: None,
+        preceding_flattened_lateral_aliases: None,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {

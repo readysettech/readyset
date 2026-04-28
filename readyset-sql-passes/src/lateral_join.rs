@@ -322,6 +322,7 @@ fn has_outer_left_join_on(stmt: &SelectStatement, local_tables: &HashSet<Relatio
 /// HAVING, GROUP BY, ORDER, ext_to_int, alias) are intact for deferred
 /// `apply_inline`. The caller pushes the returned value into its deferred
 /// queue.
+#[allow(clippy::too_many_arguments)]
 fn absorb_flatten(
     mut prepared: InlineCandidate,
     outer_stmt: &SelectStatement,
@@ -330,6 +331,8 @@ fn absorb_flatten(
     out_joins: &mut Vec<JoinClause>,
     preceding_from_items: &mut HashSet<Relation>,
     preceding_to_rhs: &mut Vec<Relation>,
+    pre_hoist_lateral_exactly_one: &HashSet<Relation>,
+    pre_hoist_lateral_at_most_one: &HashSet<Relation>,
 ) -> ReadySetResult<InlineCandidate> {
     let (ds_tables, ds_joins) = compute_downstream_for_position(outer_stmt, inl_from_item_ord_idx);
 
@@ -355,6 +358,9 @@ fn absorb_flatten(
         inner_rel: prepared.alias.clone().into(),
         is_inner_agg: is_aggregation_or_grouped(&prepared.stmt)?,
         is_outer_agg: is_aggregation_or_grouped(outer_stmt)?,
+        pre_hoist_lateral_exactly_one: Some(pre_hoist_lateral_exactly_one),
+        pre_hoist_lateral_at_most_one: Some(pre_hoist_lateral_at_most_one),
+        preceding_flattened_lateral_aliases: Some(preceding_from_items),
     };
 
     if can_inline_subquery(&ctx)?.is_none() {
@@ -916,6 +922,8 @@ fn resolve_lateral_subqueries(
                     &mut new_joins,
                     &mut preceding_from_items,
                     &mut preceding_to_rhs,
+                    &ctx.pre_hoist_lateral_exactly_one,
+                    &ctx.pre_hoist_lateral_at_most_one,
                 )?);
                 had_lateral = true;
                 rewrite_status.rewrite();
@@ -1040,6 +1048,8 @@ fn resolve_lateral_subqueries(
                         &mut were_lateral,
                         &mut preceding_from_items,
                         &mut preceding_to_rhs,
+                        &ctx.pre_hoist_lateral_exactly_one,
+                        &ctx.pre_hoist_lateral_at_most_one,
                     )?);
                     rewrite_status.rewrite();
                 }

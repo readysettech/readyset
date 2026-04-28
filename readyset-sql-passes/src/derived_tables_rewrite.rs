@@ -283,6 +283,9 @@ fn can_inline_from_item(
         inner_rel: inl_stmt_alias.clone().into(),
         is_inner_agg: is_aggregation_or_grouped(inl_stmt)?,
         is_outer_agg: is_aggregation_or_grouped(base_stmt)?,
+        pre_hoist_lateral_exactly_one: None,
+        pre_hoist_lateral_at_most_one: None,
+        preceding_flattened_lateral_aliases: None,
     };
 
     // Reject aggregated inlinable + multi-FROM base.  `inline_from_item_in_place`
