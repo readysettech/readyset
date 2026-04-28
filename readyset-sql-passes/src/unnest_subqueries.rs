@@ -2401,7 +2401,7 @@ fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<b
 /// grouped-with-correlation bodies are different shapes, and conflating
 /// them on the ExactlyOne side would silently corrupt the COALESCE-zero
 /// promotion in `get_join_operator_for_lateral`.
-fn collect_pre_hoist_lateral_hints(
+pub(crate) fn collect_pre_hoist_lateral_hints(
     stmt: &SelectStatement,
     ctx: &mut UnnestContext,
 ) -> ReadySetResult<()> {

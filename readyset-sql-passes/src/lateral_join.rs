@@ -333,7 +333,7 @@ fn absorb_flatten(
     preceding_to_rhs: &mut Vec<Relation>,
     pre_hoist_lateral_exactly_one: &HashSet<Relation>,
     pre_hoist_lateral_at_most_one: &HashSet<Relation>,
-) -> ReadySetResult<InlineCandidate> {
+) -> ReadySetResult<(InlineCandidate, Vec<Expr>)> {
     let (ds_tables, ds_joins) = compute_downstream_for_position(outer_stmt, inl_from_item_ord_idx);
 
     // Full eligibility check with the outer statement.
@@ -363,9 +363,9 @@ fn absorb_flatten(
         preceding_flattened_lateral_aliases: Some(preceding_from_items),
     };
 
-    if can_inline_subquery(&ctx)?.is_none() {
+    let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
         unsupported!("LATERAL wrapper not eligible for flattening after full eligibility check");
-    }
+    };
 
     // Alias deduplication: rename any inner FROM-item alias that collides
     // with an outer top-level FROM-item alias. Must run BEFORE tables/joins
@@ -404,7 +404,7 @@ fn absorb_flatten(
         }
         out_joins.push(jc);
     }
-    Ok(prepared)
+    Ok((prepared, downstream_group_by_additions))
 }
 
 /// LATERAL RHS sanitation (before limit/offset guard):
@@ -422,7 +422,7 @@ fn try_resolve_as_lateral_subquery(
     let mut has_transformed;
 
     // Descend and resolve inner subqueries first; bail if not actually LATERAL
-    let Some((stmt, _)) = as_sub_query_with_alias_mut(from_item) else {
+    let Some((stmt, body_alias_ident)) = as_sub_query_with_alias_mut(from_item) else {
         return Ok((false, None));
     };
 
@@ -452,22 +452,33 @@ fn try_resolve_as_lateral_subquery(
     // We use `stmt` (already borrowed mutably from `from_item`) to check the inner
     // statement's joins; if eligible we drop the mutable borrow before calling
     // `prepare_inline` on the whole `from_item`.
-    // LATERAL-specific: reject flattening if the wrapper has per-outer-row
-    // semantics that would become global after flattening:
+    //
+    // LATERAL-specific: per-outer-row semantics that differ from global semantics
+    // are blanket-rejected:
     //   - LIMIT / OFFSET: applied per outer row in LATERAL, global after flatten.
-    //   - GROUP BY / aggregates: grouped per outer row in LATERAL, globally after.
     //   - DISTINCT: deduplicated per outer row in LATERAL, globally after.
     //   - ORDER BY: per-outer ordering is meaningless at outer scope post-flatten.
-    // Note: aggregation of the wrapper's own SELECT (e.g. COUNT(*) directly)
-    // is detected via `is_aggregation_or_grouped(stmt)?`. HAVING is handled
-    // by `apply_inline`: with aggregates/GROUP BY, HAVING is merged into outer
-    // HAVING; without them, HAVING is semantically a WHERE filter and is
-    // merged into outer WHERE.
+    //
+    // Aggregation/GROUP BY is conditionally accepted: bodies whose alias is in
+    // `pre_hoist_lateral_exactly_one` (aggregate-only-no-GROUP-BY → 1 row per
+    // outer regardless of match) or `pre_hoist_lateral_at_most_one` (correlation-
+    // pinned GROUP BY → 0..1 row per outer) flatten safely because their per-
+    // outer cardinality is bounded.  The downstream-cardinality validation in
+    // `check_downstream_joins_cardinality_preserving_lateral` (called from
+    // `absorb_flatten`) ensures the lifted aggregation produces correct results
+    // when downstream joins/tables are also cardinality-preserving.
+    //
+    // HAVING is handled by `apply_inline`: with aggregates/GROUP BY, HAVING is
+    // merged into outer HAVING; without them, HAVING is semantically a WHERE
+    // filter and is merged into outer WHERE.
+    let body_alias_rel: Relation = body_alias_ident.clone().into();
     let lateral_flatten_safe = allow_flatten
         && stmt.limit_clause.is_empty()
         && stmt.order.is_none()
         && !stmt.distinct
-        && !is_aggregation_or_grouped(stmt)?;
+        && (!is_aggregation_or_grouped(stmt)?
+            || ctx.pre_hoist_lateral_exactly_one.contains(&body_alias_rel)
+            || ctx.pre_hoist_lateral_at_most_one.contains(&body_alias_rel));
     if lateral_flatten_safe {
         let local_tables = collect_local_from_items(stmt)?;
         if has_outer_left_join_on(stmt, &local_tables) {
@@ -616,7 +627,7 @@ fn get_join_operator_for_lateral(
                 join_operator
             }
             JoinConstraint::Using(_) => {
-                // SAFETY: `expand_join_on_using` runs unconditionally in Block A (step 8)
+                // SAFETY: `expand_join_on_using` runs unconditionally in Block A
                 // before all Block B passes, guaranteeing no USING constraints remain.
                 // TODO: refactor to return `ReadySetResult` with `internal!()`.
                 unreachable!("USING should have been desugared by expand_join_on_using")
@@ -744,7 +755,8 @@ fn coalesce_fields_references(
     //
     // b) Downstream LATERAL bodies: a downstream LATERAL that references an upstream COUNT
     //    column will have that reference hoisted to its JOIN ON as a cross-table equality
-    //    (e.g. lat2._corr = lat1.cnt), which is caught and rejected by step 2 above.
+    //    (e.g. lat2._corr = lat1.cnt), which is caught and rejected by
+    //    `check_nested_aggregation` above.
     //    If the reference survives in the body SELECT, the downstream join's own ON condition
     //    is `lat2._corr = lat1.cnt = NULL` for no-match rows, so the body result is never
     //    observed — LEFT JOIN NULL-propagation makes the missing COALESCE irrelevant.
@@ -840,8 +852,15 @@ fn resolve_lateral_subqueries(
 
     // Deferred apply_inline calls for flattened LATERAL wrappers.
     // We cannot mutably borrow `stmt` during iteration, so we collect them
-    // and apply after the loops splice tables/joins into place.
-    let mut deferred_inlines: Vec<InlineCandidate> = Vec::new();
+    // and apply after the loops splice tables/joins into place.  Each entry
+    // pairs the prepared inline with the `downstream_group_by_additions`
+    // captured by `check_group_by_compatibility`; the additions
+    // must be threaded into `apply_inline` so that the outer GROUP BY is
+    // extended with bare-column references from the outer SELECT (which
+    // is required when the inner is aggregated/grouped — without the
+    // additions the lifted aggregation would collapse all outer rows into
+    // a single group).
+    let mut deferred_inlines: Vec<(InlineCandidate, Vec<Expr>)> = Vec::new();
 
     // Normalizes the ON for a rewritten LATERAL:
     // - Keep only atoms over {RHS, chosen LHS} in ON; push the remainder to outer WHERE.
@@ -1140,8 +1159,8 @@ fn resolve_lateral_subqueries(
     // Apply deferred inlines for flattened LATERAL wrappers.
     // At this point the absorbed tables/joins are already in place, so
     // column rebinding can see them.
-    for prepared in deferred_inlines {
-        apply_inline(stmt, prepared, true, vec![])?;
+    for (prepared, additions) in deferred_inlines {
+        apply_inline(stmt, prepared, true, additions)?;
     }
 
     // Apply COUNT→COALESCE mappings throughout the statement (SELECT, WHERE, HAVING,
@@ -1169,7 +1188,7 @@ pub(crate) fn unnest_lateral_subqueries(
 #[cfg(test)]
 mod tests {
     use crate::lateral_join::unnest_lateral_subqueries;
-    use crate::unnest_subqueries::{NonNullSchema, UnnestContext};
+    use crate::unnest_subqueries::{NonNullSchema, UnnestContext, collect_pre_hoist_lateral_hints};
     use crate::unnest_subqueries_3vl::ProbeRegistry;
     use readyset_sql::ast::{Column, Relation, SqlQuery};
     use readyset_sql::{Dialect, DialectDisplay};
@@ -1204,18 +1223,22 @@ mod tests {
             _ => unreachable!(),
         };
 
-        match unnest_lateral_subqueries(
-            &mut stmt,
-            &mut UnnestContext {
-                schema: &NonNullSchemaMoke {},
-                probes: ProbeRegistry::new(),
-                pre_hoist_lateral_exactly_one: HashSet::new(),
-                pre_hoist_lateral_at_most_one: HashSet::new(),
-                lateral_trivial_on: HashSet::new(),
-                ancestor_scope: HashSet::new(),
-                ancestor_scope_ordered: Vec::new(),
-            },
-        ) {
+        let mut ctx = UnnestContext {
+            schema: &NonNullSchemaMoke {},
+            probes: ProbeRegistry::new(),
+            pre_hoist_lateral_exactly_one: HashSet::new(),
+            pre_hoist_lateral_at_most_one: HashSet::new(),
+            lateral_trivial_on: HashSet::new(),
+            ancestor_scope: HashSet::new(),
+            ancestor_scope_ordered: Vec::new(),
+        };
+        // Mirror `unnest_subqueries_main`'s pre-pass so LATERAL pre-hoist
+        // hints (consumed by `lateral_flatten_safe` and the LATERAL downstream-cardinality
+        // variant) are populated before rewriting.
+        collect_pre_hoist_lateral_hints(&stmt, &mut ctx)
+            .unwrap_or_else(|e| panic!("> {test_name}: PRE-HOIST HINT COLLECTION ERROR: {e}"));
+
+        match unnest_lateral_subqueries(&mut stmt, &mut ctx) {
             Ok(_) => {
                 println!(">>> Resolved: {}", stmt.display(Dialect::PostgreSQL));
                 assert_eq!(
@@ -2167,6 +2190,242 @@ FROM
         let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN (SELECT "spj"."pn", "spj"."sn" AS "sn" FROM "spj") AS "l1") AS "l" ON ("l"."sn" = "s"."sn")"#;
         test_it(
             "nested_lateral_grandparent_correlation",
+            original_text,
+            expected_text,
+        );
+    }
+
+    // ----- Commit 4 (gate relaxation) tests -----
+
+    /// Positive: LATERAL body with correlation-pinned GROUP BY whose body
+    /// has an internal LEFT JOIN whose ON references an outer-scope alias.
+    /// Flattens via the `pre_hoist_lateral_at_most_one` relaxation; the
+    /// internal LEFT JOIN gets pulled up to the outer via the algebraic
+    /// identity A × (B ⟕_p C) = (A × B) ⟕_p C.  apply_inline lifts the
+    /// body's GROUP BY and aggregate to the outer; GROUP-BY additions add
+    /// the outer's bare-column SELECT references (`a.k`) to the GROUP BY.
+    #[test]
+    fn correlation_pinned_grouped_lateral_with_internal_left_join_flattens() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "b"."k", "a"."k""#;
+        test_it(
+            "correlation_pinned_grouped_lateral_with_internal_left_join_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Positive: aggregate-only-no-GROUP-BY LATERAL body with internal LEFT
+    /// JOIN.  Flattens via the `pre_hoist_lateral_exactly_one` relaxation.
+    /// Without the relaxation, this body would route to Resolved; with the
+    /// internal LEFT JOIN that needs hoisting, Flatten is the cleaner path.
+    /// `check_group_by_compatibility` additions promote `a.k` into the outer GROUP BY (the body
+    /// has no GROUP BY of its own).
+    #[test]
+    fn aggregate_only_lateral_with_internal_left_join_flattens() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+             ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "a"."k""#;
+        test_it(
+            "aggregate_only_lateral_with_internal_left_join_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Positive: LATERAL body with HAVING in addition to correlation-pinned
+    /// GROUP BY.  HAVING is correctly merged into the outer HAVING after
+    /// flattening (since the lifted body remains aggregated).
+    #[test]
+    fn correlation_pinned_grouped_lateral_with_having_flattens() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+                 HAVING COUNT(c.x) > 0
+             ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "b"."k", "a"."k"
+            HAVING (count("c"."x") > 0)"#;
+        test_it(
+            "correlation_pinned_grouped_lateral_with_having_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Positive: aggregate-only-no-GROUP-BY LATERAL body in JOIN position
+    /// (CROSS JOIN, not comma-join).  Mirrors `aggregate_only_lateral_with_
+    /// internal_left_join_flattens` but exercises the JOIN-loop call site
+    /// of `try_resolve_as_lateral_subquery`/`absorb_flatten` rather than
+    /// the comma-loop site.  CROSS JOIN with internal LEFT JOIN body
+    /// tests that the JOIN-loop's `allow_flatten` check (INNER JOIN with
+    /// Empty/ON-TRUE) accepts CROSS JOIN.
+    #[test]
+    fn aggregate_only_lateral_in_join_position_flattens() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a
+        CROSS JOIN LATERAL (
+            SELECT COUNT(c.x) AS cnt
+            FROM qa.b AS b
+            LEFT JOIN qa.c AS c ON c.k = a.k
+            WHERE b.k = a.k
+        ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a"
+            INNER JOIN "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "a"."k""#;
+        test_it(
+            "aggregate_only_lateral_in_join_position_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: GROUP BY is NOT correlation-pinned (no correlation predicate
+    /// at all).  Body's alias is in NEITHER pre-hoist set.  Gate rejects
+    /// the relaxation; falls through to Resolved.  Without correlation,
+    /// Resolved emits the LATERAL-stripped subquery as a regular cross-
+    /// joined derived table.
+    #[test]
+    fn unpinned_grouped_lateral_bails_to_resolved() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(*) AS cnt
+                 FROM qa.b AS b
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", "l1"."cnt"
+            FROM "qa"."a" AS "a",
+                 (SELECT "b"."k", count(*) AS "cnt" FROM "qa"."b" AS "b" GROUP BY "b"."k") AS "l1""#;
+        test_it(
+            "unpinned_grouped_lateral_bails_to_resolved",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: correlation-pinned grouped body, but the outer has a
+    /// downstream INNER JOIN whose ON predicate `d.k = a.k` is a non-bare-
+    /// column expression referencing relations OTHER than the inner alias.
+    /// `check_group_by_compatibility` rejects this — it can only
+    /// add bare column refs to the outer GROUP BY when hoisting an
+    /// aggregated body, and a binary equality predicate on `d.k = a.k`
+    /// can't be added directly.  Falls through to Resolved (which here
+    /// also rejects via correlation-in-LEFT-JOIN-ON).
+    #[test]
+    fn grouped_lateral_with_multi_row_downstream_bails() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt, d.x
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        JOIN qa.d AS d ON d.k = a.k
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "grouped_lateral_with_multi_row_downstream_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: LATERAL body has DISTINCT in addition to GROUP BY.  The
+    /// `!stmt.distinct` clause in `lateral_flatten_safe` still blocks
+    /// regardless of pre-hoist set membership — DISTINCT is its own
+    /// relaxation candidate.  Gate rejects → Resolved → Resolved also
+    /// rejects (correlation in LEFT JOIN ON cannot be moved to WHERE
+    /// out of a LEFT OUTER without changing semantics).
+    #[test]
+    fn grouped_lateral_with_distinct_bails() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT DISTINCT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "grouped_lateral_with_distinct_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Negative: grouped LATERAL body with ORDER BY.  `stmt.order.is_none()`
+    /// in `lateral_flatten_safe` still blocks — ORDER BY without LIMIT is
+    /// a no-op semantically but the gate is conservative until a separate
+    /// ORDER-BY relaxation lands.  Gate rejects → Resolved → Resolved
+    /// rejects (same reason as `grouped_lateral_with_distinct_bails`).
+    #[test]
+    fn grouped_lateral_with_order_by_bails() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+                 ORDER BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "grouped_lateral_with_order_by_bails",
             original_text,
             expected_text,
         );
