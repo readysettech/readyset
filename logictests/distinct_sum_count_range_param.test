@@ -85,11 +85,11 @@ SELECT DISTINCT SUM(v) AS s FROM t WHERE id > ? GROUP BY cat ORDER BY s LIMIT 2
 20
 90
 
-# DISTINCT AVG with post-lookup aggregation is explicitly rejected
-# on Readyset. MySQL runs it natively, so this is Readyset-only.
-onlyif readyset
-query I rowsort error: SELECT\ DISTINCT\ with\ AVG\ and\ post\-lookup\ aggregation\ is\ not\ supported
+# DISTINCT AVG with post-lookup aggregation (REA-6581):
+# id > 2 -> v in {20, 30, 30, 30, 40, 50, 50}, sum=250, count=7 -> AVG ~= 35.7143.
+# DISTINCT over a single-row aggregate collapses to that one row.
+query R rowsort
 SELECT DISTINCT AVG(v) FROM t WHERE id > ?
 ? = 2
 ----
-0
+35.7143

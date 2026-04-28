@@ -178,7 +178,7 @@ SELECT avg(table_1.column_10) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_11) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 NOT BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 
@@ -197,7 +197,7 @@ SELECT avg(table_1.column_13) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_14) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 1.0000
@@ -210,12 +210,12 @@ SELECT avg(table_1.column_15) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_16) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 NOT BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_17) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 1.0000
@@ -330,7 +330,7 @@ SELECT avg(table_1.column_19) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_20) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -343,12 +343,12 @@ SELECT avg(table_1.column_21) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_22) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_23) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -363,21 +363,21 @@ SELECT avg(table_1.column_24) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_25) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_26) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_27) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -443,12 +443,12 @@ SELECT avg(table_1.column_28) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_29) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -456,7 +456,7 @@ SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2, 
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_31) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -464,7 +464,7 @@ SELECT DISTINCT avg(table_1.column_31) AS alias_1, table_1.column_2 AS alias_2, 
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_32) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -480,7 +480,7 @@ SELECT DISTINCT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_33) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -645,7 +645,7 @@ SELECT avg(table_1.column_10) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_11) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 NOT BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 
@@ -664,7 +664,7 @@ SELECT avg(table_1.column_13) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_14) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 1.0000
@@ -677,12 +677,12 @@ SELECT avg(table_1.column_15) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_16) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 NOT BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_17) AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE table_1.column_2 BETWEEN 1 AND 5 GROUP BY table_1.column_2
 ----
 1.0000
@@ -779,7 +779,7 @@ SELECT avg(table_1.column_19) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_20) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 
@@ -792,12 +792,12 @@ SELECT avg(table_1.column_21) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_22) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_23) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -812,21 +812,21 @@ SELECT avg(table_1.column_24) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_25) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_26) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_27) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -884,12 +884,12 @@ SELECT avg(table_1.column_28) AS alias_1, table_1.column_2 AS alias_2, table_1.c
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_29) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -897,7 +897,7 @@ SELECT DISTINCT avg(table_1.column_30) AS alias_1, table_1.column_2 AS alias_2, 
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_31) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -905,7 +905,7 @@ SELECT DISTINCT avg(table_1.column_31) AS alias_1, table_1.column_2 AS alias_2, 
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_32) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000
@@ -921,7 +921,7 @@ SELECT DISTINCT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_
 1
 1
 
-query  nosort error: SELECT DISTINCT with AVG and post-lookup aggregation is not supported
+query  rowsort
 SELECT DISTINCT avg(table_1.column_33) AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ----
 1.0000

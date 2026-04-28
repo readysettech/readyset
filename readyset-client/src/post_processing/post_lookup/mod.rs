@@ -52,15 +52,17 @@ pub fn run_post_processing_pipeline<'a>(
         post_lookup.default_row.as_ref(),
     );
 
+    let (rows, schema) = match plan {
+        Some(plan) if !plan.is_empty() => postprocess_decompositions(rows, schema, plan, dialect)?,
+        _ => (rows, schema),
+    };
+
+    // Dedup runs *after* recompose so the HashSet sees recomposed `AVG` values,
+    // not raw `(SUM, COUNT, MIN)` triples (REA-6581).
     let rows = if matches!(post_lookup.distinct, PostLookupDistinct::HashBased) {
         rows.with_hash_dedup()
     } else {
         rows
-    };
-
-    let (rows, schema) = match plan {
-        Some(plan) if !plan.is_empty() => postprocess_decompositions(rows, schema, plan, dialect)?,
-        _ => (rows, schema),
     };
 
     let rows = rows
@@ -293,6 +295,49 @@ mod tests {
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].len(), 1, "COUNT and MIN stripped");
+        assert_eq!(rows[0][0], DfValue::try_from(5.0_f64).unwrap());
+    }
+
+    /// REA-6581 guard: when HashBased distinct is combined with a non-empty
+    /// plan, dedup must run *after* recompose so two groups whose raw
+    /// (SUM, COUNT) differ but whose recomposed AVG agrees both collapse to
+    /// one row.
+    #[test]
+    fn hash_dedup_runs_after_recompose() {
+        // Two groups with identical AVG=5.0 but different SUM/COUNT triples.
+        let data = shared(vec![vec![
+            vec![DfValue::Int(10), DfValue::Int(2), DfValue::Int(3)], // AVG = 5
+            vec![DfValue::Int(20), DfValue::Int(4), DfValue::Int(3)], // AVG = 5
+        ]]);
+        let schema = select_schema(vec![
+            ("sum_x", DfType::BigInt),
+            ("count_x", DfType::BigInt),
+            ("min_x", DfType::Int),
+        ]);
+        let plan = avg_plan(0, 1, 2, "avg_x");
+        let post_lookup = PostLookup {
+            distinct: PostLookupDistinct::HashBased,
+            ..PostLookup::default()
+        };
+
+        let (rows, _schema) = run_post_processing_pipeline(
+            data,
+            schema,
+            &post_lookup,
+            Some(&plan),
+            None,
+            None,
+            None,
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap();
+        let rows = rows.into_vec();
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "duplicate recomposed AVG values must collapse"
+        );
         assert_eq!(rows[0][0], DfValue::try_from(5.0_f64).unwrap());
     }
 

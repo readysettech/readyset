@@ -19,8 +19,8 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    BinaryOperator, Expr, FieldDefinitionExpr, FunctionExpr, InValue, ItemPlaceholder, LimitClause,
-    Literal, OrderClause, SelectMetadata, SelectStatement, ShallowCacheQuery,
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
+    SelectMetadata, SelectStatement, ShallowCacheQuery,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
@@ -405,19 +405,6 @@ fn has_range_condition(query: &SelectStatement) -> bool {
     query.where_clause.as_ref().is_some_and(check_expr)
 }
 
-/// Whether any top-level field in the SELECT list is a plain `AVG(...)` call.
-fn has_top_level_avg(query: &SelectStatement) -> bool {
-    query.fields.iter().any(|f| {
-        matches!(
-            f,
-            FieldDefinitionExpr::Expr {
-                expr: Expr::Call(FunctionExpr::Avg { .. }),
-                ..
-            }
-        )
-    })
-}
-
 /// Additional rewrites for Readyset requirements.
 ///
 /// After these transformations, the query is NOT equivalent to the original query unless
@@ -485,13 +472,10 @@ pub fn rewrite_for_readyset(
     // decompose before it reaches MIR. Decomposition is safe even without PLA:
     // SUM(x)/COUNT(x) == AVG(x) for a single result set.
     let needs_pla = !rewritten_in_conditions.is_empty() || has_range_condition(query);
-    if needs_pla && query.distinct && has_top_level_avg(query) {
-        unsupported!("SELECT DISTINCT with AVG and post-lookup aggregation is not supported");
-    }
-    // Skip decomposition for SELECT DISTINCT: the un-decomposed AVG will be
-    // rejected by MIR (the DISTINCT+AVG+PLA case is caught above; any remaining
-    // case is nested AVG, which MIR rejects with its own error).
-    let post_lookup_decompositions = if needs_pla && !query.distinct {
+    // DISTINCT + AVG is fine here because the read-path orchestrator runs the
+    // HashBased DISTINCT dedup over recomposed AVG values (i.e. after
+    // `postprocess_decompositions`), not over raw SUM/COUNT/MIN triples.
+    let post_lookup_decompositions = if needs_pla {
         let d = decompose_aggregates_for_post_lookup(query, dialect)?;
         if !d.is_empty() {
             trace!(parent: &span, pass="decompose_aggregates_for_post_lookup", query = %query.display(flags.dialect), decompositions=?d);
@@ -3276,19 +3260,16 @@ mod tests {
         }
 
         #[test]
-        fn distinct_avg_with_range_param_is_unsupported() {
+        fn distinct_avg_with_range_param_is_decomposed() {
             let mut query =
                 parse_select_statement_mysql("SELECT DISTINCT AVG(x) FROM t WHERE y > ?");
-            let result = rewrite_query(
+            let params = rewrite_query(
                 &mut query,
                 rewrite_params(Dialect::MySQL),
                 rewrite_context(Dialect::MySQL),
-            );
-            let err = result.unwrap_err().to_string();
-            assert!(
-                err.contains("SELECT DISTINCT with AVG"),
-                "error should flag DISTINCT + AVG, got: {err}"
-            );
+            )
+            .expect("DISTINCT + AVG over range param should decompose, not error");
+            assert!(!params.post_lookup_plan().is_empty());
         }
 
         #[test]
