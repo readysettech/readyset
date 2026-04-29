@@ -397,13 +397,6 @@
       "title": "Cached Queries",
       "transformations": [
         {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "query id",
-            "renamePattern": "query_id"
-          }
-        },
-        {
           "id": "seriesToColumns",
           "options": {
             "byField": "query_id"
@@ -421,11 +414,9 @@
               "Time 6": true,
               "Time 7": true,
               "Value #Readyset QPS": true,
-              "cache name": true,
+              "name": true,
               "count": true,
-              "properties": false,
-              "properties results": true,
-              "name results": true
+              "properties": false
             },
             "includeByName": {},
             "indexByName": {
@@ -441,10 +432,10 @@
               "Value #Readyset 90p": 8,
               "Value #Readyset 99p": 10,
               "Value #Readyset QPS": 12,
-              "cache name": 14,
+              "name": 14,
               "count": 16,
               "properties": 15,
-              "query text": 1,
+              "query": 1,
               "query_id": 0
             },
             "renameByName": {
@@ -458,9 +449,7 @@
               "Value #Readyset 90p": "90p Latency",
               "Value #Readyset 99p": "99p Latency",
               "Value #Readyset QPS": "Readyset QPS",
-              "name results": "Query ID",
               "query": "Query Text",
-              "query text": "Query Text",
               "query_id": "Query ID"
             }
           }
@@ -795,20 +784,6 @@
       "title": "Proxied Queries",
       "transformations": [
         {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "proxied query",
-            "renamePattern": "query"
-          }
-        },
-        {
-          "id": "renameByRegex",
-          "options": {
-            "regex": "query id",
-            "renamePattern": "query_id"
-          }
-        },
-        {
           "id": "seriesToColumns",
           "options": {
             "byField": "query_id"
@@ -835,8 +810,7 @@
               "count": true,
               "deployment": true,
               "instance": true,
-              "job": true,
-              "query id results": false
+              "job": true
             },
             "includeByName": {},
             "indexByName": {
@@ -851,8 +825,7 @@
               "Value #MySQL 99p": 5,
               "Value #RS Duration": 6,
               "query": 1,
-              "query_id": 0,
-              "readyset supported results": 12
+              "query_id": 0
             },
             "renameByName": {
               "Value #50p Noria": "Noria 50p",
@@ -881,13 +854,9 @@
               "Value #Upstream Duration": "Total duration",
               "Value #test": "Readyset Count",
               "count": "",
-              "proxied query": "Proxied Query",
               "query": "Query Text",
-              "query id": "Query ID",
-              "query id results": "Query ID",
               "query_id": "Query ID",
-              "readyset supported": "Supported By Readyset",
-              "readyset supported results": "Supported By Readyset",
+              "readyset_supported": "Supported By Readyset",
               "{query=\"SELECT `column_name` FROM `information_schema`.`statistics` WHERE ((`index_name` = '<anonymized>') AND ((`table_schema` = database()) AND (`table_name` = '<anonymized>'))) ORDER BY `seq_in_index`\"}": "MySQL90p"
             }
           }

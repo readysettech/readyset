@@ -1205,11 +1205,11 @@ where
         .map_err(|e| internal_err!("spawn_blocking failed: {}", e))?;
 
         let select_schema = create_dummy_schema!(
-            "query id",
-            "entry id",
-            "last accessed",
-            "last refreshed",
-            "refresh time ms",
+            "query_id",
+            "entry_id",
+            "last_accessed",
+            "last_refreshed",
+            "refresh_time_ms",
             "bytes"
         );
 
@@ -3504,7 +3504,7 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         Ok(noria_connector::QueryResult::Meta(vec![
             MetaVariable {
-                name: "query id".into(),
+                name: "query_id".into(),
                 value: query_id.to_string(),
             },
             MetaVariable {
@@ -3512,7 +3512,7 @@ where
                 value: query,
             },
             MetaVariable {
-                name: "readyset supported".into(),
+                name: "readyset_supported".into(),
                 value: supported.into(),
             },
         ]))
@@ -3776,8 +3776,7 @@ where
             // Must snapshot to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::Upstream);
 
-            let mut select_schema =
-                create_dummy_schema!("query id", "proxied query", "readyset supported");
+            let mut select_schema = create_dummy_schema!("query_id", "query", "readyset_supported");
 
             // Add count separately with a different type (UnsignedInt)
             let count_schema = ColumnSchema {
@@ -3793,7 +3792,7 @@ where
 
             select_schema
         } else {
-            create_dummy_schema!("query id", "proxied query", "readyset supported")
+            create_dummy_schema!("query_id", "query", "readyset_supported")
         };
 
         let mut data = queries
@@ -3885,15 +3884,9 @@ where
         let select_schema = if let Some(handle) = state.metrics_handle.as_mut() {
             // Must snapshot histograms to get the latest metrics
             handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
-            create_dummy_schema!(
-                "query id",
-                "cache name",
-                "query text",
-                "properties",
-                "count"
-            )
+            create_dummy_schema!("query_id", "name", "query", "properties", "count")
         } else {
-            create_dummy_schema!("query id", "cache name", "query text", "properties")
+            create_dummy_schema!("query_id", "name", "query", "properties")
         };
 
         let mut rows = vec![];
@@ -5634,7 +5627,7 @@ where
                 .map(|create| vec![DfValue::from(create.display(DB::SQL_DIALECT).to_string())]),
         );
 
-        let select_schema = create_dummy_schema!("query text");
+        let select_schema = create_dummy_schema!("query");
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
