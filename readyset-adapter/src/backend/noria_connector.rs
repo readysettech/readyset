@@ -896,11 +896,7 @@ impl NoriaConnector {
                     })
                     .collect(),
             ),
-            columns: Cow::Owned(vec![
-                "table".into(),
-                "replication status".into(),
-                "replication status description".into(),
-            ]),
+            columns: Cow::Owned(vec!["table".into(), "status".into(), "description".into()]),
         };
         let data = statuses
             .into_iter()
