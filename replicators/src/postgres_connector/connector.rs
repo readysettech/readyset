@@ -63,6 +63,10 @@ pub struct PostgresWalConnector {
     in_transaction: bool,
     /// A handle to the controller
     controller: ReadySetHandle,
+    /// The most recent min-persisted LSN we successfully fetched from the controller. We
+    /// re-ack this if a later RPC fails, so a busy base-table domain can't push the
+    /// replicator into restart territory just by failing to answer the persistence query.
+    last_successful_min_persisted_lsn: Option<Lsn>,
     /// The interval on which we should send status updates to the upstream Postgres instance
     status_update_interval: Duration,
     /// Whether or not we just processed a table error and need to allow mismatched lsns for the
@@ -175,6 +179,7 @@ impl PostgresWalConnector {
             // database, we'll always start replicating outside of a transaction
             in_transaction: false,
             controller,
+            last_successful_min_persisted_lsn: None,
             status_update_interval,
             had_table_error: false,
             table_filter,
@@ -454,11 +459,18 @@ impl PostgresWalConnector {
             .as_micros() as i64
             - J2000_EPOCH_GAP;
 
-        let lsn_to_ack = match self.controller.min_persisted_replication_offset().await? {
-            // If all of the data written to base tables has been persisted, we can just report our
-            // current position upstream
-            PersistencePoint::Persisted => cur_pos,
-            PersistencePoint::UpTo(offset) => Lsn::try_from(&offset)?,
+        // Fetch the controller's view of the min-persisted offset. The controller has to
+        // ask each base-table domain, and that request rides the domain's main message
+        // queue — so a busy domain (replay, large join) can stall or fail it. That is
+        // not a reason to tear down the replicator; if we have a cached value from a
+        // prior successful fetch, re-ack it so Postgres doesn't grow WAL retention any
+        // more than it already would, and otherwise skip this status update entirely.
+        let rpc_result = self.controller.min_persisted_replication_offset().await;
+        let (lsn_to_ack, new_cache) =
+            select_ack_lsn(rpc_result, cur_pos, self.last_successful_min_persisted_lsn)?;
+        self.last_successful_min_persisted_lsn = new_cache;
+        let Some(lsn_to_ack) = lsn_to_ack else {
+            return Ok(());
         };
 
         debug!(%lsn_to_ack, "sending status update");
@@ -537,6 +549,55 @@ impl PostgresWalConnector {
     }
 }
 
+/// Decide what LSN to ack given the controller's `min_persisted_replication_offset`
+/// response and the current cached value. Returns `(lsn_to_ack, new_cache)`:
+/// `lsn_to_ack == None` means skip the status update entirely.
+///
+/// Extracted from `send_standby_status_update` so the controller-RPC-vs-cache
+/// handshake is testable without a real Postgres connection or controller.
+fn select_ack_lsn(
+    rpc_result: ReadySetResult<PersistencePoint>,
+    cur_pos: Lsn,
+    cached: Option<Lsn>,
+) -> ReadySetResult<(Option<Lsn>, Option<Lsn>)> {
+    match rpc_result {
+        Ok(PersistencePoint::Persisted) => Ok((Some(cur_pos), Some(cur_pos))),
+        Ok(PersistencePoint::UpTo(offset)) => {
+            let lsn = Lsn::try_from(&offset)?;
+            Ok((Some(lsn), Some(lsn)))
+        }
+        Err(e) => match cached {
+            Some(cached_lsn) => {
+                antithesis_sdk::assert_sometimes!(
+                    true,
+                    "min_persisted_replication_offset RPC failed with cached LSN available",
+                    &serde_json::json!({})
+                );
+                warn!(
+                    error = %e,
+                    cached = %cached_lsn,
+                    "min_persisted_replication_offset RPC failed; re-acking last \
+                     successful LSN",
+                );
+                Ok((Some(cached_lsn), Some(cached_lsn)))
+            }
+            None => {
+                antithesis_sdk::assert_sometimes!(
+                    true,
+                    "min_persisted_replication_offset RPC failed with no cached LSN",
+                    &serde_json::json!({})
+                );
+                warn!(
+                    error = %e,
+                    "min_persisted_replication_offset RPC failed and no cached LSN \
+                     is available; skipping standby status update",
+                );
+                Ok((None, None))
+            }
+        },
+    }
+}
+
 /// Drops a replication slot, freeing any reserved server-side resources.
 /// If the slot is a logical slot that was created in a database other than the database
 /// the walsender is connected to, this command fails.
@@ -594,11 +655,20 @@ impl Connector for PostgresWalConnector {
 
         // If it has been longer than the defined status update interval, send a status update to
         // the upstream database to report our position in the WAL as the LSN of the last event we
-        // successfully applied to ReadySet
+        // successfully applied to ReadySet. Status updates are best-effort: if anything fails,
+        // log and move on. We always update `time_last_position_reported` so we wait the full
+        // interval before retrying rather than tight-looping on a transient failure.
         if self.time_last_position_reported.elapsed() > self.status_update_interval {
-            let lsn: Lsn = last_pos.try_into()?;
-
-            self.send_standby_status_update(lsn).await?;
+            match Lsn::try_from(last_pos) {
+                Ok(lsn) => {
+                    if let Err(e) = self.send_standby_status_update(lsn).await {
+                        warn!(error = %e, "failed to send standby status update");
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to compute LSN for standby status update");
+                }
+            }
             self.time_last_position_reported = Instant::now();
         }
 
@@ -800,17 +870,28 @@ impl Connector for PostgresWalConnector {
                     }
                 }
                 WalEvent::WantsKeepaliveResponse { end } => {
-                    if !self.in_transaction && actions.is_empty() {
+                    // Status updates are best-effort here too — see the timer-driven path
+                    // above for the rationale.
+                    let lsn = if !self.in_transaction && actions.is_empty() {
                         // If the last event we applied to our base tables was a COMMIT and we have
                         // no buffered actions, we can safely report the "end LSN" given to us in
                         // the keepalive request as our current position.
-                        self.send_standby_status_update(end).await?;
+                        Ok(end)
                     } else {
                         // If we have buffered actions, we have to report the position of the *last*
                         // event we applied, since we haven't yet applied the events associated with
                         // `cur_pos`
-                        self.send_standby_status_update(last_pos.try_into()?)
-                            .await?;
+                        Lsn::try_from(last_pos)
+                    };
+                    match lsn {
+                        Ok(lsn) => {
+                            if let Err(e) = self.send_standby_status_update(lsn).await {
+                                warn!(error = %e, "failed to send keepalive status update");
+                            }
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "failed to compute LSN for keepalive status update");
+                        }
                     }
                     self.time_last_position_reported = Instant::now();
                 }
@@ -881,5 +962,82 @@ impl Connector for PostgresWalConnector {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use replication_offset::postgres::{CommitLsn, PostgresPosition};
+
+    use super::*;
+
+    fn lsn(n: i64) -> Lsn {
+        Lsn::from(n)
+    }
+
+    fn offset_at(commit: i64, lsn: i64) -> ReplicationOffset {
+        PostgresPosition {
+            commit_lsn: CommitLsn::from(commit),
+            lsn: Lsn::from(lsn),
+        }
+        .into()
+    }
+
+    fn err() -> ReadySetError {
+        ReadySetError::ReplicationFailed("simulated controller RPC failure".into())
+    }
+
+    #[test]
+    fn ack_lsn_persisted_uses_cur_pos_and_caches_it() {
+        let (ack, cache) = select_ack_lsn(Ok(PersistencePoint::Persisted), lsn(42), None).unwrap();
+        assert_eq!(ack, Some(lsn(42)));
+        assert_eq!(cache, Some(lsn(42)));
+    }
+
+    #[test]
+    fn ack_lsn_upto_uses_offset_lsn_and_caches_it() {
+        let offset = offset_at(100, 75);
+        let (ack, cache) =
+            select_ack_lsn(Ok(PersistencePoint::UpTo(offset)), lsn(99), None).unwrap();
+        assert_eq!(ack, Some(lsn(75)));
+        assert_eq!(cache, Some(lsn(75)));
+    }
+
+    #[test]
+    fn ack_lsn_rpc_error_with_cache_re_acks_cached() {
+        let (ack, cache) = select_ack_lsn(Err(err()), lsn(99), Some(lsn(42))).unwrap();
+        assert_eq!(ack, Some(lsn(42)));
+        assert_eq!(cache, Some(lsn(42)));
+    }
+
+    #[test]
+    fn ack_lsn_rpc_error_without_cache_skips() {
+        let (ack, cache) = select_ack_lsn(Err(err()), lsn(99), None).unwrap();
+        assert_eq!(ack, None);
+        assert_eq!(cache, None);
+    }
+
+    #[test]
+    fn ack_lsn_subsequent_success_overwrites_cache() {
+        // Simulate: had a cached value from a prior success, now a fresh successful RPC
+        // should advance the cache to the newer value.
+        let (ack, cache) =
+            select_ack_lsn(Ok(PersistencePoint::Persisted), lsn(200), Some(lsn(42))).unwrap();
+        assert_eq!(ack, Some(lsn(200)));
+        assert_eq!(cache, Some(lsn(200)));
+    }
+
+    #[test]
+    fn ack_lsn_upto_overwrites_upto_cache() {
+        // Realistic timeline: a prior UpTo response cached `offset_a`, the next RPC
+        // fails (cache holds), then a fresh UpTo response cached `offset_b` advances
+        // past it. This locks the cache-monotonicity assumption that successful
+        // responses always replace the cached value rather than min-ing with it.
+        let cached = Some(lsn(50));
+        let new_offset = offset_at(200, 150);
+        let (ack, cache) =
+            select_ack_lsn(Ok(PersistencePoint::UpTo(new_offset)), lsn(999), cached).unwrap();
+        assert_eq!(ack, Some(lsn(150)));
+        assert_eq!(cache, Some(lsn(150)));
     }
 }

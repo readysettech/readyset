@@ -6984,6 +6984,7 @@ dependencies = [
 name = "replicators"
 version = "0.1.0"
 dependencies = [
+ "antithesis_sdk",
  "anyhow",
  "assert_matches",
  "async-trait",
