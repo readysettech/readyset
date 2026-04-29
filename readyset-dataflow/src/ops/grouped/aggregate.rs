@@ -107,15 +107,8 @@ impl Aggregation {
             }
         };
 
-        let avg_scale_mode = match (&self, dialect.engine()) {
-            (Aggregation::Avg, SqlEngine::PostgreSQL) => match &out_ty {
-                DfType::Numeric { .. } => AvgScaleMode::PostgresComputed,
-                _ => AvgScaleMode::Fixed(0), // Double — no rounding
-            },
-            (Aggregation::Avg, SqlEngine::MySQL) => match &out_ty {
-                DfType::Numeric { scale, .. } => AvgScaleMode::Fixed(*scale as i64),
-                _ => AvgScaleMode::Fixed(0),
-            },
+        let avg_scale_mode = match &self {
+            Aggregation::Avg => AvgScaleMode::for_avg(*dialect, &out_ty)?,
             _ => AvgScaleMode::Fixed(0),
         };
 
@@ -188,7 +181,7 @@ struct AverageDataPair {
 }
 
 fn default_scale_mode() -> AvgScaleMode {
-    // Legacy default: use target_scale (Fixed) or no rounding
+    // Serde default for state predating the `scale_mode` field.
     AvgScaleMode::Fixed(0)
 }
 
