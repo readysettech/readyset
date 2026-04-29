@@ -524,8 +524,6 @@ struct SharedState {
     replication_offset: Option<ReplicationOffset>,
     /// The current state of the RocksDB WAL as it relates to flushing and persisting data to disk
     wal_state: WalState,
-    /// The last error that occurred in the WAL flush thread
-    last_wal_flush_error: Option<Error>,
     /// The lookup indices stored for this table. The first element is always considered the
     /// primary index
     indices: Vec<PersistentIndex>,
@@ -584,9 +582,9 @@ impl WalFlusher {
                 Err(RecvTimeoutError::Timeout) => {
                     let wal_state = self.state_handle.shared_state().wal_state.clone();
 
-                    // We don't need to check `last_wal_flush_error` here because we just want to
-                    // keep retrying based on our current state. If there's further action to be
-                    // taken, the controller will orchestrate it
+                    // Keep retrying based on the current `wal_state` regardless of whether the
+                    // last attempt failed; failures are logged at error! by `flush_wal`/`sync_wal`
+                    // and the next tick is the recovery mechanism.
                     match wal_state {
                         WalState::Unflushed { persisted_up_to } => {
                             if self.flush_wal(persisted_up_to) {
@@ -604,8 +602,8 @@ impl WalFlusher {
         }
     }
 
-    /// Returns true if the flush succeeds and false otherwise. If the flush fails, the
-    /// corresponding error is stored in `SharedState.last_wal_flush_error`.
+    /// Returns true if the flush succeeds and false otherwise. The flusher loop will retry on
+    /// the next tick.
     fn flush_wal(&self, persisted_up_to: ReplicationOffset) -> bool {
         trace!(%self.table, "flushing WAL");
 
@@ -619,11 +617,7 @@ impl WalFlusher {
         // increased if *some* of the data was flushed. Regardless, we have no way of knowing what
         // data *was* successfully flushed, so we keep our state as-is
         if let Err(error) = db.flush_wal(false) {
-            // If we failed to flush, we set the error in `SharedState` so the replicator sees it
-            // and waits till the next iteration of the loop to retry
             error!(%error, %self.table, "failed to flush WAL");
-            self.state_handle.shared_state_mut().last_wal_flush_error = Some(error.into());
-
             false
         } else {
             self.state_handle.shared_state_mut().wal_state =
@@ -643,11 +637,7 @@ impl WalFlusher {
         // successfully synced, so we keep our state as-is. We'll know we're caught up when a future
         // sync succeeds
         if let Err(error) = res {
-            // If we failed to sync, we set the error in `SharedState` so the replicator sees it and
-            // wait till the next iteration of the loop to retry
             error!(%error, %self.table, "failed to sync WAL");
-
-            self.state_handle.shared_state_mut().last_wal_flush_error = Some(error.into());
         } else {
             let mut ss = self.state_handle.shared_state_mut();
 
@@ -765,20 +755,14 @@ impl State for PersistentState {
     }
 
     fn persisted_up_to(&self) -> ReadySetResult<PersistencePoint> {
-        let mut ss = self.db.shared_state_mut();
-
-        // We clear out the error here (if one exists) since we're reporting it upwards
-        if let Some(error) = &ss.last_wal_flush_error.take() {
-            Err(error.into())
-        } else {
-            match &ss.wal_state {
-                WalState::FlushedAndPersisted => Ok(PersistencePoint::Persisted),
-                WalState::FlushedAndUnpersisted { persisted_up_to }
-                | WalState::Unflushed { persisted_up_to } => {
-                    Ok(PersistencePoint::UpTo(persisted_up_to.clone()))
-                }
+        let ss = self.db.shared_state();
+        Ok(match &ss.wal_state {
+            WalState::FlushedAndPersisted => PersistencePoint::Persisted,
+            WalState::FlushedAndUnpersisted { persisted_up_to }
+            | WalState::Unflushed { persisted_up_to } => {
+                PersistencePoint::UpTo(persisted_up_to.clone())
             }
-        }
+        })
     }
 
     fn lookup(&self, columns: &[usize], key: &PointKey) -> LookupResult<'_> {
@@ -1992,7 +1976,6 @@ impl PersistentState {
         let shared_state = SharedState {
             replication_offset: replication_offset.clone(),
             wal_state: WalState::FlushedAndPersisted,
-            last_wal_flush_error: None,
             indices,
         };
         let read_handle = PersistentStateHandle::new(shared_state, db, replication_offset);
