@@ -706,9 +706,17 @@ impl MySqlBinlogConnector {
             name: tme.table_name().into(),
         };
 
+        // All rows in a single WRITE_ROWS_EVENT share the outer binlog
+        // event's position. We tag with the *post-event* offset so the
+        // per-op already-applied filter correctly compares row N's
+        // position against the table offset — see `post_event_offset`.
+        let event_pos = self.post_event_offset();
         Ok(ReplicationAction::TableAction {
             table,
-            actions: inserted_rows,
+            actions: inserted_rows
+                .into_iter()
+                .map(|op| (op, event_pos.clone()))
+                .collect(),
         })
     }
 
@@ -910,9 +918,16 @@ impl MySqlBinlogConnector {
             name: tme.table_name().into(),
         };
 
+        // All rows in a single UPDATE_ROWS_EVENT share the outer binlog
+        // event's position. See `post_event_offset` for why we use the
+        // post-event variant rather than `current_offset`.
+        let event_pos = self.post_event_offset();
         Ok(ReplicationAction::TableAction {
             table,
-            actions: updated_rows,
+            actions: updated_rows
+                .into_iter()
+                .map(|op| (op, event_pos.clone()))
+                .collect(),
         })
     }
 
@@ -980,9 +995,16 @@ impl MySqlBinlogConnector {
             name: tme.table_name().into(),
         };
 
+        // All rows in a single DELETE_ROWS_EVENT share the outer binlog
+        // event's position. See `post_event_offset` for why we use the
+        // post-event variant rather than `current_offset`.
+        let event_pos = self.post_event_offset();
         Ok(ReplicationAction::TableAction {
             table,
-            actions: deleted_rows,
+            actions: deleted_rows
+                .into_iter()
+                .map(|op| (op, event_pos.clone()))
+                .collect(),
         })
     }
 
@@ -1098,7 +1120,7 @@ impl MySqlBinlogConnector {
                 }
                 Ok(ReplicationAction::TableAction {
                     table: relation,
-                    actions: vec![TableOperation::Truncate],
+                    actions: vec![(TableOperation::Truncate, self.current_offset())],
                 })
             }
             Ok(SqlQuery::CreateTable(mut create)) if create.like.is_some() => {
@@ -1466,6 +1488,31 @@ impl MySqlBinlogConnector {
     /// Get the current replication offset.
     fn current_offset(&self) -> ReplicationOffset {
         self.replication_offset.clone()
+    }
+
+    /// Returns the replication offset that represents the state immediately
+    /// after the *current* binlog row event is applied.
+    ///
+    /// In file-based mode, the outer loop already advances
+    /// `replication_offset.position` to the current event's `log_pos`
+    /// before processing it (so `current_offset()` already reflects the
+    /// post-event state). In GTID mode, `advance_current_gtid_event()`
+    /// runs *after* `process_event_*_rows`, so calling
+    /// `current_offset()` from inside those functions captures the
+    /// pre-event state — equal to the previous event's post-state, and
+    /// equal to whatever was just persisted to the table. The per-op
+    /// already-applied filter would then incorrectly drop legitimate
+    /// row N because `op_pos == table_offset`. Advancing the cloned
+    /// pending GTID's `event_index` here gives every row in this binlog
+    /// event the post-event position it deserves.
+    fn post_event_offset(&self) -> ReplicationOffset {
+        let mut offset = self.replication_offset.clone();
+        if let Some(set) = offset.gtid_set_mut() {
+            if let Some(pending) = set.pending_mut() {
+                pending.advance_event();
+            }
+        }
+        offset
     }
 
     /// Process binlog events until an actionable event occurs.
@@ -2469,12 +2516,25 @@ mod tests {
         }
     }
 
+    fn make_position(pos: u64) -> ReplicationOffset {
+        ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.000001".to_string(), pos)
+                .expect("valid position"),
+        )
+    }
+
     fn make_table_action(table_name: &str, row_values: Vec<i32>) -> ReplicationAction {
         ReplicationAction::TableAction {
             table: make_relation(table_name),
             actions: row_values
                 .into_iter()
-                .map(|v| TableOperation::Insert(vec![DfValue::from(v)]))
+                .enumerate()
+                .map(|(i, v)| {
+                    (
+                        TableOperation::Insert(vec![DfValue::from(v)]),
+                        make_position(100 + i as u64),
+                    )
+                })
                 .collect(),
         }
     }
@@ -2544,7 +2604,7 @@ mod tests {
             // Verify ordering: 10, 20, 30, 40
             let values: Vec<_> = actions
                 .iter()
-                .filter_map(|op| match op {
+                .filter_map(|(op, _)| match op {
                     TableOperation::Insert(row) => Some(row[0].clone()),
                     _ => None,
                 })

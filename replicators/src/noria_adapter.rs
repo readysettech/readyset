@@ -56,7 +56,16 @@ const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
 pub(crate) enum ReplicationAction {
     TableAction {
         table: Relation,
-        actions: Vec<TableOperation>,
+        /// Each row operation paired with the upstream replication offset
+        /// at which it was logged. Pairing in a single Vec (rather than two
+        /// parallel Vecs) keeps the operation and its position locked
+        /// together under any reordering, filtering, or merge — the shape
+        /// itself prevents desync.
+        ///
+        /// The per-op position lets `handle_table_actions` filter
+        /// already-applied events inside a coalesced batch where the
+        /// batch's own position alone is insufficient. See REA-6582.
+        actions: Vec<(TableOperation, ReplicationOffset)>,
     },
     DdlChange {
         schema: String,
@@ -1151,7 +1160,7 @@ impl<'a> NoriaAdapter<'a> {
     async fn handle_table_actions(
         &mut self,
         table: Relation,
-        mut actions: Vec<TableOperation>,
+        actions: Vec<(TableOperation, ReplicationOffset)>,
         pos: &ReplicationOffset,
     ) -> ReadySetResult<()> {
         // Send the rows as are
@@ -1174,10 +1183,15 @@ impl<'a> NoriaAdapter<'a> {
             }
             return Ok(());
         };
-        let batch_size = actions.len();
-        actions.push(TableOperation::SetReplicationOffset(pos.clone()));
+        // Per-op positions are not used yet by this function: the existing
+        // batch-level filter in handle_action already gates entry. A future
+        // change will activate per-op filtering here to handle coalesced
+        // batches that cross transaction boundaries (REA-6582).
+        let mut ops: Vec<TableOperation> = actions.into_iter().map(|(op, _)| op).collect();
+        let batch_size = ops.len();
+        ops.push(TableOperation::SetReplicationOffset(pos.clone()));
         let start = std::time::Instant::now();
-        table_mutator.perform_all(actions).await?;
+        table_mutator.perform_all(ops).await?;
         let duration = start.elapsed();
         histogram!(recorded::REPLICATOR_BATCH_SIZE).record(batch_size as f64);
         counter!(recorded::REPLICATOR_PERFORM_ALL_CALLS).increment(1);
@@ -1437,8 +1451,8 @@ impl<'a> NoriaAdapter<'a> {
     /// Extract the heartbeat timestamp from a set of table operations and store it
     /// in the shared heartbeat timestamp. Only processes rows matching this instance's
     /// UUID to avoid reading another ReadySet instance's heartbeat.
-    async fn extract_heartbeat_timestamp(&self, actions: &[TableOperation]) {
-        for action in actions {
+    async fn extract_heartbeat_timestamp(&self, actions: &[(TableOperation, ReplicationOffset)]) {
+        for (action, _) in actions {
             // The heartbeat table has columns (id TEXT, ts TIMESTAMPTZ).
             // Extract both: id at index 0, ts at index 1.
             let (id_value, ts_value): (Option<&DfValue>, Option<&DfValue>) = match action {

@@ -838,8 +838,8 @@ impl Connector for PostgresWalConnector {
                     };
                     set_current(&mut cur_table, schema, name);
                     set_peek(tables);
-                    actions.push(TableOperation::Truncate);
                     cur_pos = cur_pos.with_lsn(lsn);
+                    actions.push((TableOperation::Truncate, cur_pos.into()));
                     return_current_actions!();
                 }
                 WalEvent::Insert {
@@ -960,15 +960,15 @@ impl Connector for PostgresWalConnector {
                 }
                 WalEvent::Insert { tuple, lsn, .. } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::Insert(tuple));
+                    actions.push((TableOperation::Insert(tuple), cur_pos.into()));
                 }
                 WalEvent::DeleteRow { tuple, lsn, .. } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::DeleteRow { row: tuple });
+                    actions.push((TableOperation::DeleteRow { row: tuple }, cur_pos.into()));
                 }
                 WalEvent::DeleteByKey { key, lsn, .. } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::DeleteByKey { key })
+                    actions.push((TableOperation::DeleteByKey { key }, cur_pos.into()));
                 }
                 WalEvent::UpdateRow {
                     old_tuple,
@@ -977,12 +977,16 @@ impl Connector for PostgresWalConnector {
                     ..
                 } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::DeleteRow { row: old_tuple });
-                    actions.push(TableOperation::Insert(new_tuple));
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    actions.push((
+                        TableOperation::DeleteRow { row: old_tuple },
+                        event_pos.clone(),
+                    ));
+                    actions.push((TableOperation::Insert(new_tuple), event_pos));
                 }
                 WalEvent::UpdateByKey { key, set, lsn, .. } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push(TableOperation::Update { key, update: set })
+                    actions.push((TableOperation::Update { key, update: set }, cur_pos.into()));
                 }
                 op @ WalEvent::Truncate { .. } => {
                     unreachable!("unhandled WalEvent::Truncate: {op:?}");
