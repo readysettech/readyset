@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use readyset_data::dialect::SqlEngine;
-use readyset_data::{AvgScaleMode, DfType, Dialect};
-use readyset_decimal::Decimal;
+use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, Dialect};
 use readyset_errors::{invariant, ReadySetResult};
 pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
 use serde::{Deserialize, Serialize};
@@ -162,74 +161,15 @@ pub struct NumericalDiff {
     group_hash: GroupHash,
 }
 
-/// For storing (Count, Sum) in additional state for Average.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AverageDataPair {
-    count: DfValue,
-    sum: DfValue,
-    /// The value returned when the group has no non-NULL rows (i.e., count
-    /// drops to 0).  This is SQL NULL, not a numeric zero — `sum` uses a
-    /// typed numeric zero for correct arithmetic accumulation.
-    #[serde(default = "default_avg_empty_value")]
-    empty_value: DfValue,
-    /// If set, round the result to this many decimal places.
-    #[serde(default)]
-    target_scale: Option<i64>,
-    /// Scale computation strategy for the AVG result.
-    #[serde(default = "default_scale_mode")]
-    scale_mode: AvgScaleMode,
-}
-
 fn default_scale_mode() -> AvgScaleMode {
     // Serde default for state predating the `scale_mode` field.
     AvgScaleMode::Fixed(0)
 }
 
-fn default_avg_empty_value() -> DfValue {
-    DfValue::None
-}
-
-impl AverageDataPair {
-    fn apply_diff(&mut self, d: NumericalDiff) -> ReadySetResult<DfValue> {
-        if d.positive {
-            self.sum = (&self.sum + &d.value)?;
-            self.count = (&self.count + &DfValue::Int(1))?;
-        } else {
-            self.sum = (&self.sum - &d.value)?;
-            self.count = (&self.count - &DfValue::Int(1))?;
-        }
-
-        if self.count > DfValue::Int(0) {
-            let result = (&self.sum / &self.count)?;
-            match (&result, &self.scale_mode) {
-                (DfValue::Numeric(dec), AvgScaleMode::Fixed(scale)) => {
-                    Ok(DfValue::from(dec.round_dp(*scale)))
-                }
-                (DfValue::Numeric(dec), AvgScaleMode::PostgresComputed) => {
-                    let sum_dec = match &self.sum {
-                        DfValue::Numeric(d) => d.as_ref(),
-                        _ => internal!("PostgresComputed avg: sum is not Numeric"),
-                    };
-                    let count_i64 = match &self.count {
-                        DfValue::Int(n) => *n,
-                        _ => internal!("PostgresComputed avg: count is not Int"),
-                    };
-                    let count_dec = Decimal::from(count_i64);
-                    let scale = Decimal::select_div_scale(sum_dec, &count_dec)?;
-                    Ok(DfValue::from(dec.round_dp(scale)))
-                }
-                _ => Ok(result),
-            }
-        } else {
-            Ok(self.empty_value.clone())
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 /// Auxiliary State for an Aggregator node, which is owned by a Domain
 pub struct AggregatorState {
-    count_sum_map: HashMap<GroupHash, AverageDataPair>,
+    count_sum_map: HashMap<GroupHash, AverageAccumulator>,
 }
 
 impl Aggregator {
@@ -323,27 +263,14 @@ impl GroupedOperation for Aggregator {
             None => internal!("Missing auxiliary state for Aggregation node"),
         };
 
-        let avg_zero = self.new_data()?;
-        let avg_target_scale = match &self.out_ty {
-            DfType::Numeric { scale, .. } => Some(*scale as i64),
-            _ => None,
-        };
-        let avg_scale_mode = self.avg_scale_mode;
+        let scale_mode = self.avg_scale_mode;
+        let out_ty = &self.out_ty;
         let mut apply_avg = |_curr, diff: Self::Diff| -> ReadySetResult<DfValue> {
-            count_sum_map
+            let acc = count_sum_map
                 .entry(diff.group_hash)
-                .or_insert(AverageDataPair {
-                    // sum starts at typed numeric zero (not NULL) so that
-                    // arithmetic with the first non-NULL value works
-                    // correctly (0 + x = x).  empty_value controls what
-                    // is returned when count drops to 0.
-                    sum: avg_zero.clone(),
-                    count: DfValue::Int(0),
-                    empty_value: DfValue::None,
-                    target_scale: avg_target_scale,
-                    scale_mode: avg_scale_mode,
-                })
-                .apply_diff(diff)
+                .or_insert_with(|| AverageAccumulator::for_out_ty(out_ty, scale_mode));
+            acc.delta(&diff.value, diff.positive)?;
+            acc.result()
         };
 
         let apply_diff =

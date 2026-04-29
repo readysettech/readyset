@@ -53,7 +53,7 @@ pub use ndarray::{ArrayD, IxDyn};
 use proptest::arbitrary::Arbitrary;
 
 pub use crate::array::Array;
-pub use crate::average::AvgScaleMode;
+pub use crate::average::{AverageAccumulator, AvgScaleMode};
 pub use crate::collation::{CharsetFamily, Collation};
 pub use crate::dialect::{Dialect, SqlEngine};
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
