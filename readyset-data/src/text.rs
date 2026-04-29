@@ -3,8 +3,6 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::num::{IntErrorKind, ParseIntError};
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::Relaxed;
 
 use cidr::IpInet;
 use lazy_static::lazy_static;
@@ -55,11 +53,10 @@ pub struct TinyText {
 
 #[derive(Debug)]
 struct TextHeader {
-    valid: AtomicBool,
     collation: Collation,
 }
 
-/// A thin pointer over an Arc<[u8]> with lazy UTF-8 validation
+/// A thin pointer over an `Arc<[u8]>`. Bytes are guaranteed to be valid UTF-8.
 #[derive(Clone)]
 pub struct Text {
     inner: triomphe::ThinArc<TextHeader, u8>,
@@ -198,51 +195,27 @@ impl Text {
     /// Returns the underlying byte slice as an `str`
     #[inline]
     pub fn as_str(&self) -> &str {
-        // Check if already validated
-        if self.inner.header.header.valid.load(Relaxed) {
-            // SAFETY: Safe because we checked validation flag
-            unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
-        } else {
-            let validated = std::str::from_utf8(self.as_bytes()).expect("Must always be UTF8");
-            self.inner.header.header.valid.store(true, Relaxed);
-            validated
-        }
+        // SAFETY: every constructor validates UTF-8, so `as_bytes()` is always valid UTF-8.
+        unsafe { std::str::from_utf8_unchecked(self.as_bytes()) }
     }
 
-    /// Create a new `Text` with the given collation by copying a byte slice
+    /// Create a new `Text` with the given collation by copying a byte slice.
     ///
-    /// This function does not check if the slice contains valid UTF-8 text, and may panic later if
-    /// `as_str` is called and it does not.
+    /// # Safety
+    ///
+    /// `v` must contain valid UTF-8.
     #[inline]
-    pub fn from_slice(v: &[u8], collation: Collation) -> Self {
-        // SAFETY: passing `false` to `valid`, which means we will validate later (i.e. in `as_str`)
-        unsafe { Self::new(false, collation, v) }
+    pub unsafe fn from_slice(v: &[u8], collation: Collation) -> Self {
+        Self {
+            inner: triomphe::ThinArc::from_header_and_slice(TextHeader { collation }, v),
+        }
     }
 
     /// Create a new `Text` with the given collation by copying a str
     #[inline]
     pub fn from_str_with_collation(s: &str, collation: Collation) -> Self {
-        // SAFETY: `s` is guaranteed to contain valid UTF-8
-        unsafe { Self::new(true, collation, s.as_bytes()) }
-    }
-
-    /// Construct a new possibly-valid `Text` value. If it has not been validated, it will be
-    /// validated on first use in [`Text::as_str`], which may panic if the text is not valid UTF-8
-    /// (regardless of whether it was initially marked as valid or not).
-    ///
-    /// # Safety
-    ///
-    /// If `valid` is true, `v` must contain valid UTF-8.
-    unsafe fn new(valid: bool, collation: Collation, v: &[u8]) -> Self {
-        Self {
-            inner: triomphe::ThinArc::from_header_and_slice(
-                TextHeader {
-                    valid: AtomicBool::new(valid),
-                    collation,
-                },
-                v,
-            ),
-        }
+        // SAFETY: a `str` always contains valid UTF-8.
+        unsafe { Self::from_slice(s.as_bytes(), collation) }
     }
 
     /// Return the configured collation on this [`Text`] value
@@ -261,8 +234,7 @@ impl TryFrom<&[u8]> for Text {
 
 impl From<&str> for Text {
     fn from(t: &str) -> Self {
-        // SAFETY: `t` is guaranteed to contain valid UTF-8
-        unsafe { Self::new(true, Collation::Utf8, t.as_bytes()) }
+        Self::from_str_with_collation(t, Collation::Utf8)
     }
 }
 
@@ -694,14 +666,6 @@ mod tests {
     fn text_collation_round_trip(s: String, c: Collation) {
         let t = Text::from_str_with_collation(&s, c);
         assert_eq!(t.collation(), c);
-    }
-
-    #[test]
-    #[should_panic]
-    fn text_panics_non_utf8() {
-        let s = [255, 255, 255, 255];
-        let t = Text::from_slice(&s, Collation::Utf8);
-        t.as_str();
     }
 
     #[test]

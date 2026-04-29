@@ -297,7 +297,11 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
 
                         match TinyText::from_slice(&bytes, self.0) {
                             Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                            _ => Ok(TextOrTinyText::Text(Text::from_slice(&bytes, self.0))),
+                            _ => Ok(TextOrTinyText::Text(
+                                // SAFETY: bytes came from a previous `Text`/`TinyText`
+                                // serialization, which only writes validated UTF-8.
+                                unsafe { Text::from_slice(&bytes, self.0) },
+                            )),
                         }
                     }
 
@@ -307,7 +311,11 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
                     {
                         match TinyText::from_slice(v, self.0) {
                             Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                            _ => Ok(TextOrTinyText::Text(Text::from_slice(v, self.0))),
+                            _ => Ok(TextOrTinyText::Text(
+                                // SAFETY: bytes came from a previous `Text`/`TinyText`
+                                // serialization, which only writes validated UTF-8.
+                                unsafe { Text::from_slice(v, self.0) },
+                            )),
                         }
                     }
                 }
