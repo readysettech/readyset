@@ -1095,14 +1095,30 @@ impl<'a> NoriaAdapter<'a> {
         self.replication_offsets.schema = Some(pos.clone());
         self.clear_mutator_cache();
 
-        // Set the replication offset for each table we just created to this replication offset
-        // (since otherwise they'll get initialized without an offset)
+        // Seed each newly-created table's replication offset to the
+        // *start* of the current transaction rather than the DDL's own
+        // position. PostgreSQL permits transactional DDL — a single
+        // upstream transaction can contain `CREATE TABLE` followed by
+        // `INSERT` row events for that table — and the DDL's batch
+        // position is mid-transaction under the
+        // `(commit_lsn, lsn)` ordering of `PostgresPosition`. Using it
+        // as the per-table seed would let row events from the same
+        // transaction compare equal-or-less and be wrongly dropped by
+        // the per-op already-applied filter in `handle_table_actions`.
+        // `transaction_start` returns `(commit_lsn, 0)` for PostgreSQL
+        // (a strict lower bound for any event in the same commit) and
+        // returns the position unchanged for MySQL (where DDL is
+        // implicitly committed and cannot share a transaction with row
+        // events). Persisting this seed keeps `max_offset()` populated
+        // and avoids triggering a spurious full resnapshot on next
+        // restart. See REA-6582.
+        let init_offset = pos.transaction_start();
         for table in &added_tables {
             self.replication_offsets
                 .tables
-                .insert(table.clone(), Some(pos.clone()));
+                .insert(table.clone(), Some(init_offset.clone()));
             if let Some(mutator) = self.mutator_for_table(table).await? {
-                mutator.set_replication_offset(pos.clone()).await?;
+                mutator.set_replication_offset(init_offset.clone()).await?;
             } else {
                 warn!(
                     table = %table.display_unquoted(),
@@ -1163,6 +1179,35 @@ impl<'a> NoriaAdapter<'a> {
         actions: Vec<(TableOperation, ReplicationOffset)>,
         pos: &ReplicationOffset,
     ) -> ReadySetResult<()> {
+        // Per-op already-applied filter. The caller (handle_action) already
+        // guarantees `pos > table_offset` at the batch level; this strains
+        // out individual operations whose own logged position is <= the
+        // table's persisted offset. That can happen inside coalesced
+        // batches (e.g. MySQL group commit's merge_table_actions) where
+        // the batch-level position alone cannot distinguish stale events
+        // from fresh ones. See REA-6582.
+        //
+        // Snapshot the table offset before acquiring `table_mutator` (which
+        // borrows `self` mutably) so we can read both in the same scope.
+        let table_offset = self
+            .replication_offsets
+            .tables
+            .get(&table)
+            .and_then(Option::as_ref)
+            .cloned();
+        let total = actions.len();
+        let (kept, skipped) = filter_already_applied_ops(actions, table_offset.as_ref())?;
+        if skipped > 0 {
+            trace!(
+                table = %table.display_unquoted(),
+                skipped,
+                total,
+                %pos,
+                "filtered already-applied row events inside coalesced batch"
+            );
+        }
+        let mut kept = kept;
+
         // Send the rows as are
         let table_mutator = if let Some(table) = self.mutator_for_table(&table).await? {
             table
@@ -1176,22 +1221,31 @@ impl<'a> NoriaAdapter<'a> {
             if self.warned_missing_tables.insert(table.clone()) {
                 warn!(
                     table_name = %table.display(readyset_sql::Dialect::PostgreSQL),
-                    num_actions = actions.len(),
+                    num_actions = total,
                     position = %pos,
                     "Could not find table, discarding actions"
                 );
             }
             return Ok(());
         };
-        // Per-op positions are not used yet by this function: the existing
-        // batch-level filter in handle_action already gates entry. A future
-        // change will activate per-op filtering here to handle coalesced
-        // batches that cross transaction boundaries (REA-6582).
-        let mut ops: Vec<TableOperation> = actions.into_iter().map(|(op, _)| op).collect();
-        let batch_size = ops.len();
-        ops.push(TableOperation::SetReplicationOffset(pos.clone()));
+
+        // If everything was filtered, still advance the persisted offset to
+        // `pos`. Otherwise the in-memory `replication_offsets.tables` entry
+        // (which we update below) and the on-disk offset would diverge, and
+        // a restart would re-stream these same events and re-enter this
+        // filter every time.
+        if kept.is_empty() {
+            table_mutator.set_replication_offset(pos.clone()).await?;
+            self.replication_offsets
+                .tables
+                .insert(table, Some(pos.clone()));
+            return Ok(());
+        }
+
+        let batch_size = kept.len();
+        kept.push(TableOperation::SetReplicationOffset(pos.clone()));
         let start = std::time::Instant::now();
-        table_mutator.perform_all(ops).await?;
+        table_mutator.perform_all(kept).await?;
         let duration = start.elapsed();
         histogram!(recorded::REPLICATOR_BATCH_SIZE).record(batch_size as f64);
         counter!(recorded::REPLICATOR_PERFORM_ALL_CALLS).increment(1);
@@ -1639,4 +1693,103 @@ pub async fn pg_pool(
     };
     let mgr = Manager::from_config(config, tls, mgr_config);
     Pool::builder(mgr).max_size(pool_size).build()
+}
+
+/// Drop operations whose paired position is at or below `table_offset`,
+/// returning the kept operations and the number of operations skipped.
+///
+/// `table_offset = None` means the table has no persisted offset yet
+/// (first delivery), in which case nothing is filtered.
+fn filter_already_applied_ops(
+    actions: Vec<(TableOperation, ReplicationOffset)>,
+    table_offset: Option<&ReplicationOffset>,
+) -> ReadySetResult<(Vec<TableOperation>, usize)> {
+    let total = actions.len();
+    let mut kept: Vec<TableOperation> = Vec::with_capacity(total);
+    for (op, op_pos) in actions {
+        let already_applied = match table_offset {
+            Some(cur) => op_pos.try_partial_cmp(cur)?.is_le(),
+            None => false,
+        };
+        if !already_applied {
+            kept.push(op);
+        }
+    }
+    let skipped = total - kept.len();
+    Ok((kept, skipped))
+}
+
+#[cfg(test)]
+mod tests {
+    use replication_offset::mysql::MySqlPosition;
+
+    use super::*;
+
+    fn pos(p: u64) -> ReplicationOffset {
+        ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.000001".to_string(), p)
+                .expect("valid"),
+        )
+    }
+
+    fn ins(v: i64) -> TableOperation {
+        TableOperation::Insert(vec![DfValue::from(v)])
+    }
+
+    #[test]
+    fn filter_keeps_all_when_no_table_offset() {
+        let actions = vec![(ins(1), pos(10)), (ins(2), pos(20))];
+        let (kept, skipped) = filter_already_applied_ops(actions, None).unwrap();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(skipped, 0);
+    }
+
+    #[test]
+    fn filter_drops_ops_at_or_below_table_offset() {
+        // table_offset = 15: ops at <=15 are stale; ops at >15 are fresh.
+        let actions = vec![
+            (ins(1), pos(10)), // stale
+            (ins(2), pos(15)), // stale (== table_offset)
+            (ins(3), pos(20)), // fresh
+            (ins(4), pos(30)), // fresh
+        ];
+        let off = pos(15);
+        let (kept, skipped) = filter_already_applied_ops(actions, Some(&off)).unwrap();
+        assert_eq!(skipped, 2);
+        assert_eq!(kept.len(), 2);
+        // Verify the kept ops are the ones with values 3 and 4.
+        let values: Vec<_> = kept
+            .iter()
+            .filter_map(|op| match op {
+                TableOperation::Insert(row) => Some(row[0].clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(values, vec![DfValue::from(3), DfValue::from(4)]);
+    }
+
+    #[test]
+    fn filter_drops_everything_when_all_stale() {
+        let actions = vec![(ins(1), pos(5)), (ins(2), pos(10))];
+        let off = pos(20);
+        let (kept, skipped) = filter_already_applied_ops(actions, Some(&off)).unwrap();
+        assert_eq!(skipped, 2);
+        assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn filter_keeps_everything_when_all_fresh() {
+        let actions = vec![(ins(1), pos(50)), (ins(2), pos(60))];
+        let off = pos(20);
+        let (kept, skipped) = filter_already_applied_ops(actions, Some(&off)).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn filter_handles_empty_input() {
+        let (kept, skipped) = filter_already_applied_ops(vec![], None).unwrap();
+        assert!(kept.is_empty());
+        assert_eq!(skipped, 0);
+    }
 }

@@ -188,6 +188,38 @@ impl ReplicationOffset {
         }
     }
 
+    /// Returns a position representing the start of the same upstream
+    /// transaction as `self`, strictly less than the position of any
+    /// row event in the same transaction.
+    ///
+    /// PostgreSQL allows DDL inside a multi-statement transaction
+    /// (`BEGIN; CREATE TABLE …; INSERT …; COMMIT;`), so when the DDL
+    /// handler seeds a newly-created table's replication offset, the
+    /// DDL's own position is *mid-transaction* under the lexicographic
+    /// `(commit_lsn, lsn)` ordering of [`postgres::PostgresPosition`].
+    /// Subsequent row events in the same transaction may then compare
+    /// equal-or-less and be wrongly dropped by the per-op
+    /// already-applied filter in `handle_table_actions`. Returning
+    /// `(commit_lsn, 0)` for the PostgreSQL variant yields a strict
+    /// lower bound: any row event in the same commit has `lsn > 0`
+    /// and therefore compares strictly greater.
+    ///
+    /// MySQL has no equivalent hazard — DDL is implicitly committed
+    /// and cannot share a transaction with row events — so this
+    /// returns `self` unchanged for the [`MySql`] and [`Gtid`]
+    /// variants.
+    ///
+    /// [`MySql`]: Self::MySql
+    /// [`Gtid`]: Self::Gtid
+    pub fn transaction_start(&self) -> Self {
+        match self {
+            Self::Postgres(p) => {
+                Self::Postgres(postgres::PostgresPosition::commit_start(p.commit_lsn))
+            }
+            Self::MySql(_) | Self::Gtid(_) => self.clone(),
+        }
+    }
+
     /// Returns true if this is a GTID-based MySQL offset.
     pub fn is_gtid(&self) -> bool {
         matches!(self, Self::Gtid(_))
@@ -761,6 +793,55 @@ mod tests {
                 "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
             let postgres: ReplicationOffset = "0/16B3748".parse().unwrap();
             assert_ne!(gtid.dialect(), postgres.dialect());
+        }
+    }
+
+    mod transaction_start {
+        use super::*;
+
+        #[test]
+        fn postgres_collapses_lsn_to_zero() {
+            // (commit_lsn = 0x100, lsn = 0x80) → (commit_lsn = 0x100, lsn = 0)
+            let lsn: postgres::Lsn = 0x80i64.into();
+            let pos = postgres::PostgresPosition::commit_start(0x100i64.into()).with_lsn(lsn);
+            let offset: ReplicationOffset = pos.into();
+            let start = offset.transaction_start();
+            let start_pg = postgres::PostgresPosition::try_from(start).unwrap();
+            assert_eq!(start_pg.commit_lsn.as_i64(), 0x100);
+            assert_eq!(start_pg.lsn.as_i64(), 0);
+        }
+
+        #[test]
+        fn postgres_transaction_start_strictly_less_than_any_event_in_same_commit() {
+            // The whole point: every event in the same commit has lsn > 0,
+            // so its position is strictly greater than `transaction_start`.
+            let lsn: postgres::Lsn = 0x4841D5A0i64.into();
+            let event_pos: ReplicationOffset =
+                postgres::PostgresPosition::commit_start(0x4841D5C0i64.into())
+                    .with_lsn(lsn)
+                    .into();
+            let seed = event_pos.transaction_start();
+            assert!(event_pos.try_partial_cmp(&seed).unwrap().is_gt());
+            assert!(seed.try_partial_cmp(&event_pos).unwrap().is_lt());
+        }
+
+        #[test]
+        fn mysql_binlog_returns_self_unchanged() {
+            // MySQL DDL is implicitly committed; the DDL's own position
+            // is already a valid lower bound for any subsequent row
+            // events. `transaction_start` should be identity here.
+            let pos: ReplicationOffset =
+                MySqlPosition::from_file_name_and_position("binlog.000001".into(), 154)
+                    .unwrap()
+                    .into();
+            assert_eq!(pos.transaction_start(), pos);
+        }
+
+        #[test]
+        fn gtid_returns_self_unchanged() {
+            let gtid: ReplicationOffset =
+                "3E11FA47-71CA-11E1-9E33-C80AA9429562:1-10".parse().unwrap();
+            assert_eq!(gtid.transaction_start(), gtid);
         }
     }
 }
