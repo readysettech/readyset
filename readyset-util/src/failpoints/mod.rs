@@ -105,3 +105,11 @@ pub const CACHING_SHA2_FULL_AUTH_BEGIN: &str = "caching-sha2-full-auth-begin";
 /// the connect-timeout bound around `setup_heartbeat_table` and the per-poll
 /// MySQL connects in `replicators::replication_lag_reporter`.
 pub const REPLICATION_LAG_CONNECT: &str = "replication-lag-connect";
+
+/// Injects an `Err` return from the controller-level
+/// `min_persisted_replication_offset` RPC the Postgres replicator uses when
+/// computing the next standby status update. With `set_failpoint_return_err!`
+/// semantics, the wrapper returns `Err` without ever calling the controller,
+/// driving the cache-fallback path in `select_ack_lsn` so end-to-end tests
+/// can verify the replicator stays alive across RPC failures.
+pub const POSTGRES_MIN_PERSISTED_RPC: &str = "postgres-min-persisted-rpc";

@@ -555,9 +555,14 @@ impl PostgresWalConnector {
 
 /// Wraps the controller-level `min_persisted_replication_offset` RPC with
 /// an explicit timeout so a hung call can't block the replicator.
+///
+/// Also hosts the [`failpoints::POSTGRES_MIN_PERSISTED_RPC`] failpoint so
+/// e2e tests can drive `select_ack_lsn`'s cache-fallback branch without
+/// needing an actual controller failure.
 async fn fetch_min_persisted_replication_offset(
     controller: &mut ReadySetHandle,
 ) -> ReadySetResult<PersistencePoint> {
+    set_failpoint_return_err!(failpoints::POSTGRES_MIN_PERSISTED_RPC);
     match tokio::time::timeout(
         MIN_PERSISTED_RPC_TIMEOUT,
         controller.min_persisted_replication_offset(),
