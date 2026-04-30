@@ -1,0 +1,71 @@
+# Coverage for the TopK operator with multi-column inputs.
+# Each query uses ORDER BY + LIMIT (no OFFSET) so it lowers to TopK
+# rather than the post-lookup ordering path.
+
+# --- Multi-column ORDER BY with mixed ASC/DESC ---
+
+statement ok
+create table topk_multi_ord (a int, b int, c int)
+
+statement ok
+insert into topk_multi_ord values
+  (1, 10, 1), (1, 10, 2), (1, 20, 1), (1, 20, 2),
+  (2, 10, 1), (2, 10, 2), (2, 20, 1), (2, 20, 2)
+
+query III nosort
+select a, b, c from topk_multi_ord order by a asc, b desc, c asc limit 5
+----
+1
+20
+1
+1
+20
+2
+1
+10
+1
+1
+10
+2
+2
+20
+1
+
+query III nosort
+select a, b, c from topk_multi_ord order by a desc, b asc, c desc limit 3
+----
+2
+10
+2
+2
+10
+1
+2
+20
+2
+
+# --- Multi-column GROUP BY combined with ORDER BY + LIMIT ---
+
+statement ok
+create table topk_multi_grp (g1 int, g2 int, v int)
+
+statement ok
+insert into topk_multi_grp values
+  (1, 10, 5), (1, 10, 7),
+  (1, 20, 4),
+  (2, 10, 9),
+  (2, 20, 6), (2, 20, 8),
+  (3, 10, 1)
+
+query III nosort
+select g1, g2, sum(v) as s from topk_multi_grp group by g1, g2 order by s desc, g1 asc, g2 asc limit 3
+----
+2
+20
+14
+1
+10
+12
+2
+10
+9

@@ -1,0 +1,58 @@
+# Coverage for the TopK operator with explicit NULLS FIRST/LAST.
+# Each query uses ORDER BY + LIMIT (no OFFSET) so it lowers to TopK
+# rather than the post-lookup ordering path. NULLS FIRST/LAST is
+# postgres-specific syntax (MySQL does not parse it).
+
+statement ok
+create table topk_nulls (id int primary key, v int)
+
+statement ok
+insert into topk_nulls values (1, 10), (2, 20), (3, 30), (4, null), (5, null), (6, 5)
+
+query II nosort
+select id, v from topk_nulls order by v asc nulls first, id asc limit 4
+----
+4
+NULL
+5
+NULL
+6
+5
+1
+10
+
+query II nosort
+select id, v from topk_nulls order by v asc nulls last, id asc limit 4
+----
+6
+5
+1
+10
+2
+20
+3
+30
+
+query II nosort
+select id, v from topk_nulls order by v desc nulls first, id asc limit 4
+----
+4
+NULL
+5
+NULL
+3
+30
+2
+20
+
+query II nosort
+select id, v from topk_nulls order by v desc nulls last, id asc limit 4
+----
+3
+30
+2
+20
+1
+10
+6
+5
