@@ -29,6 +29,10 @@ use super::PUBLICATION_NAME;
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
 
+/// Cap on how long the standby status update will wait for the controller's
+/// `min_persisted_replication_offset` RPC.
+const MIN_PERSISTED_RPC_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
 ///
@@ -465,7 +469,7 @@ impl PostgresWalConnector {
         // not a reason to tear down the replicator; if we have a cached value from a
         // prior successful fetch, re-ack it so Postgres doesn't grow WAL retention any
         // more than it already would, and otherwise skip this status update entirely.
-        let rpc_result = self.controller.min_persisted_replication_offset().await;
+        let rpc_result = fetch_min_persisted_replication_offset(&mut self.controller).await;
         let (lsn_to_ack, new_cache) =
             select_ack_lsn(rpc_result, cur_pos, self.last_successful_min_persisted_lsn)?;
         self.last_successful_min_persisted_lsn = new_cache;
@@ -546,6 +550,24 @@ impl PostgresWalConnector {
     /// Perform a simple query and return the resulting rows
     async fn simple_query(&mut self, query: &str) -> ReadySetResult<Vec<SimpleQueryMessage>> {
         Ok(self.client.simple_query(query).await?)
+    }
+}
+
+/// Wraps the controller-level `min_persisted_replication_offset` RPC with
+/// an explicit timeout so a hung call can't block the replicator.
+async fn fetch_min_persisted_replication_offset(
+    controller: &mut ReadySetHandle,
+) -> ReadySetResult<PersistencePoint> {
+    match tokio::time::timeout(
+        MIN_PERSISTED_RPC_TIMEOUT,
+        controller.min_persisted_replication_offset(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_elapsed) => Err(ReadySetError::RequestTimeoutWithContext(
+            "min_persisted_replication_offset".to_string(),
+        )),
     }
 }
 
