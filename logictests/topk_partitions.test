@@ -1,0 +1,52 @@
+# Coverage for TopK with multiple groups (parameterized partition key)
+# and bulk inserts that affect multiple groups in a single batch.
+
+statement ok
+create table t_part (x int primary key, grp int, z int)
+
+# Two groups grp=1 and grp=2 each get rows with z=3,4,5.
+
+statement ok
+insert into t_part values
+  (3,1,3),(4,1,4),(5,1,5),
+  (13,2,3),(14,2,4),(15,2,5)
+
+query I nosort
+select x from t_part where grp = ? order by z asc limit 3
+? = 1
+----
+3
+4
+5
+
+query I nosort
+select x from t_part where grp = ? order by z asc limit 3
+? = 2
+----
+13
+14
+15
+
+# Bulk insert that adds smaller rows to both groups: every group's
+# top-3 must update.
+
+statement ok
+insert into t_part values
+  (1,1,1),(2,1,2),
+  (11,2,1),(12,2,2)
+
+query I nosort
+select x from t_part where grp = ? order by z asc limit 3
+? = 1
+----
+1
+2
+3
+
+query I nosort
+select x from t_part where grp = ? order by z asc limit 3
+? = 2
+----
+11
+12
+13

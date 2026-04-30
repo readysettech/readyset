@@ -1,0 +1,87 @@
+# Coverage for TopK with ASC ordering (keep-smallest), including the
+# delete-then-backfill recovery path.
+
+# --- it_forwards_reversed: mixed-order inserts, ORDER BY ASC LIMIT 3 ---
+
+statement ok
+create table t_rev_fwd (x int primary key, y int, z int)
+
+statement ok
+insert into t_rev_fwd values (1,1,12)
+
+query I nosort
+select x from t_rev_fwd where y = ? order by z asc limit 3
+? = 1
+----
+1
+
+statement ok
+insert into t_rev_fwd values (2,1,10)
+
+query I nosort
+select x from t_rev_fwd where y = ? order by z asc limit 3
+? = 1
+----
+2
+1
+
+statement ok
+insert into t_rev_fwd values (3,1,11)
+
+query I nosort
+select x from t_rev_fwd where y = ? order by z asc limit 3
+? = 1
+----
+2
+3
+1
+
+statement ok
+insert into t_rev_fwd values (4,1,5)
+
+query I nosort
+select x from t_rev_fwd where y = ? order by z asc limit 3
+? = 1
+----
+4
+2
+3
+
+statement ok
+insert into t_rev_fwd values (5,1,15)
+
+query I nosort
+select x from t_rev_fwd where y = ? order by z asc limit 3
+? = 1
+----
+4
+2
+3
+
+# --- it_queries_parent_on_deletes_reversed: delete drains top-k under
+#     ASC, backfill must promote next-smallest from the parent ---
+
+statement ok
+create table t_rev_del (x int primary key, y int, z int)
+
+statement ok
+insert into t_rev_del values (1,1,12),(2,1,10),(3,1,11),(4,1,5),(5,1,15)
+
+query I nosort
+select x from t_rev_del where y = ? order by z asc limit 3
+? = 1
+----
+4
+2
+3
+
+statement ok
+delete from t_rev_del where x = 4
+
+query I nosort
+select x from t_rev_del where y = ? order by z asc limit 3
+? = 1
+----
+2
+3
+1

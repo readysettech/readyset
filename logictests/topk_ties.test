@@ -1,0 +1,58 @@
+# Coverage for TopK with rows that tie on the order column.
+
+statement ok
+create table t_ties (x int primary key, y int, z int)
+
+# All rows tie on z; the operator must preserve correctness when a new
+# row sorts ahead of existing entries via the full-row tiebreak.
+
+statement ok
+insert into t_ties values
+  (1,1,10),(2,1,10),(3,1,10),(4,1,10),(5,1,10),(6,1,10)
+
+query I nosort
+select x from t_ties where y = ? order by z asc, x asc limit 3
+? = 1
+----
+1
+2
+3
+
+statement ok
+insert into t_ties values (0,1,10)
+
+query I nosort
+select x from t_ties where y = ? order by z asc, x asc limit 3
+? = 1
+----
+0
+1
+2
+
+# Empty group_by (no WHERE) with duplicate order-column values; deletes
+# must shrink top-k correctly when the group runs out.
+
+statement ok
+create table t_dups (x int primary key, val int)
+
+statement ok
+insert into t_dups values (1,1),(2,1),(3,1),(4,1)
+
+query I nosort
+select x from t_dups order by val asc, x asc limit 3
+----
+1
+2
+3
+
+statement ok
+delete from t_dups where x = 1
+
+statement ok
+delete from t_dups where x = 2
+
+query I nosort
+select x from t_dups order by val asc, x asc limit 3
+----
+3
+4

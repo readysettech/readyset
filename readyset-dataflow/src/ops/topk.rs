@@ -449,11 +449,15 @@ impl Ingredient for TopK {
                         }
                     }
 
-                    // verify that the states match and that the eviction affected both states
+                    // Verify aux state agrees with main state. Debug-only by design:
+                    // release-mode detection of divergence (e.g. via a partial-replay
+                    // or restart-recovery race) is delegated to the upstream query
+                    // sampler, which catches wrong results at the system level. Do
+                    // not add a release-mode check here without coordinating with it.
                     debug_assert_eq!(
                         r.into_iter()
                             .map(|r| r.to_vec())
-                            .sorted_by(|a, b| self.order.cmp(a, b).reverse().then(a.cmp(b)))
+                            .sorted_by(|a, b| self.total_cmp(a, b))
                             .collect::<Vec<_>>(),
                         buffered_state
                             .get(group_key_ref)
@@ -506,16 +510,22 @@ impl Ingredient for TopK {
 
             match r {
                 Record::Positive(r) => {
-                    // If we're at capacity we can't consider positive records worse than our
-                    // worst element, because it's possible that there are *other* records
-                    // *between* our worst element and that positive record which we wouldn't
-                    // know about. If we drop below k records during processing and it turns out
-                    // that this positive record would have been in the topk, we'll figure that
-                    // out in post_group when we query our parent.
-                    if current.len() >= (self.k + self.buffered) {
+                    // If the group started this batch already at >= k, skip
+                    // any positive that is not strictly better than our
+                    // current worst. The buffer is bounded at k + buffered,
+                    // so the parent may hold rows between our worst and this
+                    // positive that we have never seen; admitting it would
+                    // risk promoting it to top-k later (via deletes) ahead
+                    // of those better rows.
+                    //
+                    // If deletes drain the group below k by end of batch,
+                    // post_group backfills from the parent and recovers any
+                    // skipped positive that does belong in top-k. An
+                    // under-filled group (original_group_len < k) has no
+                    // downstream-visible top-k to protect and no hidden
+                    // parent rows in dataflow, so we admit everything.
+                    if original_group_len >= self.k {
                         if let Some(worst) = current.last() {
-                            // Use total_cmp (same ordering as binary_search) to decide
-                            // whether the new record is worse than our worst element.
                             if !self.total_cmp(&worst.row, r).is_gt() {
                                 trace!(row = ?r, "topk skipping positive worse than worst");
                                 continue;
@@ -523,15 +533,16 @@ impl Ingredient for TopK {
                         }
                     }
 
-                    let record = CurrentRecord {
-                        row: Cow::Borrowed(r),
-                        // New entry to the topk
-                        original_index: None,
-                    };
-
                     match current.binary_search_by(|cr| self.total_cmp(&cr.row, r)) {
                         Ok(idx) | Err(idx) => {
-                            current.insert(idx, record);
+                            current.insert(
+                                idx,
+                                CurrentRecord {
+                                    row: Cow::Borrowed(r),
+                                    original_index: None, // New entry to top-k
+                                },
+                            );
+
                             // Enforce size bound. If the displaced record was in the
                             // original top-k, emit a Negative since downstream has it.
                             if current.len() > self.k + self.buffered {
@@ -1175,5 +1186,79 @@ mod tests {
         g.narrow_one_row(r2, true);
         g.narrow_one_row(r3, true);
         assert_eq!(g.states[ni].row_count(), 3);
+    }
+
+    /// A worse-than-worst positive must not be admitted to the buffer when
+    /// the parent has hidden rows: later deletes can promote it to top-k
+    /// ahead of a better parent row, since `current.len() == k` post-delete
+    /// does not trigger backfill.
+    #[test]
+    fn worse_than_worst_positive_promotes_stale_buffer_row() {
+        let (mut g, s) = setup(false);
+        let ni = g.node().local_addr();
+
+        let r100: Vec<DfValue> = vec![1.into(), "z".into(), 100.into()];
+        let r90: Vec<DfValue> = vec![2.into(), "z".into(), 90.into()];
+        let r80: Vec<DfValue> = vec![3.into(), "z".into(), 80.into()];
+        let r70: Vec<DfValue> = vec![4.into(), "z".into(), 70.into()];
+        let r60: Vec<DfValue> = vec![5.into(), "z".into(), 60.into()];
+        let r50: Vec<DfValue> = vec![6.into(), "z".into(), 50.into()];
+        let r40: Vec<DfValue> = vec![7.into(), "z".into(), 40.into()];
+        let r30: Vec<DfValue> = vec![8.into(), "z".into(), 30.into()];
+        let r20: Vec<DfValue> = vec![9.into(), "z".into(), 20.into()];
+
+        // Parent state at backfill time: r100/r90/r80/r70 have been
+        // deleted and r20 inserted.
+        g.seed(s, r60.clone());
+        g.seed(s, r50.clone());
+        g.seed(s, r40.clone());
+        g.seed(s, r30.clone());
+        g.seed(s, r20.clone());
+
+        // Ascending arrival ensures r40 and r30 are popped during fill
+        // and remain hidden from the operator.
+        for r in [&r30, &r40, &r50, &r60, &r70, &r80, &r90, &r100] {
+            g.narrow_one_row(r.clone(), true);
+        }
+
+        g.narrow_one(
+            vec![
+                Record::Negative(r100.clone()),
+                Record::Positive(r20.clone()),
+            ],
+            true,
+        );
+
+        g.narrow_one_row((r90.clone(), false), true);
+        g.narrow_one_row((r80.clone(), false), true);
+        let final_emit = g.narrow_one_row((r70.clone(), false), true);
+
+        assert!(
+            final_emit.iter().any(|r| r == &(r40.clone(), true).into()),
+            "expected +r40 in final emit; got {:?}",
+            final_emit,
+        );
+        assert!(
+            !final_emit.iter().any(|r| r == &(r20.clone(), true).into()),
+            "r20 must not be promoted to top-k; got {:?}",
+            final_emit,
+        );
+
+        assert_eq!(g.states[ni].row_count(), 3);
+        let LookupResult::Some(rows) = g.states[ni].lookup(&[1], &PointKey::from(["z".into()]))
+        else {
+            panic!("expected materialized rows for group 'z'");
+        };
+        let vals: Vec<DfValue> = rows.into_iter().map(|r| r[2].clone()).collect();
+        assert!(
+            vals.contains(&60.into()) && vals.contains(&50.into()) && vals.contains(&40.into()),
+            "expected state to contain {{60, 50, 40}}; got {:?}",
+            vals,
+        );
+        assert!(
+            !vals.contains(&20.into()),
+            "state must not contain stale r20; got {:?}",
+            vals,
+        );
     }
 }
