@@ -36,9 +36,22 @@ pub type TopKState = HashMap<Vec<DfValue>, Vec<Vec<DfValue>>>;
 #[derive(Debug)]
 struct CurrentRecord<'state> {
     row: Cow<'state, [DfValue]>,
-    // If the key wasn't in Top K (or buffer) then it's a new entry
-    // and `original_index` will be `None`.
+    /// `original_index` records the row's position in the persisted aux state
+    /// at the start of the current batch. It encodes whether downstream has
+    /// the row: positions `[0, k)` were the persisted top-k slice (downstream
+    /// has them), positions `[k, k + buffered)` were buffer-only (downstream
+    /// does not), and `None` means the row was newly added in this batch.
+    /// Use the helpers below rather than comparing the index directly.
     original_index: Option<usize>,
+}
+
+impl<'state> CurrentRecord<'state> {
+    /// True iff this row was in the persisted top-k slice at the start of
+    /// this batch — i.e., downstream's main state currently holds it and
+    /// any removal must emit a Negative.
+    fn was_in_downstream_top_k(&self, k: usize) -> bool {
+        matches!(self.original_index, Some(i) if i < k)
+    }
 }
 
 /// TopK provides an operator that will produce the top k elements for each group.
@@ -207,25 +220,20 @@ impl TopK {
             }
         }
 
-        let k = min(current.len(), self.k);
-        let end = min(current.len(), self.k + self.buffered);
+        let top_end = min(current.len(), self.k);
+        let buffer_end = min(current.len(), self.k + self.buffered);
 
-        // check top k records first
-        for r in current[..k].iter() {
-            match r.original_index {
-                // new entry in top k rows; push positive
-                None => out.push(Record::Positive(r.row.to_vec())),
-                // was in the buffer zone, now in top k; push positive
-                Some(i) if i >= self.k => out.push(Record::Positive(r.row.to_vec())),
-                // was in top k, still in top k; do nothing
-                _ => (),
+        // Top-k slice: emit a Positive for any row downstream doesn't yet have.
+        for r in current[..top_end].iter() {
+            if !r.was_in_downstream_top_k(self.k) {
+                out.push(Record::Positive(r.row.to_vec()));
             }
         }
 
-        // now check the buffer zone
-        for r in current[k..end].iter() {
-            // was in top k, now is in buffer; push negative
-            if matches!(r.original_index, Some(i) if i < k) {
+        // Buffer slice: emit a Negative for any row downstream still has but
+        // that has been demoted out of top-k.
+        for r in current[top_end..buffer_end].iter() {
+            if r.was_in_downstream_top_k(self.k) {
                 out.push(Record::Negative(r.row.to_vec()));
             }
         }
@@ -475,6 +483,20 @@ impl Ingredient for TopK {
 
                 current = match buffered_state.get(group_key_ref) {
                     Some(records) => {
+                        // The aux state for a group must hold at most k +
+                        // buffered rows. The first k define downstream's
+                        // top-k slice and the rest define the buffer; the
+                        // `original_index < k` predicate (encoded by the
+                        // CurrentRecord helpers) depends on this shape.
+                        if records.len() > self.k + self.buffered {
+                            internal!(
+                                "topk aux state for group has {} rows, exceeds k + buffered ({} + {})",
+                                records.len(),
+                                self.k,
+                                self.buffered,
+                            );
+                        }
+
                         original_group_len = records.len();
 
                         records
@@ -533,6 +555,12 @@ impl Ingredient for TopK {
                         }
                     }
 
+                    // `Err` is a non-duplicate insertion; `Ok` means a
+                    // byte-identical row already exists in `current` (under
+                    // `total_cmp`, equality requires full-row equality). In
+                    // the `Ok` case we insert a duplicate intentionally; the
+                    // negative handler below resolves it via the smallest
+                    // `original_index` tiebreak when the row is later removed.
                     match current.binary_search_by(|cr| self.total_cmp(&cr.row, r)) {
                         Ok(idx) | Err(idx) => {
                             current.insert(
@@ -543,12 +571,15 @@ impl Ingredient for TopK {
                                 },
                             );
 
-                            // Enforce size bound. If the displaced record was in the
-                            // original top-k, emit a Negative since downstream has it.
+                            // Enforce size bound. The popped row is worse than every
+                            // survivor; it can only matter to a future top-k once they
+                            // are all deleted, which triggers backfill in post_group.
+                            // If the popped row was in the original top-k, emit a
+                            // Negative since downstream has it.
                             if current.len() > self.k + self.buffered {
                                 let dropped =
                                     current.pop().expect("current is non-empty after insert");
-                                if matches!(dropped.original_index, Some(i) if i < self.k) {
+                                if dropped.was_in_downstream_top_k(self.k) {
                                     out.push(Record::Negative(dropped.row.into_owned()));
                                 }
                             }
@@ -579,7 +610,7 @@ impl Ingredient for TopK {
                                     best = i;
                                 }
                             }
-                            if matches!(current[best].original_index, Some(i) if i < self.k) {
+                            if current[best].was_in_downstream_top_k(self.k) {
                                 out.push(Record::Negative(r.clone()));
                             }
                             current.remove(best);
