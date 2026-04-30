@@ -1361,6 +1361,10 @@ impl SqlToMirConverter {
             unsupported!("Paginate is not supported");
         }
 
+        if limit == 0 {
+            unsupported!("LIMIT 0 is not supported");
+        }
+
         // Gather a list of expressions we need to evaluate before the paginate node
         let mut exprs_to_project = vec![];
 

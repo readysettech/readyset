@@ -221,3 +221,11 @@ SELECT grp, sum(val) AS s FROM agg_topk GROUP BY grp ORDER BY s ASC LIMIT 3
 
 # Window function + aggregate + TopK tests are in
 # logictests/sqlparser/window_functions_aggs_topk.test
+
+# Literal `LIMIT 0` cannot be cached: TopK is not designed for k = 0,
+# and the result is always empty, so MIR rejects the lowering and the
+# query falls back to upstream.
+
+statement error: LIMIT 0 is not supported
+create cache from select column_2 from table_1 where column_1 = ? order by column_2 limit 0
+
