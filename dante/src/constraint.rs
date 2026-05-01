@@ -81,9 +81,13 @@ pub enum LiteralKind {
     Boolean,
 }
 
-/// Where a subquery appears in the outer query.
+/// What kind of expression-position subquery this is.
+///
+/// Expression-position subqueries are used as values inline in WHERE / SELECT
+/// (`EXISTS`, `IN`, scalar). They never produce an outer relation alias, so
+/// they live in [`Constraint::SubqueryExpr`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SubqueryPosition {
+pub enum SubqueryExprKind {
     /// Uncorrelated `EXISTS (SELECT ...)`
     ExistsUncorrelated,
     /// Correlated `EXISTS (SELECT ... WHERE inner.col = outer.col)`
@@ -94,24 +98,33 @@ pub enum SubqueryPosition {
     ScalarSubquery,
 }
 
-/// What the right side of a JOIN is.
+/// What kind of relation-position subquery this is.
+///
+/// Relation-position subqueries produce an outer relation that other
+/// constraints can reference by alias VarId — the resolver `env.bind`s the
+/// alias to a fresh SQL identifier (`cteN`, `sqN`, ...) so outer
+/// `From(alias)` / `ProjectColumn { table: alias, .. }` references resolve
+/// through env uniformly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubqueryRelationKind {
+    /// Common Table Expression (`WITH cte0 AS (SELECT ...) SELECT ... FROM cte0`)
+    Cte,
+    /// Inline subquery used as the right side of a JOIN
+    /// (`... JOIN (SELECT ...) AS sqN ON ...`). The alias var is referenced
+    /// by a sibling `Join { right: JoinRight::Table(alias) }` constraint.
+    JoinTarget,
+}
+
+/// What the right side of a JOIN is. Always a relation var — base table,
+/// CTE alias, FROM-subquery alias, or `JoinTarget` SubqueryRelation alias.
+/// JOIN-subqueries and CTE joins are emitted as a sibling
+/// `Constraint::SubqueryRelation` whose alias var goes here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JoinRight {
-    /// Join to a table variable directly
+    /// Any relation var (base table, CTE alias, derived alias, or
+    /// `JoinTarget` alias). The resolver looks up the var's binding to
+    /// decide whether to emit a table reference or an inline subquery.
     Table(VarId),
-    /// Join to a subquery
-    Subquery {
-        constraints: Vec<Constraint>,
-        shared_vars: Vec<VarId>,
-    },
-    /// Join to a CTE by name. `alias` is the variable bound to the CTE's
-    /// SQL alias (e.g., `cte0`), so outer references resolve to that name
-    /// rather than the underlying base table.
-    Cte {
-        alias: VarId,
-        constraints: Vec<Constraint>,
-        shared_vars: Vec<VarId>,
-    },
 }
 
 /// Dialect support for a pattern.
@@ -245,16 +258,21 @@ pub enum Constraint {
     Distinct,
 
     // --- Subquery / CTE ---
-    /// A subquery that appears as a join target or WHERE element.
-    Subquery {
-        position: SubqueryPosition,
+    /// An expression-position subquery (`EXISTS`, `IN`, scalar). Has no
+    /// outer-relation alias because the subquery is consumed as a value
+    /// inline in WHERE / SELECT.
+    SubqueryExpr {
+        kind: SubqueryExprKind,
         constraints: Vec<Constraint>,
         shared_vars: Vec<VarId>,
     },
-    /// A Common Table Expression (WITH clause). `alias` is the variable
-    /// bound to the CTE's SQL alias name, so outer references like
-    /// `From(alias)` resolve to the CTE name rather than a base table.
-    Cte {
+    /// A relation-position subquery — the subquery produces an outer
+    /// relation that other constraints reference by `alias`. The
+    /// resolver binds `alias` to a fresh SQL identifier (`cteN`, etc.)
+    /// so outer `From(alias)` / `ProjectColumn { table: alias, .. }`
+    /// references resolve through env.
+    SubqueryRelation {
+        kind: SubqueryRelationKind,
         alias: VarId,
         constraints: Vec<Constraint>,
         shared_vars: Vec<VarId>,
@@ -292,17 +310,11 @@ impl Constraint {
             }
             Constraint::From(v) => vec![*v],
             Constraint::Join {
-                right,
+                right: JoinRight::Table(t),
                 left_col,
                 right_col,
                 ..
-            } => {
-                let mut ids = vec![*left_col, *right_col];
-                if let JoinRight::Table(t) = right {
-                    ids.push(*t);
-                }
-                ids
-            }
+            } => vec![*left_col, *right_col, *t],
             Constraint::ProjectColumn { col, table }
             | Constraint::GroupBy { col, table }
             | Constraint::WhereRangeParam { col, table }
@@ -330,7 +342,7 @@ impl Constraint {
                 conditions.iter().flat_map(|c| c.var_ids()).collect()
             }
             Constraint::OrderBy { col, table, .. } => vec![*col, *table],
-            Constraint::Subquery { .. } | Constraint::Cte { .. } => vec![],
+            Constraint::SubqueryExpr { .. } | Constraint::SubqueryRelation { .. } => vec![],
             Constraint::Or(preferred, fallback) => {
                 let mut ids: Vec<VarId> = preferred.iter().flat_map(|c| c.var_ids()).collect();
                 ids.extend(fallback.iter().flat_map(|c| c.var_ids()));
@@ -378,30 +390,12 @@ impl Constraint {
             Constraint::From(v) => Constraint::From(f(*v)),
             Constraint::Join {
                 operator,
-                right,
+                right: JoinRight::Table(t),
                 left_col,
                 right_col,
             } => Constraint::Join {
                 operator: *operator,
-                right: match right {
-                    JoinRight::Table(t) => JoinRight::Table(f(*t)),
-                    JoinRight::Subquery {
-                        constraints,
-                        shared_vars,
-                    } => JoinRight::Subquery {
-                        constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
-                        shared_vars: shared_vars.iter().copied().map(&f).collect(),
-                    },
-                    JoinRight::Cte {
-                        alias,
-                        constraints,
-                        shared_vars,
-                    } => JoinRight::Cte {
-                        alias: f(*alias),
-                        constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
-                        shared_vars: shared_vars.iter().copied().map(&f).collect(),
-                    },
-                },
+                right: JoinRight::Table(f(*t)),
                 left_col: f(*left_col),
                 right_col: f(*right_col),
             },
@@ -512,20 +506,22 @@ impl Constraint {
                 offset: *offset,
             },
             Constraint::Distinct => Constraint::Distinct,
-            Constraint::Subquery {
-                position,
+            Constraint::SubqueryExpr {
+                kind,
                 constraints,
                 shared_vars,
-            } => Constraint::Subquery {
-                position: position.clone(),
+            } => Constraint::SubqueryExpr {
+                kind: kind.clone(),
                 constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
                 shared_vars: shared_vars.iter().copied().map(&f).collect(),
             },
-            Constraint::Cte {
+            Constraint::SubqueryRelation {
+                kind,
                 alias,
                 constraints,
                 shared_vars,
-            } => Constraint::Cte {
+            } => Constraint::SubqueryRelation {
+                kind: kind.clone(),
                 alias: f(*alias),
                 constraints: constraints.iter().map(|c| c.map_var_ids(f)).collect(),
                 shared_vars: shared_vars.iter().copied().map(&f).collect(),
@@ -702,8 +698,8 @@ mod tests {
         let inner_col = VarId(1);
         let inner_table = VarId(2);
 
-        let _ = Constraint::Subquery {
-            position: SubqueryPosition::ExistsCorrelated,
+        let _ = Constraint::SubqueryExpr {
+            kind: SubqueryExprKind::ExistsCorrelated,
             constraints: vec![
                 Constraint::From(inner_table),
                 Constraint::ProjectColumn {
@@ -715,7 +711,8 @@ mod tests {
         };
 
         let cte_alias = VarId(3);
-        let _ = Constraint::Cte {
+        let _ = Constraint::SubqueryRelation {
+            kind: SubqueryRelationKind::Cte,
             alias: cte_alias,
             constraints: vec![Constraint::From(inner_table)],
             shared_vars: vec![],

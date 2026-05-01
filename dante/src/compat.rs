@@ -90,70 +90,36 @@ pub fn has_constraint(constraints: &[Constraint], pred: fn(&Constraint) -> bool)
 /// contains a constraint matching the predicate. Recurses into all nested scopes.
 pub fn any_nested_contains(constraints: &[Constraint], pred: fn(&Constraint) -> bool) -> bool {
     for c in constraints {
-        match c {
-            Constraint::Subquery {
-                constraints: inner, ..
-            }
-            | Constraint::Cte {
-                constraints: inner, ..
-            } if inner.iter().any(pred) || any_nested_contains(inner, pred) => {
-                return true;
-            }
-            Constraint::Join {
-                right:
-                    crate::constraint::JoinRight::Subquery {
-                        constraints: inner, ..
-                    },
-                ..
-            }
-            | Constraint::Join {
-                right:
-                    crate::constraint::JoinRight::Cte {
-                        constraints: inner, ..
-                    },
-                ..
-            } if inner.iter().any(pred) || any_nested_contains(inner, pred) => {
-                return true;
-            }
-            _ => {}
+        if let Constraint::SubqueryExpr {
+            constraints: inner, ..
+        }
+        | Constraint::SubqueryRelation {
+            constraints: inner, ..
+        } = c
+            && (inner.iter().any(pred) || any_nested_contains(inner, pred))
+        {
+            return true;
         }
     }
     false
 }
 
-/// Check if any top-level constraint is a Subquery/CTE whose inner
-/// constraints match the predicate. One level of nesting only.
+/// Check if any top-level constraint is a SubqueryExpr/SubqueryRelation whose
+/// inner constraints match the predicate. One level of nesting only.
 pub fn has_subquery_containing(
     constraints: &[Constraint],
     pred: fn(&[Constraint]) -> bool,
 ) -> bool {
     for c in constraints {
-        match c {
-            Constraint::Subquery {
-                constraints: inner, ..
-            }
-            | Constraint::Cte {
-                constraints: inner, ..
-            } if pred(inner) => {
-                return true;
-            }
-            Constraint::Join {
-                right:
-                    crate::constraint::JoinRight::Subquery {
-                        constraints: inner, ..
-                    },
-                ..
-            }
-            | Constraint::Join {
-                right:
-                    crate::constraint::JoinRight::Cte {
-                        constraints: inner, ..
-                    },
-                ..
-            } if pred(inner) => {
-                return true;
-            }
-            _ => {}
+        if let Constraint::SubqueryExpr {
+            constraints: inner, ..
+        }
+        | Constraint::SubqueryRelation {
+            constraints: inner, ..
+        } = c
+            && pred(inner)
+        {
+            return true;
         }
     }
     false
@@ -321,7 +287,7 @@ pub fn check_rules(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constraint::{SubqueryPosition, WindowFn};
+    use crate::constraint::{SubqueryExprKind, WindowFn};
 
     #[test]
     fn tag_conflict_rejects_conflicting_tags() {
@@ -451,8 +417,8 @@ mod tests {
 
     #[test]
     fn any_nested_contains_finds_in_subquery() {
-        let constraints = vec![Constraint::Subquery {
-            position: SubqueryPosition::ExistsUncorrelated,
+        let constraints = vec![Constraint::SubqueryExpr {
+            kind: SubqueryExprKind::ExistsUncorrelated,
             constraints: vec![Constraint::Distinct],
             shared_vars: vec![],
         }];
@@ -470,8 +436,8 @@ mod tests {
 
     #[test]
     fn cross_scope_window_in_subquery_detected() {
-        let constraints = vec![Constraint::Subquery {
-            position: SubqueryPosition::ExistsUncorrelated,
+        let constraints = vec![Constraint::SubqueryExpr {
+            kind: SubqueryExprKind::ExistsUncorrelated,
             constraints: vec![Constraint::WindowFunction {
                 function: WindowFn::RowNumber,
                 partition_col: None,

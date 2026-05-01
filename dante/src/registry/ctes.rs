@@ -75,7 +75,7 @@ mod tests {
         assert!(
             p.constraints
                 .iter()
-                .any(|c| matches!(c, Constraint::Cte { .. }))
+                .any(|c| matches!(c, Constraint::SubqueryRelation { .. }))
         );
     }
 
@@ -90,7 +90,7 @@ mod tests {
         assert!(
             p.constraints
                 .iter()
-                .any(|c| matches!(c, Constraint::Cte { .. }))
+                .any(|c| matches!(c, Constraint::SubqueryRelation { .. }))
         );
         assert!(
             p.constraints

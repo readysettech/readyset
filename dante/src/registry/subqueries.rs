@@ -2,7 +2,7 @@
 
 use readyset_sql::ast::JoinOperator;
 
-use crate::constraint::{Constraint, SubqueryPosition, TypeClass};
+use crate::constraint::{Constraint, SubqueryExprKind, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// SELECT t0.c0 FROM t0 WHERE EXISTS (SELECT 1 FROM t1 WHERE t1.c1 = t0.c2)
@@ -25,7 +25,7 @@ pub fn exists_subquery() -> Pattern {
         right_col: c_outer_ref,
         right_table: t_outer,
     });
-    sq.commit_as_where(SubqueryPosition::ExistsCorrelated);
+    sq.commit_as_where(SubqueryExprKind::ExistsCorrelated);
 
     b.from(t_outer);
     b.project_column(c_outer_proj, t_outer);
@@ -48,7 +48,7 @@ pub fn in_subquery() -> Pattern {
     sq.project_column(c_inner, t_inner);
     // Reference outer column to create shared_var for IN LHS
     sq.constraint(Constraint::TypeCompatible(c_outer_in, c_inner));
-    sq.commit_as_where(SubqueryPosition::InSubquery);
+    sq.commit_as_where(SubqueryExprKind::InSubquery);
 
     b.from(t_outer);
     b.project_column(c_outer_proj, t_outer);
@@ -72,7 +72,7 @@ pub fn scalar_subquery() -> Pattern {
         limit: 1,
         offset: None,
     });
-    sq.commit_as_where(SubqueryPosition::ScalarSubquery);
+    sq.commit_as_where(SubqueryExprKind::ScalarSubquery);
 
     b.from(t_outer);
     b.project_column(c_outer, t_outer);
@@ -123,7 +123,7 @@ mod tests {
         assert!(
             p.constraints
                 .iter()
-                .any(|c| matches!(c, Constraint::Subquery { .. }))
+                .any(|c| matches!(c, Constraint::SubqueryExpr { .. }))
         );
     }
 
@@ -136,7 +136,7 @@ mod tests {
         assert!(
             p.constraints
                 .iter()
-                .any(|c| matches!(c, Constraint::Subquery { .. }))
+                .any(|c| matches!(c, Constraint::SubqueryExpr { .. }))
         );
     }
 
@@ -155,11 +155,19 @@ mod tests {
         assert!(p.tags.contains(&"subquery"));
         assert!(p.tags.contains(&"join"));
 
-        // Should have a Join constraint with Subquery right side
+        // Should have a SubqueryRelation { kind: JoinTarget } sibling and
+        // a Join referencing its alias.
+        assert!(p.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::SubqueryRelation {
+                kind: crate::constraint::SubqueryRelationKind::JoinTarget,
+                ..
+            }
+        )));
         assert!(p.constraints.iter().any(|c| matches!(
             c,
             Constraint::Join {
-                right: crate::constraint::JoinRight::Subquery { .. },
+                right: crate::constraint::JoinRight::Table(_),
                 ..
             }
         )));
@@ -172,8 +180,8 @@ mod tests {
         let sub = p
             .constraints
             .iter()
-            .find(|c| matches!(c, Constraint::Subquery { .. }));
-        if let Some(Constraint::Subquery { shared_vars, .. }) = sub {
+            .find(|c| matches!(c, Constraint::SubqueryExpr { .. }));
+        if let Some(Constraint::SubqueryExpr { shared_vars, .. }) = sub {
             assert!(
                 !shared_vars.is_empty(),
                 "correlated subquery should have shared vars"
@@ -189,8 +197,8 @@ mod tests {
         let sub = p
             .constraints
             .iter()
-            .find(|c| matches!(c, Constraint::Subquery { .. }));
-        if let Some(Constraint::Subquery { shared_vars, .. }) = sub {
+            .find(|c| matches!(c, Constraint::SubqueryExpr { .. }));
+        if let Some(Constraint::SubqueryExpr { shared_vars, .. }) = sub {
             assert!(
                 !shared_vars.is_empty(),
                 "IN subquery should have shared vars for LHS column"
@@ -238,7 +246,7 @@ mod tests {
             .constraints
             .iter()
             .find_map(|c| match c {
-                Constraint::Subquery {
+                Constraint::SubqueryExpr {
                     constraints: inner, ..
                 } => Some(inner.as_slice()),
                 _ => None,

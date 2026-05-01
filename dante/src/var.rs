@@ -12,8 +12,20 @@ pub struct VarId(pub(crate) usize);
 /// What kind of entity a variable represents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VarKind {
-    /// Resolves to a relation (base table, alias, or derived relation).
+    /// Resolves to a base relation: a real table, or a SQL alias of one.
+    /// Two `Relation` vars may unify (e.g., when `compose` merges two
+    /// patterns onto the same outer table).
     Relation,
+    /// Resolves to a derived relation alias: the name of a CTE, a
+    /// FROM-position derived table, or a JOIN subquery — anything where
+    /// the relation has no underlying base-table schema and is bound to
+    /// a fresh SQL identifier (`cte0`, `sq0`, ...) by the resolver.
+    /// Distinct from `Relation` so union-find refuses to unify a
+    /// derived alias with a base table; this prevents `compose` from
+    /// retroactively retargeting partner-pattern columns onto the
+    /// derived alias and emitting `cteN.cX` for columns the CTE body
+    /// never projects.
+    DerivedRelation,
     /// Resolves to a column within a specific relation variable.
     Column { table: VarId },
     /// Resolves to a SQL type.
@@ -25,6 +37,7 @@ impl VarKind {
     fn discriminant_name(&self) -> &'static str {
         match self {
             VarKind::Relation => "Relation",
+            VarKind::DerivedRelation => "DerivedRelation",
             VarKind::Column { .. } => "Column",
             VarKind::SqlType => "SqlType",
         }
@@ -267,6 +280,33 @@ mod tests {
                 UnifyError::KindMismatch {
                     left_kind: "Relation",
                     right_kind: "Column"
+                }
+            ),
+            "expected KindMismatch, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn union_find_relation_with_derived_relation_fails() {
+        // A base-table var (allocated with Relation) and a CTE/subquery
+        // alias var (allocated with DerivedRelation) must never unify:
+        // unifying them via Eq lets the resolver bind every column the
+        // partner pattern attached to the base-table rep onto the
+        // derived alias, producing `cteN.cX` references for columns the
+        // CTE body never projects (MySQL 1054).
+        let mut alloc = VarAllocator::new();
+        let t = alloc.alloc(VarKind::Relation);
+        let cte = alloc.alloc(VarKind::DerivedRelation);
+
+        let mut uf = UnionFind::new(alloc.len());
+        let err = uf.union(t.0, cte.0, alloc.kinds()).unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                UnifyError::KindMismatch {
+                    left_kind: "Relation",
+                    right_kind: "DerivedRelation"
                 }
             ),
             "expected KindMismatch, got: {err:?}"

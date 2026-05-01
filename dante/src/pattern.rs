@@ -6,8 +6,8 @@
 use readyset_sql::ast::{BinaryOperator, JoinOperator, NullOrder, OrderType};
 
 use crate::constraint::{
-    AggregateFn, Constraint, DialectSupport, JoinRight, LiteralKind, ScalarFn, SubqueryPosition,
-    TypeClass, WindowFn,
+    AggregateFn, Constraint, DialectSupport, JoinRight, LiteralKind, ScalarFn, SubqueryExprKind,
+    SubqueryRelationKind, TypeClass, WindowFn,
 };
 use crate::var::{VarAllocator, VarId, VarKind};
 
@@ -133,28 +133,58 @@ impl Recipe {
 
         let mut constraints = self.constraints.clone();
 
-        // If `other` self-joins on its primary (i.e. has a Join whose right
-        // is `Table(other_primary)`), unifying with Eq would make base's
-        // FROM and other's JOIN render the same physical table+alias —
-        // MySQL rejects that with "Not unique table/alias" (1066). Use
-        // AliasOf instead so the JOIN target gets a distinct SQL alias of
-        // the same underlying table.
-        let other_primary_is_join_target = other_recipe.constraints.iter().any(|c| {
-            matches!(
-                c,
-                Constraint::Join {
-                    right: JoinRight::Table(t),
-                    ..
-                } if *t == other_primary
-            )
-        });
-        if other_primary_is_join_target {
-            constraints.push(Constraint::AliasOf {
-                alias: other_primary,
-                original: base_primary,
+        // A primary that is a `DerivedRelation` (CTE alias, FROM-position
+        // derived table, or JOIN subquery) is not interchangeable with a
+        // base-table primary — unifying them via Eq/AliasOf would let
+        // `resolve_eq` collapse the partner's column references onto the
+        // derived alias rep, then `Cte`/`Subquery` build retroactively
+        // retargets every column the partner bound on that rep to the
+        // synthesized `cteN`/`sqN` name. The resolved query emits
+        // `cteN.cX` for columns the CTE body never projects, and MySQL
+        // rejects with `ERROR 42S22 (1054): Unknown column`.
+        //
+        // When either primary is `DerivedRelation`, leave both relations
+        // distinct: the resolved query has both FROM entries (an
+        // implicit cross join), the derived alias is referenced only
+        // where the base pattern explicitly uses it, and the partner's
+        // columns stay qualified by the partner's real base table.
+        // var_kinds is indexed by absolute VarId (Recipe carries no
+        // offset metadata), so no offset arithmetic is needed.
+        let base_primary_is_derived = matches!(
+            self.var_kinds.get(base_primary.0),
+            Some(VarKind::DerivedRelation)
+        );
+        let other_primary_is_derived = matches!(
+            other_recipe.var_kinds.get(other_primary.0),
+            Some(VarKind::DerivedRelation)
+        );
+        let unify_primaries = !(base_primary_is_derived || other_primary_is_derived);
+
+        if unify_primaries {
+            // If `other` self-joins on its primary (i.e. has a Join whose
+            // right is `Table(other_primary)`), unifying with Eq would
+            // make base's FROM and other's JOIN render the same physical
+            // table+alias — MySQL rejects that with "Not unique
+            // table/alias" (1066). Use AliasOf instead so the JOIN
+            // target gets a distinct SQL alias of the same underlying
+            // table.
+            let other_primary_is_join_target = other_recipe.constraints.iter().any(|c| {
+                matches!(
+                    c,
+                    Constraint::Join {
+                        right: JoinRight::Table(t),
+                        ..
+                    } if *t == other_primary
+                )
             });
-        } else {
-            constraints.push(Constraint::Eq(base_primary, other_primary));
+            if other_primary_is_join_target {
+                constraints.push(Constraint::AliasOf {
+                    alias: other_primary,
+                    original: base_primary,
+                });
+            } else {
+                constraints.push(Constraint::Eq(base_primary, other_primary));
+            }
         }
 
         let (mut base_has_limit, mut base_has_distinct, mut base_has_having, mut base_has_order_by) =
@@ -171,10 +201,13 @@ impl Recipe {
 
         for c in &other_recipe.constraints {
             let skip = match c {
-                // Deduplicate From for the unified table
-                Constraint::From(t) if *t == other_primary => true,
-                // Deduplicate BaseTable for the unified table
-                Constraint::BaseTable(t) if *t == other_primary => true,
+                // Deduplicate From for the unified table. Skip dedup
+                // when primaries are NOT unified (derived-alias case):
+                // the partner's own base table needs its own FROM in
+                // the rendered query.
+                Constraint::From(t) if unify_primaries && *t == other_primary => true,
+                // Deduplicate BaseTable for the unified table (same caveat).
+                Constraint::BaseTable(t) if unify_primaries && *t == other_primary => true,
                 // Keep only one Limit
                 Constraint::Limit { .. } if base_has_limit => true,
                 // Deduplicate Distinct
@@ -205,11 +238,28 @@ impl Recipe {
         let mut var_kinds = self.var_kinds.clone();
         var_kinds.extend(other_recipe.var_kinds.into_iter().skip(offset));
 
+        // When the base's primary IS a `DerivedRelation` (CTE alias /
+        // FROM-subquery alias) and we just cross-joined a partner whose
+        // primary is a real base table, promote that base-table primary
+        // as the recipe's new primary. Subsequent `compose` calls then
+        // unify their partners against the base table instead of
+        // accumulating more cross-joins onto the derived alias —
+        // without this, an N-partner fusion against a derived base
+        // produces an (N+1)-way cartesian (50^(N+1) rows at the soak's
+        // rows_per_table=50, which blows past Readyset's connection
+        // budget around N=4).
+        let new_primary = if unify_primaries || !base_primary_is_derived || other_primary_is_derived
+        {
+            base_primary
+        } else {
+            other_primary
+        };
+
         Recipe {
             constraints,
             num_vars: self.num_vars + other_recipe.num_vars,
             var_kinds,
-            primary_table: base_primary,
+            primary_table: new_primary,
         }
     }
 }
@@ -683,30 +733,40 @@ impl<'a> SubqueryBuilder<'a> {
 
     /// Commit the subquery scope as a `Constraint::Subquery` in the outer
     /// pattern (e.g., for EXISTS / IN / scalar subqueries).
-    pub fn commit_as_where(self, position: SubqueryPosition) {
+    pub fn commit_as_where(self, kind: SubqueryExprKind) {
         let shared_vars = self.compute_shared_vars();
         let SubqueryBuilder {
             outer, constraints, ..
         } = self;
-        outer.constraints.push(Constraint::Subquery {
-            position,
+        outer.constraints.push(Constraint::SubqueryExpr {
+            kind,
             constraints,
             shared_vars,
         });
     }
 
     /// Commit the subquery scope as the right side of a JOIN.
+    ///
+    /// Emits two constraints: a `SubqueryRelation { kind: JoinTarget,
+    /// alias }` (which the resolver processes uniformly with CTE /
+    /// FROM-subquery relations) and a sibling `Join { right:
+    /// JoinRight::Table(alias) }` that references the alias. This is the
+    /// peer of `commit_as_cte` / `commit_as_from`.
     pub fn commit_as_join(self, operator: JoinOperator, left_col: VarId, right_col: VarId) {
         let shared_vars = self.compute_shared_vars();
         let SubqueryBuilder {
             outer, constraints, ..
         } = self;
+        let alias = outer.allocator.alloc(VarKind::DerivedRelation);
+        outer.constraints.push(Constraint::SubqueryRelation {
+            kind: SubqueryRelationKind::JoinTarget,
+            alias,
+            constraints,
+            shared_vars,
+        });
         outer.constraints.push(Constraint::Join {
             operator,
-            right: JoinRight::Subquery {
-                constraints,
-                shared_vars,
-            },
+            right: JoinRight::Table(alias),
             left_col,
             right_col,
         });
@@ -721,8 +781,13 @@ impl<'a> SubqueryBuilder<'a> {
         let SubqueryBuilder {
             outer, constraints, ..
         } = self;
-        let alias = outer.allocator.alloc(VarKind::Relation);
-        outer.constraints.push(Constraint::Cte {
+        // `DerivedRelation` (not `Relation`) so union-find refuses any
+        // attempt to unify the CTE alias with a partner pattern's base
+        // table — see `compose` and `VarKind::DerivedRelation` for the
+        // failure mode this prevents.
+        let alias = outer.allocator.alloc(VarKind::DerivedRelation);
+        outer.constraints.push(Constraint::SubqueryRelation {
+            kind: SubqueryRelationKind::Cte,
             alias,
             constraints,
             shared_vars,
@@ -739,21 +804,13 @@ impl<'a> SubqueryBuilder<'a> {
 }
 
 /// Compute the minimum subquery depth by scanning constraints for
-/// Subquery/Cte nesting.
+/// SubqueryExpr / SubqueryRelation nesting.
 fn compute_min_depth(constraints: &[Constraint]) -> usize {
     let mut max_inner_depth = 0;
     for c in constraints {
         let inner_depth = match c {
-            Constraint::Subquery { constraints, .. } => 1 + compute_min_depth(constraints),
-            Constraint::Cte { constraints, .. } => 1 + compute_min_depth(constraints),
-            Constraint::Join {
-                right: JoinRight::Subquery { constraints, .. },
-                ..
-            } => 1 + compute_min_depth(constraints),
-            Constraint::Join {
-                right: JoinRight::Cte { constraints, .. },
-                ..
-            } => 1 + compute_min_depth(constraints),
+            Constraint::SubqueryExpr { constraints, .. } => 1 + compute_min_depth(constraints),
+            Constraint::SubqueryRelation { constraints, .. } => 1 + compute_min_depth(constraints),
             _ => 0,
         };
         max_inner_depth = max_inner_depth.max(inner_depth);
@@ -773,17 +830,11 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
         }
         Constraint::From(v) => vec![*v],
         Constraint::Join {
-            right,
+            right: JoinRight::Table(t),
             left_col,
             right_col,
             ..
-        } => {
-            let mut ids = vec![*left_col, *right_col];
-            if let JoinRight::Table(t) = right {
-                ids.push(*t);
-            }
-            ids
-        }
+        } => vec![*left_col, *right_col, *t],
         Constraint::ProjectColumn { col, table }
         | Constraint::GroupBy { col, table }
         | Constraint::WhereRangeParam { col, table }
@@ -811,7 +862,7 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             conditions.iter().flat_map(constraint_var_ids).collect()
         }
         Constraint::OrderBy { col, table, .. } => vec![*col, *table],
-        Constraint::Subquery { .. } | Constraint::Cte { .. } => {
+        Constraint::SubqueryExpr { .. } | Constraint::SubqueryRelation { .. } => {
             // Don't recurse into nested constraint sets
             vec![]
         }
@@ -908,6 +959,63 @@ mod tests {
         ));
     }
 
+    /// `commit_as_join` should emit a `SubqueryRelation { kind: JoinTarget,
+    /// alias }` paired with a `Join { right: JoinRight::Table(alias) }` —
+    /// not a self-contained `Join { right: JoinRight::Subquery { .. } }`.
+    /// This shape lets the resolver process the inner subquery via the
+    /// uniform `SubqueryRelation` arm and reference it from the join via
+    /// the alias var, the same way `commit_as_cte` works.
+    #[test]
+    fn commit_as_join_emits_subquery_relation_pair() {
+        let mut b = PatternBuilder::new("join_pair");
+        let outer_t = b.table();
+        let outer_col = b.column(outer_t);
+        b.from(outer_t);
+        b.project_column(outer_col, outer_t);
+
+        let mut sq = b.subquery();
+        let inner_t = sq.table();
+        let inner_col = sq.column(inner_t);
+        sq.from(inner_t);
+        sq.project_column(inner_col, inner_t);
+        sq.commit_as_join(JoinOperator::InnerJoin, outer_col, inner_col);
+
+        let pattern = b.build();
+
+        // Find the SubqueryRelation { kind: JoinTarget } constraint.
+        let jt_alias = pattern
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::SubqueryRelation {
+                    kind: SubqueryRelationKind::JoinTarget,
+                    alias,
+                    ..
+                } => Some(*alias),
+                _ => None,
+            })
+            .expect("expected SubqueryRelation { kind: JoinTarget }");
+
+        // Find the Join constraint and assert its right side references the
+        // alias var (not a nested subquery).
+        let join_right_var = pattern
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::Join {
+                    right: JoinRight::Table(t),
+                    ..
+                } => Some(*t),
+                _ => None,
+            })
+            .expect("expected Join { right: JoinRight::Table(_) }");
+
+        assert_eq!(
+            join_right_var, jt_alias,
+            "Join right table should reference the JoinTarget SubqueryRelation alias"
+        );
+    }
+
     #[test]
     fn build_pattern_with_subquery() {
         let mut b = PatternBuilder::new("with_subquery");
@@ -934,35 +1042,61 @@ mod tests {
 
         let pattern = b.build();
 
-        assert_eq!(pattern.num_vars(), 4); // outer_t, outer_col, inner_t, inner_col
+        // outer_t, outer_col, inner_t, inner_col, plus the JoinTarget
+        // alias allocated by `commit_as_join`.
+        assert_eq!(pattern.num_vars(), 5);
         assert_eq!(pattern.min_depth, 1); // has one level of subquery
 
-        // Find the Join constraint
-        let join = pattern
+        // Inner constraints live on the SubqueryRelation { kind: JoinTarget }
+        // sibling, not inside the Join itself.
+        let (constraints, shared_vars) = pattern
             .constraints
             .iter()
-            .find(|c| matches!(c, Constraint::Join { .. }));
-        assert!(join.is_some());
-        if let Some(Constraint::Join {
-            right:
-                JoinRight::Subquery {
+            .find_map(|c| match c {
+                Constraint::SubqueryRelation {
+                    kind: SubqueryRelationKind::JoinTarget,
                     constraints,
                     shared_vars,
-                },
-            ..
-        }) = join
-        {
-            // Inner constraints: BaseTable, ColumnExists, From, ProjectColumn, WhereParam.
-            // All five were emitted via sq's allocation/emission methods, so they all
-            // live in the inner scope rather than leaking to the outer pattern.
-            assert_eq!(constraints.len(), 5);
-            // Inner constraints reference only inner-scope vars (>= scope_start),
-            // so there are no shared (cross-scope) references. The cross-scope
-            // eq(outer_t, VarId(2)) is on the outer builder, not the sub-builder.
-            assert_eq!(shared_vars.len(), 0);
-        } else {
-            panic!("expected Join with Subquery");
-        }
+                    ..
+                } => Some((constraints, shared_vars)),
+                _ => None,
+            })
+            .expect("expected SubqueryRelation { kind: JoinTarget }");
+
+        // Inner constraints: BaseTable, ColumnExists, From, ProjectColumn, WhereParam.
+        // All five were emitted via sq's allocation/emission methods, so they all
+        // live in the inner scope rather than leaking to the outer pattern.
+        assert_eq!(constraints.len(), 5);
+        // Inner constraints reference only inner-scope vars (>= scope_start),
+        // so there are no shared (cross-scope) references. The cross-scope
+        // eq(outer_t, VarId(2)) is on the outer builder, not the sub-builder.
+        assert_eq!(shared_vars.len(), 0);
+    }
+
+    #[test]
+    fn commit_as_cte_allocates_derived_relation_var() {
+        // The CTE alias var must be `VarKind::DerivedRelation`, not
+        // `Relation`. Union-find then refuses to unify it with a
+        // partner pattern's base-table primary, which is what causes
+        // the `cteN.cX` corruption in the resolver.
+        let mut b = PatternBuilder::new("cte_kind");
+        let mut sq = b.subquery();
+        let inner_t = sq.table();
+        let inner_col = sq.column(inner_t);
+        sq.from(inner_t);
+        sq.project_column(inner_col, inner_t);
+        let cte_alias = sq.commit_as_cte();
+
+        b.from(cte_alias);
+        b.project_column(inner_col, cte_alias);
+
+        let pattern = b.build();
+        assert_eq!(
+            pattern.vars[cte_alias.0],
+            crate::var::VarKind::DerivedRelation,
+            "CTE alias var must be DerivedRelation, got: {:?}",
+            pattern.vars[cte_alias.0]
+        );
     }
 
     #[test]
@@ -988,7 +1122,7 @@ mod tests {
             right_col: outer_col,
             right_table: outer_t,
         });
-        sq.commit_as_where(SubqueryPosition::ExistsCorrelated);
+        sq.commit_as_where(SubqueryExprKind::ExistsCorrelated);
 
         let pattern = b.build();
 
@@ -996,9 +1130,9 @@ mod tests {
         let sub = pattern
             .constraints
             .iter()
-            .find(|c| matches!(c, Constraint::Subquery { .. }));
+            .find(|c| matches!(c, Constraint::SubqueryExpr { .. }));
         assert!(sub.is_some());
-        if let Some(Constraint::Subquery { shared_vars, .. }) = sub {
+        if let Some(Constraint::SubqueryExpr { shared_vars, .. }) = sub {
             // outer_col (VarId(1)) and outer_t (VarId(0)) are referenced in inner constraints
             assert!(
                 shared_vars.len() >= 2,
@@ -1216,6 +1350,23 @@ mod tests {
         b.build()
     }
 
+    /// Helper: build a minimal CTE pattern whose primary is the CTE
+    /// alias (a `DerivedRelation` var, not a base table).
+    fn make_cte_pattern() -> Pattern {
+        let mut b = PatternBuilder::new("cte_primary");
+        let mut sq = b.subquery();
+        let inner_t = sq.table();
+        let inner_c = sq.column(inner_t);
+        sq.from(inner_t);
+        sq.project_column(inner_c, inner_t);
+        let cte_alias = sq.commit_as_cte();
+
+        b.from(cte_alias);
+        b.project_column(inner_c, cte_alias);
+        b.tags(&["cte"]);
+        b.build()
+    }
+
     /// Helper: build a topk pattern (ORDER BY + LIMIT).
     fn make_topk_pattern() -> Pattern {
         let mut b = PatternBuilder::new("topk");
@@ -1269,6 +1420,60 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Constraint::Eq(VarId(0), VarId(2)))),
             "compose should unify primary tables"
+        );
+    }
+
+    #[test]
+    fn compose_with_cte_primary_skips_unification() {
+        // When the recipe's primary is a CTE alias (DerivedRelation kind),
+        // compose must NOT emit Eq/AliasOf unifying it with a partner's
+        // base-table primary. Unifying would let union-find collapse
+        // the partner's columns onto the CTE alias and emit `cteN.cX`
+        // for columns the CTE body never projects.
+        let base = make_cte_pattern();
+        let partner = make_single_table_pattern();
+
+        let recipe = base.to_recipe(0).compose(&partner);
+        let cte_primary = base.primary_table;
+
+        // No Eq referencing the CTE primary.
+        assert!(
+            !recipe.constraints.iter().any(|c| matches!(
+                c,
+                Constraint::Eq(a, _) | Constraint::Eq(_, a) if *a == cte_primary
+            )),
+            "compose must not Eq a CTE-primary recipe with a base-table partner; constraints: {:#?}",
+            recipe.constraints
+        );
+
+        // No AliasOf referencing the CTE primary as `original`.
+        assert!(
+            !recipe.constraints.iter().any(|c| matches!(
+                c,
+                Constraint::AliasOf { original, .. } if *original == cte_primary
+            )),
+            "compose must not AliasOf-against a CTE primary; constraints: {:#?}",
+            recipe.constraints
+        );
+
+        // Partner's base table must keep its own From/BaseTable in the
+        // composed constraints — without dedup-suppression, the partner
+        // would have lost both and the resolver would have no way to
+        // build the partner's relation.
+        let partner_primary = VarId(base.num_vars() + partner.primary_table.0);
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::From(t) if *t == partner_primary)),
+            "partner From must survive when CTE primary doesn't unify"
+        );
+        assert!(
+            recipe
+                .constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::BaseTable(t) if *t == partner_primary)),
+            "partner BaseTable must survive when CTE primary doesn't unify"
         );
     }
 

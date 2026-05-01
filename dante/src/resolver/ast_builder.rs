@@ -9,7 +9,8 @@ use readyset_sql::ast::{
 
 use super::{Binding, DdlStep, Env, ParamMeta, ResolveError};
 use crate::constraint::{
-    AggregateFn, Constraint, LiteralKind, ScalarFn, SubqueryPosition, WindowFn,
+    AggregateFn, Constraint, LiteralKind, ScalarFn, SubqueryExprKind, SubqueryRelationKind,
+    WindowFn,
 };
 use crate::entropy::Entropy;
 use crate::state::GenerationState;
@@ -71,6 +72,12 @@ fn build_select_inner(
     };
     let mut distinct = false;
     let mut params = Vec::new();
+    // Stash the resolved inner SelectStatement + sqN alias for each
+    // `SubqueryRelation { kind: JoinTarget, alias }`, keyed by the alias
+    // VarId. The sibling `Join { right: JoinRight::Table(alias) }` looks
+    // it up to emit `JOIN (SELECT ...) AS sqN`.
+    let mut join_subqueries: std::collections::HashMap<VarId, (SelectStatement, SqlIdentifier)> =
+        std::collections::HashMap::new();
 
     for c in constraints {
         match c {
@@ -334,110 +341,46 @@ fn build_select_inner(
             }
             Constraint::Join {
                 operator,
-                right,
+                right: crate::constraint::JoinRight::Table(t),
                 left_col,
                 right_col,
             } => {
                 let (lc_name, lt_name) = get_col_and_table_for_join(env, *left_col)?;
 
-                // For plain table joins we resolve the right column up
-                // front; for subquery / CTE joins we defer to the inner
-                // resolution because the right column's owning relation
-                // is the subquery alias / CTE alias, and inner column
-                // bindings are propagated to the outer env by
-                // `resolve_inner_subquery`.
+                // The right side is always a relation var. If a sibling
+                // `SubqueryRelation { kind: JoinTarget }` already stashed
+                // an inner SelectStatement for this var, emit it as an
+                // inline subquery; otherwise look up the env binding for
+                // a plain table / CTE alias reference.
                 let rc_name;
                 let effective_rt_name;
 
-                let right_side = match right {
-                    crate::constraint::JoinRight::Table(t) => {
-                        let (rcn, rtn) = get_col_and_table_for_join(env, *right_col)?;
-                        rc_name = rcn;
-                        effective_rt_name = rtn;
-                        let (tn, t_alias) = get_table_name_and_alias(env, *t)?;
-                        JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Table(Relation {
-                                schema: None,
-                                name: tn,
-                            }),
-                            alias: t_alias,
-                            column_aliases: vec![],
-                        })
-                    }
-                    crate::constraint::JoinRight::Subquery {
-                        constraints: inner_constraints,
-                        shared_vars,
-                    } => {
-                        let alias = state.fresh_subquery_alias();
-                        let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
-                            inner_constraints,
-                            env,
-                            var_kinds,
-                            shared_vars,
-                            state,
-                            entropy,
-                            placeholder_idx,
-                        )?;
-                        params.extend(inner_params);
-                        env.ddl_steps.extend(inner_ddl);
-                        effective_rt_name = alias.clone();
-                        rc_name = first_projected_column(&inner_query).ok_or_else(|| {
-                            ResolveError::TypeMismatch {
-                                expected: "join subquery to project at least one column".into(),
-                                actual: "no projected column".into(),
-                            }
-                        })?;
-                        JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Subquery(Box::new(inner_query)),
-                            alias: Some(alias),
-                            column_aliases: vec![],
-                        })
-                    }
-                    crate::constraint::JoinRight::Cte {
-                        alias: alias_var,
-                        constraints: inner_constraints,
-                        shared_vars,
-                    } => {
-                        let cte_alias = state.fresh_cte_alias();
-                        env.bind(
-                            *alias_var,
-                            Binding::Table {
-                                name: cte_alias.clone(),
-                                alias: None,
-                            },
-                        );
-                        let (inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
-                            inner_constraints,
-                            env,
-                            var_kinds,
-                            shared_vars,
-                            *alias_var,
-                            state,
-                            entropy,
-                            placeholder_idx,
-                        )?;
-                        params.extend(inner_params);
-                        env.ddl_steps.extend(inner_ddl);
-                        rc_name = first_projected_column(&inner_query).ok_or_else(|| {
-                            ResolveError::TypeMismatch {
-                                expected: "join CTE to project at least one column".into(),
-                                actual: "no projected column".into(),
-                            }
-                        })?;
-                        ctes.push(CommonTableExpr {
-                            name: cte_alias.clone(),
-                            statement: inner_query,
-                        });
-                        effective_rt_name = cte_alias.clone();
-                        JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Table(Relation {
-                                schema: None,
-                                name: cte_alias,
-                            }),
-                            alias: None,
-                            column_aliases: vec![],
-                        })
-                    }
+                let right_side = if let Some((inner_query, sq_alias)) = join_subqueries.remove(t) {
+                    effective_rt_name = sq_alias.clone();
+                    rc_name = first_projected_column(&inner_query).ok_or_else(|| {
+                        ResolveError::TypeMismatch {
+                            expected: "join subquery to project at least one column".into(),
+                            actual: "no projected column".into(),
+                        }
+                    })?;
+                    JoinRightSide::Table(TableExpr {
+                        inner: TableExprInner::Subquery(Box::new(inner_query)),
+                        alias: Some(sq_alias),
+                        column_aliases: vec![],
+                    })
+                } else {
+                    let (rcn, rtn) = get_col_and_table_for_join(env, *right_col)?;
+                    rc_name = rcn;
+                    effective_rt_name = rtn;
+                    let (tn, t_alias) = get_table_name_and_alias(env, *t)?;
+                    JoinRightSide::Table(TableExpr {
+                        inner: TableExprInner::Table(Relation {
+                            schema: None,
+                            name: tn,
+                        }),
+                        alias: t_alias,
+                        column_aliases: vec![],
+                    })
                 };
 
                 let on_expr = Expr::BinaryOp {
@@ -508,8 +451,8 @@ fn build_select_inner(
                     count: 1,
                 });
             }
-            Constraint::Subquery {
-                position,
+            Constraint::SubqueryExpr {
+                kind,
                 constraints: inner_constraints,
                 shared_vars,
             } => {
@@ -525,11 +468,11 @@ fn build_select_inner(
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
 
-                match position {
-                    SubqueryPosition::ExistsUncorrelated | SubqueryPosition::ExistsCorrelated => {
+                match kind {
+                    SubqueryExprKind::ExistsUncorrelated | SubqueryExprKind::ExistsCorrelated => {
                         where_clauses.push(Expr::Exists(Box::new(inner_query)));
                     }
-                    SubqueryPosition::InSubquery => {
+                    SubqueryExprKind::InSubquery => {
                         let outer_var =
                             *shared_vars
                                 .first()
@@ -551,7 +494,7 @@ fn build_select_inner(
                             _ => return Err(ResolveError::Unbound(outer_var)),
                         }
                     }
-                    SubqueryPosition::ScalarSubquery => {
+                    SubqueryExprKind::ScalarSubquery => {
                         fields.push(FieldDefinitionExpr::Expr {
                             expr: Expr::NestedSelect(Box::new(inner_query)),
                             alias: None,
@@ -559,7 +502,8 @@ fn build_select_inner(
                     }
                 }
             }
-            Constraint::Cte {
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::Cte,
                 alias: alias_var,
                 constraints: inner_constraints,
                 shared_vars,
@@ -588,6 +532,40 @@ fn build_select_inner(
                     name: cte_alias,
                     statement: inner_query,
                 });
+            }
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::JoinTarget,
+                alias: alias_var,
+                constraints: inner_constraints,
+                shared_vars,
+            } => {
+                // Resolve the inner subquery and bind the alias var to a
+                // fresh `sqN`. Inner column bindings get propagated to the
+                // outer env by `resolve_inner_subquery`, so any
+                // `right_col` reference on the sibling Join arm resolves
+                // through env. The Join arm consumes `join_subqueries`
+                // entry to splice the inner query into the JOIN as
+                // `(SELECT ...) AS sqN`.
+                let sq_alias = state.fresh_subquery_alias();
+                env.bind(
+                    *alias_var,
+                    Binding::Table {
+                        name: sq_alias.clone(),
+                        alias: None,
+                    },
+                );
+                let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
+                    inner_constraints,
+                    env,
+                    var_kinds,
+                    shared_vars,
+                    state,
+                    entropy,
+                    placeholder_idx,
+                )?;
+                params.extend(inner_params);
+                env.ddl_steps.extend(inner_ddl);
+                join_subqueries.insert(*alias_var, (inner_query, sq_alias));
             }
             Constraint::WindowFunction {
                 function,
@@ -1220,7 +1198,7 @@ mod tests {
     use readyset_sql::ast::BinaryOperator;
     use readyset_sql::{Dialect, DialectDisplay};
 
-    use crate::constraint::{AggregateFn, Constraint, SubqueryPosition, TypeClass};
+    use crate::constraint::{AggregateFn, Constraint, SubqueryExprKind, TypeClass};
     use crate::entropy::Entropy;
     use crate::resolver::{ResolveError, ResolverOutput, resolve};
     use crate::state::{GenerationState, GeneratorConfig};
@@ -1772,7 +1750,7 @@ mod tests {
 
     #[test]
     fn ast_where_exists_subquery() {
-        use crate::constraint::SubqueryPosition;
+        use crate::constraint::SubqueryExprKind;
         use crate::pattern::PatternBuilder;
 
         let mut b = PatternBuilder::new("exists_sq");
@@ -1784,7 +1762,7 @@ mod tests {
         let c_inner = sq.column(t_inner);
         sq.from(t_inner);
         sq.project_column(c_inner, t_inner);
-        sq.commit_as_where(SubqueryPosition::ExistsUncorrelated);
+        sq.commit_as_where(SubqueryExprKind::ExistsUncorrelated);
 
         b.from(t_outer);
         b.project_column(c_outer, t_outer);
@@ -1799,7 +1777,7 @@ mod tests {
 
     #[test]
     fn ast_where_in_subquery() {
-        use crate::constraint::SubqueryPosition;
+        use crate::constraint::SubqueryExprKind;
         use crate::pattern::PatternBuilder;
 
         let mut b = PatternBuilder::new("in_sq");
@@ -1814,7 +1792,7 @@ mod tests {
         sq.project_column(c_inner, t_inner);
         // Reference the outer column inside the inner scope to create a shared var
         sq.constraint(Constraint::TypeCompatible(c_outer_in, c_inner));
-        sq.commit_as_where(SubqueryPosition::InSubquery);
+        sq.commit_as_where(SubqueryExprKind::InSubquery);
 
         b.from(t_outer);
         b.project_column(c_outer_proj, t_outer);
@@ -1875,8 +1853,8 @@ mod tests {
                 col: c_outer,
                 table: t_outer,
             },
-            Constraint::Subquery {
-                position: SubqueryPosition::InSubquery,
+            Constraint::SubqueryExpr {
+                kind: SubqueryExprKind::InSubquery,
                 constraints: vec![
                     Constraint::BaseTable(t_inner),
                     Constraint::ColumnExists {
