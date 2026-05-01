@@ -631,20 +631,32 @@ fn parse_cache_options(
         None
     };
 
-    let mut trx_cache_policy = TrxCachePolicy::Never;
-    let mut concurrently = false;
-    match parser.parse_one_of_keywords(&[Keyword::ALWAYS, Keyword::CONCURRENTLY]) {
-        Some(Keyword::ALWAYS) => {
-            trx_cache_policy = TrxCachePolicy::Always;
-            concurrently = parser.parse_keyword(Keyword::CONCURRENTLY);
-        }
-        Some(Keyword::CONCURRENTLY) => {
-            concurrently = true;
-            if parser.parse_keyword(Keyword::ALWAYS) {
-                trx_cache_policy = TrxCachePolicy::Always;
+    // ALWAYS and UNTIL WRITE are mutually exclusive in the same grammar slot;
+    // CONCURRENTLY composes with either.
+    fn try_parse_policy(parser: &mut Parser) -> Result<TrxCachePolicy, ReadysetParsingError> {
+        if parser.parse_keyword(Keyword::ALWAYS) {
+            Ok(TrxCachePolicy::Always)
+        } else if parser.parse_keyword(Keyword::UNTIL) {
+            if !parser.parse_keyword(Keyword::WRITE) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "expected WRITE after UNTIL".into(),
+                ));
             }
+            Ok(TrxCachePolicy::UntilWrite)
+        } else {
+            Ok(TrxCachePolicy::Never)
         }
-        _ => {}
+    }
+
+    let mut trx_cache_policy = try_parse_policy(parser)?;
+    let mut concurrently = false;
+    if matches!(trx_cache_policy, TrxCachePolicy::Never) {
+        if parser.parse_keyword(Keyword::CONCURRENTLY) {
+            concurrently = true;
+            trx_cache_policy = try_parse_policy(parser)?;
+        }
+    } else {
+        concurrently = parser.parse_keyword(Keyword::CONCURRENTLY);
     }
 
     Ok(CreateCacheOptions {

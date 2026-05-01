@@ -403,6 +403,51 @@ fn parse_create_cache_hint_always() {
 }
 
 #[test]
+fn parse_create_cache_hint_until_write() {
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE UNTIL WRITE")
+        .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::UntilWrite);
+
+    // CONCURRENTLY composes with UNTIL WRITE in either order.
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE CONCURRENTLY UNTIL WRITE",
+    )
+    .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::UntilWrite);
+    assert!(opts.concurrently);
+
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE UNTIL WRITE CONCURRENTLY",
+    )
+    .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::UntilWrite);
+    assert!(opts.concurrently);
+}
+
+#[test]
+fn parse_create_cache_hint_always_and_until_write_rejected() {
+    // ALWAYS and UNTIL WRITE occupy the same grammar slot; combining them in
+    // either order leaves trailing tokens that the hint parser rejects.
+    assert!(
+        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE ALWAYS UNTIL WRITE").is_err()
+    );
+    assert!(
+        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE UNTIL WRITE ALWAYS").is_err()
+    );
+}
+
+#[test]
 fn parse_create_cache_hint_case_insensitive() {
     let result =
         parse_hint_directive(Dialect::MySQL, "create shallow cache policy ttl 100 seconds")

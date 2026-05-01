@@ -924,6 +924,7 @@ fn cached_query_options(
     // A CREATE CACHE optional argument. Used to avoid string matching
     enum Option {
         Always,
+        UntilWrite,
         Concurrently,
         Policy(EvictionPolicy),
         Coalesce(Duration),
@@ -936,6 +937,15 @@ fn cached_query_options(
         map(tuple((tag_no_case("always"), whitespace1)), |_| {
             Option::Always
         }),
+        map(
+            tuple((
+                tag_no_case("until"),
+                whitespace1,
+                tag_no_case("write"),
+                whitespace1,
+            )),
+            |_| Option::UntilWrite,
+        ),
         map(tuple((tag_no_case("concurrently"), whitespace1)), |_| {
             Option::Concurrently
         }),
@@ -985,6 +995,12 @@ fn cached_query_options(
                     return Err(error(i));
                 }
                 opts.trx_cache_policy = TrxCachePolicy::Always;
+            }
+            Option::UntilWrite => {
+                if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
+                    return Err(error(i));
+                }
+                opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
             }
             Option::Concurrently => {
                 if std::mem::replace(&mut opts.concurrently, true) {
@@ -1910,6 +1926,50 @@ mod tests {
                     vec![TableExpr::from(Relation::from("users"))]
                 );
             }
+        }
+
+        #[test]
+        fn create_cached_query_until_write() {
+            let q1 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE UNTIL WRITE FROM SELECT id FROM users WHERE name = ?"
+            );
+            assert_eq!(q1.trx_cache_policy, TrxCachePolicy::UntilWrite);
+            assert!(!q1.concurrently);
+
+            let q2 = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE CONCURRENTLY UNTIL WRITE FROM SELECT id FROM users WHERE name = ?"
+            );
+            assert_eq!(q2.trx_cache_policy, TrxCachePolicy::UntilWrite);
+            assert!(q2.concurrently);
+
+            // ALWAYS and UNTIL WRITE are mutually exclusive.
+            assert!(create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE ALWAYS UNTIL WRITE FROM SELECT id FROM users WHERE name = ?"
+            ))
+            .is_err());
+            assert!(create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE UNTIL WRITE ALWAYS FROM SELECT id FROM users WHERE name = ?"
+            ))
+            .is_err());
+        }
+
+        #[test]
+        fn display_create_query_cache_until_write() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE UNTIL WRITE foo FROM SELECT id FROM users WHERE name = ?"
+            );
+            let res = stmt.display(Dialect::MySQL).to_string();
+            assert_eq!(
+                res,
+                "CREATE CACHE UNTIL WRITE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+            );
+
+            // Round-trip: re-parsing the displayed form preserves the policy.
+            let reparsed = test_parse!(create_cached_query(Dialect::MySQL), res.as_bytes());
+            assert_eq!(reparsed.trx_cache_policy, TrxCachePolicy::UntilWrite);
         }
 
         #[test]
