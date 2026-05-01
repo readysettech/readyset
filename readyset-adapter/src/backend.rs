@@ -4679,7 +4679,7 @@ where
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<MigrationState> {
-        let (opts, trigger) = match hint_directive {
+        let (mut opts, trigger) = match hint_directive {
             Some(ReadysetHintDirective::CreateCache(opts)) => {
                 let wants_shallow = match opts.cache_type {
                     Some(CacheType::Shallow) => true,
@@ -4731,6 +4731,13 @@ where
                 );
                 return None;
             }
+        }
+
+        // Caches created automatically (in-request-path or hint with no policy keyword)
+        // default to `UntilWrite` so that read-only-so-far transactions can still serve from
+        // cache. Hints that explicitly set `ALWAYS` or `UNTIL WRITE` are respected.
+        if matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
+            opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
         }
 
         if !settings.allow_cache_ddl {
@@ -5937,6 +5944,9 @@ fn resolve_eviction_policy(
 }
 
 /// Build a synthetic `CREATE SHALLOW CACHE ...` DDL string for hint-based creation.
+///
+/// Emits the trx-cache-policy keyword so the policy survives a restart: caches reload by
+/// re-parsing this persisted DDL via `recreate_shallow_caches`.
 fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text: &str) -> String {
     use std::fmt::Write;
     let mut ddl = String::from("CREATE SHALLOW CACHE ");
@@ -5946,8 +5956,10 @@ fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text
     if let Some(coalesce) = &opts.coalesce_ms {
         let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
     }
-    if matches!(opts.trx_cache_policy, TrxCachePolicy::Always) {
-        ddl.push_str("ALWAYS ");
+    match opts.trx_cache_policy {
+        TrxCachePolicy::Always => ddl.push_str("ALWAYS "),
+        TrxCachePolicy::UntilWrite => ddl.push_str("UNTIL WRITE "),
+        TrxCachePolicy::Never => {}
     }
     let _ = write!(ddl, "FROM {query_text}");
     ddl
@@ -6364,5 +6376,41 @@ mod tests {
             Some(Duration::from_secs(17)),
             "Coalesce must survive DDL round-trip"
         );
+    }
+
+    #[test]
+    fn hint_ddl_emits_until_write() {
+        let opts = CreateCacheOptions {
+            trx_cache_policy: TrxCachePolicy::UntilWrite,
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+        assert!(
+            ddl.contains("UNTIL WRITE"),
+            "DDL missing UNTIL WRITE: {ddl}"
+        );
+    }
+
+    #[test]
+    fn hint_ddl_until_write_roundtrip() {
+        for policy in [
+            TrxCachePolicy::Never,
+            TrxCachePolicy::UntilWrite,
+            TrxCachePolicy::Always,
+        ] {
+            let opts = CreateCacheOptions {
+                trx_cache_policy: policy,
+                ..Default::default()
+            };
+            let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+            let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+            let SqlQuery::CreateCache(stmt) = parsed else {
+                panic!("Expected CreateCache, got: {parsed:?}");
+            };
+            assert_eq!(
+                stmt.trx_cache_policy, policy,
+                "policy must survive DDL round-trip: {ddl}"
+            );
+        }
     }
 }
