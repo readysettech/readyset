@@ -187,4 +187,137 @@ mod tests {
         assert!(sql.contains("WITH"), "sql: {sql}");
         assert!(sql.contains("= ?"), "expected parameter in sql: {sql}");
     }
+
+    /// Regression: when a CTE pattern is composed with a partner that
+    /// introduces additional columns on the unified primary table, the
+    /// partner's column references end up qualified by the CTE alias even
+    /// though the CTE body never projects them. MySQL rejects the resulting
+    /// SQL with `ERROR 42S22: Unknown column 'cteN.cX' in 'field list'`.
+    ///
+    /// Repro from the seed=42 / seed=43 / seed=256 dante-oracle soak runs
+    /// (2026-04-30): the CTE body is `SELECT t.c0 FROM t` but outer refs
+    /// like `cte0.c1`, `cte0.c2`, etc. show up because partner column
+    /// resolution unifies the partner's primary with the CTE alias var,
+    /// then `Cte` build re-binds the union-find rep to `cte0`,
+    /// retroactively retargeting every partner column reference to it.
+    ///
+    /// Drives the full generator (registry + composition partners) for many
+    /// seeds, mimicking the soak run that exposed the bug.
+    #[test]
+    fn generator_never_references_unprojected_cte_columns() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+        use readyset_sql::DialectDisplay;
+        use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
+
+        use crate::entropy::Entropy;
+        use crate::generator::Generator;
+        use crate::state::GeneratorConfig;
+
+        let config = GeneratorConfig {
+            reuse_preference: 0.9,
+            ..Default::default()
+        };
+        let mut g = Generator::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut bad_examples: Vec<String> = Vec::new();
+        for _ in 0..200 {
+            let Ok(out) = g.generate_with_ddl(&mut entropy) else {
+                continue;
+            };
+            let sql = out.query.display(Dialect::MySQL).to_string();
+            // Skip queries we can't parse — those are unrelated generator
+            // bugs (e.g. `CROSS JOIN ... ON ...`) that this test doesn't
+            // cover.
+            let Ok(parsed) = parse_query_with_config(
+                ParsingPreset::for_tests().into_config(),
+                Dialect::MySQL,
+                &sql,
+            ) else {
+                continue;
+            };
+            let select = match parsed {
+                readyset_sql::ast::SqlQuery::Select(s) => s,
+                _ => continue,
+            };
+
+            let mut cte_projections: std::collections::HashMap<
+                String,
+                std::collections::HashSet<String>,
+            > = Default::default();
+            for cte in &select.ctes {
+                let mut cols = std::collections::HashSet::new();
+                for f in &cte.statement.fields {
+                    if let readyset_sql::ast::FieldDefinitionExpr::Expr {
+                        expr: readyset_sql::ast::Expr::Column(c),
+                        alias,
+                    } = f
+                    {
+                        cols.insert(
+                            alias
+                                .as_ref()
+                                .map(|a| a.to_string())
+                                .unwrap_or_else(|| c.name.to_string()),
+                        );
+                    }
+                }
+                cte_projections.insert(cte.name.to_string(), cols);
+            }
+            if cte_projections.is_empty() {
+                continue;
+            }
+
+            let mut bad: Vec<(String, String)> = Vec::new();
+            let mut stack: Vec<&readyset_sql::ast::Expr> = Vec::new();
+            for f in &select.fields {
+                if let readyset_sql::ast::FieldDefinitionExpr::Expr { expr, .. } = f {
+                    stack.push(expr);
+                }
+            }
+            if let Some(w) = &select.where_clause {
+                stack.push(w);
+            }
+            while let Some(expr) = stack.pop() {
+                use readyset_sql::ast::Expr::*;
+                match expr {
+                    Column(c) => {
+                        if let Some(table) = &c.table
+                            && let Some(allowed) = cte_projections.get(&table.name.to_string())
+                            && !allowed.contains(&c.name.to_string())
+                        {
+                            bad.push((table.name.to_string(), c.name.to_string()));
+                        }
+                    }
+                    BinaryOp { lhs, rhs, .. } => {
+                        stack.push(lhs);
+                        stack.push(rhs);
+                    }
+                    UnaryOp { rhs, .. } => stack.push(rhs),
+                    Call(call) => {
+                        for arg in call.arguments() {
+                            stack.push(arg);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !bad.is_empty() {
+                bad_examples.push(format!("refs unprojected CTE cols {bad:?}\n{sql}"));
+            }
+        }
+
+        assert!(
+            bad_examples.is_empty(),
+            "{} queries had invalid CTE refs. First few:\n\n{}",
+            bad_examples.len(),
+            bad_examples
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n\n----\n\n")
+        );
+    }
 }

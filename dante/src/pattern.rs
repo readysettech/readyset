@@ -1773,6 +1773,30 @@ mod tests {
     }
 
     #[test]
+    fn compose_promotes_partner_primary_when_base_is_derived() {
+        // When base's primary is `DerivedRelation` (CTE / FROM-subquery)
+        // and the partner's primary is a real base table, the composed
+        // recipe must adopt the partner's primary as the new primary.
+        // Without this, subsequent `compose` calls keep cross-joining
+        // additional partners onto the derived alias — at the soak's
+        // rows_per_table=50, an N-partner fusion against a CTE base
+        // explodes to 50^(N+1) rows around N=4 and Readyset drops the
+        // connection.
+        let base = make_cte_pattern();
+        let partner = make_single_table_pattern();
+
+        let recipe = base.to_recipe(0).compose(&partner);
+        let partner_primary = VarId(base.num_vars() + partner.primary_table.0);
+
+        assert_eq!(
+            recipe.primary_table, partner_primary,
+            "composed recipe must promote the base-table partner as new \
+             primary (was: {:?}, expected: {:?})",
+            recipe.primary_table, partner_primary
+        );
+    }
+
+    #[test]
     fn compose_deduplicates_from_for_unified_table() {
         let base = make_single_table_pattern();
         let addon = make_between_pattern();
