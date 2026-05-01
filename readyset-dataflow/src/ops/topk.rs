@@ -182,10 +182,37 @@ impl TopK {
                 .map(|r| (r.row, r.original_index))
                 .collect();
 
-            let mut rs = parent_records.collect::<Result<Vec<_>, _>>()?;
-            rs.sort_unstable_by(|a, b| self.total_cmp(a, b));
+            // Stream parent rows into a sorted Vec bounded at `k + buffered`
+            // so groups with millions of rows do not materialize fully here.
+            // We use a sorted Vec rather than a `BinaryHeap` because the
+            // heap takes no custom comparator: each row would have to be
+            // wrapped in a struct that captures `&self.order` to satisfy
+            // `Ord`. For typical small k the asymptotic win of the heap
+            // is not worth the per-row wrapper allocation and the extra
+            // boilerplate.
+            let cap = self.k + self.buffered;
+            let mut rs: Vec<Cow<'_, [DfValue]>> = Vec::with_capacity(cap + 1);
+            for row in parent_records {
+                let row = row?;
+                // Once full, reject rows that don't beat the current worst
+                // before paying for `binary_search_by` + `Vec::insert`.
+                if rs.len() == cap
+                    && rs
+                        .last()
+                        .is_some_and(|worst| !self.total_cmp(worst, &row).is_gt())
+                {
+                    continue;
+                }
+                let pos = rs
+                    .binary_search_by(|existing| self.total_cmp(existing, &row))
+                    .unwrap_or_else(|p| p);
+                rs.insert(pos, row);
+                if rs.len() > cap {
+                    rs.pop();
+                }
+            }
 
-            current.extend(rs.into_iter().take(self.k + self.buffered).map(|row| {
+            current.extend(rs.into_iter().map(|row| {
                 // Find and remove the first matching entry from old_current
                 // to correctly handle duplicate rows. Order of old_current
                 // doesn't matter (it's a lookup bag), so use swap_remove
@@ -359,9 +386,10 @@ impl Ingredient for TopK {
         // Skip the sort when group_by is empty (single global group).
         if !self.group_by.is_empty() {
             rs.sort_by(|a: &Record, b: &Record| {
-                self.project_group(&***a)
-                    .unwrap_or_default()
-                    .cmp(&self.project_group(&***b).unwrap_or_default())
+                self.group_by
+                    .iter()
+                    .map(|&col| &a.rec()[col])
+                    .cmp(self.group_by.iter().map(|&col| &b.rec()[col]))
             });
         }
 
@@ -481,7 +509,11 @@ impl Ingredient for TopK {
                     true
                 };
 
-                current = match buffered_state.get(group_key_ref) {
+                // Reuse `current`'s allocation across group transitions. Its
+                // capacity was set at the top of `on_input` and stays valid
+                // for every group; clear+extend avoids a malloc per group.
+                current.clear();
+                match buffered_state.get(group_key_ref) {
                     Some(records) => {
                         // The aux state for a group must hold at most k +
                         // buffered rows. The first k define downstream's
@@ -499,22 +531,18 @@ impl Ingredient for TopK {
 
                         original_group_len = records.len();
 
-                        records
-                            .iter()
-                            .cloned()
-                            .enumerate()
-                            .map(|(i, r)| CurrentRecord {
+                        current.extend(records.iter().cloned().enumerate().map(|(i, r)| {
+                            CurrentRecord {
                                 row: Cow::Owned(r),
                                 original_index: Some(i),
-                            })
-                            .collect()
+                            }
+                        }));
                     }
                     None => {
-                        // New group or was previously evicted. Either way, we need to start fresh
+                        // New group or was previously evicted. Either way, we start fresh.
                         original_group_len = 0;
-                        Vec::with_capacity(current_capacity)
                     }
-                };
+                }
             }
 
             if missed {
