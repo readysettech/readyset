@@ -356,6 +356,56 @@ impl ProxyState {
         }
     }
 
+    /// Returns true when a cache hit must be skipped given the cache's transaction policy
+    /// and whether a write has been observed in the current transaction.
+    ///
+    /// Outside any transaction, only `ProxyAlways` forces a skip — and even then
+    /// `TrxCachePolicy::Always` keeps serving from cache. Inside a transaction or implicit
+    /// transaction, `Never` always skips, `UntilWrite` skips only if `had_write_in_txn`,
+    /// and `Always` never skips. The `had_write_in_txn` flag is computed by the caller
+    /// from [`SessionWriteTracker::had_write_in_txn`] and is meaningful only when the
+    /// state is `InTransaction` / `AutocommitOff`.
+    pub fn should_skip_cache_for(
+        &self,
+        trx_cache_policy: TrxCachePolicy,
+        had_write_in_txn: bool,
+    ) -> bool {
+        if matches!(trx_cache_policy, TrxCachePolicy::Always) {
+            return false;
+        }
+        match self {
+            ProxyState::Never | ProxyState::Fallback => false,
+            ProxyState::ProxyAlways => true,
+            ProxyState::InTransaction | ProxyState::AutocommitOff => match trx_cache_policy {
+                TrxCachePolicy::Never => true,
+                TrxCachePolicy::UntilWrite => had_write_in_txn,
+                TrxCachePolicy::Always => false,
+            },
+        }
+    }
+
+    /// Reason tag matched to [`Self::should_skip_cache_for`]. Used by `record_skip_cache`
+    /// so dashboards distinguish `"trx"` (default per-cache rule) from `"trx_after_write"`
+    /// (`UntilWrite` cache that observed a write earlier in the transaction).
+    pub fn skip_reason_for(
+        &self,
+        trx_cache_policy: TrxCachePolicy,
+        had_write_in_txn: bool,
+    ) -> &'static str {
+        if self.is_proxy_always() {
+            return "unsupported_set";
+        }
+        match (self, trx_cache_policy, had_write_in_txn) {
+            (
+                ProxyState::InTransaction | ProxyState::AutocommitOff,
+                TrxCachePolicy::UntilWrite,
+                true,
+            ) => "trx_after_write",
+            (ProxyState::InTransaction | ProxyState::AutocommitOff, _, _) => "trx",
+            _ => "unknown",
+        }
+    }
+
     /// Sets the autocommit state accordingly. If turning autocommit on, will set ProxyState to
     /// Fallback as long as current state is AutocommitOff or InTransaction (the latter models
     /// MySQL's implicit COMMIT on `SET autocommit=1` during an active transaction).
@@ -2834,17 +2884,26 @@ where
         }
 
         let should_fallback = {
-            if matches!(cached_statement.trx_cache_policy, TrxCachePolicy::Always) {
+            let policy = cached_statement.trx_cache_policy;
+            if matches!(policy, TrxCachePolicy::Always) {
                 false
             } else {
                 let is_recovering = cached_statement.in_fallback_recovery(
                     self.settings.query_max_failure_duration,
                     self.settings.fallback_recovery_duration,
                 );
+                let had_write_in_txn = self
+                    .state
+                    .write_tracker
+                    .had_write_in_txn(self.state.proxy_state);
+                let should_skip = self
+                    .state
+                    .proxy_state
+                    .should_skip_cache_for(policy, had_write_in_txn);
 
                 if cached_statement.is_unsupported_execute() {
                     true
-                } else if !is_recovering && self.state.proxy_state.should_proxy() {
+                } else if !is_recovering && should_skip {
                     let has_cache = matches!(
                         &cached_statement.prep.inner,
                         PrepareResultInner::Noria(_)
@@ -2868,12 +2927,14 @@ where
                         record_skip_cache(
                             query_id,
                             cache_type,
-                            self.state.proxy_state.skip_reason(),
+                            self.state
+                                .proxy_state
+                                .skip_reason_for(policy, had_write_in_txn),
                         );
                     }
                     true
                 } else {
-                    is_recovering || self.state.proxy_state.should_proxy()
+                    is_recovering || should_skip
                 }
             }
         };
@@ -4654,11 +4715,17 @@ where
             .try_query_status(shallow)
             .map(|status| status.trx_cache_policy)
             .unwrap_or_default();
-        if state.proxy_state.should_proxy() && !matches!(trx_cache_policy, TrxCachePolicy::Always) {
+        let had_write_in_txn = state.write_tracker.had_write_in_txn(state.proxy_state);
+        if state
+            .proxy_state
+            .should_skip_cache_for(trx_cache_policy, had_write_in_txn)
+        {
             record_skip_cache(
                 query_id.to_string(),
                 "shallow",
-                state.proxy_state.skip_reason(),
+                state
+                    .proxy_state
+                    .skip_reason_for(trx_cache_policy, had_write_in_txn),
             );
             return None;
         }
@@ -5091,18 +5158,25 @@ where
                         record_skip_cache(QueryId::from(&*q).to_string(), "deep", "hint");
                     }
                     false
-                } else if state.proxy_state.should_proxy() {
-                    let always = matches!(status.trx_cache_policy, TrxCachePolicy::Always);
-                    if !always && has_deep_cache {
-                        record_skip_cache(
-                            QueryId::from(&*q).to_string(),
-                            "deep",
-                            state.proxy_state.skip_reason(),
-                        );
-                    }
-                    always
                 } else {
-                    true
+                    let had_write_in_txn = state.write_tracker.had_write_in_txn(state.proxy_state);
+                    if state
+                        .proxy_state
+                        .should_skip_cache_for(status.trx_cache_policy, had_write_in_txn)
+                    {
+                        if has_deep_cache {
+                            record_skip_cache(
+                                QueryId::from(&*q).to_string(),
+                                "deep",
+                                state
+                                    .proxy_state
+                                    .skip_reason_for(status.trx_cache_policy, had_write_in_txn),
+                            );
+                        }
+                        false
+                    } else {
+                        true
+                    }
                 };
                 if should_try {
                     ShouldTrySelect::Yes {
@@ -6320,6 +6394,103 @@ mod tests {
         let mut s = ProxyState::ProxyAlways;
         s.end_transaction();
         assert_eq!(s, ProxyState::ProxyAlways);
+    }
+
+    #[test]
+    fn should_skip_cache_for_always_never_skips() {
+        for state in [
+            ProxyState::Never,
+            ProxyState::Fallback,
+            ProxyState::ProxyAlways,
+            ProxyState::InTransaction,
+            ProxyState::AutocommitOff,
+        ] {
+            for had_write in [false, true] {
+                assert!(
+                    !state.should_skip_cache_for(TrxCachePolicy::Always, had_write),
+                    "Always must never be skipped (state={state:?}, had_write={had_write})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn should_skip_cache_for_outside_transaction() {
+        // Fallback is the normal "no transaction" state. Cache should always serve.
+        // The `had_write` flag is irrelevant outside a transaction (must be false there
+        // anyway), and the routing rule honors that.
+        let state = ProxyState::Fallback;
+        for had_write in [false, true] {
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::Never, had_write));
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, had_write));
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, had_write));
+        }
+    }
+
+    #[test]
+    fn should_skip_cache_for_proxy_always_skips_unless_always_policy() {
+        let state = ProxyState::ProxyAlways;
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+    }
+
+    #[test]
+    fn should_skip_cache_for_in_transaction_until_write() {
+        let state = ProxyState::InTransaction;
+        // Read-only-so-far transaction: UntilWrite serves from cache, Never skips.
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+
+        // After a write: UntilWrite reverts to upstream-only, like Never.
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true));
+    }
+
+    #[test]
+    fn should_skip_cache_for_autocommit_off_until_write() {
+        let state = ProxyState::AutocommitOff;
+        // Implicit transaction with no write yet: UntilWrite serves from cache.
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+
+        // After a write in the implicit transaction: skip.
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true));
+    }
+
+    #[test]
+    fn skip_reason_for_distinguishes_until_write_after_write() {
+        // UntilWrite + had_write: dashboards see "trx_after_write" so the rollout impact on
+        // the Supabase auto-cache configuration is observable.
+        for state in [ProxyState::InTransaction, ProxyState::AutocommitOff] {
+            assert_eq!(
+                state.skip_reason_for(TrxCachePolicy::UntilWrite, true),
+                "trx_after_write"
+            );
+            // No write yet: still "trx" (though this path doesn't actually skip the cache).
+            assert_eq!(
+                state.skip_reason_for(TrxCachePolicy::UntilWrite, false),
+                "trx"
+            );
+            // Never-policy in any txn state stays "trx".
+            assert_eq!(state.skip_reason_for(TrxCachePolicy::Never, false), "trx");
+            assert_eq!(state.skip_reason_for(TrxCachePolicy::Never, true), "trx");
+        }
+
+        // ProxyAlways always wins.
+        assert_eq!(
+            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::Never, false),
+            "unsupported_set"
+        );
+        assert_eq!(
+            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::UntilWrite, false),
+            "unsupported_set"
+        );
     }
 
     #[test]
