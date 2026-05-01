@@ -892,7 +892,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                 )
                                 .await?;
                             }
-                            Err(_) => {
+                            Err(e) => {
+                                debug!(
+                                    %username,
+                                    error = %e,
+                                    "COM_CHANGE_USER rejected by shim handler",
+                                );
                                 writers::write_err(
                                     ErrorKind::ER_ACCESS_DENIED_ERROR,
                                     format!("Access denied for user {username}").as_bytes(),
@@ -902,7 +907,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             }
                         }
                     } else {
-                        debug!("Received incorrect password");
+                        debug!(
+                            %username,
+                            ?session_plugin,
+                            "COM_CHANGE_USER authentication failed: invalid credentials",
+                        );
                         writers::write_err(
                             ErrorKind::ER_ACCESS_DENIED_ERROR,
                             format!("Access denied for user {username}").as_bytes(),
