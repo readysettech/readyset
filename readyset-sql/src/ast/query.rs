@@ -328,6 +328,63 @@ impl SqlQuery {
         matches!(self, Self::Select(_))
     }
 
+    /// Returns true if this query is a write statement, used by the adapter to flip the
+    /// per-transaction `had_write` flag that gates [`TrxCachePolicy::UntilWrite`] caches.
+    ///
+    /// "Write" is interpreted broadly: every variant that changes user-visible state of the
+    /// upstream database (DML, DDL, cache lifecycle, RLS, and runtime configuration
+    /// statements) counts. Read-only and transaction-control variants return `false`,
+    /// as do Readyset-internal management statements that do not mutate upstream user
+    /// data (e.g. MCP token DDL).
+    ///
+    /// Several writes never reach an `SqlQuery` variant because the parser rejects them
+    /// upstream of this code (e.g. `SELECT ... FOR UPDATE`, `LOAD DATA`, stored-procedure
+    /// `CALL`, CTE-embedded INSERT). Routing-layer callers must compensate by conservatively
+    /// flipping `had_write` on parse failure inside a transaction; see the design doc.
+    pub fn is_write(&self) -> bool {
+        match self {
+            // DML.
+            Self::Insert(_) | Self::Update(_) | Self::Delete(_) | Self::Truncate(_) => true,
+            // DDL on relations.
+            Self::CreateTable(_)
+            | Self::AlterTable(_)
+            | Self::DropTable(_)
+            | Self::RenameTable(_)
+            | Self::CreateView(_)
+            | Self::DropView(_)
+            | Self::CreateIndex(_)
+            | Self::CreateDatabase(_) => true,
+            // Cache lifecycle.
+            Self::CreateCache(_)
+            | Self::DropCache(_)
+            | Self::DropAllCaches(_)
+            | Self::FlushCache(_)
+            | Self::FlushAllShallowCaches(_) => true,
+            // RLS DDL.
+            Self::CreateRls(_) | Self::DropRls(_) => true,
+            // Runtime control.
+            Self::AlterReadySet(_) => true,
+            // Reads, transaction control, session-only commands, and Readyset bookkeeping
+            // (including MCP token management, which mutates Readyset state but not the
+            // upstream user data that drives cache routing).
+            Self::Select(_)
+            | Self::CompoundSelect(_)
+            | Self::Set(_)
+            | Self::Show(_)
+            | Self::Explain(_)
+            | Self::Comment(_)
+            | Self::Use(_)
+            | Self::Deallocate(_)
+            | Self::StartTransaction(_)
+            | Self::Commit(_)
+            | Self::Rollback(_)
+            | Self::DropAllProxiedQueries(_)
+            | Self::CreateMcpToken(_)
+            | Self::DropMcpToken(_)
+            | Self::AlterMcpToken(_) => false,
+        }
+    }
+
     /// Returns the query as a select statement, if it is a select statement.
     pub fn into_select(self) -> Option<SelectStatement> {
         match self {
