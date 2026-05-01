@@ -313,7 +313,9 @@ impl ProxyState {
         }
     }
 
-    /// Perform the appropriate state transition for this proxy state to end a transaction
+    /// Perform the appropriate state transition for this proxy state to end a transaction.
+    /// Explicit `InTransaction` returns to `Fallback`; under `AutocommitOff`, COMMIT/ROLLBACK
+    /// just begins a fresh implicit transaction and the state stays `AutocommitOff`.
     fn end_transaction(&mut self) {
         if !matches!(self, Self::Never | Self::ProxyAlways | Self::AutocommitOff) {
             *self = ProxyState::Fallback;
@@ -376,6 +378,57 @@ impl ProxyState {
     #[must_use]
     fn is_fallback(&self) -> bool {
         matches!(self, Self::Fallback)
+    }
+}
+
+/// Session-level write tracking. Drives the [`TrxCachePolicy::UntilWrite`] routing rule
+/// (and, in the next commit, RYOW) from a single source of truth: the wall-clock time of
+/// the most recent write the session has issued.
+///
+/// State machine:
+///
+///   - `mark_write()` sets `last_write_at = Some(Instant::now())`.
+///   - `on_start_transaction()` (BEGIN / START TRANSACTION) clears the field. Pre-txn write
+///     history is intentionally dropped; once a transaction begins, only in-txn writes
+///     are tracked. RYOW does not apply inside a transaction.
+///   - `on_commit()` (explicit COMMIT or implicit COMMIT under autocommit=0) refreshes the
+///     timestamp to `Some(Instant::now())` if the field was already `Some` (the txn's
+///     writes just landed in the upstream, so the RYOW window must fire from now). If the
+///     field was `None`, COMMIT leaves it `None`.
+///   - `on_rollback()` always clears the field. Rolled-back writes never landed.
+///
+/// `had_write_in_txn(state)` is then a simple presence check: inside a transaction the
+/// field is `Some` iff a write occurred in that transaction.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SessionWriteTracker {
+    /// Wall-clock time of the most recent write on this session, or `None` if no write
+    /// has happened (or the most recent write was rolled back / cleared by `BEGIN`).
+    pub last_write_at: Option<Instant>,
+}
+
+impl SessionWriteTracker {
+    pub fn mark_write(&mut self) {
+        self.last_write_at = Some(Instant::now());
+    }
+
+    pub fn on_start_transaction(&mut self) {
+        self.last_write_at = None;
+    }
+
+    pub fn on_commit(&mut self) {
+        if self.last_write_at.is_some() {
+            self.last_write_at = Some(Instant::now());
+        }
+    }
+
+    pub fn on_rollback(&mut self) {
+        self.last_write_at = None;
+    }
+
+    /// Returns `true` when a write has been observed since the current transaction began.
+    /// Always `false` outside any transaction.
+    pub fn had_write_in_txn(&self, proxy_state: ProxyState) -> bool {
+        proxy_state.in_transaction_or_implicit() && self.last_write_at.is_some()
     }
 }
 
@@ -502,6 +555,7 @@ impl BackendBuilder {
             state: BackendState {
                 client_addr: self.client_addr,
                 proxy_state,
+                write_tracker: SessionWriteTracker::default(),
                 last_query: None,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared_statements: Default::default(),
@@ -928,6 +982,9 @@ where
     client_addr: SocketAddr,
     /// Tracks information related to our decision to proxy or not.
     proxy_state: ProxyState,
+    /// Tracks when the last write on this session happened, driving
+    /// [`TrxCachePolicy::UntilWrite`] (in-txn) and read-your-own-writes (cross-txn).
+    write_tracker: SessionWriteTracker,
     /// Information regarding the last query sent over this connection. If None, then no queries
     /// have been handled using this connection (Backend) yet.
     last_query: Option<QueryInfo>,
@@ -2904,7 +2961,11 @@ where
         };
 
         if let Some(q) = &cached_statement.parsed_query {
-            Self::update_transaction_boundaries(&mut self.state.proxy_state, q.as_ref());
+            Self::update_transaction_boundaries(
+                &mut self.state.proxy_state,
+                &mut self.state.write_tracker,
+                q.as_ref(),
+            );
         }
 
         if let Some(e) = event.noria_error.as_ref() {
@@ -2978,27 +3039,38 @@ where
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
-    /// Rollback. Used to handle transaction boundary queries.
-    fn update_transaction_boundaries(proxy_state: &mut ProxyState, query: &SqlQuery) {
+    /// Rollback. Used to handle transaction boundary queries. Updates both the
+    /// `ProxyState` machine and the [`SessionWriteTracker`] timestamp lifecycle (BEGIN
+    /// clears, COMMIT refreshes-if-set, ROLLBACK clears).
+    fn update_transaction_boundaries(
+        proxy_state: &mut ProxyState,
+        write_tracker: &mut SessionWriteTracker,
+        query: &SqlQuery,
+    ) {
         match query {
             SqlQuery::StartTransaction(_) => {
                 proxy_state.start_transaction();
+                write_tracker.on_start_transaction();
             }
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
+                write_tracker.on_commit();
             }
             SqlQuery::Rollback(rollback_stmt) if rollback_stmt.ends_transaction() => {
                 proxy_state.end_transaction();
+                write_tracker.on_rollback();
             }
             _ => (),
         }
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
-    /// Rollback. Used to handle transaction boundary queries.
+    /// Rollback. Used to handle transaction boundary queries. Updates both the
+    /// `ProxyState` machine and the [`SessionWriteTracker`] timestamp lifecycle.
     async fn handle_transaction_boundaries<'a>(
         upstream: Option<&'a mut DB>,
         proxy_state: &mut ProxyState,
+        write_tracker: &mut SessionWriteTracker,
         query: &SqlQuery,
         raw_query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -3012,17 +3084,20 @@ where
             SqlQuery::StartTransaction(inner) => {
                 let result = QueryResult::Upstream(upstream.start_tx(inner).await?, None, None);
                 proxy_state.start_transaction();
+                write_tracker.on_start_transaction();
                 Ok(result)
             }
             SqlQuery::Commit(_) => {
                 let result = QueryResult::Upstream(upstream.commit().await?, None, None);
                 proxy_state.end_transaction();
+                write_tracker.on_commit();
                 Ok(result)
             }
             SqlQuery::Rollback(rollback_stmt) => {
                 if rollback_stmt.ends_transaction() {
                     let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
                     proxy_state.end_transaction();
+                    write_tracker.on_rollback();
                     Ok(result)
                 } else {
                     // ROLLBACK TO SAVEPOINT does NOT end the transaction - it only rolls back
@@ -5207,6 +5282,12 @@ where
             let prev = state.proxy_state;
             state.proxy_state.set_autocommit(enabled);
             if state.proxy_state != prev {
+                // `SET autocommit=1` from a transactional state does an implicit COMMIT;
+                // refresh `last_write_at` so any RYOW window fires from now.
+                if enabled && matches!(prev, ProxyState::InTransaction | ProxyState::AutocommitOff)
+                {
+                    state.write_tracker.on_commit();
+                }
                 if matches!(state.proxy_state, ProxyState::AutocommitOff) {
                     debug!(
                         set = %set.display(settings.dialect),
@@ -5300,6 +5381,7 @@ where
                         Self::handle_transaction_boundaries(
                             Some(upstream),
                             &mut state.proxy_state,
+                            &mut state.write_tracker,
                             &query,
                             raw_query,
                         )
@@ -6074,6 +6156,134 @@ mod tests {
         assert!(ProxyState::InTransaction.in_transaction());
         assert!(!ProxyState::AutocommitOff.in_transaction());
         assert!(!ProxyState::ProxyAlways.in_transaction());
+    }
+
+    #[test]
+    fn last_write_at_lifecycle() {
+        // mark_write() bumps the timestamp; nothing else does.
+        let mut tracker = SessionWriteTracker::default();
+        assert!(tracker.last_write_at.is_none());
+        tracker.mark_write();
+        let first = tracker.last_write_at.expect("mark_write must set it");
+
+        // Idempotent in the sense that mark_write() always produces a fresh `Some`.
+        std::thread::sleep(Duration::from_millis(2));
+        tracker.mark_write();
+        let second = tracker.last_write_at.expect("still set");
+        assert!(
+            second >= first,
+            "mark_write must produce a non-decreasing instant"
+        );
+    }
+
+    #[test]
+    fn begin_clears_last_write_at() {
+        // INSERT (outside txn); BEGIN; -> field cleared.
+        let mut tracker = SessionWriteTracker::default();
+        tracker.mark_write();
+        assert!(tracker.last_write_at.is_some());
+        tracker.on_start_transaction();
+        assert!(
+            tracker.last_write_at.is_none(),
+            "BEGIN must clear pre-txn writes per the design"
+        );
+    }
+
+    #[test]
+    fn commit_refreshes_when_txn_had_writes() {
+        // BEGIN; INSERT; COMMIT; -> field refreshed (RYOW window applies post-commit).
+        let mut tracker = SessionWriteTracker::default();
+        tracker.on_start_transaction();
+        tracker.mark_write();
+        let in_txn = tracker.last_write_at.expect("write inside txn");
+        std::thread::sleep(Duration::from_millis(2));
+        tracker.on_commit();
+        let post_commit = tracker
+            .last_write_at
+            .expect("COMMIT must keep last_write_at when txn had writes");
+        assert!(
+            post_commit > in_txn,
+            "COMMIT must refresh the timestamp so RYOW fires from now"
+        );
+
+        // BEGIN; SELECT; COMMIT (no writes); -> field stays None.
+        let mut tracker = SessionWriteTracker::default();
+        tracker.on_start_transaction();
+        tracker.on_commit();
+        assert!(
+            tracker.last_write_at.is_none(),
+            "COMMIT with no writes must leave the field unset"
+        );
+    }
+
+    #[test]
+    fn rollback_always_clears() {
+        // BEGIN; INSERT; ROLLBACK; -> field cleared (writes never landed).
+        let mut tracker = SessionWriteTracker::default();
+        tracker.on_start_transaction();
+        tracker.mark_write();
+        tracker.on_rollback();
+        assert!(tracker.last_write_at.is_none());
+
+        // ROLLBACK without an active txn is a no-op.
+        let mut tracker = SessionWriteTracker::default();
+        tracker.on_rollback();
+        assert!(tracker.last_write_at.is_none());
+    }
+
+    #[test]
+    fn had_write_in_txn_reflects_field_presence() {
+        // Inside a txn, had_write_in_txn() returns true iff last_write_at is Some.
+        // (The state machine guarantees the field was None at txn start.)
+        let mut tracker = SessionWriteTracker::default();
+        tracker.on_start_transaction();
+        assert!(!tracker.had_write_in_txn(ProxyState::InTransaction));
+        tracker.mark_write();
+        assert!(tracker.had_write_in_txn(ProxyState::InTransaction));
+
+        // Outside a txn, never true regardless of last_write_at.
+        let mut tracker = SessionWriteTracker::default();
+        tracker.mark_write();
+        assert!(!tracker.had_write_in_txn(ProxyState::Fallback));
+        assert!(!tracker.had_write_in_txn(ProxyState::ProxyAlways));
+        assert!(!tracker.had_write_in_txn(ProxyState::Never));
+    }
+
+    #[test]
+    fn set_autocommit_state_transitions_only() {
+        // The state-machine helper handles ProxyState transitions; the timestamp lives
+        // separately and is unaffected by autocommit toggles.
+        let mut s = ProxyState::InTransaction;
+        s.set_autocommit(false);
+        assert_eq!(s, ProxyState::AutocommitOff);
+
+        let mut s = ProxyState::AutocommitOff;
+        s.set_autocommit(true);
+        assert_eq!(s, ProxyState::Fallback);
+
+        let mut s = ProxyState::ProxyAlways;
+        s.set_autocommit(false);
+        assert_eq!(s, ProxyState::ProxyAlways);
+
+        let mut s = ProxyState::Never;
+        s.set_autocommit(false);
+        assert_eq!(s, ProxyState::Never);
+    }
+
+    #[test]
+    fn end_transaction_state_transitions_only() {
+        let mut s = ProxyState::InTransaction;
+        s.end_transaction();
+        assert_eq!(s, ProxyState::Fallback);
+
+        // AutocommitOff stays AutocommitOff (a fresh implicit txn).
+        let mut s = ProxyState::AutocommitOff;
+        s.end_transaction();
+        assert_eq!(s, ProxyState::AutocommitOff);
+
+        let mut s = ProxyState::ProxyAlways;
+        s.end_transaction();
+        assert_eq!(s, ProxyState::ProxyAlways);
     }
 
     #[test]
