@@ -350,7 +350,7 @@ impl WorkloadSpec {
                         shallow: Err("Not used".into()),
                     },
                     unparsed_create_cache_statement: None,
-                    always: false,
+                    trx_cache_policy: TrxCachePolicy::Never,
                     concurrently: false,
                 };
 

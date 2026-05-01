@@ -19,6 +19,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
+    TrxCachePolicy,
 };
 use readyset_util::SizeOf;
 use readyset_util::timestamp::current_timestamp_ms;
@@ -190,7 +191,7 @@ pub struct CacheInfo {
     pub refresh_ms: Option<u64>,
     pub coalesce_ms: Option<u64>,
     pub ddl_req: CacheDDLRequest,
-    pub always: bool,
+    pub trx_cache_policy: TrxCachePolicy,
     pub schedule: bool,
 }
 
@@ -237,7 +238,7 @@ impl From<CacheInfo> for CreateCacheStatement {
                 shallow: Ok(Box::new(info.query.clone())),
             },
             unparsed_create_cache_statement: None,
-            always: info.always,
+            trx_cache_policy: info.trx_cache_policy,
             concurrently: false,
         }
     }
@@ -260,7 +261,7 @@ where
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
     ddl_req: CacheDDLRequest,
-    always: bool,
+    trx_cache_policy: TrxCachePolicy,
     scheduler: Option<Scheduler<K, V>>,
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     hit_counter: Counter,
@@ -297,7 +298,7 @@ where
         query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
         ddl_req: CacheDDLRequest,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
     ) -> Arc<Self> {
         let (ttl_ms, refresh_ms, schedule) = match policy {
@@ -343,7 +344,7 @@ where
             refresh_ms,
             coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
             ddl_req,
-            always,
+            trx_cache_policy,
             scheduler: scheduler.clone(),
             shutdown_tx: std::sync::Mutex::new(shutdown_tx),
             hit_counter,
@@ -658,7 +659,7 @@ where
             refresh_ms: self.refresh_ms,
             coalesce_ms: self.coalesce_ms,
             ddl_req: self.ddl_req.clone(),
-            always: self.always,
+            trx_cache_policy: self.trx_cache_policy,
             schedule: self.is_scheduled(),
         }
     }
@@ -740,7 +741,7 @@ mod tests {
             ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         )
     }
@@ -822,7 +823,7 @@ mod tests {
             stmt.clone(),
             vec![],
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         );
         let cache_1 = Cache::new(
@@ -834,7 +835,7 @@ mod tests {
             stmt.clone(),
             vec![],
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         );
 
@@ -1060,7 +1061,7 @@ mod tests {
             ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         );
 

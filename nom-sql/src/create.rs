@@ -981,9 +981,10 @@ fn cached_query_options(
         // Error if the same option appears twice.
         match opt {
             Option::Always => {
-                if std::mem::replace(&mut opts.always, true) {
+                if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
                     return Err(error(i));
                 }
+                opts.trx_cache_policy = TrxCachePolicy::Always;
             }
             Option::Concurrently => {
                 if std::mem::replace(&mut opts.concurrently, true) {
@@ -1064,7 +1065,7 @@ pub fn create_cached_query(
                 coalesce_ms: opts.coalesce_ms,
                 inner,
                 unparsed_create_cache_statement,
-                always: opts.always,
+                trx_cache_policy: opts.trx_cache_policy,
                 concurrently: opts.concurrently,
             },
         ))
@@ -1889,13 +1890,13 @@ mod tests {
                 create_cached_query(Dialect::MySQL),
                 b"CREATE CACHE ALWAYS CONCURRENTLY FROM SELECT id FROM users WHERE name = ?"
             );
-            assert!(q1.always);
+            assert_eq!(q1.trx_cache_policy, TrxCachePolicy::Always);
             assert!(q1.concurrently);
-            assert!(q2.always);
+            assert_eq!(q2.trx_cache_policy, TrxCachePolicy::Always);
             assert!(!q2.concurrently);
-            assert!(!q3.always);
+            assert_eq!(q3.trx_cache_policy, TrxCachePolicy::Never);
             assert!(q3.concurrently);
-            assert!(q4.always);
+            assert_eq!(q4.trx_cache_policy, TrxCachePolicy::Always);
             assert!(q4.concurrently);
             let q = vec![q1, q2, q3, q4];
             for stmt in q {

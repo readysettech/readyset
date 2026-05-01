@@ -8,7 +8,7 @@ use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, QueryMetadata};
 use readyset_sql::Dialect;
-use readyset_sql::ast::ShallowCacheQuery;
+use readyset_sql::ast::{ShallowCacheQuery, TrxCachePolicy};
 
 const NUM_ENTRIES: usize = 1_000_000;
 const NUM_LOOKUPS: usize = 10_000;
@@ -36,7 +36,7 @@ fn bench_cache_hit(c: &mut Criterion) {
                 schema_search_path: vec![],
                 dialect: Dialect::PostgreSQL.into(),
             },
-            false,
+            TrxCachePolicy::Never,
             None,
         )
         .expect("failed to create cache");
@@ -106,7 +106,7 @@ fn bench_cache_insert(c: &mut Criterion) {
                 schema_search_path: vec![],
                 dialect: Dialect::PostgreSQL.into(),
             },
-            false,
+            TrxCachePolicy::Never,
             None,
         )
         .expect("failed to create cache");

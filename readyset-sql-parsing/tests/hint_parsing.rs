@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use readyset_sql::ast::{CacheInner, CacheType, EvictionPolicy, ReadysetHintDirective, SqlQuery};
+use readyset_sql::ast::{
+    CacheInner, CacheType, EvictionPolicy, ReadysetHintDirective, SqlQuery, TrxCachePolicy,
+};
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{parse_hint_directive, parse_query, parse_shallow_query};
 
@@ -353,7 +355,7 @@ fn parse_create_cache_hint_basic() {
         panic!("Expected CreateCache directive");
     };
     assert_eq!(opts.cache_type, Some(CacheType::Shallow));
-    assert!(!opts.always);
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::Never);
     assert!(opts.policy.is_none());
 }
 
@@ -397,7 +399,7 @@ fn parse_create_cache_hint_always() {
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
-    assert!(opts.always);
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::Always);
 }
 
 #[test]

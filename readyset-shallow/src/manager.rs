@@ -16,7 +16,7 @@ use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
-use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier};
+use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy};
 use readyset_util::SizeOf;
 
 use crate::cache::{Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache};
@@ -128,7 +128,7 @@ where
         schema_search_path: Vec<SqlIdentifier>,
         policy: EvictionPolicy,
         ddl_req: CacheDDLRequest,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<()> {
         Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
@@ -158,7 +158,7 @@ where
             query,
             schema_search_path,
             ddl_req,
-            always,
+            trx_cache_policy,
             coalesce_ms,
         );
 
@@ -608,7 +608,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -621,7 +621,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -678,7 +678,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -691,7 +691,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -747,7 +747,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -782,7 +782,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();
@@ -834,7 +834,7 @@ mod tests {
                 vec![],
                 default_policy(),
                 test_ddl_req(),
-                false,
+                TrxCachePolicy::Never,
                 None,
             )
             .unwrap();

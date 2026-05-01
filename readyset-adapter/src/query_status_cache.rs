@@ -21,7 +21,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::{ShallowViewRequest, ViewCreateRequest};
 use readyset_data::DfValue;
-use readyset_sql::ast::{CacheType, Relation, SqlIdentifier};
+use readyset_sql::ast::{CacheType, Relation, SqlIdentifier, TrxCachePolicy};
 
 use schema_catalog::{SchemaChangeHandler, SchemaGeneration};
 
@@ -599,7 +599,7 @@ impl QueryStatusCache {
                 QueryStatus {
                     migration_state: MigrationState::Pending,
                     execution_info: None,
-                    always: false,
+                    trx_cache_policy: TrxCachePolicy::default(),
                     schema_generation: None,
                 },
             );
@@ -621,9 +621,13 @@ impl QueryStatusCache {
     /// Updates a query's migration state to `m` unless the query's migration state was
     /// `MigrationState::Inlined`. An Inlined query can only transition to the Unsupported state.
     ///
-    /// If provided, also updates this query's ALWAYS status.
-    pub fn update_query_migration_state<Q>(&self, q: &Q, m: MigrationState, always: Option<bool>)
-    where
+    /// If provided, also updates this query's transaction cache policy.
+    pub fn update_query_migration_state<Q>(
+        &self,
+        q: &Q,
+        m: MigrationState,
+        trx_cache_policy: Option<TrxCachePolicy>,
+    ) where
         Q: QueryStatusKey,
     {
         let should_insert = q.with_mut_status(self, |s| {
@@ -639,8 +643,8 @@ impl QueryStatusCache {
                         // All other state transitions are allowed.
                         _ => s.migration_state = m.clone(),
                     }
-                    if let Some(always) = always {
-                        s.always = always;
+                    if let Some(policy) = trx_cache_policy {
+                        s.trx_cache_policy = policy;
                     }
                     false
                 }
@@ -653,7 +657,7 @@ impl QueryStatusCache {
                 QueryStatus {
                     migration_state: m,
                     execution_info: None,
-                    always: always.unwrap_or(false),
+                    trx_cache_policy: trx_cache_policy.unwrap_or_default(),
                     schema_generation: None,
                 },
             );
@@ -697,7 +701,7 @@ impl QueryStatusCache {
                         "Inlined migration not supported".to_string(),
                     ),
                     execution_info: None,
-                    always: false,
+                    trx_cache_policy: TrxCachePolicy::default(),
                     schema_generation: None,
                 },
             );
@@ -705,16 +709,16 @@ impl QueryStatusCache {
         self.persistent_handle.pending_inlined_migrations.remove(q);
     }
 
-    /// Updates the query's always flag, indicating whether the query should be served from
-    /// ReadySet regardless of autocommit state.
+    /// Updates the query's transaction cache policy, controlling how the cached query is
+    /// served when the connection is inside a transaction.
     /// Will not try to insert a query if it has not already been registered.
-    pub fn always_attempt_readyset<Q>(&self, q: &Q, always: bool)
+    pub fn set_trx_cache_policy<Q>(&self, q: &Q, trx_cache_policy: TrxCachePolicy)
     where
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |s| {
             if let Some(s) = s {
-                s.always = always;
+                s.trx_cache_policy = trx_cache_policy;
             }
         })
     }
@@ -745,7 +749,7 @@ impl QueryStatusCache {
             .filter(|v| v.is_cached(cache_type))
             .for_each(|mut v| {
                 v.migration_state = MigrationState::Pending;
-                v.always = false;
+                v.trx_cache_policy = TrxCachePolicy::default();
             });
         let mut statuses = self.persistent_handle.statuses.write();
         statuses
@@ -753,7 +757,7 @@ impl QueryStatusCache {
             .filter(|(_query_id, (_query, status))| status.is_cached(cache_type))
             .for_each(|(_query_id, (_query, status))| {
                 status.migration_state = MigrationState::Pending;
-                status.always = false;
+                status.trx_cache_policy = TrxCachePolicy::default();
             });
     }
 

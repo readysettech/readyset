@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::{CacheType, Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier};
+use readyset_sql::ast::{
+    CacheType, Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy,
+};
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::anonymize_shallow_query;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
@@ -247,8 +249,9 @@ pub struct QueryStatus {
     pub migration_state: MigrationState,
     /// The execution info of the query, if any
     pub execution_info: Option<ExecutionInfo>,
-    /// If we should always cache the query (never proxy to upstream)
-    pub always: bool,
+    /// Controls whether the cached query is served when the connection is inside a
+    /// transaction. See [`TrxCachePolicy`].
+    pub trx_cache_policy: TrxCachePolicy,
     /// Schema generation active when this query was last rewritten by the adapter.
     /// `None` for shallow queries (which are schema-insensitive) or queries that entered
     /// the cache before this field was added.
@@ -256,13 +259,13 @@ pub struct QueryStatus {
 }
 
 impl QueryStatus {
-    /// Constructs a QueryStatus with the default migration state for the query, no migration state,
-    /// and always set to false
+    /// Constructs a QueryStatus with the default migration state for the query, no
+    /// migration state, and the default transaction cache policy ([`TrxCachePolicy::Never`]).
     pub fn default_for_query(query: &Query) -> Self {
         Self {
             migration_state: MigrationState::default_for_query(query),
             execution_info: None,
-            always: false,
+            trx_cache_policy: TrxCachePolicy::default(),
             schema_generation: None,
         }
     }
@@ -272,7 +275,7 @@ impl QueryStatus {
         Self {
             migration_state,
             execution_info: None,
-            always: false,
+            trx_cache_policy: TrxCachePolicy::default(),
             schema_generation: None,
         }
     }

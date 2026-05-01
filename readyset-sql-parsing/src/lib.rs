@@ -10,7 +10,7 @@ use readyset_sql::ast::{
     CreateTableStatement, CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr,
     FlushAllShallowCachesStatement, FlushCacheStatement, ReadysetHintDirective,
     ResnapshotTableStatement, SelectStatement, SetEviction, SetReplicationPositionStatement,
-    ShallowCacheQuery, SqlQuery, SqlType, TableKey,
+    ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -631,22 +631,24 @@ fn parse_cache_options(
         None
     };
 
-    let mut always = false;
+    let mut trx_cache_policy = TrxCachePolicy::Never;
     let mut concurrently = false;
     match parser.parse_one_of_keywords(&[Keyword::ALWAYS, Keyword::CONCURRENTLY]) {
         Some(Keyword::ALWAYS) => {
-            always = true;
+            trx_cache_policy = TrxCachePolicy::Always;
             concurrently = parser.parse_keyword(Keyword::CONCURRENTLY);
         }
         Some(Keyword::CONCURRENTLY) => {
             concurrently = true;
-            always = parser.parse_keyword(Keyword::ALWAYS);
+            if parser.parse_keyword(Keyword::ALWAYS) {
+                trx_cache_policy = TrxCachePolicy::Always;
+            }
         }
         _ => {}
     }
 
     Ok(CreateCacheOptions {
-        always,
+        trx_cache_policy,
         concurrently,
         cache_type,
         policy,
@@ -717,7 +719,7 @@ fn parse_create_cache(
         coalesce_ms: opts.coalesce_ms,
         inner,
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
-        always: opts.always,
+        trx_cache_policy: opts.trx_cache_policy,
         concurrently: opts.concurrently,
     }))
 }

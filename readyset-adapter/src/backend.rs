@@ -112,7 +112,7 @@ use readyset_sql::ast::{
     DropMcpTokenStatement, ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
     McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
     SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
-    StatementIdentifier, UseStatement,
+    StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
@@ -218,7 +218,7 @@ struct PrepareSelectMeta {
     migration_state: MigrationState,
     must_migrate: bool,
     should_do_noria: bool,
-    always: bool,
+    trx_cache_policy: TrxCachePolicy,
 }
 
 #[derive(Debug)]
@@ -226,7 +226,7 @@ struct PrepareShallowSelectMeta {
     query_id: QueryId,
     stmt: ShallowViewRequest,
     params: ShallowQueryParameters,
-    always: bool,
+    trx_cache_policy: TrxCachePolicy,
 }
 
 /// How to behave when receiving unsupported `SET` statements
@@ -705,11 +705,11 @@ where
     prep: PrepareResult<DB>,
     /// The current ReadySet migration state
     migration_state: MigrationState,
-    /// Indicates whether the prepared statement was already migrated manually with the optional
-    /// ALWAYS flag, such as a CREATE CACHE ALWAYS FROM command.
+    /// The transaction cache policy for the cached query, captured at prepare time. See
+    /// [`TrxCachePolicy`].
     /// This is imperfect, but leans on performance over correctness. It requires a user to
-    /// re-prepare queries if they decide to change between ALWAYS and not ALWAYS.
-    always: bool,
+    /// re-prepare queries if they decide to change the policy.
+    trx_cache_policy: TrxCachePolicy,
     /// Holds information about if executes have been succeeding, or failing, along with a state
     /// transition timestamp. None if prepared statement has never been executed.
     execution_info: Option<ExecutionInfo>,
@@ -1031,7 +1031,7 @@ where
             None,
         );
         self.query_status_cache
-            .always_attempt_readyset(view_request, false);
+            .set_trx_cache_policy(view_request, TrxCachePolicy::Never);
         self.invalidate_prepared_statements_cache(view_request);
     }
 
@@ -1042,7 +1042,7 @@ where
             None,
         );
         self.query_status_cache
-            .always_attempt_readyset(shallow, false);
+            .set_trx_cache_policy(shallow, TrxCachePolicy::Never);
     }
 
     async fn drop_shallow_cached_query(
@@ -2027,7 +2027,9 @@ where
             self.connectors.noria.schema_search_path().to_owned(),
         );
         let status = self.state.query_status_cache.query_status(&view_request);
-        if self.state.proxy_state.is_proxy_always() && !status.always {
+        if self.state.proxy_state.is_proxy_always()
+            && !matches!(status.trx_cache_policy, TrxCachePolicy::Always)
+        {
             Ok(PrepareMeta::Proxy)
         } else {
             let should_do_readyset =
@@ -2050,7 +2052,7 @@ where
                 must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
                     || !self.connectors.has_fallback(),
                 should_do_noria: should_do_readyset,
-                always: status.always,
+                trx_cache_policy: status.trx_cache_policy,
             }))
         }
     }
@@ -2091,7 +2093,7 @@ where
 
         if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
             *query_shallow = Some(shallow.clone());
-            if let Some((query_id, always)) = Self::should_query_shallow(
+            if let Some((query_id, trx_cache_policy)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
                 &self.state,
@@ -2105,7 +2107,7 @@ where
                         query_id,
                         stmt: shallow,
                         params,
-                        always,
+                        trx_cache_policy,
                     }),
                     is_skip_cache,
                 ));
@@ -2234,7 +2236,7 @@ where
                 parsed_query: Some(Arc::new(stmt)),
                 view_request: None,
                 shallow: None,
-                always: false,
+                trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
             },
@@ -2246,7 +2248,7 @@ where
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
                 view_request: None,
                 shallow: None,
-                always: false,
+                trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
             },
@@ -2255,7 +2257,7 @@ where
                 view_request,
                 query_id,
                 migration_state,
-                always,
+                trx_cache_policy,
                 ..
             }) => PreparedStatement {
                 query_id,
@@ -2265,7 +2267,7 @@ where
                 parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
                 view_request: Some(view_request),
                 shallow: None,
-                always,
+                trx_cache_policy,
                 params: None,
                 is_skip_cache,
             },
@@ -2273,7 +2275,7 @@ where
                 query_id,
                 stmt,
                 params,
-                always,
+                trx_cache_policy,
             }) => PreparedStatement {
                 query_id: Some(query_id),
                 prep: PrepareResult::new(statement_id, prep),
@@ -2282,7 +2284,7 @@ where
                 parsed_query: None,
                 view_request: None,
                 shallow: Some(stmt),
-                always,
+                trx_cache_policy,
                 params: Some(params),
                 is_skip_cache,
             },
@@ -2297,7 +2299,7 @@ where
                 parsed_query: None,
                 view_request: None,
                 shallow: None,
-                always: false,
+                trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
             },
@@ -2764,7 +2766,7 @@ where
         }
 
         let should_fallback = {
-            if cached_statement.always {
+            if matches!(cached_statement.trx_cache_policy, TrxCachePolicy::Always) {
                 false
             } else {
                 let is_recovering = cached_statement.in_fallback_recovery(
@@ -3085,7 +3087,7 @@ where
         query_id: QueryId,
         deep: ViewCreateRequest,
         shallow: ReadySetResult<ShallowViewRequest>,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
         schema_generation: SchemaGeneration,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -3109,7 +3111,7 @@ where
             .handle_create_cached_query(
                 Some(&name),
                 deep.clone(),
-                always,
+                trx_cache_policy,
                 concurrently,
                 schema_generation,
             )
@@ -3147,7 +3149,7 @@ where
             .update_query_migration_state(&deep, migration_state, None);
         state
             .query_status_cache
-            .always_attempt_readyset(&deep, always);
+            .set_trx_cache_policy(&deep, trx_cache_policy);
         let query = Self::format_query_text(deep.statement.display(DB::SQL_DIALECT).to_string());
         Ok(Self::create_cache_result(
             query_id,
@@ -3165,7 +3167,7 @@ where
         name: Option<Relation>,
         deep: ReadySetResult<ViewCreateRequest>,
         shallow: ReadySetResult<ShallowViewRequest>,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
         schema_generation: SchemaGeneration,
         ddl_req: Option<CacheDDLRequest>,
@@ -3189,7 +3191,7 @@ where
             query_id,
             deep,
             shallow,
-            always,
+            trx_cache_policy,
             concurrently,
             schema_generation,
         )
@@ -3219,7 +3221,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         policy: Option<ast::EvictionPolicy>,
         ddl_req: Option<CacheDDLRequest>,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let ddl_req =
@@ -3255,7 +3257,7 @@ where
             name.clone(),
             &shallow,
             policy,
-            always,
+            trx_cache_policy,
             coalesce_ms,
             ddl_req,
             false,
@@ -3286,7 +3288,7 @@ where
         name: Relation,
         shallow: &ShallowViewRequest,
         policy: Option<ast::EvictionPolicy>,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
         ddl_req: CacheDDLRequest,
         quiet: bool,
@@ -3303,7 +3305,7 @@ where
             shallow.schema_search_path.clone(),
             resolve_eviction_policy(policy, settings.default_ttl_ms),
             ddl_req.clone(),
-            always,
+            trx_cache_policy,
             resolve_coalesce(coalesce_ms, settings.default_coalesce_ms),
         );
 
@@ -3319,7 +3321,7 @@ where
                 );
                 state
                     .query_status_cache
-                    .always_attempt_readyset(shallow, always);
+                    .set_trx_cache_policy(shallow, trx_cache_policy);
             }
             Err(_) => {
                 remove_ddl_on_error(
@@ -3930,7 +3932,7 @@ where
                         .into();
                 let properties = {
                     let mut properties = CacheProperties::new(CacheType::Deep);
-                    properties.set_always(view.always);
+                    properties.set_trx_cache_policy(view.trx_cache_policy);
                     properties.to_string().into()
                 };
                 let count = state.metrics_handle.as_ref().map(|h| {
@@ -3953,7 +3955,7 @@ where
                 ttl_ms,
                 refresh_ms,
                 coalesce_ms,
-                always,
+                trx_cache_policy,
                 schedule,
                 ..
             } in state.shallow.list_caches(query_id, None)
@@ -3974,7 +3976,7 @@ where
                     if let Some(coalesce_ms) = coalesce_ms {
                         properties.set_coalesce_ms(coalesce_ms);
                     }
-                    properties.set_always(always);
+                    properties.set_trx_cache_policy(trx_cache_policy);
                     properties.set_schedule(schedule);
                     properties.to_string().into()
                 };
@@ -4186,7 +4188,7 @@ where
                     policy,
                     coalesce_ms,
                     inner,
-                    always,
+                    trx_cache_policy,
                     concurrently,
                     unparsed_create_cache_statement,
                 } = create_cache_stmt;
@@ -4227,7 +4229,7 @@ where
                         name.clone(),
                         deep,
                         shallow,
-                        *always,
+                        *trx_cache_policy,
                         *concurrently,
                         schema_generation,
                         ddl_req,
@@ -4244,7 +4246,7 @@ where
                         shallow,
                         *policy,
                         ddl_req,
-                        *always,
+                        *trx_cache_policy,
                         *coalesce_ms,
                     )
                     .await
@@ -4256,7 +4258,7 @@ where
                         name.clone(),
                         deep.clone(),
                         shallow.clone(),
-                        *always,
+                        *trx_cache_policy,
                         *concurrently,
                         schema_generation,
                         ddl_req.clone(),
@@ -4285,7 +4287,7 @@ where
                                 shallow,
                                 *policy,
                                 ddl_req,
-                                *always,
+                                *trx_cache_policy,
                                 *coalesce_ms,
                             )
                             .await
@@ -4538,7 +4540,7 @@ where
         state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
-    ) -> Option<(QueryId, bool)> {
+    ) -> Option<(QueryId, TrxCachePolicy)> {
         let (query_id, migration) = state.query_status_cache.query_migration_state(shallow);
 
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
@@ -4561,11 +4563,12 @@ where
                 return None;
             }
         }
-        let always = state
+        let trx_cache_policy = state
             .query_status_cache
             .try_query_status(shallow)
-            .is_some_and(|status| status.always);
-        if state.proxy_state.should_proxy() && !always {
+            .map(|status| status.trx_cache_policy)
+            .unwrap_or_default();
+        if state.proxy_state.should_proxy() && !matches!(trx_cache_policy, TrxCachePolicy::Always) {
             record_skip_cache(
                 query_id.to_string(),
                 "shallow",
@@ -4573,7 +4576,7 @@ where
             );
             return None;
         }
-        Some((query_id, always))
+        Some((query_id, trx_cache_policy))
     }
 
     /// Attempt to auto-create a shallow cache via [`create_shallow_cache_core`]
@@ -4673,7 +4676,7 @@ where
             name,
             shallow,
             opts.policy,
-            opts.always,
+            opts.trx_cache_policy,
             opts.coalesce_ms,
             ddl_req,
             true,
@@ -4847,7 +4850,7 @@ where
             .map(|i| i.execute_network_failure_exceeded(settings.query_max_failure_duration))
             .unwrap_or(false);
 
-        if !status.always
+        if !matches!(status.trx_cache_policy, TrxCachePolicy::Always)
             && (upstream_exists && (proxy_out_of_band || unsupported || exceeded_network_failure))
         {
             if did_work {
@@ -4921,7 +4924,7 @@ where
                     );
                 };
 
-                let always = status.always;
+                let always = matches!(status.trx_cache_policy, TrxCachePolicy::Always);
 
                 if status != original_status {
                     state
@@ -4996,14 +4999,15 @@ where
                     }
                     false
                 } else if state.proxy_state.should_proxy() {
-                    if !status.always && has_deep_cache {
+                    let always = matches!(status.trx_cache_policy, TrxCachePolicy::Always);
+                    if !always && has_deep_cache {
                         record_skip_cache(
                             QueryId::from(&*q).to_string(),
                             "deep",
                             state.proxy_state.skip_reason(),
                         );
                     }
-                    status.always
+                    always
                 } else {
                     true
                 };
@@ -5836,7 +5840,7 @@ fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text
     if let Some(coalesce) = &opts.coalesce_ms {
         let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
     }
-    if opts.always {
+    if matches!(opts.trx_cache_policy, TrxCachePolicy::Always) {
         ddl.push_str("ALWAYS ");
     }
     let _ = write!(ddl, "FROM {query_text}");
@@ -6016,7 +6020,7 @@ where
         schema_search_path.clone(),
         resolve_eviction_policy(stmt.policy, default_ttl_ms),
         ddl_req,
-        stmt.always,
+        stmt.trx_cache_policy,
         resolve_coalesce(stmt.coalesce_ms, default_coalesce_ms),
     )?;
 
@@ -6025,9 +6029,9 @@ where
         MigrationState::Successful(CacheType::Shallow),
         None,
     );
-    query_status_cache.always_attempt_readyset(
+    query_status_cache.set_trx_cache_policy(
         &ShallowViewRequest::new(select_stmt, schema_search_path),
-        stmt.always,
+        stmt.trx_cache_policy,
     );
 
     Ok(())

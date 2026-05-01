@@ -530,7 +530,7 @@ impl TestHandle {
                             parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
                                 .unwrap(),
                         ),
-                        always: false,
+                        trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                         schema_generation_used: None,
                     }),
                 ],
@@ -2276,7 +2276,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
             )
             .unwrap(),
         ),
-        always: false,
+        trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
         schema_generation_used: None,
     });
     eventually! {
@@ -2360,7 +2360,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                     )
                     .unwrap(),
                 ),
-                always: true,
+                trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Always,
                 schema_generation_used: None,
             }),
             Dialect::DEFAULT_POSTGRESQL
@@ -5448,7 +5448,7 @@ async fn get_results_for_query_inner(
                     statement: Box::new(
                         parse_select(readyset_sql::Dialect::MySQL, select_stmt).unwrap(),
                     ),
-                    always: false,
+                    trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
                 }),
             ],

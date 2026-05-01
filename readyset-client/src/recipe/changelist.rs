@@ -43,7 +43,7 @@ use readyset_sql::ast::{
     AlterTableDefinition, AlterTableStatement, CacheInner, CreateCacheStatement,
     CreateTableStatement, CreateViewStatement, DropTableStatement, DropViewStatement,
     NonReplicatedRelation, Relation, RenameTableStatement, SelectStatement, SqlIdentifier,
-    SqlQuery, TableKey,
+    SqlQuery, TableKey, TrxCachePolicy,
 };
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteContext, AdapterRewriteParams};
@@ -200,7 +200,7 @@ impl ChangeList {
                 SqlQuery::CreateCache(CreateCacheStatement {
                     name,
                     inner,
-                    always,
+                    trx_cache_policy,
                     ..
                 }) => {
                     // We don't call the rewrite on the CreateCache like we do in the adapte
@@ -225,7 +225,7 @@ impl ChangeList {
                     changes.push(Change::CreateCache(CreateCache {
                         name,
                         statement,
-                        always,
+                        trx_cache_policy,
                         schema_generation_used: None,
                     }))
                 }
@@ -338,9 +338,9 @@ pub struct CreateCache {
     pub name: Option<Relation>,
     /// The `SELECT` statement for the body of the cache
     pub statement: Box<SelectStatement>,
-    /// If set to `true`, execution of this cache will bypass transaction handling in the
-    /// adapter
-    pub always: bool,
+    /// Controls whether the cache is served when the connection is inside a transaction.
+    /// See [`TrxCachePolicy`].
+    pub trx_cache_policy: TrxCachePolicy,
     /// Schema generation that was used to rewrite this cache.
     ///
     /// This captures the generation of the `SchemaCatalog` at the time the query was rewritten
@@ -445,7 +445,7 @@ impl Change {
     pub fn create_cache<N>(
         name: N,
         statement: SelectStatement,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         schema_generation_used: Option<SchemaGeneration>,
     ) -> Self
     where
@@ -454,7 +454,7 @@ impl Change {
         Self::CreateCache(CreateCache {
             name: Some(name.into()),
             statement: Box::new(statement),
-            always,
+            trx_cache_policy,
             schema_generation_used,
         })
     }
@@ -544,7 +544,7 @@ impl Change {
             SqlQuery::CreateCache(CreateCacheStatement {
                 name,
                 inner,
-                always,
+                trx_cache_policy,
                 ..
             }) => {
                 let mut statement = match inner {
@@ -573,7 +573,7 @@ impl Change {
                 Ok(Change::CreateCache(CreateCache {
                     name,
                     statement,
-                    always,
+                    trx_cache_policy,
                     schema_generation_used: schema_generation,
                 }))
             },

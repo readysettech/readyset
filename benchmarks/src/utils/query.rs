@@ -22,7 +22,9 @@ use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseStatement, DatabaseType, QueryableConnection,
 };
 use readyset_data::DfValue;
-use readyset_sql::ast::{CacheInner, CreateCacheStatement, Literal, SqlQuery, SqlType};
+use readyset_sql::ast::{
+    CacheInner, CreateCacheStatement, Literal, SqlQuery, SqlType, TrxCachePolicy,
+};
 use readyset_sql::{Dialect, DialectDisplay};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -225,7 +227,7 @@ impl ArbitraryQueryParameters {
                 deep: Ok(Box::new(stmt.clone())),
                 shallow: Err("Not used".into()),
             },
-            always: false,
+            trx_cache_policy: TrxCachePolicy::Never,
             concurrently: false,
             unparsed_create_cache_statement: None,
         };

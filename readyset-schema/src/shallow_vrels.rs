@@ -52,7 +52,11 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 cache.ttl_ms.into(),
                 cache.refresh_ms.into(),
                 cache.coalesce_ms.into(),
-                cache.always.into(),
+                matches!(
+                    cache.trx_cache_policy,
+                    readyset_sql::ast::TrxCachePolicy::Always
+                )
+                .into(),
                 cache.schedule.into(),
             ]
         }));

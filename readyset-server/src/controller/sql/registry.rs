@@ -10,6 +10,7 @@ use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     CacheType, CreateTableBody, CreateTableStatement, CreateViewStatement, EvictionPolicy,
     ItemPlaceholder, Literal, Relation, SelectSpecification, SelectStatement, SqlType,
+    TrxCachePolicy,
 };
 use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_util::redacted::Sensitive;
@@ -39,7 +40,7 @@ pub(crate) enum RecipeExpr {
     Cache {
         name: Relation,
         statement: SelectStatement,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         cache_type: Option<CacheType>,
         policy: Option<EvictionPolicy>,
         query_id: QueryId,
@@ -463,9 +464,13 @@ impl ExprRegistry {
             .get(&expression.into())
             .map(|exp| match exp {
                 RecipeExpr::View { name, .. } => ExprInfo::View(name.clone()),
-                RecipeExpr::Cache { name, always, .. } => ExprInfo::Cache(CacheInfo {
+                RecipeExpr::Cache {
+                    name,
+                    trx_cache_policy,
+                    ..
+                } => ExprInfo::Cache(CacheInfo {
                     name: name.clone(),
-                    always: *always,
+                    trx_cache_policy: *trx_cache_policy,
                 }),
                 RecipeExpr::Table { name, .. } => ExprInfo::Table(name.clone()),
             })
@@ -738,7 +743,7 @@ mod tests {
 
         RecipeExpr::Cache {
             name: name.into(),
-            always: false,
+            trx_cache_policy: TrxCachePolicy::Never,
             cache_type: Some(CacheType::Deep),
             policy: None,
             query_id: QueryId::from_select(&statement, &[]),
@@ -1163,7 +1168,7 @@ mod tests {
                     name: "foo".into(),
                     query_id: QueryId::from_select(&statement, &[]),
                     statement: statement.clone(),
-                    always: false,
+                    trx_cache_policy: TrxCachePolicy::Never,
                     cache_type: Some(CacheType::Deep),
                     policy: None,
                 })

@@ -343,7 +343,7 @@ impl DfState {
                         RecipeExpr::Cache {
                             name,
                             statement,
-                            always,
+                            trx_cache_policy,
                             cache_type,
                             policy,
                             query_id,
@@ -354,7 +354,7 @@ impl DfState {
                             Some(CacheExpr {
                                 name,
                                 statement,
-                                always,
+                                trx_cache_policy,
                                 cache_type,
                                 policy,
                                 query_id,

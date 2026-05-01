@@ -25,8 +25,8 @@ use readyset_errors::{
 use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
 use readyset_sql::ast::{
     self, ColumnConstraint, CreateViewStatement, DeleteStatement, Expr, InsertStatement, Relation,
-    SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, UnaryOperator,
-    UpdateStatement,
+    SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, TrxCachePolicy,
+    UnaryOperator, UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::adapter_rewrites::{
@@ -1052,7 +1052,7 @@ impl NoriaConnector {
         &mut self,
         name: Option<&Relation>,
         deep: ViewCreateRequest,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
         schema_generation: SchemaGeneration,
     ) -> ReadySetResult<Option<u64>> {
@@ -1064,7 +1064,7 @@ impl NoriaConnector {
             Change::create_cache(
                 name.clone(),
                 deep.statement.clone(),
-                always,
+                trx_cache_policy,
                 Some(schema_generation),
             ),
             self.dialect,
@@ -1099,7 +1099,7 @@ impl NoriaConnector {
             Change::create_cache(
                 id.to_string(),
                 req.statement.clone(),
-                false,
+                TrxCachePolicy::Never,
                 Some(schema_generation),
             ),
             self.dialect,
@@ -1152,7 +1152,7 @@ impl NoriaConnector {
                         Change::create_cache(
                             qname.clone(),
                             q.clone(),
-                            false,
+                            TrxCachePolicy::Never,
                             Some(schema_generation),
                         ),
                         self.dialect,

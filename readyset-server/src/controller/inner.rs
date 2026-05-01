@@ -319,7 +319,7 @@ impl Leader {
                 info!(
                     query_id = %query_id,
                     name = cc.name.as_ref().map(|n| n.display_unquoted().to_string()),
-                    always = %cc.always,
+                    trx_cache_policy = ?cc.trx_cache_policy,
                     "creating cache"
                 );
             }

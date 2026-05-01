@@ -1049,10 +1049,46 @@ impl From<SelectStatement> for CacheInner {
     }
 }
 
+/// Controls whether a cached query is served from the Readyset cache when the connection
+/// is inside a transaction (or implicit transaction under `autocommit=0`).
+///
+/// - `Never`: cached query is proxied upstream for the duration of the transaction.
+/// - `UntilWrite`: serve from cache until the transaction observes a write, then proxy
+///   upstream for the remainder of the transaction.
+/// - `Always`: serve from cache regardless of transaction state.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum TrxCachePolicy {
+    #[default]
+    Never,
+    UntilWrite,
+    Always,
+}
+
+impl TrxCachePolicy {
+    /// Render the keyword used in `CREATE CACHE` DDL, with a trailing space, or empty
+    /// for the default `Never` policy.
+    fn ddl_keyword(&self) -> &'static str {
+        match self {
+            Self::Never => "",
+            Self::UntilWrite => "UNTIL WRITE ",
+            Self::Always => "ALWAYS ",
+        }
+    }
+
+    /// Render the policy as it appears in `SHOW CACHES` output, or `None` for `Never`.
+    pub fn show_caches_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Never => None,
+            Self::UntilWrite => Some("until write"),
+            Self::Always => Some("always"),
+        }
+    }
+}
+
 /// Optional `CREATE CACHE` arguments. This struct is only used for parsing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateCacheOptions {
-    pub always: bool,
+    pub trx_cache_policy: TrxCachePolicy,
     pub concurrently: bool,
     pub cache_type: Option<CacheType>,
     pub policy: Option<EvictionPolicy>,
@@ -1089,14 +1125,16 @@ pub struct CreateCacheStatement {
     /// don't divide up the input before starting parsing when using sqlparser-rs. See
     /// [`readyset_sql_parsing::parse_queries`].
     pub unparsed_create_cache_statement: Option<String>,
-    /// If `always` is true, a cached query executed inside a transaction can be served from
-    /// a readyset cache.
-    /// if false, cached queries within a transaction are proxied to upstream
-    pub always: bool,
+    /// Controls whether the cache is served when the connection is inside a transaction.
+    /// See [`TrxCachePolicy`] for the variants and their semantics.
+    pub trx_cache_policy: TrxCachePolicy,
     /// Whether the CREATE CACHE STATEMENT should block or run concurrently
     pub concurrently: bool,
 }
 
+// `trx_cache_policy` is intentionally excluded from `Eq`/`Hash`: two `CREATE CACHE`
+// statements that differ only in their transaction cache policy describe the same
+// cached query and should coalesce to a single entry.
 impl PartialEq for CreateCacheStatement {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
@@ -1104,7 +1142,6 @@ impl PartialEq for CreateCacheStatement {
             && self.policy == other.policy
             && self.coalesce_ms == other.coalesce_ms
             && self.inner == other.inner
-            && self.always == other.always
             && self.concurrently == other.concurrently
     }
 }
@@ -1118,7 +1155,6 @@ impl Hash for CreateCacheStatement {
         self.policy.hash(state);
         self.coalesce_ms.hash(state);
         self.inner.hash(state);
-        self.always.hash(state);
         self.concurrently.hash(state);
     }
 }
@@ -1143,9 +1179,7 @@ impl DialectDisplay for CreateCacheStatement {
             if self.concurrently {
                 write!(f, "CONCURRENTLY ")?;
             }
-            if self.always {
-                write!(f, "ALWAYS ")?;
-            }
+            write!(f, "{}", self.trx_cache_policy.ddl_keyword())?;
             if let Some(name) = &self.name {
                 write!(f, "{} ", name.display(dialect))?;
             }

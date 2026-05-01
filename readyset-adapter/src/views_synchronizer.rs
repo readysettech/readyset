@@ -178,16 +178,20 @@ impl ViewsSynchronizer {
                         );
                         if let Some(info) = info {
                             let name = info.name().clone();
-                            let always = if let ExprInfo::Cache(CacheInfo { always, .. }) = info {
-                                always
+                            let trx_cache_policy = if let ExprInfo::Cache(CacheInfo {
+                                trx_cache_policy,
+                                ..
+                            }) = info
+                            {
+                                trx_cache_policy
                             } else {
-                                false
+                                Default::default()
                             };
                             self.view_name_cache.insert(query.clone(), name).await;
                             self.query_status_cache.update_query_migration_state(
                                 query,
                                 MigrationState::Successful(CacheType::Deep),
-                                Some(always),
+                                Some(trx_cache_policy),
                             );
                             self.views_checked.insert(*hash);
                         }

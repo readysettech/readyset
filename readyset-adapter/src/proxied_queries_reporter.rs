@@ -111,7 +111,7 @@ mod tests {
             status: QueryStatus {
                 migration_state: MigrationState::Pending,
                 execution_info: None,
-                always: false,
+                trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                 schema_generation: None,
             },
         };
@@ -134,7 +134,7 @@ mod tests {
             status: QueryStatus {
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
-                always: false,
+                trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                 schema_generation: None,
             },
         };

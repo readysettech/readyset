@@ -7,7 +7,7 @@ use assert_matches::assert_matches;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::{Relation, ShallowCacheQuery};
+use readyset_sql::ast::{Relation, ShallowCacheQuery, TrxCachePolicy};
 use readyset_util::SizeOf;
 use tokio::time::sleep;
 
@@ -55,7 +55,7 @@ where
         vec![],
         policy,
         test_ddl_req(),
-        false,
+        TrxCachePolicy::Never,
         None,
     )
 }
@@ -764,7 +764,7 @@ async fn test_coalesce_concurrent_requests() {
             vec![],
             test_policy(),
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             Some(Duration::from_millis(5000)),
         )
         .unwrap();
@@ -839,7 +839,7 @@ async fn test_periodic_refresh_callback() {
                 schedule: true,
             },
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         )
         .unwrap();
@@ -914,7 +914,7 @@ async fn test_slow_refresh_serves_stale_data() {
                 schedule: true,
             },
             test_ddl_req(),
-            false,
+            TrxCachePolicy::Never,
             None,
         )
         .unwrap();

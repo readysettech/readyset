@@ -351,7 +351,7 @@ impl TestHandle {
                             parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
                                 .unwrap(),
                         ),
-                        always: false,
+                        trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                         schema_generation_used: None,
                     }),
                 ],

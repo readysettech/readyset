@@ -18,6 +18,7 @@ use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::ast::CacheType;
 use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::TrxCachePolicy;
 use readyset_sql::{DialectDisplay, ast::Literal};
 use readyset_sql_passes::InlineLiterals;
 use readyset_util::redacted::Sensitive;
@@ -201,7 +202,7 @@ impl MigrationHandler {
                     .handle_create_cached_query(
                         None,
                         query.query().clone(),
-                        /* always */ false,
+                        TrxCachePolicy::Never,
                         /* concurrently */ false,
                         schema_generation,
                     )
@@ -330,7 +331,7 @@ impl MigrationHandler {
         );
 
         self.noria
-            .handle_create_cached_query(None, req, false, false, schema_generation)
+            .handle_create_cached_query(None, req, TrxCachePolicy::Never, false, schema_generation)
             .await?;
         Ok(())
     }
@@ -379,7 +380,7 @@ impl MigrationHandler {
             Change::create_cache(
                 qname,
                 view_request.statement.clone(),
-                false,
+                TrxCachePolicy::Never,
                 Some(schema_generation),
             ),
             self.dialect,

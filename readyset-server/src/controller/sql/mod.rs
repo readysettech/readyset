@@ -23,6 +23,7 @@ use readyset_sql::ast::{
     self, AlterTableDefinition, CacheType, CompoundSelectStatement, CreateTableBody,
     CreateTableOption, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation,
     SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
+    TrxCachePolicy,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
@@ -385,7 +386,13 @@ impl SqlIncorporator {
                     self.add_view(stmt.name, definition, schema_search_path.clone())?;
                 }
                 Change::CreateCache(cc) => {
-                    self.add_query(cc.name, *cc.statement, cc.always, &schema_search_path, mig)?;
+                    self.add_query(
+                        cc.name,
+                        *cc.statement,
+                        cc.trx_cache_policy,
+                        &schema_search_path,
+                        mig,
+                    )?;
                 }
                 ref change @ Change::AlterTable(ref alter_table_body) => {
                     // for PG we don't replicate create index. Also Foreign key is not retrieved
@@ -691,7 +698,7 @@ impl SqlIncorporator {
         &mut self,
         name: Option<Relation>,
         mut stmt: SelectStatement,
-        always: bool,
+        trx_cache_policy: TrxCachePolicy,
         schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
@@ -764,7 +771,7 @@ impl SqlIncorporator {
         let expression = RecipeExpr::Cache {
             name: name.clone(),
             statement: stmt,
-            always,
+            trx_cache_policy,
             cache_type: Some(CacheType::Deep),
             policy: None,
             query_id,

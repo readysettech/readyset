@@ -64,7 +64,7 @@ where
         vec![],
         policy,
         test_ddl_req(),
-        false,
+        readyset_sql::ast::TrxCachePolicy::Never,
         None,
     )
 }

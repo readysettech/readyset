@@ -3553,7 +3553,14 @@ async fn finkelstein1982_queries() {
                         .unwrap();
                 }
                 SqlQuery::Select(stmt) => {
-                    inc.add_query(None, stmt, false, &[], mig).unwrap();
+                    inc.add_query(
+                        None,
+                        stmt,
+                        readyset_sql::ast::TrxCachePolicy::Never,
+                        &[],
+                        mig,
+                    )
+                    .unwrap();
                 }
                 _ => panic!("unexpected query type"),
             }
@@ -8788,7 +8795,7 @@ async fn multiple_simultaneous_migrations() {
                         parse_select(readyset_sql::Dialect::MySQL, "SELECT * FROM t WHERE x = ?")
                             .unwrap()
                     ),
-                    always: false,
+                    trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
                 }),
                 Dialect::DEFAULT_MYSQL
@@ -8800,7 +8807,7 @@ async fn multiple_simultaneous_migrations() {
                         parse_select(readyset_sql::Dialect::MySQL, "SELECT * FROM t WHERE y = ?")
                             .unwrap()
                     ),
-                    always: false,
+                    trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
                 }),
                 Dialect::DEFAULT_MYSQL
@@ -9284,7 +9291,7 @@ async fn views_out_of_order() {
             Change::create_cache(
                 "q",
                 parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
-                false,
+                readyset_sql::ast::TrxCachePolicy::Never,
                 None,
             ),
             Dialect::DEFAULT_MYSQL,
@@ -9318,7 +9325,7 @@ async fn evict_single() {
             Change::create_cache(
                 "q",
                 parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?").unwrap(),
-                false,
+                readyset_sql::ast::TrxCachePolicy::Never,
                 None,
             ),
             Dialect::DEFAULT_MYSQL,
@@ -9390,7 +9397,7 @@ async fn evict_single_intermediate_state() {
                     "SELECT sum(x) FROM t1 WHERE y = ?",
                 )
                     .unwrap(),
-                false,
+                readyset_sql::ast::TrxCachePolicy::Never,
                 None,
             ),
             Dialect::DEFAULT_MYSQL,

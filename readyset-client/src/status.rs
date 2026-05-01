@@ -14,7 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use readyset_sql::ast::CacheType;
+use readyset_sql::ast::{CacheType, TrxCachePolicy};
 use replication_offset::ReplicationOffset;
 
 // Consts for variable names.
@@ -148,7 +148,7 @@ pub struct CacheProperties {
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
-    always: bool,
+    trx_cache_policy: TrxCachePolicy,
     schedule: bool,
 }
 
@@ -156,8 +156,8 @@ impl Display for CacheProperties {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // List the most important properties first.
         let mut properties = vec![Cow::Owned(format!("{}", self.cache_type))];
-        if self.always {
-            properties.push(Cow::Borrowed("always"));
+        if let Some(label) = self.trx_cache_policy.show_caches_label() {
+            properties.push(Cow::Borrowed(label));
         }
         if let Some(ttl_ms) = self.ttl_ms {
             properties.push(Cow::Owned(format!("ttl {ttl_ms} ms")));
@@ -183,13 +183,13 @@ impl CacheProperties {
             ttl_ms: None,
             refresh_ms: None,
             coalesce_ms: None,
-            always: false,
+            trx_cache_policy: TrxCachePolicy::default(),
             schedule: false,
         }
     }
 
-    pub fn set_always(&mut self, always: bool) {
-        self.always = always;
+    pub fn set_trx_cache_policy(&mut self, trx_cache_policy: TrxCachePolicy) {
+        self.trx_cache_policy = trx_cache_policy;
     }
 
     pub fn set_schedule(&mut self, schedule: bool) {
