@@ -12,13 +12,12 @@ use itertools::Itertools;
 use metrics::counter;
 use readyset_client::metrics::recorded;
 use readyset_client::{internal, KeyComparison};
-use readyset_data::{Bound, DfValue};
+use readyset_data::DfValue;
 use readyset_errors::{internal, internal_err, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace};
-use vec1::Vec1;
 
 use crate::node::AuxiliaryNodeState;
 use crate::ops::utils::Order;
@@ -279,46 +278,6 @@ impl TopK {
 
         Ok(lookup)
     }
-
-    /// Helper method to check if a group key falls within a given range
-    /// Mainly used for ranged evictions
-    fn key_in_range(
-        &self,
-        group_key: &[DfValue],
-        start: &Bound<Vec1<DfValue>>,
-        end: &Bound<Vec1<DfValue>>,
-    ) -> bool {
-        let compare_with_bound = |key: &[DfValue], bound_vec: &Vec1<DfValue>| -> Ordering {
-            debug_assert_eq!(
-                key.len(),
-                bound_vec.len(),
-                "key_in_range: group key length {} != bound length {}",
-                key.len(),
-                bound_vec.len()
-            );
-            for (key_val, bound_val) in key.iter().zip(bound_vec.iter()) {
-                match key_val.cmp(bound_val) {
-                    Ordering::Equal => continue,
-                    other => return other,
-                }
-            }
-            key.len().cmp(&bound_vec.len())
-        };
-
-        let start_ok = match start {
-            Bound::Included(start_key) => compare_with_bound(group_key, start_key).is_ge(),
-            Bound::Excluded(start_key) => compare_with_bound(group_key, start_key).is_gt(),
-        };
-
-        if !start_ok {
-            return false;
-        }
-
-        match end {
-            Bound::Included(end_key) => compare_with_bound(group_key, end_key).is_le(),
-            Bound::Excluded(end_key) => compare_with_bound(group_key, end_key).is_lt(),
-        }
-    }
 }
 
 impl Ingredient for TopK {
@@ -356,8 +315,13 @@ impl Ingredient for TopK {
                 KeyComparison::Equal(exact) => {
                     aux_state.remove(exact.as_slice());
                 }
-                KeyComparison::Range((start, end)) => {
-                    aux_state.retain(|group_key, _| !self.key_in_range(group_key, start, end));
+                KeyComparison::Range(_) => {
+                    // Range evictions don't normally reach here: TopK is
+                    // hash-indexed and sits near leaves, so memory pressure
+                    // produces point evictions for it. We handle Range
+                    // defensively in case a future dataflow shape routes
+                    // one through.
+                    aux_state.retain(|group_key, _| !key.contains(group_key.iter()));
                 }
             }
         }
