@@ -2747,6 +2747,17 @@ where
         event.query.clone_from(&cached_statement.parsed_query);
         event.query_id = cached_statement.query_id;
 
+        // Stamp the session's `last_write_at` before dispatching, so that the routing
+        // rule for `TrxCachePolicy::UntilWrite` kicks in for subsequent reads in this
+        // transaction. The timestamp is dropped at the next BEGIN / ROLLBACK.
+        if cached_statement
+            .parsed_query
+            .as_deref()
+            .is_some_and(SqlQuery::is_write)
+        {
+            self.state.write_tracker.mark_write();
+        }
+
         let upstream = &mut self.connectors.upstream;
         let noria = &mut self.connectors.noria;
 
@@ -5505,6 +5516,19 @@ where
                 return result;
             }
             *query_shallow = Some(shallow);
+        }
+
+        // Maintain the session-level `last_write_at` that gates
+        // `TrxCachePolicy::UntilWrite` caches. Mark a write whenever the parsed query
+        // is a write, and conservatively mark on parse failure inside any transaction
+        // (some writes -- e.g. `SELECT ... FOR UPDATE`, stored-proc `CALL`,
+        // CTE-embedded `INSERT` -- never reach an `SqlQuery` variant).
+        match &parsed {
+            Ok(q) if q.is_write() => state.write_tracker.mark_write(),
+            Err(_) if state.proxy_state.in_transaction_or_implicit() => {
+                state.write_tracker.mark_write()
+            }
+            _ => {}
         }
 
         match parsed {
