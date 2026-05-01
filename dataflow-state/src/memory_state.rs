@@ -171,26 +171,14 @@ impl State for MemoryState {
                 //
                 //    XXX: we could potentially save come computation here in joins by not forcing
                 //    `right` to backfill the lookup key only to then throw the record away
-                let mut results = Vec::with_capacity(num_records);
-
-                for r in records.iter() {
-                    let keep = match *r {
-                        Record::Positive(_) => {
-                            let row = rows_iter
-                                .next()
-                                .expect("positive row count should match record count");
-                            self.insert_row(row, insert_tag)
-                        }
-                        Record::Negative(ref r) => self.remove(r),
-                    };
-                    results.push(keep);
-                }
-
-                let mut result_idx = 0;
-                records.retain(|_| {
-                    let keep = results[result_idx];
-                    result_idx += 1;
-                    keep
+                records.retain(|r| match *r {
+                    Record::Positive(_) => {
+                        let row = rows_iter
+                            .next()
+                            .expect("positive row count should match record count");
+                        self.insert_row(row, insert_tag)
+                    }
+                    Record::Negative(ref r) => self.remove(r),
                 });
             } else {
                 for row in rows_iter {
