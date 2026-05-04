@@ -48,10 +48,26 @@ const CACHE_CREATE_RETRIES: u32 = 5;
 const CACHE_CREATE_BASE_DELAY_MS: u64 = 500;
 const CACHE_CREATE_BACKOFF: u64 = 2;
 
-/// Accumulates the SQL workload executed during a fuzz run so it can be
-/// replayed for debugging. The artifact reconstructs the *workload*, not
+/// Default ring-buffer capacity for the on-error fallback path. ~1000
+/// statements at ~1KB/each ≈ 1MB resident, well under typical OOM thresholds
+/// for an Antithesis container even after a multi-million-statement run.
+const REPRO_RING_CAPACITY: usize = 1000;
+
+/// Streamed reproduction log. The artifact reconstructs the *workload*, not
 /// server-side nondeterminism (CURRENT_TIMESTAMP, AUTO_INCREMENT, sequences,
 /// etc.); replays presume a fresh database.
+///
+/// Two write paths:
+/// - Explicit (`--dump-repro`): a [`BufWriter<File>`] is opened up front and
+///   each [`record_ddl`]/[`record_select`] call streams directly. Memory is
+///   bounded to the BufWriter's internal buffer regardless of run length.
+/// - Fallback (no flag, run failed): nothing is streamed; we keep only a
+///   bounded ring buffer of the most-recent [`REPRO_RING_CAPACITY`] entries
+///   and dump them to stderr on termination.
+///
+/// In both modes the ring buffer is also kept (ordered most-recent-first)
+/// for fault-injection scenarios where the file path is unwritable: stderr
+/// emission still surfaces the recent suffix of the workload.
 ///
 /// SELECTs are recorded with parameters substituted inline via
 /// [`inline_params`], so the file is directly executable against `psql` /
@@ -61,25 +77,70 @@ const CACHE_CREATE_BACKOFF: u64 = 2;
 /// startup hygiene that would erase seed data if the script were replayed.
 #[allow(dead_code)]
 struct ReproLog {
-    statements: Vec<String>,
+    writer: Option<std::io::BufWriter<std::fs::File>>,
+    recent: std::collections::VecDeque<String>,
+    capacity: usize,
+    statements_total: usize,
     dialect: Dialect,
     seed_display: String,
+    written_path: Option<PathBuf>,
 }
 
 #[allow(dead_code)]
 impl ReproLog {
+    /// Construct a log with no streaming writer (fallback-only path).
     fn new(dialect: Dialect, seed_display: String) -> Self {
         Self {
-            statements: Vec::new(),
+            writer: None,
+            recent: std::collections::VecDeque::with_capacity(REPRO_RING_CAPACITY),
+            capacity: REPRO_RING_CAPACITY,
+            statements_total: 0,
             dialect,
             seed_display,
+            written_path: None,
         }
+    }
+
+    /// Construct a log streaming directly to `path`. Header is written
+    /// eagerly so even an aborted run leaves a parseable prefix on disk.
+    fn with_writer(path: PathBuf, dialect: Dialect, seed_display: String) -> anyhow::Result<Self> {
+        let f = std::fs::File::create(&path)
+            .with_context(|| format!("creating repro file: {}", path.display()))?;
+        let mut writer = std::io::BufWriter::new(f);
+        let mut log = Self {
+            writer: None,
+            recent: std::collections::VecDeque::with_capacity(REPRO_RING_CAPACITY),
+            capacity: REPRO_RING_CAPACITY,
+            statements_total: 0,
+            dialect,
+            seed_display,
+            written_path: Some(path),
+        };
+        writer.write_all(log.header().as_bytes())?;
+        log.writer = Some(writer);
+        Ok(log)
+    }
+
+    fn push_entry(&mut self, entry: String) {
+        self.statements_total += 1;
+        if let Some(w) = self.writer.as_mut() {
+            // Best-effort streaming write. A write error here is logged but
+            // doesn't abort the run; the bounded ring buffer still preserves
+            // the recent suffix for the stderr fallback.
+            if let Err(e) = writeln!(w, "{entry}\n") {
+                warn!(err = %e, "repro stream write failed; falling back to ring buffer only");
+                self.writer = None;
+            }
+        }
+        if self.recent.len() == self.capacity {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(entry);
     }
 
     /// Record a DDL or DML statement (CREATE TABLE, ALTER TABLE, INSERT, UPDATE).
     fn record_ddl(&mut self, query_idx: usize, sql: &str) {
-        self.statements
-            .push(format!("-- query_idx={query_idx} (DDL)\n{sql};"));
+        self.push_entry(format!("-- query_idx={query_idx} (DDL)\n{sql};"));
     }
 
     /// Record a SELECT statement, inlining concrete parameter values into the
@@ -98,7 +159,7 @@ impl ReproLog {
             entry.push_str(&format!("-- params: {vals}\n"));
         }
         entry.push_str(&format!("{inlined};"));
-        self.statements.push(entry);
+        self.push_entry(entry);
     }
 
     fn header(&self) -> String {
@@ -106,37 +167,47 @@ impl ReproLog {
             "-- readyset-dante-oracle reproduction script\n\
              -- dialect: {dialect:?}\n\
              -- seed: {seed}\n\
-             -- {n} statements recorded.\n\
              -- This script reproduces the SQL workload, not server-side\n\
              -- nondeterminism (CURRENT_TIMESTAMP, AUTO_INCREMENT, sequences).\n\
              -- Replay against a fresh database.\n",
             dialect = self.dialect,
             seed = self.seed_display,
-            n = self.statements.len(),
         )
     }
 
-    /// Write the accumulated SQL to `path`. Returns the number of statements
-    /// written.
-    fn write_to(&self, path: &std::path::Path) -> anyhow::Result<usize> {
-        let mut f = std::fs::File::create(path)
-            .with_context(|| format!("creating repro file: {}", path.display()))?;
-        f.write_all(self.header().as_bytes())?;
-        for stmt in &self.statements {
-            writeln!(f, "{stmt}\n")?;
+    /// Flush the streamed writer if any. Returns the path written and the
+    /// total statement count when streaming was active. Errors propagate
+    /// (caller decides whether they're fatal).
+    fn finish(&mut self) -> anyhow::Result<Option<(PathBuf, usize)>> {
+        if let Some(mut w) = self.writer.take() {
+            w.flush().context("flushing repro file")?;
+            return Ok(self
+                .written_path
+                .clone()
+                .map(|p| (p, self.statements_total)));
         }
-        Ok(self.statements.len())
+        Ok(None)
     }
 
-    /// Dump the script to stderr. Used as a last-resort fallback when the
-    /// file path is unwritable (e.g., Antithesis container temp_dirs vanish
-    /// across snapshots) so the artifact is at least visible in logs.
+    /// Dump the bounded ring buffer to stderr with a header. Used as a
+    /// last-resort fallback when the file path is unwritable (e.g.,
+    /// Antithesis container temp_dirs vanish across snapshots) so the
+    /// recent suffix is at least visible in logs.
     fn dump_to_stderr(&self) {
         eprintln!("{}", self.header());
-        for stmt in &self.statements {
+        let dropped = self.statements_total.saturating_sub(self.recent.len());
+        if dropped > 0 {
+            eprintln!("-- truncated: dropped {dropped} earlier statements");
+        }
+        for stmt in &self.recent {
             eprintln!("{stmt}");
             eprintln!();
         }
+    }
+
+    /// Returns the number of statements ever recorded (not the ring length).
+    fn statements_total(&self) -> usize {
+        self.statements_total
     }
 }
 
@@ -426,6 +497,12 @@ impl PatternStats {
 /// Uses a single [`Generator`] with persistent state across all queries,
 /// accumulating tables and columns over the course of the run. Tables are
 /// never dropped, so Readyset only has to snapshot each table once.
+///
+/// Compound-SELECT views (created during the run by `yolokuor`'s code path)
+/// are always dropped on termination, including on `?` early returns from
+/// later steps — see [`drop_all_views`]. Synchronous Drop guards can't issue
+/// async statements, so this wrapper provides the equivalent guarantee at
+/// the function boundary.
 #[allow(clippy::too_many_arguments)]
 async fn run_queries(
     dialect: Dialect,
@@ -438,6 +515,39 @@ async fn run_queries(
     readyset: &mut DatabaseConnection,
     stats: &mut PatternStats,
     repro: &mut ReproLog,
+) -> anyhow::Result<(usize, usize)> {
+    let mut created_views: Vec<String> = Vec::new();
+    let result = run_queries_body(
+        dialect,
+        num_queries,
+        rows_per_table,
+        rng,
+        upstream_url,
+        readyset_url,
+        upstream,
+        readyset,
+        stats,
+        repro,
+        &mut created_views,
+    )
+    .await;
+    drop_all_views(upstream, &created_views).await;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_queries_body(
+    dialect: Dialect,
+    num_queries: usize,
+    rows_per_table: usize,
+    rng: &mut dyn Rng,
+    upstream_url: &DatabaseURL,
+    readyset_url: &DatabaseURL,
+    upstream: &mut DatabaseConnection,
+    readyset: &mut DatabaseConnection,
+    stats: &mut PatternStats,
+    repro: &mut ReproLog,
+    created_views: &mut Vec<String>,
 ) -> anyhow::Result<(usize, usize)> {
     let config = GeneratorConfig {
         readyset_compatible: true,
@@ -452,7 +562,6 @@ async fn run_queries(
     // recreate). Linear-Vec growth would be unbounded across long Antithesis
     // runs.
     let mut created_tables: HashSet<SqlIdentifier> = HashSet::new();
-    let mut created_views: Vec<String> = Vec::new();
     let mut matched_count = 0usize;
     let mut mismatched_count = 0usize;
 
@@ -1143,13 +1252,6 @@ async fn run_queries(
         })
     );
 
-    for vname in &created_views {
-        let drop_view = format!("DROP VIEW IF EXISTS {vname}");
-        if let Err(err) = upstream.query_drop(&drop_view).await {
-            warn!(%vname, %err, "failed to drop compound-SELECT view on exit");
-        }
-    }
-
     info!(
         matched_count,
         mismatched_count,
@@ -1163,6 +1265,21 @@ async fn run_queries(
         "run completed"
     );
     Ok((matched_count, mismatched_count))
+}
+
+/// Drop every view we created during the run. Always called from
+/// `run_queries`, including on early-Err propagation paths, so compound-SELECT
+/// views never leak across runs. Best-effort: failures are logged but not
+/// surfaced (caller's original error takes precedence).
+async fn drop_all_views(upstream: &mut DatabaseConnection, views: &[String]) {
+    for vname in views {
+        let drop_view = format!("DROP VIEW IF EXISTS {vname}");
+        if let Err(err) =
+            with_op_timeout("DROP VIEW (cleanup)", upstream.query_drop(&drop_view)).await
+        {
+            warn!(%vname, %err, "failed to drop compound-SELECT view during cleanup");
+        }
+    }
 }
 
 /// Per-op DB timeout, set once at startup from the CLI. Antithesis injects
@@ -2124,7 +2241,15 @@ impl ConstraintFuzz {
                 .context("connecting to readyset")?;
         assert_reachable!("Connected to both upstream and Readyset", &json!({}));
 
-        let mut repro = ReproLog::new(dialect, seed_display.clone());
+        // Open the repro log up front when the user asked for an explicit
+        // dump path so writes stream directly through a BufWriter and memory
+        // stays bounded regardless of run length. Otherwise keep the bounded
+        // ring buffer only and dump it to stderr on error.
+        let mut repro = match self.dump_repro.clone() {
+            Some(path) => ReproLog::with_writer(path, dialect, seed_display.clone())
+                .context("opening reproduction script for streaming write")?,
+            None => ReproLog::new(dialect, seed_display.clone()),
+        };
 
         let result = run_queries(
             dialect,
@@ -2140,48 +2265,37 @@ impl ConstraintFuzz {
         )
         .await;
 
-        // Two write paths with different failure semantics:
-        //  - Explicit (`--dump-repro`): user asked for the artifact; a write
-        //    error is fatal so we don't exit 0 with the artifact silently
-        //    lost. Always also dump to stderr so the artifact is captured in
-        //    Antithesis container snapshots even if the tmpfs path vanishes.
-        //  - Fallback (on-error): best-effort to a temp dir; on write error
-        //    fall back to stderr but don't change the original exit status.
-        match (&self.dump_repro, result.is_err()) {
-            (Some(path), _) => {
-                let dump_result = repro.write_to(path);
+        match (self.dump_repro.is_some(), result.is_err()) {
+            (true, _) => {
+                // Explicit `--dump-repro`: flush the streamed writer. Failure
+                // here surfaces as a Result error (we don't want to exit 0
+                // with the artifact silently lost). Always also dump the ring
+                // buffer to stderr so the recent suffix is in Antithesis
+                // container logs even if the tmpfs path vanished.
+                let written = repro
+                    .finish()
+                    .context("finalizing requested reproduction script")?;
                 repro.dump_to_stderr();
-                let n = dump_result.with_context(|| {
-                    format!(
-                        "writing requested reproduction script to {}",
-                        path.display()
-                    )
-                })?;
-                info!(
-                    path = %path.display(),
-                    statements = n,
-                    "wrote reproduction script"
-                );
-            }
-            (None, true) => {
-                let path = std::env::temp_dir().join("readyset-dante-oracle-repro.sql");
-                match repro.write_to(&path) {
-                    Ok(n) => info!(
+                if let Some((path, n)) = written {
+                    info!(
                         path = %path.display(),
                         statements = n,
-                        "wrote reproduction script (fallback)"
-                    ),
-                    Err(e) => {
-                        error!(
-                            path = %path.display(),
-                            err = %e,
-                            "failed to write reproduction script — dumping to stderr"
-                        );
-                        repro.dump_to_stderr();
-                    }
+                        "wrote reproduction script"
+                    );
                 }
             }
-            (None, false) => {}
+            (false, true) => {
+                // Fallback path: nothing has been streamed; emit the bounded
+                // ring buffer to stderr. The exit status is whatever
+                // `run_queries` produced — cleanup never overwrites it.
+                repro.dump_to_stderr();
+                info!(
+                    statements_total = repro.statements_total(),
+                    ring_capacity = REPRO_RING_CAPACITY,
+                    "dumped reproduction script (most-recent suffix) to stderr"
+                );
+            }
+            (false, false) => {}
         }
 
         let (matched, mismatched) = result?;
@@ -3122,7 +3236,7 @@ mod tests {
             "SELECT * FROM t WHERE c = ?",
             &[Value::Integer(99)],
         );
-        let body = log.statements.join("\n");
+        let body: String = log.recent.iter().cloned().collect::<Vec<_>>().join("\n");
         // Inlined form must be present so the script is replayable as-is.
         assert!(
             body.contains("WHERE c = 99"),
@@ -3159,7 +3273,7 @@ mod tests {
         // would replay as a destructive statement.
         let mut log = ReproLog::new(Dialect::MySQL, "0".to_string());
         log.record_ddl(0, "CREATE TABLE t (id INT)");
-        let body = log.statements.join("\n");
+        let body: String = log.recent.iter().cloned().collect::<Vec<_>>().join("\n");
         assert!(
             !body.contains("DROP TABLE"),
             "record_ddl was passed CREATE only — must not contain DROP: {body}"
@@ -3167,15 +3281,18 @@ mod tests {
     }
 
     #[test]
-    fn repro_write_to_emits_self_consistent_script() {
-        let mut log = ReproLog::new(Dialect::MySQL, "7".to_string());
+    fn repro_streaming_writer_emits_self_consistent_script() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("dante-repro-stream-{}.sql", std::process::id()));
+        let mut log =
+            ReproLog::with_writer(path.clone(), Dialect::MySQL, "7".to_string()).expect("open");
         log.record_ddl(0, "CREATE TABLE t (a INT)");
         log.record_ddl(0, "INSERT INTO t (a) VALUES (1)");
         log.record_select(1, "single_table", "SELECT a FROM t", &[]);
 
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("dante-repro-test-{}.sql", std::process::id()));
-        let n = log.write_to(&path).expect("write succeeds");
+        let written = log.finish().expect("flush succeeds");
+        let (out_path, n) = written.expect("path returned");
+        assert_eq!(out_path, path);
         assert_eq!(n, 3);
 
         let contents = std::fs::read_to_string(&path).expect("read succeeds");
@@ -3188,5 +3305,26 @@ mod tests {
         assert!(header_pos < create_pos);
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn repro_ring_buffer_drops_oldest_when_at_capacity() {
+        // Manually shrink capacity to keep the test fast and assert the
+        // bounded-collections invariant: the ring never exceeds `capacity`,
+        // and `statements_total` keeps counting beyond that.
+        let mut log = ReproLog::new(Dialect::MySQL, "0".to_string());
+        log.capacity = 4;
+        for i in 0..10 {
+            log.record_ddl(i, &format!("STMT {i}"));
+        }
+        assert_eq!(log.statements_total(), 10);
+        assert_eq!(log.recent.len(), 4);
+        let body: String = log.recent.iter().cloned().collect::<Vec<_>>().join("\n");
+        // The 4 most-recent are 6,7,8,9; the older ones must have been
+        // evicted.
+        assert!(body.contains("STMT 9"), "expected STMT 9: {body}");
+        assert!(body.contains("STMT 6"), "expected STMT 6: {body}");
+        assert!(!body.contains("STMT 0"), "STMT 0 must be evicted: {body}");
+        assert!(!body.contains("STMT 5"), "STMT 5 must be evicted: {body}");
     }
 }
