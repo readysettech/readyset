@@ -103,7 +103,7 @@ use std::time::Duration;
 
 use database_utils::{DatabaseConnection, DatabaseStatement, QueryableConnection};
 use rand::distr::Uniform;
-use rand::Rng;
+use rand::RngExt;
 use rand_distr::weighted::WeightedAliasIndex;
 use rand_distr::{Distribution, Zipf};
 use readyset_data::{DfType, DfValue};

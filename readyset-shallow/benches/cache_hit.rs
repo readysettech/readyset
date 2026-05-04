@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use rand::Rng;
+use rand::RngExt;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, QueryMetadata};

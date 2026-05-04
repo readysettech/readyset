@@ -11,7 +11,7 @@ use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
 use rand::distr::Alphanumeric;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::ReadySetHandle;

@@ -3993,7 +3993,7 @@ where
         state: &mut BackendState<DB>,
         stmt: &CreateMcpTokenStatement,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        use rand::Rng;
+        use rand::RngExt;
         use rand::distr::Alphanumeric;
 
         let scope = match stmt.scope.as_ref() {

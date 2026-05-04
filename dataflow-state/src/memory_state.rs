@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use common::{IndexType, Record, Records, Tag};
 use hashbag::HashBag;
-use rand::{self, Rng};
+use rand::{self, RngExt};
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;

@@ -86,7 +86,7 @@ use failpoint_macros::set_failpoint;
 pub use handle::PersistentStateHandle;
 pub use index_build::{IndexBuildContext, IndexBuildStatus};
 use notify::Watcher;
-use rand::Rng;
+use rand::RngExt;
 use readyset_alloc::thread::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::Index;

@@ -10,7 +10,7 @@ use rand::distr::uniform::SampleRange as _;
 use rand::distr::{StandardUniform, Uniform};
 use rand::prelude::Distribution;
 use rand::seq::SliceRandom;
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 use rand_distr::Zipf;
 use readyset_data::Array;
 use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
@@ -560,7 +560,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
 /// is pulled from a uniform distribution over the set of possible ranges.
 pub fn random_value_of_type<R>(typ: &SqlType, rng: &mut R) -> DfValue
 where
-    R: RngCore,
+    R: Rng + RngExt,
 {
     match typ {
         SqlType::Char(Some(x)) | SqlType::VarChar(Some(x)) => {

@@ -16,7 +16,7 @@ use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use metrics::{counter, gauge, histogram};
 use pin_project::pin_project;
-use rand::Rng;
+use rand::RngExt;
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;

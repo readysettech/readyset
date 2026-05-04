@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
-use rand::Rng;
+use rand::RngExt;
 
 use crate::inner::Data;
 use crate::values::Values;

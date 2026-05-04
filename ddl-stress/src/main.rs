@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 use failpoint_client::FailpointClient;
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Pool};
-use rand::Rng as _;
+use rand::RngExt as _;
 use readyset_tracing::init_test_logging;
 use readyset_util::{failpoints, scheduler_potentially_yield};
 use serde_json::json;

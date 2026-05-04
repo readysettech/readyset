@@ -221,10 +221,10 @@ pyroscope_pprofrs = { version = "0.2", default-features = false }
 quanta = { version = "0.12", default-features = false }
 querystring = "1.1.0"
 quote = "1.0.36"
-rand = { version = "0.9.1", features = ["small_rng"] }
+rand = "0.10.1"
 rayon = "1.11"
-rand_distr = "0.5"
-rand_regex = "0.18.1"
+rand_distr = "0.6"
+rand_regex = "0.19.0"
 regex = "1.10.4"
 reqwest = { version = "0.13.1", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy"] }
 ringbuf = "0.5.0"

@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use lru::LruCache;
-use rand::Rng;
+use rand::RngExt;
 use rand::distr::Alphanumeric;
 use readyset_client::query::QueryId;
 

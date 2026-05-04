@@ -4,7 +4,8 @@ use bytes::BytesMut;
 use chrono::{DateTime, FixedOffset, TimeZone};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
-use rand::Rng;
+use rand::RngExt;
+
 use readyset_util::fmt::{write_padded_u32, FastEncode};
 
 const NUMBERS_TO_GENERATE: usize = 1_000_000;

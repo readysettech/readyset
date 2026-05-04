@@ -36,7 +36,7 @@ use futures::{FutureExt, TryFutureExt, TryStream};
 use metrics::{counter, gauge, histogram};
 use petgraph::visit::{Bfs, IntoNodeReferences};
 use petgraph::Direction;
-use rand::Rng;
+use rand::RngExt;
 use readyset_client::builders::{
     ReaderHandleBuilder, ReusedReaderHandleBuilder, TableBuilder, ViewBuilder,
 };

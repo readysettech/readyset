@@ -3,6 +3,7 @@ use std::sync::Arc;
 use common::IndexType;
 use itertools::Either;
 use rand::distr::Uniform;
+use rand::RngExt;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::{Bound, DfValue, RangeBounds};
