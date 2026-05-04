@@ -19,9 +19,8 @@ use std::time::Duration;
 
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
-use hyper::client::HttpConnector;
-use hyper::{Body, Client, Method, Request, StatusCode};
 use readyset_errors::{internal, internal_err, ReadySetResult};
+use reqwest::{Client, StatusCode};
 use schema_catalog::SchemaCatalogUpdate;
 use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
@@ -334,11 +333,11 @@ impl ControllerEventsClient {
         buffer_limit: usize,
     ) {
         // Configure the HTTP client with reasonable timeouts
-        let mut http_connector = HttpConnector::new();
-        http_connector.set_connect_timeout(Some(Duration::from_secs(5)));
         let client = Client::builder()
+            .connect_timeout(Duration::from_secs(5))
             .http2_keep_alive_timeout(Duration::from_secs(20))
-            .build(http_connector);
+            .build()
+            .expect("failed to build reqwest client");
 
         loop {
             let Some(url) = leader_url.url().await else {
@@ -419,7 +418,7 @@ impl ControllerEventsClient {
     /// Returns Ok(true) if we should attempt to reconnect, Ok(false) if we should terminate.
     async fn connect_and_stream(
         events_url: &Url,
-        client: &Client<HttpConnector>,
+        client: &Client,
         events_tx: &broadcast::Sender<ControllerEvent>,
         leader_url: &LeaderUrlSource,
         buffer_limit: usize,
@@ -428,15 +427,12 @@ impl ControllerEventsClient {
     ) -> ReadySetResult<bool> {
         tracing::debug!(url = %events_url, "Connecting to SSE endpoint");
 
-        let req = Request::builder()
-            .uri(events_url.as_str())
-            .method(Method::GET)
+        let send = client
+            .get(events_url.as_str())
             .header("Accept", "text/event-stream")
             .header("Cache-Control", "no-cache")
-            .body(Body::empty())
-            .map_err(|e| internal_err!("Failed to build request: {e}"))?;
-
-        let mut res = timeout(response_timeout, client.request(req))
+            .send();
+        let res = timeout(response_timeout, send)
             .await
             .map_err(|_| {
                 internal_err!(
@@ -448,9 +444,7 @@ impl ControllerEventsClient {
 
         if res.status() != StatusCode::OK {
             let status = res.status();
-            let body = hyper::body::to_bytes(res.body_mut())
-                .await
-                .unwrap_or_default();
+            let body = res.bytes().await.unwrap_or_default();
             internal!(
                 "Error response from server: {status} - {body}",
                 body = String::from_utf8_lossy(&body)
@@ -463,7 +457,7 @@ impl ControllerEventsClient {
         // Process the event stream
         let mut processor = SseStreamProcessor::new(buffer_limit);
 
-        let mut body_stream = res.into_body();
+        let mut body_stream = res.bytes_stream();
 
         while let Some(chunk_result) = timeout(body_chunk_timeout, body_stream.next())
             .await
@@ -590,12 +584,12 @@ mod tests {
     }
 
     /// Helper: build an HTTP client matching what `run()` creates.
-    fn build_test_client() -> Client<HttpConnector> {
-        let mut http_connector = HttpConnector::new();
-        http_connector.set_connect_timeout(Some(Duration::from_secs(5)));
+    fn build_test_client() -> Client {
         Client::builder()
+            .connect_timeout(Duration::from_secs(5))
             .http2_keep_alive_timeout(Duration::from_secs(20))
-            .build(http_connector)
+            .build()
+            .expect("failed to build reqwest client")
     }
 
     /// response_timeout fires when the server accepts TCP but never sends headers.
@@ -649,7 +643,7 @@ mod tests {
     #[tokio::test]
     async fn test_body_chunk_timeout_on_stalled_stream() {
         use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Response, Server};
+        use hyper::{Body, Response, Server};
 
         let make_svc = make_service_fn(move |_| async move {
             Ok::<_, hyper::Error>(service_fn(move |_req| async move {
@@ -728,7 +722,7 @@ mod tests {
     #[tokio::test]
     async fn test_leader_lost_clears_url_and_reconnects() {
         use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Response, Server};
+        use hyper::{Body, Response, Server};
 
         let make_svc = make_service_fn(|_| async {
             Ok::<_, hyper::Error>(service_fn(|_req| async {
@@ -799,7 +793,7 @@ mod tests {
     #[tokio::test]
     async fn test_leader_lost_stops_when_no_receivers() {
         use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Response, Server};
+        use hyper::{Body, Response, Server};
 
         let make_svc = make_service_fn(|_| async {
             Ok::<_, hyper::Error>(service_fn(|_req| async {

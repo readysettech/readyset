@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleResult};
 use futures_util::future;
-use hyper::client::HttpConnector;
 use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
@@ -17,6 +17,7 @@ use readyset_errors::{
 use readyset_sql::ast::{NonReplicatedRelation, Relation};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
+use reqwest::StatusCode;
 use schema_catalog::SchemaCatalog;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -60,14 +61,15 @@ pub struct ControllerDescriptor {
     pub nonce: u64,
 }
 
-fn make_http_client(timeout: Option<Duration>) -> hyper::Client<hyper::client::HttpConnector> {
-    let mut http_connector = HttpConnector::new();
-    http_connector.set_connect_timeout(timeout);
-    hyper::Client::builder()
-        .http2_only(true)
+fn make_http_client(timeout: Option<Duration>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .http2_prior_knowledge()
         // Sets to the keep alive default if request_timeout is not specified.
-        .http2_keep_alive_timeout(timeout.unwrap_or(Duration::from_secs(20)))
-        .build(http_connector)
+        .http2_keep_alive_timeout(timeout.unwrap_or(Duration::from_secs(20)));
+    if let Some(t) = timeout {
+        builder = builder.connect_timeout(t);
+    }
+    builder.build().expect("failed to build reqwest client")
 }
 
 /// Errors that can occur when making a request to a controller
@@ -96,20 +98,14 @@ where
 
 async fn controller_request(
     url: &Url,
-    client: &hyper::Client<hyper::client::HttpConnector>,
+    client: &reqwest::Client,
     req: ControllerRequest,
     timeout: Duration,
-) -> Result<hyper::body::Bytes, ControllerRequestError> {
-    // FIXME(eta): error[E0277]: the trait bound `Uri: From<&Url>` is not satisfied
-    //             (if you try and use the `url` directly instead of stringifying)
-    #[allow(clippy::unwrap_used)]
-    let string_url = url.join(req.path)?.to_string();
+) -> Result<Bytes, ControllerRequestError> {
+    let request_url = url.join(req.path)?;
 
-    let r = hyper::Request::post(string_url)
-        .body(hyper::Body::from(req.request.clone()))
-        .map_err(|e| internal_err!("http request failed: {}", e))?;
-
-    let res = match tokio::time::timeout(timeout, client.request(r)).await {
+    let send = client.post(request_url).body(req.request.clone()).send();
+    let res = match tokio::time::timeout(timeout, send).await {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => {
             return Err(ControllerRequestError {
@@ -124,19 +120,20 @@ async fn controller_request(
     };
 
     let status = res.status();
-    let body = hyper::body::to_bytes(res.into_body())
+    let body = res
+        .bytes()
         .await
-        .map_err(|he| internal_err!("hyper response failed: {}", he))?;
+        .map_err(|he| internal_err!("reqwest response failed: {}", he))?;
 
     match status {
-        hyper::StatusCode::OK => Ok(body),
-        hyper::StatusCode::INTERNAL_SERVER_ERROR => {
+        StatusCode::OK => Ok(body),
+        StatusCode::INTERNAL_SERVER_ERROR => {
             let err: ReadySetError = bincode::deserialize(&body)?;
             Err(err.into())
         }
         s => Err(ControllerRequestError {
             error: internal_err!("HTTP status {s}"),
-            invalidate_url: s == hyper::StatusCode::SERVICE_UNAVAILABLE,
+            invalidate_url: s == StatusCode::SERVICE_UNAVAILABLE,
             permanent: false,
         }),
     }
@@ -146,7 +143,7 @@ async fn controller_request(
 #[derive(Clone)]
 struct RawController {
     url: Url,
-    client: hyper::Client<hyper::client::HttpConnector>,
+    client: reqwest::Client,
     request_timeout: Option<Duration>,
 }
 
@@ -163,7 +160,7 @@ impl RawController {
 }
 
 impl Service<ControllerRequest> for RawController {
-    type Response = hyper::body::Bytes;
+    type Response = Bytes;
     type Error = ReadySetError;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -188,7 +185,7 @@ impl Service<ControllerRequest> for RawController {
 #[derive(Clone)]
 struct Controller {
     authority: Arc<Authority>,
-    client: hyper::Client<hyper::client::HttpConnector>,
+    client: reqwest::Client,
     /// The last valid leader URL seen by this service. Used to circumvent requests to Consul in
     /// the happy-path.
     leader_url: Arc<parking_lot::RwLock<Option<Url>>>,
@@ -222,7 +219,7 @@ impl ControllerRequest {
 }
 
 impl Service<ControllerRequest> for Controller {
-    type Response = hyper::body::Bytes;
+    type Response = Bytes;
     type Error = ReadySetError;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
@@ -537,7 +534,7 @@ impl ReadySetHandle {
     where
         R: DeserializeOwned,
     {
-        let body: hyper::body::Bytes = self
+        let body: Bytes = self
             .handle
             .ready()
             .await
@@ -712,7 +709,7 @@ impl ReadySetHandle {
     /// This is made public for inspection in integration tests and is not meant to be
     /// used to construct views, instead use `view`, which calls this method.
     pub async fn view_builder(&mut self, view_request: ViewRequest) -> ReadySetResult<ViewBuilder> {
-        let body: hyper::body::Bytes = self
+        let body: Bytes = self
             .handle
             .ready()
             .await
@@ -800,7 +797,7 @@ impl ReadySetHandle {
     ) -> impl Future<Output = ReadySetResult<Option<Table>>> + '_ {
         let domains = self.domains.clone();
         async move {
-            let body: hyper::body::Bytes = self
+            let body: Bytes = self
                 .handle
                 .ready()
                 .await

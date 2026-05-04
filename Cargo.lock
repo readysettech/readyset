@@ -2530,7 +2530,7 @@ name = "failpoint-client"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "hyper 0.14.32",
+ "reqwest 0.13.3",
  "thiserror 2.0.18",
 ]
 
@@ -2858,25 +2858,6 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap 2.14.0",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "171fefbc92fe4a4de27e0698d6a5b392d6a0e333506bc49133760b3bcf948733"
@@ -3105,7 +3086,6 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.3.27",
  "http 0.2.12",
  "http-body 0.4.6",
  "httparse",
@@ -3129,7 +3109,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.14",
+ "h2",
  "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
@@ -6051,6 +6031,7 @@ dependencies = [
  "async-bincode",
  "async-trait",
  "bincode",
+ "bytes",
  "chrono",
  "clap",
  "criterion",
@@ -6363,6 +6344,7 @@ dependencies = [
  "readyset-decimal",
  "readyset-sql",
  "readyset-util",
+ "reqwest 0.13.3",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -7157,7 +7139,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.14",
+ "h2",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",

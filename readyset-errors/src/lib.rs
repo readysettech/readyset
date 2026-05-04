@@ -1284,6 +1284,7 @@ impl_from_to_string!(io::Error, IOError);
 impl_from_to_string!(tikv_jemalloc_ctl::Error, JemallocCtlError);
 impl_from_to_string!(tokio_native_tls::native_tls::Error, NativeTlsError);
 impl_from_to_string!(hyper::Error, HttpError);
+impl_from_to_string!(reqwest::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
 impl_from_to_string!(readyset_sql::AstConversionError, AstConversionError);
 impl_from_to_string!(pem::PemError, PemError);

@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-hyper = { workspace = true, features = ["client", "http1", "tcp"] }
+reqwest = { workspace = true }
 bincode = { workspace = true }
 thiserror = { workspace = true }
 

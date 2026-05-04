@@ -39,7 +39,7 @@ impl ReadySetHandle {
         where
             R: DeserializeOwned,
         {
-            let body: hyper::body::Bytes = ch
+            let body: bytes::Bytes = ch
                 .handle
                 .ready()
                 .await

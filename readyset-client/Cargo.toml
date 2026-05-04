@@ -18,7 +18,7 @@ async-bincode = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive", "env"] }
 fail = { workspace = true }
-hyper = { workspace = true, features = ["stream", "client", "http2", "tcp", "runtime"] }
+bytes = { workspace = true }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 rmp-serde = { workspace = true }
@@ -68,7 +68,7 @@ enum_dispatch = { workspace = true }
 async-trait = { workspace = true }
 
 # metrics/
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 
 # Local dependencies
 array2 = { path = "../array2" }
@@ -86,7 +86,7 @@ schema-catalog = { path = "../schema-catalog" }
 tournament-kway = { path = "../tournament-kway" }
 
 [dev-dependencies]
-hyper = { workspace = true, features = ["server"] }
+hyper = { workspace = true, features = ["server", "http1", "tcp", "stream", "runtime"] }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 test-utils = { path = "../test-utils" }
