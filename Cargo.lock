@@ -1398,7 +1398,7 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "tokio",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -1423,7 +1423,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
- "uuid 0.8.2",
+ "uuid",
  "yore",
 ]
 
@@ -1568,7 +1568,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "url",
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -1838,7 +1838,7 @@ dependencies = [
  "rand 0.9.4",
  "regex",
  "unicode-segmentation",
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -2186,7 +2186,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -4308,7 +4308,7 @@ dependencies = [
  "portable-atomic",
  "smallvec",
  "tagptr",
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -4430,7 +4430,7 @@ dependencies = [
  "sha1",
  "sha2",
  "thiserror 2.0.18",
- "uuid 1.23.1",
+ "uuid",
  "zstd",
 ]
 
@@ -5250,7 +5250,7 @@ dependencies = [
  "postgres-protocol",
  "serde_core",
  "serde_json",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -5540,7 +5540,7 @@ dependencies = [
  "tokio-test",
  "tokio-util",
  "tracing",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -6089,7 +6089,7 @@ dependencies = [
  "tracing-futures",
  "triomphe",
  "url",
- "uuid 0.8.2",
+ "uuid",
  "vec1",
  "vec_map",
 ]
@@ -6207,7 +6207,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "triomphe",
- "uuid 0.8.2",
+ "uuid",
  "vec1",
  "yore",
 ]
@@ -6569,7 +6569,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-futures",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -6846,7 +6846,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -6914,7 +6914,7 @@ dependencies = [
  "tokio",
  "tracing",
  "triomphe",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -7026,7 +7026,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -7092,7 +7092,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-futures",
- "uuid 0.8.2",
+ "uuid",
 ]
 
 [[package]]
@@ -7249,7 +7249,7 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -8131,7 +8131,7 @@ dependencies = [
  "debugid",
  "memmap2",
  "stable_deref_trait",
- "uuid 1.23.1",
+ "uuid",
 ]
 
 [[package]]
@@ -9174,22 +9174,13 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom 0.2.16",
- "serde",
-]
-
-[[package]]
-name = "uuid"
 version = "1.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
  "getrandom 0.4.1",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

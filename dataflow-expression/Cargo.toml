@@ -54,7 +54,7 @@ nom-sql = { path = "../nom-sql" }
 postgres = { workspace = true, features = [
     "with-chrono-0_4",
     "with-eui48-1",
-    "with-uuid-0_8",
+    "with-uuid-1",
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
@@ -66,7 +66,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = [
     "with-chrono-0_4",
     "with-eui48-1",
-    "with-uuid-0_8",
+    "with-uuid-1",
     "with-serde_json-1",
     "with-bit-vec-0_6",
 ] }
