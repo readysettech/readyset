@@ -432,7 +432,7 @@ struct VrelExecutionPlan {
     do_read: VrelReadDispatch,
     projection: Option<Vec<usize>>,
     limit: Option<usize>,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl Debug for VrelExecutionPlan {
@@ -460,12 +460,12 @@ impl VrelExecutionPlan {
         };
 
         let eq_properties = EquivalenceProperties::new(Arc::clone(&projected_schema));
-        let properties = PlanProperties::new(
+        let properties = Arc::new(PlanProperties::new(
             eq_properties,
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             ctx,
@@ -493,7 +493,7 @@ impl ExecutionPlan for VrelExecutionPlan {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 

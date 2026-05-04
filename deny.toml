@@ -179,7 +179,7 @@ skip-tree = [
     # metrics-util pulls in radix_trie 0.2 / endian-type 0.1
     { name = "radix_trie", version = "0.2.1" },
     { name = "rusty-fork", version = "0.3.0" },
-    { name = "sqlparser", version = "0.59.0" },
+    { name = "sqlparser", version = "0.61.0" },
     { name = "tower", version = "0.4.13" },
     { name = "unicode-width", version = "0.1.14" },
     { name = "windows-core", version = "0.62.2" },
