@@ -8,6 +8,7 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::num::TryFromIntError;
+use std::sync::Arc;
 use std::{cmp, vec};
 
 use anyhow::bail;
@@ -37,7 +38,10 @@ pub enum Value {
     DateTime(NaiveDateTime),
     Time(MySqlTime),
     TimestampTz(DateTime<FixedOffset>),
-    ByteArray(Vec<u8>),
+    /// `Arc<Vec<u8>>` so converting from `DfValue::ByteArray` (which already
+    /// stores its bytes in an `Arc`) is a refcount bump rather than a deep
+    /// copy of the buffer. Cloning Value also no longer copies the bytes.
+    ByteArray(Arc<Vec<u8>>),
     Numeric(Decimal),
     Null,
     BitVector(BitVec),
@@ -119,7 +123,9 @@ impl From<Value> for mysql_async::Value {
                 t.microseconds(),
             ),
             Value::BitVector(bv) => mysql_async::Value::Bytes(bv.to_bytes()),
-            Value::ByteArray(bytes) => mysql_async::Value::Bytes(bytes),
+            // unwrap_or_clone avoids the deep copy when the harness owns
+            // the only Arc reference (the common path during query execution).
+            Value::ByteArray(bytes) => mysql_async::Value::Bytes(Arc::unwrap_or_clone(bytes)),
             Value::Json(json) => mysql_async::Value::from(json.to_string()),
             // MySQL has no TIMESTAMPTZ type; project to UTC-naive so we can
             // round-trip the absolute instant through the MySQL wire format.
@@ -188,7 +194,7 @@ impl pgsql::types::ToSql for Value {
                 _ => Err(unsupported("Time")),
             },
             Value::ByteArray(array) => match *ty {
-                Type::BYTEA => array.to_sql(ty, out),
+                Type::BYTEA => array.as_ref().to_sql(ty, out),
                 _ => Err(unsupported("ByteArray")),
             },
             Value::Null => None::<i8>.to_sql(ty, out),
@@ -384,7 +390,8 @@ impl TryFrom<DfValue> for Value {
                 }
             }
             DfValue::Time(t) => Ok(Value::Time(t)),
-            DfValue::ByteArray(t) => Ok(Value::ByteArray(t.as_ref().clone())),
+            // Bump the refcount instead of deep-copying the underlying Vec.
+            DfValue::ByteArray(t) => Ok(Value::ByteArray(t)),
             DfValue::Numeric(ref d) => Ok(Value::Numeric(d.as_ref().clone())),
             DfValue::BitVector(ref b) => Ok(Value::BitVector(b.as_ref().clone())),
             DfValue::Array(_) => bail!("Arrays not supported"),
@@ -1047,7 +1054,7 @@ mod tests {
                 Type::TEXT,
             ),
             (Value::Time(MySqlTime::from_microseconds(0)), Type::TEXT),
-            (Value::ByteArray(vec![1, 2]), Type::TEXT),
+            (Value::ByteArray(Arc::new(vec![1, 2])), Type::TEXT),
             (Value::BitVector(BitVec::from_bytes(&[0])), Type::TEXT),
             (
                 Value::TimestampTz(DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap()),
@@ -1084,7 +1091,7 @@ mod tests {
                 Type::TIMESTAMP,
             ),
             (Value::Time(MySqlTime::from_microseconds(0)), Type::TIME),
-            (Value::ByteArray(vec![1, 2]), Type::BYTEA),
+            (Value::ByteArray(Arc::new(vec![1, 2])), Type::BYTEA),
             (Value::Null, Type::INT4),
             (Value::BitVector(BitVec::from_bytes(&[0])), Type::BIT),
             (

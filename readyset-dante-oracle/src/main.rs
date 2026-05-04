@@ -570,8 +570,11 @@ async fn run_queries_body(
             .generate_with_ddl(&mut entropy)
             .with_context(|| format!("generating query {query_idx}"))?;
 
-        let pattern_name = output.pattern_name.clone();
-        stats.entry(&pattern_name).generated += 1;
+        // Borrow rather than clone: `output` lives through the entire query
+        // iteration, and every `pattern_name` use below is a `&str`. Cloning
+        // a String per query was unnecessary on the hot path.
+        let pattern_name: &str = &output.pattern_name;
+        stats.entry(pattern_name).generated += 1;
 
         // Pattern alone (no query_idx) keeps the Antithesis dedup catalog
         // bounded; otherwise every iteration becomes a distinct finding.
@@ -796,7 +799,7 @@ async fn run_queries_body(
                     query_idx,
                     "timed out creating deep cache for compound view; skipping comparison"
                 );
-                stats.entry(&pattern_name).skipped += 1;
+                stats.entry(pattern_name).skipped += 1;
                 continue 'query;
             }
 
@@ -806,7 +809,7 @@ async fn run_queries_body(
         };
 
         debug!(%select_sql, param_count = params.len(), "executing SELECT on both");
-        repro.record_select(query_idx, &pattern_name, &select_sql, &params);
+        repro.record_select(query_idx, pattern_name, &select_sql, &params);
 
         // Execute on upstream (deterministic source of truth).
         let upstream_results = match with_reconnect_on_drop(
@@ -818,7 +821,7 @@ async fn run_queries_body(
         .await
         {
             Ok(results) => results,
-            Err(err) => match classify_error(&err, &pattern_name) {
+            Err(err) => match classify_error(&err, pattern_name) {
                 ErrorClass::Fatal => {
                     return Err(err).context(format!("SELECT on upstream: {select_sql}"));
                 }
@@ -830,7 +833,7 @@ async fn run_queries_body(
                         err = %format!("{err:#}"),
                         "skipping query due to upstream planner limitation"
                     );
-                    stats.entry(&pattern_name).skipped += 1;
+                    stats.entry(pattern_name).skipped += 1;
                     continue;
                 }
                 ErrorClass::UpstreamGeneratorBug { code } => {
@@ -848,7 +851,7 @@ async fn run_queries_body(
                             "code": code,
                         })
                     );
-                    stats.entry(&pattern_name).skipped += 1;
+                    stats.entry(pattern_name).skipped += 1;
                     continue;
                 }
                 ErrorClass::Other
@@ -878,7 +881,7 @@ async fn run_queries_body(
                 },
             )
             .await;
-            stats.entry(&pattern_name).skipped += 1;
+            stats.entry(pattern_name).skipped += 1;
             continue;
         }
 
@@ -905,7 +908,7 @@ async fn run_queries_body(
                         }
                         continue;
                     }
-                    Err(err) => match classify_error(&err, &pattern_name) {
+                    Err(err) => match classify_error(&err, pattern_name) {
                         ErrorClass::ReadysetTransient => {
                             debug!(
                                 attempt,
@@ -926,7 +929,7 @@ async fn run_queries_body(
                                 err = %format!("{err:#}"),
                                 "skipping query due to known readyset bug"
                             );
-                            stats.entry(&pattern_name).skipped += 1;
+                            stats.entry(pattern_name).skipped += 1;
                             continue 'query;
                         }
                         _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
@@ -959,7 +962,7 @@ async fn run_queries_body(
 
         // Check how the last readyset query was served.
         let cache_mode = query_cache_mode(readyset).await;
-        stats.record_cache_mode(&pattern_name, cache_mode);
+        stats.record_cache_mode(pattern_name, cache_mode);
 
         assert_reachable!(
             "Query comparison completed",
@@ -972,7 +975,7 @@ async fn run_queries_body(
 
         if matched {
             matched_count += 1;
-            stats.entry(&pattern_name).matched += 1;
+            stats.entry(pattern_name).matched += 1;
             assert_reachable!(
                 "Query results match between upstream and Readyset",
                 &json!({
@@ -989,7 +992,7 @@ async fn run_queries_body(
             // mismatch")` panicked in that path, masking the real failure
             // (Readyset never converged) as an oracle crash. Surface them as
             // separate Antithesis findings with low-cardinality payloads.
-            stats.entry(&pattern_name).mismatched += 1;
+            stats.entry(pattern_name).mismatched += 1;
             match last_mismatch {
                 Some(mismatch_msg) => {
                     assert_unreachable!(
@@ -1013,7 +1016,7 @@ async fn run_queries_body(
         }
 
         // --- Sentinel-based autoparameterization probe for hoisting patterns ---
-        if matched && Pattern::name_needs_literal_mode(&pattern_name) && !params.is_empty() {
+        if matched && Pattern::name_needs_literal_mode(pattern_name) && !params.is_empty() {
             let (sentinel_sql, sentinels) = inline_sentinels(&select_sql, &params, dialect);
             debug!(
                 query_idx,
@@ -1105,11 +1108,7 @@ async fn run_queries_body(
                                 // Same query ID: the autoparameterization
                                 // machinery maps both literal forms to the
                                 // identical cache entry.
-                                stats
-                                    .counts
-                                    .entry(pattern_name.clone())
-                                    .or_default()
-                                    .autoparam_confirmed += 1;
+                                stats.entry(pattern_name).autoparam_confirmed += 1;
                                 assert_reachable!(
                                     "Autoparameterized cache reused for different literal values",
                                     &json!({
@@ -1123,11 +1122,7 @@ async fn run_queries_body(
                                 // Different query IDs — autoparameterization
                                 // produced different normalized forms for
                                 // different literals.  This should not happen.
-                                stats
-                                    .counts
-                                    .entry(pattern_name.clone())
-                                    .or_default()
-                                    .autoparam_none += 1;
+                                stats.entry(pattern_name).autoparam_none += 1;
                                 assert_unreachable!(
                                     "Autoparameterized query got different cache for different literals",
                                     &json!({
@@ -1147,11 +1142,7 @@ async fn run_queries_body(
                         }
                     }
                 } else {
-                    stats
-                        .counts
-                        .entry(pattern_name.clone())
-                        .or_default()
-                        .autoparam_none += 1;
+                    stats.entry(pattern_name).autoparam_none += 1;
                     debug!(
                         query_idx,
                         %pattern_name,
