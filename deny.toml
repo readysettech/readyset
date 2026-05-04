@@ -148,12 +148,19 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "bit-vec", version = "0.6.3" },
+    # arrow 57 / datafusion uses hashbrown 0.16 which pulls in foldhash 0.2,
+    # while cached still uses hashbrown 0.15 which pulls in foldhash 0.1
+    { name = "foldhash", version = "0.1.5" },
+    { name = "hashbrown", version = "0.15.5" },
     # upstream tokio-postgres 0.7.16 uses newer versions of these crates
     { name = "phf", version = "0.13.1" },
     { name = "phf_shared", version = "0.13.1" },
     { name = "rand", version = "0.9.2" },
-    { name = "rand_core", version = "0.9.5" },
     { name = "cpufeatures", version = "0.2.17" },
+    # test-discovery uses toml 0.9 (toml_datetime 0.7, winnow 0.7),
+    # while trybuild / proc-macro-crate use newer toml 1.0 / toml_edit 0.25
+    { name = "toml_datetime", version = "0.7.5" },
+    { name = "winnow", version = "0.7.15" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
@@ -169,7 +176,6 @@ skip-tree = [
     { name = "petgraph", version = "0.6.5" },
     { name = "pyroscope", version = "0.5.8" },
     { name = "pyroscope_pprofrs", version = "0.2.10" },
-    { name = "rand", version = "0.10.1" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "sqlparser", version = "0.59.0" },
     { name = "tower", version = "0.4.13" },
