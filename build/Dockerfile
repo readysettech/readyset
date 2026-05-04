@@ -1,5 +1,5 @@
 # tcv pinned version should match public/build/docker-compose.ci-tcv.yml
-ARG TCV_IMAGE_TAG=44a5c1d09f0361015bc9540d5b5438b1d4f5c5fb
+ARG TCV_IMAGE_TAG=44bcf5a5fcddb5a8972a9e8d7d4403eea013a56d
 FROM 305232526136.dkr.ecr.us-east-2.amazonaws.com/test-container-vendor:${TCV_IMAGE_TAG} AS tcv
 
 FROM public.ecr.aws/docker/library/rust:1.95.0
