@@ -148,10 +148,9 @@ deny = [
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
     { name = "bit-vec", version = "0.6.3" },
-    # arrow 57 / datafusion uses hashbrown 0.16 which pulls in foldhash 0.2,
-    # while cached still uses hashbrown 0.15 which pulls in foldhash 0.1
-    { name = "foldhash", version = "0.1.5" },
     { name = "hashbrown", version = "0.15.5" },
+    # forked mysql_async still uses lru 0.16; adapter uses 0.18
+    { name = "lru", version = "0.16.4" },
     # upstream tokio-postgres 0.7.16 uses newer versions of these crates
     { name = "phf", version = "0.13.1" },
     { name = "phf_shared", version = "0.13.1" },
@@ -176,6 +175,9 @@ skip-tree = [
     { name = "petgraph", version = "0.6.5" },
     { name = "pyroscope", version = "0.5.8" },
     { name = "pyroscope_pprofrs", version = "0.2.10" },
+    # rustyline 18 uses radix_trie 0.3 / endian-type 0.2;
+    # metrics-util pulls in radix_trie 0.2 / endian-type 0.1
+    { name = "radix_trie", version = "0.2.1" },
     { name = "rusty-fork", version = "0.3.0" },
     { name = "sqlparser", version = "0.59.0" },
     { name = "tower", version = "0.4.13" },
@@ -184,7 +186,6 @@ skip-tree = [
     { name = "windows-result", version = "0.4.1" },
     { name = "windows-strings", version = "0.5.1" },
     { name = "windows-sys", version = "0.52.0" },
-    { name = "winnow", version = "0.6.26" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
