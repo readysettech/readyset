@@ -15,7 +15,6 @@ impl fmt::Debug for Node {
             NodeType::Source => write!(f, "source node"),
             NodeType::Ingress => write!(f, "ingress node"),
             NodeType::Egress { .. } => write!(f, "egress node"),
-            NodeType::Sharder(ref s) => write!(f, "sharder [{}] node", s.sharded_by()),
             NodeType::Reader(..) => write!(f, "reader node"),
             NodeType::Base(..) => write!(f, "B"),
             NodeType::Constant(..) => write!(f, "C"),
@@ -57,10 +56,6 @@ fn out_columns(s: &mut String, span: usize, node: &Node) {
     ));
 }
 
-fn out_sharding(s: &mut String, span: usize, sharding: &str) {
-    s.push_str(&format!("<tr><td colspan=\"{span}\">{sharding}</td></tr>"));
-}
-
 impl Node {
     pub fn describe(
         &self,
@@ -98,15 +93,6 @@ impl Node {
             MaterializationStatus::Full => "●",
         };
 
-        let sharding = match self.sharded_by {
-            Sharding::ByColumn(k, w) => {
-                format!("shard ⚷: {} / {}-way", self.columns[k].name, w)
-            }
-            Sharding::Random(_) => "shard randomly".to_owned(),
-            Sharding::None => "unsharded".to_owned(),
-            Sharding::ForcedNone => "desharded to avoid SS".to_owned(),
-        };
-
         let addr = match self.index {
             Some(ref idx) if idx.has_local() => {
                 format!("{} / {}", idx.as_global().index(), **idx)
@@ -131,7 +117,6 @@ impl Node {
                     key_count,
                 ));
                 out_columns(&mut s, 3, self);
-                out_sharding(&mut s, 3, &sharding);
             }
             NodeType::Constant(..) => {
                 s.push_str(&format!(
@@ -142,25 +127,14 @@ impl Node {
                     key_count,
                 ));
                 out_columns(&mut s, 3, self);
-                out_sharding(&mut s, 3, &sharding);
             }
             NodeType::Ingress => {
                 let span = out_header(&mut s, &addr, materialized, &key_count, &node_size);
                 s.push_str(&format!("<tr><td colspan=\"{span}\">ingress</td></tr> "));
-                out_sharding(&mut s, span, &sharding);
             }
             NodeType::Egress { .. } => {
                 s.push_str(&format!("<tr><td>{addr}</td></tr> "));
                 s.push_str("<tr><td>egress</td></tr> ");
-                out_sharding(&mut s, 1, &sharding);
-            }
-            NodeType::Sharder(ref sharder) => {
-                s.push_str(&format!("<tr><td>{addr}</td></tr> "));
-                s.push_str(&format!(
-                    "<tr><td>shard by {}</td></tr> ",
-                    self.columns[sharder.sharded_by()].name
-                ));
-                out_sharding(&mut s, 1, &sharding);
             }
             NodeType::Reader(ref r) => {
                 let key = match r.index() {
@@ -171,7 +145,6 @@ impl Node {
                 s.push_str(&format!(
                     "<tr><td colspan=\"{span}\">reader — ⚷: {key}</td></tr> ",
                 ));
-                out_sharding(&mut s, span, &sharding);
             }
             NodeType::Internal(ref i) => {
                 s.push_str(&format!(
@@ -193,7 +166,6 @@ impl Node {
                 s.push_str("</tr> ");
 
                 out_columns(&mut s, span, self);
-                out_sharding(&mut s, span, &sharding);
             }
         };
         s.push_str("</table> >]");

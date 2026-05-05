@@ -105,21 +105,6 @@ impl Display for PrettyReplayPath<'_> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum SourceSelection {
-    /// Query only the shard of the source that matches the key.
-    KeyShard {
-        key_i_to_shard: usize,
-        nshards: usize,
-    },
-    /// Query the same shard of the source as the destination.
-    SameShard,
-    /// Query all shards of the source.
-    ///
-    /// Value is the number of shards.
-    AllShards(usize),
-}
-
 /// Representation for how to trigger replays for a partial replay path that touches a particular
 /// domain
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -127,9 +112,8 @@ pub enum TriggerEndpoint {
     None,
     /// This domain is the start of the replay path
     Start(Index),
-    /// This domain is the end of the replay path, with the indicated source domain and how to
-    /// query that domain's shards
-    End(SourceSelection, DomainIndex),
+    /// This domain is the end of the replay path, with the indicated source domain
+    End(DomainIndex),
     /// The replay path is contained entirely within this domain
     Local(Index),
 }
@@ -139,7 +123,7 @@ impl fmt::Display for TriggerEndpoint {
         match self {
             TriggerEndpoint::None => write!(f, "None"),
             TriggerEndpoint::Start(idx) => write!(f, "Start({})", idx),
-            TriggerEndpoint::End(source, domain) => write!(f, "End({:?}, {:?})", source, domain),
+            TriggerEndpoint::End(domain) => write!(f, "End({:?})", domain),
             TriggerEndpoint::Local(idx) => write!(f, "Local({})", idx),
         }
     }
@@ -170,8 +154,6 @@ pub enum PrepareStateKind {
         node_index: petgraph::graph::NodeIndex,
         /// The number of columns within the reader node
         num_columns: usize,
-        /// The number of ways this reader node is sharded
-        num_shards: usize,
         /// The index that the reader is keyed on
         index: Index,
         /// The domain index of the domain this reader should ask to trigger replays to this reader
@@ -194,14 +176,10 @@ pub enum ReplayPieceContext {
     Partial {
         /// The set of keys that are being replayed
         for_keys: HashSet<KeyComparison>,
-        /// The index of the shard that originally requested the replay.
-        requesting_shard: usize,
         /// The index of the replica that originally requested the replay.
         ///
         /// Only this replica will receive any replay piece packets.
         requesting_replica: usize,
-        /// Is this replay coming from a single shard in the source domain?
-        unishard: bool,
     },
     /// Context for a full replay
     Full {
@@ -220,15 +198,13 @@ pub struct SourceChannelIdentifier {
     pub tag: u32,
 }
 
-/// Description for how a sender node (an [`Egress`] or a [`Sharder`]) should replicate the
-/// messages that it sends
+/// Description for how a sender node (an [`Egress`]) should replicate the messages that it sends
 ///
 /// Currently, we're limited to either going from n replicas to n replicas, or going from 1 replica
 /// to n replicas. If in the future that limitation is lifted, this type will have to change to
 /// accommodate the different ways we can do n-to-m replication
 ///
 /// [`Egress`]: crate::node::special::Egress
-/// [`Sharder`]: crate::node::special::Sharder
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SenderReplication {
     /// Send all messages to the same replica index as the current domain.
@@ -353,23 +329,6 @@ pub enum DomainRequest {
         target_node: NodeIndex,
     },
 
-    /// Tell a Sharder node about its corresponding ingress node in the next domain, and how it
-    /// should shard messages when sending to shards of that domain.
-    ///
-    /// Note that this *must* be done *before* the sharder starts being used!
-    AddSharderTx {
-        /// The local index of the sharder node to update
-        sharder_node: LocalNodeIndex,
-        /// The local index of the ingress node in the target domain
-        ingress_node: LocalNodeIndex,
-        /// The index of the target domain
-        target_domain: DomainIndex,
-        /// The number of shards to send to in the target domain
-        num_shards: usize,
-        /// Description for how messages should be replicated when sending to the target domain
-        replication: SenderReplication,
-    },
-
     /// Set up a fresh, empty state for a node, indexed by a particular column.
     ///
     /// This is done in preparation of a subsequent state replay.
@@ -408,7 +367,6 @@ pub enum DomainRequest {
         source: Option<LocalNodeIndex>,
         source_index: Option<Index>,
         path: Vec1<ReplayPathSegment>,
-        partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: TriggerEndpoint,
 
@@ -535,8 +493,6 @@ pub mod packets {
     pub struct RequestPartialReplay {
         pub tag: Tag,
         pub keys: Vec<KeyComparison>,
-        pub unishard: bool,
-        pub requesting_shard: usize,
         pub requesting_replica: usize,
         /// The cache name associated with the replay. Only used for metric labels.
         pub cache_name: Relation,

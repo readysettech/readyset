@@ -171,7 +171,6 @@ impl ControllerState {
             g,
             source,
             0,
-            config.sharding,
             config.domain_config.clone(),
             config.persistence.clone(),
             materializations,
@@ -1504,13 +1503,6 @@ impl AuthorityLeaderElectionState {
                             Some(mut state) => {
                                 // Validate that immutable config fields have not changed.
                                 // These fields cannot be changed on restart with existing state.
-                                if state.config.sharding != self.config.sharding {
-                                    return Err(Some(ReadySetError::Internal(format!(
-                                        "Cannot change sharding on restart with existing state. \
-                                         Existing: {:?}, New: {:?}.",
-                                        state.config.sharding, self.config.sharding
-                                    ))));
-                                }
                                 if state.config.mir_config != self.config.mir_config {
                                     return Err(Some(ReadySetError::Internal(format!(
                                         "Cannot change MIR config on restart with existing state. \

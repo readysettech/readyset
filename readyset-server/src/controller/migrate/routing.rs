@@ -38,11 +38,11 @@ pub fn add(
     // so they know the true identifier of their parent in the graph.
     let mut swaps = HashMap::new();
 
-    // in the code below, there are three node type of interest: ingress, egress, and sharder. we
-    // want to ensure the following properties:
+    // in the code below, there are two node types of interest: ingress and egress. we want to
+    // ensure the following properties:
     //
     //  - every time an edge crosses a domain boundary, the target of the edge is an ingress node.
-    //  - every ingress node has a parent that is either a sharder or an egress node.
+    //  - every ingress node has a parent that is an egress node.
     //  - if an ingress does *not* have such a parent, we add an egress node to the ingress'
     //    ancestor's domain, and interject it between the ingress and its old parent.
     //  - every domain has at most one egress node as a child of any other node.
@@ -61,13 +61,12 @@ pub fn add(
             .collect(); // collect so we can mutate graph
 
         // first, we look at all other-domain parents of new nodes. if a parent does not have an
-        // egress node child, we *don't* add one at this point (this is done at a later stage,
-        // because we also need to handle the case where the parent is a sharder). when the parent
-        // does not have any egress children, the node's domain *cannot* have an ingress for that
-        // parent already, so we also make an ingress node. if the parent does have an egress
-        // child, we check the children of that egress node for any ingress nodes that are in the
-        // domain of the current node. if there aren't any, we make one. if there are, we only need
-        // to redirect the node's parent edge to the ingress.
+        // egress node child, we *don't* add one at this point (this is done at a later stage).
+        // when the parent does not have any egress children, the node's domain *cannot* have an
+        // ingress for that parent already, so we also make an ingress node. if the parent does
+        // have an egress child, we check the children of that egress node for any ingress nodes
+        // that are in the domain of the current node. if there aren't any, we make one. if there
+        // are, we only need to redirect the node's parent edge to the ingress.
         for parent in parents {
             if dataflow_state.ingredients[parent].is_graph_root()
                 || dataflow_state.ingredients[parent].domain() == domain
@@ -92,9 +91,6 @@ pub fn add(
                             if dataflow_state.ingredients[i].domain() == domain {
                                 // it does! we can just reuse that ingress :D
                                 ingress = Some(Ok(i));
-                                // FIXME(malte): this is buggy! it will re-use ingress nodes even if
-                                // they have a different sharding to the one we're about to add
-                                // (whose sharding is only determined below).
                                 trace!(
                                     to = node.index(),
                                     from = parent.index(),
@@ -114,26 +110,6 @@ pub fn add(
 
                 // it belongs to this domain, not that of the parent
                 i.add_to(domain);
-
-                // the ingress is sharded the same way as its target, but with remappings of parent
-                // columns applied
-                let sharding = if let Some(s) = dataflow_state.ingredients[parent].as_sharder() {
-                    let parent_out_sharding = s.sharded_by();
-                    // TODO(malte): below is ugly, but the only way to get the sharding width at
-                    // this point; the sharder parent does not currently have the information.
-                    // Change this once we support per-subgraph sharding widths and
-                    // the sharder knows how many children it is supposed to have.
-                    if let Sharding::ByColumn(_, width) =
-                        dataflow_state.ingredients[node].sharded_by()
-                    {
-                        Sharding::ByColumn(parent_out_sharding, width)
-                    } else {
-                        internal!()
-                    }
-                } else {
-                    dataflow_state.ingredients[parent].sharded_by()
-                };
-                i.shard_by(sharding);
 
                 // insert the new ingress node
                 let ingress = dataflow_state.ingredients.add_node(i);
@@ -176,7 +152,7 @@ pub fn add(
         }
 
         // we now have all the ingress nodes we need. it's time to check that they are all
-        // connected to an egress or a sharder (otherwise they would never receive anything!).
+        // connected to an egress (otherwise they would never receive anything!).
         // Note that we need to re-load the list of parents, because it might have changed as a
         // result of adding ingress nodes.
         let parents: Vec<_> = dataflow_state
@@ -206,19 +182,17 @@ pub fn add(
                 continue;
             }
 
-            if dataflow_state.ingredients[sender].is_sender() {
-                // all good -- we're already hooked up with an egress or sharder!
-                if dataflow_state.ingredients[sender].is_egress() {
-                    trace!(
-                        node = node.index(),
-                        egress = sender.index(),
-                        "re-using cross-domain egress to new node"
-                    );
-                }
+            if dataflow_state.ingredients[sender].is_egress() {
+                // all good -- we're already hooked up with an egress!
+                trace!(
+                    node = node.index(),
+                    egress = sender.index(),
+                    "re-using cross-domain egress to new node"
+                );
                 continue;
             }
 
-            // ingress is not already connected to egress/sharder
+            // ingress is not already connected to egress
             // next, check if source node already has an egress
             let egress = {
                 let mut es = dataflow_state
@@ -247,7 +221,6 @@ pub fn add(
                 let mut egress =
                     dataflow_state.ingredients[sender].mirror(node::special::Egress::default());
                 egress.add_to(dataflow_state.ingredients[sender].domain());
-                egress.shard_by(dataflow_state.ingredients[sender].sharded_by());
                 let egress = dataflow_state.ingredients.add_node(egress);
                 dataflow_state.ingredients.add_edge(sender, egress, ());
 
@@ -325,58 +298,14 @@ pub(in crate::controller) fn connect(
                 );
 
                 let shards = dmp.num_shards(ingress_node.domain())?;
-                if shards != 1 && !sender_node.sharded_by().is_none() {
-                    // we need to be a bit careful here in the particular case where we have a
-                    // sharded egress that sends to another domain sharded by the same key.
-                    // specifically, in that case we shouldn't have each shard of domain A send to
-                    // all the shards of B. instead A[0] should send to B[0], A[1] to B[1], etc.
-                    // note that we don't have to check the sharding of both src and dst here,
-                    // because an egress implies that no shuffle was necessary, which again means
-                    // that the sharding must be the same.
-                    for shard in 0..shards {
-                        dmp.add_message_for_shard(
-                            sender_node.domain(),
-                            shard,
-                            DomainRequest::AddEgressTx {
-                                egress_node: sender_node.local_addr(),
-                                ingress_node: (ingress_node_index, ingress_node.local_addr()),
-                                target_domain: ingress_node.domain(),
-                                target_shard: shard,
-                                replication,
-                            },
-                        )?;
-                    }
-                } else {
-                    // consider the case where len != 1. that must mean that the
-                    // sender_node.sharded_by() == Sharding::None. so, we have an unsharded egress
-                    // sending to a sharded child. but that shouldn't be allowed -- such a node
-                    // *must* be a Sharder.
-                    invariant_eq!(shards, 1);
-                    dmp.add_message(
-                        sender_node.domain(),
-                        DomainRequest::AddEgressTx {
-                            egress_node: sender_node.local_addr(),
-                            ingress_node: (ingress_node_index, ingress_node.local_addr()),
-                            target_domain: ingress_node.domain(),
-                            target_shard: 0,
-                            replication,
-                        },
-                    )?;
-                }
-            } else if sender_node.is_sharder() {
-                trace!(
-                    sharder = sender.index(),
-                    ingress = ingress_node_index.index(),
-                    "connecting"
-                );
-
+                invariant_eq!(shards, 1);
                 dmp.add_message(
                     sender_node.domain(),
-                    DomainRequest::AddSharderTx {
-                        sharder_node: sender_node.local_addr(),
-                        ingress_node: ingress_node.local_addr(),
+                    DomainRequest::AddEgressTx {
+                        egress_node: sender_node.local_addr(),
+                        ingress_node: (ingress_node_index, ingress_node.local_addr()),
                         target_domain: ingress_node.domain(),
-                        num_shards: dmp.num_shards(ingress_node.domain())?,
+                        target_shard: 0,
                         replication,
                     },
                 )?;

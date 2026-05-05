@@ -49,31 +49,10 @@ use crate::domain::ReplicaAddress;
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
 pub use crate::node_map::NodeMap;
 pub use crate::payload::{
-    DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, SourceSelection, TriggerEndpoint,
+    DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, TriggerEndpoint,
 };
 use crate::prelude::{Executor, Upcall};
 pub use crate::processing::LookupIndex;
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum Sharding {
-    None,
-    ForcedNone,
-    Random(usize),
-    ByColumn(usize, usize),
-}
-
-impl Sharding {
-    pub fn is_none(&self) -> bool {
-        matches!(*self, Sharding::None | Sharding::ForcedNone)
-    }
-
-    pub fn shards(&self) -> Option<usize> {
-        match *self {
-            Sharding::None | Sharding::ForcedNone => None,
-            Sharding::Random(shards) | Sharding::ByColumn(_, shards) => Some(shards),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum EvictionKind {
@@ -91,8 +70,6 @@ impl Display for EvictionKind {
         }
     }
 }
-
-pub use readyset_client::shard_by;
 
 impl Deref for ReaderMap {
     type Target = HashMap<ReaderAddress, SingleReadHandle>;

@@ -14,7 +14,6 @@ pub enum NodeType {
     Constant(special::Constant),
     Internal(ops::NodeOperator),
     Egress(Option<special::Egress>),
-    Sharder(special::Sharder),
     Reader(special::Reader),
     /// The root node in the graph. There is a single outgoing edge from Source to all base table
     /// nodes.
@@ -29,7 +28,6 @@ impl NodeType {
             NodeType::Constant(c) => NodeType::Constant(c.take()),
             NodeType::Egress(e) => NodeType::Egress(e.take()),
             NodeType::Reader(r) => NodeType::Reader(r.take()),
-            NodeType::Sharder(s) => NodeType::Sharder(s.take()),
             NodeType::Ingress => NodeType::Ingress,
             NodeType::Internal(i) => NodeType::Internal(i.clone()),
             NodeType::Source => NodeType::Source,
@@ -54,7 +52,6 @@ impl NodeType {
     ///    ⋃    |  Union
     ///    →|   |  Ingress
     ///    |→   |  Egress
-    ///    ÷    |  Sharder
     ///    R    |  Reader
     ///    ☒    |  Dropped
     pub(super) fn description(&self) -> String {
@@ -63,7 +60,6 @@ impl NodeType {
             NodeType::Constant(c) => c.description(),
             NodeType::Egress(_) => "|→".to_string(),
             NodeType::Reader(_) => "R".to_string(),
-            NodeType::Sharder(_) => "÷".to_string(),
             NodeType::Ingress => "→|".to_string(),
             NodeType::Internal(i) => Ingredient::description(i),
             NodeType::Source => "⊥".to_string(),
@@ -80,7 +76,6 @@ impl fmt::Display for NodeType {
             NodeType::Constant(_) => write!(f, "Constant"),
             NodeType::Internal(o) => write!(f, "Internal ({o})"),
             NodeType::Egress(_) => write!(f, "Egress"),
-            NodeType::Sharder(_) => write!(f, "Sharder"),
             NodeType::Reader(_) => write!(f, "Reader"),
             NodeType::Source => write!(f, "Source"),
             NodeType::Dropped => write!(f, "Dropped"),
@@ -127,11 +122,5 @@ impl From<special::Ingress> for NodeType {
 impl From<special::Source> for NodeType {
     fn from(_: special::Source) -> Self {
         NodeType::Source
-    }
-}
-
-impl From<special::Sharder> for NodeType {
-    fn from(s: special::Sharder) -> Self {
-        NodeType::Sharder(s)
     }
 }

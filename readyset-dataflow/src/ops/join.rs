@@ -1820,10 +1820,8 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[2], // emitted column 2 = Right.r1
             keys: &replay_keys,
-            requesting_shard: 0,
             requesting_replica: 0,
             tag,
-            unishard: true,
         };
 
         // ---- send a right-side record during the replay ----
@@ -1990,10 +1988,8 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[1, 0], // reversed order
             keys: &replay_keys,
-            requesting_shard: 0,
             requesting_replica: 0,
             tag,
-            unishard: true,
         };
 
         // Send a right-side record whose compound join key (5,6) is a HOLE
@@ -2049,10 +2045,8 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[3], // emitted column 3 = Right.r2 (non-join-key)
             keys: &replay_keys,
-            requesting_shard: 0,
             requesting_replica: 0,
             tag,
-            unishard: true,
         };
 
         // Send a right-side record.  Compound join key (5,6) is a HOLE in

@@ -591,40 +591,6 @@ impl DomainMigrationPlan {
         Ok(())
     }
 
-    /// Enqueue a message to be sent to all replicas of a specific shard of a domain on plan
-    /// application.
-    ///
-    /// Like [`DomainHandle::send_to_healthy_shard_blocking`], but includes the `domain` to which
-    /// the command should apply.
-    pub fn add_message_for_shard(
-        &mut self,
-        domain: DomainIndex,
-        shard: usize,
-        req: DomainRequest,
-    ) -> ReadySetResult<()> {
-        let domain_settings =
-            self.domains
-                .get(&domain)
-                .ok_or_else(|| ReadySetError::UnknownDomain {
-                    domain_index: domain.index(),
-                })?;
-
-        if shard > domain_settings.num_shards {
-            return Err(ReadySetError::ShardIndexOutOfBounds {
-                shard,
-                domain_index: domain.index(),
-                num_shards: domain_settings.num_shards,
-            });
-        }
-
-        self.stored.push_back(StoredDomainRequest {
-            domain,
-            shard: Some(shard),
-            req,
-        });
-        Ok(())
-    }
-
     /// Enqueue a message to be sent to all replicas of all shards of a domain on plan application.
     ///
     /// Like [`DomainHandle::send_to_healthy_blocking`], but includes the `domain` to which the
@@ -1161,15 +1127,10 @@ fn plan_add_nodes(
         match swapped0.entry((dst, src)) {
             Entry::Occupied(mut instead0) => {
                 if &instead != instead0.get() {
-                    // This can happen if sharding decides to add a Sharder *under* a node,
-                    // and routing decides to add an ingress/egress pair between that node
-                    // and the Sharder. It's perfectly okay, but we should prefer the
-                    // "bottommost" swap to take place (i.e., the node that is *now*
-                    // closest to the dst node). This *should* be the sharding node, unless
-                    // routing added an ingress *under* the Sharder. We resolve the
-                    // collision by looking at which translation currently has an adge from
-                    // `src`, and then picking the *other*, since that must then be node
-                    // below.
+                    // We prefer the "bottommost" swap (i.e., the node that is *now* closest
+                    // to the dst node). We resolve the collision by looking at which
+                    // translation currently has an edge from `src`, and then picking the
+                    // *other*, since that must then be the node below.
                     if dataflow_state.ingredients.find_edge(src, instead).is_some() {
                         // src -> instead -> instead0 -> [children]
                         // from [children]'s perspective, we should use instead0 for from, so
@@ -1275,8 +1236,7 @@ fn plan_add_nodes(
                 if dataflow_state.ingredients[ni].is_internal() {
                     // Figure out all the remappings that have happened
                     // NOTE: this has to be *per node*, since a shared parent may be remapped
-                    // differently to different children (due to sharding for example). we just
-                    // allocate it once though.
+                    // differently to different children. we just allocate it once though.
                     let mut node_index_mappings =
                         dataflow_state.domain_node_index_pairs[domain].clone();
 

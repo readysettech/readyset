@@ -290,9 +290,7 @@ mod test {
                     data,
                     context: ReplayPieceContext::Partial {
                         for_keys: HashSet::from([key]),
-                        requesting_shard: 0,
                         requesting_replica: 0,
-                        unishard: false,
                     },
                     cache_name: "test".into(),
                 })
@@ -603,9 +601,7 @@ mod test {
             let context = if let Some(k) = keys {
                 ReplayPieceContext::Partial {
                     for_keys: k,
-                    requesting_shard: 0,
                     requesting_replica: 0,
-                    unishard: false,
                 }
             } else {
                 ReplayPieceContext::Full {

@@ -122,10 +122,7 @@ impl<'state> Scheduler<'state> {
         domain_index: DomainIndex,
         nodes: &[NodeIndex],
     ) -> ReadySetResult<Array2<Option<WorkerIdentifier>>> {
-        let num_shards = self.dataflow_state.ingredients[nodes[0]]
-            .sharded_by()
-            .shards()
-            .unwrap_or(1);
+        let num_shards = 1;
         let num_replicas = self
             .dataflow_state
             .replication_strategy

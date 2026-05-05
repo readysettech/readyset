@@ -71,7 +71,7 @@ use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::ops::Side;
 use crate::payload::{
     self, Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
-    ReplayPieceContext, SenderReplication, SourceSelection,
+    ReplayPieceContext, SenderReplication,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -133,10 +133,7 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Index),
-    End {
-        source: SourceSelection,
-        options: Vec<ReplicaAddress>,
-    },
+    End { options: Vec<ReplicaAddress> },
     Local(Index),
 }
 
@@ -166,10 +163,9 @@ impl TriggerEndpoint {
     /// Get the trigger source/options (for End variant)
     pub fn trigger_source_options(&self) -> String {
         match self {
-            Self::End { source, options } => {
+            Self::End { options } => {
                 format!(
-                    "{:?}, options: [{}]",
-                    source,
+                    "options: [{}]",
                     options
                         .iter()
                         .map(|o| format!("Domain {}", o.domain_index.index()))
@@ -194,9 +190,8 @@ impl Debug for TriggerEndpoint {
             Self::None => write!(f, "None"),
             Self::Start(index) => f.debug_tuple("Start").field(index).finish(),
 
-            Self::End { source, options } => f
+            Self::End { options } => f
                 .debug_struct("End")
-                .field("source", source)
                 .field(
                     "options",
                     &options
@@ -224,9 +219,9 @@ struct StateLookupResult<'a> {
 
 /// Key for grouping replay misses that can be batched into a single `on_replay_misses` call.
 ///
-/// Within one `handle_replay` call, `tag`, `unishard`, `requesting_shard`, and
-/// `requesting_replica` are constant (from the replay piece context), so only `idx`,
-/// `lookup_columns`, and whether the replay key is a range vary per miss.
+/// Within one `handle_replay` call, `tag` and `requesting_replica` are constant (from the replay
+/// piece context), so only `idx`, `lookup_columns`, and whether the replay key is a range vary per
+/// miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ReplayMissGroup {
     idx: LocalNodeIndex,
@@ -327,18 +322,16 @@ impl ReplayMissCollector {
 ///
 /// **Every field MUST participate in `Hash` and `Eq`.** `Domain::handle_replay`
 /// dispatches via `waiting.holes.entry(redo).remove_entry()` and then reads
-/// `tag`, `replay_key`, `unishard`, `requesting_shard`, and
-/// `requesting_replica` from the key that `remove_entry` returns — which is
-/// the *stored* key, not the lookup key. If any field is excluded from
-/// `Hash`/`Eq` (manual impl, `derivative(Hash = "ignore")`, etc.), those reads
-/// will silently return values from a different in-flight request, mis-routing
-/// replays. If you need to ignore a field, audit `Domain::handle_replay` first.
+/// `tag`, `replay_key`, and `requesting_replica` from the key that `remove_entry`
+/// returns — which is the *stored* key, not the lookup key. If any field is
+/// excluded from `Hash`/`Eq` (manual impl, `derivative(Hash = "ignore")`, etc.),
+/// those reads will silently return values from a different in-flight request,
+/// mis-routing replays. If you need to ignore a field, audit
+/// `Domain::handle_replay` first.
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct Redo {
     tag: Tag,
     replay_key: KeyComparison,
-    unishard: bool,
-    requesting_shard: usize,
     requesting_replica: usize,
 }
 
@@ -1067,8 +1060,6 @@ impl Domain {
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
         missed_keys: HashSet<(KeyComparison, KeyComparison)>,
-        was_single_shard: bool,
-        requesting_shard: usize,
         requesting_replica: usize,
         needed_for: Tag,
         cache_name: Relation,
@@ -1095,8 +1086,6 @@ impl Domain {
             let redo = Redo {
                 tag: needed_for,
                 replay_key,
-                unishard: was_single_shard,
-                requesting_shard,
                 requesting_replica,
             };
 
@@ -1184,13 +1173,11 @@ impl Domain {
         cache_name: Relation,
     ) {
         trace!(?tag, ?keys, "sending replay request to self");
-        let (shard, replica) = (self.shard(), self.replica());
+        let replica = self.replica();
         self.delayed_for_self
             .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                 tag,
                 keys,
-                unishard: true, // local replays are necessarily single-shard
-                requesting_shard: shard,
                 requesting_replica: replica,
                 cache_name,
             }));
@@ -1208,15 +1195,12 @@ impl Domain {
         keys: Vec<KeyComparison>,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
-        let requesting_shard = self.shard();
         let requesting_replica = self.replica();
 
-        let pkt = |unishard, keys| {
+        let pkt = |keys| {
             Packet::RequestPartialReplay(RequestPartialReplay {
                 tag,
-                unishard,
                 keys,
-                requesting_shard,
                 requesting_replica,
                 cache_name: cache_name.clone(),
             })
@@ -1233,53 +1217,18 @@ impl Domain {
         pkt: P,
     ) -> ReadySetResult<()>
     where
-        P: Fn(bool, Vec<KeyComparison>) -> Packet,
+        P: Fn(Vec<KeyComparison>) -> Packet,
     {
-        let TriggerEndpoint::End {
-            source,
-            ref mut options,
-        } = self.replay_paths.get_mut(tag).unwrap().trigger
+        let TriggerEndpoint::End { ref mut options } =
+            self.replay_paths.get_mut(tag).unwrap().trigger
         else {
             internal!("asked to replay along non-existing path");
         };
 
-        let ask_shard_by_key_i = match source {
-            SourceSelection::AllShards(_) => None,
-            SourceSelection::SameShard => {
-                // note that we "ask all" here because we're not indexing the vector by the
-                // key's shard index. unipath will still be set to true though, since
-                // options.len() == 1.
-                None
-            }
-            SourceSelection::KeyShard { key_i_to_shard, .. } => Some(key_i_to_shard),
-        };
-
-        if ask_shard_by_key_i.is_none() && options.len() != 1 {
-            // source is sharded by a different key than we are doing lookups for,
-            // so we need to trigger on all the shards.
-            trace!(?tag, ?keys, "sending broadcast shard replay request");
-
-            for addr in options {
-                ex.send(*addr, pkt(false, keys.clone())); // ignore error on shutdown
-            }
-        } else if options.len() == 1 {
-            trace!(?tag, ?keys, "sending single replay request");
-            ex.send(options[0], pkt(true, keys));
-        } else if let Some(key_shard_i) = ask_shard_by_key_i {
-            trace!(?tag, ?keys, "sending sharded replay request");
-            let mut shards: HashMap<usize, Vec<_>> = HashMap::new();
-            for key in keys {
-                for shard in key.shard_keys_at(key_shard_i, options.len()) {
-                    shards.entry(shard).or_default().push(key.clone());
-                }
-            }
-            for (shard, keys) in shards {
-                ex.send(options[shard], pkt(true, keys));
-            }
-        } else {
-            // would have hit the if further up
-            internal!();
-        }
+        // sharding is gone, so there is exactly one source domain shard
+        invariant_eq!(options.len(), 1);
+        trace!(?tag, ?keys, "sending replay request");
+        ex.send(options[0], pkt(keys));
 
         Ok(())
     }
@@ -1375,7 +1324,6 @@ impl Domain {
                 misses, captured, ..
             } = n.process(
                 &mut m,
-                None,
                 None,
                 true,
                 ProcessEnv {
@@ -1510,14 +1458,7 @@ impl Domain {
 
             let childi = self.nodes[me].borrow().children()[i];
 
-            // we got the node from the children of the other node
-            let child_is_merger = self.nodes[childi].borrow().is_shard_merger();
-
-            if child_is_merger {
-                // we need to preserve the egress src (which includes shard identifier)
-            } else {
-                m.link_mut().src = me;
-            }
+            m.link_mut().src = me;
             m.link_mut().dst = childi;
 
             self.dispatch(m, executor)?;
@@ -1715,64 +1656,17 @@ impl Domain {
         Ok(None)
     }
 
-    #[inline(always)]
-    fn handle_add_sharder_tx(
-        &mut self,
-        sharder_node: LocalNodeIndex,
-        ingress_node: LocalNodeIndex,
-        target_domain: DomainIndex,
-        num_shards: usize,
-        replication: SenderReplication,
-    ) -> ReadySetResult<Option<Vec<u8>>> {
-        self.nodes
-            .get(sharder_node)
-            .ok_or_else(|| ReadySetError::NoSuchNode(sharder_node.id()))?
-            .borrow_mut()
-            .as_mut_sharder()
-            .ok_or(ReadySetError::InvalidNodeType {
-                node_index: sharder_node.id(),
-                expected_type: ErrorNodeType::Sharder,
-            })?
-            .add_sharded_child(target_domain, ingress_node, num_shards, replication);
-        Ok(None)
-    }
-
-    fn send_shards(miss: &KeyComparison, num_shards: usize) -> Vec<usize> {
-        if num_shards == 1 {
-            vec![0]
-        } else {
-            miss.shard_keys(num_shards)
-        }
-    }
-
-    fn send_up<P, S>(
-        shards: usize,
-        keys: &mut dyn Iterator<Item = KeyComparison>,
-        pkt: P,
-        mut send: S,
-    ) -> bool
+    fn send_up<P, S>(keys: &mut dyn Iterator<Item = KeyComparison>, pkt: P, mut send: S) -> bool
     where
         P: Fn(Vec<KeyComparison>) -> Packet,
-        S: FnMut(usize, Packet) -> bool,
+        S: FnMut(Packet) -> bool,
     {
-        let mut all = Vec::new();
-        let mut sharded = vec![Vec::new(); shards];
-        for (i, m) in keys.enumerate() {
-            assert!(shards == 1 || m.len() == 1);
-            for s in Self::send_shards(&m, shards) {
-                sharded[s].push(i);
-            }
-            all.push(m);
+        let all: Vec<KeyComparison> = keys.collect();
+        if all.is_empty() {
+            true
+        } else {
+            send(pkt(all))
         }
-
-        sharded.into_iter().enumerate().all(|(shard, keys)| {
-            if keys.is_empty() {
-                true
-            } else {
-                let pkt = pkt(keys.into_iter().map(|i| all[i].clone()).collect());
-                send(shard, pkt)
-            }
-        })
     }
 
     fn prepare_partial(
@@ -1954,8 +1848,8 @@ impl Domain {
                 cache_name: cache_name.clone(),
             })
         };
-        let send = |shard: usize, pkt| txs[shard].send(Ok(pkt)).is_ok();
-        Self::send_up(txs.len(), misses, pkt, send)
+        let send = |pkt| txs[0].send(Ok(pkt)).is_ok();
+        Self::send_up(misses, pkt, send)
     }
 
     fn unquery(
@@ -1972,11 +1866,11 @@ impl Domain {
                 keys,
             ))
         };
-        let send = |shard, pkt| {
-            ex.send(addrs[shard], pkt);
+        let send = |pkt| {
+            ex.send(addrs[0], pkt);
             true
         };
-        Self::send_up(addrs.len(), keys, pkt, send)
+        Self::send_up(keys, pkt, send)
     }
 
     fn prepare_partial_reader(
@@ -1984,7 +1878,6 @@ impl Domain {
         node: LocalNodeIndex,
         node_index: petgraph::graph::NodeIndex,
         num_columns: usize,
-        num_shards: usize,
         index: Index,
         trigger_domain: DomainIndex,
     ) -> ReadySetResult<()> {
@@ -2001,13 +1894,11 @@ impl Domain {
             });
         }
 
-        let addrs = (0..num_shards)
-            .map(|shard| ReplicaAddress {
-                domain_index: trigger_domain,
-                shard,
-                replica: self.replica,
-            })
-            .collect_vec();
+        let addrs = vec![ReplicaAddress {
+            domain_index: trigger_domain,
+            shard: 0,
+            replica: self.replica,
+        }];
         let txs = addrs
             .iter()
             .map(|addr| {
@@ -2127,17 +2018,11 @@ impl Domain {
             PrepareStateKind::PartialReader {
                 node_index,
                 num_columns,
-                num_shards,
                 index,
                 trigger_domain,
-            } => self.prepare_partial_reader(
-                node,
-                node_index,
-                num_columns,
-                num_shards,
-                index,
-                trigger_domain,
-            )?,
+            } => {
+                self.prepare_partial_reader(node, node_index, num_columns, index, trigger_domain)?
+            }
             PrepareStateKind::FullReader {
                 node_index,
                 num_columns,
@@ -2155,7 +2040,6 @@ impl Domain {
         source: Option<LocalNodeIndex>,
         source_index: Option<Index>,
         path: Vec1<ReplayPathSegment>,
-        partial_unicast_sharder: Option<NodeIndex>,
         notify_done: bool,
         trigger: crate::payload::TriggerEndpoint,
         replica_fanout: bool,
@@ -2184,35 +2068,16 @@ impl Domain {
             payload::TriggerEndpoint::None => TriggerEndpoint::None,
             payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
             payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
-            payload::TriggerEndpoint::End(selection, domain_index) => {
+            payload::TriggerEndpoint::End(domain_index) => {
                 // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
                 let replica = if replica_fanout { 0 } else { self.replica() };
-                let addr = |shard| ReplicaAddress {
+                let options = vec![ReplicaAddress {
                     domain_index,
-                    shard,
+                    shard: 0,
                     replica,
-                };
+                }];
 
-                let options = match selection {
-                    SourceSelection::AllShards(nshards)
-                    | SourceSelection::KeyShard { nshards, .. } => {
-                        // we may need to send to any of these shards
-                        (0..nshards).map(addr).collect::<Vec<_>>()
-                    }
-                    SourceSelection::SameShard => {
-                        vec![addr(self.shard.ok_or_else(|| {
-                            internal_err!(
-                                "Cannot use SourceSelection::SameShard for a replay path\
-                                             through an unsharded domain",
-                            )
-                        })?)]
-                    }
-                };
-
-                TriggerEndpoint::End {
-                    source: selection,
-                    options,
-                }
+                TriggerEndpoint::End { options }
             }
         };
 
@@ -2221,7 +2086,6 @@ impl Domain {
             source,
             source_index,
             path,
-            partial_unicast_sharder,
             notify_done,
             trigger,
         })?;
@@ -2748,19 +2612,6 @@ impl Domain {
                 egress_node,
                 target_node,
             } => self.handle_add_egress_filter(egress_node, target_node),
-            DomainRequest::AddSharderTx {
-                sharder_node,
-                ingress_node,
-                target_domain,
-                num_shards,
-                replication,
-            } => self.handle_add_sharder_tx(
-                sharder_node,
-                ingress_node,
-                target_domain,
-                num_shards,
-                replication,
-            ),
             DomainRequest::PrepareState { node, state } => {
                 self.handle_prepare_state(node, state, false)
             }
@@ -2772,7 +2623,6 @@ impl Domain {
                 source,
                 source_index,
                 path,
-                partial_unicast_sharder,
                 notify_done,
                 trigger,
                 replica_fanout,
@@ -2781,7 +2631,6 @@ impl Domain {
                 source,
                 source_index,
                 path,
-                partial_unicast_sharder,
                 notify_done,
                 trigger,
                 replica_fanout,
@@ -2820,7 +2669,6 @@ impl Domain {
                                 target_index: path.target_index.clone(),
                                 path: path.path.clone(),
                                 notify_done: path.notify_done,
-                                partial_unicast_sharder: path.partial_unicast_sharder,
                                 trigger: path.trigger.clone(),
                             },
                         )
@@ -2901,8 +2749,7 @@ impl Domain {
                 // recursing since we're just forwarding the message, not taking action
                 self.handle_request_eviction(ex, RequestEviction::new(tag, keys.clone()))?;
             } else {
-                let out =
-                    |_unishard, keys| Packet::RequestEviction(RequestEviction::new(tag, keys));
+                let out = |keys| Packet::RequestEviction(RequestEviction::new(tag, keys));
                 self.send_to_tag(ex, tag, keys.clone(), out)?;
             }
         }
@@ -3398,8 +3245,6 @@ impl Domain {
                 src,
                 &index.columns,
                 replay_keys,
-                pkt.unishard,
-                pkt.requesting_shard,
                 pkt.requesting_replica,
                 pkt.tag,
                 pkt.cache_name.clone(),
@@ -3415,8 +3260,6 @@ impl Domain {
                 records.into(),
                 ReplayPieceContext::Partial {
                     for_keys: found_keys,
-                    unishard: pkt.unishard, // if we are the only source, only one path
-                    requesting_shard: pkt.requesting_shard,
                     requesting_replica: pkt.requesting_replica,
                 },
                 pkt.cache_name,
@@ -3448,7 +3291,7 @@ impl Domain {
 
         let mut finished = None;
         let mut need_replay = ReplayMissCollector::default();
-        let mut replay_context: Option<(bool, usize, usize)> = None; // (unishard, requesting_shard, requesting_replica)
+        let mut replay_context: Option<usize> = None; // requesting_replica
         let mut finished_partial = 0;
 
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
@@ -3722,7 +3565,6 @@ impl Domain {
                 let process_result = n.process(
                     &mut pkt,
                     cols,
-                    Some(rp),
                     false,
                     ProcessEnv {
                         state: &mut self.state,
@@ -3848,28 +3690,20 @@ impl Domain {
 
                 // if we missed during replay, we need to do another replay
                 if let (Some(backfill_keys), false) = (&mut backfill_keys, misses.is_empty()) {
-                    // so, in theory, unishard can be changed by n.process. however, it
-                    // will only ever be changed by a union, which can't cause misses.
-                    // since we only enter this branch in the cases where we have a miss,
-                    // it is okay to assume that unishard _hasn't_ changed, and therefore
-                    // we can use the value that's in m.
-                    let (unishard, requesting_shard, requesting_replica) = if let ReplayPiece {
+                    let requesting_replica = if let ReplayPiece {
                         context:
                             ReplayPieceContext::Partial {
-                                unishard,
-                                requesting_shard,
-                                requesting_replica,
-                                ..
+                                requesting_replica, ..
                             },
                         ..
                     } = m
                     {
-                        (unishard, requesting_shard, requesting_replica)
+                        requesting_replica
                     } else {
                         internal!("backfill_keys.is_some() implies Context::Partial");
                     };
 
-                    replay_context = Some((unishard, requesting_shard, requesting_replica));
+                    replay_context = Some(requesting_replica);
 
                     need_replay.insert(misses);
 
@@ -4078,12 +3912,7 @@ impl Domain {
 
                 if i + 1 < path.len() {
                     // update link for next iteration
-                    if self.nodes[path[i + 1].node].borrow().is_shard_merger() {
-                        // we need to preserve the egress src for shard mergers
-                        // (which includes shard identifier)
-                    } else {
-                        m.link_mut().src = segment.node;
-                    }
+                    m.link_mut().src = segment.node;
                     m.link_mut().dst = path[i + 1].node;
                 }
 
@@ -4159,7 +3988,7 @@ impl Domain {
         }
 
         // Drain pre-grouped replay misses, dispatching each group as a batch
-        if let Some((unishard, requesting_shard, requesting_replica)) = replay_context {
+        if let Some(requesting_replica) = replay_context {
             for (group, misses) in need_replay.groups.drain() {
                 let cols = &need_replay.columns[group.lookup_columns];
                 trace!(%tag, ?misses, on = %group.idx, "missed during replay processing");
@@ -4169,8 +3998,6 @@ impl Domain {
                     group.idx,
                     cols,
                     misses,
-                    unishard,
-                    requesting_shard,
                     requesting_replica,
                     tag,
                     cache_name.clone(),
@@ -4257,12 +4084,7 @@ impl Domain {
                                     let (redo, _) = e.remove_entry();
                                     trace!(k = ?redo, "filled last hole, replaying");
                                     replay_sets
-                                        .entry((
-                                            redo.tag,
-                                            redo.unishard,
-                                            redo.requesting_shard,
-                                            redo.requesting_replica,
-                                        ))
+                                        .entry((redo.tag, redo.requesting_replica))
                                         .or_default()
                                         .push(redo.replay_key);
                                 } else {
@@ -4285,15 +4107,11 @@ impl Domain {
                 }
 
                 // After we actually finished sorting the Redos into batches, issue each batch
-                for ((tag, unishard, requesting_shard, requesting_replica), keys) in
-                    replay_sets.drain()
-                {
+                for ((tag, requesting_replica), keys) in replay_sets.drain() {
                     self.delayed_for_self
                         .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                             tag,
-                            unishard,
                             keys,
-                            requesting_shard,
                             requesting_replica,
                             cache_name: cache_name.clone(),
                         }));
@@ -4461,7 +4279,6 @@ impl Domain {
             // Call eviction hook on the source node
             nodes[node].borrow_mut().process_eviction(
                 node,
-                index.columns.as_slice(),
                 &keys,
                 tag,
                 shard,
@@ -4562,7 +4379,6 @@ impl Domain {
             // partial_key must be Some for partial replay paths
             nodes[segment.node].borrow_mut().process_eviction(
                 from,
-                &segment.partial_index.as_ref().unwrap().columns,
                 keys,
                 tag,
                 shard,

@@ -98,8 +98,8 @@
 //!    handles to base tables or views, or inspect the current data-flow, they end up interfacing
 //!    with a `Leader`.
 //!  - `Migration` in `src/controller/migrate/mod.rs`, which orchestrates any changes to the running
-//!    data-flow. This includes drawing domain boundaries, setting up sharding, and deciding what
-//!    nodes should have materialized state. This planning process is split into many files in the
+//!    data-flow. This includes drawing domain boundaries and deciding what nodes should have
+//!    materialized state. This planning process is split into many files in the
 //!    same directory, but the primary entry point is `Migration::commit`, which may be worth
 //!    reading top-to-bottom.
 //!  - `Packet` in `dataflow/src/payload.rs`, which holds all the possible messages that a domain
@@ -442,7 +442,6 @@ use serde::{Deserialize, Serialize};
 // ```
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {
-    pub(crate) sharding: Option<usize>,
     #[serde(default)]
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
@@ -478,7 +477,6 @@ fn default_background_recovery_interval() -> Duration {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            sharding: None,
             materialization_config: Default::default(),
             domain_config: DomainConfig {
                 aggressively_update_state_sizes: false,

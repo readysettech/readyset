@@ -57,8 +57,6 @@ pub enum ErrorNodeType {
     Egress,
     /// Reader nodes
     Reader,
-    /// Sharder nodes
-    Sharder,
 }
 
 /// General error type to be used across all of the ReadySet codebase.

@@ -44,7 +44,6 @@ impl Node {
         &mut self,
         m: &mut Option<Packet>,
         keyed_by: Option<&Vec<usize>>,
-        replay_path: Option<&crate::domain::ReplayPath>,
         publish_reader: bool,
         env: ProcessEnv,
     ) -> ReadySetResult<NodeProcessingResult> {
@@ -159,16 +158,6 @@ impl Node {
                     env.executor,
                 )?;
             }
-            NodeType::Sharder(ref mut s) => {
-                s.process(
-                    m,
-                    addr,
-                    env.shard.is_some(),
-                    replay_path.and_then(|rp| rp.partial_unicast_sharder.map(|ni| ni == gaddr)),
-                    env.replica,
-                    env.executor,
-                )?;
-            }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
                 let mut captured = HashSet::new();
@@ -186,9 +175,7 @@ impl Node {
                             context:
                                 payload::ReplayPieceContext::Partial {
                                     ref for_keys,
-                                    requesting_shard,
                                     requesting_replica,
-                                    unishard,
                                 },
                             ..
                         }) => {
@@ -196,9 +183,7 @@ impl Node {
                             trace!(
                                 ?data,
                                 ?for_keys,
-                                requesting_shard,
                                 requesting_replica,
-                                unishard,
                                 %tag,
                                 "received partial replay"
                             );
@@ -207,9 +192,7 @@ impl Node {
                                 ReplayContext::Partial {
                                     key_cols: keyed_by.unwrap(),
                                     keys: for_keys,
-                                    requesting_shard,
                                     requesting_replica,
-                                    unishard,
                                     tag,
                                 },
                             )
@@ -299,38 +282,6 @@ impl Node {
                             unreachable!("only a ReplayPiece can release a ReplayPiece")
                         }
                     }
-
-                    if let Packet::ReplayPiece(ReplayPiece {
-                        context:
-                            payload::ReplayPieceContext::Partial {
-                                ref mut unishard, ..
-                            },
-                        ..
-                    }) = *m
-                    {
-                        // hello, it's me again.
-                        //
-                        // on every replay path, there are some number of shard mergers, and
-                        // some number of sharders.
-                        //
-                        // if the source of a replay is sharded, and the upquery key matches
-                        // the sharding key, then only the matching shard of the source will be
-                        // queried. in that case, the next shard merger (if there is one)
-                        // shouldn't wait for replays from other shards, since none will
-                        // arrive. the same is not true for any _subsequent_ shard mergers
-                        // though, since sharders along a replay path send to _all_ shards
-                        // (modulo the last one if the destination is sharded, but then there
-                        // is no shard merger after it).
-                        //
-                        // to ensure that this is in fact what happens, we need to _unset_
-                        // unishard once we've passed the first shard merger, so that it is not
-                        // propagated to subsequent unions.
-                        if let NodeOperator::Union(ref u) = i {
-                            if u.is_shard_merger() {
-                                *unishard = false;
-                            }
-                        }
-                    }
                 }
 
                 if captured_full {
@@ -382,7 +333,6 @@ impl Node {
     pub(crate) fn process_eviction(
         &mut self,
         from: LocalNodeIndex,
-        key_columns: &[usize],
         keys: &[KeyComparison],
         tag: Tag,
         on_shard: Option<usize>,
@@ -414,17 +364,6 @@ impl Node {
                     })),
                     None,
                     on_shard.unwrap_or(0),
-                    on_replica,
-                    ex,
-                )?;
-            }
-            NodeType::Sharder(ref mut s) => {
-                s.process_eviction(
-                    key_columns,
-                    tag,
-                    keys,
-                    addr,
-                    on_shard.is_some(),
                     on_replica,
                     ex,
                 )?;

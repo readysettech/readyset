@@ -28,7 +28,7 @@ use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::prelude::{ChannelCoordinator, DomainIndex, DomainNodes, Graph, NodeIndex};
 use dataflow::{
     BaseTableState, DomainBuilder, DomainConfig, DomainRequest, DurabilityMode, NodeMap, Packet,
-    PersistenceParameters, Sharding,
+    PersistenceParameters,
 };
 use failpoint_macros::set_failpoint;
 use futures::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
@@ -122,7 +122,6 @@ pub struct DfState {
     /// when domains are reclaimed via [`Self::reclaim_orphaned_domains`]; `next_domain()` always
     /// hands out a new index.
     pub(super) ndomains: usize,
-    pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
 
@@ -186,7 +185,6 @@ impl DfState {
         ingredients: Graph,
         source: NodeIndex,
         ndomains: usize,
-        sharding: Option<usize>,
         domain_config: DomainConfig,
         persistence: PersistenceParameters,
         materializations: Materializations,
@@ -200,7 +198,6 @@ impl DfState {
             ingredients,
             source,
             ndomains,
-            sharding,
             domain_config,
             persistence,
             materializations,
@@ -393,11 +390,11 @@ impl DfState {
         name: &Relation,
         filter: &Option<ViewFilter>,
     ) -> Option<NodeIndex> {
-        // reader should be a child of the given node. however, due to sharding, it may not be an
-        // *immediate* child. furthermore, once we go beyond depth 1, we may accidentally hit an
-        // *unrelated* reader node. to account for this, readers keep track of what node they are
-        // "for", and we simply search for the appropriate reader by that metric. since we know
-        // that the reader must be relatively close, a BFS search is the way to go.
+        // reader should be a child of the given node. once we go beyond depth 1, we may
+        // accidentally hit an *unrelated* reader node. to account for this, readers keep track of
+        // what node they are "for", and we simply search for the appropriate reader by that
+        // metric. since we know that the reader must be relatively close, a BFS search is the way
+        // to go.
         let mut bfs = Bfs::new(&self.ingredients, node);
         while let Some(child) = bfs.next(&self.ingredients) {
             if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
@@ -647,7 +644,7 @@ impl DfState {
 
         trace!(base = %base.display_unquoted(), "creating table");
 
-        let mut key = node
+        let key = node
             .get_base()
             .ok_or_else(|| ReadySetError::InvalidNodeType {
                 node_index: node.local_addr().id(),
@@ -657,14 +654,7 @@ impl DfState {
             .map(|k| k.to_owned())
             .unwrap_or_default();
 
-        let mut is_primary = false;
-        if key.is_empty() {
-            if let Sharding::ByColumn(col, _) = node.sharded_by() {
-                key = vec![col];
-            }
-        } else {
-            is_primary = true;
-        }
+        let is_primary = !key.is_empty();
 
         let domain =
             self.domains
@@ -1230,8 +1220,7 @@ impl DfState {
                     .flatten()
             });
         for (node_index, count) in flat_counts {
-            // We may have multiple entries for the same node in the case of sharding, so this code
-            // adds together the key counts for any duplicate nodes we come across:
+            // Multiple replicas may report counts for the same node; sum them together.
             res.entry(node_index)
                 .and_modify(|s| *s += count)
                 .or_insert(count);
@@ -1818,7 +1807,7 @@ impl DfState {
     }
 
     /// Reset the dataflow state to empty, removing all base tables, caches, views, and domain
-    /// state. Preserves configuration (dialect, sql/mir config, persistence, sharding, etc.).
+    /// state. Preserves configuration (dialect, sql/mir config, persistence, etc.).
     ///
     /// This bypasses the migration system entirely because no domains are running at this point
     /// (called on startup before worker recovery).
@@ -1846,7 +1835,6 @@ impl DfState {
             g,
             source,
             0,
-            self.sharding,
             self.domain_config.clone(),
             self.persistence.clone(),
             materializations,

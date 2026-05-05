@@ -44,7 +44,6 @@ pub enum DuplicateMode {
 #[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum Emit {
-    AllFrom(IndexPair, Sharding),
     Project {
         #[serde_as(as = "Vec<(_, _)>")]
         emit: HashMap<IndexPair, Vec<usize>>,
@@ -153,46 +152,36 @@ fn process_records(
     emit: &Emit,
     bag_union_state: Option<&mut BagUnionState>,
 ) -> ReadySetResult<Records> {
-    let mut results = match emit {
-        Emit::AllFrom(..) => rs,
-        Emit::Project { emit_l, .. } => {
-            rs.into_iter()
-                .map(move |rec| {
-                    let (r, pos) = rec.extract();
+    let Emit::Project { emit_l, .. } = emit;
+    let mut results: Records = rs
+        .into_iter()
+        .map(move |rec| {
+            let (r, pos) = rec.extract();
 
-                    // yield selected columns for this source
-                    // TODO: if emitting all in same order then avoid clone
-                    let res = emit_l[&from].iter().map(|&col| r[col].clone()).collect();
+            // yield selected columns for this source
+            // TODO: if emitting all in same order then avoid clone
+            let res = emit_l[&from].iter().map(|&col| r[col].clone()).collect();
 
-                    // return new row with appropriate sign
-                    if pos {
-                        Record::Positive(res)
-                    } else {
-                        Record::Negative(res)
-                    }
-                })
-                .collect()
-        }
-    };
+            // return new row with appropriate sign
+            if pos {
+                Record::Positive(res)
+            } else {
+                Record::Negative(res)
+            }
+        })
+        .collect();
 
     if let Some(bus) = bag_union_state {
-        if let Some(parent) = match emit {
-            Emit::Project { cols_l, .. } => {
-                let first_parent = cols_l.keys().next().ok_or_else(|| {
-                    internal_err!(
-                        "Union node with DuplicateMode::BagUnion must have exactly 2 parents",
-                    )
-                })?;
-                if from == *first_parent {
-                    Some(Side::Left)
-                } else {
-                    Some(Side::Right)
-                }
-            }
-            _ => None,
-        } {
-            results.retain(|rec| bus.process(parent, rec));
-        }
+        let Emit::Project { cols_l, .. } = emit;
+        let first_parent = cols_l.keys().next().ok_or_else(|| {
+            internal_err!("Union node with DuplicateMode::BagUnion must have exactly 2 parents",)
+        })?;
+        let parent = if from == *first_parent {
+            Side::Left
+        } else {
+            Side::Right
+        };
+        results.retain(|rec| bus.process(parent, rec));
     }
 
     Ok(results)
@@ -203,7 +192,6 @@ fn process_records(
 pub struct BufferedReplayKey {
     tag: Tag,
     key: KeyComparison,
-    requesting_shard: usize,
     requesting_replica: usize,
 }
 
@@ -226,7 +214,6 @@ impl Ord for BufferedReplayKey {
                         .then_with(|| cmp_endbound(u.as_ref().into(), Bound::Included(k).into()))
                 }
             })
-            .then_with(|| self.requesting_shard.cmp(&other.requesting_shard))
             .then_with(|| self.requesting_replica.cmp(&other.requesting_replica))
     }
 }
@@ -256,8 +243,8 @@ pub struct Union {
     /// Stored as a btreemap so that when we iterate, we first get all the replays of one tag, then
     /// all the records of another tag, etc. This lets us avoid looking up info related to the same
     /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
-    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_shard`] and
-    /// [`BufferedReplayKey::requesting_replica`] if we do find a key match for an update.
+    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_replica`] if we
+    /// do find a key match for an update.
     // We skip any state when serializing, as we will deserialize when recovering.
     #[serde(skip)]
     replay_pieces: BTreeMap<BufferedReplayKey, ReplayPieces>,
@@ -382,32 +369,12 @@ impl Union {
             me: None,
         })
     }
-
-    /// Construct a new union operator meant to de-shard a sharded data-flow subtree.
-    pub fn new_deshard(parent: NodeIndex, sharding: Sharding) -> Union {
-        let shards = sharding.shards().unwrap();
-        Union {
-            emit: Emit::AllFrom(parent.into(), sharding),
-            bag_union_state: None,
-            required: shards,
-            replay_key: Default::default(),
-            replay_pieces: Default::default(),
-            full_wait_state: Default::default(),
-            me: None,
-        }
-    }
-
-    pub fn is_shard_merger(&self) -> bool {
-        matches!(self.emit, Emit::AllFrom(..))
-    }
 }
 
 impl Ingredient for Union {
     fn ancestors(&self) -> Vec<NodeIndex> {
-        match self.emit {
-            Emit::AllFrom(p, _) => vec![p.as_global()],
-            Emit::Project { ref emit, .. } => emit.keys().map(IndexPair::as_global).collect(),
-        }
+        let Emit::Project { ref emit, .. } = self.emit;
+        emit.keys().map(IndexPair::as_global).collect()
     }
 
     fn probe(&self) -> HashMap<String, String> {
@@ -417,71 +384,55 @@ impl Ingredient for Union {
     }
 
     fn on_connected(&mut self, g: &Graph) {
-        if let Emit::Project {
+        let Emit::Project {
             ref mut cols,
             ref emit,
             ..
-        } = self.emit
-        {
-            cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].columns().len())));
-        }
+        } = self.emit;
+        cols.extend(emit.keys().map(|&n| (n, g[n.as_global()].columns().len())));
     }
 
     fn replace_sibling(&mut self, from_idx: NodeIndex, to_idx: NodeIndex) {
-        match &mut self.emit {
-            Emit::AllFrom(p, _) => {
-                if p.as_global() == from_idx {
-                    *p = to_idx.into();
-                }
-            }
-            Emit::Project {
-                emit,
-                emit_l: _,
-                cols,
-                cols_l: _,
-            } => {
-                if let Some(val) = emit.remove(&from_idx.into()) {
-                    emit.insert(to_idx.into(), val);
-                }
-                if let Some(val) = cols.remove(&from_idx.into()) {
-                    cols.insert(to_idx.into(), val);
-                }
-            }
+        let Emit::Project {
+            emit,
+            emit_l: _,
+            cols,
+            cols_l: _,
+        } = &mut self.emit;
+        if let Some(val) = emit.remove(&from_idx.into()) {
+            emit.insert(to_idx.into(), val);
+        }
+        if let Some(val) = cols.remove(&from_idx.into()) {
+            cols.insert(to_idx.into(), val);
         }
     }
 
     fn on_commit(&mut self, me: NodeIndex, remap: &HashMap<NodeIndex, IndexPair>) {
         self.me = Some(me);
-        match self.emit {
-            Emit::Project {
-                ref mut emit,
-                ref mut cols,
-                ref mut emit_l,
-                ref mut cols_l,
-            } => {
-                let mapped_emit = emit
-                    .drain()
-                    .map(|(mut k, v)| {
-                        k.remap(remap);
-                        emit_l.insert(*k, v.clone());
-                        (k, v)
-                    })
-                    .collect();
-                let mapped_cols = cols
-                    .drain()
-                    .map(|(mut k, v)| {
-                        k.remap(remap);
-                        cols_l.insert(*k, v);
-                        (k, v)
-                    })
-                    .collect();
-                *emit = mapped_emit;
-                *cols = mapped_cols;
-            }
-            Emit::AllFrom(ref mut p, _) => {
-                p.remap(remap);
-            }
-        }
+        let Emit::Project {
+            ref mut emit,
+            ref mut cols,
+            ref mut emit_l,
+            ref mut cols_l,
+        } = self.emit;
+        let mapped_emit = emit
+            .drain()
+            .map(|(mut k, v)| {
+                k.remap(remap);
+                emit_l.insert(*k, v.clone());
+                (k, v)
+            })
+            .collect();
+        let mapped_cols = cols
+            .drain()
+            .map(|(mut k, v)| {
+                k.remap(remap);
+                cols_l.insert(*k, v);
+                (k, v)
+            })
+            .collect();
+        *emit = mapped_emit;
+        *cols = mapped_cols;
     }
 
     fn on_input(
@@ -512,10 +463,6 @@ impl Ingredient for Union {
     ) -> ReadySetResult<RawProcessingResult> {
         use std::mem;
 
-        // NOTE: in the special case of us being a shard merge node (i.e., when
-        // self.emit.is_empty()), `from` will *actually* hold the shard index of
-        // the sharded egress that sent us this record. this should make everything
-        // below just work out.
         match replay {
             ReplayContext::None => {
                 // Have any tags currently absorbed a full replay?
@@ -601,12 +548,7 @@ impl Ingredient for Union {
                 let mut replay_key = None;
                 let mut last_tag = None;
 
-                let rkey_from = if let Emit::AllFrom(..) = self.emit {
-                    // from is the shard index
-                    0
-                } else {
-                    from.id()
-                };
+                let rkey_from = from.id();
 
                 for (
                     &BufferedReplayKey {
@@ -656,8 +598,8 @@ impl Ingredient for Union {
                         buffered.push(r.clone());
 
                         // it'd be nice if we could avoid doing this exact same key check multiple
-                        // times if the same key is being replayed by multiple `(requesting_shard,
-                        // requesting_replica)`s.
+                        // times if the same key is being replayed by multiple
+                        // `requesting_replica`s.
                         // in theory, the btreemap could let us do this by walking forward in the
                         // iterator until we hit the next key or tag, and the rewinding back to
                         // where we were before continuing to the same record. but that won't work
@@ -818,53 +760,26 @@ impl Ingredient for Union {
             ReplayContext::Partial {
                 key_cols,
                 keys,
-                requesting_shard,
                 requesting_replica,
-                unishard,
                 tag,
             } => {
-                let mut is_shard_merger = false;
-                if let Emit::AllFrom(_, _) = self.emit {
-                    if unishard {
-                        // No need to buffer since request should only be for one shard
-                        invariant!(self.replay_pieces.is_empty());
-                        return Ok(RawProcessingResult::ReplayPiece {
-                            rows: rs,
-                            keys: keys.iter().cloned().collect(),
-                            captured: HashSet::new(),
-                        });
-                    }
-                    is_shard_merger = true;
-                }
-
-                let rkey_from = if let Emit::AllFrom(..) = self.emit {
-                    // from is the shard index
-                    0
-                } else {
-                    from.id()
-                };
+                let rkey_from = from.id();
 
                 use std::collections::hash_map::Entry;
                 if let Entry::Vacant(v) = self.replay_key.entry((tag, rkey_from)) {
                     // the replay key is for our *output* column
                     // which might translate to different columns in our inputs
-                    match self.emit {
-                        Emit::AllFrom(..) => {
-                            v.insert(Vec::from(key_cols));
-                        }
-                        Emit::Project { ref emit_l, .. } => {
-                            let emit = &emit_l[&from];
-                            v.insert(key_cols.iter().map(|&c| emit[c]).collect());
+                    let Emit::Project { ref emit_l, .. } = self.emit;
+                    let emit = &emit_l[&from];
+                    v.insert(key_cols.iter().map(|&c| emit[c]).collect());
 
-                            // Also insert for all the other sources while we're at it
-                            for (&src, emit) in emit_l {
-                                if src != from {
-                                    self.replay_key.insert(
-                                        (tag, src.id()),
-                                        key_cols.iter().map(|&c| emit[c]).collect(),
-                                    );
-                                }
-                            }
+                    // Also insert for all the other sources while we're at it
+                    for (&src, emit) in emit_l {
+                        if src != from {
+                            self.replay_key.insert(
+                                (tag, src.id()),
+                                key_cols.iter().map(|&c| emit[c]).collect(),
+                            );
                         }
                     }
                 } else {
@@ -912,28 +827,18 @@ impl Ingredient for Union {
                             match replay_pieces_tmp.entry(BufferedReplayKey {
                                 tag,
                                 key: key.clone(),
-                                requesting_shard,
                                 requesting_replica
                             }) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
                                         // This is a serious problem if we get two upquery
-                                        // responses for the same key for the same downstream
-                                        // shards. In this case we should panic with a stacktrace
+                                        // responses for the same key from the same parent.
+                                        // In this case we should panic with a stacktrace
                                         // to diagnose how this could have possibly happened.
                                         unimplemented!(
-                                            // got two upquery responses for the same key for the same
-                                            // downstream shard. waaaaaaat?
-                                            "downstream shard double-requested key (node: {}, src: {}, key cols: {:?})",
+                                            "double-requested key (node: {}, src: node {}, key cols: {:?})",
                                             me.unwrap().index(),
-                                            if is_shard_merger {
-                                                format!("shard {}", from.id())
-                                            } else {
-                                                format!(
-                                                    "node {}",
-                                                    n[from].borrow().global_addr().index()
-                                                )
-                                            },
+                                            n[from].borrow().global_addr().index(),
                                             key_cols,
                                         );
                                     }
@@ -1015,12 +920,10 @@ impl Ingredient for Union {
                 BufferedReplayKey {
                     tag,
                     key: key.clone(),
-                    requesting_shard: 0,
                     requesting_replica: 0,
                 }..=BufferedReplayKey {
                     tag,
                     key: key.clone(),
-                    requesting_shard: usize::MAX,
                     requesting_replica: usize::MAX,
                 },
             ) {
@@ -1053,44 +956,38 @@ impl Ingredient for Union {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        match self.emit {
-            Emit::AllFrom(p, _) => ColumnSource::exact_copy(p.as_global(), cols.into()),
-            Emit::Project { ref emit, .. } => ColumnSource::Union(
-                emit.iter()
-                    .map(|(src, emit)| ColumnRef {
-                        node: src.as_global(),
-                        columns: cols.iter().map(|&idx| emit[idx]).collect::<Vec<_>>(),
-                    })
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap(),
-            ),
-        }
+        let Emit::Project { ref emit, .. } = self.emit;
+        ColumnSource::Union(
+            emit.iter()
+                .map(|(src, emit)| ColumnRef {
+                    node: src.as_global(),
+                    columns: cols.iter().map(|&idx| emit[idx]).collect::<Vec<_>>(),
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
     }
 
     fn description(&self) -> String {
         // Ensure we get a consistent output by sorting.
-        match self.emit {
-            Emit::AllFrom(..) => "⊍".to_string(),
-            Emit::Project { ref emit, .. } => {
-                let symbol = if self.bag_union_state.is_none() {
-                    '⋃' // DuplicateMode::UnionAll
-                } else {
-                    '⊎' // DuplicateMode::BagUnion
-                };
-                emit.iter()
-                    .sorted()
-                    .map(|(src, emit)| {
-                        let cols = emit
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        format!("{}:[{}]", src.as_global().index(), cols)
-                    })
-                    .join(&format!(" {symbol} "))
-            }
-        }
+        let Emit::Project { ref emit, .. } = self.emit;
+        let symbol = if self.bag_union_state.is_none() {
+            '⋃' // DuplicateMode::UnionAll
+        } else {
+            '⊎' // DuplicateMode::BagUnion
+        };
+        emit.iter()
+            .sorted()
+            .map(|(src, emit)| {
+                let cols = emit
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}:[{}]", src.as_global().index(), cols)
+            })
+            .join(&format!(" {symbol} "))
     }
 }
 
@@ -1195,10 +1092,8 @@ mod tests {
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
-                requesting_shard: 0,
                 requesting_replica: 0,
                 tag,
-                unishard: true,
             };
 
             // point-key replay on the left
@@ -1257,10 +1152,8 @@ mod tests {
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
-                requesting_shard: 0,
                 requesting_replica: 0,
                 tag,
-                unishard: true,
             };
 
             // replay on the left

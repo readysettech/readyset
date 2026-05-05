@@ -108,8 +108,6 @@ pub struct Node {
     taken: bool,
 
     pub purge: bool,
-
-    sharded_by: Sharding,
 }
 
 // constructors
@@ -132,8 +130,6 @@ impl Node {
             taken: false,
 
             purge: false,
-
-            sharded_by: Sharding::None,
         }
     }
 
@@ -366,7 +362,6 @@ impl Node {
             | NodeType::Base(_)
             | NodeType::Constant(_)
             | NodeType::Egress(_)
-            | NodeType::Sharder(_)
             | NodeType::Reader(_)
             | NodeType::Source
             | NodeType::Dropped => None,
@@ -382,15 +377,6 @@ impl Node {
 
     pub fn columns(&self) -> &[Column] {
         &self.columns[..]
-    }
-
-    pub fn sharded_by(&self) -> Sharding {
-        self.sharded_by
-    }
-
-    /// Set this node's sharding property.
-    pub fn shard_by(&mut self, s: Sharding) {
-        self.sharded_by = s;
     }
 
     /// Returns the node's inner NodeType as a String.
@@ -425,15 +411,6 @@ impl Node {
 
 // derefs
 impl Node {
-    /// If this node is a [`special::Sharder`], return a reference to that sharder, otherwise return
-    /// None
-    pub fn as_sharder(&self) -> Option<&special::Sharder> {
-        match &self.inner {
-            NodeType::Sharder(r) => Some(r),
-            _ => None,
-        }
-    }
-
     /// If this node is a [`Internal`], return a reference to the operator, otherwise return
     /// None
     pub fn as_internal(&self) -> Option<&ops::NodeOperator> {
@@ -448,15 +425,6 @@ impl Node {
     pub fn as_mut_internal(&mut self) -> Option<&mut ops::NodeOperator> {
         match &mut self.inner {
             NodeType::Internal(i) if !self.taken => Some(i),
-            _ => None,
-        }
-    }
-
-    /// If this node is a [`special::Sharder`], return a mutable reference to that sharder,
-    /// otherwise return None
-    pub fn as_mut_sharder(&mut self) -> Option<&mut special::Sharder> {
-        match &mut self.inner {
-            NodeType::Sharder(r) => Some(r),
             _ => None,
         }
     }
@@ -661,7 +629,7 @@ impl Node {
     }
 
     pub fn is_sender(&self) -> bool {
-        matches!(self.inner, NodeType::Egress { .. } | NodeType::Sharder(..))
+        matches!(self.inner, NodeType::Egress { .. })
     }
 
     pub fn is_internal(&self) -> bool {
@@ -674,10 +642,6 @@ impl Node {
     /// itself — see [`is_source`](Self::is_source) for base tables and constants.
     pub fn is_graph_root(&self) -> bool {
         matches!(self.inner, NodeType::Source)
-    }
-
-    pub fn is_sharder(&self) -> bool {
-        matches!(self.inner, NodeType::Sharder { .. })
     }
 
     /// Returns `true` if self is fully materialized.
@@ -711,13 +675,5 @@ impl Node {
 
     pub fn is_union(&self) -> bool {
         matches!(self.inner, NodeType::Internal(NodeOperator::Union(_)))
-    }
-
-    pub fn is_shard_merger(&self) -> bool {
-        if let NodeType::Internal(NodeOperator::Union(ref u)) = self.inner {
-            u.is_shard_merger()
-        } else {
-            false
-        }
     }
 }
