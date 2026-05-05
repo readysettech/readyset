@@ -527,6 +527,15 @@ impl ControllerEventsClient {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+    use std::net::SocketAddr;
+
+    use axum::body::{Body, Bytes};
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    use axum::Router;
+    use futures_util::stream;
+
     use super::*;
 
     /// Validates that the background task exits when all receivers are dropped,
@@ -592,6 +601,43 @@ mod tests {
             .expect("failed to build reqwest client")
     }
 
+    /// Whether the test SSE stream closes after the first event or stalls open indefinitely.
+    #[derive(Clone, Copy)]
+    enum StreamClose {
+        /// Send the event and then close the stream (response body ends).
+        AfterFirst,
+        /// Send the event and then keep the body open without sending anything else, so the
+        /// client's body-chunk timeout is what eventually breaks the connection.
+        Stall,
+    }
+
+    /// Spawn an axum server on a random local port that responds to `GET /events/stream` with the
+    /// given pre-formatted SSE bytes. Returns the server's bound address.
+    async fn spawn_sse_test_server(event: &'static str, close: StreamClose) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let handler = move || async move {
+            let item = Ok::<Bytes, Infallible>(Bytes::from_static(event.as_bytes()));
+            let body = match close {
+                StreamClose::AfterFirst => Body::from_stream(stream::iter(vec![item])),
+                StreamClose::Stall => Body::from_stream(
+                    stream::iter(vec![item]).chain(stream::pending::<Result<Bytes, Infallible>>()),
+                ),
+            };
+            ([("Content-Type", "text/event-stream")], body).into_response()
+        };
+
+        let app = Router::new().route("/events/stream", get(handler));
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        addr
+    }
+
     /// response_timeout fires when the server accepts TCP but never sends headers.
     ///
     /// Uses real (not paused) time with a short timeout so we don't have to fight
@@ -639,42 +685,14 @@ mod tests {
     ///
     /// Uses real (not paused) time with a short timeout so we don't have to fight
     /// `start_paused = true` auto-advancing past the TCP connect deadline before
-    /// the real hyper I/O completes.
+    /// the real I/O completes.
     #[tokio::test]
     async fn test_body_chunk_timeout_on_stalled_stream() {
-        use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Body, Response, Server};
-
-        let make_svc = make_service_fn(move |_| async move {
-            Ok::<_, hyper::Error>(service_fn(move |_req| async move {
-                // Build a streaming body: one SSE heartbeat, then stall forever.
-                let (mut body_tx, body) = Body::channel();
-                tokio::spawn(async move {
-                    let event = "event: Heartbeat\ndata: \"Heartbeat\"\n\n";
-                    body_tx.send_data(event.into()).await.ok();
-                    // Hold body_tx open so the stream stays alive but idle.
-                    futures_util::future::pending::<()>().await;
-                });
-
-                Ok::<_, hyper::Error>(
-                    Response::builder()
-                        .status(200)
-                        .header("Content-Type", "text/event-stream")
-                        .body(body)
-                        .expect("response"),
-                )
-            }))
-        });
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("local_addr");
-        let server = Server::from_tcp(listener.into_std().expect("into_std"))
-            .expect("server")
-            .serve(make_svc);
-        tokio::spawn(server);
-
+        let addr = spawn_sse_test_server(
+            "event: Heartbeat\ndata: \"Heartbeat\"\n\n",
+            StreamClose::Stall,
+        )
+        .await;
         let url = Url::parse(&format!("http://{addr}/events/stream")).expect("url");
         let base_url = Url::parse(&format!("http://{addr}")).expect("base url");
         let (events_tx, _rx) = broadcast::channel(16);
@@ -721,36 +739,11 @@ mod tests {
     /// Verifies that a LeaderLost SSE event clears the cached URL and triggers reconnect.
     #[tokio::test]
     async fn test_leader_lost_clears_url_and_reconnects() {
-        use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Body, Response, Server};
-
-        let make_svc = make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(service_fn(|_req| async {
-                let (mut body_tx, body) = Body::channel();
-                tokio::spawn(async move {
-                    let event = "event: LeaderLost\ndata: \"LeaderLost\"\n\n";
-                    body_tx.send_data(event.into()).await.ok();
-                    // Close the stream after sending
-                });
-
-                Ok::<_, hyper::Error>(
-                    Response::builder()
-                        .status(200)
-                        .header("Content-Type", "text/event-stream")
-                        .body(body)
-                        .expect("response"),
-                )
-            }))
-        });
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("local_addr");
-        let server = Server::from_tcp(listener.into_std().expect("into_std"))
-            .expect("server")
-            .serve(make_svc);
-        tokio::spawn(server);
+        let addr = spawn_sse_test_server(
+            "event: LeaderLost\ndata: \"LeaderLost\"\n\n",
+            StreamClose::AfterFirst,
+        )
+        .await;
 
         let base_url = Url::parse(&format!("http://{addr}")).expect("base url");
         let url = Url::parse(&format!("http://{addr}/events/stream")).expect("url");
@@ -792,35 +785,11 @@ mod tests {
     /// Verifies that LeaderLost returns Ok(false) when all receivers are dropped.
     #[tokio::test]
     async fn test_leader_lost_stops_when_no_receivers() {
-        use hyper::service::{make_service_fn, service_fn};
-        use hyper::{Body, Response, Server};
-
-        let make_svc = make_service_fn(|_| async {
-            Ok::<_, hyper::Error>(service_fn(|_req| async {
-                let (mut body_tx, body) = Body::channel();
-                tokio::spawn(async move {
-                    let event = "event: LeaderLost\ndata: \"LeaderLost\"\n\n";
-                    body_tx.send_data(event.into()).await.ok();
-                });
-
-                Ok::<_, hyper::Error>(
-                    Response::builder()
-                        .status(200)
-                        .header("Content-Type", "text/event-stream")
-                        .body(body)
-                        .expect("response"),
-                )
-            }))
-        });
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("local_addr");
-        let server = Server::from_tcp(listener.into_std().expect("into_std"))
-            .expect("server")
-            .serve(make_svc);
-        tokio::spawn(server);
+        let addr = spawn_sse_test_server(
+            "event: LeaderLost\ndata: \"LeaderLost\"\n\n",
+            StreamClose::AfterFirst,
+        )
+        .await;
 
         let base_url = Url::parse(&format!("http://{addr}")).expect("base url");
         let url = Url::parse(&format!("http://{addr}/events/stream")).expect("url");

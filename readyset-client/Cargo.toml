@@ -86,7 +86,7 @@ schema-catalog = { path = "../schema-catalog" }
 tournament-kway = { path = "../tournament-kway" }
 
 [dev-dependencies]
-hyper = { workspace = true, features = ["server", "http1", "tcp", "stream", "runtime"] }
+axum = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
 test-utils = { path = "../test-utils" }
