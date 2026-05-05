@@ -43,7 +43,6 @@ fail = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
-hyper = { workspace = true, features = ["stream", "server", "http1", "client", "tcp"] }
 indexmap = { workspace = true }
 itertools = { workspace = true }
 lazy_static = { workspace = true }

@@ -5,9 +5,6 @@ use std::sync::Arc;
 use std::sync::{PoisonError, RwLock};
 use std::time::Duration;
 
-use hyper::body::{aggregate, Buf};
-use hyper::header::HeaderValue;
-use hyper::{Body, Client, Method, Request, Uri};
 use indexmap::IndexMap;
 use metrics::HistogramFn;
 use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
@@ -504,28 +501,10 @@ impl PrometheusHandle {
 
 #[derive(Clone)]
 struct PushGateway {
-    endpoint: Uri,
+    endpoint: String,
     interval: Duration,
     username: Option<String>,
     password: Option<String>,
-}
-
-fn basic_auth(username: &str, password: Option<&str>) -> HeaderValue {
-    use base64::prelude::BASE64_STANDARD;
-    use base64::write::EncoderWriter;
-    use std::io::Write;
-
-    let mut buf = b"Basic ".to_vec();
-    {
-        let mut encoder = EncoderWriter::new(&mut buf, &BASE64_STANDARD);
-        let _ = write!(encoder, "{username}:");
-        if let Some(password) = password {
-            let _ = write!(encoder, "{password}");
-        }
-    }
-    let mut header = HeaderValue::from_bytes(&buf).expect("base64 is always valid HeaderValue");
-    header.set_sensitive(true);
-    header
 }
 
 fn exporter(
@@ -533,47 +512,29 @@ fn exporter(
     username: Option<String>,
     password: Option<String>,
     interval: Duration,
-    endpoint: Uri,
+    endpoint: String,
 ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send>>> {
     Box::pin(async move {
-        let client = Client::new();
-        let auth = username
-            .as_ref()
-            .map(|name| basic_auth(name, password.as_deref()));
+        let client = reqwest::Client::new();
 
         loop {
             // Sleep for `interval` amount of time, and then do a push.
             tokio::time::sleep(interval).await;
 
-            let mut builder = Request::builder();
-            if let Some(auth) = &auth {
-                builder = builder.header("authorization", auth.clone());
+            let output = handle.render();
+            let mut req = client.put(&endpoint).body(output);
+            if let Some(name) = &username {
+                req = req.basic_auth(name, password.as_ref());
             }
 
-            let output = handle.render();
-            let result = builder
-                .method(Method::PUT)
-                .uri(endpoint.clone())
-                .body(Body::from(output));
-            let req = match result {
-                Ok(req) => req,
-                Err(e) => {
-                    error!("failed to build push gateway request: {}", e);
-                    continue;
-                }
-            };
-
-            match client.request(req).await {
+            match req.send().await {
                 Ok(response) => {
                     if !response.status().is_success() {
                         let status = response.status();
                         let status = status.canonical_reason().unwrap_or_else(|| status.as_str());
-                        let body = aggregate(response.into_body()).await;
-                        let body = body
-                            .map_err(|_| ())
-                            .map(|mut b| b.copy_to_bytes(b.remaining()))
-                            .map(|b| b[..].to_vec())
-                            .and_then(|s| String::from_utf8(s).map_err(|_| ()))
+                        let body = response
+                            .text()
+                            .await
                             .unwrap_or_else(|_| String::from("<failed to read response body>"));
                         error!(
                             message = "unexpected status after pushing metrics to push gateway",
@@ -619,9 +580,11 @@ impl PrometheusBuilder {
     where
         T: AsRef<str>,
     {
+        // Validate the URL up front so misconfiguration is detected at startup
+        reqwest::Url::parse(endpoint.as_ref())
+            .map_err(|e| BuildError::InvalidPushGatewayEndpoint(e.to_string()))?;
         self.push_gateway = Some(PushGateway {
-            endpoint: Uri::try_from(endpoint.as_ref())
-                .map_err(|e| BuildError::InvalidPushGatewayEndpoint(e.to_string()))?,
+            endpoint: endpoint.as_ref().to_owned(),
             interval,
             username,
             password,
