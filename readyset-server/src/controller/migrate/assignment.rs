@@ -28,17 +28,31 @@ use crate::controller::state::DfState;
 /// The node is assigned the same domain as its first non-source parent.
 /// If no such parent exists, it is assigned a new domain.
 pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySetResult<()> {
-    let mut ndomains = dataflow_state.ndomains;
+    assign_inner(
+        &mut dataflow_state.ingredients,
+        &mut dataflow_state.ndomains,
+        new_nodes,
+    )
+}
 
+/// Inner implementation of [`assign`] that takes only the graph and domain counter directly,
+/// so it can be exercised by unit tests without standing up a full [`DfState`].
+fn assign_inner(
+    graph: &mut Graph,
+    ndomains: &mut usize,
+    new_nodes: &[NodeIndex],
+) -> ReadySetResult<()> {
     let mut next_domain = || -> ReadySetResult<usize> {
-        ndomains += 1;
-        Ok(ndomains - 1)
+        *ndomains += 1;
+        Ok(*ndomains - 1)
     };
 
     for &node in new_nodes {
         #[allow(clippy::cognitive_complexity)]
         let assignment = (|| {
-            let graph = &dataflow_state.ingredients;
+            // Shared reborrow so the `move` closure below can capture `&Graph` (Copy) instead
+            // of consuming our `&mut Graph`.
+            let graph: &Graph = &*graph;
             let n = &graph[node];
 
             if n.is_reader() {
@@ -137,12 +151,71 @@ pub fn assign(dataflow_state: &mut DfState, new_nodes: &[NodeIndex]) -> ReadySet
 
         debug!(
             node = node.index(),
-            node_type = ?dataflow_state.ingredients[node],
+            node_type = ?graph[node],
             domain = ?assignment,
             "node added to domain"
         );
-        dataflow_state.ingredients[node].add_to(assignment.into());
+        graph[node].add_to(assignment.into());
     }
-    dataflow_state.ndomains = ndomains;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use dataflow::node::{self, Column, Node};
+    use dataflow::ops::join::{Join, JoinType};
+    use dataflow::ops::{NodeOperator, Side};
+    use dataflow::utils::make_columns;
+
+    use super::*;
+
+    /// Two base tables connected by a join in a single migration must land in distinct
+    /// domains. Pre-REA-6610 the `friendly-base` search co-located them, which serialized
+    /// their writes through a shared message queue. Regression test for the failure mode
+    /// that hit `it_works_basic` and `correct_nested_view_schema`.
+    #[test]
+    fn joined_base_tables_get_distinct_domains() {
+        let mut graph: Graph = petgraph::Graph::new();
+        let source = graph.add_node(Node::new::<_, _, Vec<Column>, _>(
+            "source",
+            Vec::new(),
+            node::special::Source,
+        ));
+
+        let a = graph.add_node(Node::new(
+            "a",
+            make_columns(&["a0", "a1"]),
+            node::special::Base::new(),
+        ));
+        let b = graph.add_node(Node::new(
+            "b",
+            make_columns(&["b0", "b1"]),
+            node::special::Base::new(),
+        ));
+        graph.add_edge(source, a, ());
+        graph.add_edge(source, b, ());
+
+        let join: NodeOperator = Join::new(
+            a,
+            b,
+            JoinType::Inner,
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Right, 1)],
+            false,
+            None,
+        )
+        .into();
+        let j = graph.add_node(Node::new("j", make_columns(&["a0", "b1"]), join));
+        graph.add_edge(a, j, ());
+        graph.add_edge(b, j, ());
+
+        let mut ndomains = 0;
+        assign_inner(&mut graph, &mut ndomains, &[a, b, j]).unwrap();
+
+        assert_ne!(
+            graph[a].domain(),
+            graph[b].domain(),
+            "two base tables joined together must land in distinct domains",
+        );
+    }
 }
