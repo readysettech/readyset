@@ -5961,7 +5961,6 @@ dependencies = [
  "futures",
  "futures-util",
  "health-reporter",
- "hyper 0.14.32",
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "linkme",

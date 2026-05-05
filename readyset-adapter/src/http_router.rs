@@ -1,16 +1,16 @@
-use std::future::Future;
-use std::io;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use anyhow::anyhow;
-use futures::TryFutureExt;
-use health_reporter::{HealthReporter as AdapterHealthReporter, State};
-use hyper::header::CONTENT_TYPE;
-use hyper::service::make_service_fn;
-use hyper::{self, Body, Method, Request, Response, StatusCode};
+use axum::Router;
+use axum::body::Bytes;
+use axum::extract::{Request, State};
+use axum::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CONTENT_TYPE};
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{Next, from_fn};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use health_reporter::{HealthReporter as AdapterHealthReporter, State as HealthState};
 use metrics::Gauge;
 use readyset_alloc::{
     activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
@@ -21,16 +21,14 @@ use readyset_server::PrometheusHandle;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::TcpListenerStream;
-use tower::Service;
 use tracing::info;
 
 use crate::UpstreamDatabase;
 use crate::status_reporter::ReadySetStatusReporter;
 
 /// Routes requests from an HTTP server to expose metrics data from the adapter.
-/// To see the supported http requests and their respective routing, see
-/// impl Service<Request<Body>> for NoriaAdapterHttpRouter.
+///
+/// See `register_routes` for the supported routes and their behavior.
 pub struct NoriaAdapterHttpRouter<U>
 where
     U: UpstreamDatabase,
@@ -74,7 +72,7 @@ where
 
 impl<U> NoriaAdapterHttpRouter<U>
 where
-    U: UpstreamDatabase + 'static,
+    U: UpstreamDatabase + Send + Sync + 'static,
 {
     /// Creates a listener object to be used to route requests.
     pub async fn create_listener(&self) -> anyhow::Result<TcpListener> {
@@ -85,309 +83,243 @@ where
         Ok(http_listener)
     }
 
-    /// Routes requests for a noria adapter http router received on `http_listener`
-    /// the service layer of the NoriaAdapterHttpRouter, see
-    /// Impl Service<_> for NoriaAdapterHttpRouter.
+    /// Routes requests for the adapter HTTP router on `http_listener`.
     pub async fn route_requests(
         router: NoriaAdapterHttpRouter<U>,
         http_listener: TcpListener,
-        shutdown_rx: ShutdownReceiver,
+        mut shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
-        hyper::server::Server::builder(hyper::server::accept::from_stream(
-            shutdown_rx.wrap_stream(TcpListenerStream::new(http_listener)),
-        ))
-        .serve(make_service_fn(move |_| {
-            let s = router.clone();
-            async move { io::Result::Ok(s) }
-        }))
-        .map_err(move |e| anyhow!("HTTP server failed, {}", e))
-        .await
+        let app = build_app(router);
+        axum::serve(http_listener, app)
+            .with_graceful_shutdown(async move { shutdown_rx.recv().await })
+            .await
+            .map_err(|e| anyhow!("HTTP server failed, {}", e))
     }
 }
 
-/// Tower service definition to route http requests `Request<Body>` to their
-/// responses.
-#[allow(clippy::type_complexity)] // No valid re-use to make this into custom type definitions.
-impl<U> Service<Request<Body>> for NoriaAdapterHttpRouter<U>
+fn build_app<U>(router: NoriaAdapterHttpRouter<U>) -> Router
 where
-    U: UpstreamDatabase + 'static,
+    U: UpstreamDatabase + Send + Sync + 'static,
 {
-    type Response = Response<Body>;
-    type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    #[cfg_attr(not(feature = "failure_injection"), allow(unused_mut))]
+    let mut app = Router::new()
+        .route("/health", get(health::<U>))
+        .route("/metrics", get(metrics::<U>))
+        .route("/readyset_status", get(readyset_status::<U>))
+        .route("/memory_stats", get(memory_stats::<U>))
+        .route("/memory_stats_verbose", get(memory_stats_verbose::<U>))
+        .route(
+            "/jemalloc/profiling/activate",
+            post(jemalloc_profiling_activate::<U>),
+        )
+        .route(
+            "/jemalloc/profiling/deactivate",
+            post(jemalloc_profiling_deactivate::<U>),
+        )
+        .route(
+            "/jemalloc/profiling/dump",
+            get(jemalloc_profiling_dump::<U>),
+        )
+        .route("/log_level", post(log_level::<U>));
 
-    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    #[cfg(feature = "failure_injection")]
+    {
+        app = app.route("/failpoint", post(failpoint::<U>));
     }
 
-    /// # ReadySet Adapter Endpoints
-    ///
-    /// The following HTTP endpoints are exposed by the ReadySet Adapter.
-    ///
-    /// ## Health Check
-    ///
-    /// Get the health of the adapter. Return 200 code without a response body if the service is
-    /// considered healthy or return no response at all if the service is unhealthy.
-    ///
-    /// "Healthy" _only_ indicates that the HTTP router is active but no further checks are
-    /// performed.
-    ///
-    /// * **URL**
-    ///
-    ///   `/health`
-    ///
-    /// * **Method:**
-    ///
-    ///   `GET`
-    ///
-    /// * **Success Response:**
-    ///
-    ///     * **Code:** 200 <br />
-    ///
-    /// * **Sample Call:**
-    ///
-    ///   `curl -X GET <adapter>:<adapter-port>/health`
-    ///
-    /// ## Prometheus
-    ///
-    /// Endpoint for Prometheus metric API calls.
-    ///
-    /// * **URL**
-    ///
-    ///   `/metrics`
-    ///
-    /// * **Method:**
-    ///
-    ///   `GET`
-    ///
-    /// * **Success Response:**
-    ///
-    ///     * **Code:** 200 <br /> **Content:** `{ ... }`
-    ///
-    /// * **Error Response:**
-    ///
-    ///   Returns 404 if adapter is run without `--prometheus-metrics` or if the Prometheus exporter
-    ///   runs into any other type of error.
-    ///
-    ///     * **Code:** 404 Not Found <br /> **Content:** `"Prometheus metrics were not enabled. To
-    ///       fix this, run the adapter with --prometheus-metrics"`
-    ///
-    ///   OR
-    ///
-    ///     * **Code:** 404 Not Found <br />
-    ///
-    /// * **Sample Call:**
-    ///
-    ///   `curl -X GET <adapter>:<adapter-port>/metrics`
-    ///
-    /// * **Notes:**
-    ///
-    /// This endpoint is intended to be scraped by Prometheus. For almost all cases you want to
-    /// query Prometheus directly to get metrics data.
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let res = Response::builder()
-            // disable CORS to allow use as API server
-            .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+    app.fallback(not_found)
+        .layer(from_fn(record_external_request))
+        .with_state(router)
+}
 
-        metrics::counter!(recorded::ADAPTER_EXTERNAL_REQUESTS).increment(1);
+/// Middleware: count every external request and tag responses with permissive CORS so the adapter
+/// can be probed from a browser.
+async fn record_external_request(req: Request, next: Next) -> Response {
+    metrics::counter!(recorded::ADAPTER_EXTERNAL_REQUESTS).increment(1);
+    let mut res = next.run(req).await;
+    res.headers_mut()
+        .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    res
+}
 
-        match (req.method(), req.uri().path()) {
-            #[cfg(feature = "failure_injection")]
-            (&Method::POST, "/failpoint") => {
-                let tx = self.failpoint_channel.clone();
-                Box::pin(async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    let contents = match bincode::deserialize(&body) {
-                        Err(_) => {
-                            return Ok(res
-                                .status(400)
-                                .header(CONTENT_TYPE, "text/plain")
-                                .body(hyper::Body::from(
-                                    "body cannot be deserialized into failpoint name and action",
-                                ))
-                                .unwrap());
-                        }
-                        Ok(contents) => contents,
-                    };
-                    let (name, action): (String, String) = contents;
-                    let resp = res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(
-                            ::bincode::serialize(&fail::cfg(name, &action)).unwrap(),
-                        ))
-                        .unwrap();
-                    if let Some(tx) = tx {
-                        let _ = tx.send(()).await;
-                    }
-                    Ok(resp)
-                })
-            }
-            (&Method::GET, "/health") => {
-                let state = self.health_reporter.health().state;
-                Box::pin(async move {
-                    let body = format!("Adapter is in {} state", &state).into();
-                    let res = match state {
-                        State::Healthy | State::ShuttingDown => res
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(body),
-                        _ => res
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(body),
-                    };
+fn text(status: StatusCode, body: impl Into<String>) -> Response {
+    (status, [(CONTENT_TYPE, "text/plain")], body.into()).into_response()
+}
 
-                    Ok(res.unwrap())
-                })
-            }
-            (&Method::GET, "/metrics") => {
-                let body = self.prometheus_handle.as_ref().map(|x| x.render());
-                let res = res.header(CONTENT_TYPE, "text/plain");
-                let res = match body {
-                    Some(metrics) => {
-                        self.metrics.rec_metrics_payload_size(metrics.len());
-                        res.body(hyper::Body::from(metrics))
-                    }
-                    None => res
-                        .status(StatusCode::NOT_FOUND)
-                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run the adapter with --prometheus-metrics".to_string())),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            (&Method::GET, "/readyset_status") => {
-                let status_reporter = self.status_reporter.clone();
-                Box::pin(async move {
-                    let body = status_reporter.report_status().await.into_json().into();
+/// # ReadySet Adapter Endpoints
+///
+/// The following HTTP endpoints are exposed by the ReadySet Adapter.
+///
+/// ## Health Check
+///
+/// `GET /health` returns 200 if the adapter is healthy or shutting down, and 500 otherwise. The
+/// router being reachable does not imply the SQL listener is healthy — see
+/// `health_reporter::HealthReporter` for what "healthy" means here.
+async fn health<U>(State(state): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    let s = state.health_reporter.health().state;
+    let body = format!("Adapter is in {} state", &s);
+    let status = match s {
+        HealthState::Healthy | HealthState::ShuttingDown => StatusCode::OK,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    text(status, body)
+}
 
-                    let res = res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(body);
-
-                    Ok(res.unwrap())
-                })
-            }
-            // Returns a summary of memory usage for the entire process and per-thread memory usage
-            (&Method::GET, "/memory_stats") => {
-                let res = match print_memory_and_per_thread_stats() {
-                    Ok(stats) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(stats)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error fetching memory stats: {e}"
-                        ))),
-                };
-
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Returns a large dump of jemalloc debugging information along with per-thread
-            // memory stats
-            (&Method::GET, "/memory_stats_verbose") => {
-                let res = match dump_stats() {
-                    Ok(stats) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(stats)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error fetching memory stats: {e}"
-                        ))),
-                };
-
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // XXX: jemalloc profiling routes are duplicated across server and adapter so that they
-            // are usable in distributed deployments, but in standalone deployments they will both
-            // poke the same shared jemalloc allocator: there is no way to enable or disable
-            // profiling on a crate-by-crate basis or anything like that.
-            //
-            // Turns on jemalloc's profiler
-            (&Method::POST, "/jemalloc/profiling/activate") => {
-                let res = match activate_prof() {
-                    Ok(_) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Memory profiling activated")),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error activating memory profiling: {e}"
-                        ))),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Disables jemalloc's profiler
-            (&Method::POST, "/jemalloc/profiling/deactivate") => {
-                let res = match deactivate_prof() {
-                    Ok(_) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Memory profiling deactivated")),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error deactivating memory profiling: {e}"
-                        ))),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Returns the current jemalloc profiler output
-            (&Method::GET, "/jemalloc/profiling/dump") => Box::pin(async move {
-                let res = match dump_prof_to_string().await {
-                    Ok(dump) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(dump)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error dumping profiling output: {e}"
-                        ))),
-                };
-                Ok(res.unwrap())
-            }),
-            // Sets the log level of the tracing system, similar to changing the `LOG_LEVEL`
-            // environment variable.
-            (&Method::POST, "/log_level") => Box::pin(async move {
-                let bytes = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                let res = match str::from_utf8(&bytes) {
-                    Err(e) => res
-                        .status(StatusCode::BAD_REQUEST)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!("Invalid UTF-8: {e}"))),
-                    Ok(directives) => match readyset_tracing::set_log_level(directives) {
-                        Ok(_) => res
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from("Log level set successfully")),
-                        Err(e) => res
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from(format!("Error setting log level: {e}"))),
-                    },
-                };
-                Ok(res.unwrap())
-            }),
-            _ => Box::pin(async move {
-                let res = res
-                    .status(StatusCode::NOT_FOUND)
-                    .header(CONTENT_TYPE, "text/plain")
-                    .body(hyper::Body::empty());
-
-                Ok(res.unwrap())
-            }),
+/// `GET /metrics` returns the Prometheus exposition payload, or 404 if the adapter was started
+/// without `--prometheus-metrics`. Intended for Prometheus scraping.
+async fn metrics<U>(State(state): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match state.prometheus_handle.as_ref() {
+        Some(h) => {
+            let payload = h.render();
+            state.metrics.rec_metrics_payload_size(payload.len());
+            text(StatusCode::OK, payload)
         }
+        None => text(
+            StatusCode::NOT_FOUND,
+            "Prometheus metrics were not enabled. To fix this, run the adapter with \
+             --prometheus-metrics",
+        ),
     }
+}
+
+/// `GET /readyset_status` returns a JSON status report aggregated by the status reporter.
+async fn readyset_status<U>(State(state): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    let body = state.status_reporter.report_status().await.into_json();
+    text(StatusCode::OK, body)
+}
+
+/// `GET /memory_stats` returns a summary of process and per-thread memory usage.
+async fn memory_stats<U>(State(_): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match print_memory_and_per_thread_stats() {
+        Ok(stats) => text(StatusCode::OK, stats),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error fetching memory stats: {e}"),
+        ),
+    }
+}
+
+/// `GET /memory_stats_verbose` dumps full jemalloc stats plus per-thread memory stats.
+async fn memory_stats_verbose<U>(State(_): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match dump_stats() {
+        Ok(stats) => text(StatusCode::OK, stats),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error fetching memory stats: {e}"),
+        ),
+    }
+}
+
+// XXX: jemalloc profiling routes are duplicated across server and adapter so that they
+// are usable in distributed deployments, but in standalone deployments they will both
+// poke the same shared jemalloc allocator: there is no way to enable or disable
+// profiling on a crate-by-crate basis or anything like that.
+
+/// `POST /jemalloc/profiling/activate` turns on jemalloc's profiler.
+async fn jemalloc_profiling_activate<U>(State(_): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match activate_prof() {
+        Ok(_) => text(StatusCode::OK, "Memory profiling activated"),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error activating memory profiling: {e}"),
+        ),
+    }
+}
+
+/// `POST /jemalloc/profiling/deactivate` turns off jemalloc's profiler.
+async fn jemalloc_profiling_deactivate<U>(State(_): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match deactivate_prof() {
+        Ok(_) => text(StatusCode::OK, "Memory profiling deactivated"),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error deactivating memory profiling: {e}"),
+        ),
+    }
+}
+
+/// `GET /jemalloc/profiling/dump` returns the current jemalloc profiler output.
+async fn jemalloc_profiling_dump<U>(State(_): State<NoriaAdapterHttpRouter<U>>) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match dump_prof_to_string().await {
+        Ok(dump) => text(StatusCode::OK, dump),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error dumping profiling output: {e}"),
+        ),
+    }
+}
+
+/// `POST /log_level` updates the tracing filter directives, mirroring the `LOG_LEVEL` env var.
+async fn log_level<U>(State(_): State<NoriaAdapterHttpRouter<U>>, body: Bytes) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    match str::from_utf8(&body) {
+        Err(e) => text(StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {e}")),
+        Ok(directives) => match readyset_tracing::set_log_level(directives) {
+            Ok(_) => text(StatusCode::OK, "Log level set successfully"),
+            Err(e) => text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error setting log level: {e}"),
+            ),
+        },
+    }
+}
+
+#[cfg(feature = "failure_injection")]
+async fn failpoint<U>(State(state): State<NoriaAdapterHttpRouter<U>>, body: Bytes) -> Response
+where
+    U: UpstreamDatabase + Send + Sync + 'static,
+{
+    use bincode::{deserialize, serialize};
+    use fail::cfg;
+
+    let (name, action): (String, String) = match deserialize(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return text(
+                StatusCode::BAD_REQUEST,
+                "body cannot be deserialized into failpoint name and action",
+            );
+        }
+    };
+    let payload = serialize(&cfg(name, &action)).expect("failpoint result is bincode-serializable");
+    if let Some(tx) = state.failpoint_channel.as_ref() {
+        let _ = tx.send(()).await;
+    }
+    (
+        StatusCode::OK,
+        [(CONTENT_TYPE, "text/plain")],
+        Bytes::from(payload),
+    )
+        .into_response()
+}
+
+async fn not_found() -> Response {
+    text(StatusCode::NOT_FOUND, String::new())
 }
 
 #[derive(Clone)]
