@@ -60,7 +60,6 @@ pub(crate) mod materialization;
 pub(in crate::controller) mod node_changes;
 pub(in crate::controller) mod routing;
 pub(in crate::controller) mod scheduling;
-mod sharding;
 
 /// The base delay used when sending follow up requests to a domain, for the exponential backoff
 /// strategy
@@ -1142,26 +1141,13 @@ fn plan_add_nodes(
     mut new_nodes: HashSet<NodeIndex>,
     worker: &Option<WorkerIdentifier>,
 ) -> ReadySetResult<DomainMigrationPlan> {
-    let mut topo = topo_order(dataflow_state, &new_nodes);
+    let topo = topo_order(dataflow_state, &new_nodes);
 
     // Tracks partially materialized nodes that were duplicated as fully materialized in this
     // planning stage.
     let mut local_redundant_partial: HashMap<NodeIndex, NodeIndex> = Default::default();
 
-    // Shard the graph as desired
-    let mut swapped0 = if let Some(shards) = dataflow_state.sharding {
-        let (t, swapped) = sharding::shard(
-            &mut dataflow_state.ingredients,
-            &mut new_nodes,
-            &topo,
-            shards,
-        )?;
-        topo = t;
-
-        swapped
-    } else {
-        HashMap::default()
-    };
+    let mut swapped0: HashMap<(NodeIndex, NodeIndex), NodeIndex> = HashMap::default();
 
     // Assign domains
     assignment::assign(dataflow_state, &topo)?;
@@ -1317,12 +1303,6 @@ fn plan_add_nodes(
                 }
             }
         }
-
-        topo = topo_order(dataflow_state, &new_nodes);
-
-        if let Some(shards) = dataflow_state.sharding {
-            sharding::validate(&dataflow_state.ingredients, &topo, shards)?
-        };
 
         // at this point, we've hooked up the graph such that, for any given domain, the graph
         // looks like this:
