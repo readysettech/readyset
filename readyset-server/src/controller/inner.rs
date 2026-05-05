@@ -11,12 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use bytes::Bytes;
 use database_utils::{DatabaseURL, UpstreamConfig};
 use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
-use hyper::Method;
+use http::Method;
 use metrics::gauge;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
@@ -329,10 +330,10 @@ impl Leader {
     #[allow(clippy::let_unit_value)]
     pub(super) async fn external_request(
         &self,
-        method: hyper::Method,
+        method: Method,
         path: &str,
         query: Option<String>,
-        body: hyper::body::Bytes,
+        body: Bytes,
         authority: &Arc<Authority>,
         leader_ready: bool,
         maintenance_mode: bool,

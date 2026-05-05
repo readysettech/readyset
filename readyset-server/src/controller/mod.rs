@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{format_err, Context};
+use bytes::Bytes;
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use futures::future::Either;
-use hyper::http::{Method, StatusCode};
+use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
@@ -338,7 +339,7 @@ pub struct ControllerRequest {
     /// The request's query string.
     pub query: Option<String>,
     /// The request body.
-    pub body: hyper::body::Bytes,
+    pub body: Bytes,
     /// Sender to send the response down.
     pub reply_tx: tokio::sync::oneshot::Sender<Result<Result<Vec<u8>, Vec<u8>>, StatusCode>>,
 }
@@ -1812,7 +1813,7 @@ pub(crate) async fn authority_runner(
 async fn handle_failover_request(
     method: &Method,
     path: &str,
-    body: &hyper::body::Bytes,
+    body: &Bytes,
     command_tx: &UnboundedSender<AdminCommand>,
 ) -> Option<ReadySetResult<Vec<u8>>> {
     let await_response = |rx: tokio::sync::oneshot::Receiver<ReadySetResult<()>>| async move {

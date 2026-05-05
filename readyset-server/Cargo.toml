@@ -32,14 +32,17 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 anyhow = { workspace = true }
 antithesis_sdk = { workspace = true }
 async-bincode = { workspace = true }
+axum = { workspace = true }
 base64 = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
 bincode = { workspace = true }
+bytes = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 enum-kinds = { workspace = true }
 fail = { workspace = true }
 futures = { workspace = true }
 futures-util = { workspace = true }
+http = { workspace = true }
 hyper = { workspace = true, features = ["stream", "server", "http1"] }
 indexmap = { workspace = true }
 itertools = { workspace = true }

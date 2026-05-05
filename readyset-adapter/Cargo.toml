@@ -9,7 +9,7 @@ edition = "2024"
 ahash = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-axum = "0.8"
+axum = { workspace = true }
 bincode = { workspace = true }
 chrono = { workspace = true }
 chrono-tz = { workspace = true }

@@ -1,16 +1,18 @@
-use std::future::Future;
-use std::io;
+use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use anyhow::anyhow;
+use axum::body::{to_bytes, Body, Bytes};
+use axum::extract::{Request, State};
+use axum::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE};
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{from_fn, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::Router;
 use futures::TryFutureExt;
-use health_reporter::{HealthReporter, State};
-use hyper::header::{CACHE_CONTROL, CONTENT_TYPE};
-use hyper::service::make_service_fn;
-use hyper::{self, Body, Method, Request, Response, StatusCode};
+use health_reporter::{HealthReporter, State as HealthState};
 use readyset_alloc::{
     activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
     print_memory_and_per_thread_stats,
@@ -22,9 +24,9 @@ use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::SchemaCatalogUpdate;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
-use tokio_stream::wrappers::{BroadcastStream, TcpListenerStream};
+use tokio::sync::oneshot;
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
-use tower::Service;
 use tracing::{info, warn};
 
 use crate::controller::events::EventsHandle;
@@ -33,10 +35,10 @@ use crate::metrics::{get_global_recorder, Render};
 use crate::worker::WorkerRequest;
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
-/// The NoriaServerHttpRouter takes several channels (`worker_tx`, `controller_tx`)
-/// used to pass messages from this context to the worker and controller threads.
-/// To see the supported http requests and their respective routing, see
-/// impl Service<Request<Body>> for NoriaServerHttpRouter.
+///
+/// `worker_tx` and `controller_tx` are mpsc senders this router uses to forward HTTP requests
+/// to the worker and controller threads respectively. Requests on `/worker_request` go to the
+/// worker; anything that doesn't match a well-known route falls through to the controller.
 #[derive(Clone)]
 pub struct NoriaServerHttpRouter {
     /// The address to attempt to listen on.
@@ -75,382 +77,324 @@ impl NoriaServerHttpRouter {
         Ok(http_listener)
     }
 
-    /// Routes requests for a noria server http router received on `http_listener`
-    /// the service layer of the NoriaServerHttpRouter, see
-    /// mpl Service<_> for NoriaServerHttpRouter.
+    /// Routes HTTP requests for a noria server router on `http_listener`.
     pub(crate) async fn route_requests(
         router: NoriaServerHttpRouter,
         http_listener: TcpListener,
-        shutdown_rx: ShutdownReceiver,
+        mut shutdown_rx: ShutdownReceiver,
     ) -> anyhow::Result<()> {
-        hyper::server::Server::builder(hyper::server::accept::from_stream(
-            shutdown_rx.wrap_stream(TcpListenerStream::new(http_listener)),
-        ))
-        .serve(make_service_fn(move |_| {
-            let s = router.clone();
-            async move { io::Result::Ok(s) }
-        }))
-        .map_err(move |e| anyhow!("HTTP server failed, {}", e))
-        .await
+        let app = build_app(router);
+        axum::serve(http_listener, app)
+            .with_graceful_shutdown(async move { shutdown_rx.recv().await })
+            .await
+            .map_err(|e| anyhow!("HTTP server failed, {}", e))
     }
 }
 
-/// Tower service definition to route http requests `Request<Body>` to their
-/// responses. Requests on the endpoint `/worker_request` are routed to the
-/// worker along the `worker_tx` channel, while any request that is not specifically
-/// handled by the http server directly is routed to the controller along the
-/// `controller_tx` channel.
-impl Service<Request<Body>> for NoriaServerHttpRouter {
-    type Response = Response<Body>;
-    type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+fn build_app(router: NoriaServerHttpRouter) -> Router {
+    #[cfg_attr(not(feature = "failure_injection"), allow(unused_mut))]
+    let mut app = Router::new()
+        .route("/graph.html", get(graph_html))
+        .route("/metrics", get(metrics))
+        .route("/health", get(health))
+        .route("/worker_request", post(worker_request))
+        .route("/memory_stats", get(memory_stats))
+        .route("/memory_stats_verbose", get(memory_stats_verbose))
+        .route(
+            "/jemalloc/profiling/activate",
+            post(jemalloc_profiling_activate),
+        )
+        .route(
+            "/jemalloc/profiling/deactivate",
+            post(jemalloc_profiling_deactivate),
+        )
+        .route("/jemalloc/profiling/dump", get(jemalloc_profiling_dump))
+        .route("/log_level", post(log_level))
+        .route("/events/stream", get(events_stream));
 
-    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    #[cfg(feature = "failure_injection")]
+    {
+        app = app.route("/failpoint", post(failpoint));
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
-        let res = Response::builder()
-            // disable CORS to allow use as API server
-            .header(hyper::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+    app.fallback(forward_to_controller)
+        .layer(from_fn(record_external_request))
+        .with_state(router)
+}
 
-        metrics::counter!(recorded::SERVER_EXTERNAL_REQUESTS).increment(1);
+/// Middleware: count every external request and tag responses with permissive CORS.
+async fn record_external_request(req: Request, next: Next) -> Response {
+    metrics::counter!(recorded::SERVER_EXTERNAL_REQUESTS).increment(1);
+    let mut res = next.run(req).await;
+    res.headers_mut()
+        .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    res
+}
 
-        match (req.method(), req.uri().path()) {
-            #[cfg(feature = "failure_injection")]
-            (&Method::POST, "/failpoint") => {
-                let tx = self.failpoint_channel.clone();
-                Box::pin(async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                    let contents = match bincode::deserialize(&body) {
-                        Err(_) => {
-                            return Ok(res
-                                .status(StatusCode::BAD_REQUEST)
-                                .header(CONTENT_TYPE, "text/plain")
-                                .body(hyper::Body::from(
-                                    "body cannot be deserialized into failpoint name and action",
-                                ))
-                                .unwrap());
-                        }
-                        Ok(contents) => contents,
-                    };
-                    let (name, action): (String, String) = contents;
-                    let resp = res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(
-                            ::bincode::serialize(&fail::cfg(name, &action)).unwrap(),
-                        ))
-                        .unwrap();
-                    if let Some(tx) = tx {
-                        let _ = tx.send(()).await;
-                    }
-                    Ok(resp)
-                })
-            }
-            (&Method::GET, "/graph.html") => {
-                let res = res
-                    .header(CONTENT_TYPE, "text/html")
-                    .body(hyper::Body::from(include_str!("graph.html")));
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            (&Method::GET, "/metrics") => {
-                let render = get_global_recorder().map(|r| r.render());
-                let res = res.header(CONTENT_TYPE, "text/plain");
-                let res = match render {
-                    Some(metrics) => res.body(hyper::Body::from(metrics)),
-                    None => res
-                        .status(StatusCode::NOT_FOUND)
-                        .body(hyper::Body::from("Prometheus metrics were not enabled. To fix this, run Noria with --prometheus-metrics".to_string())),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            (&Method::GET, "/health") => {
-                let state = self.health_reporter.health().state;
-                Box::pin(async move {
-                    let body = format!("Server is in {} state", &state).into();
-                    let res = match state {
-                        State::Healthy | State::ShuttingDown => res
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(body),
-                        _ => res
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(body),
-                    };
+fn text(status: StatusCode, body: impl Into<String>) -> Response {
+    (status, [(CONTENT_TYPE, "text/plain")], body.into()).into_response()
+}
 
-                    Ok(res.unwrap())
-                })
-            }
-            (&Method::POST, "/worker_request") => {
-                metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);
+fn octet_stream(status: StatusCode, body: Vec<u8>) -> Response {
+    (
+        status,
+        [(CONTENT_TYPE, "application/octet-stream")],
+        Bytes::from(body),
+    )
+        .into_response()
+}
 
-                let wtx = self.worker_tx.clone();
-                Box::pin(async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await?;
-                    let wrq = match bincode::deserialize(&body) {
-                        Ok(x) => x,
-                        Err(e) => {
-                            return Ok(res
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .header("Content-Type", "text/plain; charset=utf-8")
-                                .body(hyper::Body::from(
-                                    bincode::serialize(&ReadySetError::from(e)).unwrap(),
-                                ))
-                                .unwrap());
-                        }
-                    };
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    if wtx
-                        .send(WorkerRequest {
-                            kind: wrq,
-                            done_tx: tx,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        let res = res.status(StatusCode::SERVICE_UNAVAILABLE);
-                        return Ok(res.body(hyper::Body::empty()).unwrap());
-                    }
+async fn graph_html() -> Response {
+    (
+        StatusCode::OK,
+        [(CONTENT_TYPE, "text/html")],
+        include_str!("graph.html"),
+    )
+        .into_response()
+}
 
-                    let res = match rx.await {
-                        Ok(Ok(ret)) => res.header("Content-Type", "application/octet-stream").body(
-                            hyper::Body::from(
-                                ret.unwrap_or_else(|| bincode::serialize(&()).unwrap()),
-                            ),
-                        ),
-                        Ok(Err(e)) => res
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header("Content-Type", "application/octet-stream")
-                            .body(hyper::Body::from(bincode::serialize(&e).unwrap())),
-                        Err(_) => res
-                            .status(StatusCode::SERVICE_UNAVAILABLE)
-                            .body(hyper::Body::empty()),
-                    };
-                    Ok(res.unwrap())
-                })
-            }
-            // Returns a summary of memory usage for the entire process and per-thread memory usage
-            (&Method::GET, "/memory_stats") => {
-                let res = match print_memory_and_per_thread_stats() {
-                    Ok(stats) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(stats)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error fetching memory stats: {e}"
-                        ))),
-                };
+async fn metrics() -> Response {
+    match get_global_recorder().map(|r| r.render()) {
+        Some(rendered) => text(StatusCode::OK, rendered),
+        None => text(
+            StatusCode::NOT_FOUND,
+            "Prometheus metrics were not enabled. To fix this, run Noria with \
+             --prometheus-metrics",
+        ),
+    }
+}
 
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Returns a large dump of jemalloc debugging information along with per-thread
-            // memory stats
-            (&Method::GET, "/memory_stats_verbose") => {
-                let res = match dump_stats() {
-                    Ok(stats) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(stats)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error fetching memory stats: {e}"
-                        ))),
-                };
+async fn health(State(state): State<NoriaServerHttpRouter>) -> Response {
+    let s = state.health_reporter.health().state;
+    let body = format!("Server is in {} state", &s);
+    let status = match s {
+        HealthState::Healthy | HealthState::ShuttingDown => StatusCode::OK,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    text(status, body)
+}
 
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // XXX: jemalloc profiling routes are duplicated across server and adapter so that they
-            // are usable in distributed deployments, but in standalone deployments they will both
-            // poke the same shared jemalloc allocator: there is no way to enable or disable
-            // profiling on a crate-by-crate basis or anything like that.
-            //
-            // Turns on jemalloc's profiler
-            (&Method::POST, "/jemalloc/profiling/activate") => {
-                let res = match activate_prof() {
-                    Ok(_) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Memory profiling activated")),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error activating memory profiling: {e}"
-                        ))),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Disables jemalloc's profiler
-            (&Method::POST, "/jemalloc/profiling/deactivate") => {
-                let res = match deactivate_prof() {
-                    Ok(_) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from("Memory profiling deactivated")),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error deactivating memory profiling: {e}"
-                        ))),
-                };
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            // Returns the current jemalloc profiler output
-            (&Method::GET, "/jemalloc/profiling/dump") => Box::pin(async move {
-                let res = match dump_prof_to_string().await {
-                    Ok(dump) => res
-                        .status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(dump)),
-                    Err(e) => res
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!(
-                            "Error dumping profiling output: {e}"
-                        ))),
-                };
-                Ok(res.unwrap())
-            }),
-            // Sets the log level of the tracing system, similar to changing the `LOG_LEVEL`
-            // environment variable.
-            (&Method::POST, "/log_level") => Box::pin(async move {
-                let bytes = hyper::body::to_bytes(req.into_body()).await.unwrap();
-                let res = match str::from_utf8(&bytes) {
-                    Err(e) => res
-                        .status(StatusCode::BAD_REQUEST)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(format!("Invalid UTF-8: {e}"))),
-                    Ok(directives) => match readyset_tracing::set_log_level(directives) {
-                        Ok(_) => res
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from("Log level set successfully")),
-                        Err(e) => res
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header(CONTENT_TYPE, "text/plain")
-                            .body(hyper::Body::from(format!("Error setting log level: {e}"))),
-                    },
-                };
-                Ok(res.unwrap())
-            }),
-            // SSE endpoint for schema catalog updates (or whatever events the server publishes)
-            (&Method::GET, "/events/stream") => {
-                let res = if let Some((events_rx, snapshot)) =
-                    self.events_handle.subscribe_with_snapshot()
-                {
-                    // Emit the current schema catalog as the first SSE event so that
-                    // clients which connect after a broadcast don't miss it. If
-                    // serialization fails, return 500 rather than silently
-                    // degrading to the pre-fix race condition.
-                    let initial_sse = match SchemaCatalogUpdate::try_from(&*snapshot)
-                        .and_then(|update| ControllerEvent::SchemaCatalogUpdate(update).to_sse())
-                    {
-                        Ok(sse) => sse,
-                        Err(error) => {
-                            return Box::pin(async move {
-                                Ok(res
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .header(CONTENT_TYPE, "text/plain")
-                                    .body(hyper::Body::from(format!(
-                                        "Failed to serialize schema catalog snapshot: {error}"
-                                    )))
-                                    .unwrap())
-                            });
-                        }
-                    };
-                    let live_stream =
-                        BroadcastStream::new(events_rx).filter_map(move |event| match event {
-                            Ok(event) => match event.to_sse() {
-                                Ok(s) => Some(Ok::<String, ReadySetError>(s)),
-                                Err(error) => {
-                                    warn!(
-                                        %error,
-                                        "Failed to serialize controller event for SSE"
-                                    );
-                                    None
-                                }
-                            },
-                            Err(error) => {
-                                warn!(%error, "Failed to receive controller event for SSE");
-                                None
-                            }
-                        });
-                    let combined =
-                        tokio_stream::iter(Some(Ok::<String, ReadySetError>(initial_sse)))
-                            .chain(live_stream);
-                    let body = hyper::Body::wrap_stream(combined);
-                    res.status(StatusCode::OK)
-                        .header(CONTENT_TYPE, "text/event-stream")
-                        .header(CACHE_CONTROL, "no-cache")
-                        .body(body)
-                } else {
-                    res.status(StatusCode::SERVICE_UNAVAILABLE)
-                        .header(CONTENT_TYPE, "text/plain")
-                        .body(hyper::Body::from(
-                            "Leader not ready or we're not the leader",
-                        ))
-                };
+async fn worker_request(State(state): State<NoriaServerHttpRouter>, body: Bytes) -> Response {
+    metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);
 
-                Box::pin(async move { Ok(res.unwrap()) })
-            }
-            _ => {
-                metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
-
-                let method = req.method().clone();
-                let path = req.uri().path().to_string();
-                let query = req.uri().query().map(ToOwned::to_owned);
-                let controller_tx = self.controller_tx.clone();
-
-                Box::pin(async move {
-                    let body = hyper::body::to_bytes(req.into_body()).await?;
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-
-                    let req = ControllerRequest {
-                        method,
-                        path,
-                        query,
-                        body,
-                        reply_tx: tx,
-                    };
-
-                    if controller_tx.send(req).await.is_err() {
-                        let res = res
-                            .status(StatusCode::SERVICE_UNAVAILABLE)
-                            .header("Content-Type", "text/plain; charset=utf-8");
-                        return Ok(res.body(hyper::Body::from("server went away")).unwrap());
-                    }
-
-                    match rx.await {
-                        Ok(reply) => {
-                            let res = match reply {
-                                Ok(Ok(reply)) => res
-                                    .header("Content-Type", "application/octet-stream")
-                                    .body(hyper::Body::from(reply)),
-                                Ok(Err(reply)) => res
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .header("Content-Type", "application/octet-stream")
-                                    .body(hyper::Body::from(reply)),
-                                Err(status_code) => {
-                                    res.status(status_code).body(hyper::Body::empty())
-                                }
-                            };
-                            Ok(res.unwrap())
-                        }
-                        Err(_) => {
-                            let res = res.status(StatusCode::NOT_FOUND);
-                            Ok(res.body(hyper::Body::empty()).unwrap())
-                        }
-                    }
-                })
-            }
+    let wrq = match bincode::deserialize(&body) {
+        Ok(x) => x,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+                Bytes::from(bincode::serialize(&ReadySetError::from(e)).unwrap()),
+            )
+                .into_response();
         }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    if state
+        .worker_tx
+        .send(WorkerRequest {
+            kind: wrq,
+            done_tx: tx,
+        })
+        .await
+        .is_err()
+    {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+
+    match rx.await {
+        Ok(Ok(ret)) => octet_stream(
+            StatusCode::OK,
+            ret.unwrap_or_else(|| bincode::serialize(&()).unwrap()),
+        ),
+        Ok(Err(e)) => octet_stream(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            bincode::serialize(&e).unwrap(),
+        ),
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+
+async fn memory_stats() -> Response {
+    match print_memory_and_per_thread_stats() {
+        Ok(stats) => text(StatusCode::OK, stats),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error fetching memory stats: {e}"),
+        ),
+    }
+}
+
+async fn memory_stats_verbose() -> Response {
+    match dump_stats() {
+        Ok(stats) => text(StatusCode::OK, stats),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error fetching memory stats: {e}"),
+        ),
+    }
+}
+
+// XXX: jemalloc profiling routes are duplicated across server and adapter so that they
+// are usable in distributed deployments, but in standalone deployments they will both
+// poke the same shared jemalloc allocator: there is no way to enable or disable
+// profiling on a crate-by-crate basis or anything like that.
+
+async fn jemalloc_profiling_activate() -> Response {
+    match activate_prof() {
+        Ok(_) => text(StatusCode::OK, "Memory profiling activated"),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error activating memory profiling: {e}"),
+        ),
+    }
+}
+
+async fn jemalloc_profiling_deactivate() -> Response {
+    match deactivate_prof() {
+        Ok(_) => text(StatusCode::OK, "Memory profiling deactivated"),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error deactivating memory profiling: {e}"),
+        ),
+    }
+}
+
+async fn jemalloc_profiling_dump() -> Response {
+    match dump_prof_to_string().await {
+        Ok(dump) => text(StatusCode::OK, dump),
+        Err(e) => text(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Error dumping profiling output: {e}"),
+        ),
+    }
+}
+
+async fn log_level(body: Bytes) -> Response {
+    match str::from_utf8(&body) {
+        Err(e) => text(StatusCode::BAD_REQUEST, format!("Invalid UTF-8: {e}")),
+        Ok(directives) => match readyset_tracing::set_log_level(directives) {
+            Ok(_) => text(StatusCode::OK, "Log level set successfully"),
+            Err(e) => text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error setting log level: {e}"),
+            ),
+        },
+    }
+}
+
+async fn events_stream(State(state): State<NoriaServerHttpRouter>) -> Response {
+    let Some((events_rx, snapshot)) = state.events_handle.subscribe_with_snapshot() else {
+        return text(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Leader not ready or we're not the leader",
+        );
+    };
+
+    // Emit the current schema catalog as the first SSE event so that clients which connect
+    // after a broadcast don't miss it. If serialization fails, return 500 rather than silently
+    // degrading to the pre-fix race condition.
+    let initial_sse = match SchemaCatalogUpdate::try_from(&*snapshot)
+        .and_then(|update| ControllerEvent::SchemaCatalogUpdate(update).to_sse())
+    {
+        Ok(sse) => sse,
+        Err(error) => {
+            return text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serialize schema catalog snapshot: {error}"),
+            );
+        }
+    };
+
+    let live_stream = BroadcastStream::new(events_rx).filter_map(|event| match event {
+        Ok(event) => match event.to_sse() {
+            Ok(s) => Some(Ok::<String, Infallible>(s)),
+            Err(error) => {
+                warn!(%error, "Failed to serialize controller event for SSE");
+                None
+            }
+        },
+        Err(error) => {
+            warn!(%error, "Failed to receive controller event for SSE");
+            None
+        }
+    });
+    let combined =
+        tokio_stream::iter(Some(Ok::<String, Infallible>(initial_sse))).chain(live_stream);
+    let body = Body::from_stream(combined);
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "text/event-stream")
+        .header(CACHE_CONTROL, "no-cache")
+        .body(body)
+        .expect("static SSE response is well-formed")
+}
+
+#[cfg(feature = "failure_injection")]
+async fn failpoint(State(state): State<NoriaServerHttpRouter>, body: Bytes) -> Response {
+    let (name, action): (String, String) = match bincode::deserialize(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return text(
+                StatusCode::BAD_REQUEST,
+                "body cannot be deserialized into failpoint name and action",
+            );
+        }
+    };
+    let payload = ::bincode::serialize(&fail::cfg(name, &action))
+        .expect("failpoint result is bincode-serializable");
+    if let Some(tx) = state.failpoint_channel.as_ref() {
+        let _ = tx.send(()).await;
+    }
+    (
+        StatusCode::OK,
+        [(CONTENT_TYPE, "text/plain")],
+        Bytes::from(payload),
+    )
+        .into_response()
+}
+
+/// Catch-all: forward to the controller via the `controller_tx` channel and relay the response.
+async fn forward_to_controller(
+    State(state): State<NoriaServerHttpRouter>,
+    req: Request,
+) -> Response {
+    metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
+
+    let (parts, body) = req.into_parts();
+    let body = match to_bytes(body, usize::MAX).await {
+        Ok(b) => b,
+        Err(e) => {
+            return text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read request body: {e}"),
+            );
+        }
+    };
+
+    let (tx, rx) = oneshot::channel();
+    let req = ControllerRequest {
+        method: parts.method,
+        path: parts.uri.path().to_string(),
+        query: parts.uri.query().map(ToOwned::to_owned),
+        body,
+        reply_tx: tx,
+    };
+
+    if state.controller_tx.send(req).await.is_err() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+            "server went away",
+        )
+            .into_response();
+    }
+
+    match rx.await {
+        Ok(Ok(Ok(reply))) => octet_stream(StatusCode::OK, reply),
+        Ok(Ok(Err(reply))) => octet_stream(StatusCode::INTERNAL_SERVER_ERROR, reply),
+        Ok(Err(status)) => status.into_response(),
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
