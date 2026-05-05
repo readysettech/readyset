@@ -19,6 +19,7 @@ fn main() -> anyhow::Result<()> {
     let _fail_scenario = FailScenario::setup();
 
     let mut options = Options::parse();
+    options.resolve_auto_cache();
     let rt = init_adapter_runtime()?;
 
     // When cache_mode is shallow, replication and the query sampler are not needed

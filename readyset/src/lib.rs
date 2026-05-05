@@ -225,7 +225,13 @@ pub struct Options {
 
     /// Specify the migration mode for ReadySet to use. The default "explicit" mode is the only
     /// non-experimental mode.
-    #[arg(long, env = "QUERY_CACHING", default_value = "explicit", hide = true)]
+    #[arg(
+        long,
+        env = "QUERY_CACHING",
+        default_value = "explicit",
+        hide = true,
+        conflicts_with = "auto_cache"
+    )]
     query_caching: MigrationStyle,
 
     /// Sets the maximum time in minutes that we will retry migrations for in the
@@ -529,8 +535,23 @@ pub struct Options {
     verify_fail: bool,
 
     /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
-    #[arg(long, env = "CACHE_MODE", default_value_t = CacheMode::default())]
+    #[arg(
+        long,
+        env = "CACHE_MODE",
+        default_value_t = CacheMode::default(),
+        conflicts_with = "auto_cache"
+    )]
     pub cache_mode: CacheMode,
+
+    /// Enable Readyset's automatic shallow caching mode.
+    ///
+    /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
+    /// previously-unseen SELECT becomes a candidate for an automatically-created
+    /// shallow cache.  Mutually exclusive with `--cache-mode` and
+    /// `--query-caching`; pass those explicitly only when you need finer-grained
+    /// control than this flag provides.
+    #[arg(long, env = "AUTO_CACHE")]
+    pub auto_cache: bool,
 
     /// Specifies the default TTL for shallow caches when no TTL is specified.
     #[arg(long, env = "DEFAULT_TTL_MS", default_value = "10000")]
@@ -550,6 +571,18 @@ pub struct Options {
 }
 
 impl Options {
+    /// Apply the `--auto-cache` shorthand: when set, force `cache_mode` to
+    /// [`CacheMode::Shallow`] and `query_caching` to
+    /// [`MigrationStyle::InRequestPath`].  Conflicts with the underlying flags
+    /// are caught by clap at parse time, so this only ever overwrites the
+    /// defaults.
+    pub fn resolve_auto_cache(&mut self) {
+        if self.auto_cache {
+            self.cache_mode = CacheMode::Shallow;
+            self.query_caching = MigrationStyle::InRequestPath;
+        }
+    }
+
     /// Extract database type from a URL string
     ///
     /// # Input
@@ -1914,6 +1947,65 @@ mod tests {
 
         assert_eq!(opts.max_processing_minutes, 15);
         assert_eq!(opts.migration_task_interval, 20000);
+    }
+
+    #[test]
+    fn auto_cache_resolves_to_shallow_inrequestpath() {
+        let mut opts = Options::parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--auto-cache",
+        ]);
+        opts.resolve_auto_cache();
+        assert_eq!(opts.cache_mode, CacheMode::Shallow);
+        assert!(matches!(opts.query_caching, MigrationStyle::InRequestPath));
+    }
+
+    #[test]
+    fn auto_cache_conflicts_with_cache_mode() {
+        let res = Options::try_parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--auto-cache",
+            "--cache-mode",
+            "deep",
+        ]);
+        assert!(res.is_err(), "expected clap conflict error, got {res:?}");
+    }
+
+    #[test]
+    fn auto_cache_conflicts_with_query_caching() {
+        let res = Options::try_parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--auto-cache",
+            "--query-caching=inrequestpath",
+        ]);
+        assert!(res.is_err(), "expected clap conflict error, got {res:?}");
     }
 
     #[test]
