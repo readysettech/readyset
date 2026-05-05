@@ -13,6 +13,8 @@ use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options
 use tracing::{error, info};
 
 fn main() -> anyhow::Result<()> {
+    antithesis_sdk::antithesis_init();
+
     #[cfg(feature = "failure_injection")]
     let _fail_scenario = FailScenario::setup();
 
