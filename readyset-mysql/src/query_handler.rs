@@ -961,7 +961,8 @@ impl QueryHandler for MySqlQueryHandler {
                         "time_zone" => {
                             if let Expr::Literal(Literal::String(s)) = value {
                                 match parse_timezone(s) {
-                                    Some(tz) => behavior.set_timezone(tz),
+                                    Some(tz) if tz.is_utc() => behavior.set_timezone(tz),
+                                    Some(tz) => behavior.set_timezone(tz).unsupported(true),
                                     None => behavior.unsupported(true),
                                 }
                             } else {
@@ -1438,8 +1439,12 @@ mod tests {
         );
     }
 
+    /// Until eval supports `SessionTimezone`, non-UTC sessions are flagged
+    /// `unsupported` so the backend's `unsupported_set_mode` (Error/Proxy/Allow)
+    /// decides what to do. The parsed `set_timezone` is still recorded so the
+    /// future eval-side fix can pick it up unchanged.
     #[test]
-    fn set_time_zone_fixed_offset() {
+    fn set_time_zone_fixed_offset_non_utc_is_unsupported() {
         let stmt = SetStatement::Variable(SetVariables {
             variables: vec![(
                 Variable {
@@ -1451,12 +1456,14 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone(fixed(19800))
+            SetBehavior::default()
+                .set_timezone(fixed(19800))
+                .unsupported(true)
         );
     }
 
     #[test]
-    fn set_time_zone_system() {
+    fn set_time_zone_system_is_unsupported() {
         let stmt = SetStatement::Variable(SetVariables {
             variables: vec![(
                 Variable {
@@ -1468,12 +1475,14 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone(SessionTimezone::System)
+            SetBehavior::default()
+                .set_timezone(SessionTimezone::System)
+                .unsupported(true)
         );
     }
 
     #[test]
-    fn set_time_zone_named() {
+    fn set_time_zone_named_non_utc_is_unsupported() {
         let stmt = SetStatement::Variable(SetVariables {
             variables: vec![(
                 Variable {
@@ -1485,7 +1494,26 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_timezone(SessionTimezone::Named(chrono_tz::US::Eastern))
+            SetBehavior::default()
+                .set_timezone(SessionTimezone::Named(chrono_tz::US::Eastern))
+                .unsupported(true)
+        );
+    }
+
+    #[test]
+    fn set_time_zone_named_utc() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Session,
+                    name: "time_zone".into(),
+                },
+                Expr::Literal(Literal::String("UTC".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_timezone(SessionTimezone::Named(chrono_tz::UTC))
         );
     }
 
@@ -1587,7 +1615,7 @@ mod tests {
             }
 
             #[test]
-            fn handle_set_named_timezone_is_supported(s in named_timezone_strategy()) {
+            fn handle_set_named_timezone_unsupported_unless_utc(s in named_timezone_strategy()) {
                 let stmt = SetStatement::Variable(SetVariables {
                     variables: vec![(
                         Variable {
@@ -1598,7 +1626,8 @@ mod tests {
                     )],
                 });
                 let behavior = MySqlQueryHandler::handle_set_statement(&stmt);
-                prop_assert!(!behavior.unsupported);
+                let parsed_is_utc = matches!(parse_timezone(&s), Some(tz) if tz.is_utc());
+                prop_assert_eq!(behavior.unsupported, !parsed_is_utc);
                 match behavior.set_timezone {
                     Some(SessionTimezone::Named(_)) => {},
                     other => panic!("expected Some(Named(_)), got {other:?} for {s:?}"),
@@ -1642,7 +1671,7 @@ mod tests {
                     )],
                 });
                 let behavior = MySqlQueryHandler::handle_set_statement(&stmt);
-                prop_assert!(!behavior.unsupported);
+                prop_assert_eq!(behavior.unsupported, expected_secs != 0);
                 let expected_offset = chrono::FixedOffset::east_opt(expected_secs).unwrap();
                 prop_assert_eq!(
                     behavior.set_timezone,

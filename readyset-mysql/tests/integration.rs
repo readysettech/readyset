@@ -2744,95 +2744,32 @@ async fn timestamp_client_named_timezone_text() {
     shutdown_tx.shutdown().await;
 }
 
-/// Pins the wire-writer's TIMESTAMP and DATETIME passthrough behavior under
-/// non-UTC session `time_zone`. Readyset deliberately diverges from upstream
-/// MySQL: dataflow-expression eval has no `SessionTimezone` parameter and
-/// treats every `TimestampTz` as a UTC wallclock, so wire output also returns
-/// the unshifted UTC wallclock and `EXTRACT(HOUR FROM ts)` agrees. The
-/// matching upstream-comparison tests above are pinned `#[ignore]` until
-/// SessionTimezone is threaded into eval.
+/// Pins `SET @@time_zone` rejection while dataflow-expression eval lacks a
+/// `SessionTimezone` parameter. Without the gate, a non-UTC session would
+/// silently get the stored UTC wallclock from cache — wrong. With default
+/// `Error` mode the SET itself must fail; UTC SETs continue to succeed.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(mysql, modern)]
-async fn timestamp_wire_passthrough_under_non_utc_session() {
-    let mut direct_mysql = connect().await;
-    direct_mysql
-        .query_drop(
-            "DROP TABLE IF EXISTS ts_passthrough CASCADE;
-             CREATE TABLE ts_passthrough (id INT PRIMARY KEY, ts TIMESTAMP, dt DATETIME);
-             INSERT INTO ts_passthrough VALUES (1, '2024-01-15 23:30:00', '2024-01-15 23:30:00');",
-        )
-        .await
-        .unwrap();
-
-    // Sanity check: upstream MySQL still session-shifts TIMESTAMP. If this
-    // stops being true, the deliberate divergence pinned by this test loses
-    // its meaning.
-    direct_mysql
-        .query_drop("SET SESSION time_zone = '+05:30'")
-        .await
-        .unwrap();
-    let upstream_ts: String = direct_mysql
-        .query_first("SELECT ts FROM ts_passthrough WHERE id = 1")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        upstream_ts, "2024-01-16 05:00:00",
-        "upstream MySQL must session-shift TIMESTAMP; otherwise this test loses its meaning"
-    );
-
+async fn set_time_zone_non_utc_errors() {
     let (opts, _handle, shutdown_tx) =
         setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
-    conn.query_drop(
-        "CREATE CACHE FROM \
-         SELECT ts, dt, EXTRACT(HOUR FROM ts) FROM ts_passthrough WHERE id = ?",
-    )
-    .await
-    .unwrap();
-    sleep().await;
+    conn.query_drop("SET SESSION time_zone = '+00:00'")
+        .await
+        .expect("UTC session must be accepted");
 
-    let expected = NaiveDate::from_ymd_opt(2024, 1, 15)
-        .unwrap()
-        .and_hms_opt(23, 30, 0)
-        .unwrap();
-    for tz in ["+05:30", "US/Eastern", "SYSTEM"] {
-        conn.query_drop(format!("SET SESSION time_zone = '{tz}'"))
-            .await
-            .unwrap();
-
-        // Text protocol.
-        eventually!(run_test: {
-            conn.query_first::<(NaiveDateTime, NaiveDateTime, f64), _>(
-                "SELECT ts, dt, EXTRACT(HOUR FROM ts) FROM ts_passthrough WHERE id = 1",
-            )
-            .await
-            .expect("text query failed")
-        }, then_assert: |row_opt| {
-            let (ts, dt, hour) = row_opt.expect("ts_passthrough id=1 missing - cache not warm?");
-            assert_eq!(ts, expected, "TIMESTAMP must not session-shift under tz={tz}");
-            assert_eq!(dt, expected, "DATETIME must not session-shift under tz={tz}");
-            assert_eq!(hour, 23.0_f64, "EXTRACT(HOUR) must agree with the wire-rendered hour under tz={tz}");
-        });
-
-        // Binary protocol (prepared statement).
-        eventually!(run_test: {
-            conn.exec_first::<(NaiveDateTime, NaiveDateTime, f64), _, _>(
-                "SELECT ts, dt, EXTRACT(HOUR FROM ts) FROM ts_passthrough WHERE id = ?",
-                (1,),
-            )
-            .await
-            .expect("binary exec failed")
-        }, then_assert: |row_opt| {
-            let (ts, dt, hour) = row_opt.expect("ts_passthrough id=1 missing via binary - cache not warm?");
-            assert_eq!(ts, expected, "TIMESTAMP (binary) must not session-shift under tz={tz}");
-            assert_eq!(dt, expected, "DATETIME (binary) must not session-shift under tz={tz}");
-            assert_eq!(hour, 23.0_f64, "EXTRACT(HOUR) (binary) must agree under tz={tz}");
-        });
-    }
+    let err = conn
+        .query_drop("SET SESSION time_zone = '+05:30'")
+        .await
+        .expect_err("non-UTC session must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.to_ascii_lowercase().contains("set"),
+        "error must mention the rejected SET, got: {msg}"
+    );
 
     shutdown_tx.shutdown().await;
 }

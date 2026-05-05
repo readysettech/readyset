@@ -21,8 +21,10 @@ async fn setup_with(
         .await
 }
 
-/// Regression: `SET time_zone = 'us/eastern'` must be treated as supported; otherwise default
-/// `UnsupportedSetMode::Proxy` flips the session to `ProxyAlways`.
+/// Regression: `SET time_zone = 'etc/utc'` must be treated as supported; otherwise default
+/// `UnsupportedSetMode::Proxy` flips the session to `ProxyAlways`. Uses a lowercase IANA UTC
+/// alias so the case-insensitive parse is still under test even though non-UTC named zones are
+/// now flagged unsupported.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
@@ -53,7 +55,7 @@ async fn lowercase_iana_timezone_stays_on_readyset() {
         "cached query should be served by Readyset before the SET"
     );
 
-    conn.query_drop("SET time_zone = 'us/eastern'")
+    conn.query_drop("SET time_zone = 'etc/utc'")
         .await
         .unwrap();
 
@@ -61,7 +63,7 @@ async fn lowercase_iana_timezone_stays_on_readyset() {
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::Readyset(_),
-        "lowercase IANA timezone should be accepted, leaving the session on Readyset"
+        "lowercase IANA UTC alias should be accepted, leaving the session on Readyset"
     );
 
     shutdown_tx.shutdown().await;

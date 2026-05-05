@@ -35,6 +35,51 @@ impl SessionTimezone {
             Self::Named(tz) => ts.to_tz(tz),
         }
     }
+
+    /// Whether this timezone is permanently equivalent to UTC.
+    ///
+    /// Used as a safety gate while dataflow-expression eval lacks a
+    /// `SessionTimezone` parameter: only UTC sessions match the wire
+    /// writer's UTC-wallclock passthrough, so non-UTC sessions must be
+    /// rejected (or proxied) rather than silently served from cache.
+    /// `System` is treated as non-UTC because we don't know the host TZ.
+    ///
+    /// Named zones are checked against an explicit allowlist of IANA
+    /// names that are *permanently* UTC offset 0 with no DST, rather
+    /// than checking the offset at the current instant — a zone like
+    /// `Europe/London` is UTC in winter and UTC+1 in summer, and a
+    /// runtime offset check would silently flip the gate twice a year.
+    pub fn is_utc(&self) -> bool {
+        use chrono_tz::Tz;
+        match self {
+            // `FixedOffset` is a static, DST-free offset; its
+            // `local_minus_utc` is immutable for the lifetime of the
+            // value, so this is safe.
+            Self::FixedOffset(tz) => tz.local_minus_utc() == 0,
+            Self::Named(tz) => matches!(
+                tz,
+                Tz::UTC
+                    | Tz::UCT
+                    | Tz::Universal
+                    | Tz::Zulu
+                    | Tz::GMT
+                    | Tz::GMT0
+                    | Tz::GMTPlus0
+                    | Tz::GMTMinus0
+                    | Tz::Greenwich
+                    | Tz::Etc__UTC
+                    | Tz::Etc__UCT
+                    | Tz::Etc__Universal
+                    | Tz::Etc__Zulu
+                    | Tz::Etc__GMT
+                    | Tz::Etc__GMT0
+                    | Tz::Etc__GMTPlus0
+                    | Tz::Etc__GMTMinus0
+                    | Tz::Etc__Greenwich
+            ),
+            Self::System => false,
+        }
+    }
 }
 
 /// How we should be handling a SQL `SET` statement.
@@ -219,5 +264,56 @@ mod tests {
         let tz = SessionTimezone::Named(chrono_tz::US::Eastern);
         let result = tz.convert(&ts);
         assert_eq!(result.subsecond_digits(), 3);
+    }
+
+    #[test]
+    fn is_utc_allowlist() {
+        use chrono_tz::Tz;
+
+        // Every chrono_tz variant that is permanently UTC offset 0 with no DST.
+        let utc_named = [
+            Tz::UTC,
+            Tz::UCT,
+            Tz::Universal,
+            Tz::Zulu,
+            Tz::GMT,
+            Tz::GMT0,
+            Tz::GMTPlus0,
+            Tz::GMTMinus0,
+            Tz::Greenwich,
+            Tz::Etc__UTC,
+            Tz::Etc__UCT,
+            Tz::Etc__Universal,
+            Tz::Etc__Zulu,
+            Tz::Etc__GMT,
+            Tz::Etc__GMT0,
+            Tz::Etc__GMTPlus0,
+            Tz::Etc__GMTMinus0,
+            Tz::Etc__Greenwich,
+        ];
+        for tz in utc_named {
+            assert!(SessionTimezone::Named(tz).is_utc(), "{tz:?} should be UTC");
+        }
+
+        // Spot check zones that are NOT permanently UTC. `Europe::London`
+        // is UTC in winter but UTC+1 in summer — a runtime offset check
+        // would flip the gate twice a year. `Etc::GMTPlus1` is UTC-1 (the
+        // IANA reverse-sign convention).
+        for tz in [
+            Tz::US__Eastern,
+            Tz::Europe__London,
+            Tz::Asia__Tokyo,
+            Tz::Etc__GMTPlus1,
+            Tz::Etc__GMTMinus1,
+        ] {
+            assert!(
+                !SessionTimezone::Named(tz).is_utc(),
+                "{tz:?} should not be UTC"
+            );
+        }
+
+        assert!(SessionTimezone::FixedOffset(FixedOffset::east_opt(0).unwrap()).is_utc());
+        assert!(!SessionTimezone::FixedOffset(FixedOffset::east_opt(3600).unwrap()).is_utc());
+        assert!(!SessionTimezone::System.is_utc());
     }
 }
