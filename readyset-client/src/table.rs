@@ -11,6 +11,7 @@ use std::{fmt, iter};
 
 use async_bincode::tokio::AsyncBincodeStream;
 use derive_more::TryInto;
+use futures_util::future::BoxFuture;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
@@ -28,6 +29,8 @@ use tokio::sync::Mutex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
+use tower::util::BoxService;
+use tower::BoxError;
 use tower_service::Service;
 use tracing::{debug_span, error, trace, trace_span, Span};
 use vec_map::VecMap;
@@ -223,7 +226,7 @@ pub(crate) type Discover = Pin<
 >;
 
 pub(crate) type TableRpc =
-    Buffer<ConcurrencyLimit<Balance<Discover, Tagged<PacketData>>>, Tagged<PacketData>>;
+    Buffer<Tagged<PacketData>, BoxFuture<'static, Result<Tagged<()>, BoxError>>>;
 
 /// Information used to uniquely identify: a packet, and the time a packet entered the
 /// system.
@@ -350,10 +353,10 @@ impl TableBuilder {
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
-                        ConcurrencyLimit::new(
+                        BoxService::new(ConcurrencyLimit::new(
                             Balance::new(make_table_discover(addr, self.table_request_timeout)),
                             crate::PENDING_LIMIT,
-                        ),
+                        )),
                         crate::BUFFER_TO_POOL,
                     );
                     use tracing_futures::Instrument;

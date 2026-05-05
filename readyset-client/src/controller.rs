@@ -439,7 +439,7 @@ impl ReadySetHandle {
         ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
-            handle: tower::util::Either::A(Controller {
+            handle: tower::util::Either::Left(Controller {
                 authority,
                 client: make_http_client(request_timeout),
                 leader_url: Arc::new(parking_lot::RwLock::new(None)),
@@ -460,7 +460,7 @@ impl ReadySetHandle {
         ReadySetHandle {
             views: Default::default(),
             domains: Default::default(),
-            handle: tower::util::Either::B(RawController::new(url, request_timeout)),
+            handle: tower::util::Either::Right(RawController::new(url, request_timeout)),
             request_timeout,
             migration_timeout,
             controller_events_client: None,
@@ -509,11 +509,11 @@ impl ReadySetHandle {
 
     fn make_events_client(&self) -> ControllerEventsClient {
         match &self.handle {
-            tower::util::Either::A(controller) => ControllerEventsClient::with_dynamic_leader(
+            tower::util::Either::Left(controller) => ControllerEventsClient::with_dynamic_leader(
                 controller.authority(),
                 controller.leader_url.clone(),
             ),
-            tower::util::Either::B(raw_controller) => {
+            tower::util::Either::Right(raw_controller) => {
                 ControllerEventsClient::with_fixed_leader(raw_controller.url.clone())
             }
         }

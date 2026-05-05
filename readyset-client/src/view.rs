@@ -15,6 +15,7 @@ use std::time::Duration;
 use array2::Array2;
 use async_bincode::tokio::AsyncBincodeStream;
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Dialect, Expr as DfExpr};
+use futures_util::future::BoxFuture;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::{StreamExt, TryStreamExt};
@@ -46,6 +47,8 @@ use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
 use tower::timeout::Timeout;
+use tower::util::BoxService;
+use tower::BoxError;
 use tower_service::Service;
 use tracing::{debug_span, error, trace};
 use tracing_futures::Instrument;
@@ -400,8 +403,8 @@ pub(crate) type Discover = Pin<
 >;
 
 pub(crate) type ViewRpc = Buffer<
-    Timeout<ConcurrencyLimit<Balance<Discover, Instrumented<Tagged<ReadQuery>>>>>,
     Instrumented<Tagged<ReadQuery>>,
+    BoxFuture<'static, Result<Tagged<ReadReply>, BoxError>>,
 >;
 
 /// Representation for a comparison predicate against a set of keys
@@ -1023,7 +1026,7 @@ impl ReaderHandleBuilder {
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
                     let (c, w) = Buffer::pair(
-                        Timeout::new(
+                        BoxService::new(Timeout::new(
                             ConcurrencyLimit::new(
                                 Balance::new(make_views_discover(
                                     shard_addr,
@@ -1032,7 +1035,7 @@ impl ReaderHandleBuilder {
                                 crate::PENDING_LIMIT,
                             ),
                             self.view_request_timeout,
-                        ),
+                        )),
                         crate::BUFFER_TO_POOL,
                     );
                     tokio::spawn(w.instrument(debug_span!(
@@ -2130,7 +2133,7 @@ mod tests {
             );
             // Create a fake shard - will not be used for test. Worker is not spawned
             let (c, _) = Buffer::pair(
-                Timeout::new(
+                BoxService::new(Timeout::new(
                     ConcurrencyLimit::new(
                         Balance::new(make_views_discover(
                             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0),
@@ -2139,7 +2142,7 @@ mod tests {
                         crate::PENDING_LIMIT,
                     ),
                     Duration::new(1, 0),
-                ),
+                )),
                 crate::BUFFER_TO_POOL,
             );
             // Only the schema and key_mapping are used to build a ViewQuery

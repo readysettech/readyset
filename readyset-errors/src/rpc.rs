@@ -7,10 +7,12 @@ use crate::{ReadySetError, internal_err};
 ///
 /// This attempts to downcast `err` into a `Box<ReadySetError>`. If that fails, the error is
 /// formatted as a [`ReadySetError::Internal`].
-pub fn rpc_err<T>(during: T, err: Box<dyn std::error::Error>) -> ReadySetError
+pub fn rpc_err<T, E>(during: T, err: E) -> ReadySetError
 where
     T: Into<String>,
+    E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
+    let err: Box<dyn std::error::Error + Send + Sync> = err.into();
     let source = if let Some(err) = err.downcast_ref::<readyset_multiplex::Error>() {
         Box::new(err.into())
     } else {
