@@ -530,30 +530,6 @@ impl KeyComparison {
         ) == Ordering::Greater
     }
 
-    /// Returns the shard key(s) that the given cell in this [`KeyComparison`] must target, given
-    /// the total number of shards.
-    ///
-    /// ## Invariants
-    /// * the `key_idx` must be in the `key`s.
-    /// * the `key`s should have at least one element.
-    pub fn shard_keys_at(&self, key_idx: usize, num_shards: usize) -> Vec<usize> {
-        match self {
-            KeyComparison::Equal(key) => vec![crate::shard_by(&key[key_idx], num_shards)],
-            // Since we currently implement hash-based sharding, any non-point query must target all
-            // shards. This restriction could be lifted in the future by implementing (perhaps
-            // optional) range-based sharding, likely with rebalancing. See Guillote-Blouin, J.
-            // (2020) Implementing Range Queries and Write Policies in a Partially-Materialized
-            // Data-Flow [Unpublished Master's thesis]. Harvard University S 2.4
-            _ => (0..num_shards).collect(),
-        }
-    }
-
-    /// Returns the shard key(s) that the first column in this [`KeyComparison`] must target, given
-    /// the total number of shards
-    pub fn shard_keys(&self, num_shards: usize) -> Vec<usize> {
-        self.shard_keys_at(0, num_shards)
-    }
-
     /// Returns the length of the key this [`KeyComparison`] is comparing against.
     ///
     /// Since all KeyComparisons wrap a [`Vec1`], this function will never return 0
@@ -1017,8 +993,8 @@ impl ReaderHandleBuilder {
 
             addrs.push(shard_addr);
 
-            // one entry per shard so that we can send sharded requests in parallel even if
-            // they happen to be targeting the same machine.
+            // one entry per shard so that we can send requests in parallel even if they happen
+            // to be targeting the same machine.
             let mut rpcs = rpcs.lock().await;
             #[allow(clippy::significant_drop_in_scrutinee)]
             let s = match rpcs.entry((shard_addr, shardi)) {
@@ -1255,8 +1231,8 @@ impl Service<ViewQuery> for ReaderHandle {
         span.in_scope(|| trace!("shard request"));
         let mut shard_queries = vec![Vec::new(); self.shards.len()];
         for comparison in query.key_comparisons.drain(..) {
-            for shard in comparison.shard_keys(self.shards.len()) {
-                shard_queries[shard].push(comparison.clone());
+            for q in &mut shard_queries {
+                q.push(comparison.clone());
             }
         }
 
@@ -1286,8 +1262,6 @@ impl Service<ViewQuery> for ReaderHandle {
                     let span = child_span!(INFO, "view-shard", shardi);
                     let _guard = tracing::Span::enter(&span);
 
-                    // NOTE: Sharded views can't actually work with aggregates, order by, limit or
-                    // offset
                     let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
                         target: ReaderAddress {
                             node,
@@ -1374,12 +1348,6 @@ impl ReaderHandle {
     #[must_use]
     pub fn shard_addrs(&self) -> &[SocketAddr] {
         self.shard_addrs.as_ref()
-    }
-
-    /// Returns the number of times this view is sharded
-    #[must_use]
-    pub fn num_shards(&self) -> usize {
-        self.shard_addrs.len()
     }
 
     /// Get the current size of this view.

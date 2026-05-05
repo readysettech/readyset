@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::fmt::Display;
 use std::future::Future;
 use std::mem::discriminant;
@@ -7,7 +8,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
-use std::{fmt, iter};
 
 use async_bincode::tokio::AsyncBincodeStream;
 use derive_more::TryInto;
@@ -16,7 +16,6 @@ use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
 use futures_util::stream::TryStreamExt;
 use futures_util::{future, ready, Stream};
-use itertools::Either;
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
@@ -127,32 +126,6 @@ impl TableOperation {
             TableOperation::Insert(ref r) => Some(r),
             TableOperation::InsertOrUpdate { ref row, .. } => Some(row),
             _ => None,
-        }
-    }
-
-    /// Construct an iterator over the shards this TableOperation should target.
-    ///
-    /// ## Invariants
-    /// * `key_col` must be in the rows.
-    /// * the `key`s must have at least one element.
-    #[inline]
-    pub fn shards(&self, key_col: usize, num_shards: usize) -> impl Iterator<Item = usize> {
-        let key = match self {
-            TableOperation::Insert(row) => Some(&row[key_col]),
-            TableOperation::DeleteByKey { key } => Some(&key[0]),
-            TableOperation::DeleteRow { row } => Some(&row[key_col]),
-            TableOperation::Update { key, .. } => Some(&key[0]),
-            TableOperation::InsertOrUpdate { row, .. } => Some(&row[key_col]),
-            TableOperation::Truncate
-            | TableOperation::SetReplicationOffset(_)
-            | TableOperation::SetSnapshotMode(_) => None,
-        };
-
-        if let Some(key) = key {
-            Either::Left(iter::once(crate::shard_by(key, num_shards)))
-        } else {
-            // unkeyed updates should hit all shards
-            Either::Right(0..num_shards)
         }
     }
 }
@@ -512,31 +485,11 @@ impl Table {
                 let request = Tagged::from(i);
                 let _guard = span.as_ref().map(Span::enter);
                 trace!("submit request");
-                future::Either::Left(future::Either::Right(
+                future::Either::Left(future::Either::<future::Pending<_>, _>::Right(
                     table_rpc.call(request).map_err(rpc_err!("Table::input")),
                 ))
             }
             _ => {
-                let key_len = self.key.len();
-                let key_col = match self.key.first() {
-                    // If it's `None`, then it's empty.
-                    None => {
-                        return future::Either::Right(future::Either::Left(future::Either::Left(
-                            future::Either::Left(
-                                async move { internal!("sharded base without a key") },
-                            ),
-                        )))
-                    }
-                    Some(_) if key_len != 1 => {
-                        return future::Either::Right(future::Either::Left(future::Either::Left(
-                            future::Either::Right(async move {
-                                internal!("base sharded by complex key")
-                            }),
-                        )))
-                    }
-                    Some(&k) => k,
-                };
-
                 let _guard = span.as_ref().map(Span::enter);
                 trace!("shard request");
                 let mut shard_writes = vec![Vec::new(); nshards];
@@ -549,8 +502,8 @@ impl Table {
                     }
                 };
                 for r in ops.drain(..) {
-                    for shard in r.shards(key_col, nshards) {
-                        shard_writes[shard].push(r.clone())
+                    for w in &mut shard_writes {
+                        w.push(r.clone())
                     }
                 }
 

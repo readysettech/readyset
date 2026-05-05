@@ -261,7 +261,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use clap::ValueEnum;
-use readyset_data::{DfType, DfValue};
+use readyset_data::DfValue;
 use readyset_multiplex::TagStore;
 use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
@@ -419,44 +419,6 @@ pub struct SingleKeyEviction {
     pub tag: u32,
     /// The key that was evicted from the partially materialized index.
     pub key: Vec<DfValue>,
-}
-
-#[inline]
-pub fn shard_by(dt: &DfValue, shards: usize) -> usize {
-    match *dt {
-        DfValue::Int(n) => n as usize % shards,
-        DfValue::UnsignedInt(n) => n as usize % shards,
-        DfValue::Text(..) | DfValue::TinyText(..) | DfValue::TimestampTz(_) => {
-            use std::hash::{BuildHasher, Hasher};
-
-            let mut hasher =
-                ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).build_hasher();
-            // this unwrap should be safe because there are no error paths with a Text, TinyText,
-            // nor Timestamp converting to Text
-            #[allow(clippy::unwrap_used)]
-            let str_dt = dt
-                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
-                .unwrap();
-            // this unwrap should be safe because we just coerced dt to a text
-            #[allow(clippy::unwrap_used)]
-            let s: &str = <&str>::try_from(&str_dt).unwrap();
-            hasher.write(s.as_bytes());
-            hasher.finish() as usize % shards
-        }
-        // a bit hacky: send all NULL values to the first shard
-        DfValue::None | DfValue::Default | DfValue::Max => 0,
-        DfValue::Float(_)
-        | DfValue::Double(_)
-        | DfValue::Time(_)
-        | DfValue::ByteArray(_)
-        | DfValue::Numeric(_)
-        | DfValue::BitVector(_)
-        | DfValue::Array(_)
-        | DfValue::PassThrough(_) => {
-            let hash = ahash::RandomState::with_seeds(0x3306, 0x6033, 0x5432, 0x6034).hash_one(dt);
-            hash as usize % shards
-        }
-    }
 }
 
 /// How Readyset handles CREATE CACHE statements without explicit DEEP or SHALLOW modifiers.
