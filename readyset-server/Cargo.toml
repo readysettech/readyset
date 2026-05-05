@@ -68,7 +68,7 @@ timekeeper = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-retry = { workspace = true }
 tokio-stream = { workspace = true }
-tokio-tower = { workspace = true }
+readyset-multiplex = { path = "../readyset-multiplex" }
 tower = { workspace = true, features = ["util"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }

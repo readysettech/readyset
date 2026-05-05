@@ -117,25 +117,25 @@ pub enum ReadySetError {
         source: Box<ReadySetError>,
     },
 
-    /// Attempted to issue a `call` to a [`tokio-tower`] service, but the underlying transport has
+    /// Attempted to issue a `call` to a [`readyset-multiplex`] service, but the underlying transport has
     /// been closed.
     #[error("Client was dropped")]
     ClientDropped,
 
-    /// Attempted to issue a `call` to a [`tokio-tower`] service when no more requests can be in
+    /// Attempted to issue a `call` to a [`readyset-multiplex`] service when no more requests can be in
     /// flight.
     #[error("no more in-flight requests allowed")]
     TransportFull,
 
-    /// The server sent a response  to a [`tokio-tower`] service that the client was not expecting.
+    /// The server sent a response  to a [`readyset-multiplex`] service that the client was not expecting.
     #[error("server sent a response the client did not expect")]
     Desynchronized,
 
-    /// An underlying transport for a [`tokio-tower`] service failed to send a request.
+    /// An underlying transport for a [`readyset-multiplex`] service failed to send a request.
     #[error("Transport send failed: {0}")]
     TransportSendFailed(String),
 
-    /// An underlying transport for a [`tokio-tower`] service failed while receiving a response.
+    /// An underlying transport for a [`readyset-multiplex`] service failed while receiving a response.
     #[error("Transport receive failed")]
     TransportRecvFailed,
 

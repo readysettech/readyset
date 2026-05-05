@@ -1,0 +1,22 @@
+[package]
+name = "readyset-multiplex"
+version = "0.1.0"
+publish = false
+edition = "2024"
+description = "Multiplexed request/response transport adapter for tower services"
+
+[dependencies]
+futures = { workspace = true }
+futures-util = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "macros", "rt"] }
+tower = { workspace = true, features = ["load"] }
+tower-service = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

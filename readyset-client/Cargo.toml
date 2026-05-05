@@ -30,7 +30,7 @@ vec_map = { workspace = true, features = ["eders"] }
 petgraph = { workspace = true, features = ["serde-1"] }
 ahash = { workspace = true }
 tower-service = { workspace = true }
-tokio-tower = { workspace = true }
+readyset-multiplex = { path = "../readyset-multiplex" }
 tower = { workspace = true, features = [
     "limit",
     "balance",

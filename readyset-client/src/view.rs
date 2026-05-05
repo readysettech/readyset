@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use array2::Array2;
-use async_bincode::tokio::{AsyncBincodeStream, AsyncDestination};
+use async_bincode::tokio::AsyncBincodeStream;
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Dialect, Expr as DfExpr};
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
@@ -28,6 +28,7 @@ use readyset_data::{
 use readyset_errors::{
     internal, internal_err, rpc_err, unsupported, view_err, ReadySetError, ReadySetResult,
 };
+use readyset_multiplex as multiplex;
 use readyset_sql::ast::{
     BinaryOperator, Column, ColumnConstraint, ColumnSpecification, ItemPlaceholder, Literal,
     Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, SqlType,
@@ -41,7 +42,6 @@ use readyset_util::intervals::cmp_start_end;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
@@ -55,13 +55,6 @@ pub(crate) mod results;
 
 use self::results::{ResultIterator, Results};
 use crate::{ReaderAddress, Tagged, Tagger};
-
-type Transport = AsyncBincodeStream<
-    tokio::net::TcpStream,
-    Tagged<ReadReply>,
-    Instrumented<Tagged<ReadQuery>>,
-    AsyncDestination,
->;
 
 /// Index of a key column as it exists in the underlying state. During a migration this will be
 /// used throughout MIR. In steady state this will refer to the reader key columns.
@@ -262,14 +255,7 @@ pub enum SchemaType {
     ProjectedSchema,
 }
 
-type InnerService = multiplex::Client<
-    multiplex::MultiplexTransport<Transport, Tagger>,
-    tokio_tower::Error<
-        multiplex::MultiplexTransport<Transport, Tagger>,
-        Instrumented<Tagged<ReadQuery>>,
-    >,
-    Instrumented<Tagged<ReadQuery>>,
->;
+type InnerService = multiplex::Client<Instrumented<Tagged<ReadQuery>>, Tagged<ReadReply>>;
 
 impl Service<()> for Endpoint {
     type Response = InnerService;
@@ -288,9 +274,9 @@ impl Service<()> for Endpoint {
             let s = tokio::time::timeout(timeout, f).await??;
             s.set_nodelay(true)?;
             let s = AsyncBincodeStream::from(s).for_async();
-            let t = multiplex::MultiplexTransport::new(s, Tagger::default());
             Ok(multiplex::Client::with_error_handler(
-                t,
+                s,
+                Tagger::default(),
                 |e| error!(error = %e, "View server went away"),
             ))
         })
@@ -1242,11 +1228,7 @@ impl Service<ViewQuery> for ReaderHandle {
                 self.shards
                     .first_mut()
                     .call(request)
-                    .map_err(rpc_err!(
-                        "<View as Service<ViewQuery>>::call",
-                        multiplex::MultiplexTransport<Transport, Tagger>,
-                        Instrumented<Tagged<ReadQuery>>,
-                    ))
+                    .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
                     .and_then(move |reply| {
                         let future = async move {
                             reply

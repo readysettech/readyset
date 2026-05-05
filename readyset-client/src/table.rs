@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime};
 use std::{fmt, iter};
 
-use async_bincode::tokio::{AsyncBincodeStream, AsyncDestination};
+use async_bincode::tokio::AsyncBincodeStream;
 use derive_more::TryInto;
 use futures_util::future::TryFutureExt;
 use futures_util::stream::futures_unordered::FuturesUnordered;
@@ -19,12 +19,12 @@ use itertools::Either;
 use petgraph::graph::NodeIndex;
 use readyset_data::DfValue;
 use readyset_errors::{internal, rpc_err, table_err, unsupported, ReadySetError, ReadySetResult};
+use readyset_multiplex as multiplex;
 use readyset_sql::ast::{CreateTableBody, NotReplicatedReason, Relation, SqlIdentifier};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-use tokio_tower::multiplex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
 use tower::limit::concurrency::ConcurrencyLimit;
@@ -160,20 +160,13 @@ impl From<Vec<DfValue>> for TableOperation {
     }
 }
 
-type Transport =
-    AsyncBincodeStream<tokio::net::TcpStream, Tagged<()>, Tagged<PacketData>, AsyncDestination>;
-
 #[derive(Debug)]
 struct Endpoint {
     addr: SocketAddr,
     timeout: Duration,
 }
 
-type InnerService = multiplex::Client<
-    multiplex::MultiplexTransport<Transport, Tagger>,
-    tokio_tower::Error<multiplex::MultiplexTransport<Transport, Tagger>, Tagged<PacketData>>,
-    Tagged<PacketData>,
->;
+type InnerService = multiplex::Client<Tagged<PacketData>, Tagged<()>>;
 
 impl Service<()> for Endpoint {
     type Response = InnerService;
@@ -195,9 +188,9 @@ impl Service<()> for Endpoint {
             s.write_all(&[CONNECTION_FROM_BASE]).await?;
             s.flush().await?;
             let s = AsyncBincodeStream::from(s).for_async();
-            let t = multiplex::MultiplexTransport::new(s, Tagger::default());
             Ok(multiplex::Client::with_error_handler(
-                t,
+                s,
+                Tagger::default(),
                 |e| error!(error = %e, "Table server went away"),
             ))
         })
@@ -516,13 +509,9 @@ impl Table {
                 let request = Tagged::from(i);
                 let _guard = span.as_ref().map(Span::enter);
                 trace!("submit request");
-                future::Either::Left(future::Either::Right(table_rpc.call(request).map_err(
-                    rpc_err!(
-                        "Table::input",
-                        multiplex::MultiplexTransport<Transport, Tagger>,
-                        Tagged<PacketData>,
-                    ),
-                )))
+                future::Either::Left(future::Either::Right(
+                    table_rpc.call(request).map_err(rpc_err!("Table::input")),
+                ))
             }
             _ => {
                 let key_len = self.key.len();
@@ -594,11 +583,7 @@ impl Table {
                 future::Either::Right(
                     wait_for
                         .try_for_each(|_| async { Ok(()) })
-                        .map_err(rpc_err!(
-                            "Table::input",
-                            multiplex::MultiplexTransport<Transport, Tagger>,
-                            Tagged<PacketData>,
-                        ))
+                        .map_err(rpc_err!("Table::input"))
                         .map_ok(Tagged::from),
                 )
             }

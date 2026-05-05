@@ -25,6 +25,7 @@ use readyset_client::{
     ViewQuery,
 };
 use readyset_errors::internal_err;
+use readyset_multiplex::server;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -35,7 +36,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::StreamExt;
-use tokio_tower::multiplex::server;
 use tower::Service;
 use tracing::{error, warn};
 
@@ -405,14 +405,18 @@ pub(crate) async fn listen(
                     server::Error::Service(ReadySetError::ServerShuttingDown) => {}
                     server::Error::BrokenTransportRecv(ref e)
                     | server::Error::BrokenTransportSend(ref e) => {
-                        if let bincode::ErrorKind::Io(ref e) = **e {
-                            if e.kind() == std::io::ErrorKind::BrokenPipe
-                                || e.kind() == std::io::ErrorKind::ConnectionReset
-                            {
+                        let io_kind =
+                            e.downcast_ref::<bincode::ErrorKind>()
+                                .and_then(|k| match k {
+                                    bincode::ErrorKind::Io(io) => Some(io.kind()),
+                                    _ => None,
+                                });
+                        match io_kind {
+                            Some(std::io::ErrorKind::BrokenPipe)
+                            | Some(std::io::ErrorKind::ConnectionReset) => {
                                 // client went away
                             }
-                        } else {
-                            error!(error = %e, "client transport error");
+                            _ => error!(error = %e, "client transport error"),
                         }
                     }
                     e => error!(error = %e, "reader service error"),

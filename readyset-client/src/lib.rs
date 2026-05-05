@@ -262,13 +262,13 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use readyset_data::{DfType, DfValue};
+use readyset_multiplex::TagStore;
 use readyset_sql::ast::Relation;
 use readyset_tracing::propagation::Instrumented;
 use replication_offset::ReplicationOffset;
 use schema_catalog::{SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
-use tokio_tower::multiplex;
 
 pub use view::{
     ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder,
@@ -309,29 +309,27 @@ pub async fn trace_ops_in<T>(f: impl Future<Output = T>) -> T {
 // only pub because we use it to figure out the error type for ViewError
 pub struct Tagger(slab::Slab<()>);
 
-impl<Request, Response> multiplex::TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
+impl<Request, Response> TagStore<Tagged<Request>, Tagged<Response>> for Tagger {
     type Tag = u32;
 
-    fn assign_tag(mut self: Pin<&mut Self>, r: &mut Tagged<Request>) -> Self::Tag {
+    fn assign_tag(&mut self, r: &mut Tagged<Request>) -> Self::Tag {
         r.tag = self.0.insert(()) as u32;
         r.tag
     }
-    fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
+    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
         self.0.remove(r.tag as usize);
         r.tag
     }
 }
 
-impl<Request, Response> multiplex::TagStore<Instrumented<Tagged<Request>>, Tagged<Response>>
-    for Tagger
-{
+impl<Request, Response> TagStore<Instrumented<Tagged<Request>>, Tagged<Response>> for Tagger {
     type Tag = u32;
 
-    fn assign_tag(mut self: Pin<&mut Self>, r: &mut Instrumented<Tagged<Request>>) -> Self::Tag {
+    fn assign_tag(&mut self, r: &mut Instrumented<Tagged<Request>>) -> Self::Tag {
         r.inner_mut().tag = self.0.insert(()) as u32;
         r.inner_mut().tag
     }
-    fn finish_tag(mut self: Pin<&mut Self>, r: &Tagged<Response>) -> Self::Tag {
+    fn finish_tag(&mut self, r: &Tagged<Response>) -> Self::Tag {
         self.0.remove(r.tag as usize);
         r.tag
     }
