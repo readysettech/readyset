@@ -75,10 +75,6 @@ impl Builder {
         builder.set_eviction_kind(opts.eviction_kind);
         builder.set_unquery(!opts.no_unquery);
 
-        builder.set_sharding(match opts.shards {
-            0 | 1 => None,
-            x => Some(x),
-        });
         builder.set_min_workers(opts.min_workers);
         if opts.no_partial {
             builder.disable_partial();
@@ -174,11 +170,6 @@ impl Builder {
     /// allowing writes to continue during index creation.
     pub fn set_non_blocking_index_build(&mut self, enabled: bool) {
         self.config.materialization_config.non_blocking_index_build = enabled;
-    }
-
-    /// Set sharding policy for all subsequent migrations; `None` or `Some(x)` where x <= 1 disables
-    pub fn set_sharding(&mut self, shards: Option<usize>) {
-        self.config.sharding = shards.filter(|s| *s > 1);
     }
 
     /// Set how many workers this worker should wait for before becoming a controller. More workers

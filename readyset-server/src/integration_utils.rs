@@ -12,8 +12,6 @@ use readyset_util::shutdown::ShutdownSender;
 use crate::metrics::get_or_init_global_recorder;
 use crate::{Builder, Handle, ReuseConfigType};
 
-pub const DEFAULT_SHARDING: usize = 2;
-
 /// PersistenceParameters with a log_name on the form of `prefix` + timestamp,
 /// avoiding collisions between separate test runs (in case an earlier panic causes clean-up to
 /// fail).
@@ -38,13 +36,13 @@ pub fn get_persistence_params_in_tmp_dir(prefix: &str, tmpdir: &str) -> Persiste
 
 /// Builds a local worker.
 pub async fn start_simple(prefix: &str) -> (Handle, ShutdownSender) {
-    build(prefix, Some(DEFAULT_SHARDING), None).await
+    build(prefix, None).await
 }
 
 #[allow(dead_code)]
-/// Builds a local worker without sharding.
+/// Alias for [`start_simple`].
 pub async fn start_simple_unsharded(prefix: &str) -> (Handle, ShutdownSender) {
-    build(prefix, None, None).await
+    build(prefix, None).await
 }
 
 pub async fn start_simple_reuse_unsharded(prefix: &str) -> (Handle, ShutdownSender) {
@@ -59,21 +57,14 @@ pub async fn start_simple_reuse_unsharded(prefix: &str) -> (Handle, ShutdownSend
     builder.set_topk(true);
     builder.set_pagination(true);
     builder.set_straddled_joins(true);
-    builder.set_sharding(None);
     builder.start_local_custom(authority.clone()).await.unwrap()
 }
 
-/// Builds a custom local worker with log prefix `prefix`,
-/// with optional sharding and eviction.
-pub async fn build(
-    prefix: &str,
-    sharding: Option<usize>,
-    eviction: Option<(usize, Duration)>,
-) -> (Handle, ShutdownSender) {
+/// Builds a custom local worker with log prefix `prefix`, with optional eviction.
+pub async fn build(prefix: &str, eviction: Option<(usize, Duration)>) -> (Handle, ShutdownSender) {
     let authority_store = Arc::new(LocalAuthorityStore::new());
     build_custom(
         prefix,
-        sharding,
         true,
         Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
@@ -87,7 +78,6 @@ pub async fn build(
 /// Builds a custom local worker.
 pub async fn build_custom(
     prefix: &str,
-    sharding: Option<usize>,
     controller: bool,
     authority: Arc<Authority>,
     reader_only: bool,
@@ -96,7 +86,6 @@ pub async fn build_custom(
     readyset_tracing::init_test_logging();
     let mut builder = Builder::for_tests();
     builder.set_dialect(Dialect::MySQL);
-    builder.set_sharding(sharding);
     builder.set_persistence(get_persistence_params(prefix));
     builder.set_topk(true);
     builder.set_pagination(true);

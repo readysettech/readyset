@@ -478,9 +478,6 @@ fn default_background_recovery_interval() -> Duration {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            #[cfg(test)]
-            sharding: Some(2),
-            #[cfg(not(test))]
             sharding: None,
             materialization_config: Default::default(),
             domain_config: DomainConfig {
@@ -577,10 +574,6 @@ pub struct WorkerOptions {
     /// Number of workers to wait for before starting (including this one)
     #[arg(long, default_value = "1", env = "MIN_WORKERS", hide = true)]
     pub min_workers: usize,
-
-    /// Shard the graph this many ways (<= 1 : disable sharding)
-    #[arg(long, default_value = "0", env = "NORIA_SHARDS", hide = true)]
-    pub shards: usize,
 
     /// Volume associated with the server.
     #[arg(long, env = "VOLUME_ID", hide = true)]

@@ -51,7 +51,6 @@ async fn it_works_basic_impl() {
     register_metric_recorder();
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("it_works_basic"));
         builder.set_topk(true);
         builder.enable_packet_filters();
@@ -183,7 +182,6 @@ async fn it_works_basic_standalone_impl() {
 
     let start_standalone = || {
         let mut builder = builder_for_tests();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params_in_tmp_dir(
             "it_works_basic_standalone",
             dir_path,

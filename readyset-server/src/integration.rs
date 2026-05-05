@@ -63,7 +63,6 @@ async fn it_completes() {
     readyset_tracing::init_test_logging();
 
     let mut builder = builder_for_tests();
-    builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("it_completes"));
     let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
 
@@ -127,167 +126,6 @@ async fn it_completes() {
             assert_eq!(results, vec![vec![1.into(), 4.into()]])
         }
     );
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn sharded_shuffle() {
-    let (mut g, shutdown_tx) = start_simple("sharded_shuffle").await;
-
-    // in this test, we have a single sharded base node that is keyed on one column, and a sharded
-    // reader that is keyed by a different column. this requires a shuffle. we want to make sure
-    // that that shuffle happens correctly.
-
-    let a = g
-        .migrate(|mig| {
-            let a = mig.add_base(
-                "base",
-                make_columns(&["id", "non_id"]),
-                Base::new().with_primary_key([0]),
-            );
-            mig.maintain_anonymous(a, &Index::hash_map(vec![1]));
-            a
-        })
-        .await;
-
-    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
-
-    let mut base = g.table_by_index(a).await.unwrap();
-    let mut view = g.view("base").await.unwrap().into_reader_handle().unwrap();
-
-    // make sure there is data on >1 shard, and that we'd get multiple rows by querying the reader
-    // for a single key.
-    base.perform_all((0..100).map(|i| vec![i.into(), DfValue::Int(1)]))
-        .await
-        .unwrap();
-
-    eventually!(
-        run_test: {
-            view.lookup(&[DfValue::Int(1)], true)
-                .await
-                .unwrap()
-                .into_vec()
-        },
-        then_assert: |results| {
-            assert_eq!(results.len(), 100, "{results:?}")
-        }
-    );
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn broad_recursing_upquery() {
-    let nshards = 16;
-    let (mut g, shutdown_tx) = build("bru", Some(nshards), None).await;
-
-    // our goal here is to have a recursive upquery such that both levels of the upquery require
-    // contacting _all_ shards. in this setting, any miss at the leaf requires the upquery to go to
-    // all shards of the intermediate operator, and each miss there requires an upquery to each
-    // shard of the top level. as a result, we would expect every base to receive 2 upqueries for
-    // the same key, and a total of n^2+n upqueries. crucially, what we want to test is that the
-    // partial logic correctly manages all these requests, and the resulting responses (especially
-    // at the shard mergers). to achieve this, we're going to use this layout:
-    //
-    // base x    base y [sharded by a]
-    //   |         |
-    //   +----+----+ [lookup by b]
-    //        |
-    //      join [sharded by b]
-    //        |
-    //     reader [sharded by c]
-    //
-    // we basically _need_ a join in order to get this layout, since only joins allow us to
-    // introduce a new sharding without also dropping all columns that are not the sharding column
-    // (like aggregations would). with an aggregation for example, the downstream view could not be
-    // partial, since it would have no way to know the partial key to upquery for given a miss,
-    // since the miss would be on an _output_ column of the aggregation. we _could_ use a
-    // multi-column aggregation group by, but those have their own problems that we do not want to
-    // exercise here.
-    //
-    // we're also going to make the join a left join so that we know the upquery will go to base_x.
-
-    let (x, _y) = g
-        .migrate(|mig| {
-            // bases, both sharded by their first column
-            let x = mig.add_base(
-                "base_x",
-                make_columns(&["base_col", "join_col", "reader_col"]),
-                Base::new().with_primary_key([0]),
-            );
-            let y = mig.add_base(
-                "base_y",
-                make_columns(&["id"]),
-                Base::new().with_primary_key([0]),
-            );
-            // join, sharded by the join column, which is be the second column on x
-            let join = mig.add_ingredient(
-                "join",
-                make_columns(&["base_col", "join_col", "reader_col"]),
-                Join::new(
-                    x,
-                    y,
-                    JoinType::Left,
-                    vec![(1, 0)],
-                    vec![(Side::Left, 0), (Side::Left, 1), (Side::Left, 2)],
-                    true,
-                    None,
-                ),
-            );
-            // reader, sharded by the lookup column, which is the third column on x
-            mig.maintain(
-                "reader".into(),
-                join,
-                &Index::hash_map(vec![2]),
-                Default::default(),
-                Default::default(),
-            );
-            (x, y)
-        })
-        .await;
-
-    eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
-
-    let mut base_x = g.table_by_index(x).await.unwrap();
-    let mut reader = g
-        .view("reader")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-
-    // we want to make sure that all the upqueries recurse all the way to cause maximum headache
-    // for the partial logic. we do this by ensuring that every shard at every operator has at
-    // least one record. we also ensure that we can get _all_ the rows by querying a single key on
-    // the reader.
-    let n = 10_000;
-    base_x
-        .perform_all((0..n).map(|i| {
-            vec![
-                DfValue::Int(i),
-                DfValue::Int(i % nshards as i64),
-                DfValue::Int(1),
-            ]
-        }))
-        .await
-        .unwrap();
-
-    sleep().await;
-
-    // moment of truth
-    let rows = reader
-        .lookup(&[DfValue::Int(1)], true)
-        .await
-        .unwrap()
-        .into_vec();
-    assert_eq!(rows.len(), n as usize);
-    for i in 0..n {
-        assert!(rows
-            .iter()
-            .any(|row| get_col!(reader, row, "base_col", i64) == i));
-    }
 
     shutdown_tx.shutdown().await;
 }
@@ -1597,7 +1435,6 @@ async fn view_connection_churn() {
     )));
 
     let mut builder = builder_for_tests();
-    builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("view_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
@@ -1626,7 +1463,6 @@ async fn view_connection_churn() {
             let tx = tx.clone();
             tokio::spawn(async move {
                 let mut builder = builder_for_tests();
-                builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("view_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
@@ -1660,7 +1496,6 @@ async fn table_connection_churn() {
     )));
 
     let mut builder = builder_for_tests();
-    builder.set_sharding(Some(DEFAULT_SHARDING));
     builder.set_persistence(get_persistence_params("table_connection_churn"));
     let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
@@ -1684,7 +1519,6 @@ async fn table_connection_churn() {
             let tx = tx.clone();
             tokio::spawn(async move {
                 let mut builder = builder_for_tests();
-                builder.set_sharding(Some(DEFAULT_SHARDING));
                 builder.set_persistence(get_persistence_params("table_connection_churn"));
                 let (mut g, shutdown_tx) = builder.start(authority.clone()).await.unwrap();
 
@@ -2749,94 +2583,6 @@ async fn replay_during_replay() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn cascading_replays_with_sharding() {
-    let (mut g, shutdown_tx) = start_simple("cascading_replays_with_sharding").await;
-
-    // add each two bases. these are initially unsharded, but f will end up being sharded by u1,
-    // while v will be sharded by u
-
-    // force v to be in a different domain by adding it in a separate migration
-    let v = g
-        .migrate(|mig| {
-            mig.add_base(
-                "v",
-                make_columns(&["u", "s"]),
-                Base::new().with_default_values(vec!["".into(), 1.into()]),
-            )
-        })
-        .await;
-    // now add the rest
-    let _ = g
-        .migrate(move |mig| {
-            let f = mig.add_base(
-                "f",
-                make_columns(&["f1", "f2"]),
-                Base::new().with_default_values(vec!["".into(), "".into()]),
-            );
-            // add a join
-            let jb = Join::new(
-                f,
-                v,
-                JoinType::Inner,
-                vec![(0, 0)],
-                vec![(Side::Left, 0), (Side::Right, 1), (Side::Left, 1)],
-                true,
-                None,
-            );
-            let j = mig.add_ingredient("j", make_columns(&["u", "s", "f2"]), jb);
-            // aggregate over the join. this will force a shard merger to be inserted because the
-            // group-by column ("f2") isn't the same as the join's output sharding column ("f1"/"u")
-            let a = Aggregation::Count
-                .over(j, 0, &[2], &DfType::Unknown, &Dialect::DEFAULT_MYSQL)
-                .unwrap();
-            let end = mig.add_ingredient("end", make_columns(&["u", "c"]), a);
-            mig.maintain_anonymous_with_reader_processing(
-                end,
-                &Index::hash_map(vec![0]),
-                ReaderProcessing::new(None, None, Some(vec![0, 1]), None, None, Default::default())
-                    .unwrap(),
-            );
-            (j, end)
-        })
-        .await;
-
-    let mut mutf = g.table("f").await.unwrap();
-    let mut mutv = g.table("v").await.unwrap();
-
-    //                f1           f2
-    mutf.insert(vec!["u1".into(), "u3".into()]).await.unwrap();
-    mutf.insert(vec!["u2".into(), "u3".into()]).await.unwrap();
-    mutf.insert(vec!["u3".into(), "u1".into()]).await.unwrap();
-
-    //                u
-    mutv.insert(vec!["u1".into(), 1.into()]).await.unwrap();
-    mutv.insert(vec!["u2".into(), 1.into()]).await.unwrap();
-    mutv.insert(vec!["u3".into(), 1.into()]).await.unwrap();
-
-    sleep().await;
-
-    let mut e = g.view("end").await.unwrap().into_reader_handle().unwrap();
-
-    assert_eq!(
-        e.lookup(&["u1".into()], true).await.unwrap().into_vec(),
-        vec![vec!["u1".into(), 1.into()]]
-    );
-    assert_eq!(
-        e.lookup(&["u2".into()], true).await.unwrap().into_vec(),
-        Vec::<Vec<DfValue>>::new()
-    );
-    assert_eq!(
-        e.lookup(&["u3".into()], true).await.unwrap().into_vec(),
-        vec![vec!["u3".into(), 2.into()]]
-    );
-
-    sleep().await;
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn replay_multiple_keys_then_write() {
     let (mut g, shutdown_tx) = start_simple_unsharded("replay_multiple_keys_then_write").await;
     eventually! {
@@ -3357,13 +3103,9 @@ async fn migration_depends_on_unchanged_domain() {
     shutdown_tx.shutdown().await;
 }
 
-async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
+async fn do_full_vote_migration(old_puts_after: bool) {
     let name = format!("do_full_vote_migration_{old_puts_after}");
-    let (mut g, shutdown_tx) = if sharded {
-        start_simple(&name).await
-    } else {
-        start_simple_unsharded(&name).await
-    };
+    let (mut g, shutdown_tx) = start_simple_unsharded(&name).await;
     let (article, vote, vc, _end) = g
         .migrate(|mig| {
             // migrate
@@ -3527,20 +3269,8 @@ async fn do_full_vote_migration(sharded: bool, old_puts_after: bool) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn full_vote_migration_only_new() {
-    do_full_vote_migration(true, false).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn full_vote_migration_new_and_old() {
-    do_full_vote_migration(true, true).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn full_vote_migration_new_and_old_unsharded() {
-    do_full_vote_migration(false, true).await;
+    do_full_vote_migration(true).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -4697,7 +4427,6 @@ async fn correct_nested_view_schema() {
     let mut b = builder_for_tests();
     // need to disable partial due to lack of support for key subsumption (#99)
     b.disable_partial();
-    b.set_sharding(None);
     let (mut g, shutdown_tx) = b.start_local().await.unwrap();
     eventually! {
         g.extend_recipe(ChangeList::from_strings(r_txt.clone(), Dialect::DEFAULT_MYSQL).unwrap())
@@ -4799,138 +4528,6 @@ async fn join_column_projection() {
             "email",
         ]
     );
-
-    shutdown_tx.shutdown().await;
-}
-
-// Tests the case where the source is sharded by a different column than the key column
-// with no parameter.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn test_join_across_shards() {
-    let (mut g, shutdown_tx) = start_simple("test_join_across_shards").await;
-    eventually! {
-        g.extend_recipe(
-            ChangeList::from_strings(
-                vec![
-                    "CREATE TABLE votes (story int, user int)",
-                    "CREATE TABLE recs (story int, other int)",
-                    "CREATE CACHE all_user_recs FROM SELECT votes.user as u, recs.other as s
-                        FROM votes
-                        JOIN recs ON (votes.story = recs.story);",
-                ],
-                Dialect::DEFAULT_MYSQL,
-            )
-            .unwrap(),
-        )
-        .await
-        .is_ok()
-    };
-
-    let mut votes = g.table("votes").await.unwrap();
-    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-    let mut recs = g.table("recs").await.unwrap();
-    recs.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    recs.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    recs.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    recs.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    recs.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-
-    sleep().await;
-
-    // Check 'all_user_recs' results.
-    let mut query = g
-        .view("all_user_recs")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-    let results: Vec<(i32, i32)> = query
-        .lookup(&[0i32.into()], true)
-        .await
-        .unwrap()
-        .into_vec()
-        .iter()
-        .map(|r| (get_col!(query, r, "u", i32), get_col!(query, r, "s", i32)))
-        .sorted()
-        .collect();
-    let expected = vec![
-        (1, 1),
-        (1, 1),
-        (1, 1),
-        (1, 2),
-        (1, 3),
-        (2, 1),
-        (2, 2),
-        (3, 1),
-        (3, 3),
-    ];
-    assert_eq!(results, expected);
-
-    shutdown_tx.shutdown().await;
-}
-
-// Tests the case where the source is sharded by a different column than the key column
-// with a parameter.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn test_join_across_shards_with_param() {
-    let (mut g, shutdown_tx) = start_simple("test_join_across_shards_with_param").await;
-    eventually! {
-        g.extend_recipe(
-            ChangeList::from_strings(
-                vec![
-                    "CREATE TABLE votes (story int, user int);",
-                    "CREATE TABLE recs (story int, other int);",
-                    "CREATE CACHE user_recs FROM SELECT votes.user as u, recs.other as s
-                         FROM votes
-                         JOIN recs ON (votes.story = recs.story) WHERE votes.user = ?;",
-                ],
-                Dialect::DEFAULT_MYSQL,
-            )
-            .unwrap(),
-        )
-        .await
-        .is_ok()
-    };
-
-    let mut votes = g.table("votes").await.unwrap();
-    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-    let mut votes = g.table("recs").await.unwrap();
-    votes.insert(vec![1i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 1i32.into()]).await.unwrap();
-    votes.insert(vec![2i32.into(), 2i32.into()]).await.unwrap();
-    votes.insert(vec![3i32.into(), 3i32.into()]).await.unwrap();
-
-    sleep().await;
-
-    // Check 'user_recs' results.
-    let mut query = g
-        .view("user_recs")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-    let results: Vec<(i32, i32)> = query
-        .lookup(&[1i32.into()], true)
-        .await
-        .unwrap()
-        .into_vec()
-        .iter()
-        .map(|r| (get_col!(query, r, "u", i32), get_col!(query, r, "s", i32)))
-        .sorted()
-        .collect();
-    let expected = vec![(1, 1), (1, 1), (1, 1), (1, 2), (1, 3)];
-    assert_eq!(results, expected);
 
     shutdown_tx.shutdown().await;
 }
@@ -5228,7 +4825,6 @@ async fn non_sql_materialized_range_query() {
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
         builder.disable_partial();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_materialized_range_query"));
         builder.start_local()
     }
@@ -5276,7 +4872,6 @@ async fn non_sql_materialized_range_query() {
 async fn non_sql_range_upquery() {
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
     }
@@ -5324,7 +4919,6 @@ async fn non_sql_range_upquery() {
 async fn range_upquery_after_point_queries() {
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("non_sql_range_upquery"));
         builder.start_local()
     }
@@ -5589,7 +5183,6 @@ async fn post_read_ilike() {
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
         builder.disable_partial();
-        builder.set_sharding(None);
         builder.set_persistence(get_persistence_params("post_read_ilike"));
         builder.start_local()
     }
@@ -6390,136 +5983,6 @@ async fn multiple_aggregate_same_col() {
     shutdown_tx.shutdown().await;
 }
 
-// multiple_aggregate_sum_sharded tests multiple aggregators of the same type, in this case sum(),
-// operating over different columns from the same table in a sharded environment.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn multiple_aggregate_sum_sharded() {
-    let (mut g, shutdown_tx) = start_simple("multiple_aggregate_sharded").await;
-
-    let sql = vec![
-        "CREATE TABLE test (number int, value1 int, value2 int);",
-        "CREATE CACHE multiaggsharded FROM SELECT sum(value1) AS s1, sum(value2) as s2 FROM test GROUP BY number;",
-    ];
-    eventually! {
-        g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
-            .await
-            .is_ok()
-    };
-
-    let mut t = g.table("test").await.unwrap();
-    let mut q = g
-        .view("multiaggsharded")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-
-    t.insert_many(vec![
-        vec![
-            DfValue::from(1i32),
-            DfValue::from(1i32),
-            DfValue::from(5i32),
-        ],
-        vec![
-            DfValue::from(1i32),
-            DfValue::from(4i32),
-            DfValue::from(2i32),
-        ],
-        vec![
-            DfValue::from(2i32),
-            DfValue::from(5i32),
-            DfValue::from(7i32),
-        ],
-        vec![
-            DfValue::from(2i32),
-            DfValue::from(7i32),
-            DfValue::from(1i32),
-        ],
-        vec![
-            DfValue::from(3i32),
-            DfValue::from(1i32),
-            DfValue::from(3i32),
-        ],
-    ])
-    .await
-    .unwrap();
-
-    sleep().await;
-
-    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-
-    let res = rows
-        .into_iter()
-        .map(|r| {
-            (
-                get_col!(q, r, "s1", Decimal).try_into().unwrap(),
-                get_col!(q, r, "s2", Decimal).try_into().unwrap(),
-            )
-        })
-        .sorted()
-        .collect::<Vec<(i32, i32)>>();
-
-    assert_eq!(res, vec![(1, 3), (5, 7), (12, 8)]);
-
-    shutdown_tx.shutdown().await;
-}
-
-// multiple_aggregate_same_col_sharded tests multiple aggregators of different types operating on
-// the same column in a sharded environment.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn multiple_aggregate_same_col_sharded() {
-    let (mut g, shutdown_tx) = start_simple("multiple_aggregate_same_col_sharded").await;
-
-    let sql = vec![
-        "CREATE TABLE test (number int, value int);",
-        "CREATE CACHE multiaggsamecolsharded FROM SELECT sum(value) AS s, avg(value) AS a FROM test GROUP BY number;",
-    ];
-    eventually! {
-        g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
-            .await
-            .is_ok()
-    };
-
-    let mut t = g.table("test").await.unwrap();
-    let mut q = g
-        .view("multiaggsamecolsharded")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-
-    t.insert_many(vec![
-        vec![DfValue::from(1i32), DfValue::from(1i32)],
-        vec![DfValue::from(1i32), DfValue::from(4i32)],
-        vec![DfValue::from(2i32), DfValue::from(5i32)],
-        vec![DfValue::from(2i32), DfValue::from(7i32)],
-        vec![DfValue::from(3i32), DfValue::from(1i32)],
-    ])
-    .await
-    .unwrap();
-
-    sleep().await;
-
-    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-
-    let res = rows
-        .into_iter()
-        .map(|r| {
-            (
-                get_col!(q, r, "s", Decimal).try_into().unwrap(),
-                get_col!(q, r, "a", f64),
-            )
-        })
-        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
-        .collect::<Vec<(i32, f64)>>();
-
-    assert_eq!(res, vec![(1, 1.), (5, 2.5), (12, 6.0)]);
-
-    shutdown_tx.shutdown().await;
-}
-
 // multiple_aggregate_over_two tests the case of more than two aggregate functions being used in
 // the same select query. This effectively tests our ability to appropriately generate multiple
 // MirNodeInner::JoinAggregates nodes and join them all together correctly.
@@ -6577,65 +6040,6 @@ async fn multiple_aggregate_over_two() {
     shutdown_tx.shutdown().await;
 }
 
-// multiple_aggregate_over_two_sharded tests the case of more than two aggregate functions being
-// used in the same select query. This effectively tests our ability to appropriately generate
-// multiple MirNodeInner::JoinAggregates nodes and join them all together correctly in a sharded
-// environment.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn multiple_aggregate_over_two_sharded() {
-    let (mut g, shutdown_tx) = start_simple("multiple_aggregate_over_two_sharded").await;
-
-    let sql = vec![
-        "CREATE TABLE test (number int, value int);",
-        "CREATE CACHE multiaggovertwosharded FROM SELECT sum(value) AS s, avg(value) AS a, count(value) AS c, max(value) as m FROM test GROUP BY number;"
-    ];
-    eventually! {
-        g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
-            .await
-            .is_ok()
-    };
-
-    let mut t = g.table("test").await.unwrap();
-    let mut q = g
-        .view("multiaggovertwosharded")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-
-    t.insert_many(vec![
-        vec![DfValue::from(1i32), DfValue::from(1i32)],
-        vec![DfValue::from(1i32), DfValue::from(4i32)],
-        vec![DfValue::from(2i32), DfValue::from(5i32)],
-        vec![DfValue::from(2i32), DfValue::from(7i32)],
-        vec![DfValue::from(3i32), DfValue::from(1i32)],
-    ])
-    .await
-    .unwrap();
-
-    sleep().await;
-
-    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-
-    let res = rows
-        .into_iter()
-        .map(|r| {
-            (
-                get_col!(q, r, "s", Decimal).try_into().unwrap(),
-                get_col!(q, r, "a", f64),
-                get_col!(q, r, "c", i32),
-                get_col!(q, r, "m", i32),
-            )
-        })
-        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
-        .collect::<Vec<(i32, f64, i32, i32)>>();
-
-    assert_eq!(res, vec![(1, 1., 1, 1), (5, 2.5, 2, 4), (12, 6.0, 2, 7)]);
-
-    shutdown_tx.shutdown().await;
-}
-
 // multiple_aggregate_with_expressions tests multiple aggregates involving arithmetic expressions
 // that would modify the output of the resulting columns. This tests that when we join aggregates
 // that we are ignoring projection nodes appropriately.
@@ -6656,62 +6060,6 @@ async fn multiple_aggregate_with_expressions() {
     let mut t = g.table("test").await.unwrap();
     let mut q = g
         .view("multiaggwexpressions")
-        .await
-        .unwrap()
-        .into_reader_handle()
-        .unwrap();
-
-    t.insert_many(vec![
-        vec![DfValue::from(1i32), DfValue::from(1i32)],
-        vec![DfValue::from(1i32), DfValue::from(4i32)],
-        vec![DfValue::from(2i32), DfValue::from(5i32)],
-        vec![DfValue::from(2i32), DfValue::from(7i32)],
-        vec![DfValue::from(3i32), DfValue::from(1i32)],
-    ])
-    .await
-    .unwrap();
-
-    sleep().await;
-
-    let rows = q.lookup(&[0i32.into()], true).await.unwrap();
-
-    let res = rows
-        .into_iter()
-        .map(|r| {
-            (
-                get_col!(q, r, "s", Decimal).try_into().unwrap(),
-                get_col!(q, r, "a", f64),
-            )
-        })
-        .sorted_by(|a, b| Ord::cmp(&a.0, &b.0))
-        .collect::<Vec<(i32, f64)>>();
-
-    assert_eq!(res, vec![(1, 5.), (5, 12.5), (12, 30.0)]);
-
-    shutdown_tx.shutdown().await;
-}
-
-// multiple_aggregate_with_expressions_sharded tests multiple aggregates involving arithmetic
-// expressions that would modify the output of the resulting columns. This tests that when we join
-// aggregates that we are ignoring projection nodes appropriately in a sharded environment
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Ignoring sharded tests"]
-async fn multiple_aggregate_with_expressions_sharded() {
-    let (mut g, shutdown_tx) = start_simple("multiple_aggregate_with_expressions_sharded").await;
-
-    let sql = vec![
-        "CREATE TABLE test (number int, value int);",
-        "CREATE CACHE multiaggwexpressionssharded FROM SELECT sum(value) AS s, 5 * avg(value) AS a FROM test GROUP BY number;",
-    ];
-    eventually! {
-        g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
-            .await
-            .is_ok()
-    };
-
-    let mut t = g.table("test").await.unwrap();
-    let mut q = g
-        .view("multiaggwexpressionssharded")
         .await
         .unwrap()
         .into_reader_handle()
@@ -7864,7 +7212,6 @@ async fn mixed_inclusive_range_and_equality() {
 
     let (mut g, shutdown_tx) = {
         let mut builder = builder_for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
         builder.set_persistence(get_persistence_params("mixed_inclusive_range_and_equality"));
         builder.set_mixed_comparisons(true);
         builder
@@ -8375,7 +7722,6 @@ const LIMIT: usize = 10;
 async fn aggressive_eviction_setup() -> (crate::Handle, ShutdownSender) {
     let (mut g, shutdown_tx) = build(
         "aggressive_eviction",
-        None,
         Some((15000, Duration::from_millis(100))),
     )
     .await;
@@ -8918,8 +8264,7 @@ async fn reroutes_count() {
 #[ignore]
 async fn overwrite_with_changed_recipe() {
     let (mut g, shutdown_tx) = {
-        let mut builder = builder_for_tests();
-        builder.set_sharding(Some(DEFAULT_SHARDING));
+        let builder = builder_for_tests();
         builder
             .start_local_custom(Arc::new(Authority::from(LocalAuthority::new_with_store(
                 Arc::new(LocalAuthorityStore::new()),
@@ -8983,7 +8328,6 @@ async fn it_recovers_fully_materialized() {
 
         let mut g = builder_for_tests();
         g.set_persistence(persistence_params.clone());
-        g.set_sharding(None);
         g.start(authority)
     };
     {
@@ -9215,7 +8559,6 @@ async fn simple_drop_tables_with_persisted_data() {
     let mut builder = builder_for_tests();
     let dir = TempDir::new().unwrap();
     let path = dir.path().to_path_buf();
-    builder.set_sharding(None);
     builder.set_persistence(PersistenceParameters::new(
         DurabilityMode::Permanent,
         Some("simple_drop_tables_with_persisted_data".to_string()),
@@ -10153,7 +9496,6 @@ async fn window_output_column_filter_patterns() {
     builder.set_persistence(get_persistence_params(
         "window_output_column_filter_patterns",
     ));
-    builder.set_sharding(None);
     builder.set_parsing_preset(ParsingPreset::OnlySqlparser);
     builder.set_mixed_comparisons(true);
     let (mut g, shutdown_tx) = builder.start_local_custom(authority.clone()).await.unwrap();
