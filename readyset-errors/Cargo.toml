@@ -12,7 +12,6 @@ datafusion = { workspace = true }
 deadpool-postgres = { workspace = true }
 derive_more = { workspace = true }
 futures = { workspace = true }
-hyper = { workspace = true }
 mysql_async = { workspace = true }
 reqwest = { workspace = true }
 pem = { workspace = true }
