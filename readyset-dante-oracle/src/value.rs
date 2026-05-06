@@ -278,6 +278,30 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
                 }
             }};
         }
+        // Same shape as `handle_int_array` but for element types whose
+        // `Display` produces SQL-shaped literals (floats, bools).
+        macro_rules! handle_displayable_array {
+            ($elem:ty) => {{
+                match Vec::<Option<$elem>>::from_sql(ty, raw) {
+                    Ok(items) => {
+                        let joined = items
+                            .iter()
+                            .map(|opt| match opt {
+                                Some(v) => v.to_string(),
+                                None => "NULL".to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        Ok(Self::Text(format!("{{{}}}", joined)))
+                    }
+                    Err(e) => {
+                        tracing::debug!(%e, "Vec::from_sql failed, falling back to Array::from_sql");
+                        let arr = readyset_data::Array::from_sql(ty, raw)?;
+                        Ok(Self::Text(arr.to_string()))
+                    }
+                }
+            }};
+        }
 
         match *ty {
             Type::BOOL => Ok(Self::Integer(bool::from_sql(ty, raw)? as _)),
@@ -309,6 +333,14 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::INT2_ARRAY => handle_int_array!(i16),
             Type::INT4_ARRAY => handle_int_array!(i32),
             Type::INT8_ARRAY => handle_int_array!(i64),
+            // ARRAY_AGG over float / bool / timestamp columns surfaces
+            // these element types via the standard `_<elem>` array OID.
+            // Comparison happens on the rendered Text form, so as long as
+            // both sides decode to the same bracketed string the row
+            // matches.
+            Type::FLOAT4_ARRAY => handle_displayable_array!(f32),
+            Type::FLOAT8_ARRAY => handle_displayable_array!(f64),
+            Type::BOOL_ARRAY => handle_displayable_array!(bool),
             Type::DATE => {
                 let val = match NaiveDateTime::from_sql(ty, raw) {
                     Ok(datetime) => datetime,
@@ -352,6 +384,9 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::INT8
             | Type::INT4_ARRAY
             | Type::INT8_ARRAY
+            | Type::FLOAT4_ARRAY
+            | Type::FLOAT8_ARRAY
+            | Type::BOOL_ARRAY
             | Type::FLOAT4
             | Type::FLOAT8
             | Type::NUMERIC
