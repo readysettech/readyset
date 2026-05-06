@@ -5,8 +5,8 @@ use std::sync::Arc;
 use ahash::RandomState;
 use dataflow_expression::{PostLookup, ReaderProcessing};
 use reader_map::{EvictionQuantity, EvictionStrategy};
-use readyset_client::results::SharedResults;
 use readyset_client::KeyComparison;
+use readyset_client::results::SharedResults;
 use readyset_data::Bound;
 use readyset_util::SizeOf;
 use vec1::Vec1;
@@ -94,11 +94,11 @@ fn new_inner(
         let mut contiguous = true;
         let mut last = None;
         for &k in &index.columns {
-            if let Some(last) = last {
-                if k != last + 1 {
-                    contiguous = false;
-                    break;
-                }
+            if let Some(last) = last
+                && k != last + 1
+            {
+                contiguous = false;
+                break;
             }
             last = Some(k);
         }

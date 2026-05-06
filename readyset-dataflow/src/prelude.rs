@@ -30,7 +30,7 @@ pub use readyset_client::internal::*;
 
 pub use crate::node::Node;
 pub use crate::ops::NodeOperator;
-pub use crate::payload::{packets::*, Packet};
+pub use crate::payload::{Packet, packets::*};
 pub type Graph = petgraph::Graph<Node, Edge>;
 use dataflow_state::MaterializedNodeState;
 pub use dataflow_state::{DurabilityMode, PersistenceParameters};

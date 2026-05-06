@@ -1,5 +1,5 @@
 use readyset_data::DfType;
-use readyset_errors::{invariant, ReadySetResult};
+use readyset_errors::{ReadySetResult, invariant};
 use serde::{Deserialize, Serialize};
 
 use crate::node::AuxiliaryNodeState;
@@ -176,7 +176,7 @@ impl GroupedOperation for ExtremumOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ops, LookupIndex};
+    use crate::{LookupIndex, ops};
 
     fn setup(op: Extremum, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();

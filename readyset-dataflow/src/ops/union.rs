@@ -1,15 +1,15 @@
 use std::cmp::Ordering;
-use std::collections::{hash_map, BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, hash_map};
 use std::convert::{TryFrom, TryInto};
 
 use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_data::Bound;
-use readyset_errors::{invariant, ReadySetResult};
+use readyset_errors::{ReadySetResult, invariant};
+use readyset_util::Indices;
 use readyset_util::hash::hash;
 use readyset_util::intervals::{cmp_endbound, cmp_startbound};
 use readyset_util::ranges::RangeBounds;
-use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use test_strategy::Arbitrary;
@@ -1047,27 +1047,31 @@ mod tests {
     fn it_resolves() {
         let (u, l, r) = setup(DuplicateMode::UnionAll);
         let r0 = u.node().resolve(0);
-        assert!(r0
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|&(n, c)| n == l.as_global() && c == 0));
-        assert!(r0
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|&(n, c)| n == r.as_global() && c == 0));
+        assert!(
+            r0.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == l.as_global() && c == 0)
+        );
+        assert!(
+            r0.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == r.as_global() && c == 0)
+        );
         let r1 = u.node().resolve(1);
-        assert!(r1
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|&(n, c)| n == l.as_global() && c == 1));
-        assert!(r1
-            .as_ref()
-            .unwrap()
-            .iter()
-            .any(|&(n, c)| n == r.as_global() && c == 2));
+        assert!(
+            r1.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == l.as_global() && c == 1)
+        );
+        assert!(
+            r1.as_ref()
+                .unwrap()
+                .iter()
+                .any(|&(n, c)| n == r.as_global() && c == 2)
+        );
     }
 
     mod buffered_replay_key {
@@ -1448,7 +1452,7 @@ mod tests {
     mod bag_union {
         use std::cmp::max;
 
-        use test_strategy::{proptest, Arbitrary};
+        use test_strategy::{Arbitrary, proptest};
         use test_utils::tags;
 
         use super::*;
@@ -1490,11 +1494,7 @@ mod tests {
                 .fold(
                     0_isize,
                     |acc, rec| {
-                        if rec.is_positive() {
-                            acc + 1
-                        } else {
-                            acc - 1
-                        }
+                        if rec.is_positive() { acc + 1 } else { acc - 1 }
                     },
                 );
             assert_eq!(state_size, expected)

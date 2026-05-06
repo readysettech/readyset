@@ -1,12 +1,12 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use dataflow_state::PointKey;
 use readyset_data::DfType;
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal_err};
 use serde::{Deserialize, Serialize};
 
 use crate::node::AuxiliaryNodeState;

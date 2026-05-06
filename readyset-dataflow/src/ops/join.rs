@@ -5,12 +5,12 @@ use std::mem;
 use dataflow_state::PointKey;
 use itertools::Itertools;
 use readyset_client::KeyComparison;
-use readyset_errors::{internal_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal_err};
 use readyset_util::intervals::into_bound_endpoint;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use tracing::debug;
-use vec1::{vec1, Vec1};
+use vec1::{Vec1, vec1};
 
 use dataflow_expression::Expr;
 
@@ -153,7 +153,7 @@ impl Join {
             .emit
             .iter()
             .enumerate()
-            .filter(|(_, &(side, _))| side == Side::Left)
+            .filter(|&(_, &(side, _))| side == Side::Left)
             .map(|(i, &(_, col))| EmitColumn {
                 output: i,
                 source: col,
@@ -163,7 +163,7 @@ impl Join {
             .emit
             .iter()
             .enumerate()
-            .filter(|(_, &(side, _))| side == Side::Right)
+            .filter(|&(_, &(side, _))| side == Side::Right)
             .map(|(i, &(_, col))| EmitColumn {
                 output: i,
                 source: col,
@@ -486,16 +486,10 @@ impl Join {
                             (Side::Left, l) if from == *self.left => return Ok(l),
                             (Side::Right, r) if from == *self.right => return Ok(r),
                             (Side::Left, l) => {
-                                if let Some(r) =
-                                    self.on.iter().find_map(
-                                        |(on_l, r)| {
-                                            if *on_l == l {
-                                                Some(r)
-                                            } else {
-                                                None
-                                            }
-                                        },
-                                    )
+                                if let Some(r) = self
+                                    .on
+                                    .iter()
+                                    .find_map(|(on_l, r)| if *on_l == l { Some(r) } else { None })
                                 {
                                     // since we didn't hit the case above, we know that the
                                     // message
@@ -504,16 +498,10 @@ impl Join {
                                 }
                             }
                             (Side::Right, r) => {
-                                if let Some(l) =
-                                    self.on.iter().find_map(
-                                        |(l, on_r)| {
-                                            if *on_r == r {
-                                                Some(l)
-                                            } else {
-                                                None
-                                            }
-                                        },
-                                    )
+                                if let Some(l) = self
+                                    .on
+                                    .iter()
+                                    .find_map(|(l, on_r)| if *on_r == r { Some(l) } else { None })
                                 {
                                     // same
                                     return Ok(*l);
@@ -538,9 +526,11 @@ impl Join {
             .entry((key_cols, side))
             .and_modify(|entry| {
                 // Ensure all existing entries have the same column indices as the new one
-                debug_assert!(entry
-                    .iter()
-                    .all(|miss| { miss.column_indices == missed_keys.column_indices }));
+                debug_assert!(
+                    entry
+                        .iter()
+                        .all(|miss| { miss.column_indices == missed_keys.column_indices })
+                );
                 entry.push(missed_keys.clone());
             })
             .or_insert_with(|| vec![missed_keys.clone()]);
@@ -1178,7 +1168,11 @@ impl Ingredient for Join {
         let join_execution_mode = self.execution_type_for_replay(replay, from);
         debug!(
             "on_input join_execution_mode: {:?} for from: {:?} for replay: {:?}, records: {:?}, rhs_full_mat: {:?}",
-            join_execution_mode, from, replay, rs.len(), self.rhs_full_mat
+            join_execution_mode,
+            from,
+            replay,
+            rs.len(),
+            self.rhs_full_mat
         );
         match join_execution_mode {
             JoinExecutionMode::RegularLookup => {
@@ -1891,9 +1885,10 @@ mod tests {
 
             // Both of the keys have to match to give us a match
             j.seed(r, vec![3.into(), 3.into(), "w".into()]);
-            assert!(j
-                .one_row(r, vec![3.into(), 3.into(), "w".into()], false)
-                .is_empty());
+            assert!(
+                j.one_row(r, vec![3.into(), 3.into(), "w".into()], false)
+                    .is_empty()
+            );
 
             // Once we get a match, we should revoke the nulls and replace it with a full row
             j.seed(r, vec![3.into(), 4.into(), "w".into()]);

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use readyset_data::dialect::SqlEngine;
 use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, Dialect};
-use readyset_errors::{invariant, ReadySetResult};
+use readyset_errors::{ReadySetResult, invariant};
 pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use crate::node::AuxiliaryNodeState;
 use crate::ops::grouped::{GroupedOperation, GroupedOperator};
 use crate::prelude::*;
 
-use super::{hash_grouped_records, GroupHash};
+use super::{GroupHash, hash_grouped_records};
 
 /// Supported aggregation operators.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,7 +256,7 @@ impl GroupedOperation for Aggregator {
         };
 
         let count_sum_map = match auxiliary_node_state {
-            Some(AuxiliaryNodeState::Aggregation(ref mut aggregator_state)) => {
+            Some(AuxiliaryNodeState::Aggregation(aggregator_state)) => {
                 &mut aggregator_state.count_sum_map
             }
             Some(_) => internal!("Incorrect auxiliary state for Aggregation node"),
@@ -343,7 +343,7 @@ mod tests {
     use readyset_decimal::Decimal;
 
     use super::*;
-    use crate::{ops, LookupIndex};
+    use crate::{LookupIndex, ops};
 
     fn setup(aggregation: Aggregation, mat: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -1447,9 +1447,10 @@ mod tests {
         .into();
         let rs2 = c.narrow_one(u, true);
         // Should revoke [NULL, 0] and emit [8, 2] — NOT [NULL, 2]
-        assert!(rs2
-            .iter()
-            .any(|r| r.is_positive() && r[0] == DfValue::from(8i64)));
+        assert!(
+            rs2.iter()
+                .any(|r| r.is_positive() && r[0] == DfValue::from(8i64))
+        );
     }
 
     #[test]
@@ -1462,9 +1463,10 @@ mod tests {
         ]
         .into();
         let rs = c.narrow_one(u, true);
-        assert!(rs
-            .iter()
-            .any(|r| r.is_positive() && r[0] == DfValue::from(8i64)));
+        assert!(
+            rs.iter()
+                .any(|r| r.is_positive() && r[0] == DfValue::from(8i64))
+        );
 
         // Delete all rows
         let d: Records = vec![

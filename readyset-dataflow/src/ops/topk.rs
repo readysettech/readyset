@@ -3,7 +3,7 @@
 ///
 /// TODO: Remove the MIR reversal and simplify the comparison logic here.
 use std::borrow::Cow;
-use std::cmp::{min, Ordering};
+use std::cmp::{Ordering, min};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -11,9 +11,9 @@ use dataflow_state::PointKey;
 use itertools::Itertools;
 use metrics::counter;
 use readyset_client::metrics::recorded;
-use readyset_client::{internal, KeyComparison};
+use readyset_client::{KeyComparison, internal};
 use readyset_data::DfValue;
-use readyset_errors::{internal, internal_err, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
@@ -410,10 +410,9 @@ impl Ingredient for TopK {
                     state,
                     nodes,
                     buffered_state,
-                )? {
-                    if replay.is_partial() {
-                        lookups.push(lookup)
-                    }
+                )? && replay.is_partial()
+                {
+                    lookups.push(lookup)
                 }
 
                 // make ready for the new one — only clone into owned values on group change
@@ -538,13 +537,12 @@ impl Ingredient for TopK {
                     // under-filled group (original_group_len < k) has no
                     // downstream-visible top-k to protect and no hidden
                     // parent rows in dataflow, so we admit everything.
-                    if original_group_len >= self.k {
-                        if let Some(worst) = current.last() {
-                            if !self.total_cmp(&worst.row, r).is_gt() {
-                                trace!(row = ?r, "topk skipping positive worse than worst");
-                                continue;
-                            }
-                        }
+                    if original_group_len >= self.k
+                        && let Some(worst) = current.last()
+                        && !self.total_cmp(&worst.row, r).is_gt()
+                    {
+                        trace!(row = ?r, "topk skipping positive worse than worst");
+                        continue;
                     }
 
                     // `Err` is a non-duplicate insertion; `Ok` means a
@@ -623,10 +621,9 @@ impl Ingredient for TopK {
             state,
             nodes,
             buffered_state,
-        )? {
-            if replay.is_partial() {
-                lookups.push(lookup)
-            }
+        )? && replay.is_partial()
+        {
+            lookups.push(lookup)
         }
 
         Ok(ProcessingResult {

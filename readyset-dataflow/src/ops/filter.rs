@@ -137,10 +137,10 @@ impl Ingredient for Filter {
 
 #[cfg(test)]
 mod tests {
-    use dataflow_expression::utils::{column_with_type, make_literal};
-    use dataflow_expression::BinaryOperator;
-    use readyset_data::DfType;
     use Expr::Op;
+    use dataflow_expression::BinaryOperator;
+    use dataflow_expression::utils::{column_with_type, make_literal};
+    use readyset_data::DfType;
 
     use super::*;
     use crate::ops;

@@ -13,8 +13,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::Bound;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use std::{cell, cmp, mem, process, time};
 
@@ -27,9 +27,9 @@ use dataflow_state::{
 };
 use exponential_backoff::Backoff;
 use failpoint_macros::set_failpoint;
+use futures_util::TryFutureExt;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
-use futures_util::TryFutureExt;
 pub use internal::{DomainIndex, ReplicaAddress};
 use itertools::Itertools;
 use merging_interval_tree::IntervalTreeSet;
@@ -41,31 +41,31 @@ use readyset_client::internal::{self, Index};
 use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress, TableStatus};
 use readyset_data::DfType;
-use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
+use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::Relation;
+use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
 use readyset_util::ranges::RangeBounds;
 use readyset_util::redacted::Sensitive;
-use readyset_util::SizeOf;
-use readyset_util::{time_scope, Indices};
+use readyset_util::{Indices, time_scope};
 use replication_offset::ReplicationOffset;
 use serde::{Deserialize, Serialize};
 use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, info_span, trace, warn, Instrument};
+use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 use url::Url;
 use vec1::Vec1;
 
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 pub use self::replay_paths::{ReplayPath, ReplayPathWithContext};
+use crate::domain::NodeOperator::Join;
 use crate::domain::channel::{
     ChannelCoordinator, DomainReceiver, DomainSender, ReplayReceiver, ReplaySender,
 };
-use crate::domain::NodeOperator::Join;
 use crate::node::special::EgressTx;
 use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::ops::Side;
@@ -75,7 +75,7 @@ use crate::payload::{
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
-use crate::{backlog, DomainRequest, Readers};
+use crate::{DomainRequest, Readers, backlog};
 
 const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
 
@@ -1705,11 +1705,7 @@ impl Domain {
         S: FnMut(Packet) -> bool,
     {
         let all: Vec<KeyComparison> = keys.collect();
-        if all.is_empty() {
-            true
-        } else {
-            send(pkt(all))
-        }
+        if all.is_empty() { true } else { send(pkt(all)) }
     }
 
     fn prepare_partial(
@@ -1796,52 +1792,53 @@ impl Domain {
         // state (FullMaterialization via materialization_persistence) uses the older
         // blocking index buid.
         let is_base = self.nodes[node].borrow().is_base();
-        if use_online_build && is_base {
-            if let Some(persistent) = state.as_persistent_mut() {
-                if persistent.index_build_status() == IndexBuildStatus::InProgress {
-                    warn!(
-                        node = %node.id(),
-                        "received index build request while a build is already in progress"
-                    );
-                    return Err(internal_err!(
-                        "index build already in progress for node {}",
-                        node.id()
-                    ));
-                }
-
-                // Prepare indices: filter existing, create primary if needed, return filtered list
-                let Some(indices) = persistent.prepare_indices_for_build(strict, weak)? else {
-                    // No indices to build after filtering
-                    return Ok(());
-                };
-
-                persistent.mark_index_build_in_progress()?;
-                let ctx = persistent.create_index_build_context();
-
-                tokio::task::spawn_blocking(move || {
-                    // catch_unwind prevents a panic in the build thread from
-                    // tearing down the entire tokio runtime. IndexBuildGuard's
-                    // Drop impl will mark the build as Failed on unwind, so the
-                    // migration controller's status poll will see the failure.
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        ctx.build_indices(indices)
-                    }));
-                    match result {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => error!(error = %e, "Background index build failed"),
-                        Err(panic_payload) => {
-                            let msg = panic_payload
-                                .downcast_ref::<String>()
-                                .map(|s| s.as_str())
-                                .or_else(|| panic_payload.downcast_ref::<&str>().copied())
-                                .unwrap_or("unknown panic");
-                            error!(panic = %msg, "Background index build panicked");
-                        }
-                    }
-                });
-
-                return Ok(());
+        if use_online_build
+            && is_base
+            && let Some(persistent) = state.as_persistent_mut()
+        {
+            if persistent.index_build_status() == IndexBuildStatus::InProgress {
+                warn!(
+                    node = %node.id(),
+                    "received index build request while a build is already in progress"
+                );
+                return Err(internal_err!(
+                    "index build already in progress for node {}",
+                    node.id()
+                ));
             }
+
+            // Prepare indices: filter existing, create primary if needed, return filtered list
+            let Some(indices) = persistent.prepare_indices_for_build(strict, weak)? else {
+                // No indices to build after filtering
+                return Ok(());
+            };
+
+            persistent.mark_index_build_in_progress()?;
+            let ctx = persistent.create_index_build_context();
+
+            tokio::task::spawn_blocking(move || {
+                // catch_unwind prevents a panic in the build thread from
+                // tearing down the entire tokio runtime. IndexBuildGuard's
+                // Drop impl will mark the build as Failed on unwind, so the
+                // migration controller's status poll will see the failure.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ctx.build_indices(indices)
+                }));
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => error!(error = %e, "Background index build failed"),
+                    Err(panic_payload) => {
+                        let msg = panic_payload
+                            .downcast_ref::<String>()
+                            .map(|s| s.as_str())
+                            .or_else(|| panic_payload.downcast_ref::<&str>().copied())
+                            .unwrap_or("unknown panic");
+                        error!(panic = %msg, "Background index build panicked");
+                    }
+                }
+            });
+
+            return Ok(());
         }
 
         state.add_index_multi(strict, weak);
@@ -1867,8 +1864,7 @@ impl Domain {
                 state.process_records(&mut records, None, None)?;
                 trace!(
                     local = node.id(),
-                    "populated constant node with {} initial rows",
-                    num_rows
+                    "populated constant node with {} initial rows", num_rows
                 );
             }
         }
@@ -3559,35 +3555,32 @@ impl Domain {
                         // themselves). So for now we just mark the original key as filled,
                         // and any subsequent queries that remap to the same upstream key
                         // have to replay the same set of rows over again (sad!)
-                        if let Some(state) = self.state.get_mut(segment.node) {
-                            if let Some(waiting) = self.waiting.get(segment.node) {
-                                let target_node = target.unwrap();
-                                let cols: Arc<[usize]> = Arc::from(
-                                    self.replay_paths[tag]
-                                        .target_index
-                                        .as_ref()
-                                        .unwrap()
-                                        .columns
-                                        .as_slice(),
-                                );
-                                if let Some(inner) = waiting.redos.get(&(target_node, cols)) {
-                                    for key in backfill_keys.iter() {
-                                        if let Some(redos) = inner.get(key) {
-                                            for redo in redos {
-                                                // Are we about to satisfy the last hole
-                                                // this redo was waiting for?
-                                                if waiting.holes.get(redo) == Some(&1) {
-                                                    trace!(
-                                                        key = ?redo.replay_key,
-                                                        tag = ?redo.tag,
-                                                        local = %segment.node,
-                                                        "Marking remapped hole filled"
-                                                    );
-                                                    state.mark_filled(
-                                                        redo.replay_key.clone(),
-                                                        redo.tag,
-                                                    )
-                                                }
+                        if let Some(state) = self.state.get_mut(segment.node)
+                            && let Some(waiting) = self.waiting.get(segment.node)
+                        {
+                            let target_node = target.unwrap();
+                            let cols: Arc<[usize]> = Arc::from(
+                                self.replay_paths[tag]
+                                    .target_index
+                                    .as_ref()
+                                    .unwrap()
+                                    .columns
+                                    .as_slice(),
+                            );
+                            if let Some(inner) = waiting.redos.get(&(target_node, cols)) {
+                                for key in backfill_keys.iter() {
+                                    if let Some(redos) = inner.get(key) {
+                                        for redo in redos {
+                                            // Are we about to satisfy the last hole
+                                            // this redo was waiting for?
+                                            if waiting.holes.get(redo) == Some(&1) {
+                                                trace!(
+                                                    key = ?redo.replay_key,
+                                                    tag = ?redo.tag,
+                                                    local = %segment.node,
+                                                    "Marking remapped hole filled"
+                                                );
+                                                state.mark_filled(redo.replay_key.clone(), redo.tag)
                                             }
                                         }
                                     }
@@ -3648,11 +3641,11 @@ impl Domain {
                         }
 
                         // and also unmark the replay request
-                        if let Some(ref mut prev) = self.reader_triggered.get_mut(segment.node) {
-                            if let Some(backfill_keys) = &backfill_keys {
-                                for key in backfill_keys {
-                                    prev.remove(key);
-                                }
+                        if let Some(ref mut prev) = self.reader_triggered.get_mut(segment.node)
+                            && let Some(backfill_keys) = &backfill_keys
+                        {
+                            for key in backfill_keys {
+                                prev.remove(key);
                             }
                         }
                     }
@@ -3665,11 +3658,11 @@ impl Domain {
                         for key in &process_result.captured {
                             state.mark_hole(key, tag);
                         }
-                    } else if n.is_reader() {
-                        if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
-                            for key in &process_result.captured {
-                                wh.mark_hole(key)?;
-                            }
+                    } else if n.is_reader()
+                        && let Some(wh) = self.reader_write_handles.get_mut(segment.node)
+                    {
+                        for key in &process_result.captured {
+                            wh.mark_hole(key)?;
                         }
                     }
                 }
@@ -3698,10 +3691,11 @@ impl Domain {
                 //  2. we should only set finished_partial if it hasn't already been set. this is
                 //     important, as misses will cause backfill_keys to be pruned over time, which
                 //     would cause finished_partial to hold the wrong value!
-                if let Some(backfill_keys) = &backfill_keys {
-                    if finished_partial == 0 && (dst_is_reader || !dst_is_sender) {
-                        finished_partial = backfill_keys.len();
-                    }
+                if let Some(backfill_keys) = &backfill_keys
+                    && finished_partial == 0
+                    && (dst_is_reader || !dst_is_sender)
+                {
+                    finished_partial = backfill_keys.len();
                 }
 
                 // only continue with the keys that weren't captured
@@ -3709,20 +3703,18 @@ impl Domain {
                 // captured some keys (removing them from for_keys). In the common case
                 // (no captures), for_keys still contains all of backfill_keys, so the
                 // retain would be a no-op.
-                if !process_result.captured.is_empty() {
-                    if let ReplayPiece {
+                if !process_result.captured.is_empty()
+                    && let ReplayPiece {
                         context:
                             ReplayPieceContext::Partial {
                                 ref mut for_keys, ..
                             },
                         ..
                     } = m
-                    {
-                        if let Some(backfill_keys) = &mut backfill_keys {
-                            backfill_keys.retain(|k| for_keys.contains(k));
-                            backfill_keys_modified = true;
-                        }
-                    }
+                    && let Some(backfill_keys) = &mut backfill_keys
+                {
+                    backfill_keys.retain(|k| for_keys.contains(k));
+                    backfill_keys_modified = true;
                 }
 
                 // if we missed during replay, we need to do another replay
@@ -3932,19 +3924,18 @@ impl Domain {
                 }
 
                 // we're all good -- continue propagating
-                if m.is_empty() {
-                    if let ReplayPiece {
+                if m.is_empty()
+                    && let ReplayPiece {
                         context: ReplayPieceContext::Full { last: false, .. },
                         ..
                     } = m
-                    {
-                        trace!("dropping empty non-terminal full replay packet");
-                        // don't continue processing empty updates, *except* if this is the
-                        // last replay batch. in that case we need to send it so that the
-                        // next domain knows that we're done
-                        // TODO: we *could* skip ahead to path.last() here
-                        break;
-                    }
+                {
+                    trace!("dropping empty non-terminal full replay packet");
+                    // don't continue processing empty updates, *except* if this is the
+                    // last replay batch. in that case we need to send it so that the
+                    // next domain knows that we're done
+                    // TODO: we *could* skip ahead to path.last() here
+                    break;
                 }
 
                 if i + 1 < path.len() {
@@ -4528,10 +4519,10 @@ impl Domain {
                 state.publish();
                 state.notify_readers_of_eviction()?;
 
-                if let Some(addrs) = self.trigger_addresses.get(node) {
-                    if self.unquery_after_eviction {
-                        Self::unquery(ex, addrs, node, state.index_columns(), &mut keys);
-                    }
+                if let Some(addrs) = self.trigger_addresses.get(node)
+                    && self.unquery_after_eviction
+                {
+                    Self::unquery(ex, addrs, node, state.index_columns(), &mut keys);
                 }
             } else if let Some(EvictBytesResult {
                 index,
@@ -4819,11 +4810,11 @@ impl Domain {
                 if n.is_reader() {
                     // We are a reader, which has its own kind of state
                     let mut size = 0;
-                    if let Some(wh) = self.reader_write_handles.get(local_index) {
-                        if wh.is_partial() {
-                            size = wh.deep_size_of();
-                            reader_size += size;
-                        }
+                    if let Some(wh) = self.reader_write_handles.get(local_index)
+                        && wh.is_partial()
+                    {
+                        size = wh.deep_size_of();
+                        reader_size += size;
                     }
 
                     self.metrics.set_reader_state_size(n.name(), size);

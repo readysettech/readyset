@@ -242,7 +242,7 @@ impl Node {
             }
             ColumnSource::Union(ref colrefs) => {
                 if cfg!(debug_assertions) {
-                    for ColumnRef { ref columns, .. } in colrefs {
+                    for ColumnRef { columns, .. } in colrefs {
                         debug_assert_eq!(cols.len(), columns.len());
                     }
                 }

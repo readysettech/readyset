@@ -4,15 +4,15 @@ use std::collections::{HashMap, HashSet};
 use common::DfValue;
 use readyset_client::KeyComparison;
 use readyset_data::Bound;
-use readyset_errors::{internal, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use vec1::Vec1;
 
+use crate::Packet;
 use crate::payload::packets::*;
 use crate::payload::{Eviction, ReplayPieceContext};
 use crate::prelude::NodeIndex;
-use crate::Packet;
 
 type ColumnIndexes = Vec<usize>;
 
@@ -103,10 +103,10 @@ impl PacketFilter {
                         keys.iter().any(|key| match key {
                             // Here we filter the records based on the keys that the target node
                             // requested previously.
-                            KeyComparison::Equal(ref cond) => {
+                            KeyComparison::Equal(cond) => {
                                 check_bound(ci, row, cond, |d1, d2| d1 == d2)
                             }
-                            KeyComparison::Range((ref lower_bound, ref upper_bound)) => {
+                            KeyComparison::Range((lower_bound, upper_bound)) => {
                                 check_lower_bound(lower_bound, ci, row)
                                     && check_upper_bound(upper_bound, ci, row)
                             }
@@ -534,7 +534,10 @@ mod test {
 
             let result = processor.process(&mut packet, None, ni);
 
-            assert!(result.is_err(), "Calls to process with a replay message packet should always be passed a keyed-by vector of column indexes");
+            assert!(
+                result.is_err(),
+                "Calls to process with a replay message packet should always be passed a keyed-by vector of column indexes"
+            );
         }
 
         #[test]

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use readyset_client::metrics::recorded;
-use readyset_errors::{internal_err, invariant, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal_err, invariant};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 

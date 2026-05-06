@@ -155,11 +155,11 @@ impl Ingredient for Project {
 
 #[cfg(test)]
 mod tests {
-    use dataflow_expression::utils::{make_int_column, make_literal};
+    use Expr::Op;
     use dataflow_expression::BinaryOperator;
+    use dataflow_expression::utils::{make_int_column, make_literal};
     use dataflow_state::{MaterializedNodeState, PersistenceType};
     use readyset_data::DfType;
-    use Expr::Op;
 
     use super::*;
     use crate::ops;

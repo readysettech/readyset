@@ -1,13 +1,13 @@
+use crate::LookupIndex;
 use crate::ops::utils::Order;
 use crate::prelude::*;
-use crate::LookupIndex;
 
 use dataflow_state::PointKey;
 use enum_kinds::EnumKind;
 use itertools::{Either, Itertools};
 use readyset_client::internal;
 use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, Dialect};
-use readyset_errors::{unsupported, ReadySetResult};
+use readyset_errors::{ReadySetResult, unsupported};
 use readyset_sql::ast::FunctionExpr;
 use readyset_sql::ast::{NullOrder, OrderType};
 use readyset_util::Indices;

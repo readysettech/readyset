@@ -8,10 +8,10 @@ use crate::prelude::*;
 use common::DfValue;
 use dataflow_expression::grouped::accumulator::{AccumulationOp, AccumulatorData};
 use readyset_data::{Collation, DfType, Dialect};
-use readyset_errors::{internal_err, invariant_eq, ReadySetResult};
+use readyset_errors::{ReadySetResult, internal_err, invariant_eq};
 use serde::{Deserialize, Serialize};
 
-use super::{hash_grouped_records, GroupHash};
+use super::{GroupHash, hash_grouped_records};
 
 /// The last stored state for a given group.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -134,7 +134,7 @@ impl GroupedOperation for Accumulator {
         let group = first_diff.group_hash;
 
         let last_state = match auxiliary_node_state {
-            Some(AuxiliaryNodeState::Accumulator(ref mut acc_state)) => &mut acc_state.last_state,
+            Some(AuxiliaryNodeState::Accumulator(acc_state)) => &mut acc_state.last_state,
             Some(_) => internal!("Incorrect auxiliary state for Accumulator node"),
             None => internal!("Missing auxiliary state for Accumulator node"),
         };
@@ -299,7 +299,7 @@ mod tests {
     use readyset_sql::ast::{NullOrder, OrderType};
 
     use super::*;
-    use crate::{ops, LookupIndex};
+    use crate::{LookupIndex, ops};
 
     fn setup(mat: bool, op: Option<AccumulationOp>) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
@@ -524,7 +524,7 @@ mod tests {
         // multiple positives and negatives should update aggregation value by appropriate amount
         let rs = c.narrow_one(u, true);
         assert_eq!(rs.len(), 5); // one - and one + for each group, except last (new) group
-                                 // group 1 had [2], now has [1,2]
+        // group 1 had [2], now has [1,2]
         assert!(rs.iter().any(|r| if let Record::Negative(ref r) = *r {
             if r[0] == 1.into() {
                 assert_eq!(r[1], "2".into());

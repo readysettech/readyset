@@ -10,8 +10,8 @@ use derive_more::From;
 use readyset_client::KeyComparison;
 use readyset_data::DfType;
 use readyset_errors::ReadySetResult;
-use readyset_util::ranges::RangeBounds;
 use readyset_util::Indices;
+use readyset_util::ranges::RangeBounds;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 

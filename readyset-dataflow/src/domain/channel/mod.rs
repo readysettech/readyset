@@ -11,7 +11,7 @@ use std::task::{Context, Poll};
 
 use async_bincode::tokio::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
-use metrics::{gauge, Gauge};
+use metrics::{Gauge, gauge};
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN, CONNECTION_MAGIC_NUMBER};

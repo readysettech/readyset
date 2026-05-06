@@ -5,8 +5,8 @@ use std::time::Instant;
 use dataflow_state::PointKey;
 use derive_more::From;
 use metrics::{counter, histogram};
-use readyset_client::metrics::recorded;
 use readyset_client::KeyComparison;
+use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 
@@ -512,7 +512,7 @@ pub mod test {
                 return res;
             }
 
-            if let RawProcessingResult::Regular(ref mut res) = &mut res {
+            if let RawProcessingResult::Regular(res) = &mut res {
                 node::materialize(
                     &mut res.results,
                     None,

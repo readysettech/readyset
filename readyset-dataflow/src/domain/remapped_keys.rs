@@ -79,7 +79,7 @@
 //! This replaces the complex nested HashMap structure with a more readable flat structure.
 use crate::processing::ColumnMiss;
 use common::Len;
-use readyset_client::{internal::LocalNodeIndex, KeyComparison};
+use readyset_client::{KeyComparison, internal::LocalNodeIndex};
 use std::collections::HashMap;
 use std::sync::Arc;
 

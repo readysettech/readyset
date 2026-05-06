@@ -8,8 +8,8 @@ use readyset_errors::ReadySetResult;
 use replication_offset::ReplicationOffset;
 use tracing::{debug_span, trace};
 
-use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::node::NodeType;
+use crate::node::special::base::{BaseWrite, SetSnapshotMode};
 use crate::payload::Eviction;
 use crate::prelude::*;
 use crate::{backlog, payload};

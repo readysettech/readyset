@@ -4,10 +4,10 @@ use ahash::RandomState;
 use dataflow_expression::PreInsertion;
 use reader_map::{BatchEntry, BatchSegment, EvictionQuantity};
 use readyset_data::Bound;
-use readyset_util::ranges::RangeBounds;
 use readyset_util::SizeOf;
+use readyset_util::ranges::RangeBounds;
 
-use super::{key_to_single, Key};
+use super::{Key, key_to_single};
 use crate::prelude::*;
 
 pub(super) enum Handle {
@@ -96,7 +96,7 @@ impl Handle {
     ) {
         let base_value_size = self.base_value_size();
         match self {
-            Handle::Single(ref mut h) => {
+            Handle::Single(h) => {
                 let (bytes, keys) = h.evict_keys(keys_to_evict, |k, v| {
                     // Each row's state is composed of: The key, the set of Values in the row
                     // (DfValues) and the bytes required to hold the Row data
@@ -108,7 +108,7 @@ impl Handle {
                 let keys = keys.map(|(x, y)| (vec![x], y.map(|y| vec![y])));
                 (bytes, Box::new(keys))
             }
-            Handle::Many(ref mut h) => h.evict_keys(keys_to_evict, |k, v| {
+            Handle::Many(h) => h.evict_keys(keys_to_evict, |k, v| {
                 k.deep_size_of()
                     + v.iter().map(|r| r.deep_size_of()).sum::<usize>()
                     + base_value_size
@@ -118,10 +118,10 @@ impl Handle {
 
     pub fn publish(&mut self) {
         match self {
-            Handle::Single(ref mut h) => {
+            Handle::Single(h) => {
                 h.publish();
             }
-            Handle::Many(ref mut h) => {
+            Handle::Many(h) => {
                 h.publish();
             }
         }
@@ -133,14 +133,14 @@ impl Handle {
     {
         let mut memory_delta = 0isize;
         match self {
-            Handle::Single(ref mut h) => {
+            Handle::Single(h) => {
                 assert_eq!(key_columns.len(), 1);
                 let key_col = key_columns[0];
                 let entries =
                     collect_batch(records, cols, &mut memory_delta, |r| r[key_col].clone());
                 h.batch(entries);
             }
-            Handle::Many(ref mut h) => {
+            Handle::Many(h) => {
                 let entries = collect_batch(records, cols, &mut memory_delta, |r| {
                     key_columns.iter().map(|&k| r[k].clone()).collect()
                 });

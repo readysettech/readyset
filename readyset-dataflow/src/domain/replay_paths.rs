@@ -1,17 +1,17 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, btree_map};
 use std::hash::Hash;
 use std::{fmt, iter, ops};
 
 use itertools::Either;
-use readyset_client::internal::LocalNodeIndex;
 use readyset_client::KeyComparison;
+use readyset_client::internal::LocalNodeIndex;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
 use super::{RemappedKeys, TriggerEndpoint};
-use crate::prelude::*;
 use crate::NodeMap;
+use crate::prelude::*;
 
 /// Information about the subset of a replay path that is relevant to a particular domain.
 ///
@@ -35,7 +35,16 @@ pub struct ReplayPath {
 
 impl fmt::Display for ReplayPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ReplayPath {{ source: {:?}, destination_index: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, trigger: {:?} }}", self.source, self.destination_index, self.target_index, self.path, self.notify_done, self.trigger)
+        write!(
+            f,
+            "ReplayPath {{ source: {:?}, destination_index: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, trigger: {:?} }}",
+            self.source,
+            self.destination_index,
+            self.target_index,
+            self.path,
+            self.notify_done,
+            self.trigger
+        )
     }
 }
 
