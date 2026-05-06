@@ -1,6 +1,6 @@
 //! Compound SELECT patterns: UNION ALL, etc.
 
-use readyset_sql::ast::CompoundSelectOperator;
+use readyset_sql::ast::{CompoundSelectOperator, SqlType};
 
 use crate::constraint::Constraint;
 use crate::pattern::{Pattern, PatternBuilder};
@@ -25,6 +25,44 @@ pub fn union_all_same_table() -> Pattern {
             vec![
                 Constraint::From(t),
                 Constraint::ProjectColumn { col: c, table: t },
+            ],
+        ],
+    );
+    b.tags(&["compound", "union"]);
+    b.build()
+}
+
+/// SELECT t1.c FROM t1 UNION ALL SELECT t2.c FROM t2 with heterogeneous
+/// declared types unified by [`Constraint::TypeCompatible`].
+///
+/// `c1` is declared `Integer` (resolves to Int/BigInt/...) and `c2` is
+/// pinned to exact `Double`. Pinning `c2` to a float type — rather than
+/// the broader `Numeric` class which also covers Int/BigInt — guarantees
+/// every seed exercises a true cross-type pair, not an Int/Int collapse.
+/// The `TypeCompatible(c1, c2)` constraint anchors the resolver's
+/// cross-class type-check on the MIR Union node and is a regression
+/// anchor if `types_compatible` is ever narrowed.
+pub fn union_all_cross_type() -> Pattern {
+    let mut b = PatternBuilder::new("union_all_cross_type");
+    let t1 = b.table();
+    let t2 = b.table();
+    let c1 = b.column(t1);
+    let c2 = b.column(t2);
+    b.not_eq(t1, t2);
+    b.column_type_class(c1, crate::constraint::TypeClass::Integer);
+    b.column_type_class(c2, crate::constraint::TypeClass::Exact(SqlType::Double));
+    b.type_compatible(c1, c2);
+
+    b.compound_select(
+        CompoundSelectOperator::UnionAll,
+        vec![
+            vec![
+                Constraint::From(t1),
+                Constraint::ProjectColumn { col: c1, table: t1 },
+            ],
+            vec![
+                Constraint::From(t2),
+                Constraint::ProjectColumn { col: c2, table: t2 },
             ],
         ],
     );
@@ -99,6 +137,26 @@ mod tests {
         let sql = resolve_pattern(&p, Dialect::MySQL);
         assert!(sql.contains("UNION ALL"), "expected UNION ALL in: {sql}");
         assert!(sql.contains("SELECT"), "expected SELECT in: {sql}");
+    }
+
+    #[test]
+    fn union_all_cross_type_resolves() {
+        // Pattern declares c1: Integer, c2: Numeric, with TypeCompatible(c1, c2).
+        // Resolver must accept the heterogeneous classes (Integer ⊂ Numeric)
+        // and emit a UNION ALL across two distinct base tables.
+        let p = union_all_cross_type();
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, crate::constraint::Constraint::TypeCompatible(_, _))),
+            "cross-type pattern must carry a TypeCompatible constraint"
+        );
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(sql.contains("UNION ALL"), "expected UNION ALL in: {sql}");
+        assert!(
+            sql.contains("FROM `t0`") && sql.contains("FROM `t1`"),
+            "expected both `t0` and `t1` as base FROMs in: {sql}"
+        );
     }
 
     #[test]

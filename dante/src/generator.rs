@@ -250,6 +250,7 @@ impl ConstraintRegistry {
         ] {
             reg.register(compound::union_all_two_tables(class));
         }
+        reg.register(compound::union_all_cross_type());
 
         // Advanced patterns
         reg.register(advanced::window_function());
