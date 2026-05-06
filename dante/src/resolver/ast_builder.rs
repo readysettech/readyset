@@ -446,9 +446,13 @@ fn build_select_inner(
                     rhs: Box::new(Expr::Literal(Literal::Placeholder(placeholder))),
                 };
                 and_merge(&mut having_expr, new_expr);
+                // Param compares against the AGGREGATE'S RESULT, not the
+                // input column. Postgres prepared statements reject
+                // `count(c) > $param` if $param's pg type doesn't match
+                // BIGINT; MySQL coerced silently.
                 let col_type = get_col_type(env, *col)?;
                 params.push(ParamMeta {
-                    sql_type: col_type,
+                    sql_type: aggregate_result_type(function, &col_type),
                     gen_spec: ColumnGenerationSpec::Random,
                     count: 1,
                 });
@@ -940,6 +944,45 @@ fn get_col_type(env: &mut Env, col: VarId) -> Result<SqlType, ResolveError> {
     }
 }
 
+/// SQL return type of an aggregate over a column of type `col_type`.
+///
+/// Used when building HAVING parameters: `aggregate_fn(col) op $param`
+/// compares against the aggregate's RESULT, not the underlying column.
+/// Returning the wrong type only manifests on Postgres (prepared-statement
+/// type checking is strict); MySQL silently coerces.
+///
+/// Approximations:
+/// - `Sum`/`Avg` collapse to BigInt/Numeric/Double respectively, ignoring
+///   precision details; Postgres-correct enough that the param serializes,
+///   and the comparison in MySQL still works after silent widening.
+/// - `ArrayAgg` returns the column type; HAVING on an array is not a
+///   shape the generator emits today, so this stays approximate.
+fn aggregate_result_type(function: &AggregateFn, col_type: &SqlType) -> SqlType {
+    use AggregateFn::*;
+    match function {
+        Count { .. } => SqlType::BigInt(None),
+        Sum { .. } => match col_type {
+            SqlType::TinyInt(_) | SqlType::SmallInt(_) | SqlType::Int(_) | SqlType::BigInt(_) => {
+                SqlType::BigInt(None)
+            }
+            // For Float/Double, sum stays double-precision in both
+            // dialects; for Numeric, postgres widens but we don't
+            // generate Numeric columns today.
+            _ => col_type.clone(),
+        },
+        Avg { .. } => match col_type {
+            SqlType::Float | SqlType::Double => SqlType::Double,
+            // Postgres avg(int) → numeric; we don't emit Numeric columns,
+            // so default to Double and accept the small mismatch (PG will
+            // coerce Double → Numeric on bind).
+            _ => SqlType::Double,
+        },
+        Min | Max => col_type.clone(),
+        GroupConcat | JsonObjectAgg => SqlType::Text,
+        ArrayAgg => col_type.clone(),
+    }
+}
+
 /// Get (col_name, table_name) from a Column binding, resolving the table
 /// name lazily from the Table binding so that aliases applied after column
 /// binding are reflected.
@@ -1400,7 +1443,7 @@ fn make_scalar_fn_expr(
 mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use readyset_sql::ast::BinaryOperator;
+    use readyset_sql::ast::{BinaryOperator, SqlType};
     use readyset_sql::{Dialect, DialectDisplay};
 
     use readyset_sql::ast::CompoundSelectOperator;
@@ -1457,6 +1500,56 @@ mod tests {
         let mut entropy = Entropy::new(&mut rng);
 
         resolve(&constraints, &var_kinds, &mut state, &mut entropy).expect_err("expected Err")
+    }
+
+    #[test]
+    fn having_count_param_sql_type_is_bigint_not_column_type() {
+        // Regression: the HAVING param used to inherit the underlying
+        // column's sql_type, but the comparison operand on the LHS is the
+        // aggregate's RESULT (e.g., COUNT(c) returns BigInt). On Postgres
+        // this caused `error serializing parameter: <col_type> → Int8`
+        // when the column wasn't already an integer; MySQL silently
+        // coerced. Param sql_type for HAVING must come from the aggregate
+        // function's return type, not the column.
+        use crate::constraint::AggregateFn;
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            // Force the column to a non-integer type so the bug is visible
+            // even when MySQL would coerce.
+            Constraint::ColumnTypeClass {
+                col: c,
+                type_class: TypeClass::DateTime,
+            },
+            Constraint::From(t),
+            Constraint::ProjectColumn { col: c, table: t },
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: c,
+                table: t,
+            },
+            Constraint::GroupBy { col: c, table: t },
+            Constraint::Having {
+                function: AggregateFn::Count { distinct: false },
+                col: c,
+                table: t,
+                op: BinaryOperator::Greater,
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let (_sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
+        assert_eq!(
+            output.params.len(),
+            1,
+            "HAVING contributes exactly one param"
+        );
+        assert!(
+            matches!(output.params[0].sql_type, SqlType::BigInt(_)),
+            "HAVING param for COUNT must be BigInt; got {:?}",
+            output.params[0].sql_type
+        );
     }
 
     #[test]
