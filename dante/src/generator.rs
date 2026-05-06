@@ -456,9 +456,10 @@ impl Generator {
 
             // Add 3-8 columns with random types
             let num_cols = entropy.range(3..9usize);
+            let dialect = self.state.dialect();
             for _ in 0..num_cols {
                 let col_name = schema.fresh_column_name();
-                let sql_type = crate::resolver::schema::pick_random_type(entropy);
+                let sql_type = crate::resolver::schema::pick_random_type(entropy, dialect);
                 let meta = ColumnMeta {
                     sql_type,
                     gen_spec: self.state.config().default_gen_spec.clone(),
@@ -492,6 +493,7 @@ impl Generator {
                 .ok_or(GenerateError::NoExistingSchema)?;
             let table_name = table.name.clone();
             let default_gen_spec = self.state.config().default_gen_spec.clone();
+            let dialect = self.state.dialect();
 
             let table_schema = self.state.table_mut(&table_name).ok_or_else(|| {
                 GenerateError::TableLookupFailed {
@@ -499,7 +501,7 @@ impl Generator {
                 }
             })?;
             let col_name = table_schema.fresh_column_name();
-            let sql_type = crate::resolver::schema::pick_random_type(entropy);
+            let sql_type = crate::resolver::schema::pick_random_type(entropy, dialect);
             let meta = ColumnMeta {
                 sql_type,
                 gen_spec: default_gen_spec,

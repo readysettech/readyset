@@ -1,4 +1,5 @@
 use data_generator::ColumnGenerationSpec;
+use readyset_sql::Dialect;
 use readyset_sql::ast::SqlType;
 
 use super::{Binding, DdlStep, Env, ResolveError};
@@ -453,8 +454,8 @@ fn resolve_column_exists(
     } else {
         // Synthesize a new column
         let sql_type = match &type_class {
-            Some(tc) => pick_type_for_class(tc, entropy),
-            None => pick_random_type(entropy),
+            Some(tc) => pick_type_for_class(tc, entropy, state.dialect()),
+            None => pick_random_type(entropy, state.dialect()),
         };
         let role = column_role(col, all_constraints);
         let gen_spec = gen_spec_for_role(role, &sql_type, &state.config().default_gen_spec);
@@ -643,9 +644,15 @@ fn is_string(t: &SqlType) -> bool {
 }
 
 /// Pick a concrete SQL type for a type class.
-fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>) -> SqlType {
+///
+/// `dialect` controls which physical types are reachable: PostgreSQL uses
+/// `TIMESTAMP` where MySQL uses `DATETIME`, so the DateTime slot swaps to
+/// `SqlType::Timestamp` under PG. Without this, ALTER TABLE / CREATE TABLE
+/// emits `DATETIME` against Postgres and the upstream errors out (PG has
+/// no `DATETIME` type).
+fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Dialect) -> SqlType {
     match tc {
-        TypeClass::Any => pick_random_type(entropy),
+        TypeClass::Any => pick_random_type(entropy, dialect),
         TypeClass::Integer => entropy
             .choose(&[SqlType::Int(None), SqlType::BigInt(None)])
             .cloned()
@@ -664,10 +671,20 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>) -> SqlType {
             .cloned()
             .expect("string type slice is non-empty"),
         TypeClass::DateTime => entropy
-            .choose(&[SqlType::DateTime(None), SqlType::Date])
+            .choose(&[datetime_for(dialect), SqlType::Date])
             .cloned()
             .expect("datetime type slice is non-empty"),
         TypeClass::Exact(t) => t.clone(),
+    }
+}
+
+/// Dialect-appropriate "datetime" sql type: `TIMESTAMP` for PG, `DATETIME`
+/// for MySQL. Both decode to `Value::DateTime` upstream-side per the
+/// `mmjjsbptsxwu` work, so cross-dialect comparison stays well-defined.
+fn datetime_for(dialect: Dialect) -> SqlType {
+    match dialect {
+        Dialect::PostgreSQL => SqlType::Timestamp,
+        Dialect::MySQL => SqlType::DateTime(None),
     }
 }
 
@@ -675,7 +692,10 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>) -> SqlType {
 ///
 /// Includes all types that the data generator can produce valid values for.
 /// gen_spec_for_role handles type-appropriate ranges for small/non-integer types.
-pub(crate) fn pick_random_type(entropy: &mut Entropy<'_>) -> SqlType {
+///
+/// `dialect` swaps `DATETIME` for `TIMESTAMP` under PostgreSQL — see
+/// `pick_type_for_class` for rationale.
+pub(crate) fn pick_random_type(entropy: &mut Entropy<'_>, dialect: Dialect) -> SqlType {
     entropy
         .choose(&[
             SqlType::Int(None),
@@ -684,7 +704,7 @@ pub(crate) fn pick_random_type(entropy: &mut Entropy<'_>) -> SqlType {
             SqlType::VarChar(Some(255)),
             SqlType::Text,
             SqlType::Double,
-            SqlType::DateTime(None),
+            datetime_for(dialect),
             SqlType::Date,
             SqlType::Bool,
         ])
@@ -1220,7 +1240,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut entropy = Entropy::new(&mut rng);
 
-        let sql_type = pick_type_for_class(&TypeClass::DateTime, &mut entropy);
+        let sql_type = pick_type_for_class(&TypeClass::DateTime, &mut entropy, Dialect::MySQL);
         assert!(
             type_matches(&sql_type, &TypeClass::DateTime),
             "expected DateTime type, got: {sql_type:?}"
@@ -1235,7 +1255,7 @@ mod tests {
 
         let mut has_datetime = false;
         for _ in 0..200 {
-            let t = pick_random_type(&mut entropy);
+            let t = pick_random_type(&mut entropy, Dialect::MySQL);
             if type_matches(&t, &TypeClass::DateTime) {
                 has_datetime = true;
                 break;
@@ -1248,13 +1268,65 @@ mod tests {
     }
 
     #[test]
+    fn pick_random_type_postgres_never_returns_datetime() {
+        // Postgres rejects MySQL's DATETIME type (it uses TIMESTAMP). The
+        // generator must swap DateTime → Timestamp under PostgreSQL dialect
+        // so DDL is dialect-valid; otherwise ALTER TABLE / CREATE TABLE
+        // bombs on first emission of a datetime column.
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        for _ in 0..500 {
+            let t = pick_random_type(&mut entropy, Dialect::PostgreSQL);
+            assert!(
+                !matches!(t, SqlType::DateTime(_)),
+                "PostgreSQL pick_random_type must not return DATETIME, got: {t:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_random_type_postgres_can_return_timestamp() {
+        // The DateTime slot should be filled by Timestamp under PG, not
+        // dropped — otherwise we lose datetime coverage entirely.
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let mut has_timestamp = false;
+        for _ in 0..500 {
+            if matches!(
+                pick_random_type(&mut entropy, Dialect::PostgreSQL),
+                SqlType::Timestamp
+            ) {
+                has_timestamp = true;
+                break;
+            }
+        }
+        assert!(
+            has_timestamp,
+            "PostgreSQL pick_random_type should sometimes return TIMESTAMP"
+        );
+    }
+
+    #[test]
+    fn pick_type_for_class_datetime_postgres_never_returns_mysql_datetime() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        for _ in 0..200 {
+            let t = pick_type_for_class(&TypeClass::DateTime, &mut entropy, Dialect::PostgreSQL);
+            assert!(
+                !matches!(t, SqlType::DateTime(_)),
+                "PostgreSQL pick_type_for_class(DateTime) must not return DATETIME, got: {t:?}"
+            );
+        }
+    }
+
+    #[test]
     fn pick_random_type_can_return_small_int() {
         let mut rng = SmallRng::seed_from_u64(42);
         let mut entropy = Entropy::new(&mut rng);
 
         let mut has_smallint = false;
         for _ in 0..200 {
-            let t = pick_random_type(&mut entropy);
+            let t = pick_random_type(&mut entropy, Dialect::MySQL);
             if matches!(t, SqlType::SmallInt(_)) {
                 has_smallint = true;
                 break;
