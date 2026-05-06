@@ -187,6 +187,11 @@ impl pgsql::types::ToSql for Value {
             },
             Value::DateTime(x) => match *ty {
                 Type::TIMESTAMP => x.to_sql(ty, out),
+                // Postgres `DATE` columns flow through Value::DateTime
+                // because the data-generator's NaiveDate → DfValue path
+                // widens to TimestampTz and then narrows to Value::DateTime
+                // (no timezone). Project to NaiveDate at bind time.
+                Type::DATE => x.date().to_sql(ty, out),
                 _ => Err(unsupported("DateTime")),
             },
             Value::Time(x) => match *ty {
@@ -230,6 +235,7 @@ impl pgsql::types::ToSql for Value {
             | Type::TIMESTAMP
             | Type::TIMESTAMPTZ
             | Type::TIME
+            | Type::DATE
             | Type::BYTEA
             | Type::BIT
             | Type::VARBIT
@@ -1089,6 +1095,18 @@ mod tests {
                         .unwrap(),
                 ),
                 Type::TIMESTAMP,
+            ),
+            // Postgres `DATE` columns: data-generator produces NaiveDate
+            // → DfValue::TimestampTz(naive) → Value::DateTime, and the
+            // bind has to project back to NaiveDate.
+            (
+                Value::DateTime(
+                    NaiveDate::from_ymd_opt(2024, 1, 1)
+                        .unwrap()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap(),
+                ),
+                Type::DATE,
             ),
             (Value::Time(MySqlTime::from_microseconds(0)), Type::TIME),
             (Value::ByteArray(Arc::new(vec![1, 2])), Type::BYTEA),
