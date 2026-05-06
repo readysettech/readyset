@@ -563,6 +563,22 @@ pub struct Options {
     #[arg(long, env = "DEFAULT_COALESCE_MS", default_value = "5000")]
     default_coalesce_ms: u64,
 
+    /// Opportunistic read-your-writes window (ms). Applies only *outside* transactions:
+    /// after any write on a session, reads on that same session bypass the cache and go
+    /// to the upstream for this many milliseconds. In-transaction routing is governed by
+    /// the per-cache `TrxCachePolicy` (`NEVER` / `ALWAYS` / `UNTIL WRITE`), not this
+    /// window. The intent is to give upstream replication a chance to catch up before
+    /// serving cached reads of just-written rows.
+    ///
+    /// This is opportunistic, not a consistency guarantee. Once the window elapses, reads
+    /// resume from the cache, and the cache may still hold a pre-write value (e.g. a TTL
+    /// that has not yet expired, or a row Readyset has not yet refreshed). Use only when
+    /// occasional stale reads after the window are acceptable.
+    ///
+    /// Unset (the default) disables the window; a value of 0 also disables it.
+    #[arg(long, env = "OPPORTUNISTIC_RYW_MS")]
+    opportunistic_ryw_ms: Option<u64>,
+
     /// Specifies the name for Readyset's virtual schema.
     ///
     /// Make sure this database/schema does not exist on your upstream.
@@ -1708,6 +1724,7 @@ where
                 .cache_mode(options.cache_mode)
                 .default_ttl_ms(options.default_ttl_ms)
                 .default_coalesce_ms(options.default_coalesce_ms)
+                .opportunistic_ryw_ms(options.opportunistic_ryw_ms)
                 .query_max_failure_seconds(options.query_max_failure_seconds)
                 .telemetry_sender(telemetry_sender.clone())
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)

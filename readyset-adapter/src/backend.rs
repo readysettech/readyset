@@ -356,20 +356,34 @@ impl ProxyState {
         }
     }
 
-    /// Returns true when a cache hit must be skipped given the cache's transaction policy
-    /// and whether a write has been observed in the current transaction.
+    /// Returns true when a cache hit must be skipped given the cache's transaction policy,
+    /// whether a write has been observed in the current transaction, and whether the
+    /// session-level opportunistic read-your-writes window is active.
     ///
-    /// Outside any transaction, only `ProxyAlways` forces a skip — and even then
-    /// `TrxCachePolicy::Always` keeps serving from cache. Inside a transaction or implicit
-    /// transaction, `Never` always skips, `UntilWrite` skips only if `had_write_in_txn`,
-    /// and `Always` never skips. The `had_write_in_txn` flag is computed by the caller
-    /// from [`SessionWriteTracker::had_write_in_txn`] and is meaningful only when the
-    /// state is `InTransaction` / `AutocommitOff`.
+    /// Two regimes, decided by whether the session is inside a transaction:
+    ///
+    /// 1. Inside a transaction (or implicit transaction under `autocommit=0`):
+    ///    only the per-cache [`TrxCachePolicy`] matters — `Never` always skips,
+    ///    `UntilWrite` skips only after the first write (`had_write_in_txn`), and
+    ///    `Always` never skips. The opportunistic window does not apply here, and
+    ///    `opportunistic_ryw_active` is `false` by construction (cleared on `BEGIN`).
+    ///
+    /// 2. Outside any transaction: `opportunistic_ryw_active` overrides every per-cache
+    ///    policy (including `Always`) because the window's whole purpose is to route
+    ///    post-write reads upstream. The guarantee is opportunistic, not absolute: once
+    ///    the window elapses the cache may still hold a pre-write value (e.g. a TTL that
+    ///    has not expired, or a row Readyset has not yet refreshed), and reads can flip
+    ///    back to a stale cached result. With the window inactive, only `ProxyAlways`
+    ///    forces a skip.
     pub fn should_skip_cache_for(
         &self,
         trx_cache_policy: TrxCachePolicy,
         had_write_in_txn: bool,
+        opportunistic_ryw_active: bool,
     ) -> bool {
+        if opportunistic_ryw_active {
+            return true;
+        }
         if matches!(trx_cache_policy, TrxCachePolicy::Always) {
             return false;
         }
@@ -385,13 +399,19 @@ impl ProxyState {
     }
 
     /// Reason tag matched to [`Self::should_skip_cache_for`]. Used by `record_skip_cache`
-    /// so dashboards distinguish `"trx"` (default per-cache rule) from `"trx_after_write"`
-    /// (`UntilWrite` cache that observed a write earlier in the transaction).
+    /// so dashboards distinguish `"trx"` (default per-cache rule), `"trx_after_write"`
+    /// (`UntilWrite` cache that observed a write earlier in the transaction), and
+    /// `"opportunistic_ryw"` (opportunistic read-your-writes window active outside any
+    /// transaction).
     pub fn skip_reason_for(
         &self,
         trx_cache_policy: TrxCachePolicy,
         had_write_in_txn: bool,
+        opportunistic_ryw_active: bool,
     ) -> &'static str {
+        if opportunistic_ryw_active {
+            return "opportunistic_ryw";
+        }
         if self.is_proxy_always() {
             return "unsupported_set";
         }
@@ -431,54 +451,117 @@ impl ProxyState {
     }
 }
 
-/// Session-level write tracking. Drives the [`TrxCachePolicy::UntilWrite`] routing rule
-/// (and, in the next commit, RYOW) from a single source of truth: the wall-clock time of
-/// the most recent write the session has issued.
+/// Session-level write tracking. Drives two separate rules from a single source of
+/// truth (the wall-clock time of the most recent write the session has issued):
 ///
-/// State machine:
+///   - In-transaction read-your-writes: governed entirely by the per-cache
+///     [`TrxCachePolicy`]. `had_write_in_txn` is the input the policy consumes.
+///   - Outside any transaction: the opportunistic read-your-writes window suppresses
+///     the cache for the configured duration after a write.
 ///
-///   - `mark_write()` sets `last_write_at = Some(Instant::now())`.
-///   - `on_start_transaction()` (BEGIN / START TRANSACTION) clears the field. Pre-txn write
-///     history is intentionally dropped; once a transaction begins, only in-txn writes
-///     are tracked. RYOW does not apply inside a transaction.
-///   - `on_commit()` (explicit COMMIT or implicit COMMIT under autocommit=0) refreshes the
-///     timestamp to `Some(Instant::now())` if the field was already `Some` (the txn's
-///     writes just landed in the upstream, so the RYOW window must fire from now). If the
-///     field was `None`, COMMIT leaves it `None`.
-///   - `on_rollback()` always clears the field. Rolled-back writes never landed.
+/// The two regimes do not overlap. The opportunistic window is *only* consulted
+/// outside transactions; inside a transaction, `TrxCachePolicy` decides routing and
+/// the window is dormant (the deadline is cleared on `BEGIN`).
 ///
-/// `had_write_in_txn(state)` is then a simple presence check: inside a transaction the
-/// field is `Some` iff a write occurred in that transaction.
+/// The window is opportunistic, not a consistency guarantee. It only suppresses the
+/// cache for the configured duration; once it elapses, reads resume from the cache and
+/// can serve a pre-write value if the cache has not refreshed yet.
+///
+/// State machine for `last_write_at`:
+///
+///   - `mark_write()` sets `last_write_at = Some(Instant::now())` and, if a window is
+///     configured, precomputes `opportunistic_ryw_deadline = Some(now + window)`.
+///   - `on_start_transaction()` (BEGIN / START TRANSACTION) clears both fields. Pre-txn
+///     write history is intentionally dropped; once a transaction begins, only in-txn
+///     writes are tracked, and the opportunistic window does not apply inside a
+///     transaction (per-cache `TrxCachePolicy` governs in-txn read-your-writes).
+///   - `on_commit()` (explicit COMMIT or implicit COMMIT under autocommit=0) refreshes
+///     both fields if `last_write_at` was already `Some` (the txn's writes just landed
+///     in the upstream, so the window must fire from now). If the field was `None`,
+///     COMMIT leaves both fields `None`.
+///   - `on_rollback()` always clears both fields. Rolled-back writes never landed.
+///
+/// `had_write_in_txn(state)` is a presence check on `last_write_at` while in a
+/// transaction. `opportunistic_ryw_active()` checks the precomputed deadline (with
+/// lazy-clear when stale), giving the read path a near-zero check once the window has
+/// elapsed.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SessionWriteTracker {
+    /// Configured opportunistic read-your-writes window. `None` disables the feature;
+    /// the read path then never pays the `Instant::now()` comparison.
+    opportunistic_ryw_window: Option<Duration>,
     /// Wall-clock time of the most recent write on this session, or `None` if no write
     /// has happened (or the most recent write was rolled back / cleared by `BEGIN`).
     pub last_write_at: Option<Instant>,
+    /// Precomputed deadline `last_write_at + opportunistic_ryw_window`. Set in `mark_write()` so the
+    /// read path does a single `Instant::now()` comparison and lazy-clears once stale.
+    /// `None` either means there is no recent write or the configured window is `None`.
+    opportunistic_ryw_deadline: Option<Instant>,
 }
 
 impl SessionWriteTracker {
+    /// Construct a tracker with the configured opportunistic read-your-writes window.
+    /// `None` disables the feature.
+    pub fn new(opportunistic_ryw_window: Option<Duration>) -> Self {
+        Self {
+            opportunistic_ryw_window,
+            last_write_at: None,
+            opportunistic_ryw_deadline: None,
+        }
+    }
+
     pub fn mark_write(&mut self) {
-        self.last_write_at = Some(Instant::now());
+        let now = Instant::now();
+        self.last_write_at = Some(now);
+        self.opportunistic_ryw_deadline = self.opportunistic_ryw_window.map(|w| now + w);
     }
 
     pub fn on_start_transaction(&mut self) {
         self.last_write_at = None;
+        self.opportunistic_ryw_deadline = None;
     }
 
     pub fn on_commit(&mut self) {
         if self.last_write_at.is_some() {
-            self.last_write_at = Some(Instant::now());
+            let now = Instant::now();
+            self.last_write_at = Some(now);
+            self.opportunistic_ryw_deadline = self.opportunistic_ryw_window.map(|w| now + w);
         }
     }
 
     pub fn on_rollback(&mut self) {
         self.last_write_at = None;
+        self.opportunistic_ryw_deadline = None;
     }
 
     /// Returns `true` when a write has been observed since the current transaction began.
     /// Always `false` outside any transaction.
     pub fn had_write_in_txn(&self, proxy_state: ProxyState) -> bool {
         proxy_state.in_transaction_or_implicit() && self.last_write_at.is_some()
+    }
+
+    /// Returns `true` when the opportunistic read-your-writes window is currently active
+    /// for this session, i.e. a write has been observed within the last configured window
+    /// and we are not inside a transaction. The deadline is lazy-cleared when stale, so
+    /// steady-state reads (no recent write) collapse back to a single branch on the read
+    /// path.
+    ///
+    /// This is consulted only outside transactions. `BEGIN` clears the deadline, so the
+    /// return value is `false` inside any transaction by construction; in-transaction
+    /// read-your-writes is governed by the per-cache [`TrxCachePolicy`] via
+    /// [`Self::had_write_in_txn`] instead.
+    pub fn opportunistic_ryw_active(&mut self) -> bool {
+        match self.opportunistic_ryw_deadline {
+            Some(d) if Instant::now() < d => true,
+            Some(_) => {
+                // Window elapsed; collapse back to the cheap path so subsequent reads
+                // skip the clock check entirely. `last_write_at` is left intact for
+                // diagnostics and is overwritten by the next `mark_write()`.
+                self.opportunistic_ryw_deadline = None;
+                false
+            }
+            None => false,
+        }
     }
 }
 
@@ -520,6 +603,14 @@ pub struct BackendBuilder {
     cache_mode: CacheMode,
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
+    /// Opportunistic read-your-writes window (ms). Applies only *outside* transactions:
+    /// after any write on a session, reads on that same session bypass the cache for
+    /// this many milliseconds. In-transaction routing is governed by the per-cache
+    /// `TrxCachePolicy`, not this window. Opportunistic only: once the window elapses,
+    /// the cache may still hold a pre-write value (TTL not yet expired, refresh not yet
+    /// caught up), so subsequent reads can flip back to a stale result.
+    /// `None` (the default) disables the window.
+    opportunistic_ryw_ms: Option<u64>,
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
     replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
@@ -550,6 +641,7 @@ impl Default for BackendBuilder {
             cache_mode: CacheMode::Deep,
             default_ttl_ms: 10_000,
             default_coalesce_ms: 5_000,
+            opportunistic_ryw_ms: None,
             upstream_config: None,
             replication_enabled: true,
             readyset_schema: None,
@@ -605,7 +697,9 @@ impl BackendBuilder {
             state: BackendState {
                 client_addr: self.client_addr,
                 proxy_state,
-                write_tracker: SessionWriteTracker::default(),
+                write_tracker: SessionWriteTracker::new(
+                    self.opportunistic_ryw_ms.map(Duration::from_millis),
+                ),
                 last_query: None,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared_statements: Default::default(),
@@ -776,6 +870,13 @@ impl BackendBuilder {
 
     pub fn default_coalesce_ms(mut self, default_coalesce_ms: u64) -> Self {
         self.default_coalesce_ms = default_coalesce_ms;
+        self
+    }
+
+    /// Configure the opportunistic read-your-writes window (in milliseconds). `None`
+    /// (the default) disables the feature. A `Some(0)` is treated the same as `None`.
+    pub fn opportunistic_ryw_ms(mut self, opportunistic_ryw_ms: Option<u64>) -> Self {
+        self.opportunistic_ryw_ms = opportunistic_ryw_ms.filter(|&ms| ms > 0);
         self
     }
 
@@ -2203,7 +2304,7 @@ where
             if let Some((query_id, trx_cache_policy)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
-                &self.state,
+                &mut self.state,
                 &shallow,
                 hint,
             )
@@ -2896,10 +2997,12 @@ where
                     .state
                     .write_tracker
                     .had_write_in_txn(self.state.proxy_state);
-                let should_skip = self
-                    .state
-                    .proxy_state
-                    .should_skip_cache_for(policy, had_write_in_txn);
+                let opportunistic_ryw_active = self.state.write_tracker.opportunistic_ryw_active();
+                let should_skip = self.state.proxy_state.should_skip_cache_for(
+                    policy,
+                    had_write_in_txn,
+                    opportunistic_ryw_active,
+                );
 
                 if cached_statement.is_unsupported_execute() {
                     true
@@ -2927,9 +3030,11 @@ where
                         record_skip_cache(
                             query_id,
                             cache_type,
-                            self.state
-                                .proxy_state
-                                .skip_reason_for(policy, had_write_in_txn),
+                            self.state.proxy_state.skip_reason_for(
+                                policy,
+                                had_write_in_txn,
+                                opportunistic_ryw_active,
+                            ),
                         );
                     }
                     true
@@ -4684,7 +4789,7 @@ where
     async fn should_query_shallow(
         connectors: &mut BackendConnectors<DB>,
         settings: &BackendSettings,
-        state: &BackendState<DB>,
+        state: &mut BackendState<DB>,
         shallow: &ShallowViewRequest,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, TrxCachePolicy)> {
@@ -4716,16 +4821,20 @@ where
             .map(|status| status.trx_cache_policy)
             .unwrap_or_default();
         let had_write_in_txn = state.write_tracker.had_write_in_txn(state.proxy_state);
-        if state
-            .proxy_state
-            .should_skip_cache_for(trx_cache_policy, had_write_in_txn)
-        {
+        let opportunistic_ryw_active = state.write_tracker.opportunistic_ryw_active();
+        if state.proxy_state.should_skip_cache_for(
+            trx_cache_policy,
+            had_write_in_txn,
+            opportunistic_ryw_active,
+        ) {
             record_skip_cache(
                 query_id.to_string(),
                 "shallow",
-                state
-                    .proxy_state
-                    .skip_reason_for(trx_cache_policy, had_write_in_txn),
+                state.proxy_state.skip_reason_for(
+                    trx_cache_policy,
+                    had_write_in_txn,
+                    opportunistic_ryw_active,
+                ),
             );
             return None;
         }
@@ -5139,7 +5248,7 @@ where
     /// Returns (should_try, query_status, processed_params).
     fn process_and_check_query(
         settings: &BackendSettings,
-        state: &BackendState<DB>,
+        state: &mut BackendState<DB>,
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
@@ -5160,17 +5269,21 @@ where
                     false
                 } else {
                     let had_write_in_txn = state.write_tracker.had_write_in_txn(state.proxy_state);
-                    if state
-                        .proxy_state
-                        .should_skip_cache_for(status.trx_cache_policy, had_write_in_txn)
-                    {
+                    let opportunistic_ryw_active = state.write_tracker.opportunistic_ryw_active();
+                    if state.proxy_state.should_skip_cache_for(
+                        status.trx_cache_policy,
+                        had_write_in_txn,
+                        opportunistic_ryw_active,
+                    ) {
                         if has_deep_cache {
                             record_skip_cache(
                                 QueryId::from(&*q).to_string(),
                                 "deep",
-                                state
-                                    .proxy_state
-                                    .skip_reason_for(status.trx_cache_policy, had_write_in_txn),
+                                state.proxy_state.skip_reason_for(
+                                    status.trx_cache_policy,
+                                    had_write_in_txn,
+                                    opportunistic_ryw_active,
+                                ),
                             );
                         }
                         false
@@ -5206,7 +5319,7 @@ where
     /// attempted.
     fn lookup_topk_cache(
         settings: &BackendSettings,
-        state: &BackendState<DB>,
+        state: &mut BackendState<DB>,
         q: &mut ViewCreateRequest,
         rewrite_params: AdapterRewriteParams,
         params: QueryParameters,
@@ -5264,7 +5377,7 @@ where
     fn noria_should_try_select(
         noria: &NoriaConnector,
         settings: &BackendSettings,
-        state: &BackendState<DB>,
+        state: &mut BackendState<DB>,
         q: &mut ViewCreateRequest,
         params: QueryParameters,
         schema_generation: SchemaGeneration,
@@ -5375,7 +5488,7 @@ where
             state.proxy_state.set_autocommit(enabled);
             if state.proxy_state != prev {
                 // `SET autocommit=1` from a transactional state does an implicit COMMIT;
-                // refresh `last_write_at` so any RYOW window fires from now.
+                // refresh `last_write_at` so any RYW window fires from now.
                 if enabled && matches!(prev, ProxyState::InTransaction | ProxyState::AutocommitOff)
                 {
                     state.write_tracker.on_commit();
@@ -6301,7 +6414,7 @@ mod tests {
 
     #[test]
     fn commit_refreshes_when_txn_had_writes() {
-        // BEGIN; INSERT; COMMIT; -> field refreshed (RYOW window applies post-commit).
+        // BEGIN; INSERT; COMMIT; -> field refreshed (RYW window applies post-commit).
         let mut tracker = SessionWriteTracker::default();
         tracker.on_start_transaction();
         tracker.mark_write();
@@ -6313,7 +6426,7 @@ mod tests {
             .expect("COMMIT must keep last_write_at when txn had writes");
         assert!(
             post_commit > in_txn,
-            "COMMIT must refresh the timestamp so RYOW fires from now"
+            "COMMIT must refresh the timestamp so RYW fires from now"
         );
 
         // BEGIN; SELECT; COMMIT (no writes); -> field stays None.
@@ -6357,6 +6470,81 @@ mod tests {
         assert!(!tracker.had_write_in_txn(ProxyState::Fallback));
         assert!(!tracker.had_write_in_txn(ProxyState::ProxyAlways));
         assert!(!tracker.had_write_in_txn(ProxyState::Never));
+    }
+
+    #[test]
+    fn opportunistic_ryw_disabled_by_default() {
+        // No window configured: opportunistic_ryw_active() is always false, even after a write.
+        let mut tracker = SessionWriteTracker::default();
+        assert!(!tracker.opportunistic_ryw_active());
+        tracker.mark_write();
+        assert!(!tracker.opportunistic_ryw_active());
+    }
+
+    #[test]
+    fn opportunistic_ryw_active_within_window() {
+        // 1s window: a fresh write keeps opportunistic_ryw_active() true until the deadline elapses.
+        let mut tracker = SessionWriteTracker::new(Some(Duration::from_secs(1)));
+        assert!(!tracker.opportunistic_ryw_active());
+        tracker.mark_write();
+        assert!(tracker.opportunistic_ryw_active());
+        // Idempotent on the read path: still active a moment later.
+        assert!(tracker.opportunistic_ryw_active());
+    }
+
+    #[test]
+    fn opportunistic_ryw_lazy_clears_when_stale() {
+        // Tiny window so we can let it elapse in the test.
+        let mut tracker = SessionWriteTracker::new(Some(Duration::from_millis(5)));
+        tracker.mark_write();
+        assert!(tracker.opportunistic_ryw_active());
+        std::thread::sleep(Duration::from_millis(15));
+        // First call after expiry returns false and clears the deadline.
+        assert!(!tracker.opportunistic_ryw_active());
+        // Subsequent calls take the cheap path (no clock read needed semantically).
+        assert!(!tracker.opportunistic_ryw_active());
+    }
+
+    #[test]
+    fn opportunistic_ryw_cleared_on_begin() {
+        let mut tracker = SessionWriteTracker::new(Some(Duration::from_secs(60)));
+        tracker.mark_write();
+        assert!(tracker.opportunistic_ryw_active());
+        tracker.on_start_transaction();
+        assert!(
+            !tracker.opportunistic_ryw_active(),
+            "BEGIN must clear RYW so the in-txn rule takes over"
+        );
+    }
+
+    #[test]
+    fn opportunistic_ryw_refreshed_on_commit_when_txn_had_writes() {
+        // BEGIN; INSERT; COMMIT -> RYW window fires from the commit.
+        let mut tracker = SessionWriteTracker::new(Some(Duration::from_secs(60)));
+        tracker.on_start_transaction();
+        tracker.mark_write();
+        // Inside the txn, RYW is suppressed (BEGIN cleared the deadline; mark_write
+        // re-armed it, but in-txn the routing layer ignores it). Verify the deadline
+        // is in fact set so on_commit() refreshes rather than clears.
+        assert!(tracker.last_write_at.is_some());
+        std::thread::sleep(Duration::from_millis(2));
+        tracker.on_commit();
+        assert!(
+            tracker.opportunistic_ryw_active(),
+            "COMMIT must keep RYW armed so post-COMMIT reads see their own writes"
+        );
+    }
+
+    #[test]
+    fn opportunistic_ryw_cleared_on_rollback() {
+        let mut tracker = SessionWriteTracker::new(Some(Duration::from_secs(60)));
+        tracker.on_start_transaction();
+        tracker.mark_write();
+        tracker.on_rollback();
+        assert!(
+            !tracker.opportunistic_ryw_active(),
+            "ROLLBACK must drop RYW since the writes never landed"
+        );
     }
 
     #[test]
@@ -6407,8 +6595,8 @@ mod tests {
         ] {
             for had_write in [false, true] {
                 assert!(
-                    !state.should_skip_cache_for(TrxCachePolicy::Always, had_write),
-                    "Always must never be skipped (state={state:?}, had_write={had_write})"
+                    !state.should_skip_cache_for(TrxCachePolicy::Always, had_write, false),
+                    "Always must never be skipped without RYW (state={state:?}, had_write={had_write})"
                 );
             }
         }
@@ -6417,50 +6605,71 @@ mod tests {
     #[test]
     fn should_skip_cache_for_outside_transaction() {
         // Fallback is the normal "no transaction" state. Cache should always serve.
-        // The `had_write` flag is irrelevant outside a transaction (must be false there
-        // anyway), and the routing rule honors that.
         let state = ProxyState::Fallback;
         for had_write in [false, true] {
-            assert!(!state.should_skip_cache_for(TrxCachePolicy::Never, had_write));
-            assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, had_write));
-            assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, had_write));
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::Never, had_write, false));
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, had_write, false));
+            assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, had_write, false));
         }
     }
 
     #[test]
     fn should_skip_cache_for_proxy_always_skips_unless_always_policy() {
         let state = ProxyState::ProxyAlways;
-        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
-        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false, false));
     }
 
     #[test]
     fn should_skip_cache_for_in_transaction_until_write() {
         let state = ProxyState::InTransaction;
         // Read-only-so-far transaction: UntilWrite serves from cache, Never skips.
-        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false, false));
 
         // After a write: UntilWrite reverts to upstream-only, like Never.
-        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true));
-        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true, false));
     }
 
     #[test]
     fn should_skip_cache_for_autocommit_off_until_write() {
         let state = ProxyState::AutocommitOff;
         // Implicit transaction with no write yet: UntilWrite serves from cache.
-        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, false, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::UntilWrite, false, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, false, false));
 
         // After a write in the implicit transaction: skip.
-        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true));
-        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true));
-        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::Never, true, false));
+        assert!(state.should_skip_cache_for(TrxCachePolicy::UntilWrite, true, false));
+        assert!(!state.should_skip_cache_for(TrxCachePolicy::Always, true, false));
+    }
+
+    #[test]
+    fn should_skip_cache_for_opportunistic_ryw_overrides_every_policy() {
+        // RYW is a correctness property; it overrides every per-cache policy when active.
+        // BEGIN clears the deadline, so by construction `opportunistic_ryw_active=true` only happens
+        // outside any transaction.
+        for state in [
+            ProxyState::Never,
+            ProxyState::Fallback,
+            ProxyState::ProxyAlways,
+        ] {
+            for policy in [
+                TrxCachePolicy::Never,
+                TrxCachePolicy::UntilWrite,
+                TrxCachePolicy::Always,
+            ] {
+                assert!(
+                    state.should_skip_cache_for(policy, false, true),
+                    "RYW must override {policy:?} in {state:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -6469,27 +6678,43 @@ mod tests {
         // the Supabase auto-cache configuration is observable.
         for state in [ProxyState::InTransaction, ProxyState::AutocommitOff] {
             assert_eq!(
-                state.skip_reason_for(TrxCachePolicy::UntilWrite, true),
+                state.skip_reason_for(TrxCachePolicy::UntilWrite, true, false),
                 "trx_after_write"
             );
             // No write yet: still "trx" (though this path doesn't actually skip the cache).
             assert_eq!(
-                state.skip_reason_for(TrxCachePolicy::UntilWrite, false),
+                state.skip_reason_for(TrxCachePolicy::UntilWrite, false, false),
                 "trx"
             );
             // Never-policy in any txn state stays "trx".
-            assert_eq!(state.skip_reason_for(TrxCachePolicy::Never, false), "trx");
-            assert_eq!(state.skip_reason_for(TrxCachePolicy::Never, true), "trx");
+            assert_eq!(
+                state.skip_reason_for(TrxCachePolicy::Never, false, false),
+                "trx"
+            );
+            assert_eq!(
+                state.skip_reason_for(TrxCachePolicy::Never, true, false),
+                "trx"
+            );
         }
 
-        // ProxyAlways always wins.
+        // ProxyAlways always wins (over both "trx*" tags).
         assert_eq!(
-            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::Never, false),
+            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::Never, false, false),
             "unsupported_set"
         );
         assert_eq!(
-            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::UntilWrite, false),
+            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::UntilWrite, false, false),
             "unsupported_set"
+        );
+
+        // RYW takes precedence over ProxyAlways and the trx tags.
+        assert_eq!(
+            ProxyState::Fallback.skip_reason_for(TrxCachePolicy::Always, false, true),
+            "opportunistic_ryw"
+        );
+        assert_eq!(
+            ProxyState::ProxyAlways.skip_reason_for(TrxCachePolicy::Never, false, true),
+            "opportunistic_ryw"
         );
     }
 
