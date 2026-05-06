@@ -684,6 +684,18 @@ async fn run_queries_body(
                         .generator_for_col(meta.sql_type.clone(), &mut entropy);
                     let value = generator.r#gen(&mut entropy);
                     let lit: Literal = value.try_into().unwrap_or(Literal::Null);
+                    // Bool columns get `Literal::Integer(0|1)` from the
+                    // data-generator (DfValue::Int → Literal::Integer);
+                    // Postgres rejects `bool_col = 1` with no implicit
+                    // coercion. Project to `Literal::Boolean` so the
+                    // dialect printer emits TRUE/FALSE on PG and 1/0
+                    // on MySQL.
+                    let lit = match (&meta.sql_type, lit) {
+                        (readyset_sql::ast::SqlType::Bool, Literal::Integer(i)) => {
+                            Literal::Boolean(i != 0)
+                        }
+                        (_, l) => l,
+                    };
                     let update_sql = format!(
                         "UPDATE {} SET {} = {}",
                         table,
