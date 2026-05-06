@@ -45,8 +45,8 @@ use readyset_data::{DfType, PgEnumMetadata};
 use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
-    AlterTableStatement, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
-    CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation,
+    AlterTableStatement, Column, ColumnSpecification, CreateTableBody, CreateTableStatement,
+    NonReplicatedRelation, NotReplicatedReason, Relation,
 };
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{
@@ -96,6 +96,15 @@ pub(crate) struct DdlCreateTableColumn {
     name: String,
     column_type: String,
     not_null: bool,
+    /// The upstream Postgres collation name for this column, if any. `None` for non-collatable
+    /// types (e.g. integers, where `pg_attribute.attcollation = 0`). Set to `"default"` (with
+    /// `collation_provider = Some("d")`) for columns that inherit the database default.
+    collation_name: Option<String>,
+    /// The `pg_collation.collprovider` character serialized through JSON as a 1-character string:
+    /// `"c"` (libc), `"i"` (ICU), `"b"` (builtin, PG 17+), or `"d"` (default). Same Some/None
+    /// semantics as `collation_name`.
+    #[allow(dead_code)]
+    collation_provider: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -170,6 +179,10 @@ impl DdlEvent {
                 let create_table_body: Result<_, String> = columns
                     .into_iter()
                     .map(|col| {
+                        let constraints = super::pg_column_constraints(
+                            col.not_null,
+                            col.collation_name.as_deref(),
+                        );
                         Ok(ColumnSpecification {
                             column: Column {
                                 name: col.name.into(),
@@ -181,11 +194,7 @@ impl DdlEvent {
                                 col.column_type,
                             )?,
                             generated: None,
-                            constraints: if col.not_null {
-                                vec![ColumnConstraint::NotNull]
-                            } else {
-                                vec![]
-                            },
+                            constraints,
                             comment: None,
                             invisible: false,
                         })
@@ -486,7 +495,14 @@ mod tests {
         let client = setup("create_table").await;
 
         client
-            .simple_query("create table t1 (id integer primary key, value text, unique(value))")
+            .simple_query(
+                "create table t1 (
+                    id integer primary key,
+                    value text,
+                    s_c text collate \"C\",
+                    unique(value)
+                )",
+            )
             .await
             .unwrap();
 
@@ -516,13 +532,25 @@ mod tests {
                             attnum: 1,
                             name: "id".into(),
                             column_type: "integer".into(),
-                            not_null: true
+                            not_null: true,
+                            collation_name: None,
+                            collation_provider: None,
                         },
                         DdlCreateTableColumn {
                             attnum: 2,
                             name: "value".into(),
                             column_type: "text".into(),
-                            not_null: false
+                            not_null: false,
+                            collation_name: Some("default".into()),
+                            collation_provider: Some("d".into()),
+                        },
+                        DdlCreateTableColumn {
+                            attnum: 3,
+                            name: "s_c".into(),
+                            column_type: "text".into(),
+                            not_null: false,
+                            collation_name: Some("C".into()),
+                            collation_provider: Some("c".into()),
                         },
                     ]
                 );

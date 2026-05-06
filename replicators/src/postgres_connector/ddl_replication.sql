@@ -79,9 +79,14 @@ BEGIN
                             attr.atttypid,
                             attr.atttypmod
                         ),
-                        'not_null', attr.attnotnull
+                        'not_null', attr.attnotnull,
+                        'collation_name', coll.collname,
+                        'collation_provider', coll.collprovider
                     ) ORDER BY attr.attnum)
                     FROM pg_catalog.pg_attribute attr
+                    LEFT JOIN pg_catalog.pg_collation coll
+                        ON coll.oid = attr.attcollation
+                        AND attr.attcollation != 0
                     WHERE attr.attrelid = object.objid
                     AND attr.attnum > 0
                     AND NOT attr.attisdropped

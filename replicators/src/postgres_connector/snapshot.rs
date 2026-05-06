@@ -14,9 +14,8 @@ use readyset_client::{TableOperation, TableStatus};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    CollationName, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
-    CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier,
-    TableKey,
+    Column, ColumnSpecification, CreateTableBody, CreateTableStatement, NonReplicatedRelation,
+    NotReplicatedReason, Relation, SqlIdentifier, TableKey,
 };
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
@@ -31,6 +30,7 @@ use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 use super::connector::CreatedSlot;
+use super::pg_column_constraints;
 use crate::db_util::CreateSchema;
 use crate::table_filter::TableFilter;
 use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
@@ -525,15 +525,8 @@ impl TableDescription {
                         .columns
                         .into_iter()
                         .map(|c| {
-                            let mut constraints = Vec::new();
-                            if c.not_null {
-                                constraints.push(ColumnConstraint::NotNull);
-                            }
-                            if let Some(name) = c.collation_name {
-                                constraints.push(ColumnConstraint::Collation(CollationName::from(
-                                    name.as_str(),
-                                )));
-                            }
+                            let constraints =
+                                pg_column_constraints(c.not_null, c.collation_name.as_deref());
                             Ok(ColumnSpecification {
                                 column: Column {
                                     name: c.name.into(),
