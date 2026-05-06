@@ -14,8 +14,9 @@ use readyset_client::{TableOperation, TableStatus};
 use readyset_data::{DfType, DfValue, Dialect as DataDialect, PgEnumMetadata};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    Column, ColumnConstraint, ColumnSpecification, CreateTableBody, CreateTableStatement,
-    NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier, TableKey,
+    CollationName, Column, ColumnConstraint, ColumnSpecification, CreateTableBody,
+    CreateTableStatement, NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier,
+    TableKey,
 };
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
@@ -98,6 +99,16 @@ struct ColumnEntry {
     not_null: bool,
     /// The [`Type`] of this column
     pg_type: Type,
+    /// The upstream Postgres collation name for this column, if any. `None` for non-collatable
+    /// types (e.g. integers, where `pg_attribute.attcollation = 0`). Set to `"default"` (with
+    /// `collation_provider = Some(b'd' as i8)`) for columns that inherit the database default;
+    /// the resolver in `DfType::from_sql_type` is responsible for substituting the database's
+    /// `lc_collate`.
+    collation_name: Option<String>,
+    /// The `pg_collation.collprovider` character: `'c'` (libc), `'i'` (ICU), `'b'` (builtin,
+    /// PG 17+), or `'d'` (default). Same Some/None semantics as `collation_name`.
+    #[allow(dead_code)]
+    collation_provider: Option<i8>,
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +182,8 @@ impl TryFrom<pgsql::Row> for ColumnEntry {
             not_null: row.try_get(2 /* pg_attribute.attnotnull */)?,
             sql_type: row.try_get(4)?,
             pg_type,
+            collation_name: row.try_get(14 /* pg_collation.collname */)?,
+            collation_provider: row.try_get(15 /* pg_collation.collprovider */)?,
         })
     }
 }
@@ -307,12 +320,15 @@ impl TableEntry {
                 member_tn.nspname,
                 (SELECT array_agg(e.enumlabel ORDER BY e.enumsortorder ASC)
                  FROM pg_enum e
-                 WHERE (member_t.oid IS NULL AND (e.enumtypid = t.oid)) OR e.enumtypid = member_t.oid)
+                 WHERE (member_t.oid IS NULL AND (e.enumtypid = t.oid)) OR e.enumtypid = member_t.oid),
+                co.collname,
+                co.collprovider
             FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_type t ON a.atttypid = t.oid
             JOIN pg_catalog.pg_namespace tn ON t.typnamespace = tn.oid
             LEFT JOIN pg_catalog.pg_type member_t ON t.typelem = member_t.oid
             LEFT JOIN pg_catalog.pg_namespace member_tn ON member_t.typnamespace = member_tn.oid
+            LEFT JOIN pg_catalog.pg_collation co ON co.oid = a.attcollation AND a.attcollation != 0
             WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped
             ORDER BY a.attnum
             "#;
@@ -509,6 +525,15 @@ impl TableDescription {
                         .columns
                         .into_iter()
                         .map(|c| {
+                            let mut constraints = Vec::new();
+                            if c.not_null {
+                                constraints.push(ColumnConstraint::NotNull);
+                            }
+                            if let Some(name) = c.collation_name {
+                                constraints.push(ColumnConstraint::Collation(CollationName::from(
+                                    name.as_str(),
+                                )));
+                            }
                             Ok(ColumnSpecification {
                                 column: Column {
                                     name: c.name.into(),
@@ -521,11 +546,7 @@ impl TableDescription {
                                 )
                                 .map_err(|e| internal_err!("Could not parse SQL type: {e}"))?,
                                 generated: None,
-                                constraints: if c.not_null {
-                                    vec![ColumnConstraint::NotNull]
-                                } else {
-                                    vec![]
-                                },
+                                constraints,
                                 comment: None,
                                 invisible: false,
                             })
@@ -1268,6 +1289,8 @@ mod tests {
                     sql_type: "varchar".into(),
                     not_null: true,
                     pg_type: Type::VARCHAR,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 1,
@@ -1275,6 +1298,8 @@ mod tests {
                     sql_type: "varchar".into(),
                     not_null: false,
                     pg_type: Type::VARCHAR,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 2,
@@ -1282,6 +1307,8 @@ mod tests {
                     sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
                     pg_type: Type::TIMESTAMP,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 3,
@@ -1289,6 +1316,8 @@ mod tests {
                     sql_type: "timestamp(6) without time zone".into(),
                     not_null: true,
                     pg_type: Type::TIMESTAMP,
+                    collation_name: None,
+                    collation_provider: None,
                 },
             ],
             constraints: vec![ConstraintEntry {
@@ -1367,6 +1396,8 @@ mod tests {
                     sql_type: "integer".into(),
                     not_null: true,
                     pg_type: Type::INT4,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 2,
@@ -1374,6 +1405,8 @@ mod tests {
                     sql_type: "varchar".into(),
                     not_null: true,
                     pg_type: Type::VARCHAR,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 3,
@@ -1381,6 +1414,8 @@ mod tests {
                     sql_type: "varchar".into(),
                     not_null: false,
                     pg_type: Type::VARCHAR,
+                    collation_name: None,
+                    collation_provider: None,
                 },
             ],
             constraints: vec![ConstraintEntry {
@@ -1493,6 +1528,8 @@ mod tests {
                     sql_type: "integer".into(),
                     not_null: true,
                     pg_type: Type::INT4,
+                    collation_name: None,
+                    collation_provider: None,
                 },
                 ColumnEntry {
                     attnum: 2,
@@ -1500,6 +1537,8 @@ mod tests {
                     sql_type: "varchar".into(),
                     not_null: true,
                     pg_type: Type::VARCHAR,
+                    collation_name: None,
+                    collation_provider: None,
                 },
             ],
             constraints: vec![],

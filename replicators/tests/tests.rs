@@ -21,7 +21,7 @@ use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
-use readyset_sql::ast::{NonReplicatedRelation, Relation};
+use readyset_sql::ast::{ColumnConstraint, NonReplicatedRelation, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 #[cfg(feature = "failure_injection")]
@@ -1349,6 +1349,13 @@ async fn psql_ddl_replicate_create_view() {
     postgresql_ddl_replicate_create_view_internal(&pgsql_url()).await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn psql_snapshot_has_column_collation() {
+    postgresql_snapshot_has_column_collation_internal(&pgsql_url()).await
+}
+
 /// This test checks that when writes and replication happen in parallel
 /// noria correctly catches up from binlog
 /// NOTE: If this test flakes, please notify Vlad
@@ -2153,6 +2160,68 @@ async fn mysql_binlog_transaction_compression() {
 
     client.stop().await;
     ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+async fn postgresql_snapshot_has_column_collation_internal(url: &str) {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS coll_t CASCADE;
+             CREATE TABLE coll_t (
+                id          int PRIMARY KEY,
+                s_c         text COLLATE \"C\",
+                s_posix     text COLLATE \"POSIX\",
+                s_default   text
+             );",
+        )
+        .await
+        .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let table = ctx
+        .noria
+        .table(Relation {
+            schema: Some("public".into()),
+            name: "coll_t".into(),
+        })
+        .await
+        .unwrap();
+    let body = table
+        .schema()
+        .expect("table should have a schema after snapshot");
+
+    let collation_for = |col_name: &str| -> Option<String> {
+        let field = body
+            .fields
+            .iter()
+            .find(|f| f.column.name == col_name)
+            .unwrap_or_else(|| panic!("column {col_name} missing from snapshotted schema"));
+        field.constraints.iter().find_map(|c| match c {
+            ColumnConstraint::Collation(name) => Some(name.name.to_string()),
+            _ => None,
+        })
+    };
+
+    assert_eq!(collation_for("s_c").as_deref(), Some("C"));
+    assert_eq!(collation_for("s_posix").as_deref(), Some("POSIX"));
+    // Plain `text` columns inherit the database default, which the catalog reports as the
+    // `pg_collation` row named "default" (provider 'd'). The resolver substitutes the actual
+    // `lc_collate` later.
+    assert_eq!(collation_for("s_default").as_deref(), Some("default"));
+    // Non-collatable columns (`attcollation = 0`) have no constraint.
+    assert_eq!(collation_for("id"), None);
+
+    client.query("DROP TABLE coll_t CASCADE;").await.unwrap();
     shutdown_tx.shutdown().await;
 }
 
