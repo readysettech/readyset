@@ -178,8 +178,7 @@ pub struct Options {
     ///
     /// When running in embedded_readers mode, this process will run a ReadySet adapter with reader
     /// replicas (and only reader replicas) embedded in the adapter.  This mode should be combined
-    /// with `--no-readers` and `--reader-replicas` set to the number of adapter instances to each
-    /// server process.
+    /// with `--no-readers`.
     ///
     /// When running in adapter mode, this process will run a ReadySet adapter with no locally
     /// cached data.

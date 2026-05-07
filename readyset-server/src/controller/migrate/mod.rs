@@ -109,10 +109,12 @@ impl StoredDomainRequest {
                 .map(|placed| match self.shard {
                     Some(shard) => Ok(placed
                         .get_column(shard)
-                        .ok_or_else(|| ReadySetError::ShardIndexOutOfBounds {
-                            shard,
-                            domain_index: domain.into(),
-                            num_shards: placed.row_size(),
+                        .ok_or_else(|| {
+                            ReadySetError::Internal(format!(
+                                "Shard {shard} out of bounds for domain {} with {} shards",
+                                Into::<usize>::into(domain),
+                                placed.row_size(),
+                            ))
                         })?
                         .enumerate()
                         .filter_map(|(replica, placed)| (*placed).then_some(replica))

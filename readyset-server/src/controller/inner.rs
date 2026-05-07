@@ -82,8 +82,6 @@ type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 /// occur at any given point in time.
 pub struct Leader {
     pub(super) dataflow_state_handle: Arc<DfStateHandle>,
-    /// Number of workers to wait for before we start trying to run any domains at all
-    min_workers: usize,
     controller_uri: Url,
     /// The amount of time to wait for a worker request to complete.
     worker_request_timeout: Duration,
@@ -911,14 +909,10 @@ impl Leader {
             ds.workers.insert(worker_uri.clone(), ws);
             ds.read_addrs.insert(worker_uri, reader_addr);
 
-            info!(
-                "now have {} of {} required workers",
-                ds.workers.len(),
-                self.min_workers
-            );
+            info!("registered worker; now have {}", ds.workers.len());
         }
 
-        let dmp = if ds.workers.len() >= self.min_workers && !ds.all_replicas_placed() {
+        let dmp = if !ds.workers.is_empty() && !ds.all_replicas_placed() {
             let domain_nodes = ds.unplaced_domain_nodes();
             debug!(
                 num_unplaced_domains = domain_nodes.len(),
@@ -1176,8 +1170,6 @@ impl Leader {
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         events_handle: EventsHandle,
     ) -> Self {
-        assert_ne!(state.config.min_workers, 0);
-
         let dataflow_state_handle = Arc::new(DfStateHandle::new(
             state.dataflow_state,
             Some(events_handle),
@@ -1185,7 +1177,6 @@ impl Leader {
 
         Leader {
             dataflow_state_handle,
-            min_workers: state.config.min_workers,
             controller_uri,
             replicator_statement_logging,
             replicator_config,

@@ -155,7 +155,6 @@ impl ControllerState {
         materializations.set_config(config.materialization_config.clone());
 
         let cc = Arc::new(ChannelCoordinator::new());
-        assert_ne!(config.min_workers, 0);
 
         let dialect = dialect
             .unwrap_or_else(|| {

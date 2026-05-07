@@ -75,7 +75,6 @@ impl Builder {
         builder.set_eviction_kind(opts.eviction_kind);
         builder.set_unquery(!opts.no_unquery);
 
-        builder.set_min_workers(opts.min_workers);
         if opts.no_partial {
             builder.disable_partial();
         }
@@ -103,14 +102,9 @@ impl Builder {
         ));
         builder.set_upquery_timeout(Duration::from_millis(opts.upquery_timeout_ms));
 
-        builder.set_replication_strategy(opts.domain_replication_options.into());
         builder.set_verbose_domain_metrics(opts.verbose_domain_metrics);
         builder.set_frontier_strategy(opts.materialization_frontier);
         builder.set_non_blocking_index_build(opts.feature_non_blocking_index_build);
-
-        if let Some(volume_id) = opts.volume_id {
-            builder.set_volume_id(volume_id);
-        }
 
         let mut persistence_params = PersistenceParameters::new(
             opts.durability,
@@ -172,13 +166,6 @@ impl Builder {
     /// allowing writes to continue during index creation.
     pub fn set_non_blocking_index_build(&mut self, enabled: bool) {
         self.config.materialization_config.non_blocking_index_build = enabled;
-    }
-
-    /// Set how many workers this worker should wait for before becoming a controller. More workers
-    /// can join later, but they won't be assigned any of the initial domains.
-    pub fn set_min_workers(&mut self, min_workers: usize) {
-        assert_ne!(min_workers, 0);
-        self.config.min_workers = min_workers;
     }
 
     /// Set the memory limit (target) and how often we check it (in millis).

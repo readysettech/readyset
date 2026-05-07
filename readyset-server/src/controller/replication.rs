@@ -1,33 +1,8 @@
-use clap::Parser;
 use dataflow::prelude::{Graph, NodeIndex};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-// Command-line options for configuring the domain replication strategy
-#[allow(missing_docs)] // Allows us to exclude docs (from doc comments) from --help text
-#[derive(Debug, Parser, Clone)]
-pub struct ReplicationOptions {
-    /// Number of times to replicate domains that contain readers.
-    ///
-    /// This flag should be set to the number of adapter instances in the ReadySet deployment when
-    /// running in embbedded readers mode (eg for high availability)
-    #[arg(
-        long,
-        conflicts_with = "non_base_replicas",
-        env = "READER_REPLICAS",
-        hide = true
-    )]
-    reader_replicas: Option<usize>,
-
-    /// Number of times to replicate domains that don't contain base nodes
-    #[arg(long, hide = true, conflicts_with = "reader_replicas")]
-    non_base_replicas: Option<usize>,
-}
-
 /// Description for how to decide how many times a domain should be replicated
-///
-/// This configuration is specified for an entire cluster, and can be built from command-line
-/// options by converting from [`ReplicationOptions`].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReplicationStrategy {
     /// Never replicate domains
@@ -40,18 +15,6 @@ pub enum ReplicationStrategy {
     ReaderDomains(usize),
     /// Replicate domains that don't contain base nodes this many times
     NonBaseDomains(usize),
-}
-
-impl From<ReplicationOptions> for ReplicationStrategy {
-    fn from(opts: ReplicationOptions) -> Self {
-        if let Some(reader_replicas) = opts.reader_replicas {
-            Self::ReaderDomains(reader_replicas)
-        } else if let Some(non_base_replicas) = opts.non_base_replicas {
-            Self::NonBaseDomains(non_base_replicas)
-        } else {
-            Self::Never
-        }
-    }
 }
 
 impl ReplicationStrategy {

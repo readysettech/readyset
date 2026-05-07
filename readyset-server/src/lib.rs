@@ -401,7 +401,7 @@ pub enum ReuseConfigType {
 
 use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
-pub use controller::replication::{ReplicationOptions, ReplicationStrategy};
+pub use controller::replication::ReplicationStrategy;
 use controller::sql;
 use database_utils::UpstreamConfig;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
@@ -459,8 +459,10 @@ pub struct Config {
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
-    /// Number of workers to wait for before we start trying to run any domains at all
-    #[serde(alias = "quorum")]
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime.
+    #[serde(default, alias = "quorum")]
+    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
     pub(crate) min_workers: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
     /// If set to true (the default), failing tokio tasks will cause a full-process abort.
@@ -505,7 +507,8 @@ impl Default for Config {
                 materialization_persistence: false,
             },
             persistence: Default::default(),
-            min_workers: 1,
+            #[allow(deprecated)]
+            min_workers: 0,
             reuse: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
@@ -584,14 +587,6 @@ pub struct WorkerOptions {
     #[arg(long, hide = true)]
     pub enable_packet_filters: bool,
 
-    /// Number of workers to wait for before starting (including this one)
-    #[arg(long, default_value = "1", env = "MIN_WORKERS", hide = true)]
-    pub min_workers: usize,
-
-    /// Volume associated with the server.
-    #[arg(long, env = "VOLUME_ID", hide = true)]
-    pub volume_id: Option<VolumeId>,
-
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
     #[arg(
         long,
@@ -611,9 +606,6 @@ pub struct WorkerOptions {
     /// subdirectory within `storage_dir`.
     #[arg(long, env = "WORKING_DIR")]
     working_dir: Option<PathBuf>,
-
-    #[command(flatten)]
-    pub domain_replication_options: ReplicationOptions,
 
     #[command(flatten)]
     pub replicator_config: UpstreamConfig,

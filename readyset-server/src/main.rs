@@ -209,10 +209,6 @@ fn main() -> anyhow::Result<()> {
     .set(1.0);
     metrics::counter!(recorded::READYSET_SERVER_STARTUPS).increment(1);
 
-    if let Some(volume_id) = &opts.worker_options.volume_id {
-        info!(%volume_id);
-    }
-
     let deployment_dir = opts.worker_options.storage_dir(&opts.deployment);
     let authority = opts.authority.clone();
     let authority_addr = match authority {

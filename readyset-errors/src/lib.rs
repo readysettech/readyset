@@ -490,14 +490,6 @@ pub enum ReadySetError {
     #[error("HTTP request {request} failed: {message}")]
     HttpRequestFailed { request: String, message: String },
 
-    /// A shard index was used for a domain that doesn't have that many shards
-    #[error("Shard {shard} out of bounds for domain {domain_index} with {num_shards} shards")]
-    ShardIndexOutOfBounds {
-        shard: usize,
-        domain_index: usize,
-        num_shards: usize,
-    },
-
     /// A replica index was used for a domain that doesn't have that many shards
     #[error("Replica {replica} out of bounds for view {view_name} with {num_replicas} replicas")]
     ViewReplicaOutOfBounds {
