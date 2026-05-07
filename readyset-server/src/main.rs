@@ -10,7 +10,7 @@ use dataflow_state::init_parallel_row_pool;
 use futures_util::future::{self, Either};
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_client::metrics::recorded;
-use readyset_metrics::get_or_init_global_recorder;
+use readyset_metrics::init_global_recorder;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::{resolve_addr, Builder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
@@ -191,7 +191,7 @@ fn main() -> anyhow::Result<()> {
         // `PrometheusBuilder::build_recorder` spawns an upkeep task, so we need to execute it in
         // the context of the runtime
         rt.block_on(async {
-            get_or_init_global_recorder(&[("deployment", opts.deployment.as_str())]);
+            init_global_recorder(&[("deployment", opts.deployment.as_str())]);
         });
     }
 

@@ -103,6 +103,7 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
+use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
@@ -136,7 +137,6 @@ use vec1::Vec1;
 
 use crate::auto_cache_eligibility::auto_cache_skip_reason;
 use crate::backend::noria_connector::ExecuteSelectContext;
-use crate::metrics_handle::{MetricsHandle, MetricsSummary};
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
@@ -594,7 +594,6 @@ pub struct BackendBuilder {
     fallback_recovery_seconds: u64,
     telemetry_sender: Option<TelemetrySender>,
     placeholder_inlining: bool,
-    metrics_handle: Option<MetricsHandle>,
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     allow_cache_ddl: bool,
     sampler_tx:
@@ -633,7 +632,6 @@ impl Default for BackendBuilder {
             fallback_recovery_seconds: 0,
             telemetry_sender: None,
             placeholder_inlining: false,
-            metrics_handle: None,
             connections: None,
             allow_cache_ddl: true,
             sampler_tx: None,
@@ -710,7 +708,6 @@ impl BackendBuilder {
                 query_log_sender: self.query_log_sender,
                 query_log_mode: self.query_log_mode,
                 telemetry_sender: self.telemetry_sender,
-                metrics_handle: self.metrics_handle,
                 connections: self.connections,
                 client_username: None,
                 status_reporter,
@@ -836,11 +833,6 @@ impl BackendBuilder {
 
     pub fn connections(mut self, connections: Arc<SkipSet<ConnectionInfo>>) -> Self {
         self.connections = Some(connections);
-        self
-    }
-
-    pub fn metrics_handle(mut self, metrics_handle: Option<MetricsHandle>) -> Self {
-        self.metrics_handle = metrics_handle;
         self
     }
 
@@ -1161,8 +1153,6 @@ where
     query_log_mode: Option<QueryLogMode>,
     /// Provides the ability to send [`TelemetryEvent`]s to Segment
     telemetry_sender: Option<TelemetrySender>,
-    /// Handle to the [`metrics_exporter_prometheus::PrometheusRecorder`] that runs in the adapter.
-    metrics_handle: Option<MetricsHandle>,
     /// Set of active connections to this adapter
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     /// The authenticated username for this connection
@@ -1326,10 +1316,48 @@ where
     }
 
     fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut statuses = match self.metrics_handle.as_ref() {
-            Some(handle) => handle.readyset_status(),
-            None => vec![],
-        };
+        let mut statuses = Vec::new();
+        if let Some(h) = metrics_handle() {
+            let [connected_clients, upstream_connections] = h.gauges(
+                [
+                    recorded::CONNECTED_CLIENTS,
+                    recorded::CLIENT_UPSTREAM_CONNECTIONS,
+                ],
+                [],
+            );
+            let [parse_errors, set_disallowed, view_not_found, rpc_errors] = h.counters(
+                [
+                    recorded::QUERY_LOG_PARSE_ERRORS,
+                    recorded::QUERY_LOG_SET_DISALLOWED,
+                    recorded::QUERY_LOG_VIEW_NOT_FOUND,
+                    recorded::QUERY_LOG_RPC_ERRORS,
+                ],
+                [],
+            );
+            statuses.extend([
+                (
+                    "Connected clients count".into(),
+                    connected_clients.get().to_string(),
+                ),
+                (
+                    "Upstream database connection count".into(),
+                    upstream_connections.get().to_string(),
+                ),
+                (
+                    "Query parse failures".into(),
+                    parse_errors.get().to_string(),
+                ),
+                (
+                    "SET statement disallowed count".into(),
+                    set_disallowed.get().to_string(),
+                ),
+                (
+                    "View not found count".into(),
+                    view_not_found.get().to_string(),
+                ),
+                ("RPC error count".into(), rpc_errors.get().to_string()),
+            ]);
+        }
         let time_ms = self
             .adapter_start_time
             .duration_since(UNIX_EPOCH)
@@ -4045,10 +4073,16 @@ where
             queries.retain(|q| q.status.migration_state.is_supported());
         }
 
-        let select_schema = if let Some(handle) = state.metrics_handle.as_mut() {
-            // Must snapshot to get the latest metrics
-            handle.snapshot_counters(readyset_client_metrics::DatabaseType::Upstream);
+        let exec_counts = metrics_handle().map(|h| {
+            let [counts] = h.counters_by_label(
+                [recorded::QUERY_LOG_EXECUTION_COUNT],
+                "query_id",
+                [("database_type", "upstream")],
+            );
+            counts
+        });
 
+        let select_schema = if exec_counts.is_some() {
             let mut select_schema = create_dummy_schema!("query_id", "query", "readyset_supported");
 
             // Add count separately with a different type (UnsignedInt)
@@ -4088,11 +4122,8 @@ where
                     DfValue::from(s),
                 ];
 
-                // Append metrics if we have them
-                if let Some(handle) = state.metrics_handle.as_ref() {
-                    let MetricsSummary { sample_count } =
-                        handle.metrics_summary(&id.to_string()).unwrap_or_default();
-                    row.push(DfValue::UnsignedInt(sample_count));
+                if let Some(exec_counts) = &exec_counts {
+                    row.push(DfValue::UnsignedInt(exec_counts.get(&id.to_string())));
                 }
 
                 row
@@ -4154,9 +4185,16 @@ where
             None => None,
         };
 
-        let select_schema = if let Some(handle) = state.metrics_handle.as_mut() {
-            // Must snapshot histograms to get the latest metrics
-            handle.snapshot_counters(readyset_client_metrics::DatabaseType::ReadySet);
+        let exec_counts = metrics_handle().map(|h| {
+            let [counts] = h.counters_by_label(
+                [recorded::QUERY_LOG_EXECUTION_COUNT],
+                "query_id",
+                [("database_type", "readyset")],
+            );
+            counts
+        });
+
+        let select_schema = if exec_counts.is_some() {
             create_dummy_schema!("query_id", "name", "query", "properties", "count")
         } else {
             create_dummy_schema!("query_id", "name", "query", "properties")
@@ -4184,13 +4222,9 @@ where
                     properties.set_trx_cache_policy(view.trx_cache_policy);
                     properties.to_string().into()
                 };
-                let count = state.metrics_handle.as_ref().map(|h| {
-                    h.metrics_summary(&query_id)
-                        .unwrap_or_default()
-                        .sample_count
-                        .to_string()
-                        .into()
-                });
+                let count = exec_counts
+                    .as_ref()
+                    .map(|c| c.get(&query_id).to_string().into());
                 let query_id = query_id.into();
 
                 push_row(query_id, name, query, properties, count);
@@ -4229,13 +4263,9 @@ where
                     properties.set_schedule(schedule);
                     properties.to_string().into()
                 };
-                let count = state.metrics_handle.as_ref().map(|h| {
-                    h.metrics_summary(&query_id)
-                        .unwrap_or_default()
-                        .sample_count
-                        .to_string()
-                        .into()
-                });
+                let count = exec_counts
+                    .as_ref()
+                    .map(|c| c.get(&query_id).to_string().into());
                 let query_id = query_id.into();
 
                 push_row(query_id, name, query, properties, count);

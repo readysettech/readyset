@@ -28,7 +28,6 @@ use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterS
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
-use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{
@@ -50,7 +49,7 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
-use readyset_metrics::get_or_init_global_recorder;
+use readyset_metrics::init_global_recorder;
 use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
@@ -1129,23 +1128,18 @@ where
             warn!("--noria-metrics is deprecated and has no effect. It will be removed in a future release.");
         }
 
-        let prometheus_handle = if options.prometheus_metrics {
+        if options.prometheus_metrics {
             let _guard = rt.enter();
             let database_label = match self.database_type {
                 DatabaseType::MySQL => "mysql",
                 DatabaseType::PostgreSQL => "psql",
             };
-
-            let recorder = get_or_init_global_recorder(&[
+            init_global_recorder(&[
                 ("upstream_db_type", database_label),
                 ("deployment", &options.deployment),
             ]);
-            Some(recorder.handle())
-        } else {
-            None
-        };
-
-        rs_connect.in_scope(|| info!("PrometheusHandle created"));
+            rs_connect.in_scope(|| info!("PrometheusHandle created"));
+        }
 
         metrics::gauge!(
             recorded::READYSET_ADAPTER_VERSION,
@@ -1165,7 +1159,7 @@ where
 
         // if we're running in standalone mode, server will already
         // spawn it's own allocator metrics reporter.
-        if prometheus_handle.is_some() && !options.deployment_mode.is_standalone() {
+        if options.prometheus_metrics && !options.deployment_mode.is_standalone() {
             let alloc_shutdown = shutdown_rx.clone();
             rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
         }
@@ -1729,7 +1723,6 @@ where
                 .fallback_recovery_seconds(options.fallback_recovery_seconds)
                 .set_placeholder_inlining(options.feature_placeholder_inlining)
                 .connections(connections.clone())
-                .metrics_handle(prometheus_handle.clone().map(MetricsHandle::new))
                 .sampler_tx(global_sampler_tx.clone())
                 .upstream_config(Some(Arc::clone(&upstream_config)))
                 .replication_enabled(replication_enabled)

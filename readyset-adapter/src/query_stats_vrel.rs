@@ -1,25 +1,15 @@
-use metrics_exporter_prometheus::{Distribution, LabelSet};
+use metrics_exporter_prometheus::Distribution;
 use quanta::Instant;
 
 use readyset_client_metrics::recorded;
 use readyset_data::{DfType, DfValue};
-use readyset_metrics::get_global_recorder;
+use readyset_metrics::metrics_handle;
 use readyset_schema::bind_vrel;
 use readyset_schema::virtual_relation::{VrelContext, VrelRead, VrelRows};
 use readyset_sql::DialectDisplay;
 use readyset_util::scheduler_potentially_yield;
 
 use crate::query_status_cache::QueryStatusCache;
-
-fn label_value(labels: &LabelSet, key: &str) -> Option<String> {
-    let prefix = format!("{key}=\"");
-    for tag in labels.to_strings() {
-        if let Some(rest) = tag.strip_prefix(&prefix) {
-            return Some(rest.trim_end_matches('"').to_string());
-        }
-    }
-    None
-}
 
 fn extract_summary(dist: &Distribution) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
     if let Distribution::Summary(summary, _quantiles, sum) = dist {
@@ -44,66 +34,51 @@ fn query_stats_read(ctx: &VrelContext, database_type: &'static str) -> VrelRead 
     let query_status_cache = ctx.query_status_cache.downcast_ref::<QueryStatusCache>();
 
     Box::pin(async move {
-        let handle = match get_global_recorder() {
-            Some(r) => r.handle(),
-            None => {
-                let rows: VrelRows = Box::new(std::iter::empty());
-                return Ok(rows);
-            }
+        let Some(handle) = metrics_handle() else {
+            return Ok(Box::new(std::iter::empty()) as VrelRows);
         };
-
-        let counts = handle.counters(Some(|k: &str| k == recorded::QUERY_LOG_EXECUTION_COUNT));
-        let exec_times =
-            handle.distributions(Some(|k: &str| k == recorded::QUERY_LOG_EXECUTION_TIME));
-        let last_exec_times = handle.gauges(Some(|k: &str| {
-            k == recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S
-        }));
-
-        let counts = counts.get(recorded::QUERY_LOG_EXECUTION_COUNT);
-        let exec_times = exec_times.get(recorded::QUERY_LOG_EXECUTION_TIME);
-        let last_exec_times = last_exec_times.get(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S);
+        let database_type = [("database_type", database_type)];
+        let [counts] = handle.counters_by_label(
+            [recorded::QUERY_LOG_EXECUTION_COUNT],
+            "query_id",
+            database_type,
+        );
+        let [exec_times] = handle.distributions_by_label(
+            [recorded::QUERY_LOG_EXECUTION_TIME],
+            "query_id",
+            database_type,
+        );
+        let [last_exec] = handle.gauges_by_label(
+            [recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S],
+            "query_id",
+            database_type,
+        );
 
         let mut entries: Vec<Vec<DfValue>> = Vec::new();
-        if let Some(counts_map) = counts {
-            for (labels, count) in counts_map.iter() {
-                scheduler_potentially_yield!();
+        for (query_id, count) in counts.iter() {
+            scheduler_potentially_yield!();
+            let query = query_status_cache
+                .and_then(|qs| Some(qs.query(query_id)?.display(dialect).to_string()));
+            let last_exec_s = last_exec.get(query_id);
+            let (sum, min, max, p50, p90, p95, p99, p999) =
+                extract_summary(exec_times.get(query_id));
+            let avg = if count > 0 { sum / count as f64 } else { 0.0 };
 
-                if label_value(labels, "database_type").as_deref() != Some(database_type) {
-                    continue;
-                }
-                let Some(query_id) = label_value(labels, "query_id") else {
-                    continue;
-                };
-                let query = query_status_cache.and_then(|qs| {
-                    let q = qs.query(&query_id)?;
-                    Some(q.display(dialect).to_string())
-                });
-                let last_exec_s = last_exec_times
-                    .and_then(|g| g.get(labels))
-                    .copied()
-                    .unwrap_or(0.0);
-                let (sum, min, max, p50, p90, p95, p99, p999) = exec_times
-                    .and_then(|d| d.get(labels))
-                    .map(extract_summary)
-                    .unwrap_or_default();
-                let avg = if *count > 0 { sum / *count as f64 } else { 0.0 };
-
-                entries.push(vec![
-                    DfValue::from(query_id),
-                    query.map(DfValue::from).unwrap_or(DfValue::None),
-                    DfValue::UnsignedInt(*count),
-                    DfValue::Double(sum),
-                    DfValue::Double(avg),
-                    DfValue::Double(min),
-                    DfValue::Double(max),
-                    DfValue::Double(p50),
-                    DfValue::Double(p90),
-                    DfValue::Double(p95),
-                    DfValue::Double(p99),
-                    DfValue::Double(p999),
-                    DfValue::UnsignedInt(last_exec_s as u64),
-                ]);
-            }
+            entries.push(vec![
+                DfValue::from(query_id),
+                query.map(DfValue::from).unwrap_or(DfValue::None),
+                DfValue::UnsignedInt(count),
+                DfValue::Double(sum),
+                DfValue::Double(avg),
+                DfValue::Double(min),
+                DfValue::Double(max),
+                DfValue::Double(p50),
+                DfValue::Double(p90),
+                DfValue::Double(p95),
+                DfValue::Double(p99),
+                DfValue::Double(p999),
+                DfValue::UnsignedInt(last_exec_s as u64),
+            ]);
         }
 
         let rows: VrelRows = Box::new(entries.into_iter());

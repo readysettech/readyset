@@ -5,7 +5,7 @@ use std::time::Duration;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_metrics::get_or_init_global_recorder;
+use readyset_metrics::init_global_recorder;
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_util::shutdown::ShutdownSender;
@@ -113,7 +113,7 @@ pub async fn build_custom(
 /// must be called before the server is started, otherwise it will fail to
 /// register its metrics with the correct recorder, and none will be recorded
 pub fn register_metric_recorder() {
-    get_or_init_global_recorder(&[]);
+    init_global_recorder(&[]);
 }
 
 // TODO: schema

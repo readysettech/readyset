@@ -13,7 +13,6 @@ use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, Repli
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
-use readyset_adapter::metrics_handle::MetricsHandle;
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
@@ -29,7 +28,7 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
-use readyset_metrics::get_or_init_global_recorder;
+use readyset_metrics::init_global_recorder;
 use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
@@ -248,9 +247,7 @@ impl Default for TestBuilder {
 
 impl TestBuilder {
     pub fn new(backend_builder: BackendBuilder) -> Self {
-        let recorder_handle = get_or_init_global_recorder(&[]).handle();
-        let backend_builder =
-            backend_builder.metrics_handle(Some(MetricsHandle::new(recorder_handle)));
+        init_global_recorder(&[]);
         Self {
             backend_builder,
             replicate: Default::default(),
