@@ -293,13 +293,13 @@ impl PartialOrd for Text {
 
 impl PartialEq for Text {
     fn eq(&self, other: &Self) -> bool {
-        self.as_str() == other.as_str()
+        self.cmp(other) == Ordering::Equal
     }
 }
 
 impl Ord for Text {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.as_str().cmp(other.as_str())
+        self.collation().compare(self.as_str(), other.as_str())
     }
 }
 
