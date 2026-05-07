@@ -436,23 +436,11 @@ impl NoriaConnector {
 
         let mut data = domains
             .into_iter()
-            .flat_map(|(di, shards)| {
-                shards
-                    .into_iter()
-                    .enumerate()
-                    .flat_map(move |(shard, replicas)| {
-                        replicas
-                            .into_iter()
-                            .enumerate()
-                            .map(move |(replica, worker)| {
-                                vec![
-                                    DfValue::from(format!("{di}.{shard}.{replica}")),
-                                    DfValue::from(
-                                        worker.map(|w| w.to_string()).unwrap_or_default(),
-                                    ),
-                                ]
-                            })
-                    })
+            .map(|(di, worker)| {
+                vec![
+                    DfValue::from(format!("{di}.0.0")),
+                    DfValue::from(worker.map(|w| w.to_string()).unwrap_or_default()),
+                ]
             })
             .collect::<Vec<_>>();
 

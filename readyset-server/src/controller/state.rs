@@ -69,7 +69,6 @@ use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use vec1::{vec1, Vec1};
 
-use super::migrate::DomainSettings;
 use super::replication::ReplicationStrategy;
 use super::sql::Recipe;
 use crate::controller::domain_handle::DomainHandle;
@@ -261,29 +260,20 @@ impl DfState {
     pub(super) fn get_info(&self) -> ReadySetResult<GraphInfo> {
         let mut worker_info = HashMap::new();
         for (di, dh) in self.domains.iter() {
-            for (shard, replicas) in dh.shards().enumerate() {
-                for (replica, url) in replicas.iter().enumerate() {
-                    let Some(url) = url else {
-                        continue;
-                    };
-                    worker_info
-                        .entry(url.clone())
-                        .or_insert_with(HashMap::new)
-                        .entry(ReplicaAddress {
-                            domain_index: *di,
-                            shard,
-                            replica,
-                        })
-                        .or_insert_with(Vec::new)
-                        .extend(
-                            self.domain_nodes
-                                .get(di)
-                                .ok_or_else(|| {
-                                    internal_err!("{:?} in domains but not in domain_nodes", di)
-                                })?
-                                .values(),
-                        )
-                }
+            for (addr, url) in dh.assignments() {
+                worker_info
+                    .entry(url.clone())
+                    .or_insert_with(HashMap::new)
+                    .entry(addr)
+                    .or_insert_with(Vec::new)
+                    .extend(
+                        self.domain_nodes
+                            .get(di)
+                            .ok_or_else(|| {
+                                internal_err!("{:?} in domains but not in domain_nodes", di)
+                            })?
+                            .values(),
+                    );
             }
         }
         Ok(GraphInfo {
@@ -487,25 +477,18 @@ impl DfState {
                     domain_index: domain_index.index(),
                 })?;
 
-        let replicas = (0..domain.num_replicas())
-            .map(|replica| {
-                (0..domain.num_shards())
-                    .map(|shard| {
-                        domain
-                            .assignment(shard, replica)
-                            .map(|worker| {
-                                self.read_addrs
-                                    .get(worker)
-                                    .ok_or_else(|| ReadySetError::UnmappableDomain {
-                                        domain_index: domain_index.index(),
-                                    })
-                                    .copied()
-                            })
-                            .transpose()
+        let read_addr = domain
+            .worker()
+            .map(|worker| {
+                self.read_addrs
+                    .get(worker)
+                    .ok_or_else(|| ReadySetError::UnmappableDomain {
+                        domain_index: domain_index.index(),
                     })
-                    .collect::<ReadySetResult<Vec<_>>>()
+                    .copied()
             })
-            .collect::<ReadySetResult<Vec<_>>>()?;
+            .transpose()?;
+        let replicas = vec![vec![read_addr]];
 
         Ok(Some(ReaderHandleBuilder {
             name: name.clone(),
@@ -681,26 +664,20 @@ impl DfState {
                     domain_index: node.domain().index(),
                 })?;
 
-        invariant_eq!(
-            domain.num_replicas(),
-            1,
-            "Base table domains can't be replicated"
-        );
+        // Standalone Readyset has a single replica per domain.
+        debug_assert!(domain.is_placed() || domain.worker().is_none());
 
-        let txs = (0..domain.num_shards())
-            .map(|shard| {
-                let replica_addr = ReplicaAddress {
-                    domain_index: node.domain(),
-                    shard,
-                    replica: 0, // Base tables can't currently be replicated
-                };
-                self.channel_coordinator
-                    .get_addr(&replica_addr)
-                    .ok_or_else(|| {
-                        internal_err!("failed to get channel coordinator for {}", replica_addr)
-                    })
-            })
-            .collect::<ReadySetResult<Vec<_>>>()?;
+        let replica_addr = ReplicaAddress {
+            domain_index: node.domain(),
+            shard: 0,
+            replica: 0,
+        };
+        let txs = vec![self
+            .channel_coordinator
+            .get_addr(&replica_addr)
+            .ok_or_else(|| {
+                internal_err!("failed to get channel coordinator for {}", replica_addr)
+            })?];
 
         let base_operator = node
             .get_base()
@@ -757,21 +734,16 @@ impl DfState {
         let mut domains = HashMap::new();
         for (&domain_index, s) in self.domains.iter() {
             trace!(domain = %domain_index.index(), "requesting stats from domain");
-            domains.extend(
-                s.send_to_healthy(DomainRequest::GetStatistics, workers)
-                    .await?
-                    .into_entries()
-                    .map(|((shard, replica), stats)| {
-                        (
-                            ReplicaAddress {
-                                domain_index,
-                                shard,
-                                replica,
-                            },
-                            stats,
-                        )
-                    }),
-            );
+            if let Some(stats) = s.try_send(DomainRequest::GetStatistics, workers).await? {
+                domains.insert(
+                    ReplicaAddress {
+                        domain_index,
+                        shard: 0,
+                        replica: 0,
+                    },
+                    stats,
+                );
+            }
         }
 
         Ok(GraphStats { domains })
@@ -945,7 +917,7 @@ impl DfState {
     fn query_domains<'a, I, R>(
         &'a self,
         requests: I,
-    ) -> impl TryStream<Ok = (DomainIndex, Array2<R>), Error = ReadySetError> + 'a
+    ) -> impl TryStream<Ok = (DomainIndex, R), Error = ReadySetError> + 'a
     where
         I: IntoIterator<Item = (DomainIndex, DomainRequest)>,
         I::IntoIter: 'a,
@@ -954,7 +926,7 @@ impl DfState {
         stream::iter(requests)
             .map(move |(domain, request)| {
                 self.domains[&domain]
-                    .send_to_all::<R>(request, &self.workers)
+                    .send::<R>(request, &self.workers)
                     .map(move |r| -> ReadySetResult<_> { Ok((domain, r?)) })
             })
             .buffer_unordered(CONCURRENT_REQUESTS)
@@ -978,24 +950,22 @@ impl DfState {
 
         let mut cur_min = PersistencePoint::Persisted;
 
-        while let Some((_idx, replicas)) = min_persisted_offsets.try_next().await? {
-            for offset in replicas.into_cells() {
-                let min_persisted_offset_for_domain = match offset {
-                    BaseTableState::Initialized(persisted_offset) => persisted_offset,
-                    BaseTableState::Pending => internal!(
-                        "At least one table does not have a replication offset because it is \
-                        not ready yet. The caller should wait for all tables to be ready before \
-                        requesting replication offsets",
-                    ),
-                };
+        while let Some((_idx, offset)) = min_persisted_offsets.try_next().await? {
+            let min_persisted_offset_for_domain = match offset {
+                BaseTableState::Initialized(persisted_offset) => persisted_offset,
+                BaseTableState::Pending => internal!(
+                    "At least one table does not have a replication offset because it is \
+                    not ready yet. The caller should wait for all tables to be ready before \
+                    requesting replication offsets",
+                ),
+            };
 
-                match (&cur_min, &min_persisted_offset_for_domain) {
-                    (PersistencePoint::Persisted, _) => cur_min = min_persisted_offset_for_domain,
-                    (PersistencePoint::UpTo(_), PersistencePoint::Persisted) => {}
-                    (PersistencePoint::UpTo(min), PersistencePoint::UpTo(persisted_offset)) => {
-                        if persisted_offset.try_partial_cmp(min)?.is_lt() {
-                            cur_min = PersistencePoint::UpTo(persisted_offset.clone());
-                        }
+            match (&cur_min, &min_persisted_offset_for_domain) {
+                (PersistencePoint::Persisted, _) => cur_min = min_persisted_offset_for_domain,
+                (PersistencePoint::UpTo(_), PersistencePoint::Persisted) => {}
+                (PersistencePoint::UpTo(min), PersistencePoint::UpTo(persisted_offset)) => {
+                    if persisted_offset.try_partial_cmp(min)?.is_lt() {
+                        cur_min = PersistencePoint::UpTo(persisted_offset.clone());
                     }
                 }
             }
@@ -1020,34 +990,27 @@ impl DfState {
         .try_fold(
             ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
             |mut acc, (domain, domain_offs)| async move {
-                for replica in domain_offs.into_cells() {
-                    for (lni, offset) in replica {
-                        let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
-                            internal_err!(
-                                "Domain {} returned nonexistent local node {}",
-                                domain,
-                                lni
-                            )
-                        })?;
+                for (lni, offset) in domain_offs {
+                    let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
+                        internal_err!("Domain {} returned nonexistent local node {}", domain, lni)
+                    })?;
 
-                        if !self.ingredients[*ni].is_base() {
-                            continue;
+                    if !self.ingredients[*ni].is_base() {
+                        continue;
+                    }
+
+                    let table_name = self.ingredients[*ni].name();
+                    match offset {
+                        BaseTableState::Initialized(offset) => {
+                            acc.tables.insert(table_name.clone(), offset);
                         }
-
-                        let table_name = self.ingredients[*ni].name();
-                        match offset {
-                            BaseTableState::Initialized(offset) => {
-                                // TODO min of all shards
-                                acc.tables.insert(table_name.clone(), offset);
-                            }
-                            BaseTableState::Pending => {
-                                internal!(
-                                    "Table {} does not have a replication offset because it is \
-                                     not ready yet. The caller should wait for all tables to \
-                                     be ready before requesting replication offsets",
-                                    table_name.display_unquoted()
-                                );
-                            }
+                        BaseTableState::Pending => {
+                            internal!(
+                                "Table {} does not have a replication offset because it is \
+                                 not ready yet. The caller should wait for all tables to \
+                                 be ready before requesting replication offsets",
+                                table_name.display_unquoted()
+                            );
                         }
                     }
                 }
@@ -1057,19 +1020,8 @@ impl DfState {
         .await
     }
 
-    pub(super) fn domain_settings(&self) -> HashMap<DomainIndex, DomainSettings> {
-        self.domains
-            .iter()
-            .map(|(idx, hdl)| {
-                (
-                    *idx,
-                    DomainSettings {
-                        num_shards: hdl.num_shards(),
-                        num_replicas: hdl.num_replicas(),
-                    },
-                )
-            })
-            .collect()
+    pub(super) fn known_domains(&self) -> HashSet<DomainIndex> {
+        self.domains.keys().copied().collect()
     }
 
     /// Collects a unique list of domains that might contain base tables. Errors out if a domain
@@ -1098,22 +1050,16 @@ impl DfState {
     /// running domains within the cluster
     pub(super) fn domain_addresses(&self) -> Vec<DomainDescriptor> {
         let mut domain_addresses = Vec::new();
-        for (domain_index, handle) in &self.domains {
-            for shard in 0..handle.num_shards() {
-                for replica in 0..handle.num_replicas() {
-                    let replica_address = ReplicaAddress {
-                        domain_index: *domain_index,
-                        shard,
-                        replica,
-                    };
-
-                    if let Some(socket_addr) = self.channel_coordinator.get_addr(&replica_address) {
-                        domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
-                    }
-                }
+        for domain_index in self.domains.keys() {
+            let replica_address = ReplicaAddress {
+                domain_index: *domain_index,
+                shard: 0,
+                replica: 0,
+            };
+            if let Some(socket_addr) = self.channel_coordinator.get_addr(&replica_address) {
+                domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
             }
         }
-
         domain_addresses
     }
 
@@ -1121,18 +1067,14 @@ impl DfState {
     pub(super) fn all_replicas_placed(&self) -> bool {
         self.domain_nodes
             .keys()
-            .all(|d| self.domains.get(d).is_some_and(|h| h.all_replicas_placed()))
+            .all(|d| self.domains.get(d).is_some_and(|h| h.is_placed()))
     }
 
     /// Returns a map of nodes for domains which have not yet been placed onto a worker
     pub(super) fn unplaced_domain_nodes(&self) -> HashMap<DomainIndex, HashSet<NodeIndex>> {
         self.domain_nodes
             .iter()
-            .filter(|(d, _)| {
-                self.domains
-                    .get(d)
-                    .is_none_or(|dh| !dh.all_replicas_placed())
-            })
+            .filter(|(d, _)| self.domains.get(d).is_none_or(|dh| !dh.is_placed()))
             .map(|(k, v)| (*k, v.values().copied().collect()))
             .collect()
     }
@@ -1149,9 +1091,7 @@ impl DfState {
             .map_ok(|(di, local_indices)| {
                 stream::iter(
                     local_indices
-                        .into_cells()
                         .into_iter()
-                        .flatten()
                         .map(move |li| -> ReadySetResult<_> { Ok((di, li)) }),
                 )
             })
@@ -1180,7 +1120,7 @@ impl DfState {
                     .into_iter()
                     .map(|domain| (domain, DomainRequest::AllTablesCompacted)),
             )
-            .map_ok(|(_, compacted)| compacted.cells().iter().all(|finished| *finished));
+            .map_ok(|(_, compacted)| compacted);
         while let Some(finished) = stream.next().await {
             if !finished? {
                 return Ok(false);
@@ -1202,7 +1142,7 @@ impl DfState {
         // Copying the keys into a vec here is a workaround for a higher order
         // lifetime compile error in `external_request` that occurs if we simply
         // use keys().map() to pass into query_domains directly.
-        let counts_per_domain: Vec<(DomainIndex, Array2<Option<Vec<(NodeIndex, NodeSize)>>>)> = {
+        let counts_per_domain: Vec<(DomainIndex, Option<Vec<(NodeIndex, NodeSize)>>)> = {
             let requests = domains
                 .map(|di| (di, DomainRequest::RequestNodeSizes))
                 .collect::<Vec<_>>();
@@ -1217,7 +1157,7 @@ impl DfState {
                     });
                     async move {
                         let r = handle?
-                            .send_to_healthy::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
+                            .try_send::<Vec<(NodeIndex, NodeSize)>>(request, &self.workers)
                             .await?;
                         Ok::<_, ReadySetError>((domain, r))
                     }
@@ -1228,20 +1168,12 @@ impl DfState {
         .await?;
 
         let mut res = HashMap::new();
-        let flat_counts = counts_per_domain
-            .into_iter()
-            .flat_map(|(_domain, per_shard_counts)| {
-                per_shard_counts
-                    .into_cells()
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-            });
-        for (node_index, count) in flat_counts {
-            // Multiple replicas may report counts for the same node; sum them together.
-            res.entry(node_index)
-                .and_modify(|s| *s += count)
-                .or_insert(count);
+        for (_domain, counts) in counts_per_domain {
+            for (node_index, count) in counts.into_iter().flatten() {
+                res.entry(node_index)
+                    .and_modify(|s| *s += count)
+                    .or_insert(count);
+            }
         }
         Ok(res)
     }
@@ -1288,7 +1220,7 @@ impl DfState {
     pub(in crate::controller) async fn place_domain(
         &mut self,
         idx: DomainIndex,
-        shard_replica_workers: Array2<Option<WorkerIdentifier>>,
+        worker: Option<WorkerIdentifier>,
         nodes: Vec<NodeIndex>,
     ) -> ReadySetResult<DomainHandle> {
         // Reader nodes are always assigned to their own domains, so it's good enough to see
@@ -1318,66 +1250,53 @@ impl DfState {
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
 
-        let num_shards = shard_replica_workers.num_rows();
-
         let mut domain_addresses = vec![];
-        let mut assignments = Vec::with_capacity(num_shards);
+        let mut assigned_worker = None;
 
-        for (shard, replicas) in shard_replica_workers.rows().enumerate() {
-            let num_replicas = replicas.len();
-            let mut shard_assignments = Vec::with_capacity(num_replicas);
-            for (replica, worker_id) in replicas.iter().enumerate() {
-                let Some(worker_id) = worker_id else {
-                    shard_assignments.push(None);
-                    continue;
-                };
+        if let Some(worker_id) = worker {
+            let replica_address = ReplicaAddress {
+                domain_index: idx,
+                shard: 0,
+                replica: 0,
+            };
 
-                let replica_address = ReplicaAddress {
-                    domain_index: idx,
-                    shard,
-                    replica,
-                };
+            let domain = DomainBuilder {
+                index: idx,
+                shard: None,
+                replica: 0,
+                nshards: 1,
+                config: self.domain_config.clone(),
+                nodes: domain_nodes.clone(),
+                persistence_parameters: self.persistence.clone(),
+            };
 
-                let domain = DomainBuilder {
-                    index: idx,
-                    shard: if num_shards > 1 { Some(shard) } else { None },
-                    replica,
-                    nshards: num_shards,
-                    config: self.domain_config.clone(),
-                    nodes: domain_nodes.clone(),
-                    persistence_parameters: self.persistence.clone(),
-                };
+            let w = self.workers.get(&worker_id).ok_or_else(|| {
+                internal_err!(
+                    "Domain {replica_address} scheduled onto nonexistent worker {worker_id}"
+                )
+            })?;
 
-                let w = self.workers.get(worker_id).ok_or_else(|| {
-                    internal_err!(
-                        "Domain {replica_address} scheduled onto nonexistent worker {worker_id}"
-                    )
+            let idx = domain.index;
+
+            debug!("sending domain {} to worker {}", replica_address, w.uri);
+
+            let ret = w
+                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
+                .await
+                .map_err(|e| ReadySetError::DomainCreationFailed {
+                    domain_index: idx.index(),
+                    shard: 0,
+                    replica: 0,
+                    worker_uri: w.uri.clone(),
+                    source: Box::new(e),
                 })?;
 
-                let idx = domain.index;
+            debug!(external_addr = %ret.external_addr, "worker booted domain");
 
-                // send domain to worker
-                debug!("sending domain {} to worker {}", replica_address, w.uri);
-
-                let ret = w
-                    .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
-                    .await
-                    .map_err(|e| ReadySetError::DomainCreationFailed {
-                        domain_index: idx.index(),
-                        shard,
-                        replica,
-                        worker_uri: w.uri.clone(),
-                        source: Box::new(e),
-                    })?;
-
-                debug!(external_addr = %ret.external_addr, "worker booted domain");
-
-                self.channel_coordinator
-                    .insert_remote(replica_address, ret.external_addr);
-                domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
-                shard_assignments.push(Some(w.uri.clone()));
-            }
-            assignments.push(shard_assignments);
+            self.channel_coordinator
+                .insert_remote(replica_address, ret.external_addr);
+            domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
+            assigned_worker = Some(w.uri.clone());
         }
 
         // Tell all workers about the new domain(s)
@@ -1411,7 +1330,7 @@ impl DfState {
             }
         }
 
-        Ok(DomainHandle::new(idx, Array2::from_rows(assignments)))
+        Ok(DomainHandle::new(idx, assigned_worker))
     }
 
     pub(super) async fn remove_nodes(
@@ -1448,7 +1367,7 @@ impl DfState {
                     shard: 0,
                     replica: 0,
                 })?
-                .send_to_healthy::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
+                .try_send::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
                 .await
             {
                 // The worker failing is an even more efficient way to remove nodes.
@@ -1471,14 +1390,13 @@ impl DfState {
         let mut to_evict = Vec::new();
         for (di, s) in &self.domains {
             let domain_to_evict: Vec<(NodeIndex, u64)> = s
-                .send_to_healthy::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
+                .try_send::<(DomainStats, HashMap<NodeIndex, NodeStats>)>(
                     DomainRequest::GetStatistics,
                     workers,
                 )
                 .await?
-                .into_cells()
+                // Discard results from non-running domains.
                 .into_iter()
-                .flatten(/* Discard results from non-running domains */)
                 .flat_map(move |(_, node_stats)| {
                     node_stats
                         .into_iter()
@@ -1503,7 +1421,7 @@ impl DfState {
                 self.domains
                     .get(&di)
                     .unwrap()
-                    .send_to_healthy::<()>(
+                    .try_send::<()>(
                         DomainRequest::Packet(Packet::Evict(Evict {
                             req: Eviction::Bytes {
                                 node: Some(na),
@@ -1528,12 +1446,11 @@ impl DfState {
     /// List all replay paths from all domains
     pub(super) async fn replay_paths(
         &self,
-    ) -> ReadySetResult<Vec<(DomainIndex, Array2<Option<BTreeMap<Tag, ReplayPath>>>)>> {
-        let mut per_domain: Vec<(DomainIndex, Array2<Option<BTreeMap<Tag, ReplayPath>>>)> =
-            Vec::new();
+    ) -> ReadySetResult<Vec<(DomainIndex, Option<BTreeMap<Tag, ReplayPath>>)>> {
+        let mut per_domain: Vec<(DomainIndex, Option<BTreeMap<Tag, ReplayPath>>)> = Vec::new();
         for domain in self.domains.keys() {
             let res = self.domains[domain]
-                .send_to_healthy::<BTreeMap<Tag, ReplayPath>>(
+                .try_send::<BTreeMap<Tag, ReplayPath>>(
                     DomainRequest::RequestReplayPaths,
                     &self.workers,
                 )
@@ -1587,16 +1504,12 @@ impl DfState {
             .domains
             .get(&di)
             .ok_or_else(|| internal_err!())?
-            .send_to_healthy::<Option<Vec<DfValue>>>(
+            .try_send::<Option<Vec<DfValue>>>(
                 DomainRequest::Evict { req: Eviction::SingleKey { tag, key } },
                 &self.workers,
             )
             .await?
-            .into_cells()
-            .into_iter()
             .flatten(/* Discard results from non-running domains */)
-            .next()
-            .ok_or_else(|| internal_err!("expected a shard+replica"))?
             .map(|key| SingleKeyEviction {
                 domain_idx: di,
                 tag: u32::from(tag),
@@ -1899,7 +1812,7 @@ impl DfState {
         self.read_addrs.remove(wi);
         let mut res = vec![];
         for dh in self.domains.values_mut() {
-            for replica_addr in dh.remove_worker(wi) {
+            if let Some(replica_addr) = dh.remove_worker(wi) {
                 self.channel_coordinator.remove(replica_addr);
                 res.push(replica_addr);
             }
@@ -1971,7 +1884,7 @@ impl DfState {
         while let Some(r) = futs.next().await {
             for killed_addr in r? {
                 if let Some(dh) = self.domains.get_mut(&killed_addr.domain_index) {
-                    dh.remove_assignment(killed_addr.shard, killed_addr.replica);
+                    dh.clear_assignment();
                 }
             }
         }
@@ -2151,8 +2064,7 @@ impl DfState {
         domain_nodes: &HashMap<DomainIndex, HashSet<NodeIndex>>,
     ) -> ReadySetResult<DomainMigrationPlan> {
         info!("Planning recovery");
-        let mut dmp =
-            DomainMigrationPlan::new(DomainMigrationMode::Recover, self.domain_settings());
+        let mut dmp = DomainMigrationPlan::new(DomainMigrationMode::Recover, self.known_domains());
         let domain_nodes = domain_nodes
             .iter()
             .map(|(idx, nm)| (*idx, nm.iter().copied().collect::<Vec<_>>()))
@@ -2160,34 +2072,19 @@ impl DfState {
         let mut new = HashSet::new();
         {
             for (domain, nodes) in domain_nodes {
-                let workers = schedule_domain(self, &None, domain, &nodes[..])?;
+                let worker = schedule_domain(self, &None, domain, &nodes[..])?;
 
-                for ((shard, replica), worker) in workers.entries() {
-                    let not_already_placed = self
-                        .domains
-                        .get(&domain)
-                        .and_then(|dh| dh.assignment(shard, replica))
-                        .is_none();
-
-                    if not_already_placed && worker.is_none() {
-                        dmp.replica_failed_placement(ReplicaAddress {
-                            domain_index: domain,
-                            shard,
-                            replica,
-                        });
-                    }
+                let already_placed = self.domains.get(&domain).is_some_and(|dh| dh.is_placed());
+                if !already_placed && worker.is_none() {
+                    dmp.replica_failed_placement(ReplicaAddress {
+                        domain_index: domain,
+                        shard: 0,
+                        replica: 0,
+                    });
                 }
 
-                let num_shards = workers.num_rows();
-                let num_replicas = workers[0].len();
-                dmp.place_domain(domain, workers, nodes.clone());
-                dmp.set_domain_settings(
-                    domain,
-                    DomainSettings {
-                        num_shards,
-                        num_replicas,
-                    },
-                );
+                dmp.place_domain(domain, worker, nodes.clone());
+                dmp.register_domain(domain);
                 new.extend(nodes);
             }
         }

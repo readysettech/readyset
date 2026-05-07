@@ -1006,11 +1006,10 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Get a map from domain index to a shard->replica mapping of the workers that are running the
-        /// shard replicas of that domain .
+        /// Get a map from domain index to the worker running that domain (if any).
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-        domains() -> HashMap<DomainIndex, Vec<Vec<Option<Url>>>>
+        domains() -> HashMap<DomainIndex, Option<Url>>
     );
 
     simple_request!(

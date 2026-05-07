@@ -412,10 +412,10 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/domains") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let res: HashMap<DomainIndex, Vec<Vec<Option<WorkerIdentifier>>>> = ds
+                let res: HashMap<DomainIndex, Option<WorkerIdentifier>> = ds
                     .domains
                     .iter()
-                    .map(|(di, dh)| (*di, dh.shards().map(|wis| wis.to_vec()).collect::<Vec<_>>()))
+                    .map(|(di, dh)| (*di, dh.worker().cloned()))
                     .collect();
                 return_serialized!(res)
             }
@@ -701,8 +701,8 @@ impl Leader {
 
                 // Flatten replay paths into ReplayPathInfo structs
                 let mut result: Vec<ReplayPathInfo> = Vec::new();
-                for (domain_idx, array) in replay_paths {
-                    for paths_map in array.into_cells().into_iter().flatten() {
+                for (domain_idx, paths) in replay_paths {
+                    if let Some(paths_map) = paths {
                         for (tag, path) in paths_map {
                             result.push(
                                 dataflow::ReplayPathWithContext {
@@ -1073,7 +1073,7 @@ impl Leader {
                 warn!(domain = %addr, "Notified about failure of unknown domain");
                 return Ok(());
             };
-            dh.remove_assignment(addr.shard, addr.replica);
+            dh.clear_assignment();
 
             let mut domains_to_recover = vec![addr.domain_index];
 
