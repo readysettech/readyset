@@ -50,7 +50,7 @@ use tracing::{debug, debug_span, error, info, info_span, trace};
 
 use crate::controller::migrate::materialization::InvalidEdge;
 use crate::controller::migrate::node_changes::{MigrationNodeChanges, NodeChanges};
-use crate::controller::migrate::scheduling::Scheduler;
+use crate::controller::migrate::scheduling::schedule_domain;
 use crate::controller::state::DfState;
 use crate::controller::WorkerIdentifier;
 
@@ -1318,8 +1318,6 @@ fn plan_add_nodes(
             DomainMigrationMode::Extend,
             dataflow_state.domain_settings(),
         );
-        let mut scheduler = Scheduler::new(dataflow_state, worker)?;
-
         for domain in changed_domains {
             if dataflow_state.domains.contains_key(&domain) {
                 // this is not a new domain
@@ -1329,7 +1327,7 @@ fn plan_add_nodes(
             // uninformed_domain_nodes is built from changed_domains
             #[allow(clippy::unwrap_used)]
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let worker_shards = scheduler.schedule_domain(domain, &nodes)?;
+            let worker_shards = schedule_domain(dataflow_state, worker, domain, &nodes)?;
 
             for ((shard, replica), worker) in worker_shards.entries() {
                 if worker.is_none() {

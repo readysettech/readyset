@@ -1,23 +1,16 @@
-//! Scheduling which domain replicas run on which workers
+//! Scheduling which domain replicas run on which workers.
 //!
-//! The domain scheduling algorithm, which is currently quite simplistic, works as follows:
+//! Standalone Readyset only ever has one worker, so scheduling reduces to:
 //!
-//! 1. We filter the set of workers in the cluster by two criteria: a. The worker must be healhty,
-//!    and b. The worker can be [configured to only run reader nodes][reader_only], in which case
-//!    only domains that contain a reader node can run on that worker
-//! 2. Migrations can optionally [be restricted to a single worker][worker] - if so, all replicas of
-//!    all shards of all domains within the migration will be scheduled to that worker, *if* it's
-//!    valid
-//! 3. Otherwise, for each replica of each shard in the domain, we first filter the set of workers
-//!    down to only workers that aren't running a different replica of the same domain shard, then
-//!    either: a. If the domain contains base tables, run it on the worker running the smallest
-//!    number of other base tables, or otherwise b. Run it on the worker that has the smallest
-//!    number of domain shards scheduled onto it
+//! 1. Pick the single healthy worker, optionally [restricted to a specific worker][worker] by the
+//!    migration. The worker may also be [configured to only run reader nodes][reader_only], in
+//!    which case it can only host domains that contain a reader node.
+//! 2. Place that worker on the first replica slot per shard that isn't already assigned, leaving
+//!    the remaining replica slots empty (since one worker can only host one replica of any given
+//!    shard).
 //!
 //! [reader_only]: Worker::reader_only
 //! [worker]: Migration::worker
-
-use std::collections::{HashMap, HashSet};
 
 use array2::Array2;
 use dataflow::prelude::*;
@@ -26,182 +19,93 @@ use readyset_client::internal::DomainIndex;
 use tracing::trace;
 
 use crate::controller::state::DfState;
-use crate::controller::{Worker, WorkerIdentifier};
+use crate::controller::WorkerIdentifier;
 
-/// Statistics about the domains scheduled onto a worker
-#[derive(Default, Clone, Copy)]
-struct WorkerStats {
-    /// The number of replicas of domain shards that are running in this worker.
-    num_domain_shard_replicas: usize,
-    /// The number of replicas of shards of domains with base tables that are running in this
-    /// worker.
-    ///
-    /// Currently there will only be 1 replica of each base table shard (because we don't have the
-    /// ability to replicate base tables yet) but this is intended to still work once we lift that
-    /// limitation.
-    num_base_table_domain_shard_replicas: usize,
-}
+/// Decide which workers the shards of `domain_index` (with the given list of `nodes`) should run
+/// on, optionally restricted to a single `worker_filter`.
+///
+/// Returns a 2-dimensional vector, indexed by shard index first and replica index second, of
+/// `Option<WorkerIdentifier>`. A cell is `None` if that domain/shard/replica cannot be scheduled
+/// or has already been scheduled.
+///
+/// # Invariants
+///
+/// * `nodes` cannot be empty
+/// * All the nodes in `nodes` must exist in `dataflow_state.ingredients`
+pub(crate) fn schedule_domain(
+    dataflow_state: &DfState,
+    worker_filter: &Option<WorkerIdentifier>,
+    domain_index: DomainIndex,
+    nodes: &[NodeIndex],
+) -> ReadySetResult<Array2<Option<WorkerIdentifier>>> {
+    let num_shards = 1;
+    let num_replicas = dataflow_state
+        .replication_strategy
+        .replicate_domain(&dataflow_state.ingredients, nodes);
 
-/// A short-lived struct holding all the information necessary to assign domain shards to workers.
-pub(crate) struct Scheduler<'state> {
-    valid_workers: Vec<(&'state WorkerIdentifier, &'state Worker)>,
-    worker_stats: HashMap<&'state WorkerIdentifier, WorkerStats>,
-    scheduled_shards: HashMap<&'state WorkerIdentifier, HashSet<(DomainIndex, usize)>>,
-    dataflow_state: &'state DfState,
-}
+    let is_reader_domain = nodes
+        .iter()
+        .any(|n| dataflow_state.ingredients[*n].is_reader());
+    let is_base_table_domain = nodes
+        .iter()
+        .any(|n| dataflow_state.ingredients[*n].is_base());
+    trace!(is_reader_domain, is_base_table_domain);
 
-impl<'state> Scheduler<'state> {
-    /// Create a new [`Scheduler`], optionally restricted to the given `worker`.
-    pub(crate) fn new(
-        dataflow_state: &'state DfState,
-        worker: &Option<WorkerIdentifier>,
-    ) -> ReadySetResult<Self> {
-        let valid_workers = dataflow_state
-            .workers
-            .iter()
-            .filter(|(_, w)| w.healthy)
-            .filter(|(wi, _)| worker.iter().all(|target_worker| *target_worker == **wi))
-            .collect();
+    if is_base_table_domain {
+        invariant_eq!(num_replicas, 1);
+    }
 
-        let mut worker_stats: HashMap<&WorkerIdentifier, WorkerStats> = HashMap::new();
-        let mut scheduled_shards: HashMap<&WorkerIdentifier, HashSet<(DomainIndex, usize)>> =
-            HashMap::new();
-
-        for (di, dh) in &dataflow_state.domains {
-            let is_base_table_domain = dataflow_state.domain_nodes[di]
-                .values()
-                .any(|ni| dataflow_state.ingredients[*ni].is_base());
-            for (shard, replicas) in dh.shards().enumerate() {
-                for wi in replicas.iter().flatten(/* some replicas might not be scheduled yet */) {
-                    let stats = worker_stats.entry(wi).or_default();
-                    stats.num_domain_shard_replicas += 1;
-                    if is_base_table_domain {
-                        stats.num_base_table_domain_shard_replicas += 1;
-                    }
-
-                    scheduled_shards.entry(wi).or_default().insert((*di, shard));
+    let eligible_worker = dataflow_state
+        .workers
+        .iter()
+        .find(|(wi, w)| {
+            w.healthy
+                && worker_filter.iter().all(|target| target == *wi)
+                && match w.domain_scheduling_config.reader_nodes {
+                    NodeTypeSchedulingRestriction::None => true,
+                    NodeTypeSchedulingRestriction::OnlyWithNodeType => is_reader_domain,
+                    NodeTypeSchedulingRestriction::NeverWithNodeType => !is_reader_domain,
                 }
-            }
-        }
-
-        Ok(Self {
-            valid_workers,
-            worker_stats,
-            scheduled_shards,
-            dataflow_state,
         })
+        .map(|(wi, _)| wi.clone());
+
+    let existing_dh = dataflow_state.domains.get(&domain_index);
+
+    let mut res = Vec::with_capacity(num_shards);
+    for shard in 0..num_shards {
+        // A single worker can host at most one replica of any given shard, so if a prior placement
+        // already used the worker for this shard we can't place additional replicas on it.
+        let mut worker_available = match (&eligible_worker, existing_dh) {
+            (Some(w), Some(dh)) => {
+                !(0..dh.num_replicas()).any(|r| dh.assignment(shard, r) == Some(w))
+            }
+            _ => eligible_worker.is_some(),
+        };
+
+        let mut replicas = Vec::with_capacity(num_replicas);
+        for replica in 0..num_replicas {
+            // Don't reschedule a replica that's already placed (eg in another run of recovery).
+            let already_placed = existing_dh
+                .and_then(|dh| dh.assignment(shard, replica))
+                .is_some();
+
+            let assignment = if already_placed {
+                None
+            } else if worker_available {
+                worker_available = false;
+                let w = eligible_worker.clone();
+                if let Some(ref wid) = w {
+                    trace!(%shard, %replica, worker_id = %wid, "Scheduled replica");
+                }
+                w
+            } else {
+                trace!(%shard, %replica, "Failed to schedule replica");
+                None
+            };
+            replicas.push(assignment);
+        }
+        res.push(replicas);
     }
 
-    /// Decide which workers the shards of the given `domain` (with the given list of `nodes`)
-    /// should run on
-    ///
-    /// Returns a 2-dimensional vector, indexed by shard index first and replica index second, of
-    /// `Option<WorkerIdentifier>` - which will be `None` if that domain/shard/replica cannot be
-    /// scheduled or has already been scheduled.
-    ///
-    /// # Invariants
-    ///
-    /// * `nodes` cannot be empty
-    /// * All the nodes in `nodes` must exist in `self.dataflow_state.ingredients`
-    pub(crate) fn schedule_domain(
-        &mut self,
-        domain_index: DomainIndex,
-        nodes: &[NodeIndex],
-    ) -> ReadySetResult<Array2<Option<WorkerIdentifier>>> {
-        let num_shards = 1;
-        let num_replicas = self
-            .dataflow_state
-            .replication_strategy
-            .replicate_domain(&self.dataflow_state.ingredients, nodes);
-
-        let is_reader_domain = nodes
-            .iter()
-            .any(|n| self.dataflow_state.ingredients[*n].is_reader());
-        let is_base_table_domain = nodes
-            .iter()
-            .any(|n| self.dataflow_state.ingredients[*n].is_base());
-        trace!(is_reader_domain, is_base_table_domain);
-
-        if is_base_table_domain {
-            invariant_eq!(num_replicas, 1);
-        }
-
-        let workers = self.valid_workers.iter().filter(|(_, worker)| {
-            match worker.domain_scheduling_config.reader_nodes {
-                NodeTypeSchedulingRestriction::None => true,
-                NodeTypeSchedulingRestriction::OnlyWithNodeType => is_reader_domain,
-                NodeTypeSchedulingRestriction::NeverWithNodeType => !is_reader_domain,
-            }
-        });
-
-        let mut res = Vec::with_capacity(num_shards);
-        for shard in 0..num_shards {
-            let mut replicas = Vec::with_capacity(num_replicas);
-            for replica in 0..num_replicas {
-                // Don't schedule this replica if it's already been scheduled (eg in another run of
-                // recovery)
-                if self
-                    .dataflow_state
-                    .domains
-                    .get(&domain_index)
-                    .and_then(|dh| dh.assignment(shard, replica))
-                    .is_some()
-                {
-                    replicas.push(None);
-                    continue;
-                }
-
-                // Filter out any workers that have a different replica of the same domain shard, to
-                // avoid scheduling two replicas of the same shard onto the same worker
-                let available_workers = workers
-                    .clone()
-                    .filter(|(wi, _)| {
-                        self.scheduled_shards
-                            .get(wi)
-                            .is_none_or(|shards| !shards.contains(&(domain_index, shard)))
-                    })
-                    .collect::<Vec<_>>();
-
-                // Pick the worker based on load-balancing heuristics.
-                let worker_id = available_workers
-                    .iter()
-                    .min_by_key(|(wi, _)| {
-                        let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
-
-                        if is_base_table_domain {
-                            // If there are base tables in the domain, find the worker running the
-                            // smallest number of base table domain shards
-                            stats.num_base_table_domain_shard_replicas
-                        } else {
-                            // Otherwise, find the worker running the smallest number of domain
-                            // shards overall
-                            stats.num_domain_shard_replicas
-                        }
-                    })
-                    .map(|(wi, _)| *wi);
-
-                match worker_id {
-                    Some(worker_id) => trace!(%shard, %replica, %worker_id, "Scheduled replica"),
-                    None => trace!(%shard, %replica, "Failed to schedule replica"),
-                }
-                replicas.push(worker_id.cloned());
-
-                if let Some(worker_id) = worker_id {
-                    self.scheduled_shards
-                        .entry(worker_id)
-                        .or_default()
-                        .insert((domain_index, shard));
-
-                    let stats = self.worker_stats.entry(worker_id).or_default();
-                    stats.num_domain_shard_replicas += 1;
-                    if is_base_table_domain {
-                        stats.num_base_table_domain_shard_replicas += 1;
-                    }
-                }
-            }
-            res.push(replicas);
-        }
-
-        Ok(Array2::from_rows(res))
-    }
+    Ok(Array2::from_rows(res))
 }

@@ -74,7 +74,7 @@ use super::replication::ReplicationStrategy;
 use super::sql::Recipe;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
-use crate::controller::migrate::scheduling::Scheduler;
+use crate::controller::migrate::scheduling::schedule_domain;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::{RecipeExpr, Schema};
 use crate::controller::{schema, ControllerState, Worker, WorkerIdentifier};
@@ -2159,9 +2159,8 @@ impl DfState {
             .collect::<HashMap<_, _>>();
         let mut new = HashSet::new();
         {
-            let mut scheduler = Scheduler::new(self, &None)?;
             for (domain, nodes) in domain_nodes {
-                let workers = scheduler.schedule_domain(domain, &nodes[..])?;
+                let workers = schedule_domain(self, &None, domain, &nodes[..])?;
 
                 for ((shard, replica), worker) in workers.entries() {
                     let not_already_placed = self
