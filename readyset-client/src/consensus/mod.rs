@@ -36,7 +36,6 @@ use crate::ControllerDescriptor;
 // LeaderPayload must be Serialize + DeserializeOwned + PartialEq
 type LeaderPayload = ControllerDescriptor;
 
-pub type VolumeId = String;
 pub type WorkerId = String;
 
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
@@ -86,10 +85,6 @@ pub enum NodeTypeSchedulingRestriction {
 /// The [`Default`] value for this struct allows any domain to be scheduled onto any worker.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
 pub struct WorkerSchedulingConfig {
-    /// Identifier for the persistent volume associated with this worker, if any. This is used to
-    /// make sure that once a domain with a particular base table is scheduled onto a worker, that
-    /// domain will always be scheduled onto a worker with the same persistent volume.
-    pub volume_id: Option<VolumeId>,
     /// Configuration for how domains containing or not containing reader nodes may be scheduled
     /// onto this worker
     pub reader_nodes: NodeTypeSchedulingRestriction,

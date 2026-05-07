@@ -22,7 +22,6 @@
 // annotations stay narrow (use statement + per-fn) so unrelated
 // deprecations would still surface as warnings here.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{bail, ensure, Context, Result};
@@ -117,7 +116,6 @@ fn build_v1_state() -> ControllerState {
         Materializations::new(),
         recipe,
         None,
-        HashMap::new(),
         Arc::new(ChannelCoordinator::new()),
         config.replication_strategy,
     );

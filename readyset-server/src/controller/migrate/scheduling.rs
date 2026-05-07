@@ -10,14 +10,12 @@
 //!    valid
 //! 3. Otherwise, for each replica of each shard in the domain, we first filter the set of workers
 //!    down to only workers that aren't running a different replica of the same domain shard, then
-//!    either: a. Run the domain shard on the worker matching its [placement restrictions][], if it
-//!    has any, or b. If the domain contains base tables, run it on the worker running the smallest
-//!    number of other base tables, or otherwise c. Run it on the worker that has the smallest
+//!    either: a. If the domain contains base tables, run it on the worker running the smallest
+//!    number of other base tables, or otherwise b. Run it on the worker that has the smallest
 //!    number of domain shards scheduled onto it
 //!
 //! [reader_only]: Worker::reader_only
 //! [worker]: Migration::worker
-//! [placement restrictions]: DomainPlacementRestriction
 
 use std::collections::{HashMap, HashSet};
 
@@ -28,19 +26,7 @@ use readyset_client::internal::DomainIndex;
 use tracing::trace;
 
 use crate::controller::state::DfState;
-use crate::controller::{DomainPlacementRestriction, NodeRestrictionKey, Worker, WorkerIdentifier};
-
-/// Verifies that the worker `worker` meets the domain placement restrictions of all dataflow nodes
-/// that will be placed in a new domain on the worker.  If the set of restrictions in this domain
-/// are too stringent, no worker may be able to satisfy the domain placement.
-fn worker_meets_restrictions(
-    worker: &Worker,
-    restrictions: &[&DomainPlacementRestriction],
-) -> bool {
-    restrictions
-        .iter()
-        .all(|r| r.worker_volume == worker.domain_scheduling_config.volume_id)
-}
+use crate::controller::{Worker, WorkerIdentifier};
 
 /// Statistics about the domains scheduled onto a worker
 #[derive(Default, Clone, Copy)]
@@ -176,25 +162,10 @@ impl<'state> Scheduler<'state> {
                     })
                     .collect::<Vec<_>>();
 
-                // Shards of certain dataflow nodes may have restrictions that
-                // limit the workers they are placed upon.
-                let dataflow_node_restrictions = nodes
+                // Pick the worker based on load-balancing heuristics.
+                let worker_id = available_workers
                     .iter()
-                    .filter_map(|n| {
-                        let node_name = self.dataflow_state.ingredients[*n].name();
-                        self.dataflow_state
-                            .node_restrictions
-                            .get(&NodeRestrictionKey {
-                                node_name: node_name.clone(),
-                                shard,
-                            })
-                    })
-                    .collect::<Vec<_>>();
-
-                let worker_id = if dataflow_node_restrictions.is_empty() {
-                    // If there are no placement restrictions, pick the node based on load-balancing
-                    // heuristics
-                    available_workers.iter().min_by_key(|(wi, _)| {
+                    .min_by_key(|(wi, _)| {
                         let stats = self.worker_stats.get(wi).copied().unwrap_or_default();
 
                         if is_base_table_domain {
@@ -207,16 +178,7 @@ impl<'state> Scheduler<'state> {
                             stats.num_domain_shard_replicas
                         }
                     })
-                } else {
-                    // Otherwise, if there are placement restrictions, we select the first worker
-                    // that meets the placement restrictions. This can lead to
-                    // imbalance in the number of dataflow nodes placed on each
-                    // server.
-                    available_workers.iter().find(|(_, worker)| {
-                        worker_meets_restrictions(worker, &dataflow_node_restrictions)
-                    })
-                }
-                .map(|(wi, _)| *wi);
+                    .map(|(wi, _)| *wi);
 
                 match worker_id {
                     Some(worker_id) => trace!(%shard, %replica, %worker_id, "Scheduled replica"),

@@ -77,10 +77,7 @@ use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::Scheduler;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::{RecipeExpr, Schema};
-use crate::controller::{
-    schema, ControllerState, DomainPlacementRestriction, NodeRestrictionKey, Worker,
-    WorkerIdentifier,
-};
+use crate::controller::{schema, ControllerState, Worker, WorkerIdentifier};
 use crate::coordination::{DomainDescriptor, RunDomainResponse};
 use crate::internal::LocalNodeIndex;
 use crate::worker::WorkerRequestKind;
@@ -170,9 +167,14 @@ pub struct DfState {
     /// - `None` in `CreateCache::schema_generation_used` indicates "missing/unset"
     /// - Wraps from u64::MAX back to 1 (never 0)
     schema_generation: SchemaGeneration,
-    /// Placement restrictions for nodes and the domains they are placed into.
+
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime. See [`super::NodeRestrictionKey`] and
+    /// [`super::DomainPlacementRestriction`].
     #[serde_as(as = "Vec<(_, _)>")]
-    pub(super) node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
+    #[serde(default)]
+    pub(super) node_restrictions:
+        HashMap<super::NodeRestrictionKey, super::DomainPlacementRestriction>,
 
     #[serde_as(as = "Vec<(_, _)>")]
     /// Map from local to global node index for each domain
@@ -205,7 +207,6 @@ impl DfState {
         materializations: Materializations,
         recipe: Recipe,
         schema_replication_offset: Option<ReplicationOffset>,
-        node_restrictions: HashMap<NodeRestrictionKey, DomainPlacementRestriction>,
         channel_coordinator: Arc<ChannelCoordinator>,
         replication_strategy: ReplicationStrategy,
     ) -> Self {
@@ -221,7 +222,7 @@ impl DfState {
             recipe,
             schema_replication_offset,
             schema_generation: SchemaGeneration::INITIAL,
-            node_restrictions,
+            node_restrictions: Default::default(),
             domains: Default::default(),
             domain_nodes: Default::default(),
             channel_coordinator,
@@ -1321,7 +1322,6 @@ impl DfState {
 
         let mut domain_addresses = vec![];
         let mut assignments = Vec::with_capacity(num_shards);
-        let mut new_domain_restrictions = vec![];
 
         for (shard, replicas) in shard_replica_workers.rows().enumerate() {
             let num_replicas = replicas.len();
@@ -1370,22 +1370,6 @@ impl DfState {
                         source: Box::new(e),
                     })?;
 
-                // Update the domain placement restrictions on nodes in the placed
-                // domain if necessary.
-                for n in &nodes {
-                    let node = &self.ingredients[*n];
-
-                    if node.is_base() && w.domain_scheduling_config.volume_id.is_some() {
-                        new_domain_restrictions.push((
-                            node.name().to_owned(),
-                            shard,
-                            DomainPlacementRestriction {
-                                worker_volume: w.domain_scheduling_config.volume_id.clone(),
-                            },
-                        ));
-                    }
-                }
-
                 debug!(external_addr = %ret.external_addr, "worker booted domain");
 
                 self.channel_coordinator
@@ -1394,13 +1378,6 @@ impl DfState {
                 shard_assignments.push(Some(w.uri.clone()));
             }
             assignments.push(shard_assignments);
-        }
-
-        // Push all domain placement restrictions to the local controller state. We
-        // do this outside the loop to satisfy the borrow checker as this immutably
-        // borrows self.
-        for (node_name, shard, restrictions) in new_domain_restrictions {
-            self.set_domain_placement_local(node_name, shard, restrictions);
         }
 
         // Tell all workers about the new domain(s)
@@ -1481,16 +1458,6 @@ impl DfState {
         }
 
         Ok(())
-    }
-
-    pub(super) fn set_domain_placement_local(
-        &mut self,
-        node_name: Relation,
-        shard: usize,
-        node_restriction: DomainPlacementRestriction,
-    ) {
-        self.node_restrictions
-            .insert(NodeRestrictionKey { node_name, shard }, node_restriction);
     }
 
     pub(super) fn set_schema_replication_offset(&mut self, offset: Option<ReplicationOffset>) {
@@ -1857,7 +1824,6 @@ impl DfState {
             materializations,
             recipe,
             None,
-            HashMap::new(),
             Arc::new(ChannelCoordinator::new()),
             self.replication_strategy,
         );
@@ -2178,7 +2144,7 @@ impl DfState {
     ///   (except for `self.source`) must belong to a domain; and there must not be any overlap
     ///   between the nodes owned by each domain. All the invariants for Domain assignment from
     ///   [`crate::controller::migrate::assignment::assign`] must hold as well.
-    ///  - `self.remap` and `self.node_restrictions` must be valid.
+    ///  - `self.remap` must be valid.
     /// - All the other fields should be empty or `[Default::default()]`.
     pub(super) async fn plan_recovery(
         &mut self,

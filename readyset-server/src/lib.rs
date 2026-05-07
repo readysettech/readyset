@@ -831,10 +831,6 @@ impl WorkerOptions {
     }
 }
 
-// TODO(justin): Change VolumeId type when we know this fixed size.
-/// Id associated with the worker server's volume.
-pub type VolumeId = String;
-
 // Settle time must be longer than the leader state check interval
 // // when using a local authority.
 const DEFAULT_SETTLE_TIME_MS: u64 = 1500;

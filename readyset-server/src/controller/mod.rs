@@ -47,7 +47,7 @@ use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
 use crate::worker::WorkerRequestKind;
-use crate::{Config, VolumeId};
+use crate::Config;
 
 mod domain_handle;
 pub(crate) mod events;
@@ -74,19 +74,24 @@ const REPLICATOR_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Timeout for failover command responses from the controller event loop.
 const FAILOVER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// A set of placement restrictions applied to a domain
-/// that a dataflow node is in. Each base table node can have
-/// a set of DomainPlacementRestrictions. A domain's
-/// DomainPlacementRestriction is the merged set of restrictions
-/// of all contained dataflow nodes.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+/// Historical persistent-volume identifier.
+#[doc(hidden)]
+#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+pub type VolumeId = String;
+
+/// Historical placement restriction associated with a base-table domain.
+#[doc(hidden)]
+#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+#[allow(deprecated)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DomainPlacementRestriction {
     worker_volume: Option<VolumeId>,
 }
 
-/// The key for a DomainPlacementRestriction for a dataflow node.
-/// Each dataflow node, shard pair may have a DomainPlacementRestriction.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Debug)]
+/// Historical key used to look up a [`DomainPlacementRestriction`].
+#[doc(hidden)]
+#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct NodeRestrictionKey {
     node_name: Relation,
     shard: usize,
@@ -130,7 +135,6 @@ impl Debug for ControllerState {
                 "schema_replication_offset",
                 &self.dataflow_state.schema_replication_offset(),
             )
-            .field("node_restrictions", &self.dataflow_state.node_restrictions)
             .finish()
     }
 }
@@ -186,7 +190,6 @@ impl ControllerState {
             materializations,
             recipe,
             None,
-            HashMap::new(),
             cc,
             config.replication_strategy,
         );

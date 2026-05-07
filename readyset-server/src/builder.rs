@@ -16,7 +16,7 @@ use readyset_util::shutdown::{self, ShutdownSender};
 
 use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
-use crate::{Config, FrontierStrategy, ReuseConfigType, VolumeId};
+use crate::{Config, FrontierStrategy, ReuseConfigType};
 
 /// Used to construct a worker.
 #[derive(Clone)]
@@ -307,11 +307,6 @@ impl Builder {
     /// Configures this ReadySet server to be unable to become the leader
     pub fn cannot_become_leader(&mut self) {
         self.leader_eligible = false;
-    }
-
-    /// Configures the volume id associated with this server.
-    pub fn set_volume_id(&mut self, volume_id: VolumeId) {
-        self.domain_scheduling_config.volume_id = Some(volume_id);
     }
 
     /// Set the value of [`Config::abort_on_task_failure`]. See the documentation of that field for
