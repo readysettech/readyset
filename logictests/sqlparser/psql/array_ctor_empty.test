@@ -1,0 +1,207 @@
+# REA-6187: ARRAY(SELECT ...) with empty inner result.  The rewrite
+# derives the element type from the inner projection and synthesizes a
+# typed cast for the COALESCE fallback (avoiding REA-6186's bare-ARRAY
+# reject).  This file exercises every dispatch arm of
+# `derive_sql_type_of_expr`.
+
+statement ok
+create table outer_t (id int);
+
+statement ok
+create table inner_t (link_id int, name text);
+
+statement ok
+insert into outer_t values (1), (2);
+
+statement ok
+insert into inner_t values (1, 'one'), (1, 'won'), (2, 'two');
+
+
+# ---- Column reference, single base, unqualified ----
+# `single_base_relation` -> base schema lookup of `inner_t.name`.
+
+query IT rowsort
+select id, ARRAY(select name from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select name from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{one,won}
+2
+{two}
+
+
+# ---- Column reference, alias-qualified ----
+# `resolve_alias_to_relation` translates 'i' -> inner_t before schema lookup.
+
+query IT rowsort
+select id, ARRAY(select i.name from inner_t i where i.link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+
+# ---- Explicit cast: cast target type wins ----
+
+query IT rowsort
+select id, ARRAY(select link_id::text from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select link_id::text from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{1,1}
+2
+{2}
+
+
+# ---- String-returning calls: concat / concat_ws / lower / upper ----
+# All four route through the same arm -> SqlType::Text.
+
+query IT rowsort
+select id, ARRAY(select concat(name, '!') from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select concat_ws('-', name, name) from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select lower(name) from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select upper(name) from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select upper(name) from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{ONE,WON}
+2
+{TWO}
+
+
+# ---- Literal projections ----
+# Integer literal -> SqlType::Int.
+
+query IT rowsort
+select id, ARRAY(select 42 from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+query IT rowsort
+select id, ARRAY(select 42 from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{42,42}
+2
+{42}
+
+
+# ---- Aggregate type pass-through ----
+# Scalar aggregates always return one row, so the COALESCE empty-fallback
+# path is unreachable at runtime.  The synthesized cast type still has to
+# match `array_agg`'s element type or the rewrite produces a query that
+# fails COALESCE type unification.  These queries verify the type
+# derivation for max/min (arg-type pass-through) and count (BIGINT).
+
+query IT rowsort
+select id, ARRAY(select max(link_id) from inner_t where link_id = -999) from outer_t;
+----
+1
+{NULL}
+2
+{NULL}
+
+query IT rowsort
+select id, ARRAY(select min(name) from inner_t where link_id = -999) from outer_t;
+----
+1
+{NULL}
+2
+{NULL}
+
+query IT rowsort
+select id, ARRAY(select count(*) from inner_t where link_id = -999) from outer_t;
+----
+1
+{0}
+2
+{0}
+
+
+# ---- NULL projection with an explicit cast (REA-6187 repro) ----
+# `ARRAY(SELECT NULL::int ...)` is the ticket's reported failure.  The cast
+# gives array_agg a concrete element type and types the COALESCE fallback
+# (ARRAY[]::int[]), so the query caches and returns arrays of NULLs instead
+# of erroring with "expected array type, but got text".
+
+query IT rowsort
+select id, ARRAY(select NULL::int from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{NULL,NULL}
+2
+{NULL}
+
+query IT rowsort
+select id, ARRAY(select NULL::int from inner_t where link_id = -999) from outer_t;
+----
+1
+{}
+2
+{}
+
+
+# ---- sum aggregate (PG numeric promotion) ----
+# Scalar aggregates always return one row, so the empty-array fallback is
+# unreachable at runtime; this verifies sum is typed (sum(int) -> bigint)
+# rather than left as bare ARRAY[], which REA-6186 would reject.
+
+query IT rowsort
+select id, ARRAY(select sum(link_id) from inner_t where link_id = outer_t.id) from outer_t;
+----
+1
+{2}
+2
+{2}
+
+
+# Bare-fallback failure-path coverage (derivation returns None -> rewrite
+# emits bare ARRAY[] -> REA-6186 reject) lives on the REA-6186 commit
+# above this one in the stack, since the reject does not exist at this
+# commit on its own.
