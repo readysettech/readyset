@@ -29,7 +29,7 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
-use crate::coordination::{DomainDescriptor, RunDomainResponse};
+use crate::coordination::RunDomainResponse;
 use crate::worker::replica::WrappedDomainRequest;
 use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers};
@@ -64,12 +64,6 @@ pub enum WorkerRequestKind {
 
     /// Kill one or more domains running on this worker
     KillDomains(Vec1<ReplicaAddress>),
-
-    /// A set of domains has been started elsewhere in the distributed system.
-    ///
-    /// The message contains information on how the domain can be reached, in order that
-    /// domains on this worker can communicate with it.
-    GossipDomainInformation(Vec<DomainDescriptor>),
 
     /// The sender of the request would like one of the domains on this worker to do something.
     ///
@@ -419,18 +413,6 @@ impl Worker {
                         }
                         None => warn!(domain = %addr, "Asked to kill domain that is not running"),
                     }
-                }
-                Ok(None)
-            }
-            WorkerRequestKind::GossipDomainInformation(domains) => {
-                for dd in domains {
-                    trace!(
-                        replica_address = %dd.replica_address(),
-                        addr = ?dd.socket_address(),
-                        "found domain"
-                    );
-                    self.coord
-                        .insert_remote(dd.replica_address(), dd.socket_address());
                 }
                 Ok(None)
             }

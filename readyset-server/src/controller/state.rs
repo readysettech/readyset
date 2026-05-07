@@ -77,7 +77,7 @@ use crate::controller::migrate::scheduling::schedule_domain;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::{RecipeExpr, Schema};
 use crate::controller::{schema, ControllerState, Worker, WorkerIdentifier};
-use crate::coordination::{DomainDescriptor, RunDomainResponse};
+use crate::coordination::RunDomainResponse;
 use crate::internal::LocalNodeIndex;
 use crate::worker::WorkerRequestKind;
 mod graphviz;
@@ -1046,23 +1046,6 @@ impl DfState {
         Ok(domains)
     }
 
-    /// Returns a vector of [`DomainDescriptor`] giving information about the addresses of all
-    /// running domains within the cluster
-    pub(super) fn domain_addresses(&self) -> Vec<DomainDescriptor> {
-        let mut domain_addresses = Vec::new();
-        for domain_index in self.domains.keys() {
-            let replica_address = ReplicaAddress {
-                domain_index: *domain_index,
-                shard: 0,
-                replica: 0,
-            };
-            if let Some(socket_addr) = self.channel_coordinator.get_addr(&replica_address) {
-                domain_addresses.push(DomainDescriptor::new(replica_address, socket_addr));
-            }
-        }
-        domain_addresses
-    }
-
     /// Have all domain replicas been placed onto workers in the cluster?
     pub(super) fn all_replicas_placed(&self) -> bool {
         self.domain_nodes
@@ -1250,7 +1233,6 @@ impl DfState {
             .map(|nd| (nd.local_addr(), cell::RefCell::new(nd)))
             .collect();
 
-        let mut domain_addresses = vec![];
         let mut assigned_worker = None;
 
         if let Some(worker_id) = worker {
@@ -1295,39 +1277,7 @@ impl DfState {
 
             self.channel_coordinator
                 .insert_remote(replica_address, ret.external_addr);
-            domain_addresses.push(DomainDescriptor::new(replica_address, ret.external_addr));
             assigned_worker = Some(w.uri.clone());
-        }
-
-        // Tell all workers about the new domain(s)
-        // TODO(jon): figure out how much of the below is still true
-        // TODO(malte): this is a hack, and not an especially neat one. In response to a
-        // domain boot message, we broadcast information about this new domain to all
-        // workers, which inform their ChannelCoordinators about it. This is required so
-        // that domains can find each other when starting up.
-        // Moreover, it is required for us to do this *here*, since this code runs on
-        // the thread that initiated the migration, and which will query domains to ask
-        // if they're ready. No domain will be ready until it has found its neighbours,
-        // so by sending out the information here, we ensure that we cannot deadlock
-        // with the migration waiting for a domain to become ready when trying to send
-        // the information. (We used to do this in the controller thread, with the
-        // result of a nasty deadlock.)
-        for (address, w) in self.workers.iter_mut() {
-            for &dd in &domain_addresses {
-                debug!(worker_uri = %w.uri, "informing worker about newly placed domain");
-                if let Err(e) = w
-                    .rpc::<()>(WorkerRequestKind::GossipDomainInformation(vec![dd]))
-                    .await
-                {
-                    // TODO(Fran): We need better error handling for workers
-                    //   that failed before the controller noticed.
-                    error!(
-                        %address,
-                        error = ?e,
-                        "Worker could not be reached and will be ignored",
-                    );
-                }
-            }
         }
 
         Ok(DomainHandle::new(idx, assigned_worker))

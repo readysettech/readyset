@@ -883,7 +883,6 @@ impl Leader {
                 domain_scheduling_config,
                 self.worker_request_timeout,
             );
-            let domain_addresses = ds.domain_addresses();
 
             // Clean up any potential stale domains that may have been running on that worker
             if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
@@ -891,18 +890,6 @@ impl Leader {
                     %worker_uri,
                     %e,
                     "Worker could not be reached to clear its domain.",
-                );
-            }
-
-            // Then, tell the worker about the addresses of all the other domains within the cluster
-            if let Err(e) = ws
-                .rpc::<()>(WorkerRequestKind::GossipDomainInformation(domain_addresses))
-                .await
-            {
-                error!(
-                    %worker_uri,
-                    %e,
-                    "Worker could not be reached and was not updated on domain information",
                 );
             }
 
