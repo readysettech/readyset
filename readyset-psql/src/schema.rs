@@ -63,33 +63,25 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Unknown => Ok(Type::TEXT), // The default type for "unknown" in pgsql is TEXT
         DfType::Bool => Ok(Type::BOOL),
         DfType::Char(..) => Ok(Type::BPCHAR),
-        DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR),
+        DfType::VarChar(_, Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
+            Ok(Type::VARCHAR)
+        }
         DfType::VarChar(_, Collation::Utf8Ci) => {
             // TODO: use the right CITEXT type
             Ok(Type::VARCHAR)
         }
         DfType::VarChar(
             _,
-            Collation::Utf8AiCi
-            | Collation::Binary
-            | Collation::Latin1SwedishCi
-            | Collation::Utf8Binary
-            | Collation::Utf8AiCiPad,
+            Collation::Utf8AiCi | Collation::Latin1SwedishCi | Collation::Utf8AiCiPad,
         ) => unreachable!("not used by Postgres"),
         DfType::Int => Ok(Type::INT4),
         DfType::BigInt => Ok(Type::INT8),
         DfType::SmallInt => Ok(Type::INT2),
         DfType::Float => Ok(Type::FLOAT4),
         DfType::Double => Ok(Type::FLOAT8),
-        DfType::Text(Collation::Utf8) => Ok(Type::TEXT),
+        DfType::Text(Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => Ok(Type::TEXT),
         DfType::Text(Collation::Utf8Ci) => Ok(Type::TEXT), // TODO: use the right CITEXT type
-        DfType::Text(
-            Collation::Utf8AiCi
-            | Collation::Binary
-            | Collation::Latin1SwedishCi
-            | Collation::Utf8Binary
-            | Collation::Utf8AiCiPad,
-        ) => {
+        DfType::Text(Collation::Utf8AiCi | Collation::Latin1SwedishCi | Collation::Utf8AiCiPad) => {
             unreachable!("not used by Postgres")
         }
         DfType::Timestamp { .. } => Ok(Type::TIMESTAMP),
@@ -141,35 +133,31 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 }
                 DfType::Bool => Ok(Type::BOOL_ARRAY),
                 DfType::Char(..) => Ok(Type::BPCHAR_ARRAY),
-                DfType::VarChar(_, Collation::Utf8) => Ok(Type::VARCHAR_ARRAY),
+                DfType::VarChar(_, Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
+                    Ok(Type::VARCHAR_ARRAY)
+                }
                 DfType::VarChar(_, Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT type
                     Ok(Type::VARCHAR_ARRAY)
                 }
                 DfType::VarChar(
                     _,
-                    Collation::Utf8AiCi
-                    | Collation::Binary
-                    | Collation::Latin1SwedishCi
-                    | Collation::Utf8Binary
-                    | Collation::Utf8AiCiPad,
+                    Collation::Utf8AiCi | Collation::Latin1SwedishCi | Collation::Utf8AiCiPad,
                 ) => unreachable!("not used by Postgres"),
                 DfType::Int => Ok(Type::INT4_ARRAY),
                 DfType::BigInt => Ok(Type::INT8_ARRAY),
                 DfType::SmallInt => Ok(Type::INT2_ARRAY),
                 DfType::Float => Ok(Type::FLOAT4_ARRAY),
                 DfType::Double => Ok(Type::FLOAT8_ARRAY),
-                DfType::Text(Collation::Utf8) => Ok(Type::TEXT_ARRAY),
+                DfType::Text(Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
+                    Ok(Type::TEXT_ARRAY)
+                }
                 DfType::Text(Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT_ARRAY type
                     Ok(Type::TEXT_ARRAY)
                 }
                 DfType::Text(
-                    Collation::Utf8AiCi
-                    | Collation::Binary
-                    | Collation::Latin1SwedishCi
-                    | Collation::Utf8Binary
-                    | Collation::Utf8AiCiPad,
+                    Collation::Utf8AiCi | Collation::Latin1SwedishCi | Collation::Utf8AiCiPad,
                 ) => unreachable!("not used by Postgres"),
                 DfType::Timestamp { .. } => Ok(Type::TIMESTAMP_ARRAY),
                 DfType::TimestampTz { .. } => Ok(Type::TIMESTAMPTZ_ARRAY),
