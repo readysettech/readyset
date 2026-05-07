@@ -17,8 +17,6 @@ use async_bincode::tokio::AsyncBincodeStream;
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Dialect, Expr as DfExpr};
 use futures_util::future::BoxFuture;
 use futures_util::future::TryFutureExt;
-use futures_util::stream::futures_unordered::FuturesUnordered;
-use futures_util::stream::{StreamExt, TryStreamExt};
 use futures_util::{future, ready, Stream};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
@@ -966,26 +964,21 @@ impl ReaderHandleBuilder {
         let schema = self.schema.clone();
         let key_mapping = self.key_mapping.clone();
 
-        let mut addrs = Vec::with_capacity(shards.len());
-        let mut conns = Vec::with_capacity(shards.len());
+        // Standalone Readyset always reports a single shard per reader.
+        debug_assert_eq!(shards.len(), 1);
+        let Some(shard_addr) = shards.first().copied().flatten() else {
+            return Err(ReadySetError::ReaderReplicaNotRunning {
+                replica: replica.unwrap_or(0),
+                node,
+            });
+        };
 
-        for (shardi, shard_addr) in shards.iter().enumerate() {
+        let shard = {
             use std::collections::hash_map::Entry;
 
-            let Some(shard_addr) = *shard_addr else {
-                return Err(ReadySetError::ReaderReplicaNotRunning {
-                    replica: replica.unwrap_or(0),
-                    node,
-                });
-            };
-
-            addrs.push(shard_addr);
-
-            // one entry per shard so that we can send requests in parallel even if they happen
-            // to be targeting the same machine.
             let mut rpcs = rpcs.lock().await;
             #[allow(clippy::significant_drop_in_scrutinee)]
-            let s = match rpcs.entry((shard_addr, shardi)) {
+            match rpcs.entry((shard_addr, 0)) {
                 Entry::Occupied(e) => e.get().clone(),
                 Entry::Vacant(h) => {
                     // TODO: maybe always use the same local port?
@@ -1005,14 +998,13 @@ impl ReaderHandleBuilder {
                     tokio::spawn(w.instrument(debug_span!(
                         "view_worker",
                         addr = %shard_addr,
-                        shard = shardi
+                        shard = 0
                     )));
                     h.insert(c.clone());
                     c
                 }
-            };
-            conns.push(s);
-        }
+            }
+        };
 
         Ok(ReaderHandle {
             name: self.name.clone(),
@@ -1020,13 +1012,7 @@ impl ReaderHandleBuilder {
             schema,
             columns,
             key_mapping,
-            shard_addrs: addrs,
-            shards: Vec1::try_from_vec(conns).map_err(|_| {
-                internal_err!(
-                    "cannot create view {} without shards",
-                    self.name.display_unquoted()
-                )
-            })?,
+            shard,
         })
     }
 }
@@ -1074,8 +1060,7 @@ pub struct ReaderHandle {
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly
     /// one entry for each key column at the reader.
     key_mapping: Vec<(ViewPlaceholder, KeyColumnIdx)>,
-    shards: Vec1<ViewRpc>,
-    shard_addrs: Vec<SocketAddr>,
+    shard: ViewRpc,
 }
 
 impl fmt::Debug for ReaderHandle {
@@ -1083,7 +1068,6 @@ impl fmt::Debug for ReaderHandle {
         f.debug_struct("ReaderHandle")
             .field("node", &self.node)
             .field("columns", &self.columns)
-            .field("shard_addrs", &self.shard_addrs)
             .finish_non_exhaustive()
     }
 }
@@ -1156,16 +1140,14 @@ impl Service<ViewQuery> for ReaderHandle {
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        for s in &mut self.shards {
-            let ni = self.node;
-            ready!(s.poll_ready(cx))
-                .map_err(rpc_err!("<View as Service<ViewQuery>>::poll_ready"))
-                .map_err(|e| view_err(ni, e))?
-        }
+        let ni = self.node;
+        ready!(self.shard.poll_ready(cx))
+            .map_err(rpc_err!("<View as Service<ViewQuery>>::poll_ready"))
+            .map_err(|e| view_err(ni, e))?;
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, mut query: ViewQuery) -> Self::Future {
+    fn call(&mut self, query: ViewQuery) -> Self::Future {
         let ni = self.node;
         let span = child_span!(
             INFO,
@@ -1174,124 +1156,41 @@ impl Service<ViewQuery> for ReaderHandle {
             node = self.node.index()
         );
 
-        if self.shards.len() == 1 {
-            let request = span.in_scope(|| {
-                Instrumented::from(Tagged::from(ReadQuery::Normal {
-                    target: ReaderAddress {
-                        node: self.node,
-                        name: self.name.clone(),
-                        shard: 0,
-                    },
-                    query,
-                }))
-            });
+        let request = span.in_scope(|| {
+            Instrumented::from(Tagged::from(ReadQuery::Normal {
+                target: ReaderAddress {
+                    node: self.node,
+                    name: self.name.clone(),
+                    shard: 0,
+                },
+                query,
+            }))
+        });
 
-            trace!("submit request");
+        trace!("submit request");
 
-            return Box::pin(future::Either::<_, Self::Future>::Left(
-                self.shards
-                    .first_mut()
-                    .call(request)
-                    .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
-                    .and_then(move |reply| {
-                        let future = async move {
-                            reply
-                                .v
-                                .into_normal()
-                                .ok_or_else(|| {
-                                    internal_err!("Unexpected response type from reader service")
-                                })?
-                                .map(|l| {
-                                    l.map_results(|rows, stats| {
-                                        Results::with_stats(rows.into(), stats.clone())
-                                    })
-                                })
-                        };
-                        instrument_if_enabled(future, span)
-                    })
-                    .map_err(move |e| view_err(ni, e)),
-            ));
-        }
-
-        span.in_scope(|| trace!("shard request"));
-        let mut shard_queries = vec![Vec::new(); self.shards.len()];
-        for comparison in query.key_comparisons.drain(..) {
-            for q in &mut shard_queries {
-                q.push(comparison.clone());
-            }
-        }
-
-        let node = self.node;
-        let name = self.name.clone();
-        Box::pin(future::Either::<Self::Future, _>::Right(
-            self.shards
-                .iter_mut()
-                .enumerate()
-                .zip(shard_queries)
-                .filter_map(|((shardi, shard), shard_queries)| {
-                    if shard_queries.is_empty() {
-                        // poll_ready reserves a sender slot which we have to release
-                        // we do that by dropping the old handle and replacing it with a clone
-                        // https://github.com/tokio-rs/tokio/issues/898
-                        *shard = shard.clone();
-                        None
-                    } else {
-                        Some(((shardi, shard), shard_queries))
-                    }
-                })
-                .map(move |((shardi, shard), shard_queries)| {
-                    // The double-enter here is used to crate an inner span for the "view-shard"
-                    // portion of the request, and ensure that its parent is the "view-request"
-                    // span.
-                    let _guard = tracing::Span::enter(&span);
-                    let span = child_span!(INFO, "view-shard", shardi);
-                    let _guard = tracing::Span::enter(&span);
-
-                    let request = Instrumented::from(Tagged::from(ReadQuery::Normal {
-                        target: ReaderAddress {
-                            node,
-                            name: name.clone(),
-                            shard: shardi,
-                        },
-                        query: ViewQuery {
-                            key_comparisons: shard_queries,
-                            filter: query.filter.clone(),
-                            limit: query.limit,
-                            offset: query.offset,
-                        },
-                    }));
-
-                    trace!("submit request shard");
-
-                    shard
-                        .call(request)
-                        .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
-                        .and_then(|reply| async move {
-                            reply.v.into_normal().ok_or_else(|| {
+        Box::pin(
+            self.shard
+                .call(request)
+                .map_err(rpc_err!("<View as Service<ViewQuery>>::call"))
+                .and_then(move |reply| {
+                    let future = async move {
+                        reply
+                            .v
+                            .into_normal()
+                            .ok_or_else(|| {
                                 internal_err!("Unexpected response type from reader service")
                             })?
-                        })
-                        .map_err(move |e| view_err(ni, e))
+                            .map(|l| {
+                                l.map_results(|rows, stats| {
+                                    Results::with_stats(rows.into(), stats.clone())
+                                })
+                            })
+                    };
+                    instrument_if_enabled(future, span)
                 })
-                .collect::<FuturesUnordered<_>>()
-                .try_collect::<Vec<LookupResult<ReadReplyBatch>>>()
-                .map_ok(move |e| {
-                    e.into_iter().fold(
-                        LookupResult {
-                            results: Vec::new(),
-                            stats: ReadReplyStats::default(),
-                        },
-                        |mut acc, x| {
-                            acc.results.extend(
-                                x.results
-                                    .into_iter()
-                                    .map(|rows| Results::with_stats(rows.into(), x.stats.clone())),
-                            );
-                            acc
-                        },
-                    )
-                }),
-        ))
+                .map_err(move |e| view_err(ni, e)),
+        )
     }
 }
 
@@ -1323,50 +1222,29 @@ impl ReaderHandle {
         &self.name
     }
 
-    /// Returns a reference to the list of socket addresses for the view's shards
-    #[must_use]
-    pub fn shard_addrs(&self) -> &[SocketAddr] {
-        self.shard_addrs.as_ref()
-    }
-
     /// Get the current size of this view.
     ///
     /// Note that you must also continue to poll this `View` for the returned future to resolve.
     pub async fn len(&mut self) -> ReadySetResult<usize> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
-        let node = self.node;
-        let name = self.name.clone();
-        let mut rsps = self
-            .shards
-            .iter_mut()
-            .enumerate()
-            .map(|(shardi, shard)| {
-                shard.call(Instrumented::from(Tagged::from(ReadQuery::Size {
-                    target: ReaderAddress {
-                        node,
-                        name: name.clone(),
-                        shard: shardi,
-                    },
-                })))
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        let mut nrows = 0;
-        while let Some(reply) = rsps
-            .next()
+        let reply = self
+            .shard
+            .call(Instrumented::from(Tagged::from(ReadQuery::Size {
+                target: ReaderAddress {
+                    node: self.node,
+                    name: self.name.clone(),
+                    shard: 0,
+                },
+            })))
             .await
-            .transpose()
-            .map_err(rpc_err!("View::len"))?
-        {
-            if let ReadReply::Size(rows) = reply.v {
-                nrows += rows;
-            } else {
-                unreachable!();
-            }
-        }
+            .map_err(rpc_err!("View::len"))?;
 
-        Ok(nrows)
+        if let ReadReply::Size(rows) = reply.v {
+            Ok(rows)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Get the placeholder to key column index mapping for the reader node
@@ -1379,38 +1257,23 @@ impl ReaderHandle {
     pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DfValue>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
 
-        let node = self.node;
-        let name = self.name.clone();
-        let mut rsps = self
-            .shards
-            .iter_mut()
-            .enumerate()
-            .map(|(shardi, shard)| {
-                shard.call(Instrumented::from(Tagged::from(ReadQuery::Keys {
-                    target: ReaderAddress {
-                        node,
-                        name: name.clone(),
-                        shard: shardi,
-                    },
-                })))
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        let mut vec = vec![];
-        while let Some(reply) = rsps
-            .next()
+        let reply = self
+            .shard
+            .call(Instrumented::from(Tagged::from(ReadQuery::Keys {
+                target: ReaderAddress {
+                    node: self.node,
+                    name: self.name.clone(),
+                    shard: 0,
+                },
+            })))
             .await
-            .transpose()
-            .map_err(rpc_err!("View::keys"))?
-        {
-            if let ReadReply::Keys(mut keys) = reply.v {
-                vec.append(&mut keys);
-            } else {
-                unreachable!();
-            }
-        }
+            .map_err(rpc_err!("View::keys"))?;
 
-        Ok(vec)
+        if let ReadReply::Keys(keys) = reply.v {
+            Ok(keys)
+        } else {
+            unreachable!()
+        }
     }
 
     /// Issue a raw `ViewQuery` against this view, and return the results.
@@ -2067,8 +1930,7 @@ mod tests {
                 columns: Arc::new([]),        // Not used for test
                 schema: Some(schema),
                 key_mapping: key_map.to_vec(),
-                shards: Vec1::new(c), // Not used for test
-                shard_addrs: vec![],  // Not used for test
+                shard: c, // Not used for test
             };
             let dataflow_dialect = match dialect {
                 Dialect::MySQL => DfDialect::DEFAULT_MYSQL,

@@ -672,12 +672,12 @@ impl DfState {
             shard: 0,
             replica: 0,
         };
-        let txs = vec![self
+        let tx = self
             .channel_coordinator
             .get_addr(&replica_addr)
             .ok_or_else(|| {
                 internal_err!("failed to get channel coordinator for {}", replica_addr)
-            })?];
+            })?;
 
         let base_operator = node
             .get_base()
@@ -714,7 +714,7 @@ impl DfState {
             .transpose()?;
 
         Ok(Some(TableBuilder {
-            txs,
+            tx,
             ni: node.global_addr(),
             addr: node.local_addr(),
             key,
