@@ -818,15 +818,12 @@ impl DfValue {
     /// `serialize(d1) == serialize(d2)`.
     #[inline]
     pub fn transform_for_serialized_key(&self) -> Cow<'_, Self> {
-        match self.as_str_and_collation() {
-            Some((s, collation)) => Cow::Owned(collation.key(s).into()),
-            None => match self {
-                DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
-                DfValue::TimestampTz(ts) => {
-                    Cow::Owned(DfValue::TimestampTz(ts.normalize_for_key()))
-                }
-                _ => Cow::Borrowed(self),
-            },
+        match self {
+            DfValue::Text(t) => Cow::Owned(t.collation().key(t.as_str()).into()),
+            DfValue::TinyText(t) => Cow::Owned(t.collation().key(t.as_str()).into()),
+            DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
+            DfValue::TimestampTz(ts) => Cow::Owned(DfValue::TimestampTz(ts.normalize_for_key())),
+            _ => Cow::Borrowed(self),
         }
     }
 
@@ -1232,11 +1229,8 @@ impl Hash for DfValue {
             DfValue::UnsignedInt(n) => n.hash(state),
             DfValue::Float(f) => (f as f64).to_bits().hash(state),
             DfValue::Double(f) => f.to_bits().hash(state),
-            DfValue::Text(..) | DfValue::TinyText(..) => {
-                let collation = self.collation().unwrap();
-                let s = <&str>::try_from(self).unwrap();
-                collation.key(s).hash(state);
-            }
+            DfValue::Text(ref t) => t.collation_hash().hash(state),
+            DfValue::TinyText(ref t) => t.collation().key_hash(t.as_str()).hash(state),
             DfValue::TimestampTz(ts) => ts.hash(state),
             DfValue::Time(ref t) => t.hash(state),
             DfValue::ByteArray(ref array) => array.hash(state),

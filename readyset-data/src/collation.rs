@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use icu::collator::options::{CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
@@ -217,6 +217,14 @@ impl Collation {
         } else {
             ord
         }
+    }
+
+    /// Compute a 64-bit fingerprint of the collation sort key for a string.  Equal strings under
+    /// this collation produce the same fingerprint.
+    pub(crate) fn key_hash(&self, s: &str) -> u64 {
+        let mut h = DefaultHasher::new();
+        self.key(s).hash(&mut h);
+        h.finish()
     }
 
     /// Compute a collation key for a string.  This key may be compared bytewise with another

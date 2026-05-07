@@ -9,7 +9,7 @@
         "index_type": "HashMap"
       }
     ],
-    "persistent_state_version": 6,
+    "persistent_state_version": 7,
     "replication_offset": null
   },
   {
@@ -29,7 +29,7 @@
         "index_type": "BTreeMap"
       }
     ],
-    "persistent_state_version": 6,
+    "persistent_state_version": 7,
     "replication_offset": {
       "MySql": {
         "binlog_file_base_name": "binlog",
@@ -49,7 +49,7 @@
         "index_type": "HashMap"
       }
     ],
-    "persistent_state_version": 6,
+    "persistent_state_version": 7,
     "replication_offset": {
       "Postgres": {
         "commit_lsn": 12345,
@@ -69,7 +69,7 @@
         "index_type": "BTreeMap"
       }
     ],
-    "persistent_state_version": 6,
+    "persistent_state_version": 7,
     "replication_offset": {
       "Gtid": {
         "entries": {

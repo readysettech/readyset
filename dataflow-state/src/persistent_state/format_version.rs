@@ -43,7 +43,7 @@ use super::{serialize_key, PersistentMeta, PointKey};
 /// - Changes to [`PointKey`]'s `Serialize` impl (tuple/seq wrapping)
 /// - Changes to [`serialize_key()`](super::serialize_key) (length-prefix wrapping, extra data
 ///   encoding)
-pub(super) const PERSISTENT_STATE_VERSION: u8 = 6;
+pub(super) const PERSISTENT_STATE_VERSION: u8 = 7;
 
 /// Returns labeled single-element `DfValue`s exercising each normalization path in the key
 /// serialization pipeline.

@@ -54,6 +54,7 @@ pub struct TinyText {
 #[derive(Debug)]
 struct TextHeader {
     collation: Collation,
+    collation_hash: u64,
 }
 
 /// A thin pointer over an `Arc<[u8]>`. Bytes are guaranteed to be valid UTF-8.
@@ -206,8 +207,17 @@ impl Text {
     /// `v` must contain valid UTF-8.
     #[inline]
     pub unsafe fn from_slice(v: &[u8], collation: Collation) -> Self {
+        // SAFETY: caller guarantees `v` is valid UTF-8.
+        let s = unsafe { std::str::from_utf8_unchecked(v) };
+        let collation_hash = collation.key_hash(s);
         Self {
-            inner: triomphe::ThinArc::from_header_and_slice(TextHeader { collation }, v),
+            inner: triomphe::ThinArc::from_header_and_slice(
+                TextHeader {
+                    collation,
+                    collation_hash,
+                },
+                v,
+            ),
         }
     }
 
@@ -218,9 +228,34 @@ impl Text {
         unsafe { Self::from_slice(s.as_bytes(), collation) }
     }
 
+    /// Create a new `Text` from a precomputed collation hash and bytes — used to reconstruct a
+    /// `Text` from a serialized form without recomputing the hash.
+    ///
+    /// # Safety
+    ///
+    /// `v` must contain valid UTF-8 and `collation_hash` must equal `collation.key_hash(v)`.
+    #[inline]
+    pub(crate) unsafe fn from_parts(collation: Collation, collation_hash: u64, v: &[u8]) -> Self {
+        Self {
+            inner: triomphe::ThinArc::from_header_and_slice(
+                TextHeader {
+                    collation,
+                    collation_hash,
+                },
+                v,
+            ),
+        }
+    }
+
     /// Return the configured collation on this [`Text`] value
     pub fn collation(&self) -> Collation {
         self.inner.header.header.collation
+    }
+
+    /// Return a 64-bit fingerprint of the collation sort key. Equal strings under the configured
+    /// collation produce the same fingerprint.
+    pub fn collation_hash(&self) -> u64 {
+        self.inner.header.header.collation_hash
     }
 }
 

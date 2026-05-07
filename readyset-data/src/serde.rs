@@ -6,7 +6,7 @@ use bit_vec::BitVec;
 use chrono::DateTime;
 use mysql_time::MySqlTime;
 use readyset_decimal::Decimal;
-use serde::de::{DeserializeSeed, EnumAccess, VariantAccess, Visitor};
+use serde::de::{EnumAccess, VariantAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::{EnumString, FromRepr, VariantNames};
@@ -43,10 +43,18 @@ impl Serialize for TextRef<'_> {
     where
         S: serde::Serializer,
     {
+        let bytes = self.0.as_bytes();
+        // Match `DfValue::Serialize`: TinyText writes a placeholder hash since the type has no
+        // room to store one; full Text writes the real collation hash.
+        let hash = if bytes.len() > crate::text::TINYTEXT_WIDTH {
+            Collation::Utf8.key_hash(self.0)
+        } else {
+            0
+        };
         serialize_variant(
             serializer,
             Variant::Text,
-            &(Collation::Utf8, Bytes::new(self.0.as_bytes())),
+            &(Collation::Utf8, Bytes::new(bytes), hash),
         )
     }
 }
@@ -81,12 +89,14 @@ impl serde::ser::Serialize for DfValue {
             DfValue::Text(v) => serialize_variant(
                 serializer,
                 Variant::Text,
-                &(v.collation(), Bytes::new(v.as_bytes())),
+                &(v.collation(), Bytes::new(v.as_bytes()), v.collation_hash()),
             ),
+            // TinyText has no room to store a collation hash; write a placeholder zero so the
+            // wire format is the same shape as full Text.
             DfValue::TinyText(v) => serialize_variant(
                 serializer,
                 Variant::Text,
-                &(v.collation(), Bytes::new(v.as_bytes())),
+                &(v.collation(), Bytes::new(v.as_bytes()), 0u64),
             ),
             DfValue::Time(v) => serialize_variant(serializer, Variant::Time, &v),
             DfValue::ByteArray(a) => {
@@ -263,74 +273,13 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
     where
         D: Deserializer<'de>,
     {
-        // Once we grab the collation out of the first element, we need to pass that in *to the
-        // construction* of the Text in the second element - this is the hoop we have to jump
-        // through to make serde deserializers stateful
-        struct FoundCollation(Collation);
-
-        impl<'de> DeserializeSeed<'de> for FoundCollation {
-            type Value = TextOrTinyText;
-
-            fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                struct TextVisitor(Collation);
-
-                impl<'de> Visitor<'de> for TextVisitor {
-                    type Value = TextOrTinyText;
-
-                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                        formatter.write_str("a byte array")
-                    }
-
-                    fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-                    where
-                        V: serde::de::SeqAccess<'de>,
-                    {
-                        let len = std::cmp::min(visitor.size_hint().unwrap_or(0), 4096);
-                        let mut bytes = Vec::with_capacity(len);
-
-                        while let Some(b) = visitor.next_element()? {
-                            bytes.push(b);
-                        }
-
-                        match TinyText::from_slice(&bytes, self.0) {
-                            Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                            _ => Ok(TextOrTinyText::Text(
-                                // SAFETY: bytes came from a previous `Text`/`TinyText`
-                                // serialization, which only writes validated UTF-8.
-                                unsafe { Text::from_slice(&bytes, self.0) },
-                            )),
-                        }
-                    }
-
-                    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-                    where
-                        E: serde::de::Error,
-                    {
-                        match TinyText::from_slice(v, self.0) {
-                            Ok(tt) => Ok(TextOrTinyText::TinyText(tt)),
-                            _ => Ok(TextOrTinyText::Text(
-                                // SAFETY: bytes came from a previous `Text`/`TinyText`
-                                // serialization, which only writes validated UTF-8.
-                                unsafe { Text::from_slice(v, self.0) },
-                            )),
-                        }
-                    }
-                }
-
-                deserializer.deserialize_bytes(TextVisitor(self.0))
-            }
-        }
-
         struct TupleVisitor;
 
         impl<'de> Visitor<'de> for TupleVisitor {
             type Value = TextOrTinyText;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a tuple of (collation, text)")
+                formatter.write_str("a tuple of (collation, bytes, hash)")
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -340,13 +289,30 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
                 let collation = seq
                     .next_element::<Collation>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let bytes = seq
+                    .next_element::<ByteBuf>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?
+                    .into_vec();
+                let hash = seq
+                    .next_element::<u64>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
 
-                seq.next_element_seed(FoundCollation(collation))?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))
+                // The serializer's TinyText-vs-Text choice is determined by whether the bytes
+                // fit in TinyText, so the same length test reproduces it on read. The
+                // placeholder hash written for TinyText is discarded.
+                if let Ok(tt) = TinyText::from_slice(&bytes, collation) {
+                    Ok(TextOrTinyText::TinyText(tt))
+                } else {
+                    // SAFETY: bytes came from a previous `Text` serialization (validated UTF-8)
+                    // and `hash` is the matching collation hash written by the same serializer.
+                    Ok(TextOrTinyText::Text(unsafe {
+                        Text::from_parts(collation, hash, &bytes)
+                    }))
+                }
             }
         }
 
-        deserializer.deserialize_tuple(2, TupleVisitor)
+        deserializer.deserialize_tuple(3, TupleVisitor)
     }
 }
 
