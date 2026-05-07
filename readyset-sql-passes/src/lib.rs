@@ -131,6 +131,25 @@ impl<C: BaseSchemasContext> BaseSchemasContext for &C {
     }
 }
 
+/// Empty schema context for tests that don't need real schema lookups.  Any
+/// pass that calls `base_schema()` against this gets `None` -- callers that
+/// depend on schema-driven type inference (e.g.
+/// `array_constructor::derive_array_element_sql_type`) fall back to their
+/// no-info path.
+#[cfg(test)]
+pub(crate) struct EmptyBaseSchemas;
+
+#[cfg(test)]
+impl BaseSchemasContext for EmptyBaseSchemas {
+    fn base_schemas(&self) -> Box<dyn Iterator<Item = (&Relation, &CreateTableBody)> + '_> {
+        Box::new(std::iter::empty())
+    }
+
+    fn base_schema(&self, _: &Relation) -> Option<&CreateTableBody> {
+        None
+    }
+}
+
 /// Context provided to all server-side query rewriting passes, i.e. those performed at migration
 /// time, not those performed in the adapter on the hot path. For those passes, see
 /// [`crate::adapter_rewrites`].

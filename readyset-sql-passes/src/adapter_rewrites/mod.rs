@@ -323,7 +323,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
             Ok(_) => {
                 query.validate_query_semantics(flags.dialect)?;
                 trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
-                query.rewrite_array_constructors()?;
+                query.rewrite_array_constructors(&context)?;
                 trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
                 let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
                 query.drop_redundant_join(&unique_cols_schema)?;

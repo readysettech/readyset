@@ -423,7 +423,7 @@ mod tests {
 
     fn rewrite_statement(sql_text: &str) -> ReadySetResult<SelectStatement> {
         let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql_text)?;
-        stmt.rewrite_array_constructors()?;
+        stmt.rewrite_array_constructors(&crate::EmptyBaseSchemas)?;
         hoist_lhsmost_derived_table_rewrite_impl(&mut stmt, true)?;
         Ok(stmt)
     }

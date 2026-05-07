@@ -95,11 +95,13 @@ use itertools::Either;
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit::{Visitor, walk_expr, walk_select_statement};
 use readyset_sql::ast::{
-    ArrayArguments, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
-    JoinClause, JoinConstraint, JoinOperator, JoinRightSide, OrderClause, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
+    ArrayArguments, CastStyle, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr,
+    GroupByClause, JoinClause, JoinConstraint, JoinOperator, JoinRightSide, Literal, OrderClause,
+    Relation, SelectStatement, SqlIdentifier, SqlQuery, SqlType, TableExpr, TableExprInner,
 };
 
+use crate::BaseSchemasContext;
+use crate::get_local_from_items_iter;
 use crate::get_local_from_items_iter_mut;
 use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
@@ -111,8 +113,14 @@ use std::mem;
 
 /// A trait to drive to the rewrite of array constructors with subqueries.
 pub trait ArrayConstructorRewrite {
-    /// Does the needful.
-    fn rewrite_array_constructors(&mut self) -> ReadySetResult<&mut Self>
+    /// Does the needful.  `context` is consulted to derive the array element
+    /// type for the empty-array fallback the rewrite synthesizes inside its
+    /// `COALESCE(array_agg(...), ...)` shape -- without a typed cast on the
+    /// fallback, the lowering layer rejects bare `ARRAY[]` per PG semantics.
+    fn rewrite_array_constructors<C: BaseSchemasContext>(
+        &mut self,
+        context: &C,
+    ) -> ReadySetResult<&mut Self>
     where
         Self: Sized;
 }
@@ -305,6 +313,148 @@ fn validate_no_disallowed_array_constructors(stmt: &SelectStatement) -> ReadySet
     ArrayConstructorValidator.visit_select_statement(stmt)
 }
 
+/// Best-effort derivation of the array element type for the empty-array
+/// fallback the rewrite synthesizes inside its `COALESCE(array_agg(...), ...)`.
+/// Returns `None` when the type can't be determined from local information.
+///
+/// The exact type is not load-bearing: the COALESCE takes its result type from
+/// `array_agg`, and the fallback is an empty array that evaluates to `{}`
+/// whatever its element type. The derivation exists only so the fallback can be
+/// a typed `ARRAY[]::<elem>[]` cast -- lowering rejects a bare, untyped
+/// `ARRAY[]`, just as PostgreSQL can't infer the type of an empty array. When
+/// no type can be derived we emit the bare `ARRAY[]` anyway, so lowering rejects
+/// the query and it falls back to the upstream rather than caching a rewrite
+/// whose `array_agg` may itself be untyped -- e.g. `ARRAY(SELECT NULL ...)`.
+///
+/// Handles column references (resolved against the FROM/JOIN items and the
+/// schema catalog), explicit casts, non-NULL literals, 1-D array constructors,
+/// the string-returning calls (`concat`/`concat_ws`/`lower`/`upper`), and the
+/// scalar aggregates (`max`/`min`/`sum`/`avg`/`count`); anything else is `None`.
+fn derive_array_element_sql_type<C: BaseSchemasContext>(
+    field: &FieldDefinitionExpr,
+    stmt: &SelectStatement,
+    context: &C,
+) -> Option<SqlType> {
+    let FieldDefinitionExpr::Expr { expr, .. } = field else {
+        return None;
+    };
+    derive_sql_type_of_expr(expr, stmt, context)
+}
+
+fn derive_sql_type_of_expr<C: BaseSchemasContext>(
+    expr: &Expr,
+    stmt: &SelectStatement,
+    context: &C,
+) -> Option<SqlType> {
+    match expr {
+        Expr::Column(col) => derive_sql_type_of_column(col, stmt, context),
+        Expr::Cast { ty, .. } => Some(ty.clone()),
+        Expr::Literal(lit) => sql_type_of_literal(lit),
+        Expr::Array(ArrayArguments::List(elems)) => {
+            // For nested-array projections (e.g. `array(select array[d_id]...)`),
+            // recurse on the first element and wrap.  A bare `array[]` element
+            // would have no type info, so we fall through to None.
+            let first = elems.first()?;
+            let elem_ty = derive_sql_type_of_expr(first, stmt, context)?;
+            Some(SqlType::Array(Box::new(elem_ty)))
+        }
+        Expr::Call(
+            FunctionExpr::Concat(_)
+            | FunctionExpr::ConcatWs(_)
+            | FunctionExpr::Lower { .. }
+            | FunctionExpr::Upper { .. },
+        ) => {
+            // String-returning functions.
+            Some(SqlType::Text)
+        }
+        Expr::Call(FunctionExpr::Max(arg) | FunctionExpr::Min(arg)) => {
+            // Recurse the argument rather than re-encoding PG's aggregate result
+            // promotion (it lives in `Aggregation::over` / `output_col_type`),
+            // since the cast type is only cosmetic here.
+            derive_sql_type_of_expr(arg, stmt, context)
+        }
+        Expr::Call(FunctionExpr::Sum { expr, .. } | FunctionExpr::Avg { expr, .. }) => {
+            derive_sql_type_of_expr(expr, stmt, context)
+        }
+        Expr::Call(FunctionExpr::Count { .. } | FunctionExpr::CountStar) => {
+            // No argument to recurse on; any array type will do.
+            Some(SqlType::BigInt(None))
+        }
+        _ => None,
+    }
+}
+
+fn derive_sql_type_of_column<C: BaseSchemasContext>(
+    col: &readyset_sql::ast::Column,
+    stmt: &SelectStatement,
+    context: &C,
+) -> Option<SqlType> {
+    // Columns are qualified before this pass runs (`expand_implied_tables`),
+    // so `col.table` is always set in production; an unqualified column here
+    // is unresolvable, so give up.  The qualifier may be a table alias or a
+    // real relation name -- `resolve_alias_to_relation` handles both, and
+    // returns `None` for anything it cannot map to a base relation (e.g. a
+    // derived-table/CTE alias) rather than fabricating one.
+    let table = col.table.as_ref()?;
+    let rel = resolve_alias_to_relation(table, stmt)?;
+    let body = context.base_schema(&rel)?;
+    body.fields
+        .iter()
+        .find(|c| c.column.name == col.name)
+        .map(|c| c.sql_type.clone())
+}
+
+/// Resolve a column qualifier (a table alias or a relation name) to the
+/// underlying base relation, so its schema can be looked up.  This is the
+/// inverse of `get_from_item_reference_name`, which yields the outward
+/// reference name (the alias) rather than the base relation.
+fn resolve_alias_to_relation(alias_or_rel: &Relation, stmt: &SelectStatement) -> Option<Relation> {
+    // First pass: an explicit alias shadows base-table names, so match
+    // aliases across all FROM/JOIN items before considering relation names.
+    let by_alias = get_local_from_items_iter!(stmt).find_map(|t| {
+        let is_alias = t
+            .alias
+            .as_ref()
+            .is_some_and(|a| a.as_str() == alias_or_rel.name.as_str());
+        match (is_alias, &t.inner) {
+            (true, TableExprInner::Table(base)) => Some(base.clone()),
+            _ => None,
+        }
+    });
+    if by_alias.is_some() {
+        return by_alias;
+    }
+    // Second pass: no alias matched; fall back to a base-relation name match.
+    get_local_from_items_iter!(stmt).find_map(|t| match &t.inner {
+        TableExprInner::Table(base)
+            if base.name == alias_or_rel.name
+                && (alias_or_rel.schema.is_none() || base.schema == alias_or_rel.schema) =>
+        {
+            Some(base.clone())
+        }
+        _ => None,
+    })
+}
+
+/// Best-effort literal -> `SqlType` for the cosmetic empty-array fallback
+/// cast.  A deliberately coarse, local mirror of the authoritative literal
+/// typing in `dataflow-expression`'s lowering (`lower.rs`), which produces a
+/// `DfType` rather than a `SqlType`.  Exactness does not matter here -- the
+/// fallback is an empty array and the COALESCE column type comes from
+/// `array_agg` -- so unhandled kinds fall through to `None` (bare `ARRAY[]`).
+fn sql_type_of_literal(lit: &Literal) -> Option<SqlType> {
+    match lit {
+        Literal::Boolean(_) => Some(SqlType::Bool),
+        Literal::Integer(_) => Some(SqlType::Int(None)),
+        Literal::UnsignedInteger(_) => Some(SqlType::IntUnsigned(None)),
+        Literal::Number(_) => Some(SqlType::Numeric(None)),
+        Literal::String(_) => Some(SqlType::Text),
+        // NULL has no type and `Placeholder` is parameter-dependent.  Leave
+        // those to the caller's None fallback.
+        _ => None,
+    }
+}
+
 /// Rewrite a single array constructor into a lateral join with `array_agg()`.
 ///
 /// # Arguments
@@ -323,12 +473,13 @@ fn validate_no_disallowed_array_constructors(stmt: &SelectStatement) -> ReadySet
 /// - `FieldDefinitionExpr` - a new field to be added to the `stmt` SELECT list,
 ///   which a `coalesce()` around the alias to the subquery.
 /// - `TableExpr` - a derived table that be joined to the `stmt` FROM clause.
-fn rewrite_single_array_constructor(
+fn rewrite_single_array_constructor<C: BaseSchemasContext>(
     mut query: Box<SelectStatement>,
     alias: Option<SqlIdentifier>,
     stmt: &SelectStatement,
     existing_aliases: &[Relation],
     in_lateral_context: bool,
+    context: &C,
 ) -> ReadySetResult<(FieldDefinitionExpr, TableExpr)> {
     let mut stmt_locals = collect_local_from_items(stmt)?;
     stmt_locals.extend(existing_aliases.iter().cloned());
@@ -351,6 +502,15 @@ fn rewrite_single_array_constructor(
     {
         *alias = Some(inner_field_alias.clone());
     }
+
+    // Derive the fallback element type BEFORE `query` is moved into
+    // `lateral_subquery` below; the derivation reads the inner query's first
+    // projection and its FROM items.
+    let inner = &*query;
+    let fallback_elem_ty = inner
+        .fields
+        .first()
+        .and_then(|field| derive_array_element_sql_type(field, inner, context));
 
     // Build array_agg with DISTINCT and ORDER BY that match the query.
     // DISTINCT and ORDER BY and retained in the query to ensure TopK correctness.
@@ -402,9 +562,23 @@ fn rewrite_single_array_constructor(
         table: Some(lateral_alias.clone().into()),
     });
 
+    // Give the fallback an explicit element-type cast when we have one; a bare,
+    // untyped `ARRAY[]` is rejected at lowering. If the type couldn't be
+    // derived, leave it bare so that reject fires (see
+    // `derive_array_element_sql_type` for why).
+    let empty_fallback = match fallback_elem_ty {
+        Some(elem_ty) => Expr::Cast {
+            expr: Box::new(Expr::Array(ArrayArguments::List(vec![]))),
+            ty: SqlType::Array(Box::new(elem_ty)),
+            style: CastStyle::DoubleColon,
+            array: false,
+        },
+        None => Expr::Array(ArrayArguments::List(vec![])),
+    };
+
     let coalesced_expr = Expr::Call(FunctionExpr::Coalesce(vec![
         lateral_result_ref,
-        Expr::Array(ArrayArguments::List(vec![])),
+        empty_fallback,
     ]));
 
     let new_field = FieldDefinitionExpr::Expr {
@@ -415,9 +589,10 @@ fn rewrite_single_array_constructor(
     Ok((new_field, lateral_table))
 }
 
-fn rewrite_array_constructors_in_select(
+fn rewrite_array_constructors_in_select<C: BaseSchemasContext>(
     stmt: &mut SelectStatement,
     in_lateral_context: bool,
+    context: &C,
 ) -> ReadySetResult<()> {
     // if we are already in a lateral context, retain that state;
     // otherwise, check if current statement declares it is lateral.
@@ -425,12 +600,12 @@ fn rewrite_array_constructors_in_select(
 
     // process nested SELECT statements in allowed positions
     for cte in &mut stmt.ctes {
-        rewrite_array_constructors_in_select(&mut cte.statement, in_lateral_context)?;
+        rewrite_array_constructors_in_select(&mut cte.statement, in_lateral_context, context)?;
     }
 
     for t in get_local_from_items_iter_mut!(stmt) {
         if let Some((subquery, _)) = as_sub_query_with_alias_mut(t) {
-            rewrite_array_constructors_in_select(subquery, in_lateral_context)?;
+            rewrite_array_constructors_in_select(subquery, in_lateral_context, context)?;
         }
     }
 
@@ -452,6 +627,7 @@ fn rewrite_array_constructors_in_select(
                     stmt,
                     &lateral_table_aliases,
                     in_lateral_context,
+                    context,
                 )?;
                 new_fields.push(new_field);
                 lateral_table_aliases.push(get_from_item_reference_name(&lateral_table)?);
@@ -493,19 +669,25 @@ fn rewrite_array_constructors_in_select(
 }
 
 impl ArrayConstructorRewrite for SelectStatement {
-    fn rewrite_array_constructors(&mut self) -> ReadySetResult<&mut Self> {
+    fn rewrite_array_constructors<C: BaseSchemasContext>(
+        &mut self,
+        context: &C,
+    ) -> ReadySetResult<&mut Self> {
         // fail fast if array constructors in disallowed locations
         validate_no_disallowed_array_constructors(self)?;
 
-        rewrite_array_constructors_in_select(self, false)?;
+        rewrite_array_constructors_in_select(self, false, context)?;
         Ok(self)
     }
 }
 
 impl ArrayConstructorRewrite for SqlQuery {
-    fn rewrite_array_constructors(&mut self) -> ReadySetResult<&mut Self> {
+    fn rewrite_array_constructors<C: BaseSchemasContext>(
+        &mut self,
+        context: &C,
+    ) -> ReadySetResult<&mut Self> {
         if let SqlQuery::Select(select) = self {
-            select.rewrite_array_constructors()?;
+            select.rewrite_array_constructors(context)?;
         }
         Ok(self)
     }
@@ -1003,7 +1185,7 @@ mod tests {
             Ok(stmt) => stmt,
             Err(e) => panic!("PARSE ERROR: {e}"),
         };
-        stmt.rewrite_array_constructors()
+        stmt.rewrite_array_constructors(&crate::EmptyBaseSchemas)
             .expect("rewrite should succeed");
         stmt
     }
@@ -1148,5 +1330,138 @@ mod tests {
         test_validation_error(
             "SELECT ARRAY(SELECT p.id FROM posts p ORDER BY p.id + 1) FROM users u",
         );
+    }
+
+    /// A schema-carrying `BaseSchemasContext` for exercising the column/alias
+    /// resolution helpers, which the `EmptyBaseSchemas` stub cannot reach.
+    /// A newtype rather than `impl ... for HashMap<...>` so it doesn't collide
+    /// with the identical impl in `order_limit_removal`'s test module.
+    struct TestSchemas(std::collections::HashMap<Relation, readyset_sql::ast::CreateTableBody>);
+
+    impl BaseSchemasContext for TestSchemas {
+        fn base_schemas(
+            &self,
+        ) -> Box<dyn Iterator<Item = (&Relation, &readyset_sql::ast::CreateTableBody)> + '_>
+        {
+            Box::new(self.0.iter())
+        }
+
+        fn base_schema(&self, relation: &Relation) -> Option<&readyset_sql::ast::CreateTableBody> {
+            self.0.get(relation)
+        }
+    }
+
+    /// Build a single-table schema `rel(col ty)` for fallback-type tests.
+    fn schema_with(rel: &str, col: &str, ty: SqlType) -> TestSchemas {
+        let spec = readyset_sql::ast::ColumnSpecification {
+            column: readyset_sql::ast::Column {
+                name: col.into(),
+                table: Some(rel.into()),
+            },
+            sql_type: ty,
+            generated: None,
+            constraints: vec![],
+            comment: None,
+            invisible: false,
+        };
+        let mut schemas = std::collections::HashMap::new();
+        schemas.insert(
+            rel.into(),
+            readyset_sql::ast::CreateTableBody {
+                fields: vec![spec],
+                keys: None,
+            },
+        );
+        TestSchemas(schemas)
+    }
+
+    fn test_rewrite_with<C: BaseSchemasContext>(sql: &str, context: &C) -> SelectStatement {
+        let mut stmt = match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql) {
+            Ok(stmt) => stmt,
+            Err(e) => panic!("PARSE ERROR: {e}"),
+        };
+        stmt.rewrite_array_constructors(context)
+            .expect("rewrite should succeed");
+        stmt
+    }
+
+    /// The COALESCE empty-array fallback the rewrite synthesized for the
+    /// (single) array constructor in `stmt`: `Some(elem)` for a typed
+    /// `ARRAY[]::elem[]` cast, `None` for a bare `ARRAY[]`.
+    fn fallback_array_type(stmt: &SelectStatement) -> Option<SqlType> {
+        let FieldDefinitionExpr::Expr { expr, .. } = &stmt.fields[0] else {
+            panic!("expected an expression field");
+        };
+        let Expr::Call(FunctionExpr::Coalesce(args)) = expr else {
+            panic!("expected COALESCE, got {expr:?}");
+        };
+        match args.get(1).expect("COALESCE needs a fallback arg") {
+            Expr::Cast { ty, .. } => Some(ty.clone()),
+            Expr::Array(ArrayArguments::List(elems)) if elems.is_empty() => None,
+            other => panic!("unexpected fallback: {other:?}"),
+        }
+    }
+
+    /// The synthesized empty-array fallback is typed from the inner projection
+    /// so the COALESCE lowers and the bare-`ARRAY[]` reject doesn't fire.
+    /// Exercises the schema-backed resolution helpers and the aggregate type
+    /// derivation directly, which the logictests only reach end to end.
+    #[test]
+    fn fallback_type_derivation() {
+        // Relation-name-qualified column -> base-name match -> schema lookup.
+        let text_schema = schema_with("inner_t", "name", SqlType::Text);
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT inner_t.name FROM inner_t WHERE link_id = o.id) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+
+        // Alias-qualified column -> alias resolves to inner_t before lookup.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT i.name FROM inner_t i WHERE i.link_id = o.id) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+
+        // count(*) -> bigint, independent of schema.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT count(*) FROM inner_t WHERE link_id = o.id) FROM outer_t o",
+            &crate::EmptyBaseSchemas,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::BigInt(None))))
+        );
+
+        // max/sum/avg all recurse to the argument's type (the cast is cosmetic,
+        // so we don't re-encode PG's aggregate result promotion).
+        let int_schema = schema_with("inner_t", "n", SqlType::Int(None));
+        for agg in ["max", "sum", "avg"] {
+            let stmt = test_rewrite_with(
+                &format!(
+                    "SELECT ARRAY(SELECT {agg}(inner_t.n) FROM inner_t WHERE link_id = o.id) FROM outer_t o"
+                ),
+                &int_schema,
+            );
+            assert_eq!(
+                fallback_array_type(&stmt),
+                Some(SqlType::Array(Box::new(SqlType::Int(None)))),
+                "{agg}(n) fallback should recurse to the column type"
+            );
+        }
+
+        // Unresolvable projection (binary arithmetic) -> None -> bare ARRAY[],
+        // which lowering then rejects.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT n + 1 FROM inner_t WHERE link_id = o.id) FROM outer_t o",
+            &int_schema,
+        );
+        assert_eq!(fallback_array_type(&stmt), None);
     }
 }
