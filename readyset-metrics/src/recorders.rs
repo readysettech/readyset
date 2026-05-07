@@ -1,24 +1,26 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::sync::{PoisonError, RwLock};
+#[cfg(feature = "push-gateway")]
 use std::time::Duration;
 
 use indexmap::IndexMap;
 use metrics::HistogramFn;
 use metrics::{Counter, Gauge, Histogram, Key, KeyName, Metadata, Recorder, SharedString, Unit};
+#[cfg(feature = "push-gateway")]
+use metrics_exporter_prometheus::BuildError;
 use metrics_exporter_prometheus::formatting::{
     sanitize_metric_name, write_help_line, write_metric_line, write_type_line,
 };
-use metrics_exporter_prometheus::{BuildError, Distribution, DistributionBuilder, LabelSet};
-use metrics_util::registry::{Recency, Registry};
+use metrics_exporter_prometheus::{Distribution, DistributionBuilder, LabelSet};
 use metrics_util::MetricKindMask;
+use metrics_util::registry::{Recency, Registry};
 use metrics_util::{registry::GenerationalStorage, storage::AtomicBucket};
 use quanta::Instant;
+#[cfg(feature = "push-gateway")]
 use tracing::error;
-
-use crate::metrics::Render;
 
 struct Snapshot {
     pub counters: HashMap<String, HashMap<LabelSet, u64>>,
@@ -93,8 +95,11 @@ impl Inner {
         let mut counters = HashMap::new();
         let counter_handles = self.registry.get_counter_handles();
         for (key, counter) in counter_handles {
-            let gen = counter.get_generation();
-            if !self.recency.should_store_counter(&key, gen, &self.registry) {
+            let generation = counter.get_generation();
+            if !self
+                .recency
+                .should_store_counter(&key, generation, &self.registry)
+            {
                 continue;
             }
 
@@ -120,8 +125,11 @@ impl Inner {
         let mut gauges = HashMap::new();
         let gauge_handles = self.registry.get_gauge_handles();
         for (key, gauge) in gauge_handles {
-            let gen = gauge.get_generation();
-            if !self.recency.should_store_gauge(&key, gen, &self.registry) {
+            let generation = gauge.get_generation();
+            if !self
+                .recency
+                .should_store_gauge(&key, generation, &self.registry)
+            {
                 continue;
             }
 
@@ -152,10 +160,10 @@ impl Inner {
         // Remove expired histograms
         let histogram_handles = self.registry.get_histogram_handles();
         for (key, histogram) in histogram_handles {
-            let gen = histogram.get_generation();
+            let generation = histogram.get_generation();
             if !self
                 .recency
-                .should_store_histogram(&key, gen, &self.registry)
+                .should_store_histogram(&key, generation, &self.registry)
             {
                 // Since we store aggregated distributions directly, when we're told that a metric
                 // is not recent enough and should be/was deleted from the registry, we also need to
@@ -183,8 +191,7 @@ impl Inner {
             }
         }
 
-        let distributions = self
-            .distributions
+        self.distributions
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
@@ -195,8 +202,7 @@ impl Inner {
                     None
                 }
             })
-            .collect();
-        distributions
+            .collect()
     }
 
     fn get_recent_metrics(&self) -> Snapshot {
@@ -438,12 +444,6 @@ impl Recorder for PrometheusRecorder {
     }
 }
 
-impl Render for PrometheusRecorder {
-    fn render(&self) -> String {
-        self.inner.render()
-    }
-}
-
 /// Handle for accessing metrics stored via [`PrometheusRecorder`].
 ///
 /// In certain scenarios, it may be necessary to directly handle requests that would otherwise be
@@ -499,6 +499,7 @@ impl PrometheusHandle {
     }
 }
 
+#[cfg(feature = "push-gateway")]
 #[derive(Clone)]
 struct PushGateway {
     endpoint: String,
@@ -507,51 +508,50 @@ struct PushGateway {
     password: Option<String>,
 }
 
-fn exporter(
+#[cfg(feature = "push-gateway")]
+async fn exporter(
     handle: PrometheusHandle,
     username: Option<String>,
     password: Option<String>,
     interval: Duration,
     endpoint: String,
-) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error + Send>>> {
-    Box::pin(async move {
-        let client = reqwest::Client::new();
+) -> Result<(), Box<dyn std::error::Error + Send>> {
+    let client = reqwest::Client::new();
 
-        loop {
-            // Sleep for `interval` amount of time, and then do a push.
-            tokio::time::sleep(interval).await;
+    loop {
+        tokio::time::sleep(interval).await;
 
-            let output = handle.render();
-            let mut req = client.put(&endpoint).body(output);
-            if let Some(name) = &username {
-                req = req.basic_auth(name, password.as_ref());
-            }
-
-            match req.send().await {
-                Ok(response) => {
-                    if !response.status().is_success() {
-                        let status = response.status();
-                        let status = status.canonical_reason().unwrap_or_else(|| status.as_str());
-                        let body = response
-                            .text()
-                            .await
-                            .unwrap_or_else(|_| String::from("<failed to read response body>"));
-                        error!(
-                            message = "unexpected status after pushing metrics to push gateway",
-                            status,
-                            %body,
-                        );
-                    }
-                }
-                Err(e) => error!("error sending request to push gateway: {:?}", e),
-            }
+        let output = handle.render();
+        let mut req = client.put(&endpoint).body(output);
+        if let Some(name) = &username {
+            req = req.basic_auth(name, password.as_ref());
         }
-    })
+
+        match req.send().await {
+            Ok(response) => {
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let status = status.canonical_reason().unwrap_or_else(|| status.as_str());
+                    let body = response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| String::from("<failed to read response body>"));
+                    error!(
+                        message = "unexpected status after pushing metrics to push gateway",
+                        status,
+                        %body,
+                    );
+                }
+            }
+            Err(e) => error!("error sending request to push gateway: {:?}", e),
+        }
+    }
 }
 
 #[derive(Default)]
 pub struct PrometheusBuilder {
     global_labels: Option<IndexMap<String, String>>,
+    #[cfg(feature = "push-gateway")]
     push_gateway: Option<PushGateway>,
 }
 
@@ -570,6 +570,7 @@ impl PrometheusBuilder {
         self
     }
 
+    #[cfg(feature = "push-gateway")]
     pub fn with_push_gateway<T>(
         mut self,
         endpoint: T,
@@ -618,6 +619,8 @@ impl PrometheusBuilder {
         rec
     }
 
+    #[cfg(feature = "push-gateway")]
+    #[allow(clippy::type_complexity)]
     pub fn build(
         self,
     ) -> Result<
@@ -627,7 +630,10 @@ impl PrometheusBuilder {
         ),
         BuildError,
     > {
-        let gw = self.push_gateway.clone().expect("gateway not configured");
+        let gw = self
+            .push_gateway
+            .clone()
+            .ok_or(BuildError::MissingExporterConfiguration)?;
         let recorder = self.build_recorder();
         let handle = recorder.handle();
         let exporter = exporter(handle, gw.username, gw.password, gw.interval, gw.endpoint);

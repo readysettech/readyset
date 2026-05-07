@@ -591,6 +591,7 @@ dependencies = [
  "rand_distr",
  "readyset-client",
  "readyset-data",
+ "readyset-metrics",
  "readyset-server",
  "readyset-sql",
  "readyset-sql-parsing",
@@ -5828,6 +5829,7 @@ dependencies = [
  "readyset-dataflow",
  "readyset-errors",
  "readyset-mcp",
+ "readyset-metrics",
  "readyset-mysql",
  "readyset-psql",
  "readyset-query-logger",
@@ -5903,6 +5905,7 @@ dependencies = [
  "readyset-dataflow",
  "readyset-errors",
  "readyset-mcp",
+ "readyset-metrics",
  "readyset-schema",
  "readyset-server",
  "readyset-shallow",
@@ -6057,6 +6060,7 @@ dependencies = [
  "readyset-client-metrics",
  "readyset-data",
  "readyset-errors",
+ "readyset-metrics",
  "readyset-mysql",
  "readyset-psql",
  "readyset-query-logger",
@@ -6375,6 +6379,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-metrics"
+version = "0.1.0"
+dependencies = [
+ "indexmap 2.14.0",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "metrics-util",
+ "quanta",
+ "reqwest 0.13.3",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "readyset-mir"
 version = "0.7.0"
 dependencies = [
@@ -6630,6 +6648,7 @@ dependencies = [
  "readyset-dataflow",
  "readyset-decimal",
  "readyset-errors",
+ "readyset-metrics",
  "readyset-mir",
  "readyset-multiplex",
  "readyset-sql",

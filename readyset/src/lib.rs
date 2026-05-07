@@ -50,10 +50,10 @@ use readyset_common::ulimit::maybe_increase_nofile_limit;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
+use readyset_metrics::get_or_init_global_recorder;
 use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
-use readyset_server::metrics::get_or_init_global_recorder;
 use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
 use readyset_server::WorkerOptions;
 use readyset_shallow::CacheManager;
@@ -1219,7 +1219,6 @@ where
         };
         let http_server = NoriaAdapterHttpRouter {
             listen_addr: options.metrics_address,
-            prometheus_handle: prometheus_handle.clone(),
             health_reporter: health_reporter.clone(),
             failpoint_channel: tx,
             metrics: Default::default(),

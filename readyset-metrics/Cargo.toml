@@ -1,0 +1,23 @@
+[package]
+name = "readyset-metrics"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[features]
+default = []
+push-gateway = ["dep:reqwest"]
+
+[dependencies]
+indexmap = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+metrics-util = { workspace = true }
+quanta = { workspace = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

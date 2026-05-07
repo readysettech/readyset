@@ -6,7 +6,7 @@ use metrics_exporter_prometheus::formatting::{sanitize_label_key, sanitize_label
 use metrics_exporter_prometheus::{Distribution, LabelSet};
 use readyset_client_metrics::DatabaseType;
 use readyset_client_metrics::recorded::QUERY_LOG_EXECUTION_COUNT;
-use readyset_server::PrometheusHandle;
+use readyset_metrics::PrometheusHandle;
 
 #[derive(Debug, Default, Clone)]
 pub struct MetricsSummary {

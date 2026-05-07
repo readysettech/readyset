@@ -20,6 +20,7 @@ use readyset_alloc::{
 use readyset_client::events::ControllerEvent;
 use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetError;
+use readyset_metrics::metrics_body;
 use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::SchemaCatalogUpdate;
 use tokio::net::TcpListener;
@@ -31,7 +32,6 @@ use tracing::{info, warn};
 
 use crate::controller::events::EventsHandle;
 use crate::controller::ControllerRequest;
-use crate::metrics::{get_global_recorder, Render};
 use crate::worker::WorkerRequest;
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
@@ -154,13 +154,9 @@ async fn graph_html() -> Response {
 }
 
 async fn metrics() -> Response {
-    match get_global_recorder().map(|r| r.render()) {
-        Some(rendered) => text(StatusCode::OK, rendered),
-        None => text(
-            StatusCode::NOT_FOUND,
-            "Prometheus metrics were not enabled. To fix this, run Noria with \
-             --prometheus-metrics",
-        ),
+    match metrics_body() {
+        Ok(body) => text(StatusCode::OK, body),
+        Err(msg) => text(StatusCode::NOT_FOUND, msg),
     }
 }
 

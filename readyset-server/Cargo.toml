@@ -68,7 +68,6 @@ timekeeper = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-retry = { workspace = true }
 tokio-stream = { workspace = true }
-readyset-multiplex = { path = "../readyset-multiplex" }
 tower = { workspace = true, features = ["util"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
@@ -91,6 +90,8 @@ readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-metrics = { path = "../readyset-metrics" }
+readyset-multiplex = { path = "../readyset-multiplex" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

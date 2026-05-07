@@ -17,7 +17,7 @@ use readyset_alloc::{
     print_memory_and_per_thread_stats,
 };
 use readyset_client_metrics::recorded;
-use readyset_server::PrometheusHandle;
+use readyset_metrics::metrics_body;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::Sender;
@@ -43,10 +43,6 @@ where
     /// to the adapter.
     pub failpoint_channel: Option<Arc<Sender<()>>>,
 
-    /// Used to retrieve the prometheus scrape's render as a String when servicing
-    /// HTTP requests on /metrics.
-    pub prometheus_handle: Option<PrometheusHandle>,
-
     /// Used to record metrics related to http request handling.
     pub metrics: HttpRouterMetrics,
 
@@ -63,7 +59,6 @@ where
             listen_addr: self.listen_addr,
             health_reporter: self.health_reporter.clone(),
             failpoint_channel: self.failpoint_channel.clone(),
-            prometheus_handle: self.prometheus_handle.clone(),
             metrics: self.metrics.clone(),
             status_reporter: self.status_reporter.clone(),
         }
@@ -174,17 +169,12 @@ async fn metrics<U>(State(state): State<NoriaAdapterHttpRouter<U>>) -> Response
 where
     U: UpstreamDatabase + Send + Sync + 'static,
 {
-    match state.prometheus_handle.as_ref() {
-        Some(h) => {
-            let payload = h.render();
+    match metrics_body() {
+        Ok(payload) => {
             state.metrics.rec_metrics_payload_size(payload.len());
             text(StatusCode::OK, payload)
         }
-        None => text(
-            StatusCode::NOT_FOUND,
-            "Prometheus metrics were not enabled. To fix this, run the adapter with \
-             --prometheus-metrics",
-        ),
+        Err(msg) => text(StatusCode::NOT_FOUND, msg),
     }
 }
 

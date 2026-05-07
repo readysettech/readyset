@@ -5,11 +5,11 @@ use std::time::Duration;
 use dataflow::{DurabilityMode, PersistenceParameters};
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_metrics::get_or_init_global_recorder;
 use readyset_sql::ast::Relation;
 use readyset_sql::Dialect;
 use readyset_util::shutdown::ShutdownSender;
 
-use crate::metrics::get_or_init_global_recorder;
 use crate::{Builder, Handle, ReuseConfigType};
 
 /// PersistenceParameters with a log_name on the form of `prefix` + timestamp,

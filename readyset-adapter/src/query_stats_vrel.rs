@@ -3,9 +3,9 @@ use quanta::Instant;
 
 use readyset_client_metrics::recorded;
 use readyset_data::{DfType, DfValue};
+use readyset_metrics::get_global_recorder;
 use readyset_schema::bind_vrel;
 use readyset_schema::virtual_relation::{VrelContext, VrelRead, VrelRows};
-use readyset_server::metrics::get_global_recorder;
 use readyset_sql::DialectDisplay;
 use readyset_util::scheduler_potentially_yield;
 

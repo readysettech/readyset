@@ -52,6 +52,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-dataflow = { path = "../readyset-dataflow" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-mcp = { path = "../readyset-mcp" }
+readyset-metrics = { path = "../readyset-metrics" }
 readyset-mysql = { path = "../readyset-mysql" }
 readyset-psql = { path = "../readyset-psql" }
 readyset-query-logger = { path = "../readyset-query-logger" }

@@ -29,10 +29,10 @@ use readyset_data::upstream_system_props::{
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
+use readyset_metrics::get_or_init_global_recorder;
 use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
-use readyset_server::metrics::get_or_init_global_recorder;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
