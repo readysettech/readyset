@@ -1228,7 +1228,7 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
 
     eventually!(
         run_test: {
-            client
+            let rows: Vec<u32> = client
                 .simple_query("SELECT * FROM cats")
                 .await
                 .unwrap()
@@ -1237,28 +1237,27 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
                     SimpleQueryMessage::Row(r) => Some(r.get(0).unwrap().parse().unwrap()),
                     _ => None,
                 })
-                .collect::<Vec<u32>>()
+                .collect();
+            let destination = match client
+                .simple_query("EXPLAIN LAST STATEMENT")
+                .await
+                .unwrap()
+                .into_iter()
+                .next()
+                .unwrap()
+            {
+                SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
+                _ => panic!(),
+            };
+            (rows, destination)
         },
-        then_assert: |result| {
+        then_assert: |(result, destination)| {
             assert_eq!(result, [1]);
+            assert_matches!(
+                destination.as_str().try_into(),
+                Ok(QueryDestination::Readyset(Some(_)))
+            );
         }
-    );
-
-    let destination = match client
-        .simple_query("EXPLAIN LAST STATEMENT")
-        .await
-        .unwrap()
-        .into_iter()
-        .next()
-        .unwrap()
-    {
-        SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
-        _ => panic!(),
-    };
-
-    assert_matches!(
-        destination.as_str().try_into(),
-        Ok(QueryDestination::Readyset(Some(_)))
     );
 
     shutdown_tx.shutdown().await;

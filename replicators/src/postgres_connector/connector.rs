@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::error::Error;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -5,14 +7,16 @@ use database_utils::UpstreamConfig;
 #[cfg(feature = "failure_injection")]
 use failpoint_macros::set_failpoint;
 use futures::FutureExt;
+use metrics::histogram;
 use pgsql::SimpleQueryMessage;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
+use readyset_client::metrics::recorded;
 use readyset_client::{PersistencePoint, ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
 };
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql_parsing::{ParsingConfig, ParsingPreset};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -20,7 +24,7 @@ use readyset_util::select;
 use replication_offset::postgres::{CommitLsn, Lsn, PostgresPosition};
 use replication_offset::ReplicationOffset;
 use tokio_postgres as pgsql;
-use tokio_postgres::error::SqlState;
+use tokio_postgres::error::{DbError, SqlState};
 use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
@@ -32,6 +36,135 @@ use crate::table_filter::TableFilter;
 /// Cap on how long the standby status update will wait for the controller's
 /// `min_persisted_replication_offset` RPC.
 const MIN_PERSISTED_RPC_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Returns true if `err` is the PostgreSQL error reported when dropping
+/// a replication slot that does not exist on the server.
+fn error_is_slot_not_found(err: &ReadySetError, slot_name: &str) -> bool {
+    err.to_string()
+        .ends_with(&format!("replication slot \"{slot_name}\" does not exist"))
+}
+
+/// Per-connector group commit state. Encapsulates the accumulated pending
+/// row actions and the window-tracking fields that decide when to flush.
+#[derive(Debug)]
+struct GroupCommitState {
+    /// Maximum number of row events to accumulate in memory before
+    /// flushing a batch. Bounds memory usage for large transactions.
+    replication_batch_size: usize,
+    /// Accumulated row operations for the current batch being built,
+    /// keyed by table relation so operations for the same table coalesce
+    /// into a single `ReplicationAction::TableAction` at flush time.
+    /// Each operation is paired with the upstream replication offset at
+    /// which it was logged, so that `handle_table_actions` can filter
+    /// already-applied events inside a coalesced batch where the batch's
+    /// own position alone is insufficient. See REA-6582.
+    pending_actions: HashMap<Relation, Vec<(TableOperation, ReplicationOffset)>>,
+    /// Number of row events accumulated in `pending_actions`.
+    pending_row_count: usize,
+    /// Maximum transactions per group commit batch.
+    max_trx: usize,
+    /// Duration budget for the group commit window.
+    wait: Duration,
+    /// Deadline for current group commit window. Set when the first
+    /// transaction in a group commits (the "leader").
+    deadline: Option<Instant>,
+    /// Instant at which the leader transaction of the current group
+    /// committed. Stored separately from `deadline` so the metric path
+    /// reads it directly instead of computing `deadline - wait`, which
+    /// would panic on `Instant - Duration` underflow.
+    leader: Option<Instant>,
+    /// Number of committed transactions in the current group.
+    trx_count: usize,
+}
+
+impl GroupCommitState {
+    fn new(batch_size: usize, max_trx: usize, wait: Duration) -> Self {
+        Self {
+            replication_batch_size: batch_size,
+            pending_actions: HashMap::new(),
+            pending_row_count: 0,
+            max_trx,
+            wait,
+            deadline: None,
+            leader: None,
+            trx_count: 0,
+        }
+    }
+
+    /// Accumulate one or more row operations (each paired with the
+    /// upstream replication offset where it was logged) into the
+    /// pending batch for the given table. Operations for the same table
+    /// are appended to the same per-table `Vec`, preserving the order
+    /// in which they arrived.
+    ///
+    /// Returns `true` if the batch has reached `replication_batch_size`
+    /// and should be flushed.
+    fn accumulate_row(
+        &mut self,
+        relation: Relation,
+        ops: impl IntoIterator<Item = (TableOperation, ReplicationOffset)>,
+    ) -> bool {
+        let entry = self.pending_actions.entry(relation).or_default();
+        let before = entry.len();
+        entry.extend(ops);
+        self.pending_row_count += entry.len() - before;
+        self.pending_row_count >= self.replication_batch_size
+    }
+
+    /// Drain the pending action accumulator and return the batch,
+    /// constructing one `ReplicationAction::TableAction` per table.
+    /// Also emits group commit metrics and resets the window state.
+    fn flush(&mut self) -> Vec<ReplicationAction> {
+        self.emit_metrics();
+        self.pending_row_count = 0;
+        self.reset_window();
+        self.pending_actions
+            .drain()
+            .map(|(table, actions)| ReplicationAction::TableAction { table, actions })
+            .collect()
+    }
+
+    /// Advance group commit state for a newly committed transaction.
+    ///
+    /// Starts the group commit deadline on the first commit (the
+    /// "leader") and increments the transaction counter. Only takes
+    /// effect when there are pending row actions to flush.
+    fn advance(&mut self) {
+        if self.pending_row_count > 0 {
+            if self.deadline.is_none() {
+                let now = Instant::now();
+                self.leader = Some(now);
+                self.deadline = Some(now + self.wait);
+            }
+            self.trx_count += 1;
+        }
+    }
+
+    /// Check if the group commit batch should be flushed now.
+    fn should_flush(&self) -> bool {
+        self.wait.is_zero()
+            || self.trx_count >= self.max_trx
+            || self.pending_row_count >= self.replication_batch_size
+    }
+
+    /// Reset the group commit window tracking fields after a flush.
+    fn reset_window(&mut self) {
+        self.deadline = None;
+        self.leader = None;
+        self.trx_count = 0;
+    }
+
+    /// Emit group commit metrics before flushing.
+    fn emit_metrics(&self) {
+        if self.trx_count > 0 {
+            histogram!(recorded::REPLICATOR_GROUP_COMMIT_TXNS).record(self.trx_count as f64);
+            if let Some(leader) = self.leader {
+                histogram!(recorded::REPLICATOR_GROUP_COMMIT_DURATION)
+                    .record(leader.elapsed().as_micros() as f64);
+            }
+        }
+    }
+}
 
 /// A connector that connects to a PostgreSQL server and starts reading WAL from the "noria"
 /// replication slot with the "noria" publication.
@@ -80,6 +213,22 @@ pub struct PostgresWalConnector {
     table_filter: TableFilter,
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
+    /// Group commit state: accumulated pending row actions plus the
+    /// window-tracking fields that decide when to flush.
+    group_commit: GroupCommitState,
+    /// Position of the last fully-processed COMMIT. Used when flushing
+    /// pending row actions from a path where `cur_pos` has been clobbered
+    /// to `(T_next.final_lsn, 0)` by the BEGIN of a subsequent transaction
+    /// (specifically the `WalEvent::Truncate` and `WalEvent::DdlEvent`
+    /// flush-pending-first branches), so the flushed rows carry the
+    /// position of the last real COMMIT instead of the sentinel.
+    last_committed_pos: Option<PostgresPosition>,
+    /// Saved `cur_pos` to restore when the next `next_action` call pops
+    /// `peek`. Set whenever we stash an event in `peek` *after* the
+    /// in-progress transaction's BEGIN has already clobbered `cur_pos`,
+    /// so the next iteration's `cur_pos` reflects the new transaction's
+    /// `commit_lsn` rather than the (stale) returned flush position.
+    peek_cur_pos: Option<PostgresPosition>,
 }
 
 /// The decoded response to `IDENTIFY_SYSTEM`
@@ -117,14 +266,6 @@ pub(crate) struct CreatedSlot {
 }
 
 impl PostgresWalConnector {
-    /// The max number of replication actions we buffer before returning them as a batch.
-    ///
-    /// Calling the ReadySet API is a bit expensive, therefore we try to queue as many actions
-    /// as possible before calling into the API. We therefore try to stop batching actions when
-    /// we hit this limit, BUT note that we may substantially exceed this limit in cases where
-    /// we receive many consecutive events that share the same LSN.
-    const MAX_QUEUED_INDEPENDENT_ACTIONS: usize = 100;
-
     /// Connects to postgres and if needed creates a new replication slot for itself with an
     /// exported snapshot.
     #[allow(clippy::too_many_arguments)]
@@ -147,18 +288,15 @@ impl PostgresWalConnector {
         pg_config.dbname(dbname.as_ref()).set_replication_database();
 
         let (client, connection) = pg_config.connect(tls_connector).await.map_err(|e| {
-            if let Some(db_err) = e.as_db_error() {
-                if db_err.code() == &SqlState::INVALID_AUTHORIZATION_SPECIFICATION {
+            if let Some(e) = e.source().and_then(|e| e.downcast_ref::<DbError>()) {
+                if e.code() == &SqlState::INVALID_AUTHORIZATION_SPECIFICATION {
                     // Can be caused by rds.logical_replication = 0 on RDS.
                     return ReadySetError::ReplicationFailed(format!(
-                        "Failed to connect (remember to enable logical replication): {db_err}"
+                        "Failed to connect (remember to enable logical replication): {e}"
                     ));
                 }
             }
-            ReadySetError::ReplicationFailed(format!(
-                "Failed to connect: {}",
-                readyset_errors::postgres_err(&e)
-            ))
+            ReadySetError::ReplicationFailed(format!("Failed to connect: {e}"))
         })?;
         let connection_handle = tokio::spawn(connection);
         let status_update_interval = Duration::from_secs(config.status_update_interval_secs as u64);
@@ -188,6 +326,13 @@ impl PostgresWalConnector {
             had_table_error: false,
             table_filter,
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
+            group_commit: GroupCommitState::new(
+                config.replication_batch_size,
+                config.group_commit_max_trx,
+                Duration::from_micros(config.group_commit_wait_us),
+            ),
+            last_committed_pos: None,
+            peek_cur_pos: None,
         };
 
         if full_resnapshot || next_position.is_none() {
@@ -217,23 +362,20 @@ impl PostgresWalConnector {
         );
 
         if !config.disable_create_publication {
-            let query = format!("CREATE PUBLICATION {PUBLICATION_NAME} FOR ALL TABLES");
-            match self.client.simple_query(&query).await {
-                Ok(_) => {
+            match self.create_publication(PUBLICATION_NAME).await {
+                Ok(()) => {
                     // Created a new publication, everything is good
                 }
-                Err(e) if matches!(e.code(), Some(&SqlState::DUPLICATE_OBJECT)) => {
+                Err(err)
+                    if err.to_string().contains("publication")
+                        && err.to_string().contains("already exists") =>
+                {
                     // This is an existing publication we are going to use
                 }
-                Err(e) if matches!(e.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE)) => {
+                Err(err) if err.to_string().contains("permission denied") => {
                     error!("Insufficient permissions to create publication FOR ALL TABLES");
                 }
-                Err(e) => {
-                    return Err(ReadySetError::ReplicationFailed(format!(
-                        "Failed to create publication: {}",
-                        readyset_errors::postgres_err(&e)
-                    )))
-                }
+                Err(err) => return Err(err),
             }
         }
 
@@ -241,7 +383,8 @@ impl PostgresWalConnector {
         self.drop_replication_slot(repl_slot_name).await?;
 
         match self.create_replication_slot(repl_slot_name, false).await {
-            Ok(slot) => self.replication_slot = Some(slot),
+            Ok(slot) => self.replication_slot = Some(slot), /* Created a new slot, */
+            // everything is good
             Err(err)
                 if err.to_string().contains("replication slot")
                     && err.to_string().contains("already exists") =>
@@ -279,6 +422,46 @@ impl PostgresWalConnector {
         }
     }
 
+    /// Waits for the next WAL event with a timeout. Returns `Ok(None)` if the
+    /// timeout expires before an event arrives.
+    async fn next_event_with_timeout(
+        &mut self,
+        read_timeout: Duration,
+    ) -> ReadySetResult<Option<WalEvent>> {
+        match tokio::time::timeout(read_timeout, self.next_event()).await {
+            Ok(result) => result.map(Some),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Thin wrapper around [`GroupCommitState::accumulate_row`] that
+    /// assembles the `Relation` from the WAL event's schema/table fields
+    /// and pairs each operation with `event_pos` (the position of the
+    /// WAL event that produced these operations).
+    fn accumulate_row(
+        &mut self,
+        schema: SqlIdentifier,
+        table: SqlIdentifier,
+        ops: impl IntoIterator<Item = TableOperation>,
+        event_pos: ReplicationOffset,
+    ) -> bool {
+        let relation = Relation {
+            schema: Some(schema),
+            name: table,
+        };
+        self.group_commit
+            .accumulate_row(relation, ops.into_iter().map(|op| (op, event_pos.clone())))
+    }
+
+    /// Drain pending row actions and append a
+    /// [`ReplicationAction::LogPosition`] marker so the caller can
+    /// persist the replication offset alongside the flushed rows.
+    fn flush_pending_actions_with_log_position(&mut self) -> Vec<ReplicationAction> {
+        let mut actions = self.group_commit.flush();
+        actions.push(ReplicationAction::LogPosition);
+        actions
+    }
+
     /// Requests the server to identify itself. Server replies with a result set of a single row,
     /// containing four fields:
     ///
@@ -304,6 +487,16 @@ impl PostgresWalConnector {
             xlogpos,
             dbname,
         })
+    }
+
+    /// Creates a new `PUBLICATION name FOR ALL TABLES`, to be able to receive WAL on that slot.
+    /// The user must have superuser privileges for that to work.
+    async fn create_publication(&mut self, name: &str) -> ReadySetResult<()> {
+        let query = format!("CREATE PUBLICATION {name} FOR ALL TABLES");
+        self.simple_query(&query).await.map_err(|e| {
+            ReadySetError::ReplicationFailed(format!("Failed to create publication: {e}"))
+        })?;
+        Ok(())
     }
 
     /// Creates a new replication slot on the primary.
@@ -631,18 +824,24 @@ fn select_ack_lsn(
 /// Not really needed when `TEMPORARY` slot is Used
 pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
     info!(slot = name, "Dropping replication slot if exists");
+    // SQL command to drop the replication slot over replication connection
     let formatted_command = format!("DROP_REPLICATION_SLOT {name}");
 
-    match client.simple_query(&formatted_command).await {
+    let res: ReadySetResult<Vec<pgsql::SimpleQueryMessage>> = client
+        .simple_query(&formatted_command)
+        .await
+        .map_err(ReadySetError::from);
+
+    match res {
         Ok(_) => Ok(()),
-        Err(e) if matches!(e.code(), Some(&SqlState::UNDEFINED_OBJECT)) => {
+        Err(err) if error_is_slot_not_found(&err, name) => {
             debug!(
                 slot = name,
                 "Replication slot to-drop already doesn't exist"
             );
             Ok(())
         }
-        Err(e) => Err(ReadySetError::from(e)),
+        Err(err) => Err(err),
     }
 }
 
@@ -672,7 +871,12 @@ impl Drop for PostgresWalConnector {
 
 #[async_trait]
 impl Connector for PostgresWalConnector {
-    /// Process WAL events and batch them into actions
+    /// Process WAL events and batch them into actions.
+    ///
+    /// Uses group commit to coalesce multiple consecutive committed
+    /// transactions into a single batch, reducing RPC overhead. After the
+    /// first transaction in a group commits, a time window is opened to
+    /// collect additional committed transactions before flushing.
     async fn next_action(
         &mut self,
         last_pos: &ReplicationOffset,
@@ -680,114 +884,98 @@ impl Connector for PostgresWalConnector {
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         set_failpoint_return_err!(failpoints::POSTGRES_REPLICATION_NEXT_ACTION);
 
-        // If it has been longer than the defined status update interval, send a status update to
-        // the upstream database to report our position in the WAL as the LSN of the last event we
-        // successfully applied to ReadySet. Status updates are best-effort: if anything fails,
-        // log and move on. We always update `time_last_position_reported` so we wait the full
-        // interval before retrying rather than tight-looping on a transient failure.
-        if self.time_last_position_reported.elapsed() > self.status_update_interval {
-            match Lsn::try_from(last_pos) {
-                Ok(lsn) => {
-                    if let Err(e) = self.send_standby_status_update(lsn).await {
-                        warn!(error = %e, "failed to send standby status update");
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "failed to compute LSN for standby status update");
-                }
-            }
-            self.time_last_position_reported = Instant::now();
-        }
-
-        let mut cur_table = Relation {
-            schema: None,
-            name: "".into(),
-        };
         let mut cur_pos = PostgresPosition::try_from(last_pos.clone())?;
-        let mut actions = Vec::with_capacity(Self::MAX_QUEUED_INDEPENDENT_ACTIONS);
 
         loop {
-            debug_assert!(
-                cur_table.schema.is_some() || cur_table.name.is_empty(),
-                "We should either have no current table, or the current table should have a schema"
-            );
-
-            // If we have no buffered actions, an `until` was passed, and the LSN is >= `until`,
-            // we report the log position
-            if actions.is_empty()
+            // If we have no pending actions, an `until` was passed, and we
+            // have reached it, report the log position.
+            if self.group_commit.pending_row_count == 0
                 && matches!(until, Some(until) if &ReplicationOffset::from(cur_pos) >= until)
             {
                 return Ok((vec![ReplicationAction::LogPosition], cur_pos.into()));
             }
 
-            // Get the next buffered event or error, or read a new event from the WAL stream.
-            let event = match self.peek.take() {
-                Some(buffered) => buffered,
-                None => self.next_event().await,
+            // When a group commit window is active, use it as the read
+            // timeout so we flush promptly when no more transactions arrive.
+            let read_timeout = if let Some(deadline) = self.group_commit.deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    // Group commit deadline expired — flush immediately
+                    let actions = self.flush_pending_actions_with_log_position();
+                    return Ok((actions, cur_pos.into()));
+                }
+                remaining
+            } else {
+                Duration::from_secs(30)
             };
 
-            match &event.as_ref().map(|ev| ev.lsn()) {
-                // If our next event is an error but there are buffered actions, we need to flush
-                // the buffered actions before handling the error
-                Err(_) if !actions.is_empty() => {
-                    self.peek = Some(event);
-                    return Ok((
-                        vec![ReplicationAction::TableAction {
-                            table: cur_table,
-                            actions,
-                        }],
-                        cur_pos.into(),
-                    ));
+            // Send a status update to the upstream database if the interval
+            // has elapsed, reporting the last successfully applied position.
+            // Status updates are best-effort: if anything fails, log and move
+            // on. We always advance `time_last_position_reported` so we wait
+            // the full interval before retrying rather than tight-looping on
+            // a transient failure.
+            if self.time_last_position_reported.elapsed() > self.status_update_interval {
+                match Lsn::try_from(last_pos) {
+                    Ok(lsn) => {
+                        if let Err(e) = self.send_standby_status_update(lsn).await {
+                            warn!(error = %e, "failed to send standby status update");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "failed to compute LSN for standby status update");
+                    }
                 }
-                // If our next event has an LSN, if our batch size has exceeded the max, and if the
-                // LSN of the event does not match the LSN of the prior event, we need to flush the
-                // buffered actions. This is to ensure that we apply all of the actions with a given
-                // LSN atomically: if the next event has an LSN that is different than the LSN of
-                // our current position, we need to stash the event with a different LSN, apply the
-                // batch of actions we have buffered, and then come back to the stashed event the
-                // next time this method is called.
-                //
-                // Note that COMMITs and BEGINs are counted as events that don't have LSNs and thus
-                // will never result in an early return here, since WalEvent::lsn() will return
-                // None.
-                //
-                // There are two situations in which we will receive a BEGIN: 1) if the last event
-                // we've received was a COMMIT and 2) if we are starting replication in the middle
-                // of a transaction after a restart. If the last event we received was a COMMIT, we
-                // know that we've already flushed all of our actions in the prior invocation of
-                // `handle_action`, so there would be no reason to return early here. If we are
-                // starting replication in the middle of a transaction after a restart, we will end
-                // up throwing out the actions that occur between this BEGIN and `last_pos`, since
-                // we've already processed them.
-                //
-                // A COMMIT always results in the flushing of our buffered events with the
-                // replication offset reported to be `(LSN of the COMMIT, LSN of the COMMIT)`. For a
-                // COMMIT event with LSN `x`, the `PostgresPosition` of that COMMIT event would be
-                // `(x, x)`. Even if the next event were to share an LSN with the COMMIT that came
-                // directly before it, the LSN `y` of the COMMIT that ends the next transaction
-                // would be greater than the LSN of the prior commit, which means
-                // `(x, x) != (y, x)`. In simpler terms, this guarantees that there will never be an
-                // event that comes after a COMMIT that shares the same `PostgresPosition`, so we
-                // don't need to worry about applying these events atomically to a base table
-                // domain.
-                Ok(Some(lsn))
-                    if actions.len() >= Self::MAX_QUEUED_INDEPENDENT_ACTIONS
-                        && *lsn != cur_pos.lsn =>
-                {
-                    self.peek = Some(event);
-                    return Ok((
-                        vec![ReplicationAction::TableAction {
-                            table: cur_table,
-                            actions,
-                        }],
-                        cur_pos.into(),
-                    ));
+                self.time_last_position_reported = Instant::now();
+            }
+
+            // Get the next buffered event, or read a new one with timeout.
+            let event = match self.peek.take() {
+                Some(buffered) => {
+                    // If the peek was stashed from a flush-pending-first
+                    // branch (DDL or Truncate that arrived after BEGIN had
+                    // already clobbered `cur_pos`), restore the saved
+                    // in-transaction `cur_pos` so the peek'd event is
+                    // processed in the correct transaction context.
+                    if let Some(saved) = self.peek_cur_pos.take() {
+                        cur_pos = saved;
+                    }
+                    buffered
                 }
-                _ => {}
+                None => match self.next_event_with_timeout(read_timeout).await {
+                    Ok(Some(ev)) => Ok(ev),
+                    Ok(None) => {
+                        // Timeout expired
+                        if self.group_commit.pending_row_count > 0 {
+                            let actions = self.flush_pending_actions_with_log_position();
+                            return Ok((actions, cur_pos.into()));
+                        }
+                        continue;
+                    }
+                    Err(e) => Err(e),
+                },
+            };
+
+            // If the next event is an error but we have pending actions,
+            // flush the pending actions before propagating the error.
+            // We use `cur_pos` rather than `last_committed_pos` because
+            // pending rows may belong to the *current* uncommitted
+            // transaction (e.g. when two statements share an implicit
+            // transaction via simple_query).  In that case
+            // `last_committed_pos` still points at a *prior* transaction
+            // whose position has already been recorded by the adapter via
+            // `handle_log_position`, so flushing at that position would
+            // cause the adapter to skip the data as "already applied".
+            // `cur_pos` is always at or after the last accumulated row's
+            // LSN, so the data will not be skipped.
+            if event.is_err() && self.group_commit.pending_row_count > 0 {
+                self.peek = Some(event);
+                self.peek_cur_pos = Some(cur_pos);
+                let actions = self.flush_pending_actions_with_log_position();
+                return Ok((actions, cur_pos.into()));
             }
 
             trace!(?event);
-            // Don't log the statement if we're catching up
             if self.enable_statement_logging {
                 info!(target: "replicator_statement", "{:?}", event);
             }
@@ -798,116 +986,46 @@ impl Connector for PostgresWalConnector {
 
             let event = event?;
 
-            macro_rules! return_current_actions {
-                () => {
-                    return Ok((
-                        vec![ReplicationAction::TableAction {
-                            table: cur_table,
-                            actions,
-                        }],
-                        cur_pos.into(),
-                    ))
-                };
-            }
-
-            let set_current = |cur_table: &mut Relation, schema: String, name: String| {
-                *cur_table = Relation {
-                    schema: Some(schema.into()),
-                    name: name.into(),
-                };
-            };
-
-            let event = match event {
-                WalEvent::Truncate { mut tables, lsn } => {
-                    let mut set_peek = |others| {
-                        self.peek = Some(Ok(WalEvent::Truncate {
-                            tables: others,
-                            lsn,
-                        }));
-                    };
-
-                    if !actions.is_empty() {
-                        // put each truncate in its own batch so the base node will be able to
-                        // see all rows when deleting them.
-                        set_peek(tables);
-                        return_current_actions!();
-                    }
-
-                    let Some((schema, name)) = tables.pop() else {
-                        continue; // finished
-                    };
-                    set_current(&mut cur_table, schema, name);
-                    set_peek(tables);
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push((TableOperation::Truncate, cur_pos.into()));
-                    return_current_actions!();
-                }
-                WalEvent::Insert {
-                    ref schema,
-                    ref table,
-                    ..
-                }
-                | WalEvent::DeleteRow {
-                    ref schema,
-                    ref table,
-                    ..
-                }
-                | WalEvent::DeleteByKey {
-                    ref schema,
-                    ref table,
-                    ..
-                }
-                | WalEvent::UpdateRow {
-                    ref schema,
-                    ref table,
-                    ..
-                }
-                | WalEvent::UpdateByKey {
-                    ref schema,
-                    ref table,
-                    ..
-                } if cur_table.schema.as_deref() != Some(schema.as_str())
-                    || cur_table.name != table.as_str() =>
-                {
-                    // if next event is for another table, flush
-                    if !actions.is_empty() {
-                        self.peek = Some(Ok(event));
-                        return_current_actions!();
-                    } else {
-                        set_current(&mut cur_table, schema.into(), table.into());
-                    }
-                    event
-                }
-                _ => event,
-            };
-
             match event {
                 WalEvent::DdlEvent { ddl_event, lsn } => {
-                    if actions.is_empty() {
-                        return Ok((
-                            vec![ReplicationAction::DdlChange {
-                                schema: ddl_event.schema().to_string(),
-                                changes: vec![ddl_event.try_into_change(self.parsing_config)?],
-                            }],
-                            cur_pos.with_lsn(lsn).into(),
-                        ));
-                    } else {
+                    if self.group_commit.pending_row_count > 0 {
+                        // Flush pending rows first; the DDL is stashed in
+                        // peek and processed on the next call. Return
+                        // `last_committed_pos` as the flush position —
+                        // `cur_pos` has been clobbered to
+                        // `(T_ddl.final_lsn, 0)` by the BEGIN of this DDL
+                        // transaction, so using it here would tag the
+                        // flushed rows with `lsn = 0`. Stash `cur_pos` so
+                        // the peek-pop on the next call can restore the
+                        // correct in-transaction state before processing
+                        // the DDL event.
+                        let flush_pos = self
+                            .last_committed_pos
+                            .expect("pending rows imply at least one prior COMMIT");
                         self.peek = Some(Ok(WalEvent::DdlEvent { ddl_event, lsn }));
-                        return_current_actions!();
+                        self.peek_cur_pos = Some(cur_pos);
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, flush_pos.into()));
                     }
+                    return Ok((
+                        vec![ReplicationAction::DdlChange {
+                            schema: ddl_event.schema().to_string(),
+                            changes: vec![ddl_event.try_into_change(self.parsing_config)?],
+                        }],
+                        cur_pos.with_lsn(lsn).into(),
+                    ));
                 }
+
                 WalEvent::WantsKeepaliveResponse { end } => {
-                    // Status updates are best-effort here too — see the timer-driven path
-                    // above for the rationale.
-                    let lsn = if !self.in_transaction && actions.is_empty() {
-                        // If the last event we applied to our base tables was a COMMIT and we have
-                        // no buffered actions, we can safely report the "end LSN" given to us in
-                        // the keepalive request as our current position.
+                    // Status updates are best-effort here too — see the
+                    // timer-driven path above for the rationale.
+                    let lsn = if !self.in_transaction && self.group_commit.pending_row_count == 0 {
+                        // No buffered or in-flight actions — safe to report
+                        // the keepalive's end LSN as our current position.
                         Ok(end)
                     } else {
-                        // If we have buffered actions, we have to report the position of the *last*
-                        // event we applied, since we haven't yet applied the events associated with
-                        // `cur_pos`
+                        // We have uncommitted or unflushed actions — report
+                        // the last position we actually persisted.
                         Lsn::try_from(last_pos)
                     };
                     match lsn {
@@ -922,74 +1040,195 @@ impl Connector for PostgresWalConnector {
                     }
                     self.time_last_position_reported = Instant::now();
                 }
+
                 WalEvent::Begin { final_lsn } => {
-                    // BEGINs should only happen if we aren't already in a transaction
                     invariant!(!self.in_transaction);
                     self.in_transaction = true;
-
-                    // Update our current position to be `(final_lsn, 0)`, which points to the first
-                    // position in the transaction that is ended by the COMMIT at `final_lsn`.
                     cur_pos = PostgresPosition::commit_start(final_lsn);
                 }
+
                 WalEvent::Commit { lsn, end_lsn } => {
-                    // Unless we just failed to process the previous event due to a table error, in
-                    // which case we will have dropped the cache for the associated table, If the
-                    // `CommitLsn` from the COMMIT does not match the `CommitLsn` from the
-                    // BEGIN, something has gone very wrong
                     if !self.had_table_error {
                         invariant_eq!(lsn, cur_pos.commit_lsn);
                     }
                     self.had_table_error = false;
-
-                    // COMMITs should only happen in the context of a transaction
                     invariant!(self.in_transaction);
                     self.in_transaction = false;
 
-                    // On commit we flush, because there is no knowing when the next commit is
-                    // coming. We report our current position to reflect the COMMIT we just saw.
-                    // If we crash after returning this position but before persisting this new
-                    // position in the base tables, we will begin replicating from a COMMIT prior to
-                    // this one, guaranteeing that we don't miss any events.
                     cur_pos = cur_pos.with_lsn(end_lsn);
+                    // Record this committed position. The DDL and Truncate
+                    // flush-pending-first paths return it as their flush
+                    // position, because by that point `cur_pos` has been
+                    // clobbered to `(T_next.final_lsn, 0)` by the BEGIN
+                    // of the next transaction.
+                    self.last_committed_pos = Some(cur_pos);
 
-                    if !actions.is_empty() {
-                        return_current_actions!();
-                    } else {
+                    // Group commit: decide whether to flush or coalesce.
+                    self.group_commit.advance();
+
+                    // During catchup (until is Some), flush on every commit
+                    // to stop precisely at the target position.
+                    if until.is_some() || self.group_commit.should_flush() {
+                        let actions = self.flush_pending_actions_with_log_position();
+                        return Ok((actions, cur_pos.into()));
+                    }
+
+                    // Not flushing yet — coalesce with next transaction.
+                    debug!(
+                        group_commit_trx_count = self.group_commit.trx_count,
+                        pending_row_count = self.group_commit.pending_row_count,
+                        "group commit: coalescing COMMIT"
+                    );
+                    if self.group_commit.pending_row_count == 0 {
+                        // Empty transaction — just report position.
                         return Ok((vec![ReplicationAction::LogPosition], cur_pos.into()));
                     }
                 }
-                WalEvent::Insert { tuple, lsn, .. } => {
+
+                WalEvent::Truncate { mut tables, lsn } => {
+                    // Truncate needs its own batch per table so the base
+                    // node can see all rows when deleting them. If we have
+                    // pending row actions, flush them first. Return
+                    // `last_committed_pos` as the flush position —
+                    // `cur_pos` has been clobbered to
+                    // `(T_trunc.final_lsn, 0)` by the BEGIN of this
+                    // truncate transaction, so using it here would tag
+                    // the flushed rows with `lsn = 0`. Stash `cur_pos` so
+                    // the peek-pop on the next call can restore the
+                    // correct in-transaction state before processing the
+                    // Truncate event.
+                    if self.group_commit.pending_row_count > 0 {
+                        let flush_pos = self
+                            .last_committed_pos
+                            .expect("pending rows imply at least one prior COMMIT");
+                        self.peek = Some(Ok(WalEvent::Truncate { tables, lsn }));
+                        self.peek_cur_pos = Some(cur_pos);
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, flush_pos.into()));
+                    }
+
+                    let Some((schema, name)) = tables.pop() else {
+                        continue;
+                    };
+
+                    // Stash remaining tables for the next call
+                    if !tables.is_empty() {
+                        self.peek = Some(Ok(WalEvent::Truncate { tables, lsn }));
+                    }
+
+                    let table = Relation {
+                        schema: Some(schema.into()),
+                        name: name.into(),
+                    };
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push((TableOperation::Insert(tuple), cur_pos.into()));
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    return Ok((
+                        vec![ReplicationAction::TableAction {
+                            table,
+                            actions: vec![(TableOperation::Truncate, event_pos.clone())],
+                        }],
+                        event_pos,
+                    ));
                 }
-                WalEvent::DeleteRow { tuple, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push((TableOperation::DeleteRow { row: tuple }, cur_pos.into()));
-                }
-                WalEvent::DeleteByKey { key, lsn, .. } => {
-                    cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push((TableOperation::DeleteByKey { key }, cur_pos.into()));
-                }
-                WalEvent::UpdateRow {
-                    old_tuple,
-                    new_tuple,
+
+                WalEvent::Insert {
+                    schema,
+                    table,
+                    tuple,
                     lsn,
-                    ..
                 } => {
                     cur_pos = cur_pos.with_lsn(lsn);
                     let event_pos: ReplicationOffset = cur_pos.into();
-                    actions.push((
-                        TableOperation::DeleteRow { row: old_tuple },
+                    if self.accumulate_row(
+                        schema.into(),
+                        table.into(),
+                        [TableOperation::Insert(tuple)],
                         event_pos.clone(),
-                    ));
-                    actions.push((TableOperation::Insert(new_tuple), event_pos));
+                    ) {
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, event_pos));
+                    }
                 }
-                WalEvent::UpdateByKey { key, set, lsn, .. } => {
+
+                WalEvent::DeleteRow {
+                    schema,
+                    table,
+                    tuple,
+                    lsn,
+                } => {
                     cur_pos = cur_pos.with_lsn(lsn);
-                    actions.push((TableOperation::Update { key, update: set }, cur_pos.into()));
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    if self.accumulate_row(
+                        schema.into(),
+                        table.into(),
+                        [TableOperation::DeleteRow { row: tuple }],
+                        event_pos.clone(),
+                    ) {
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, event_pos));
+                    }
                 }
-                op @ WalEvent::Truncate { .. } => {
-                    unreachable!("unhandled WalEvent::Truncate: {op:?}");
+
+                WalEvent::DeleteByKey {
+                    schema,
+                    table,
+                    key,
+                    lsn,
+                } => {
+                    cur_pos = cur_pos.with_lsn(lsn);
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    if self.accumulate_row(
+                        schema.into(),
+                        table.into(),
+                        [TableOperation::DeleteByKey { key }],
+                        event_pos.clone(),
+                    ) {
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, event_pos));
+                    }
+                }
+
+                WalEvent::UpdateRow {
+                    schema,
+                    table,
+                    old_tuple,
+                    new_tuple,
+                    lsn,
+                } => {
+                    cur_pos = cur_pos.with_lsn(lsn);
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    if self.accumulate_row(
+                        schema.into(),
+                        table.into(),
+                        [
+                            TableOperation::DeleteRow { row: old_tuple },
+                            TableOperation::Insert(new_tuple),
+                        ],
+                        event_pos.clone(),
+                    ) {
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, event_pos));
+                    }
+                }
+
+                WalEvent::UpdateByKey {
+                    schema,
+                    table,
+                    key,
+                    set,
+                    lsn,
+                } => {
+                    cur_pos = cur_pos.with_lsn(lsn);
+                    let event_pos: ReplicationOffset = cur_pos.into();
+                    if self.accumulate_row(
+                        schema.into(),
+                        table.into(),
+                        [TableOperation::Update { key, update: set }],
+                        event_pos.clone(),
+                    ) {
+                        let actions = self.group_commit.flush();
+                        return Ok((actions, event_pos));
+                    }
                 }
             }
         }
@@ -998,6 +1237,7 @@ impl Connector for PostgresWalConnector {
 
 #[cfg(test)]
 mod tests {
+    use readyset_data::DfValue;
     use replication_offset::postgres::{CommitLsn, PostgresPosition};
 
     use super::*;
@@ -1070,5 +1310,256 @@ mod tests {
             select_ack_lsn(Ok(PersistencePoint::UpTo(new_offset)), lsn(999), cached).unwrap();
         assert_eq!(ack, Some(lsn(150)));
         assert_eq!(cache, Some(lsn(150)));
+    }
+
+    fn relation(name: &str) -> Relation {
+        Relation {
+            schema: Some("public".into()),
+            name: SqlIdentifier::from(name),
+        }
+    }
+
+    /// A plain `TableOperation::Insert` of a single integer paired with
+    /// a placeholder replication offset, used so the unit tests don't
+    /// have to care about column types or per-event positions.
+    fn int_insert(v: i32) -> (TableOperation, ReplicationOffset) {
+        let pos: ReplicationOffset =
+            replication_offset::postgres::PostgresPosition::default().into();
+        (TableOperation::Insert(vec![DfValue::from(v)]), pos)
+    }
+
+    /// Extract the inserted integer values from the first `TableAction`
+    /// in the given Vec that targets the given table.
+    fn insert_values(actions: &[ReplicationAction], table: &Relation) -> Vec<i32> {
+        actions
+            .iter()
+            .find_map(|a| match a {
+                ReplicationAction::TableAction { table: t, actions } if t == table => Some(
+                    actions
+                        .iter()
+                        .filter_map(|(op, _)| match op {
+                            TableOperation::Insert(row) => i32::try_from(row[0].clone()).ok(),
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// Construct a `GroupCommitState` with the given limits and default
+    /// empty accumulator. The wait duration is large enough that tests
+    /// can treat the time-based flush path as "never fires on its own".
+    fn new_state(batch_size: usize, max_trx: usize) -> GroupCommitState {
+        GroupCommitState::new(batch_size, max_trx, Duration::from_secs(3600))
+    }
+
+    // ── accumulate_row ──────────────────────────────────────────────
+
+    #[test]
+    fn accumulate_row_creates_new_entry() {
+        let mut state = new_state(100, 20);
+        let should_flush = state.accumulate_row(relation("users"), [int_insert(1), int_insert(2)]);
+
+        assert!(!should_flush);
+        assert_eq!(state.pending_row_count, 2);
+        assert_eq!(state.pending_actions.len(), 1);
+        assert_eq!(state.pending_actions[&relation("users")].len(), 2);
+    }
+
+    #[test]
+    fn accumulate_row_appends_to_existing_table() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1), int_insert(2)]);
+        state.accumulate_row(relation("users"), [int_insert(3)]);
+
+        assert_eq!(state.pending_row_count, 3);
+        assert_eq!(state.pending_actions.len(), 1);
+        assert_eq!(state.pending_actions[&relation("users")].len(), 3);
+    }
+
+    #[test]
+    fn accumulate_row_separate_tables() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.accumulate_row(relation("posts"), [int_insert(2)]);
+
+        assert_eq!(state.pending_row_count, 2);
+        assert_eq!(state.pending_actions.len(), 2);
+    }
+
+    #[test]
+    fn accumulate_row_preserves_order_within_table() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(10), int_insert(20)]);
+        state.accumulate_row(relation("users"), [int_insert(30), int_insert(40)]);
+
+        let actions = state.flush();
+        assert_eq!(
+            insert_values(&actions, &relation("users")),
+            vec![10, 20, 30, 40]
+        );
+    }
+
+    #[test]
+    fn accumulate_row_returns_true_at_exact_batch_size() {
+        let mut state = new_state(2, 20);
+        // 1 row — under the limit
+        assert!(!state.accumulate_row(relation("users"), [int_insert(1)]));
+        // 2 rows — exactly at the limit, should signal flush
+        assert!(state.accumulate_row(relation("users"), [int_insert(2)]));
+    }
+
+    #[test]
+    fn accumulate_row_returns_true_past_batch_size() {
+        let mut state = new_state(2, 20);
+        // Inserting 3 in one shot crosses the limit in a single call
+        assert!(state.accumulate_row(
+            relation("users"),
+            [int_insert(1), int_insert(2), int_insert(3)],
+        ));
+    }
+
+    // ── flush ───────────────────────────────────────────────────────
+
+    #[test]
+    fn flush_drains_and_resets_counters() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.accumulate_row(relation("posts"), [int_insert(2)]);
+        state.advance();
+
+        let actions = state.flush();
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(state.pending_row_count, 0);
+        assert!(state.pending_actions.is_empty());
+        assert_eq!(state.trx_count, 0);
+        assert!(state.deadline.is_none());
+        assert!(state.leader.is_none());
+    }
+
+    #[test]
+    fn flush_with_no_pending_returns_empty() {
+        let mut state = new_state(100, 20);
+        let actions = state.flush();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn flush_emits_one_table_action_per_relation() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("a"), [int_insert(1), int_insert(2)]);
+        state.accumulate_row(relation("b"), [int_insert(3)]);
+        state.accumulate_row(relation("a"), [int_insert(4)]);
+
+        let mut actions = state.flush();
+        // Order across tables isn't guaranteed by HashMap drain; sort for
+        // deterministic comparison.
+        actions.sort_by(|x, y| match (x, y) {
+            (
+                ReplicationAction::TableAction { table: t1, .. },
+                ReplicationAction::TableAction { table: t2, .. },
+            ) => t1.name.cmp(&t2.name),
+            _ => std::cmp::Ordering::Equal,
+        });
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(insert_values(&actions, &relation("a")), vec![1, 2, 4]);
+        assert_eq!(insert_values(&actions, &relation("b")), vec![3]);
+    }
+
+    // ── advance / should_flush / reset_window ──────────────────────
+
+    #[test]
+    fn advance_noop_when_no_pending_rows() {
+        let mut state = new_state(100, 20);
+        state.advance();
+
+        assert_eq!(state.trx_count, 0);
+        assert!(state.deadline.is_none());
+        assert!(state.leader.is_none());
+    }
+
+    #[test]
+    fn advance_sets_deadline_on_first_commit() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.advance();
+
+        assert_eq!(state.trx_count, 1);
+        assert!(state.deadline.is_some());
+        assert!(state.leader.is_some());
+    }
+
+    #[test]
+    fn advance_preserves_deadline_on_subsequent_commits() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.advance();
+        let deadline_after_first = state.deadline;
+        let leader_after_first = state.leader;
+
+        state.accumulate_row(relation("users"), [int_insert(2)]);
+        state.advance();
+
+        assert_eq!(state.trx_count, 2);
+        assert_eq!(state.deadline, deadline_after_first);
+        assert_eq!(state.leader, leader_after_first);
+    }
+
+    #[test]
+    fn should_flush_false_when_below_all_limits() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.advance();
+        assert!(!state.should_flush());
+    }
+
+    #[test]
+    fn should_flush_true_when_trx_count_reaches_max() {
+        let mut state = new_state(100, 3);
+        for i in 0..3 {
+            state.accumulate_row(relation("users"), [int_insert(i)]);
+            state.advance();
+        }
+        assert!(state.should_flush());
+    }
+
+    #[test]
+    fn should_flush_true_when_row_count_reaches_batch_size() {
+        let mut state = new_state(2, 20);
+        state.accumulate_row(relation("users"), [int_insert(1), int_insert(2)]);
+        state.advance();
+        assert!(state.should_flush());
+    }
+
+    #[test]
+    fn should_flush_true_when_wait_is_zero() {
+        let mut state = GroupCommitState::new(100, 20, Duration::ZERO);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.advance();
+        assert!(state.should_flush());
+    }
+
+    #[test]
+    fn reset_window_clears_deadline_leader_and_trx_count() {
+        let mut state = new_state(100, 20);
+        state.accumulate_row(relation("users"), [int_insert(1)]);
+        state.advance();
+        // Sanity check — advance set everything
+        assert!(state.deadline.is_some());
+        assert!(state.leader.is_some());
+        assert_eq!(state.trx_count, 1);
+
+        state.reset_window();
+
+        assert!(state.deadline.is_none());
+        assert!(state.leader.is_none());
+        assert_eq!(state.trx_count, 0);
+        // `reset_window` is intentionally *not* supposed to clear the
+        // accumulated rows — those are only drained by `flush`.
+        assert_eq!(state.pending_row_count, 1);
     }
 }
