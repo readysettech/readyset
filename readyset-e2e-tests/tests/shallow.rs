@@ -277,6 +277,10 @@ async fn show_shallow_caches() {
         .query_drop("CREATE TABLE foo (a INT, b INT)")
         .await
         .unwrap();
+    upstream
+        .query_drop("INSERT INTO foo VALUES (1, 10)")
+        .await
+        .unwrap();
 
     let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
@@ -304,6 +308,23 @@ async fn show_shallow_caches() {
         .await
         .unwrap();
 
+    readyset
+        .query_drop("SELECT * FROM foo WHERE a = 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream
+    );
+    readyset
+        .query_drop("SELECT * FROM foo WHERE a = 1")
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow
+    );
+
     // Check SHOW CACHES.
     let rows: Vec<(String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHES").await.unwrap();
@@ -313,6 +334,8 @@ async fn show_shallow_caches() {
     assert_eq!(query_id, "q_89a59a917bc9c0ba");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
+    let count: u64 = count.parse().unwrap();
+    assert!(count >= 1, "expected at least one shallow hit, got {count}");
 
     let mut properties: HashSet<_> = properties.split(",").map(|p| p.trim().to_string()).collect();
     assert!(properties.remove("shallow"), "missing expected shallow property: {properties:?}");
@@ -321,15 +344,31 @@ async fn show_shallow_caches() {
     assert!(properties.remove("coalesce 2000 ms"), "missing expected coalesce: {properties:?}");
     assert!(properties.is_empty(), "unexpected properties remaining: {properties:?}");
 
-    assert_eq!(count, "0");
-
     // Check the shallow_caches vrel.
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool)> =
-        readyset.query("SELECT * FROM readyset.shallow_caches").await.unwrap();
+    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool, u64, u64)> =
+        readyset
+            .query(
+                "SELECT query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule,
+                        hits, misses
+                 FROM readyset.shallow_caches",
+            )
+            .await
+            .unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
 
-    let (query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule) = &rows[0];
+    let (
+        query_id,
+        name,
+        query,
+        ttl_ms,
+        refresh_ms,
+        coalesce_ms,
+        always,
+        schedule,
+        hits,
+        misses,
+    ) = &rows[0];
     assert_eq!(query_id, "q_89a59a917bc9c0ba");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
@@ -338,6 +377,8 @@ async fn show_shallow_caches() {
     assert_eq!(*coalesce_ms, 2000);
     assert_eq!(*always, false);
     assert_eq!(*schedule, false);
+    assert!(*hits >= 1, "expected at least one shallow hit, got {hits}");
+    assert!(*misses >= 1, "expected at least one shallow miss, got {misses}");
 
     shutdown_tx.shutdown().await;
 }
@@ -460,8 +501,13 @@ async fn show_shallow_cache_entries() {
     let entries: Vec<(String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
-    let vrel_entries: Vec<(String, String, u64, u64, u64, u64)> =
-        readyset.query("SELECT * FROM readyset.shallow_cache_entries").await.unwrap();
+    let vrel_entries: Vec<(String, String, u64, u64, u64, u64)> = readyset
+        .query(
+            "SELECT query_id, entry_id, last_accessed_ms, last_refreshed_ms, refresh_time_ms, bytes
+             FROM readyset.shallow_cache_entries",
+        )
+        .await
+        .unwrap();
     assert_eq!(vrel_entries.len(), 2);
 
     // Get the query_id from one of the entries
@@ -479,8 +525,13 @@ async fn show_shallow_cache_entries() {
         2,
         "Filtered by query_id should return both entries for this cache"
     );
-    let vrel_filtered: Vec<(String, String, u64, u64, u64, u64)> =
-        readyset.query(format!("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = '{query_id}'")).await.unwrap();
+    let vrel_filtered: Vec<(String, String, u64, u64, u64, u64)> = readyset
+        .query(format!(
+            "SELECT query_id, entry_id, last_accessed_ms, last_refreshed_ms, refresh_time_ms, bytes
+             FROM readyset.shallow_cache_entries WHERE query_id = '{query_id}'"
+        ))
+        .await
+        .unwrap();
     assert_eq!(vrel_filtered.len(), 2);
 
     // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
@@ -512,8 +563,13 @@ async fn show_shallow_cache_entries() {
         non_existent.is_empty(),
         "Non-existent query_id should return empty results"
     );
-    let vrel_non_existent: Vec<(String, String, u64, u64, u64, u64)> =
-        readyset.query("SELECT * FROM readyset.shallow_cache_entries WHERE query_id = 'q_12345'").await.unwrap();
+    let vrel_non_existent: Vec<(String, String, u64, u64, u64, u64)> = readyset
+        .query(
+            "SELECT query_id, entry_id, last_accessed_ms, last_refreshed_ms, refresh_time_ms, bytes
+             FROM readyset.shallow_cache_entries WHERE query_id = 'q_12345'",
+        )
+        .await
+        .unwrap();
     assert_eq!(vrel_non_existent.len(), 0);
 
     shutdown_tx.shutdown().await;

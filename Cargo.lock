@@ -6589,6 +6589,7 @@ dependencies = [
  "readyset-client",
  "readyset-data",
  "readyset-errors",
+ "readyset-metrics",
  "readyset-shallow",
  "readyset-sql",
  "readyset-util",

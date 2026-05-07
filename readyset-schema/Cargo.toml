@@ -19,6 +19,7 @@ psql-srv = { path = "../psql-srv" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
+readyset-metrics = { path = "../readyset-metrics" }
 readyset-shallow = { path = "../readyset-shallow" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }

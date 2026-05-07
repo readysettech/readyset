@@ -1,7 +1,9 @@
 use std::hash::Hash;
 
+use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_data::DfType;
+use readyset_metrics::metrics_handle;
 use readyset_shallow::{CacheEntryInfo, CacheInfo, CacheManager};
 use readyset_sql::{DialectDisplay, ast::Relation};
 use readyset_util::SizeOf;
@@ -38,15 +40,33 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("coalesce_ms", DfType::UnsignedBigInt),
     ("always", DfType::Bool),
     ("schedule", DfType::Bool),
+    ("hits", DfType::UnsignedBigInt),
+    ("misses", DfType::UnsignedBigInt),
+    ("refreshes", DfType::UnsignedBigInt),
 ];
 
 fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
     let dialect = ctx.dialect;
     let caches = ctx.shallow.list_caches(None, None);
     Box::pin(async move {
+        let [hits, misses, refreshes] = metrics_handle()
+            .map(|h| {
+                h.counters_by_label(
+                    [
+                        recorded::SHALLOW_HIT,
+                        recorded::SHALLOW_MISS,
+                        recorded::SHALLOW_REFRESH,
+                    ],
+                    "query_id",
+                    [],
+                )
+            })
+            .unwrap_or_default();
+
         let rows: VrelRows = Box::new(caches.into_iter().map(move |cache| {
+            let query_id = cache.query_id.to_string();
             vec![
-                cache.query_id.to_string().into(),
+                query_id.clone().into(),
                 cache.name.map(|n| n.display_unquoted().to_string()).into(),
                 cache.query.display(dialect).to_string().into(),
                 cache.ttl_ms.into(),
@@ -58,6 +78,9 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 )
                 .into(),
                 cache.schedule.into(),
+                hits.get(&query_id).into(),
+                misses.get(&query_id).into(),
+                refreshes.get(&query_id).into(),
             ]
         }));
         Ok(rows)
