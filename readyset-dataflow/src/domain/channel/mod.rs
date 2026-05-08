@@ -394,7 +394,7 @@ impl ChannelCoordinator {
         let guard = self.inner.read().expect("poisoned mutex");
         #[allow(clippy::significant_drop_in_scrutinee)]
         match guard.addrs.get(key) {
-            None => Err(ReadySetError::NoSuchReplica {
+            None => Err(ReadySetError::DomainNotFound {
                 domain_index: key.index(),
             }),
             Some(addrs) => Ok(DomainConnectionBuilder {

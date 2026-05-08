@@ -490,21 +490,13 @@ pub enum ReadySetError {
     #[error("HTTP request {request} failed: {message}")]
     HttpRequestFailed { request: String, message: String },
 
-    /// A replica index was used for a domain that doesn't have that many shards
-    #[error("Replica {replica} out of bounds for view {view_name} with {num_replicas} replicas")]
-    ViewReplicaOutOfBounds {
-        replica: usize,
-        view_name: String,
-        num_replicas: usize,
-    },
-
     /// A view was attempted to be built for a reader whose domain is not running
     #[error("Domain for reader node {node:?} is not running")]
-    ReaderReplicaNotRunning { node: NodeIndex },
+    ReaderNotRunning { node: NodeIndex },
 
     /// A request for a domain was sent to a worker that doesn't have that domain.
-    #[error("Could not find domain {domain_index} on worker")]
-    NoSuchReplica {
+    #[error("Could not find domain {domain_index}")]
+    DomainNotFound {
         /// The index of the domain.
         domain_index: usize,
     },
@@ -1418,7 +1410,7 @@ mod test {
         assert!(err.caused_by_controller_recovering());
 
         // Not caused by ControllerRecovering
-        let err = ReadySetError::NoSuchReplica { domain_index: 0 };
+        let err = ReadySetError::DomainNotFound { domain_index: 0 };
         assert!(!err.caused_by_controller_recovering());
     }
 }

@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use array2::Array2;
 use async_bincode::tokio::AsyncBincodeStream;
 use dataflow_expression::{BinaryOperator as DfBinaryOperator, Dialect, Expr as DfExpr};
 use futures_util::future::BoxFuture;
@@ -20,7 +19,6 @@ use futures_util::future::TryFutureExt;
 use futures_util::{future, ready, Stream};
 use petgraph::graph::NodeIndex;
 use proptest::arbitrary::Arbitrary;
-use rand::prelude::IteratorRandom;
 use readyset_data::{
     Bound, BoundedRange, Collation, DfType, DfValue, IntoBoundedRange, RangeBounds,
 };
@@ -889,8 +887,8 @@ pub struct ReaderHandleBuilder {
     pub columns: Arc<[SqlIdentifier]>,
     pub schema: Option<ViewSchema>,
 
-    /// replica -> shard index -> addr (if running)
-    pub replica_shard_addrs: Array2<Option<SocketAddr>>,
+    /// Address of the worker hosting the reader, if running.
+    pub read_addr: Option<SocketAddr>,
 
     /// (view_placeholder, key_column_index) pairs according to their mapping. Contains exactly one
     /// entry for each key column at the reader.
@@ -929,46 +927,18 @@ pub enum ViewBuilder {
 
 impl ReaderHandleBuilder {
     /// Build a [`ReaderHandle`] out of a [`ReaderHandleBuilder`].
-    ///
-    /// If `replica` is specified, this selects the reader replica with that index, returning an
-    /// error if the index is out of bounds. Otherwise, a replica is selected at random
     pub async fn build(
         &self,
-        replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<ReaderHandle> {
         let node = self.node;
-
-        let shards = match replica {
-            Some(replica) => self.replica_shard_addrs.get(replica),
-            None if self.replica_shard_addrs.num_rows() == 1 => Some(&self.replica_shard_addrs[0]),
-            None => self
-                .replica_shard_addrs
-                .rows()
-                .filter(|a| a.iter().all(|addr| addr.is_some()))
-                .choose(&mut rand::rng()),
-        }
-        .ok_or_else(|| {
-            if replica.is_none() && self.replica_shard_addrs.num_rows() != 1 {
-                ReadySetError::ReaderReplicaNotRunning { node }
-            } else {
-                ReadySetError::ViewReplicaOutOfBounds {
-                    replica: replica.unwrap_or(0),
-                    view_name: self.name.clone().display_unquoted().to_string(),
-                    num_replicas: self.replica_shard_addrs.num_rows(),
-                }
-            }
-        })?;
+        let shard_addr = self
+            .read_addr
+            .ok_or(ReadySetError::ReaderNotRunning { node })?;
 
         let columns = self.columns.clone();
         let schema = self.schema.clone();
         let key_mapping = self.key_mapping.clone();
-
-        // Standalone Readyset always reports a single shard per reader.
-        debug_assert_eq!(shards.len(), 1);
-        let Some(shard_addr) = shards.first().copied().flatten() else {
-            return Err(ReadySetError::ReaderReplicaNotRunning { node });
-        };
 
         let shard = {
             use std::collections::hash_map::Entry;
@@ -1018,11 +988,10 @@ impl ViewBuilder {
     /// Build a `View` from `ViewBuilder`. Wraps ReaderHandleBuilder::build().
     pub async fn build(
         &self,
-        replica: Option<usize>,
         rpcs: Arc<Mutex<HashMap<(SocketAddr, usize), ViewRpc>>>,
     ) -> ReadySetResult<View> {
         match self {
-            ViewBuilder::Single(builder) => Ok(View::Single(builder.build(replica, rpcs).await?)),
+            ViewBuilder::Single(builder) => Ok(View::Single(builder.build(rpcs).await?)),
             ViewBuilder::MultipleReused(builders) => {
                 let mut handles = Vec::with_capacity(builders.len());
                 for ReusedReaderHandleBuilder {
@@ -1031,7 +1000,7 @@ impl ViewBuilder {
                     required_values,
                 } in builders
                 {
-                    let reader_handle = builder.build(replica, rpcs.clone()).await?;
+                    let reader_handle = builder.build(rpcs.clone()).await?;
                     handles.push(ReusedReaderHandle {
                         reader_handle,
                         key_remapping: key_remapping.clone(),

@@ -20,7 +20,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use array2::Array2;
 use common::{IndexPair, Tag};
 use dataflow::domain::replay_paths::ReplayPath;
 use dataflow::node::{self, Column};
@@ -490,14 +489,13 @@ impl DfState {
                     .copied()
             })
             .transpose()?;
-        let replicas = vec![vec![read_addr]];
 
         Ok(Some(ReaderHandleBuilder {
             name: name.clone(),
             node: reader_node,
             columns: columns.into(),
             schema,
-            replica_shard_addrs: Array2::from_rows(replicas),
+            read_addr,
             key_mapping,
             view_request_timeout: self.domain_config.view_request_timeout,
         }))
@@ -1023,7 +1021,7 @@ impl DfState {
 
         for di in domains.iter() {
             if !self.domains.contains_key(di) {
-                return Err(ReadySetError::NoSuchReplica {
+                return Err(ReadySetError::DomainNotFound {
                     domain_index: di.index(),
                 });
             }
@@ -1291,7 +1289,7 @@ impl DfState {
             match self
                 .domains
                 .get(&domain)
-                .ok_or_else(|| ReadySetError::NoSuchReplica {
+                .ok_or_else(|| ReadySetError::DomainNotFound {
                     domain_index: domain.index(),
                 })?
                 .try_send::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)

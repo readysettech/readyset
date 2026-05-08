@@ -76,7 +76,6 @@ url = { workspace = true, features = ["serde"] }
 vec1 = { workspace = true }
 
 # local deps
-array2 = { path = "../array2" }
 catalog-tables = { path = "../catalog-tables" }
 common = { path = "../readyset-common", package = "readyset-common" }
 database-utils = { path = "../database-utils" }

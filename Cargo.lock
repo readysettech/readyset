@@ -6001,7 +6001,6 @@ dependencies = [
  "ahash",
  "antithesis_sdk",
  "anyhow",
- "array2",
  "async-bincode",
  "async-trait",
  "axum",
@@ -6662,7 +6661,6 @@ version = "0.7.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
- "array2",
  "assert_approx_eq",
  "assert_matches",
  "async-bincode",

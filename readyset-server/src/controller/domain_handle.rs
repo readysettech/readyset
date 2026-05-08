@@ -117,7 +117,7 @@ impl DomainHandle {
     {
         self.try_send(req, workers)
             .await?
-            .ok_or_else(|| ReadySetError::NoSuchReplica {
+            .ok_or_else(|| ReadySetError::DomainNotFound {
                 domain_index: self.idx.into(),
             })
     }

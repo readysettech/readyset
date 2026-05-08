@@ -689,20 +689,6 @@ impl ReadySetHandle {
         self.request_view(request)
     }
 
-    /// Obtain the replica of a `View` with the given replica index
-    ///
-    /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-    pub fn view_with_replica<I: Into<Relation>>(
-        &mut self,
-        name: I,
-        replica: usize,
-    ) -> impl Future<Output = ReadySetResult<View>> + '_ {
-        self.request_view(ViewRequest {
-            name: name.into(),
-            filter: Some(ViewFilter::Replica(replica)),
-        })
-    }
-
     /// Obtain a 'ViewBuilder' for a specific view that allows you to build a view.
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
@@ -744,13 +730,8 @@ impl ReadySetHandle {
     ) -> impl Future<Output = ReadySetResult<View>> + '_ {
         let views = self.views.clone();
         async move {
-            let replica = if let Some(ViewFilter::Replica(replica)) = &view_request.filter {
-                Some(*replica)
-            } else {
-                None
-            };
             let view_builder = self.view_builder(view_request).await?;
-            view_builder.build(replica, views).await
+            view_builder.build(views).await
         }
     }
 

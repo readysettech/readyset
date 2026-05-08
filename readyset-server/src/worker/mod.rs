@@ -375,7 +375,7 @@ impl Worker {
             }
             WorkerRequestKind::KillDomains(domains) => {
                 for addr in domains {
-                    let nsde = || ReadySetError::NoSuchReplica {
+                    let nsde = || ReadySetError::DomainNotFound {
                         domain_index: addr.index(),
                     };
                     match self.domains.remove(&addr) {
@@ -408,7 +408,7 @@ impl Worker {
                 domain_index: domain,
                 request,
             } => {
-                let nsde = || ReadySetError::NoSuchReplica {
+                let nsde = || ReadySetError::DomainNotFound {
                     domain_index: domain.index(),
                 };
                 let dh = self.domains.get_mut(&domain).ok_or_else(nsde)?;

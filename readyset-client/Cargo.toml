@@ -71,7 +71,6 @@ async-trait = { workspace = true }
 reqwest = { workspace = true, features = ["json", "stream"] }
 
 # Local dependencies
-array2 = { path = "../array2" }
 dataflow-expression = { path = "../dataflow-expression" }
 failpoint-macros = { path = "../failpoint-macros" }
 readyset-data = { path = "../readyset-data" }
