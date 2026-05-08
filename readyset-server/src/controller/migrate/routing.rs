@@ -12,9 +12,7 @@ use dataflow::payload::SenderReplication;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use petgraph::graph::NodeIndex;
-use readyset_errors::{
-    internal, internal_err, invariant, invariant_eq, ReadySetError, ReadySetResult,
-};
+use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
 use tracing::trace;
 
 use crate::controller::migrate::DomainMigrationPlan;
@@ -275,20 +273,10 @@ pub(in crate::controller) fn connect(
             let sender_node = &graph[sender];
             invariant_ne!(sender_node.domain(), ingress_node.domain());
 
-            let our_replicas = dmp.num_replicas(sender_node.domain())?;
-            let next_domain_replicas = dmp.num_replicas(ingress_node.domain())?;
-            let replication = if our_replicas == next_domain_replicas {
-                SenderReplication::Same
-            } else {
-                invariant_eq!(
-                    our_replicas,
-                    1,
-                    "Can't currently go from replicated n-ways to replicated m-ways"
-                );
-                SenderReplication::Fanout {
-                    num_replicas: next_domain_replicas,
-                }
-            };
+            dmp.check_domain(sender_node.domain())?;
+            dmp.check_domain(ingress_node.domain())?;
+            // Standalone Readyset has one replica per domain.
+            let replication = SenderReplication::Same;
 
             if sender_node.is_egress() {
                 trace!(
@@ -296,9 +284,6 @@ pub(in crate::controller) fn connect(
                     ingress = ingress_node_index.index(),
                     "connecting"
                 );
-
-                let shards = dmp.num_shards(ingress_node.domain())?;
-                invariant_eq!(shards, 1);
                 dmp.add_message(
                     sender_node.domain(),
                     DomainRequest::AddEgressTx {

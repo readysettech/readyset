@@ -367,22 +367,10 @@ impl DomainMigrationPlan {
         self.failed_placement.push(domain);
     }
 
-    /// Return the number of shards the given domain has. Always 1 in standalone Readyset.
-    pub fn num_shards(&self, domain: DomainIndex) -> ReadySetResult<usize> {
+    /// Return whether the given domain is known to this plan. Errors if not.
+    pub fn check_domain(&self, domain: DomainIndex) -> ReadySetResult<()> {
         if self.domains.contains(&domain) {
-            Ok(1)
-        } else {
-            Err(ReadySetError::UnknownDomain {
-                domain_index: domain.index(),
-            })
-        }
-    }
-
-    /// Returns the number of times each shard of the given domain is replicated. Always 1 in
-    /// standalone Readyset.
-    pub fn num_replicas(&self, domain: DomainIndex) -> ReadySetResult<usize> {
-        if self.domains.contains(&domain) {
-            Ok(1)
+            Ok(())
         } else {
             Err(ReadySetError::UnknownDomain {
                 domain_index: domain.index(),

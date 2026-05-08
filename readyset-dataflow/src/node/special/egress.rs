@@ -101,7 +101,6 @@ impl Egress {
         message: &mut Option<Packet>,
         keyed_by: Option<&[usize]>,
         shard: usize,
-        _replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let Self {

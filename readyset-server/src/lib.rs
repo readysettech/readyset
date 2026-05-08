@@ -401,7 +401,6 @@ pub enum ReuseConfigType {
 
 use controller::migrate::materialization;
 pub use controller::migrate::materialization::FrontierStrategy;
-pub use controller::replication::ReplicationStrategy;
 use controller::sql;
 use database_utils::UpstreamConfig;
 pub use dataflow::{DurabilityMode, PersistenceParameters};
@@ -473,8 +472,10 @@ pub struct Config {
     pub(crate) replicator_config: UpstreamConfig,
     #[serde(default)]
     pub(crate) replicator_statement_logging: bool,
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime. See [`controller::replication::ReplicationStrategy`].
     #[serde(default)]
-    pub(crate) replication_strategy: ReplicationStrategy,
+    pub(crate) replication_strategy: crate::controller::replication::ReplicationStrategy,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
     /// The duration to wait before canceling a task waiting on a worker request. Worker requests
@@ -514,6 +515,7 @@ impl Default for Config {
             mir_config: Default::default(),
             replicator_statement_logging: false,
             replicator_config: Default::default(),
+            #[allow(deprecated)]
             replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
             worker_request_timeout: Duration::from_millis(1800000),

@@ -34,7 +34,6 @@ pub(crate) struct ProcessEnv<'domain> {
     pub(crate) nodes: &'domain DomainNodes,
     pub(crate) executor: &'domain mut dyn Executor,
     pub(crate) shard: Option<usize>,
-    pub(crate) replica: usize,
     /// Per-Node mutable state for nodes that require it
     pub(crate) auxiliary_node_states: &'domain mut AuxiliaryNodeStateMap,
 }
@@ -154,7 +153,6 @@ impl Node {
                     m,
                     keyed_by.map(Vec::as_slice),
                     env.shard.unwrap_or(0),
-                    env.replica,
                     env.executor,
                 )?;
             }
@@ -336,7 +334,6 @@ impl Node {
         keys: &[KeyComparison],
         tag: Tag,
         on_shard: Option<usize>,
-        on_replica: usize,
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         ex: &mut dyn Executor,
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
@@ -364,7 +361,6 @@ impl Node {
                     })),
                     None,
                     on_shard.unwrap_or(0),
-                    on_replica,
                     ex,
                 )?;
             }

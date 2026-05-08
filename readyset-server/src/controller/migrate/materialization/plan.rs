@@ -562,35 +562,19 @@ impl<'a> Plan<'a> {
                 };
 
                 #[allow(clippy::expect_used)]
-                let our_replicas = self
-                    .dmp
-                    .num_replicas(domain)
+                self.dmp
+                    .check_domain(domain)
                     .expect("Domain should exist at this point");
-                let source_replicas = segments
-                    .first()
-                    .and_then(|(source_domain, _)| self.dmp.num_replicas(*source_domain).ok());
-                let replica_fanout = match source_replicas {
-                    Some(source_replicas) if source_replicas == our_replicas => {
-                        // Same number of replicas, no fanount
-                        false
-                    }
-
-                    Some(source_replicas) => {
-                        invariant_eq!(
-                            source_replicas,
-                            1,
-                            "Can't currently go from replicated n-ways to replicated m-ways"
-                        );
-                        // Replicating 1-way -> replicating n-ways
-                        true
-                    }
-                    None => {
+                if let Some((source_domain, _)) = segments.first() {
+                    if self.dmp.check_domain(*source_domain).is_err() {
                         // Since we iterate in topological order, this shouldn't happen (we should
                         // have set the number of replicas for the domain by
                         // now)
-                        internal!("Could not find replicas at source of replay path")
+                        internal!("Could not find replicas at source of replay path");
                     }
-                };
+                }
+                // Standalone Readyset has one replica per domain, so there's never any fanout.
+                let replica_fanout = false;
 
                 // build the message we send to this domain to tell it about this replay path.
                 let mut setup = DomainRequest::SetupReplayPath {

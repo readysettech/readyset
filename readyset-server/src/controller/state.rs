@@ -69,7 +69,6 @@ use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
 use vec1::{vec1, Vec1};
 
-use super::replication::ReplicationStrategy;
 use super::sql::Recipe;
 use crate::controller::domain_handle::DomainHandle;
 use crate::controller::migrate::materialization::Materializations;
@@ -136,7 +135,10 @@ pub struct DfState {
 
     pub(super) domain_config: DomainConfig,
 
-    pub(super) replication_strategy: ReplicationStrategy,
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime. See [`super::replication::ReplicationStrategy`].
+    #[serde(default)]
+    pub(super) replication_strategy: super::replication::ReplicationStrategy,
 
     /// Controls the persistence mode, and parameters related to persistence.
     ///
@@ -207,7 +209,6 @@ impl DfState {
         recipe: Recipe,
         schema_replication_offset: Option<ReplicationOffset>,
         channel_coordinator: Arc<ChannelCoordinator>,
-        replication_strategy: ReplicationStrategy,
     ) -> Self {
         Self {
             ingredients,
@@ -216,6 +217,8 @@ impl DfState {
             #[allow(deprecated)]
             sharding: None,
             domain_config,
+            #[allow(deprecated)]
+            replication_strategy: Default::default(),
             persistence,
             materializations,
             recipe,
@@ -228,7 +231,6 @@ impl DfState {
             read_addrs: Default::default(),
             workers: Default::default(),
             domain_node_index_pairs: Default::default(),
-            replication_strategy,
         }
     }
 
@@ -1664,7 +1666,6 @@ impl DfState {
             recipe,
             None,
             Arc::new(ChannelCoordinator::new()),
-            self.replication_strategy,
         );
 
         true

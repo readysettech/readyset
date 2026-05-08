@@ -14,7 +14,6 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::shutdown::{self, ShutdownSender};
 
-use crate::controller::replication::ReplicationStrategy;
 use crate::handle::Handle;
 use crate::{Config, FrontierStrategy, ReuseConfigType};
 
@@ -281,11 +280,6 @@ impl Builder {
         self.config
             .replicator_config
             .disable_upstream_ssl_verification = value;
-    }
-
-    /// Sets the strategy to use to determine how many times to replicate domains
-    pub fn set_replication_strategy(&mut self, replication_strategy: ReplicationStrategy) {
-        self.config.replication_strategy = replication_strategy
     }
 
     /// Configures this ReadySet server to accept only domains that contain reader nodes.

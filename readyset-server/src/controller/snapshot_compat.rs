@@ -117,7 +117,6 @@ fn build_v1_state() -> ControllerState {
         recipe,
         None,
         Arc::new(ChannelCoordinator::new()),
-        config.replication_strategy,
     );
     state.ndomains = 42;
     state.sharding = Some(7);
