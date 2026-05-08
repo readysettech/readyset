@@ -767,6 +767,60 @@ fn downstream_joins_cardinality_preserving(
     Ok(true)
 }
 
+/// Lower-level LATERAL variant of [`downstream_joins_cardinality_preserving`].
+/// Symmetric with the canonical lower-level: accepts raw arguments rather than
+/// a full `&InliningContext`, and is called by the unified dispatcher
+/// `check_downstream_joins_cardinality_preserving` when the caller has
+/// populated all three LATERAL-scope `Option` fields on the context.
+///
+/// Two relaxations vs. canonical:
+///   - ON predicate shape: accepts correlation-equality predicates referencing
+///     aliases in `flattened_aliases` (via [`is_on_nonrejecting_or_lateral_correlation`]).
+///   - Body cardinality signal: unions canonical structural checks with
+///     pre-hoist set membership via [`is_lateral_friendly_exactly_one`] and
+///     [`is_lateral_friendly_at_most_one`].
+fn downstream_joins_cardinality_preserving_lateral(
+    downstream_tables: &[TableExpr],
+    downstream_joins: &[JoinClause],
+    exactly_one_set: &HashSet<Relation>,
+    at_most_one_set: &HashSet<Relation>,
+    flattened_aliases: &HashSet<Relation>,
+    is_inner_agg: bool,
+    inner_limit_is_empty: bool,
+) -> ReadySetResult<bool> {
+    if !is_inner_agg && inner_limit_is_empty {
+        return Ok(true);
+    }
+    for dt in downstream_tables {
+        if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+            return Ok(false);
+        }
+    }
+    for jc in downstream_joins {
+        let Ok(dt) = jc.right.table_exprs().exactly_one() else {
+            return Ok(false);
+        };
+        if !is_on_nonrejecting_or_lateral_correlation(&jc.constraint, flattened_aliases) {
+            return Ok(false);
+        }
+        if jc.operator.is_inner_join() {
+            if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+                return Ok(false);
+            }
+        } else if matches!(
+            jc.operator,
+            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+        ) {
+            if !is_lateral_friendly_at_most_one(dt, exactly_one_set, at_most_one_set)? {
+                return Ok(false);
+            }
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------
 // Eligibility checks (composed by `can_inline_subquery`)
 // ---------------------------------------------------------------------------
@@ -1192,20 +1246,6 @@ fn check_mixed_scope_where_with_agg_limit(ctx: &InliningContext) -> ReadySetResu
     Ok(true)
 }
 
-/// Downstream-join cardinality-preservation check.  Only fires when inner
-/// is aggregated or has LIMIT.  In those cases, GROUP BY / LIMIT move to
-/// the outer level after inlining — downstream joins that change
-/// cardinality would alter group membership or which rows survive.
-/// Current check: every downstream table is an `ExactlyOne` subquery;
-/// every downstream join is INNER-with-ExactlyOne-RHS or
-/// LEFT-with-AtMostOne-RHS, with `ON TRUE`/empty constraint.
-fn check_downstream_joins_cardinality_preserving(ctx: &InliningContext) -> ReadySetResult<bool> {
-    if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
-        return Ok(true);
-    }
-    downstream_joins_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)
-}
-
 /// LATERAL-aware relaxation of [`is_on_nonrejecting`].  Accepts everything the
 /// canonical helper accepts (Empty, plus any expression
 /// [`is_always_true_filter`] folds to truthy under MySQL semantics) AND
@@ -1291,65 +1331,47 @@ fn is_lateral_friendly_at_most_one(
     is_at_most_one_deep(rhs_stmt)
 }
 
-/// LATERAL-aware downstream-cardinality check.  Used by
-/// `lateral_join::absorb_flatten` in place of the canonical variant to
-/// accept correctly-shaped LATERAL sibling chains and pre-hoist-signal-
-/// confirmed sibling cardinalities that the canonical version rejects.
+/// Unified downstream-join cardinality-preservation dispatcher.
 ///
-/// Two relaxations vs. canonical:
-///   - ON predicate shape: accepts correlation-equality predicates
-///     referencing aliases in `preceding_flattened_lateral_aliases` (in
-///     addition to canonical Empty / ON TRUE).
-///   - Body cardinality signal: unions canonical structural check with
-///     pre-hoist set membership.  ExactlyOne-required positions consult
-///     `pre_hoist_lateral_exactly_one`; AtMostOne positions consult both
-///     pre-hoist sets.
+/// Single entry point called unconditionally by `can_inline_subquery`.
+/// Dispatches to one of two lower-level helpers based on whether the caller
+/// has populated all three LATERAL-scope `Option` fields on `ctx`:
 ///
-/// Falls back to canonical behavior when any LATERAL-scope context field
-/// is `None` — `can_inline_subquery` calls this helper unconditionally,
-/// and non-LATERAL callers populate the LATERAL-scope fields with
-/// `None`, which yields the canonical behavior here.
-fn check_downstream_joins_cardinality_preserving_lateral(
-    ctx: &InliningContext,
-) -> ReadySetResult<bool> {
-    let (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) = (
+///   - **LATERAL path** (`pre_hoist_lateral_exactly_one`,
+///     `pre_hoist_lateral_at_most_one`, and
+///     `preceding_flattened_lateral_aliases` are all `Some`): delegates to
+///     [`downstream_joins_cardinality_preserving_lateral`], which accepts
+///     correlation-equality ON predicates and pre-hoist cardinality signals.
+///   - **Canonical path** (any field is `None`): non-LATERAL callers, or
+///     LATERAL callers before the pre-hoist signal is established.  Applies
+///     the early-exit (passes when inner is neither aggregated nor LIMIT-
+///     bearing) and delegates to [`downstream_joins_cardinality_preserving`].
+fn check_downstream_joins_cardinality_preserving(ctx: &InliningContext) -> ReadySetResult<bool> {
+    match (
         ctx.pre_hoist_lateral_exactly_one,
         ctx.pre_hoist_lateral_at_most_one,
         ctx.preceding_flattened_lateral_aliases,
-    ) else {
-        return check_downstream_joins_cardinality_preserving(ctx);
-    };
-    if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
-        return Ok(true);
-    }
-    for dt in ctx.downstream_tables {
-        if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
-            return Ok(false);
+    ) {
+        (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) => {
+            downstream_joins_cardinality_preserving_lateral(
+                ctx.downstream_tables,
+                ctx.downstream_joins,
+                exactly_one_set,
+                at_most_one_set,
+                flattened_aliases,
+                ctx.is_inner_agg,
+                ctx.inner_stmt.limit_clause.is_empty(),
+            )
         }
-    }
-    for jc in ctx.downstream_joins {
-        let Ok(dt) = jc.right.table_exprs().exactly_one() else {
-            return Ok(false);
-        };
-        if !is_on_nonrejecting_or_lateral_correlation(&jc.constraint, flattened_aliases) {
-            return Ok(false);
-        }
-        if jc.operator.is_inner_join() {
-            if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
-                return Ok(false);
+        _ => {
+            // Non-LATERAL callers, or LATERAL callers before the pre-hoist
+            // signal is established: fall through to the canonical lower-level.
+            if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
+                return Ok(true);
             }
-        } else if matches!(
-            jc.operator,
-            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
-        ) {
-            if !is_lateral_friendly_at_most_one(dt, exactly_one_set, at_most_one_set)? {
-                return Ok(false);
-            }
-        } else {
-            return Ok(false);
+            downstream_joins_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)
         }
     }
-    Ok(true)
 }
 
 /// Self-join detection.  Reject if inlining would introduce the same base
@@ -1477,7 +1499,7 @@ pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Optio
     if !check_mixed_scope_where_with_agg_limit(ctx)? {
         return Ok(None);
     }
-    if !check_downstream_joins_cardinality_preserving_lateral(ctx)? {
+    if !check_downstream_joins_cardinality_preserving(ctx)? {
         return Ok(None);
     }
     if !check_self_join(ctx)? {

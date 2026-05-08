@@ -464,7 +464,7 @@ fn try_resolve_as_lateral_subquery(
     // outer regardless of match) or `pre_hoist_lateral_at_most_one` (correlation-
     // pinned GROUP BY → 0..1 row per outer) flatten safely because their per-
     // outer cardinality is bounded.  The downstream-cardinality validation in
-    // `check_downstream_joins_cardinality_preserving_lateral` (called from
+    // `check_downstream_joins_cardinality_preserving` (called from
     // `absorb_flatten`) ensures the lifted aggregation produces correct results
     // when downstream joins/tables are also cardinality-preserving.
     //
