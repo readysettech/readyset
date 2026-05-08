@@ -70,15 +70,13 @@ const DOMAIN_REQUEST_DELAY_BACKOFF_FACTOR: u64 = 2;
 /// to 2s so the polling loop converges quickly on async operations.
 const DOMAIN_REQUEST_MAX_DELAY_MS: u64 = 2000; // 2 sec
 
-/// A [`DomainRequest`] with associated domain/shard information describing which domain it's for.
+/// A [`DomainRequest`] paired with the domain it should be sent to.
 ///
 /// Used as part of [`DomainMigrationPlan`].
 #[derive(Debug)]
 pub struct StoredDomainRequest {
     /// The index of the destination domain.
     pub domain: DomainIndex,
-    /// A specific shard to send the request to. If `None`, sends to all shards.
-    pub shard: Option<usize>,
     /// The request to send.
     pub req: DomainRequest,
 }
@@ -105,8 +103,6 @@ impl StoredDomainRequest {
         match self.req {
             DomainRequest::QueryReplayDone { node } => {
                 debug!("waiting for a done message");
-
-                invariant!(self.shard.is_none()); // QueryReplayDone isn't ever sent to just one shard
 
                 let mut spins = 0;
                 // FIXME(eta): this is a bit of a hack... (also, timeouts?)
@@ -160,7 +156,6 @@ impl StoredDomainRequest {
                     trace!(node = node.id(), "node is not ready yet");
                     return Ok(Some(StoredDomainRequest {
                         domain: self.domain,
-                        shard: self.shard,
                         req: DomainRequest::IsReady { node },
                     }));
                 }
@@ -190,7 +185,6 @@ impl StoredDomainRequest {
 
                 return Ok(Some(StoredDomainRequest {
                     domain: self.domain,
-                    shard: self.shard,
                     req: DomainRequest::PrepareStateStatus { node },
                 }));
             }
@@ -227,7 +221,6 @@ impl StoredDomainRequest {
                     );
                     return Ok(Some(StoredDomainRequest {
                         domain: self.domain,
-                        shard: self.shard,
                         req: DomainRequest::PrepareStateStatus { node },
                     }));
                 } else {
@@ -468,11 +461,7 @@ impl DomainMigrationPlan {
     /// command should apply.
     pub fn add_message(&mut self, domain: DomainIndex, req: DomainRequest) -> ReadySetResult<()> {
         if self.domains.contains(&domain) {
-            self.stored.push_back(StoredDomainRequest {
-                domain,
-                shard: None,
-                req,
-            });
+            self.stored.push_back(StoredDomainRequest { domain, req });
             Ok(())
         } else {
             Err(ReadySetError::UnknownDomain {
@@ -1338,7 +1327,6 @@ fn remove_nodes(
 
         dmp.stored.push_back(StoredDomainRequest {
             domain,
-            shard: None,
             req: DomainRequest::RemoveNodes { nodes },
         });
     }
