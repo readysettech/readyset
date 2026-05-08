@@ -5,6 +5,15 @@ use readyset_sql::ast::{SetStatement, SqlIdentifier, SqlQuery};
 
 use crate::backend::noria_connector;
 
+/// Maximum offset east of UTC accepted by [`parse_fixed_offset`]: `+14:00`.
+/// Matches MySQL's `@@time_zone` upper bound; conservative for PostgreSQL,
+/// which accepts a wider range. TODO(psql): widen or take a `Dialect`/bounds
+/// parameter once eval-side support lands.
+const MAX_TZ_OFFSET_EAST_SECS: i32 = 14 * 3600;
+/// Minimum offset east of UTC accepted by [`parse_fixed_offset`]: `-13:59`.
+/// See [`MAX_TZ_OFFSET_EAST_SECS`] for the dialect rationale.
+const MIN_TZ_OFFSET_EAST_SECS: i32 = -(13 * 3600 + 59 * 60);
+
 /// Represents the session timezone configuration.
 ///
 /// MySQL's `time_zone` session variable can be set to:
@@ -135,6 +144,75 @@ impl SetBehavior {
         self.set_timezone = Some(tz);
         self
     }
+}
+
+/// Parse a session-timezone string into a [`SessionTimezone`].
+///
+/// Accepts:
+/// - The literal `"SYSTEM"` (case-insensitive) → [`SessionTimezone::System`].
+/// - Fixed offsets in `±HH:MM` form, range
+///   [`MIN_TZ_OFFSET_EAST_SECS`]`..=`[`MAX_TZ_OFFSET_EAST_SECS`].
+/// - IANA names matched case-insensitively (e.g. `"US/Eastern"`,
+///   `"etc/utc"`) → [`SessionTimezone::Named`].
+///
+/// Returns `None` for unparseable strings.
+pub fn parse_timezone(s: &str) -> Option<SessionTimezone> {
+    if s.eq_ignore_ascii_case("SYSTEM") {
+        return Some(SessionTimezone::System);
+    }
+
+    if let Some(offset) = parse_fixed_offset(s) {
+        return Some(SessionTimezone::FixedOffset(offset));
+    }
+
+    s.parse::<chrono_tz::Tz>()
+        .ok()
+        .or_else(|| {
+            chrono_tz::TZ_VARIANTS
+                .iter()
+                .find(|tz| tz.name().eq_ignore_ascii_case(s))
+                .copied()
+        })
+        .map(SessionTimezone::Named)
+}
+
+/// Parse a fixed-offset timezone string like `"+05:00"` into a [`FixedOffset`].
+fn parse_fixed_offset(s: &str) -> Option<FixedOffset> {
+    let (sign, rest) = match s.as_bytes().first() {
+        Some(b'+') => (1i32, &s[1..]),
+        Some(b'-') => (-1i32, &s[1..]),
+        _ => return None,
+    };
+
+    let (hours_str, minutes_str) = rest.split_once(':')?;
+    // `u32::from_str` accepts a leading `+`, so without this guard
+    // `"++05:00"` and `"+-14:00"` would parse as `+05:00` / `+14:00`,
+    // bypassing the sign-byte discrimination above. Reject any non-digit
+    // byte in either field.
+    if hours_str.is_empty()
+        || minutes_str.is_empty()
+        || !hours_str.bytes().all(|b| b.is_ascii_digit())
+        || !minutes_str.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let hours: u32 = hours_str.parse().ok()?;
+    let minutes: u32 = minutes_str.parse().ok()?;
+
+    if minutes > 59 {
+        return None;
+    }
+
+    let magnitude = i32::try_from(hours)
+        .ok()?
+        .checked_mul(3600)?
+        .checked_add(minutes as i32 * 60)?;
+    let east_secs = sign.checked_mul(magnitude)?;
+    if !(MIN_TZ_OFFSET_EAST_SECS..=MAX_TZ_OFFSET_EAST_SECS).contains(&east_secs) {
+        return None;
+    }
+
+    FixedOffset::east_opt(east_secs)
 }
 
 impl Default for SetBehavior {
@@ -315,5 +393,243 @@ mod tests {
         assert!(SessionTimezone::FixedOffset(FixedOffset::east_opt(0).unwrap()).is_utc());
         assert!(!SessionTimezone::FixedOffset(FixedOffset::east_opt(3600).unwrap()).is_utc());
         assert!(!SessionTimezone::System.is_utc());
+    }
+
+    fn fixed(secs: i32) -> SessionTimezone {
+        SessionTimezone::FixedOffset(FixedOffset::east_opt(secs).unwrap())
+    }
+
+    #[test]
+    fn parse_timezone_fixed_offsets() {
+        assert_eq!(parse_timezone("+00:00"), Some(fixed(0)));
+        assert_eq!(parse_timezone("+05:00"), Some(fixed(18000)));
+        assert_eq!(parse_timezone("-05:00"), Some(fixed(-18000)));
+        assert_eq!(parse_timezone("+05:30"), Some(fixed(19800)));
+        assert_eq!(parse_timezone("-05:30"), Some(fixed(-19800)));
+        assert_eq!(parse_timezone("+13:00"), Some(fixed(46800)));
+    }
+
+    #[test]
+    fn parse_timezone_system() {
+        assert_eq!(parse_timezone("SYSTEM"), Some(SessionTimezone::System));
+        assert_eq!(parse_timezone("system"), Some(SessionTimezone::System));
+    }
+
+    #[test]
+    fn parse_timezone_named() {
+        use SessionTimezone::Named;
+        assert_eq!(
+            parse_timezone("US/Eastern"),
+            Some(Named(chrono_tz::US::Eastern))
+        );
+        assert_eq!(
+            parse_timezone("America/New_York"),
+            Some(Named(chrono_tz::America::New_York))
+        );
+        assert_eq!(parse_timezone("UTC"), Some(Named(chrono_tz::UTC)));
+    }
+
+    /// MySQL's IANA timezone name lookup is case-insensitive; ours must match.
+    #[test]
+    fn parse_timezone_named_case_insensitive() {
+        use SessionTimezone::Named;
+        assert_eq!(
+            parse_timezone("us/eastern"),
+            Some(Named(chrono_tz::US::Eastern))
+        );
+        assert_eq!(
+            parse_timezone("AMERICA/new_york"),
+            Some(Named(chrono_tz::America::New_York))
+        );
+        assert_eq!(
+            parse_timezone("Europe/LONDON"),
+            Some(Named(chrono_tz::Europe::London))
+        );
+        assert_eq!(parse_timezone("utc"), Some(Named(chrono_tz::UTC)));
+        assert_eq!(
+            parse_timezone("etc/gmt-5"),
+            Some(Named(chrono_tz::Etc::GMTMinus5))
+        );
+        assert_eq!(
+            parse_timezone("america/port_of_spain"),
+            Some(Named(chrono_tz::America::Port_of_Spain))
+        );
+    }
+
+    #[test]
+    fn parse_timezone_invalid() {
+        assert_eq!(parse_timezone(""), None);
+        assert_eq!(parse_timezone("abc"), None);
+        assert_eq!(parse_timezone("+14:00"), Some(fixed(50400)));
+        assert_eq!(parse_timezone("+14:01"), None);
+        assert_eq!(parse_timezone("+00:60"), None);
+        // Range is -13:59 to +14:00 (matches MySQL; conservative for PostgreSQL)
+        assert_eq!(parse_timezone("-14:00"), None);
+        assert_eq!(parse_timezone("-13:59"), Some(fixed(-50340)));
+        assert_eq!(parse_timezone("narnia/cair_paravel"), None);
+        // No whitespace trimming
+        assert_eq!(parse_timezone("us/eastern "), None);
+        assert_eq!(parse_timezone(" us/eastern"), None);
+        // Embedded NUL must not match a valid zone
+        assert_eq!(parse_timezone("utc\0"), None);
+    }
+
+    /// Hour fields large enough to overflow `i32 * 3600` must be rejected, not
+    /// wrap silently in release nor panic in debug.
+    #[test]
+    fn parse_timezone_offset_hour_overflow() {
+        assert_eq!(parse_timezone("+99999999:00"), None);
+        assert_eq!(parse_timezone("-99999999:00"), None);
+        assert_eq!(parse_timezone("+4294967295:00"), None);
+        // Hours value where `checked_mul(3600)` succeeds but adding any
+        // minutes overflows `i32`: i32::MAX / 3600 == 596523.
+        assert_eq!(parse_timezone("+596523:00"), None);
+        assert_eq!(parse_timezone("+596523:59"), None);
+    }
+
+    /// `u32::from_str` itself accepts a leading `+`, so without an explicit
+    /// guard the hour parse would silently treat `"++05:00"` as `"+05:00"`
+    /// — bypassing the sign-byte discrimination and accepting nonsense like
+    /// `"+-14:00"`. Reject any non-digit byte in the hours/minutes fields.
+    #[test]
+    fn parse_timezone_rejects_extra_sign_or_whitespace_in_fields() {
+        assert_eq!(parse_timezone("++05:00"), None);
+        assert_eq!(parse_timezone("+-14:00"), None);
+        assert_eq!(parse_timezone("--05:00"), None);
+        assert_eq!(parse_timezone("-+05:00"), None);
+        assert_eq!(parse_timezone("+ 05:00"), None);
+        assert_eq!(parse_timezone("+\t05:00"), None);
+        assert_eq!(parse_timezone("+05: 00"), None);
+        assert_eq!(parse_timezone("+05:+0"), None);
+    }
+
+    /// Property tests for `parse_timezone`. These live with the function so
+    /// any caller (MySQL or PostgreSQL) gets the same coverage; per-dialect
+    /// `handle_set_*` properties stay in the dialect crates because they
+    /// bind that crate's `QueryHandler` impl.
+    mod proptest_parse_timezone {
+        use proptest::prelude::*;
+
+        use super::*;
+
+        /// Fixed-offset strings that the parser must accept, with their
+        /// expected seconds-east-of-UTC. Range matches MySQL (`-13:59..=+14:00`);
+        /// conservative for PostgreSQL.
+        fn valid_offset_strategy() -> impl Strategy<Value = (String, i32)> {
+            prop_oneof![
+                (any::<bool>(), 0u32..=13, 0u32..=59).prop_map(|(positive, h, m)| {
+                    let sign_char = if positive { '+' } else { '-' };
+                    let sign_val: i32 = if positive { 1 } else { -1 };
+                    (
+                        format!("{sign_char}{h:02}:{m:02}"),
+                        sign_val * (h as i32 * 3600 + m as i32 * 60),
+                    )
+                }),
+                Just(("+14:00".to_string(), 14 * 3600)),
+            ]
+        }
+
+        fn named_timezone_strategy() -> impl Strategy<Value = String> {
+            prop_oneof![
+                Just("US/Eastern".to_string()),
+                Just("US/Central".to_string()),
+                Just("US/Pacific".to_string()),
+                Just("America/New_York".to_string()),
+                Just("America/Chicago".to_string()),
+                Just("America/Los_Angeles".to_string()),
+                Just("Europe/London".to_string()),
+                Just("Europe/Berlin".to_string()),
+                Just("Europe/Paris".to_string()),
+                Just("Asia/Tokyo".to_string()),
+                Just("Asia/Kolkata".to_string()),
+                Just("Asia/Shanghai".to_string()),
+                Just("Australia/Sydney".to_string()),
+                Just("Pacific/Auckland".to_string()),
+                Just("Africa/Cairo".to_string()),
+                Just("Canada/Eastern".to_string()),
+                Just("Etc/GMT".to_string()),
+                Just("Etc/GMT+5".to_string()),
+                Just("Etc/UTC".to_string()),
+                Just("UTC".to_string()),
+            ]
+        }
+
+        /// Out-of-range or malformed offsets that the parser must reject.
+        fn invalid_offset_strategy() -> impl Strategy<Value = String> {
+            prop_oneof![
+                (any::<bool>(), 15u32..=23, 0u32..=59).prop_map(|(pos, h, m)| {
+                    format!("{}{h:02}:{m:02}", if pos { '+' } else { '-' })
+                }),
+                // ±14:MM where MM > 0 (both exceed MySQL's valid range)
+                (any::<bool>(), 1u32..=59).prop_map(|(pos, m)| {
+                    format!("{}{:02}:{m:02}", if pos { '+' } else { '-' }, 14)
+                }),
+                (any::<bool>(), 0u32..=13, 60u32..=99).prop_map(|(pos, h, m)| {
+                    format!("{}{h:02}:{m:02}", if pos { '+' } else { '-' })
+                }),
+            ]
+        }
+
+        proptest! {
+            #[test]
+            fn parse_valid_offset_returns_correct_seconds((s, expected_secs) in valid_offset_strategy()) {
+                let result = parse_timezone(&s);
+                let expected_offset = FixedOffset::east_opt(expected_secs).unwrap();
+                prop_assert_eq!(result, Some(SessionTimezone::FixedOffset(expected_offset)));
+            }
+
+            #[test]
+            fn parse_valid_offset_result_is_fixed_offset((s, _) in valid_offset_strategy()) {
+                match parse_timezone(&s) {
+                    Some(SessionTimezone::FixedOffset(_)) => {}
+                    other => panic!("expected FixedOffset, got {other:?}"),
+                }
+            }
+
+            #[test]
+            fn parse_invalid_offset_returns_none(s in invalid_offset_strategy()) {
+                prop_assert_eq!(parse_timezone(&s), None);
+            }
+
+            #[test]
+            fn parse_named_timezone_returns_named(s in named_timezone_strategy()) {
+                match parse_timezone(&s) {
+                    Some(SessionTimezone::Named(_)) => {}
+                    other => panic!("expected Named, got {other:?} for {s:?}"),
+                }
+            }
+
+            /// IANA name lookup must be case-insensitive: any casing variant
+            /// of a canonical name resolves to the same `SessionTimezone`.
+            #[test]
+            fn parse_named_timezone_case_insensitive(
+                canonical in named_timezone_strategy(),
+                flips in any::<u64>(),
+            ) {
+                let variant: String = canonical
+                    .bytes()
+                    .enumerate()
+                    .map(|(i, b)| {
+                        if b.is_ascii_alphabetic() && (flips >> (i % 64)) & 1 == 1 {
+                            (b ^ 0x20) as char
+                        } else {
+                            b as char
+                        }
+                    })
+                    .collect();
+                prop_assert_eq!(parse_timezone(&canonical), parse_timezone(&variant));
+            }
+        }
+
+        #[test]
+        fn parse_system_case_insensitive() {
+            for s in ["SYSTEM", "system", "System", "sYsTeM"] {
+                assert_eq!(
+                    parse_timezone(s),
+                    Some(SessionTimezone::System),
+                    "{s:?} should parse as SYSTEM"
+                );
+            }
+        }
     }
 }
