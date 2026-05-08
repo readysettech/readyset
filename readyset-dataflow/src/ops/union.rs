@@ -192,7 +192,6 @@ fn process_records(
 pub struct BufferedReplayKey {
     tag: Tag,
     key: KeyComparison,
-    requesting_replica: usize,
 }
 
 impl Ord for BufferedReplayKey {
@@ -214,7 +213,6 @@ impl Ord for BufferedReplayKey {
                         .then_with(|| cmp_endbound(u.as_ref().into(), Bound::Included(k).into()))
                 }
             })
-            .then_with(|| self.requesting_replica.cmp(&other.requesting_replica))
     }
 }
 
@@ -242,9 +240,7 @@ pub struct Union {
     ///
     /// Stored as a btreemap so that when we iterate, we first get all the replays of one tag, then
     /// all the records of another tag, etc. This lets us avoid looking up info related to the same
-    /// tag more than once. By placing the upquery key in the btreemap key, we can also effectively
-    /// check the replay pieces for all values of [`BufferedReplayKey::requesting_replica`] if we
-    /// do find a key match for an update.
+    /// tag more than once.
     // We skip any state when serializing, as we will deserialize when recovering.
     #[serde(skip)]
     replay_pieces: BTreeMap<BufferedReplayKey, ReplayPieces>,
@@ -596,18 +592,6 @@ impl Ingredient for Union {
                         // to incorporate this record into the replay piece so that it doesn't
                         // end up getting lost.
                         buffered.push(r.clone());
-
-                        // it'd be nice if we could avoid doing this exact same key check multiple
-                        // times if the same key is being replayed by multiple
-                        // `requesting_replica`s.
-                        // in theory, the btreemap could let us do this by walking forward in the
-                        // iterator until we hit the next key or tag, and the rewinding back to
-                        // where we were before continuing to the same record. but that won't work
-                        // because https://github.com/rust-lang/rfcs/pull/2896.
-                        //
-                        // we could emulate the same thing by changing `ReplayPieces` to
-                        // `RefCell<ReplayPieces>`, using an ref-only iterator that is `Clone`, and
-                        // then play some games from there, but it seems not worth it.
                     }
                 }
 
@@ -760,7 +744,6 @@ impl Ingredient for Union {
             ReplayContext::Partial {
                 key_cols,
                 keys,
-                requesting_replica,
                 tag,
             } => {
                 let rkey_from = from.id();
@@ -827,7 +810,6 @@ impl Ingredient for Union {
                             match replay_pieces_tmp.entry(BufferedReplayKey {
                                 tag,
                                 key: key.clone(),
-                                requesting_replica
                             }) {
                                 Entry::Occupied(e) => {
                                     if e.get().buffered.contains_key(&from) {
@@ -916,17 +898,10 @@ impl Ingredient for Union {
     ) {
         for key in keys {
             // TODO: the key.clone()s here are really sad
-            for (_, e) in self.replay_pieces.range_mut(
-                BufferedReplayKey {
-                    tag,
-                    key: key.clone(),
-                    requesting_replica: 0,
-                }..=BufferedReplayKey {
-                    tag,
-                    key: key.clone(),
-                    requesting_replica: usize::MAX,
-                },
-            ) {
+            if let Some(e) = self.replay_pieces.get_mut(&BufferedReplayKey {
+                tag,
+                key: key.clone(),
+            }) {
                 if e.buffered.contains_key(&from) {
                     // we've already received something from left, but it has now been evicted.
                     // we can't remove the buffered replay, since we'll then get confused when the
@@ -1096,7 +1071,6 @@ mod tests {
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
-                requesting_replica: 0,
                 tag,
             };
 
@@ -1156,7 +1130,6 @@ mod tests {
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
-                requesting_replica: 0,
                 tag,
             };
 

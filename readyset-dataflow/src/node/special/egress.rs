@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::node::special::packet_filter::PacketFilter;
-use crate::payload::{ReplayPieceContext, SenderReplication};
 use crate::prelude::*;
 
 #[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Copy)]
@@ -23,7 +22,6 @@ pub struct EgressTx {
     local: LocalNodeIndex,
     domain_index: DomainIndex,
     shard: usize,
-    replication: SenderReplication,
 }
 
 impl EgressTx {
@@ -32,14 +30,12 @@ impl EgressTx {
         local: LocalNodeIndex,
         domain_index: DomainIndex,
         shard: usize,
-        replication: SenderReplication,
     ) -> Self {
         Self {
             node,
             local,
             domain_index,
             shard,
-            replication,
         }
     }
 
@@ -160,46 +156,7 @@ impl Egress {
             }
             tx.inc_sent();
 
-            match tx.replication {
-                SenderReplication::Same => output.send(tx.domain_index, m),
-                SenderReplication::Fanout { num_replicas } => {
-                    match m.replay_piece_context() {
-                        Some(ReplayPieceContext::Partial {
-                            requesting_replica, ..
-                        }) => {
-                            // If the message is a piece of a replay that was requested by a
-                            // particular replica, only replay to that
-                            // replica
-                            invariant!(
-                                *requesting_replica < num_replicas,
-                                "Replica index for replay piece context out-of-bounds"
-                            );
-                            output.send(tx.domain_index, m.clone())
-                        }
-                        Some(ReplayPieceContext::Full {
-                            replicas: Some(replicas),
-                            ..
-                        }) => {
-                            // Otherwise if the message is a piece of a full replay that was
-                            // intended for only a particular set of replicas, only replay to those
-                            // replicas
-                            invariant!(
-                                replicas.iter().all(|r| *r < num_replicas),
-                                "Replica index(es) for full replay piece context out-of-bounds"
-                            );
-                            for _replica in replicas {
-                                output.send(tx.domain_index, m.clone())
-                            }
-                        }
-                        _ => {
-                            // Otherwise, replay to all replicas
-                            for _replica in 0..num_replicas {
-                                output.send(tx.domain_index, m.clone())
-                            }
-                        }
-                    }
-                }
-            }
+            output.send(tx.domain_index, m);
             if take {
                 break;
             }

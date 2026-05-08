@@ -71,7 +71,7 @@ use crate::node::{Column, NodeProcessingResult, ProcessEnv};
 use crate::ops::Side;
 use crate::payload::{
     self, Eviction, MaterializedState, PacketDiscriminants, PrepareStateKind, PrettyReplayPath,
-    ReplayPieceContext, SenderReplication,
+    ReplayPieceContext,
 };
 use crate::prelude::*;
 use crate::processing::ColumnMiss;
@@ -233,9 +233,8 @@ struct StateLookupResult<'a> {
 
 /// Key for grouping replay misses that can be batched into a single `on_replay_misses` call.
 ///
-/// Within one `handle_replay` call, `tag` and `requesting_replica` are constant (from the replay
-/// piece context), so only `idx`, `lookup_columns`, and whether the replay key is a range vary per
-/// miss.
+/// Within one `handle_replay` call, `tag` is constant (from the replay piece context), so only
+/// `idx`, `lookup_columns`, and whether the replay key is a range vary per miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ReplayMissGroup {
     idx: LocalNodeIndex,
@@ -339,17 +338,16 @@ impl ReplayMissCollector {
 ///
 /// **Every field MUST participate in `Hash` and `Eq`.** `Domain::handle_replay`
 /// dispatches via `waiting.holes.entry(redo).remove_entry()` and then reads
-/// `tag`, `replay_key`, and `requesting_replica` from the key that `remove_entry`
-/// returns — which is the *stored* key, not the lookup key. If any field is
-/// excluded from `Hash`/`Eq` (manual impl, `derivative(Hash = "ignore")`, etc.),
-/// those reads will silently return values from a different in-flight request,
+/// `tag` and `replay_key` from the key that `remove_entry` returns — which is
+/// the *stored* key, not the lookup key. If any field is excluded from
+/// `Hash`/`Eq` (manual impl, `derivative(Hash = "ignore")`, etc.), those reads
+/// will silently return values from a different in-flight request,
 /// mis-routing replays. If you need to ignore a field, audit
 /// `Domain::handle_replay` first.
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct Redo {
     tag: Tag,
     replay_key: KeyComparison,
-    requesting_replica: usize,
 }
 
 /// Map from (node, column_indices) to (key -> redos waiting on that hole).
@@ -572,8 +570,6 @@ pub struct DomainBuilder {
     pub index: DomainIndex,
     /// The shard ID represented by this `DomainBuilder`.
     pub shard: Option<usize>,
-    /// The replica index of the domain to run
-    pub replica: usize,
     /// The number of shards in the domain.
     pub nshards: usize,
     /// The nodes in the domain.
@@ -619,7 +615,6 @@ impl DomainBuilder {
         let meta = vec![
             ("index", self.index.to_string()),
             ("shard", self.shard.unwrap_or_default().to_string()),
-            ("replica", self.replica.to_string()),
         ];
 
         let (replay_sender, replay_receiver) = channel::replay_channel();
@@ -627,7 +622,6 @@ impl DomainBuilder {
         let domain = Domain {
             index: self.index,
             shard: self.shard,
-            replica: self.replica,
             _nshards: self.nshards,
             persistence_parameters: self.persistence_parameters,
             state: LenMetric::new_meta("state", &meta),
@@ -694,7 +688,6 @@ struct TimedPurge {
 pub struct Domain {
     index: DomainIndex,
     shard: Option<usize>,
-    replica: usize,
     _nshards: usize,
     /// Map of nodes managed by this domain
     ///
@@ -860,11 +853,6 @@ impl Domain {
     /// Return this domain's shard
     pub fn shard(&self) -> usize {
         self.shard.unwrap_or(0)
-    }
-
-    /// Return this domain's replica
-    pub fn replica(&self) -> usize {
-        self.replica
     }
 
     fn snapshotting_base_nodes(&self) -> Vec<LocalNodeIndex> {
@@ -1086,7 +1074,6 @@ impl Domain {
         miss_in: LocalNodeIndex,
         miss_columns: &[usize],
         missed_keys: HashSet<ReplayMiss>,
-        requesting_replica: usize,
         needed_for: Tag,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
@@ -1124,7 +1111,6 @@ impl Domain {
             let redo = Redo {
                 tag: needed_for,
                 replay_key,
-                requesting_replica,
             };
 
             if is_generated {
@@ -1212,12 +1198,10 @@ impl Domain {
         cache_name: Relation,
     ) {
         trace!(?tag, ?keys, "sending replay request to self");
-        let replica = self.replica();
         self.delayed_for_self
             .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                 tag,
                 keys,
-                requesting_replica: replica,
                 cache_name,
             }));
     }
@@ -1234,13 +1218,10 @@ impl Domain {
         keys: Vec<KeyComparison>,
         cache_name: Relation,
     ) -> ReadySetResult<()> {
-        let requesting_replica = self.replica();
-
         let pkt = |keys| {
             Packet::RequestPartialReplay(RequestPartialReplay {
                 tag,
                 keys,
-                requesting_replica,
                 cache_name: cache_name.clone(),
             })
         };
@@ -1627,7 +1608,6 @@ impl Domain {
         ingress_node_local: LocalNodeIndex,
         target_domain: DomainIndex,
         target_shard: usize,
-        replication: SenderReplication,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         let mut n = self
             .nodes
@@ -1645,7 +1625,6 @@ impl Domain {
             ingress_node_local,
             target_domain,
             target_shard,
-            replication,
         ));
 
         Ok(None)
@@ -2067,7 +2046,6 @@ impl Domain {
         path: Vec1<ReplayPathSegment>,
         notify_done: bool,
         trigger: crate::payload::TriggerEndpoint,
-        _replica_fanout: bool,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         if notify_done {
             debug!(
@@ -2117,7 +2095,6 @@ impl Domain {
         executor: &mut dyn Executor,
         tag: Tag,
         from: LocalNodeIndex,
-        replicas: Option<Vec<usize>>,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         // if the node's state was not initialized yet, then just return and do nothing.
         // we should only hit this for base nodes which are in the process of having their
@@ -2190,7 +2167,6 @@ impl Domain {
             // NOTE: If we're replaying from persistent state this might be wrong, since
             // it's backed by an *estimate* of the number of keys in the state
             last: is_empty,
-            replicas: replicas.clone(),
         };
 
         let added_cols = self.ingress_inject.get(from).cloned();
@@ -2249,10 +2225,7 @@ impl Domain {
                     let p = Packet::ReplayPiece(ReplayPiece {
                         tag,
                         link, // to is overwritten by receiver
-                        context: ReplayPieceContext::Full {
-                            last,
-                            replicas: replicas.clone(),
-                        },
+                        context: ReplayPieceContext::Full { last },
                         data: chunk,
                         cache_name: MIGRATION_CACHE_NAME_STUB.into(),
                     });
@@ -2274,10 +2247,7 @@ impl Domain {
                     if let Err(error) = replay_tx.blocking_send(Packet::ReplayPiece(ReplayPiece {
                         tag,
                         link,
-                        context: ReplayPieceContext::Full {
-                            last: true,
-                            replicas: replicas.clone(),
-                        },
+                        context: ReplayPieceContext::Full { last: true },
                         data: Default::default(),
                         cache_name: MIGRATION_CACHE_NAME_STUB.into(),
                     })) {
@@ -2613,14 +2583,12 @@ impl Domain {
                 ingress_node: (ingress_node_global, ingress_node_local),
                 target_domain,
                 target_shard,
-                replication,
             } => self.handle_add_egress_tx(
                 egress_node,
                 ingress_node_global,
                 ingress_node_local,
                 target_domain,
                 target_shard,
-                replication,
             ),
             DomainRequest::AddEgressTag {
                 egress_node,
@@ -2644,22 +2612,14 @@ impl Domain {
                 path,
                 notify_done,
                 trigger,
-                replica_fanout,
-            } => self.handle_setup_replay_path(
-                tag,
-                source,
-                source_index,
-                path,
-                notify_done,
-                trigger,
-                replica_fanout,
-            ),
+            } => {
+                self.handle_setup_replay_path(tag, source, source_index, path, notify_done, trigger)
+            }
             DomainRequest::StartReplay {
                 tag,
                 from,
-                replicas,
                 targeting_domain: _,
-            } => self.handle_start_replay(executor, tag, from, replicas),
+            } => self.handle_start_replay(executor, tag, from),
             DomainRequest::Ready {
                 node: node_idx,
                 purge,
@@ -3258,7 +3218,6 @@ impl Domain {
                 src,
                 &index.columns,
                 replay_keys,
-                pkt.requesting_replica,
                 pkt.tag,
                 pkt.cache_name.clone(),
             )?;
@@ -3273,7 +3232,6 @@ impl Domain {
                 records.into(),
                 ReplayPieceContext::Partial {
                     for_keys: found_keys,
-                    requesting_replica: pkt.requesting_replica,
                 },
                 pkt.cache_name,
                 ex,
@@ -3304,7 +3262,7 @@ impl Domain {
 
         let mut finished = None;
         let mut need_replay = ReplayMissCollector::default();
-        let mut replay_context: Option<usize> = None; // requesting_replica
+        let mut partial_replay_seen = false;
         let mut finished_partial = 0;
 
         // this loop is just here so we have a way of giving up the borrow of self.replay_paths
@@ -3698,20 +3656,17 @@ impl Domain {
 
                 // if we missed during replay, we need to do another replay
                 if let (Some(backfill_keys), false) = (&mut backfill_keys, misses.is_empty()) {
-                    let requesting_replica = if let ReplayPiece {
-                        context:
-                            ReplayPieceContext::Partial {
-                                requesting_replica, ..
-                            },
-                        ..
-                    } = m
-                    {
-                        requesting_replica
-                    } else {
+                    if !matches!(
+                        m,
+                        ReplayPiece {
+                            context: ReplayPieceContext::Partial { .. },
+                            ..
+                        }
+                    ) {
                         internal!("backfill_keys.is_some() implies Context::Partial");
-                    };
+                    }
 
-                    replay_context = Some(requesting_replica);
+                    partial_replay_seen = true;
 
                     need_replay.insert(misses);
 
@@ -3995,20 +3950,12 @@ impl Domain {
         }
 
         // Drain pre-grouped replay misses, dispatching each group as a batch
-        if let Some(requesting_replica) = replay_context {
+        if partial_replay_seen {
             for (group, misses) in need_replay.groups.drain() {
                 let cols = &need_replay.columns[group.lookup_columns];
                 trace!(%tag, ?misses, on = %group.idx, "missed during replay processing");
 
-                self.on_replay_misses(
-                    ex,
-                    group.idx,
-                    cols,
-                    misses,
-                    requesting_replica,
-                    tag,
-                    cache_name.clone(),
-                )?;
+                self.on_replay_misses(ex, group.idx, cols, misses, tag, cache_name.clone())?;
             }
         } else {
             assert!(
@@ -4091,7 +4038,7 @@ impl Domain {
                                     let (redo, _) = e.remove_entry();
                                     trace!(k = ?redo, "filled last hole, replaying");
                                     replay_sets
-                                        .entry((redo.tag, redo.requesting_replica))
+                                        .entry(redo.tag)
                                         .or_default()
                                         .push(redo.replay_key);
                                 } else {
@@ -4114,12 +4061,11 @@ impl Domain {
                 }
 
                 // After we actually finished sorting the Redos into batches, issue each batch
-                for ((tag, requesting_replica), keys) in replay_sets.drain() {
+                for (tag, keys) in replay_sets.drain() {
                     self.delayed_for_self
                         .push_back(Packet::RequestPartialReplay(RequestPartialReplay {
                             tag,
                             keys,
-                            requesting_replica,
                             cache_name: cache_name.clone(),
                         }));
                 }

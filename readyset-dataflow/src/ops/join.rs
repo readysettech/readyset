@@ -1814,7 +1814,6 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[2], // emitted column 2 = Right.r1
             keys: &replay_keys,
-            requesting_replica: 0,
             tag,
         };
 
@@ -1983,7 +1982,6 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[1, 0], // reversed order
             keys: &replay_keys,
-            requesting_replica: 0,
             tag,
         };
 
@@ -2040,7 +2038,6 @@ mod tests {
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[3], // emitted column 3 = Right.r2 (non-join-key)
             keys: &replay_keys,
-            requesting_replica: 0,
             tag,
         };
 

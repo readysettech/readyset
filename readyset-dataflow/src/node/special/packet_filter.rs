@@ -290,7 +290,6 @@ mod test {
                     data,
                     context: ReplayPieceContext::Partial {
                         for_keys: HashSet::from([key]),
-                        requesting_replica: 0,
                     },
                     cache_name: "test".into(),
                 })
@@ -602,15 +601,9 @@ mod test {
 
         fn create_packet(keys: Option<HashSet<KeyComparison>>) -> Packet {
             let context = if let Some(k) = keys {
-                ReplayPieceContext::Partial {
-                    for_keys: k,
-                    requesting_replica: 0,
-                }
+                ReplayPieceContext::Partial { for_keys: k }
             } else {
-                ReplayPieceContext::Full {
-                    last: false,
-                    replicas: None,
-                }
+                ReplayPieceContext::Full { last: false }
             };
             Packet::ReplayPiece(ReplayPiece {
                 link: create_link(),

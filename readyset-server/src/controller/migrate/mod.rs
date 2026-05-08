@@ -87,7 +87,7 @@ impl StoredDomainRequest {
     /// Optionally returns another request to be sent afterwards as a follow up (up to the caller to
     /// decide when to send it).
     pub async fn apply(
-        mut self,
+        self,
         mainline: &DfState,
         just_placed: &HashMap<DomainIndex, bool>,
     ) -> ReadySetResult<Option<StoredDomainRequest>> {
@@ -161,18 +161,12 @@ impl StoredDomainRequest {
                 }
             }
             DomainRequest::StartReplay {
-                ref mut replicas,
-                targeting_domain,
-                ..
+                targeting_domain, ..
             } => {
-                let target_placed = just_placed.get(&targeting_domain).ok_or_else(|| {
-                    ReadySetError::UnknownDomain {
+                if !just_placed.contains_key(&targeting_domain) {
+                    return Err(ReadySetError::UnknownDomain {
                         domain_index: targeting_domain.into(),
-                    }
-                })?;
-
-                if !*target_placed {
-                    *replicas = Some(vec![0]);
+                    });
                 }
 
                 dom.try_send::<()>(self.req, &mainline.workers).await?;

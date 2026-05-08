@@ -1227,7 +1227,6 @@ impl DfState {
             let builder = DomainBuilder {
                 index: idx,
                 shard: None,
-                replica: 0,
                 nshards: 1,
                 config: self.domain_config.clone(),
                 nodes: domain_nodes.clone(),

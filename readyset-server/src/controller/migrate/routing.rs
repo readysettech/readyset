@@ -8,7 +8,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use dataflow::payload::SenderReplication;
 use dataflow::prelude::*;
 use dataflow::{node, DomainRequest};
 use petgraph::graph::NodeIndex;
@@ -275,8 +274,6 @@ pub(in crate::controller) fn connect(
 
             dmp.check_domain(sender_node.domain())?;
             dmp.check_domain(ingress_node.domain())?;
-            // Standalone Readyset has one replica per domain.
-            let replication = SenderReplication::Same;
 
             if sender_node.is_egress() {
                 trace!(
@@ -291,7 +288,6 @@ pub(in crate::controller) fn connect(
                         ingress_node: (ingress_node_index, ingress_node.local_addr()),
                         target_domain: ingress_node.domain(),
                         target_shard: 0,
-                        replication,
                     },
                 )?;
             } else if sender_node.is_graph_root() {

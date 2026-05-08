@@ -573,9 +573,6 @@ impl<'a> Plan<'a> {
                         internal!("Could not find replicas at source of replay path");
                     }
                 }
-                // Standalone Readyset has one replica per domain, so there's never any fanout.
-                let replica_fanout = false;
-
                 // build the message we send to this domain to tell it about this replay path.
                 let mut setup = DomainRequest::SetupReplayPath {
                     tag,
@@ -584,7 +581,6 @@ impl<'a> Plan<'a> {
                     path: locals,
                     notify_done: false,
                     trigger: TriggerEndpoint::None,
-                    replica_fanout,
                 };
 
                 // the first domain also gets to know source node

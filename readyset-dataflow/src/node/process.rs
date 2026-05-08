@@ -170,38 +170,27 @@ impl Node {
                         Packet::ReplayPiece(ReplayPiece {
                             tag,
                             ref mut data,
-                            context:
-                                payload::ReplayPieceContext::Partial {
-                                    ref for_keys,
-                                    requesting_replica,
-                                },
+                            context: payload::ReplayPieceContext::Partial { ref for_keys },
                             ..
                         }) => {
                             invariant!(keyed_by.is_some());
-                            trace!(
-                                ?data,
-                                ?for_keys,
-                                requesting_replica,
-                                %tag,
-                                "received partial replay"
-                            );
+                            trace!(?data, ?for_keys, %tag, "received partial replay");
                             (
                                 data,
                                 ReplayContext::Partial {
                                     key_cols: keyed_by.unwrap(),
                                     keys: for_keys,
-                                    requesting_replica,
                                     tag,
                                 },
                             )
                         }
                         Packet::ReplayPiece(ReplayPiece {
                             ref mut data,
-                            context: payload::ReplayPieceContext::Full { last, ref replicas },
+                            context: payload::ReplayPieceContext::Full { last },
                             tag,
                             ..
                         }) => {
-                            trace!(?data, %tag, last, ?replicas, "received full replay");
+                            trace!(?data, %tag, last, "received full replay");
                             (data, ReplayContext::Full { last, tag })
                         }
                         Packet::Update(ref mut x) => {
