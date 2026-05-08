@@ -33,19 +33,6 @@ impl Display for DomainIndex {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct ReplicaAddress {
-    pub domain_index: DomainIndex,
-    pub shard: usize,
-    pub replica: usize,
-}
-
-impl Display for ReplicaAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}.{}.{}", self.domain_index, self.shard, self.replica)
-    }
-}
-
 /// A domain-local node identifier.
 ///
 /// After migration is complete, every node in the dataflow graph gets two IDs, one

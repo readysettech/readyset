@@ -48,10 +48,10 @@ pub enum Upcall {
 }
 
 pub trait Executor {
-    fn send(&mut self, dest: ReplicaAddress, m: Packet);
+    fn send(&mut self, dest: DomainIndex, m: Packet);
     fn rpc(&mut self, url: Url, req: Upcall);
     fn cork(&mut self);
-    fn uncork(&mut self) -> Vec<(ReplicaAddress, Packet)>;
+    fn uncork(&mut self) -> Vec<(DomainIndex, Packet)>;
 }
 
 pub use crate::Outboxes;

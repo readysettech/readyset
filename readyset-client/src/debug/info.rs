@@ -11,7 +11,7 @@ use crate::internal::*;
 
 /// [`HashMap`] that has a pair of [`DomainIndex`] and [`usize`] as keys.
 /// Useful since it already implements the Serialization/Deserialization traits.
-type DomainMap<V> = HashMap<ReplicaAddress, V>;
+type DomainMap<V> = HashMap<DomainIndex, V>;
 type WorkersInfo = HashMap<Url, DomainMap<Vec<NodeIndex>>>;
 
 /// Information about the dataflow graph.

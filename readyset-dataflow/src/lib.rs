@@ -42,7 +42,6 @@ pub use dataflow_state::{
     BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
 };
 
-use crate::domain::ReplicaAddress;
 pub use crate::domain::channel::{
     ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream, ReplayReceiver, ReplaySender,
 };
@@ -105,11 +104,11 @@ impl DerefMut for ReaderMap {
 #[derive(Default)]
 pub struct Outboxes {
     /// messages for other domains
-    domains: HashMap<ReplicaAddress, VecDeque<Packet>>,
+    domains: HashMap<DomainIndex, VecDeque<Packet>>,
     /// rpcs to send
     rpcs: Vec<(Url, Upcall)>,
     /// messages held temporarily that we will revise soon
-    corked: Option<Vec<(ReplicaAddress, Packet)>>,
+    corked: Option<Vec<(DomainIndex, Packet)>>,
 }
 
 impl Outboxes {
@@ -125,7 +124,7 @@ impl Outboxes {
         !self.rpcs.is_empty()
     }
 
-    pub fn take_messages(&mut self) -> Vec<(ReplicaAddress, VecDeque<Packet>)> {
+    pub fn take_messages(&mut self) -> Vec<(DomainIndex, VecDeque<Packet>)> {
         self.domains.drain().collect()
     }
 
@@ -135,7 +134,7 @@ impl Outboxes {
 }
 
 impl Executor for Outboxes {
-    fn send(&mut self, dest: ReplicaAddress, m: Packet) {
+    fn send(&mut self, dest: DomainIndex, m: Packet) {
         if let Some(ref mut corked) = self.corked {
             corked.push((dest, m));
         } else {
@@ -151,7 +150,7 @@ impl Executor for Outboxes {
         self.corked = Some(Vec::new());
     }
 
-    fn uncork(&mut self) -> Vec<(ReplicaAddress, Packet)> {
+    fn uncork(&mut self) -> Vec<(DomainIndex, Packet)> {
         self.corked.take().expect("can't uncork when not corked!")
     }
 }

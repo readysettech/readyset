@@ -58,7 +58,7 @@ use futures_util::future::{Either, TryFutureExt};
 use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
-use readyset_client::internal::ReplicaAddress;
+use readyset_client::internal::DomainIndex;
 use readyset_client::{
     ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, TableStatus, WorkerDescriptor,
 };
@@ -123,7 +123,7 @@ fn start_worker(
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     url: Url,
-    domain_exited_tx: UnboundedSender<ReplicaAddress>,
+    domain_exited_tx: UnboundedSender<DomainIndex>,
     abort_on_task_failure: bool,
     readers: Readers,
     memory_limit: Option<usize>,
@@ -160,7 +160,7 @@ fn start_controller(
     handle_rx: Receiver<HandleRequest>,
     controller_http: ControllerConnectionPool,
     controller_rx: Receiver<ControllerRequest>,
-    domain_exited_rx: UnboundedReceiver<ReplicaAddress>,
+    domain_exited_rx: UnboundedReceiver<DomainIndex>,
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
@@ -333,7 +333,7 @@ pub(crate) async fn start_instance_inner(
 
     let controller_http = ReadySetHandle::make_pool();
     let (domain_exited_tx, domain_exited_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ReplicaAddress>();
+        tokio::sync::mpsc::unbounded_channel::<DomainIndex>();
 
     start_worker(
         worker_rx,

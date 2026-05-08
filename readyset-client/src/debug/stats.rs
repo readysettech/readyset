@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::internal::*;
 use crate::MaterializationStatus;
 
-type DomainMap = HashMap<ReplicaAddress, Option<(DomainStats, HashMap<NodeIndex, NodeStats>)>>;
+type DomainMap = HashMap<DomainIndex, Option<(DomainStats, HashMap<NodeIndex, NodeStats>)>>;
 
 /// Statistics about a domain.
 ///

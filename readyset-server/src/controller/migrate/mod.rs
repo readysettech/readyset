@@ -293,7 +293,7 @@ pub struct DomainMigrationPlan {
     place: Vec<PlaceRequest>,
     /// A list of replicas which could not be placed, because no worker was available for them to
     /// run on
-    failed_placement: Vec<ReplicaAddress>,
+    failed_placement: Vec<DomainIndex>,
     /// The set of valid domain indices known to the plan.
     domains: HashSet<DomainIndex>,
 }
@@ -368,10 +368,10 @@ impl DomainMigrationPlan {
         self.place.push(PlaceRequest { idx, worker, nodes });
     }
 
-    /// Mark that a given replica could not be placed because because no worker was available for it
+    /// Mark that a given domain could not be placed because no worker was available for it
     /// to run on
-    pub fn replica_failed_placement(&mut self, replica: ReplicaAddress) {
-        self.failed_placement.push(replica);
+    pub fn domain_failed_placement(&mut self, domain: DomainIndex) {
+        self.failed_placement.push(domain);
     }
 
     /// Return the number of shards the given domain has. Always 1 in standalone Readyset.
@@ -491,7 +491,7 @@ impl DomainMigrationPlan {
 
     /// Returns list of domains which could not be placed because no worker was available for them
     /// to run on
-    pub fn failed_placement(&self) -> &[ReplicaAddress] {
+    pub fn failed_placement(&self) -> &[DomainIndex] {
         &self.failed_placement
     }
 
@@ -1195,11 +1195,7 @@ fn plan_add_nodes(
             let worker_shards = schedule_domain(dataflow_state, worker, domain, &nodes)?;
 
             if worker_shards.is_none() {
-                dmp.replica_failed_placement(ReplicaAddress {
-                    domain_index: domain,
-                    shard: 0,
-                    replica: 0,
-                });
+                dmp.domain_failed_placement(domain);
             }
 
             dmp.place_domain(domain, worker_shards, nodes);

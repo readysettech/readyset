@@ -950,7 +950,7 @@ impl ReaderHandleBuilder {
         }
         .ok_or_else(|| {
             if replica.is_none() && self.replica_shard_addrs.num_rows() != 1 {
-                ReadySetError::ReaderReplicaNotRunning { replica: 0, node }
+                ReadySetError::ReaderReplicaNotRunning { node }
             } else {
                 ReadySetError::ViewReplicaOutOfBounds {
                     replica: replica.unwrap_or(0),
@@ -967,10 +967,7 @@ impl ReaderHandleBuilder {
         // Standalone Readyset always reports a single shard per reader.
         debug_assert_eq!(shards.len(), 1);
         let Some(shard_addr) = shards.first().copied().flatten() else {
-            return Err(ReadySetError::ReaderReplicaNotRunning {
-                replica: replica.unwrap_or(0),
-                node,
-            });
+            return Err(ReadySetError::ReaderReplicaNotRunning { node });
         };
 
         let shard = {

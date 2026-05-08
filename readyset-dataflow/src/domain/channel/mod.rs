@@ -12,7 +12,7 @@ use std::task::{Context, Poll};
 use async_bincode::tokio::{AsyncBincodeWriter, AsyncDestination};
 use futures_util::sink::{Sink, SinkExt};
 use metrics::{Gauge, gauge};
-use readyset_client::internal::ReplicaAddress;
+use readyset_client::internal::DomainIndex;
 use readyset_client::metrics::recorded;
 use readyset_client::{CONNECTION_FROM_BASE, CONNECTION_FROM_DOMAIN, CONNECTION_MAGIC_NUMBER};
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -284,15 +284,15 @@ impl DomainConnectionBuilder<MaybeLocal> {
 
 struct ChannelCoordinatorInner {
     /// Map from key to remote address.
-    addrs: HashMap<ReplicaAddress, SocketAddr>,
+    addrs: HashMap<DomainIndex, SocketAddr>,
     /// Map from key to channel sender for local connections.
-    locals: HashMap<ReplicaAddress, DomainSender>,
+    locals: HashMap<DomainIndex, DomainSender>,
 }
 
 pub struct ChannelCoordinator {
     inner: RwLock<ChannelCoordinatorInner>,
     /// Broadcast channel that can be used to be notified when the address for a key changes
-    changes_tx: broadcast::Sender<ReplicaAddress>,
+    changes_tx: broadcast::Sender<DomainIndex>,
 }
 
 impl Default for ChannelCoordinator {
@@ -314,11 +314,11 @@ impl ChannelCoordinator {
 
     /// Create a new [`broadcast::Receiver`] which will be notified whenver the *remote* address for
     /// a key is changed (but *not* when a new key is added, or when the local address changes!)
-    pub fn subscribe(&self) -> broadcast::Receiver<ReplicaAddress> {
+    pub fn subscribe(&self) -> broadcast::Receiver<DomainIndex> {
         self.changes_tx.subscribe()
     }
 
-    pub fn insert_remote(&self, key: ReplicaAddress, addr: SocketAddr) {
+    pub fn insert_remote(&self, key: DomainIndex, addr: SocketAddr) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -335,7 +335,7 @@ impl ChannelCoordinator {
         }
     }
 
-    pub fn remove(&self, key: ReplicaAddress) {
+    pub fn remove(&self, key: DomainIndex) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -350,7 +350,7 @@ impl ChannelCoordinator {
         }
     }
 
-    pub fn insert_local(&self, key: ReplicaAddress, chan: DomainSender) {
+    pub fn insert_local(&self, key: DomainIndex, chan: DomainSender) {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -360,7 +360,7 @@ impl ChannelCoordinator {
         }
     }
 
-    pub fn has(&self, key: &ReplicaAddress) -> bool {
+    pub fn has(&self, key: &DomainIndex) -> bool {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -368,7 +368,7 @@ impl ChannelCoordinator {
         guard.addrs.contains_key(key)
     }
 
-    pub fn get_addr(&self, key: &ReplicaAddress) -> Option<SocketAddr> {
+    pub fn get_addr(&self, key: &DomainIndex) -> Option<SocketAddr> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -376,7 +376,7 @@ impl ChannelCoordinator {
         guard.addrs.get(key).cloned()
     }
 
-    pub fn is_local(&self, key: &ReplicaAddress) -> Option<bool> {
+    pub fn is_local(&self, key: &DomainIndex) -> Option<bool> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
         // so we allow to panic if that happens.
@@ -386,7 +386,7 @@ impl ChannelCoordinator {
 
     pub fn builder_for(
         &self,
-        key: &ReplicaAddress,
+        key: &DomainIndex,
     ) -> ReadySetResult<DomainConnectionBuilder<MaybeLocal>> {
         #[allow(clippy::expect_used)]
         // This can only fail if the mutex is poisoned, in which case we can't recover,
@@ -395,9 +395,7 @@ impl ChannelCoordinator {
         #[allow(clippy::significant_drop_in_scrutinee)]
         match guard.addrs.get(key) {
             None => Err(ReadySetError::NoSuchReplica {
-                domain_index: key.domain_index.index(),
-                shard: key.shard,
-                replica: key.replica,
+                domain_index: key.index(),
             }),
             Some(addrs) => Ok(DomainConnectionBuilder {
                 sport: None,

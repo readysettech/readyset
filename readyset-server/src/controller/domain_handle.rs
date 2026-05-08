@@ -45,32 +45,28 @@ impl DomainHandle {
         }
     }
 
-    /// The replica address of this domain's single replica.
-    fn replica_address(&self) -> ReplicaAddress {
-        ReplicaAddress {
-            domain_index: self.idx,
-            shard: 0,
-            replica: 0,
-        }
+    /// The [`DomainIndex`] of this domain.
+    fn domain_index(&self) -> DomainIndex {
+        self.idx
     }
 
     /// Iterator over the assigned worker for this domain, yielding zero or one entry.
-    pub(super) fn assignments(&self) -> impl Iterator<Item = (ReplicaAddress, &WorkerIdentifier)> {
-        let addr = self.replica_address();
-        self.worker.as_ref().map(move |wi| (addr, wi)).into_iter()
+    pub(super) fn assignments(&self) -> impl Iterator<Item = (DomainIndex, &WorkerIdentifier)> {
+        let domain = self.domain_index();
+        self.worker.as_ref().map(move |wi| (domain, wi)).into_iter()
     }
 
     pub(super) fn is_assigned_to_worker(&self, worker: &WorkerIdentifier) -> bool {
         self.worker.as_ref() == Some(worker)
     }
 
-    /// Clear the worker assignment if it matches `wi`, returning the replica address that was
+    /// Clear the worker assignment if it matches `wi`, returning the [`DomainIndex`] that was
     /// previously assigned (if any).
-    pub(crate) fn remove_worker(&mut self, wi: &WorkerIdentifier) -> Option<ReplicaAddress> {
+    pub(crate) fn remove_worker(&mut self, wi: &WorkerIdentifier) -> Option<DomainIndex> {
         if self.worker.as_ref() == Some(wi) {
-            let addr = self.replica_address();
+            let domain = self.domain_index();
             self.worker = None;
-            Some(addr)
+            Some(domain)
         } else {
             None
         }
@@ -98,17 +94,15 @@ impl DomainHandle {
             error!(%addr, ?req, "tried to send domain request to failed worker");
             return Err(ReadySetError::WorkerFailed { uri: addr.clone() });
         };
-        let replica_address = self.replica_address();
+        let domain = self.domain_index();
         Ok(Some(
             worker
                 .rpc(WorkerRequestKind::DomainRequest {
-                    replica_address,
+                    domain_index: domain,
                     request: Box::new(req),
                 })
                 .await
-                .map_err(|e| {
-                    rpc_err_no_downcast(format!("domain request to {replica_address}"), e)
-                })?,
+                .map_err(|e| rpc_err_no_downcast(format!("domain request to {domain}"), e))?,
         ))
     }
 
@@ -125,8 +119,6 @@ impl DomainHandle {
             .await?
             .ok_or_else(|| ReadySetError::NoSuchReplica {
                 domain_index: self.idx.into(),
-                shard: 0,
-                replica: 0,
             })
     }
 }

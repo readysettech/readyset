@@ -101,7 +101,7 @@ impl Egress {
         message: &mut Option<Packet>,
         keyed_by: Option<&[usize]>,
         shard: usize,
-        replica: usize,
+        _replica: usize,
         output: &mut dyn Executor,
     ) -> ReadySetResult<()> {
         let Self {
@@ -162,14 +162,7 @@ impl Egress {
             tx.inc_sent();
 
             match tx.replication {
-                SenderReplication::Same => output.send(
-                    ReplicaAddress {
-                        domain_index: tx.domain_index,
-                        shard: tx.shard,
-                        replica,
-                    },
-                    m,
-                ),
+                SenderReplication::Same => output.send(tx.domain_index, m),
                 SenderReplication::Fanout { num_replicas } => {
                     match m.replay_piece_context() {
                         Some(ReplayPieceContext::Partial {
@@ -182,14 +175,7 @@ impl Egress {
                                 *requesting_replica < num_replicas,
                                 "Replica index for replay piece context out-of-bounds"
                             );
-                            output.send(
-                                ReplicaAddress {
-                                    domain_index: tx.domain_index,
-                                    shard: tx.shard,
-                                    replica: *requesting_replica,
-                                },
-                                m.clone(),
-                            )
+                            output.send(tx.domain_index, m.clone())
                         }
                         Some(ReplayPieceContext::Full {
                             replicas: Some(replicas),
@@ -202,28 +188,14 @@ impl Egress {
                                 replicas.iter().all(|r| *r < num_replicas),
                                 "Replica index(es) for full replay piece context out-of-bounds"
                             );
-                            for replica in replicas {
-                                output.send(
-                                    ReplicaAddress {
-                                        domain_index: tx.domain_index,
-                                        shard: tx.shard,
-                                        replica: *replica,
-                                    },
-                                    m.clone(),
-                                )
+                            for _replica in replicas {
+                                output.send(tx.domain_index, m.clone())
                             }
                         }
                         _ => {
                             // Otherwise, replay to all replicas
-                            for replica in 0..num_replicas {
-                                output.send(
-                                    ReplicaAddress {
-                                        domain_index: tx.domain_index,
-                                        shard: tx.shard,
-                                        replica,
-                                    },
-                                    m.clone(),
-                                )
+                            for _replica in 0..num_replicas {
+                                output.send(tx.domain_index, m.clone())
                             }
                         }
                     }

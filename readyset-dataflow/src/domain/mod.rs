@@ -30,7 +30,7 @@ use failpoint_macros::set_failpoint;
 use futures_util::TryFutureExt;
 use futures_util::future::FutureExt;
 use futures_util::stream::StreamExt;
-pub use internal::{DomainIndex, ReplicaAddress};
+pub use internal::DomainIndex;
 use itertools::Itertools;
 use merging_interval_tree::IntervalTreeSet;
 use metrics::{counter, histogram};
@@ -133,7 +133,7 @@ impl PartialEq for DomainMode {
 enum TriggerEndpoint {
     None,
     Start(Index),
-    End { options: Vec<ReplicaAddress> },
+    End { options: Vec<DomainIndex> },
     Local(Index),
 }
 
@@ -168,7 +168,7 @@ impl TriggerEndpoint {
                     "options: [{}]",
                     options
                         .iter()
-                        .map(|o| format!("Domain {}", o.domain_index.index()))
+                        .map(|o| format!("Domain {}", o.index()))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -196,7 +196,7 @@ impl Debug for TriggerEndpoint {
                     "options",
                     &options
                         .iter()
-                        .map(|o| format!("Domain {}", o.domain_index.index()))
+                        .map(|o| format!("Domain {}", o.index()))
                         .collect::<Vec<_>>(),
                 )
                 .finish(),
@@ -589,12 +589,8 @@ impl DomainBuilder {
         self.shard.unwrap_or(0)
     }
 
-    pub fn address(&self) -> ReplicaAddress {
-        ReplicaAddress {
-            domain_index: self.index,
-            shard: self.shard(),
-            replica: self.replica,
-        }
+    pub fn address(&self) -> DomainIndex {
+        self.index
     }
 
     /// Starts up the domain represented by this `DomainBuilder`.
@@ -728,7 +724,7 @@ pub struct Domain {
     mode: DomainMode,
     waiting: LenMetric<NodeMap<Waiting>>,
     remapped_keys: LenMetric<RemappedKeys>,
-    trigger_addresses: NodeMap<Vec<ReplicaAddress>>,
+    trigger_addresses: NodeMap<Vec<DomainIndex>>,
     /// Replay paths that go through this domain
     replay_paths: ReplayPaths,
     /// Map from node ID to an interval tree of the keys of all current pending upqueries to that
@@ -1893,7 +1889,7 @@ impl Domain {
 
     fn unquery(
         ex: &mut dyn Executor,
-        addrs: &[ReplicaAddress],
+        addrs: &[DomainIndex],
         node: LocalNodeIndex,
         cols: &[usize],
         keys: &mut dyn Iterator<Item = KeyComparison>,
@@ -1933,11 +1929,7 @@ impl Domain {
             });
         }
 
-        let addrs = vec![ReplicaAddress {
-            domain_index: trigger_domain,
-            shard: 0,
-            replica: self.replica,
-        }];
+        let addrs = vec![trigger_domain];
         let txs = addrs
             .iter()
             .map(|addr| {
@@ -2076,7 +2068,7 @@ impl Domain {
         path: Vec1<ReplayPathSegment>,
         notify_done: bool,
         trigger: crate::payload::TriggerEndpoint,
-        replica_fanout: bool,
+        _replica_fanout: bool,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         if notify_done {
             debug!(
@@ -2103,13 +2095,7 @@ impl Domain {
             payload::TriggerEndpoint::Start(index) => TriggerEndpoint::Start(index),
             payload::TriggerEndpoint::Local(index) => TriggerEndpoint::Local(index),
             payload::TriggerEndpoint::End(domain_index) => {
-                // See the documentation for DomainRequest::SetupReplayPath::replica_fanout
-                let replica = if replica_fanout { 0 } else { self.replica() };
-                let options = vec![ReplicaAddress {
-                    domain_index,
-                    shard: 0,
-                    replica,
-                }];
+                let options = vec![domain_index];
 
                 TriggerEndpoint::End { options }
             }
@@ -4785,12 +4771,8 @@ impl Domain {
         res
     }
 
-    pub fn address(&self) -> ReplicaAddress {
-        ReplicaAddress {
-            domain_index: self.index(),
-            shard: self.shard(),
-            replica: self.replica(),
-        }
+    pub fn address(&self) -> DomainIndex {
+        self.index()
     }
 
     pub fn update_state_sizes(&mut self) {
@@ -5102,7 +5084,7 @@ impl Barrier {
         );
     }
 
-    fn send(&self, ex: &mut dyn Executor, rep: ReplicaAddress, mut msg: Packet, credits: u128) {
+    fn send(&self, ex: &mut dyn Executor, rep: DomainIndex, mut msg: Packet, credits: u128) {
         let (done, barrier, cr) = match msg {
             Packet::Evict(ref mut e) => (&mut e.done, &mut e.barrier, &mut e.credits),
             Packet::RequestEvictionFromReader(ref mut e) => {
@@ -5130,12 +5112,8 @@ mod test {
     const BID: u128 = 666;
     const CREDITS: u128 = 0x40000000000000000000000000000000;
 
-    const fn fake_addr() -> ReplicaAddress {
-        ReplicaAddress {
-            domain_index: DomainIndex::new(0),
-            shard: 0,
-            replica: 0,
-        }
+    const fn fake_addr() -> DomainIndex {
+        DomainIndex::new(0)
     }
 
     const fn fake_packet() -> Packet {

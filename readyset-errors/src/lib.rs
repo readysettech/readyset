@@ -499,18 +499,14 @@ pub enum ReadySetError {
     },
 
     /// A view was attempted to be built for a reader whose domain is not running
-    #[error("Domain at replica {replica} for reader node {node:?} is not running")]
-    ReaderReplicaNotRunning { replica: usize, node: NodeIndex },
+    #[error("Domain for reader node {node:?} is not running")]
+    ReaderReplicaNotRunning { node: NodeIndex },
 
-    /// A request for a domain replica was sent to a worker that doesn't have that domain replica.
-    #[error("Could not find domain {domain_index}.{shard}.{replica} on worker")]
+    /// A request for a domain was sent to a worker that doesn't have that domain.
+    #[error("Could not find domain {domain_index} on worker")]
     NoSuchReplica {
         /// The index of the domain.
         domain_index: usize,
-        /// The shard.
-        shard: usize,
-        /// The replica.
-        replica: usize,
     },
 
     /// A request referencing a node was sent to a domain not responsible for that node.
@@ -1422,11 +1418,7 @@ mod test {
         assert!(err.caused_by_controller_recovering());
 
         // Not caused by ControllerRecovering
-        let err = ReadySetError::NoSuchReplica {
-            domain_index: 0,
-            shard: 0,
-            replica: 0,
-        };
+        let err = ReadySetError::NoSuchReplica { domain_index: 0 };
         assert!(!err.caused_by_controller_recovering());
     }
 }

@@ -13,7 +13,7 @@ use dataflow::{
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
 use futures_util::FutureExt;
-use readyset_client::internal::ReplicaAddress;
+use readyset_client::internal::DomainIndex;
 use readyset_client::{
     KeyComparison, PacketData, PacketPayload, Tagged, CONNECTION_FROM_BASE, CONNECTION_MAGIC_NUMBER,
 };
@@ -29,8 +29,7 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument, Span};
 
 use super::{ChannelCoordinator, WorkerRequestKind};
 
-type Outputs =
-    HashMap<ReplicaAddress, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
+type Outputs = HashMap<DomainIndex, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
 const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
 
@@ -262,7 +261,7 @@ impl Replica {
     /// their destination, therefore it can't be dropped before completion without risking some
     /// packets being lost
     async fn send_packets(
-        to_send: Vec<(ReplicaAddress, VecDeque<Packet>)>,
+        to_send: Vec<(DomainIndex, VecDeque<Packet>)>,
         connections: &tokio::sync::Mutex<Outputs>,
         coord: &ChannelCoordinator,
         failed: &Mutex<HashSet<SocketAddr>>,
@@ -270,20 +269,20 @@ impl Replica {
         let mut lock = connections.lock().await;
 
         let connections = &mut *lock;
-        for (replica_address, mut messages) in to_send {
+        for (domain, mut messages) in to_send {
             if messages.is_empty() {
                 continue;
             }
 
-            let tx = match connections.entry(replica_address) {
+            let tx = match connections.entry(domain) {
                 Occupied(entry) => {
-                    trace!(%replica_address, "Reusing existing domain connection");
+                    trace!(%domain, "Reusing existing domain connection");
                     entry.into_mut()
                 }
                 Vacant(entry) => {
-                    let Some(addr) = coord.get_addr(&replica_address) else {
+                    let Some(addr) = coord.get_addr(&domain) else {
                         trace!(
-                            target = %replica_address,
+                            target = %domain,
                             num_messages = messages.len(),
                             "Missing channel for domain, dropping messages"
                         );
@@ -292,15 +291,15 @@ impl Replica {
 
                     if failed.lock().await.contains(&addr) {
                         warn!(
-                            target = %replica_address,
+                            target = %domain,
                             num_messages = messages.len(),
                             "Skipping packets to domain as it may have failed"
                         );
                         continue;
                     }
 
-                    debug!(%replica_address, %addr, "Establishing connection to domain");
-                    entry.insert(coord.builder_for(&replica_address)?.build_async()?)
+                    debug!(%domain, %addr, "Establishing connection to domain");
+                    entry.insert(coord.builder_for(&domain)?.build_async()?)
                 }
             };
 
@@ -328,11 +327,11 @@ impl Replica {
             }
 
             if send_err {
-                connections.remove(&replica_address);
-                if let Some(addr) = coord.get_addr(&replica_address) {
+                connections.remove(&domain);
+                if let Some(addr) = coord.get_addr(&domain) {
                     failed.lock().await.insert(addr);
                 } else {
-                    warn!(target = ?replica_address, "Failure on sending packet to domain")
+                    warn!(target = ?domain, "Failure on sending packet to domain")
                 }
             }
         }
@@ -341,24 +340,24 @@ impl Replica {
 
     async fn handle_address_change(
         outputs: &Mutex<Outputs>,
-        replica_addr: Result<ReplicaAddress, broadcast::error::RecvError>,
+        recv: Result<DomainIndex, broadcast::error::RecvError>,
     ) {
-        match replica_addr {
-            Ok(replica_addr) => {
-                // We've received a notification that the socket address for a replica
+        match recv {
+            Ok(domain) => {
+                // We've received a notification that the socket address for a domain
                 // has changed - remove its cached connection from `outputs` so that
                 // when we try to send to it later we re-lookup the addr and reconnect
-                if outputs.lock().await.remove(&replica_addr).is_some() {
-                    info!(%replica_addr, "Removed connection for replica");
+                if outputs.lock().await.remove(&domain).is_some() {
+                    info!(%domain, "Removed connection for domain");
                 }
             }
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                 // If we've lagged behind, that means we've missed some changes to
-                // replica addresses, so we need to consider all connections invalid
+                // domain addresses, so we need to consider all connections invalid
                 warn!(
                     %skipped,
                     "Coordinator change broadcast receiver lagged behind; reconnecting \
-                    to all replicas"
+                    to all domains"
                 );
                 outputs.lock().await.clear();
             }
@@ -550,9 +549,9 @@ impl Replica {
                     established.insert(token, tcp);
                 },
 
-                // Changes to the addresses of individual domain replicas
-                replica_addr = channel_changes.recv() => {
-                    Self::handle_address_change(&outputs, replica_addr).await;
+                // Changes to the addresses of individual domains
+                recv = channel_changes.recv() => {
+                    Self::handle_address_change(&outputs, recv).await;
                 }
 
                 // Domain requests

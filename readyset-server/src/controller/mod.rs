@@ -16,7 +16,7 @@ use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
-use readyset_client::internal::ReplicaAddress;
+use readyset_client::internal::DomainIndex;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
@@ -491,7 +491,7 @@ impl Controller {
         controller_http: ControllerConnectionPool,
         controller_rx: Receiver<ControllerRequest>,
         handle_rx: Receiver<HandleRequest>,
-        domain_exited_rx: UnboundedReceiver<ReplicaAddress>,
+        domain_exited_rx: UnboundedReceiver<DomainIndex>,
         our_descriptor: ControllerDescriptor,
         worker_descriptor: WorkerDescriptor,
         telemetry_sender: TelemetrySender,
@@ -1470,7 +1470,7 @@ impl Controller {
 ///
 /// Exits cleanly on shutdown, or when all senders are dropped (process tear-down).
 async fn domain_exited_consumer(
-    mut rx: UnboundedReceiver<ReplicaAddress>,
+    mut rx: UnboundedReceiver<DomainIndex>,
     leader: Arc<LeaderHandle>,
     mut shutdown_rx: ShutdownReceiver,
 ) {

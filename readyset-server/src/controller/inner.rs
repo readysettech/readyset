@@ -21,7 +21,6 @@ use http::Method;
 use metrics::gauge;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
-use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
@@ -637,7 +636,7 @@ impl Leader {
             }
             (&Method::POST, "/status") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let replication_offsets = if ds.all_replicas_placed() {
+                let replication_offsets = if ds.all_domains_placed() {
                     Some(ds.replication_offsets().await?)
                 } else {
                     None
@@ -899,7 +898,7 @@ impl Leader {
             info!("registered worker; now have {}", ds.workers.len());
         }
 
-        let dmp = if !ds.workers.is_empty() && !ds.all_replicas_placed() {
+        let dmp = if !ds.workers.is_empty() && !ds.all_domains_placed() {
             let domain_nodes = ds.unplaced_domain_nodes();
             debug!(
                 num_unplaced_domains = domain_nodes.len(),
@@ -966,7 +965,7 @@ impl Leader {
         for wi in failed {
             warn!(worker = %wi, "handling failure of worker");
             for di in ds.remove_worker(&wi) {
-                downstream_domains.extend(ds.downstream_domains(di.domain_index)?);
+                downstream_domains.extend(ds.downstream_domains(di)?);
             }
         }
 
@@ -978,7 +977,7 @@ impl Leader {
             ds.kill_domains(downstream_domains).await?;
         }
 
-        if !ds.all_replicas_placed()
+        if !ds.all_domains_placed()
             && !self
                 .background_recovery_running
                 .swap(true, Ordering::AcqRel)
@@ -1041,7 +1040,7 @@ impl Leader {
             .await
     }
 
-    pub(super) async fn handle_failed_domain(&self, addr: ReplicaAddress) -> ReadySetResult<()> {
+    pub(super) async fn handle_failed_domain(&self, addr: DomainIndex) -> ReadySetResult<()> {
         // It's important that this happens in the background not just for parallelism /
         // performance, but because the worker thread blocks on this RPC completing before it can
         // accept any additional domain requests from us - both the "run this domain" request that
@@ -1056,16 +1055,16 @@ impl Leader {
             let ds = writer.as_mut();
 
             // 1. Remove the domain from our internal state
-            let Some(dh) = ds.domains.get_mut(&addr.domain_index) else {
+            let Some(dh) = ds.domains.get_mut(&addr) else {
                 warn!(domain = %addr, "Notified about failure of unknown domain");
                 return Ok(());
             };
             dh.clear_assignment();
 
-            let mut domains_to_recover = vec![addr.domain_index];
+            let mut domains_to_recover = vec![addr];
 
             // 2. Kill and clean up any downstream domains
-            let downstream_domains = ds.downstream_domains(addr.domain_index)?;
+            let downstream_domains = ds.downstream_domains(addr)?;
             if !downstream_domains.is_empty() {
                 info!(
                     num_downstream_domains = downstream_domains.len(),

@@ -43,7 +43,7 @@ use readyset_client::builders::{
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
-use readyset_client::internal::{MaterializationStatus, ReplicaAddress};
+use readyset_client::internal::MaterializationStatus;
 use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
@@ -657,27 +657,21 @@ impl DfState {
 
         let is_primary = !key.is_empty();
 
-        let domain =
-            self.domains
-                .get(&node.domain())
-                .ok_or_else(|| ReadySetError::UnknownDomain {
-                    domain_index: node.domain().index(),
-                })?;
+        let dh = self
+            .domains
+            .get(&node.domain())
+            .ok_or_else(|| ReadySetError::UnknownDomain {
+                domain_index: node.domain().index(),
+            })?;
 
-        // Standalone Readyset has a single replica per domain.
-        debug_assert!(domain.is_placed() || domain.worker().is_none());
+        // Standalone Readyset has at most one worker per domain.
+        debug_assert!(dh.is_placed() || dh.worker().is_none());
 
-        let replica_addr = ReplicaAddress {
-            domain_index: node.domain(),
-            shard: 0,
-            replica: 0,
-        };
+        let domain = node.domain();
         let tx = self
             .channel_coordinator
-            .get_addr(&replica_addr)
-            .ok_or_else(|| {
-                internal_err!("failed to get channel coordinator for {}", replica_addr)
-            })?;
+            .get_addr(&domain)
+            .ok_or_else(|| internal_err!("failed to get channel coordinator for {}", domain))?;
 
         let base_operator = node
             .get_base()
@@ -735,14 +729,7 @@ impl DfState {
         for (&domain_index, s) in self.domains.iter() {
             trace!(domain = %domain_index.index(), "requesting stats from domain");
             if let Some(stats) = s.try_send(DomainRequest::GetStatistics, workers).await? {
-                domains.insert(
-                    ReplicaAddress {
-                        domain_index,
-                        shard: 0,
-                        replica: 0,
-                    },
-                    stats,
-                );
+                domains.insert(domain_index, stats);
             }
         }
 
@@ -906,8 +893,7 @@ impl DfState {
     }
 
     /// Issue all of `requests` to their corresponding domains asynchronously, and return a stream
-    /// of the results, consisting of shard, then replica, then result (potentially in a different
-    /// order).
+    /// of the results, consisting of one result per domain (potentially in a different order).
     ///
     /// If any domains are not running on a worker, this method will return an error.
     ///
@@ -1037,8 +1023,6 @@ impl DfState {
             if !self.domains.contains_key(di) {
                 return Err(ReadySetError::NoSuchReplica {
                     domain_index: di.index(),
-                    shard: 0,
-                    replica: 0,
                 });
             }
         }
@@ -1046,8 +1030,8 @@ impl DfState {
         Ok(domains)
     }
 
-    /// Have all domain replicas been placed onto workers in the cluster?
-    pub(super) fn all_replicas_placed(&self) -> bool {
+    /// Have all domains been placed onto workers in the cluster?
+    pub(super) fn all_domains_placed(&self) -> bool {
         self.domain_nodes
             .keys()
             .all(|d| self.domains.get(d).is_some_and(|h| h.is_placed()))
@@ -1236,13 +1220,9 @@ impl DfState {
         let mut assigned_worker = None;
 
         if let Some(worker_id) = worker {
-            let replica_address = ReplicaAddress {
-                domain_index: idx,
-                shard: 0,
-                replica: 0,
-            };
+            let domain = idx;
 
-            let domain = DomainBuilder {
+            let builder = DomainBuilder {
                 index: idx,
                 shard: None,
                 replica: 0,
@@ -1253,17 +1233,15 @@ impl DfState {
             };
 
             let w = self.workers.get(&worker_id).ok_or_else(|| {
-                internal_err!(
-                    "Domain {replica_address} scheduled onto nonexistent worker {worker_id}"
-                )
+                internal_err!("Domain {domain} scheduled onto nonexistent worker {worker_id}")
             })?;
 
-            let idx = domain.index;
+            let idx = builder.index;
 
-            debug!("sending domain {} to worker {}", replica_address, w.uri);
+            debug!("sending domain {} to worker {}", domain, w.uri);
 
             let ret = w
-                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(domain))
+                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(builder))
                 .await
                 .map_err(|e| ReadySetError::DomainCreationFailed {
                     domain_index: idx.index(),
@@ -1276,7 +1254,7 @@ impl DfState {
             debug!(external_addr = %ret.external_addr, "worker booted domain");
 
             self.channel_coordinator
-                .insert_remote(replica_address, ret.external_addr);
+                .insert_remote(domain, ret.external_addr);
             assigned_worker = Some(w.uri.clone());
         }
 
@@ -1314,8 +1292,6 @@ impl DfState {
                 .get(&domain)
                 .ok_or_else(|| ReadySetError::NoSuchReplica {
                     domain_index: domain.index(),
-                    shard: 0,
-                    replica: 0,
                 })?
                 .try_send::<()>(DomainRequest::RemoveNodes { nodes }, &self.workers)
                 .await
@@ -1755,16 +1731,15 @@ impl DfState {
     }
 
     /// Remove all references to the given [`WorkerIdentifier`] from the runtime state of the
-    /// dataflow graph, returning a list of replica addresses that were known to be running on those
-    /// workers
-    pub(super) fn remove_worker(&mut self, wi: &WorkerIdentifier) -> Vec<ReplicaAddress> {
+    /// dataflow graph, returning a list of domains that were known to be running on that worker.
+    pub(super) fn remove_worker(&mut self, wi: &WorkerIdentifier) -> Vec<DomainIndex> {
         self.workers.remove(wi);
         self.read_addrs.remove(wi);
         let mut res = vec![];
         for dh in self.domains.values_mut() {
-            if let Some(replica_addr) = dh.remove_worker(wi) {
-                self.channel_coordinator.remove(replica_addr);
-                res.push(replica_addr);
+            if let Some(domain) = dh.remove_worker(wi) {
+                self.channel_coordinator.remove(domain);
+                res.push(domain);
             }
         }
         res
@@ -1799,13 +1774,13 @@ impl DfState {
         Ok(res)
     }
 
-    /// Send requests to whatever workers are running the given domain replicas to kill those
-    /// replicas, and remove them from runtime state.
+    /// Send requests to the workers running the given domains to kill them, and remove the domains
+    /// from runtime state.
     pub(super) async fn kill_domains<I>(&mut self, domains: I) -> ReadySetResult<()>
     where
         I: IntoIterator<Item = DomainIndex>,
     {
-        let mut workers_to_replicas: HashMap<_, Vec1<_>> = HashMap::new();
+        let mut workers_to_domains: HashMap<_, Vec1<_>> = HashMap::new();
         for di in domains {
             let Some(dh) = self.domains.get(&di) else {
                 debug!(domain = %di, "domain not running, not killing");
@@ -1813,7 +1788,7 @@ impl DfState {
             };
 
             for (addr, wi) in dh.assignments() {
-                workers_to_replicas
+                workers_to_domains
                     .entry(wi.clone())
                     .and_modify(|v| v.push(addr))
                     .or_insert_with(|| vec1![addr]);
@@ -1821,19 +1796,19 @@ impl DfState {
         }
 
         let mut futs = FuturesUnordered::new();
-        for (worker_url, replicas) in workers_to_replicas {
+        for (worker_url, domains) in workers_to_domains {
             let worker = self.workers.get(&worker_url).ok_or_else(|| {
                 internal_err!("Worker not found for url {worker_url} to kill domains")
             })?;
             futs.push(
                 worker
-                    .rpc(WorkerRequestKind::KillDomains(replicas.clone()))
-                    .map_ok(|()| replicas),
+                    .rpc(WorkerRequestKind::KillDomains(domains.clone()))
+                    .map_ok(|()| domains),
             );
         }
         while let Some(r) = futs.next().await {
             for killed_addr in r? {
-                if let Some(dh) = self.domains.get_mut(&killed_addr.domain_index) {
+                if let Some(dh) = self.domains.get_mut(&killed_addr) {
                     dh.clear_assignment();
                 }
             }
@@ -1903,11 +1878,11 @@ impl DfState {
             return Ok(());
         }
 
-        // Snapshot replica addresses to evict from the channel coordinator before
-        // `kill_domains` clears `DomainHandle::shards` via `remove_assignment`. Note that
-        // `dh.assignments()` already filters unscheduled (None) replicas, which is what we
-        // want — those were never registered with the coordinator.
-        let replica_addrs: Vec<ReplicaAddress> = orphaned
+        // Snapshot the assigned domains to evict from the channel coordinator before
+        // `kill_domains` clears `DomainHandle::worker` via `remove_assignment`. Note that
+        // `dh.assignments()` already filters unscheduled domains, which is what we want —
+        // those were never registered with the coordinator.
+        let domains_to_evict: Vec<DomainIndex> = orphaned
             .iter()
             .filter_map(|di| self.domains.get(di))
             .flat_map(|dh| dh.assignments().map(|(addr, _)| addr))
@@ -1921,7 +1896,7 @@ impl DfState {
             );
         }
 
-        for addr in replica_addrs {
+        for addr in domains_to_evict {
             self.channel_coordinator.remove(addr);
         }
 
@@ -2026,11 +2001,7 @@ impl DfState {
 
                 let already_placed = self.domains.get(&domain).is_some_and(|dh| dh.is_placed());
                 if !already_placed && worker.is_none() {
-                    dmp.replica_failed_placement(ReplicaAddress {
-                        domain_index: domain,
-                        shard: 0,
-                        replica: 0,
-                    });
+                    dmp.domain_failed_placement(domain);
                 }
 
                 dmp.place_domain(domain, worker, nodes.clone());

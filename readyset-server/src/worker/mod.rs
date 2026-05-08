@@ -34,7 +34,7 @@ use crate::worker::replica::WrappedDomainRequest;
 use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers};
 use readyset_alloc::StdThreadBuildWrapper;
-use readyset_client::internal::ReplicaAddress;
+use readyset_client::internal::DomainIndex;
 use readyset_client::metrics::recorded;
 use readyset_client::TableStatus;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
@@ -63,15 +63,15 @@ pub enum WorkerRequestKind {
     ClearDomains,
 
     /// Kill one or more domains running on this worker
-    KillDomains(Vec1<ReplicaAddress>),
+    KillDomains(Vec1<DomainIndex>),
 
     /// The sender of the request would like one of the domains on this worker to do something.
     ///
     /// This actually might return something that isn't `()`; see the `DomainRequest` docs
     /// for more.
     DomainRequest {
-        /// The address of the target domain replica
-        replica_address: ReplicaAddress,
+        /// The [`DomainIndex`] of the target domain.
+        domain_index: DomainIndex,
         /// The actual request.
         request: Box<DomainRequest>, // box for perf (clippy::large-enum-variant)
     },
@@ -141,12 +141,12 @@ impl MemoryTracker {
 }
 
 /// A future for a finished domain. Awaiting this future returns a tuple containing the result of
-/// the domain running and the domain's [`ReplicaAddress`]
+/// the domain running and the domain's [`DomainIndex`]
 #[pin_project]
-struct FinishedDomain(#[pin] JoinHandle<ReadySetResult<()>>, ReplicaAddress);
+struct FinishedDomain(#[pin] JoinHandle<ReadySetResult<()>>, DomainIndex);
 
 impl Future for FinishedDomain {
-    type Output = (Result<ReadySetResult<()>, JoinError>, ReplicaAddress);
+    type Output = (Result<ReadySetResult<()>, JoinError>, DomainIndex);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -155,7 +155,7 @@ impl Future for FinishedDomain {
     }
 }
 
-fn log_domain_result(domain: ReplicaAddress, result: &Result<ReadySetResult<()>, JoinError>) {
+fn log_domain_result(domain: DomainIndex, result: &Result<ReadySetResult<()>, JoinError>) {
     match result {
         Ok(Ok(())) => info!(%domain, "domain exited"),
         Ok(Err(error)) => error!(%domain, %error, "domain failed with an error"),
@@ -180,17 +180,17 @@ pub struct Worker {
     domain_external: IpAddr,
     /// URL at which this worker can be contacted.
     url: Url,
-    /// Reports replica-task exits to the controller (covers both controller-initiated
+    /// Reports domain-task exits to the controller (covers both controller-initiated
     /// teardown and unexpected death). The receiver lives in a dedicated controller-side
     /// task; `UnboundedSender::send` is synchronous and non-blocking, which is what
     /// prevents the historical worker↔controller loopback deadlock.
-    domain_exited_tx: UnboundedSender<ReplicaAddress>,
+    domain_exited_tx: UnboundedSender<DomainIndex>,
     /// A store of the current state size of each domain, used for eviction purposes.
-    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+    state_sizes: Arc<Mutex<HashMap<DomainIndex, Arc<AtomicUsize>>>>,
     /// Read handles.
     readers: Readers,
     /// Handles to domains currently being run by this worker.
-    domains: HashMap<ReplicaAddress, DomainHandle>,
+    domains: HashMap<DomainIndex, DomainHandle>,
     /// Run unqueries after a reader eviction.
     unquery: bool,
     memory: MemoryTracker,
@@ -210,7 +210,7 @@ impl Worker {
         listen_addr: IpAddr,
         external_addr: SocketAddr,
         url: Url,
-        domain_exited_tx: UnboundedSender<ReplicaAddress>,
+        domain_exited_tx: UnboundedSender<DomainIndex>,
         readers: Readers,
         memory_limit: Option<usize>,
         evict_interval: Option<Duration>,
@@ -283,19 +283,14 @@ impl Worker {
                 Ok(None)
             }
             WorkerRequestKind::RunDomain(builder) => {
-                let replica_addr = builder.address();
-                let span = info_span!("domain", address = %replica_addr);
+                let domain = builder.address();
+                let span = info_span!("domain", address = %domain);
                 span.in_scope(|| debug!("received domain to run"));
 
                 let bind_on = self.domain_bind;
                 let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
                     .map_err(|e| {
-                        internal_err!(
-                            "failed to bind domain {} on {}: {}",
-                            replica_addr,
-                            bind_on,
-                            e
-                        )
+                        internal_err!("failed to bind domain {} on {}: {}", domain, bind_on, e)
                     })
                     .await?;
                 let bind_actual = listener.local_addr().map_err(|e| {
@@ -310,7 +305,7 @@ impl Worker {
                 let (init_state_tx, init_state_rx) = tokio::sync::mpsc::channel(1);
 
                 let state_size = Arc::new(AtomicUsize::new(0));
-                let (domain, replay_rx) = builder.build(
+                let (dataflow_domain, replay_rx) = builder.build(
                     self.readers.clone(),
                     self.coord.clone(),
                     state_size.clone(),
@@ -329,16 +324,13 @@ impl Worker {
                 // need to register the domain with the local channel coordinator.
                 // local first to ensure that we don't unnecessarily give away remote for a
                 // local thing if there's a race
-                self.coord.insert_local(replica_addr, local_tx);
-                self.coord.insert_remote(replica_addr, bind_external);
+                self.coord.insert_local(domain, local_tx);
+                self.coord.insert_remote(domain, bind_external);
 
-                self.state_sizes
-                    .lock()
-                    .await
-                    .insert(replica_addr, state_size);
+                self.state_sizes.lock().await.insert(domain, state_size);
 
                 let replica = Replica::new(
-                    domain,
+                    dataflow_domain,
                     listener,
                     local_rx,
                     req_rx,
@@ -360,7 +352,7 @@ impl Worker {
                 let (abort, abort_rx) = oneshot::channel::<()>();
                 // Spawn the actual thread to run the domain
                 std::thread::Builder::new()
-                    .name(format!("Domain {replica_addr}"))
+                    .name(format!("Domain {domain}"))
                     .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
                     .spawn_wrapper(move || {
                         // The runtime will run until the abort signal is sent.
@@ -371,11 +363,9 @@ impl Worker {
                         runtime.shutdown_background();
                     })?;
 
-                self.domains
-                    .insert(replica_addr, DomainHandle { req_tx, abort });
+                self.domains.insert(domain, DomainHandle { req_tx, abort });
 
-                self.domain_wait_queue
-                    .push(FinishedDomain(jh, replica_addr));
+                self.domain_wait_queue.push(FinishedDomain(jh, domain));
 
                 span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted"));
                 let resp = RunDomainResponse {
@@ -386,9 +376,7 @@ impl Worker {
             WorkerRequestKind::KillDomains(domains) => {
                 for addr in domains {
                     let nsde = || ReadySetError::NoSuchReplica {
-                        domain_index: addr.domain_index.index(),
-                        shard: addr.shard,
-                        replica: addr.replica,
+                        domain_index: addr.index(),
                     };
                     match self.domains.remove(&addr) {
                         Some(domain) => {
@@ -417,15 +405,13 @@ impl Worker {
                 Ok(None)
             }
             WorkerRequestKind::DomainRequest {
-                replica_address,
+                domain_index: domain,
                 request,
             } => {
                 let nsde = || ReadySetError::NoSuchReplica {
-                    domain_index: replica_address.domain_index.index(),
-                    shard: replica_address.shard,
-                    replica: replica_address.replica,
+                    domain_index: domain.index(),
                 };
-                let dh = self.domains.get_mut(&replica_address).ok_or_else(nsde)?;
+                let dh = self.domains.get_mut(&domain).ok_or_else(nsde)?;
                 let (tx, rx) = oneshot::channel();
                 dh.req_tx
                     .send(WrappedDomainRequest {
@@ -454,7 +440,7 @@ impl Worker {
         }
     }
 
-    /// Notify the controller that the replica-task at `addr` has exited (skipping cancellation,
+    /// Notify the controller that the domain-task at `addr` has exited (skipping cancellation,
     /// which we treat as intentional teardown via `JoinHandle::abort`).
     ///
     /// `UnboundedSender::send` is synchronous and non-blocking — it does not yield in a way
@@ -465,7 +451,7 @@ impl Worker {
     /// `background_task_failed`.
     fn notify_domain_exited(
         &self,
-        addr: ReplicaAddress,
+        addr: DomainIndex,
         result: &Result<ReadySetResult<()>, JoinError>,
     ) {
         log_domain_result(addr, result);
@@ -513,8 +499,8 @@ impl Worker {
                 _ = self.evict_interval.tick() => {
                     self.evict_tick();
                 }
-                Some((result, replica_address)) = self.domain_wait_queue.next() => {
-                    self.notify_domain_exited(replica_address, &result);
+                Some((result, domain)) = self.domain_wait_queue.next() => {
+                    self.notify_domain_exited(domain, &result);
                 }
             }
         }
@@ -525,7 +511,7 @@ async fn evict_check(
     limit: usize,
     coord: Arc<ChannelCoordinator>,
     tracker: MemoryTracker,
-    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+    state_sizes: Arc<Mutex<HashMap<DomainIndex, Arc<AtomicUsize>>>>,
     url: Url,
     bmgr: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
@@ -545,14 +531,14 @@ async fn evict_check(
         let mut total_reported = 0;
         let sizes = state_sizes
             .iter()
-            .filter_map(|(replica_addr, size_atom)| {
+            .filter_map(|(domain, size_atom)| {
                 let size = size_atom.load(Ordering::Acquire);
                 if size == 0 {
                     return None;
                 }
-                trace!("domain {} state size is {} bytes", replica_addr, size);
+                trace!("domain {} state size is {} bytes", domain, size);
                 total_reported += size;
-                Some((*replica_addr, size))
+                Some((*domain, size))
             })
             .collect::<Vec<_>>();
         (sizes, total_reported)
@@ -605,7 +591,7 @@ async fn evict_check(
 
         debug!(
             "memory footprint ({} bytes) exceeds limit ({} bytes); evicting from largest domain {}",
-            used, limit, target.domain_index,
+            used, limit, target,
         );
 
         counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED).increment(1);
@@ -632,11 +618,7 @@ async fn evict_check(
         });
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
-            warn!(
-                "failed to evict from {}: {}",
-                target.domain_index.index(),
-                e
-            );
+            warn!("failed to evict from {}: {}", target.index(), e);
             // remove sender so we don't try to use it again
             domain_senders.remove(&target);
         }
@@ -662,7 +644,7 @@ async fn evict_start(
     limit: usize,
     coord: Arc<ChannelCoordinator>,
     tracker: MemoryTracker,
-    state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
+    state_sizes: Arc<Mutex<HashMap<DomainIndex, Arc<AtomicUsize>>>>,
     is_evicting: Arc<AtomicBool>,
     url: Url,
     barriers: Arc<BarrierManager>,
@@ -704,13 +686,13 @@ impl Drop for Worker {
             .name("Worker Drop".to_string())
             .spawn_wrapper(move || {
                 rt.block_on(async move {
-                    while let Some((handle, replica_addr)) = domain_wait_queue.next().await {
+                    while let Some((handle, domain)) = domain_wait_queue.next().await {
                         match handle {
                             Ok(Err(e)) => {
-                                error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                                error!(domain = %domain, err = %e, "domain failed during drop")
                             }
                             Err(e) if !e.is_cancelled() => {
-                                error!(domain = %replica_addr, err = %e, "domain failed during drop")
+                                error!(domain = %domain, err = %e, "domain failed during drop")
                             }
                             _ => {}
                         }
