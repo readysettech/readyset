@@ -34,13 +34,12 @@ use crate::rewrite_utils::{
     OnAtom, and_predicates_skip_true, are_group_by_keys_pinned_by_correlation,
     as_sub_query_with_alias, build_ext_to_int_fields_map, classify_on_atom,
     collect_local_from_items, columns_iter, contains_select, deep_columns_expr_visitor,
-    deep_columns_visitor, deep_columns_visitor_mut, default_alias_for_select_item_expression,
-    expect_field_as_expr, expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
-    expect_sub_query_with_alias_mut, extract_correlation_keys, find_rhs_join_clause,
-    for_each_window_function, get_select_item_alias, is_aggregated_expr, is_aggregation_or_grouped,
-    is_always_true_filter, is_simple_parametrizable_filter, outermost_expression,
-    partition_correlated_predicates, resolve_field_reference, split_expr, split_expr_mut,
-    substitute_columns_in_expr,
+    deep_columns_visitor, deep_columns_visitor_mut, expect_field_as_expr, expect_field_as_expr_mut,
+    expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
+    extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
+    get_select_item_alias, is_aggregated_expr, is_aggregation_or_grouped, is_always_true_filter,
+    is_simple_parametrizable_filter, outermost_expression, partition_correlated_predicates,
+    resolve_field_reference, split_expr, split_expr_mut, substitute_columns_in_expr,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -145,7 +144,7 @@ pub(crate) fn replace_columns_with_inlinable_expr(
     base_stmt: &mut SelectStatement,
     lhs_rel: &Relation,
     ext_to_int_fields: &HashMap<Column, Expr>,
-    is_top_select: bool,
+    _is_top_select: bool,
 ) -> ReadySetResult<()> {
     for select_item in &mut base_stmt.fields {
         let (expr, maybe_alias) = expect_field_as_expr_mut(select_item);
@@ -161,13 +160,14 @@ pub(crate) fn replace_columns_with_inlinable_expr(
                 _ => true,
             };
             if name_changes {
-                *maybe_alias = Some(if is_top_select {
-                    // Preserve the original projected column name at the top level.
-                    orig_col.name.clone()
-                } else {
-                    // Non-top level: keep stable naming for parents by giving a deterministic alias.
-                    default_alias_for_select_item_expression(mapped)
-                });
+                // Always preserve the original visible name as the alias.
+                // At top-level this keeps the user-visible column name unchanged.
+                // At non-top-level, parent queries reference this field by
+                // `orig_col.name`, so we must expose that name — not the
+                // inner expression's default alias, which may differ (e.g.
+                // `t1.ssn` rewritten to `s.sn` would produce alias `"sn"`,
+                // breaking parent references to `t3.ssn`).
+                *maybe_alias = Some(orig_col.name.clone());
             }
         }
     }
