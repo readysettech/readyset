@@ -10,7 +10,7 @@ use crate::controller::state::DfState;
 /// # Domain assignment heuristics
 /// The main idea is to have as few domains as possible, but with one structural exception: each
 /// base table is assigned its own domain. Constants (`VALUES`) are placed in a deferred second
-/// pass — see [`dataflow::node::NodeType::Constant`] below.
+/// pass; see [`dataflow::node::NodeType::Constant`] below.
 ///
 /// ## [`dataflow::node::NodeType::Reader`]
 /// Since readers always re-materialize, sharing a domain doesn't help them much. Having them in
@@ -23,11 +23,11 @@ use crate::controller::state::DfState;
 ///
 /// ## [`dataflow::node::NodeType::Constant`]
 /// Constants (`VALUES` clauses) are co-located with their consumer's domain in a deferred
-/// second pass. Structurally a Constant looks like a Base — both originate data and have only
-/// the graph root as a parent — but operationally a Constant does no ongoing work: it receives
+/// second pass. Structurally a Constant looks like a Base: both originate data and have only
+/// the graph root as a parent. But operationally a Constant does no ongoing work; it receives
 /// no writes, owns no I/O, and just emits a fixed set of rows once at materialization time.
 /// Giving it its own domain costs an OS thread for no benefit and forces cross-domain message
-/// passing for static rows the consumer needs. Co-locating turns Constant→Join row delivery
+/// passing for static rows the consumer needs. Co-locating turns Constant -> Join row delivery
 /// into intra-domain message passing and eliminates the Egress/Ingress pair between them.
 ///
 /// ## Node name starts with 'BOUNDARY_'
@@ -51,9 +51,9 @@ fn assign_inner(
     ndomains: &mut usize,
     new_nodes: &[NodeIndex],
 ) -> ReadySetResult<()> {
-    let mut next_domain = || -> ReadySetResult<usize> {
+    let mut next_domain = || -> usize {
         *ndomains += 1;
-        Ok(*ndomains - 1)
+        *ndomains - 1
     };
 
     // Constants are deferred to pass 2 (see below) so they can co-locate with their consumer.
@@ -159,11 +159,11 @@ fn assign_inner(
                 }
             }
 
-            Ok(assignment.unwrap_or_else(|| {
+            assignment.unwrap_or_else(|| {
                 // no other options left -- we need a new domain
-                next_domain().unwrap()
-            }))
-        })()?;
+                next_domain()
+            })
+        })();
 
         debug!(
             node = node.index(),
@@ -177,12 +177,12 @@ fn assign_inner(
 
     // Pass 2: place each deferred Constant in its consumer's domain. By processing every
     // non-Constant in pass 1, every consumer of a Constant has been assigned a domain by
-    // the time pass 2 runs — regardless of where the Constant fell in topo order.
+    // the time pass 2 runs, regardless of where the Constant fell in topo order.
     // MIR-to-graph compilation always wires a Constant to at least one downstream operator
     // before this function runs; if neither holds, the graph is malformed and we bail.
     //
     // Multi-consumer Constants are not produced by the current MIR pipeline. If that
-    // changes, the placement policy below (pick the first consumer) needs revisiting —
+    // changes, the placement policy below (pick the first consumer) needs revisiting:
     // unchosen consumers would pay a cross-domain hop, partially undoing this fix.
     for node in deferred_constants {
         debug_assert!(
@@ -285,8 +285,8 @@ mod tests {
     }
 
     /// A Constant feeding a Join must land in the Join's domain rather than its own. The
-    /// previous behavior — driven by `is_source()` returning true for both Bases and
-    /// Constants — gave every VALUES clause an OS thread for a node that does no ongoing
+    /// previous behavior, driven by `is_source()` returning true for both Bases and
+    /// Constants, gave every VALUES clause an OS thread for a node that does no ongoing
     /// work, and forced cross-domain message passing for static rows the Join needed.
     #[test]
     fn constant_inherits_consumer_domain() {
