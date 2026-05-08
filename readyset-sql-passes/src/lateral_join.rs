@@ -418,6 +418,7 @@ fn try_resolve_as_lateral_subquery(
     preceding_to_rhs: &[Relation],
     ctx: &mut UnnestContext,
     allow_flatten: bool,
+    allow_aggregated_flatten: &mut bool,
 ) -> ReadySetResult<(bool, Option<LateralResolution>)> {
     let mut has_transformed;
 
@@ -459,30 +460,55 @@ fn try_resolve_as_lateral_subquery(
     //   - DISTINCT: deduplicated per outer row in LATERAL, globally after.
     //   - ORDER BY: per-outer ordering is meaningless at outer scope post-flatten.
     //
-    // Aggregation/GROUP BY is conditionally accepted: bodies whose alias is in
-    // `pre_hoist_lateral_exactly_one` (aggregate-only-no-GROUP-BY → 1 row per
-    // outer regardless of match) or `pre_hoist_lateral_at_most_one` (correlation-
-    // pinned GROUP BY → 0..1 row per outer) flatten safely because their per-
-    // outer cardinality is bounded.  The downstream-cardinality validation in
-    // `check_downstream_joins_cardinality_preserving` (called from
-    // `absorb_flatten`) ensures the lifted aggregation produces correct results
-    // when downstream joins/tables are also cardinality-preserving.
+    // Aggregation/GROUP BY is conditionally accepted: only bodies whose
+    // alias is in `pre_hoist_lateral_at_most_one` (correlation-pinned
+    // GROUP BY → 0..1 row per outer) may take the Flatten path.  The
+    // join-partner cardinality validation in
+    // `check_join_partners_cardinality_preserving` (called from
+    // `absorb_flatten`) ensures the lifted aggregation produces correct
+    // results when the items joined to the LATERAL position are also
+    // cardinality-preserving.
     //
-    // HAVING is handled by `apply_inline`: with aggregates/GROUP BY, HAVING is
-    // merged into outer HAVING; without them, HAVING is semantically a WHERE
-    // filter and is merged into outer WHERE.
+    // `pre_hoist_lateral_exactly_one` (aggregate-only-no-GROUP-BY) is
+    // deliberately rejected here even though the body returns exactly
+    // one row per outer.  Post-flatten the body's outer-correlated
+    // WHERE moves up to outer scope and drops outer rows whose body
+    // input was empty — diverging from the pre-flatten per-outer-row
+    // semantics where the aggregate over empty input yields the
+    // empty-set value (e.g. `count(*) = 0`) and the outer row is
+    // preserved.  No catalog fact proves "every outer row has at
+    // least one matching body row," so ExactlyOne bodies fall through
+    // to the Resolve path, which decorrelates as a LEFT OUTER JOIN
+    // with COALESCE on the aggregate — preserving outer rows.
+    //
+    // `allow_aggregated_flatten` is an in-out gate owned by
+    // `unnest_lateral_subqueries`.  Read here as a precondition; the
+    // callee clears it to `false` if it actually returns `Flatten` for
+    // an aggregated body, so the caller does not have to re-derive
+    // whether the body was aggregated.  This rejects composition of
+    // two aggregated LATERAL flattens onto the same outer FROM (which
+    // would aggregate over the cross-product of both bodies — yielding
+    // the *product* of the row counts, not either per-LATERAL
+    // aggregate).
+    //
+    // HAVING is handled by `apply_inline`: with aggregates/GROUP BY,
+    // HAVING is merged into outer HAVING; without them, HAVING is
+    // semantically a WHERE filter and is merged into outer WHERE.
     let body_alias_rel: Relation = body_alias_ident.clone().into();
+    let body_is_aggregated = is_aggregation_or_grouped(stmt)?;
     let lateral_flatten_safe = allow_flatten
         && stmt.limit_clause.is_empty()
         && stmt.order.is_none()
         && !stmt.distinct
-        && (!is_aggregation_or_grouped(stmt)?
-            || ctx.pre_hoist_lateral_exactly_one.contains(&body_alias_rel)
-            || ctx.pre_hoist_lateral_at_most_one.contains(&body_alias_rel));
+        && (!body_is_aggregated || ctx.pre_hoist_lateral_at_most_one.contains(&body_alias_rel))
+        && (!body_is_aggregated || *allow_aggregated_flatten);
     if lateral_flatten_safe {
         let local_tables = collect_local_from_items(stmt)?;
         if has_outer_left_join_on(stmt, &local_tables) {
             let prepared = prepare_inline(from_item.clone())?;
+            if body_is_aggregated {
+                *allow_aggregated_flatten = false;
+            }
             return Ok((true, Some(LateralResolution::Flatten(Box::new(prepared)))));
         }
     }
@@ -862,6 +888,15 @@ fn resolve_lateral_subqueries(
     // a single group).
     let mut deferred_inlines: Vec<(InlineCandidate, Vec<Expr>)> = Vec::new();
 
+    // In-out gate threaded through `try_resolve_as_lateral_subquery`.
+    // Starts `true`; the callee clears it to `false` after queueing
+    // the first aggregated LATERAL flatten in this FROM list, so
+    // subsequent aggregated-body candidates fall through to Resolve.
+    // The gate is per-FROM-list scope; nested LATERAL un-nesting
+    // (via `unnest_all_subqueries`) creates its own local in its own
+    // `unnest_lateral_subqueries` frame.
+    let mut allow_aggregated_flatten = true;
+
     // Normalizes the ON for a rewritten LATERAL:
     // - Keep only atoms over {RHS, chosen LHS} in ON; push the remainder to outer WHERE.
     // - Safe to push only when the **current** join is INNER. With only LEFT supported later,
@@ -923,6 +958,7 @@ fn resolve_lateral_subqueries(
             &preceding_to_rhs,
             ctx,
             true, // allow_flatten
+            &mut allow_aggregated_flatten,
         )?;
 
         preceding_from_items.insert(from_item_rel.clone());
@@ -1053,6 +1089,7 @@ fn resolve_lateral_subqueries(
                 &preceding_to_rhs,
                 ctx,
                 allow_flatten,
+                &mut allow_aggregated_flatten,
             )?;
 
             preceding_from_items.insert(from_item_rel.clone());
@@ -2229,14 +2266,21 @@ FROM
         );
     }
 
-    /// Positive: aggregate-only-no-GROUP-BY LATERAL body with internal LEFT
-    /// JOIN.  Flattens via the `pre_hoist_lateral_exactly_one` relaxation.
-    /// Without the relaxation, this body would route to Resolved; with the
-    /// internal LEFT JOIN that needs hoisting, Flatten is the cleaner path.
-    /// `check_group_by_compatibility` additions promote `a.k` into the outer GROUP BY (the body
-    /// has no GROUP BY of its own).
+    /// Negative: aggregate-only-no-GROUP-BY LATERAL body (ExactlyOne)
+    /// with internal outer-correlated LEFT JOIN.  Pre-this-commit, the
+    /// rewriter accepted this on the Flatten path via the
+    /// `pre_hoist_lateral_exactly_one` relaxation and emitted
+    /// `qa.a, qa.b LEFT JOIN qa.c ... WHERE b.k=a.k GROUP BY a.k` —
+    /// unsound: outer `qa.a` rows with no matching `qa.b` get dropped
+    /// by `WHERE b.k=a.k` at outer scope, while pre-flatten the
+    /// ExactlyOne body returns one row per outer with `cnt=0` (count
+    /// over empty input is 0, not no rows).  The new gate rejects
+    /// ExactlyOne flatten unconditionally; the candidate falls through
+    /// to Resolve, which rejects per §5.2 of
+    /// `known_core_limitations.md` (correlated structure inside
+    /// LEFT JOIN ON cannot be moved out), so the rewrite bails.
     #[test]
-    fn aggregate_only_lateral_with_internal_left_join_flattens() {
+    fn aggregate_only_lateral_with_internal_left_join_bail() {
         let original_text = r#"
         SELECT a.k, l1.cnt
         FROM qa.a AS a,
@@ -2247,13 +2291,9 @@ FROM
                  WHERE b.k = a.k
              ) AS l1
         "#;
-        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
-            FROM "qa"."a" AS "a", "qa"."b" AS "b"
-            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
-            WHERE ("b"."k" = "a"."k")
-            GROUP BY "a"."k""#;
+        let expected_text = "";
         test_it(
-            "aggregate_only_lateral_with_internal_left_join_flattens",
+            "aggregate_only_lateral_with_internal_left_join_bail",
             original_text,
             expected_text,
         );
@@ -2289,15 +2329,14 @@ FROM
         );
     }
 
-    /// Positive: aggregate-only-no-GROUP-BY LATERAL body in JOIN position
-    /// (CROSS JOIN, not comma-join).  Mirrors `aggregate_only_lateral_with_
-    /// internal_left_join_flattens` but exercises the JOIN-loop call site
-    /// of `try_resolve_as_lateral_subquery`/`absorb_flatten` rather than
-    /// the comma-loop site.  CROSS JOIN with internal LEFT JOIN body
-    /// tests that the JOIN-loop's `allow_flatten` check (INNER JOIN with
-    /// Empty/ON-TRUE) accepts CROSS JOIN.
+    /// Negative: JOIN-position variant of the ExactlyOne-with-internal-
+    /// LEFT-JOIN bail.  Same body shape, same unsoundness pre-this-
+    /// commit; the JOIN-loop call site of
+    /// `try_resolve_as_lateral_subquery` is exercised instead of the
+    /// comma-loop site.  Resolve rejects per §5.2 of
+    /// `known_core_limitations.md`.
     #[test]
-    fn aggregate_only_lateral_in_join_position_flattens() {
+    fn aggregate_only_lateral_in_join_position_bail() {
         let original_text = r#"
         SELECT a.k, l1.cnt
         FROM qa.a AS a
@@ -2308,14 +2347,9 @@ FROM
             WHERE b.k = a.k
         ) AS l1
         "#;
-        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
-            FROM "qa"."a" AS "a"
-            INNER JOIN "qa"."b" AS "b"
-            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
-            WHERE ("b"."k" = "a"."k")
-            GROUP BY "a"."k""#;
+        let expected_text = "";
         test_it(
-            "aggregate_only_lateral_in_join_position_flattens",
+            "aggregate_only_lateral_in_join_position_bail",
             original_text,
             expected_text,
         );
@@ -2455,6 +2489,230 @@ FROM
             "nested_lateral_parent_and_grandparent_correlation",
             original_text,
             expected_text,
+        );
+    }
+
+    /// Negative regression for the multi-aggregated LATERAL sibling
+    /// composition rejection.  Two correlated LATERAL bodies, each
+    /// with an internal LEFT JOIN that uses outer correlation.  Body
+    /// shape forces the Flatten path (Resolve cannot decorrelate
+    /// correlated LEFT JOINs per §5.2 of
+    /// `known_core_limitations.md`).  `l1` is correlation-pinned
+    /// (AtMostOne) and gets the first aggregated-flatten slot.  `l2`
+    /// is aggregate-only-no-GROUP-BY (ExactlyOne); the new gates
+    /// reject it twice (ExactlyOne never admitted, plus composition
+    /// already-queued), and Resolve also rejects per §5.2.  Rewrite
+    /// raises `unsupported!`.
+    #[test]
+    fn lateral_two_aggregated_siblings_with_correlated_left_join_bail() {
+        let original_stmt = r#"
+        SELECT a.k, l1.cnt1, l2.cnt2
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(*) AS cnt1
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c1 ON c1.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) l1,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt2
+                 FROM qa.b AS b2
+                 LEFT JOIN qa.c AS c2 ON c2.k = a.k
+                 WHERE b2.k = a.k
+             ) l2
+        "#;
+        let expect_stmt = "";
+        test_it(
+            "lateral_two_aggregated_siblings_with_correlated_left_join_bail",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Three-sibling variant of the multi-aggregated-LATERAL bail.
+    /// `l1` claims the only aggregated-flatten slot; `l2` and `l3`
+    /// are both denied and fall through to Resolve, which rejects
+    /// the correlated LEFT JOIN per §5.2 of
+    /// `known_core_limitations.md`.
+    #[test]
+    fn lateral_three_aggregated_siblings_with_correlated_left_join_bail() {
+        let original_stmt = r#"
+        SELECT a.k, l1.cnt1, l2.cnt2, l3.cnt3
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(*) AS cnt1
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c1 ON c1.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) l1,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt2
+                 FROM qa.b AS b2
+                 LEFT JOIN qa.c AS c2 ON c2.k = a.k
+                 WHERE b2.k = a.k
+             ) l2,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt3
+                 FROM qa.b AS b3
+                 LEFT JOIN qa.c AS c3 ON c3.k = a.k
+                 WHERE b3.k = a.k
+             ) l3
+        "#;
+        let expect_stmt = "";
+        test_it(
+            "lateral_three_aggregated_siblings_with_correlated_left_join_bail",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Negative regression for the LATERAL-arm upstream cardinality
+    /// check.  ExactlyOne body with outer-correlated LEFT JOIN.
+    /// Under the current eligibility gates, the ExactlyOne rejection
+    /// fires ahead of the upstream check, but the test stays as a
+    /// regression pin: the under-correlated-`test2` upstream shape
+    /// should never flatten regardless of which gate rejects it.
+    #[test]
+    fn lateral_exactly_one_under_correlated_upstream_does_not_flatten() {
+        let original_stmt = r#"
+        SELECT t1.b, t2.i, l.cnt
+        FROM test1 t1, test2 t2,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt
+                 FROM test3 ta
+                 LEFT JOIN test3 tb ON tb.b = t1.b
+             ) l
+        "#;
+        let expect_stmt = "";
+        test_it(
+            "lateral_exactly_one_under_correlated_upstream_does_not_flatten",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Negative regression for the LATERAL-arm upstream check,
+    /// AtMostOne variant.  Body has correlation-pinned GROUP BY and
+    /// outer-correlated LEFT JOIN — would flatten — but the outer
+    /// FROM contains an uncorrelated regular `test2`.  Reject by
+    /// upstream check.
+    #[test]
+    fn lateral_at_most_one_under_correlated_upstream_does_not_flatten() {
+        let original_stmt = r#"
+        SELECT t1.b, t2.i, l.cnt
+        FROM test1 t1, test2 t2,
+             LATERAL (
+                 SELECT ta.b, COUNT(*) AS cnt
+                 FROM test3 ta
+                 LEFT JOIN test3 tb ON tb.b = t1.b
+                 WHERE ta.b = t1.b
+                 GROUP BY ta.b
+             ) l
+        "#;
+        let expect_stmt = "";
+        test_it(
+            "lateral_at_most_one_under_correlated_upstream_does_not_flatten",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Negative regression for the LATERAL-arm upstream check: a
+    /// non-INNER (LEFT) upstream join is rejected unconditionally,
+    /// even if the body's correlation references both upstream
+    /// items.  The interaction between a null-extending upstream
+    /// join and the post-flatten aggregate is not analyzed;
+    /// conservatively bail.
+    #[test]
+    fn lateral_with_left_join_upstream_does_not_flatten() {
+        let original_stmt = r#"
+        SELECT t1.b, t2.i, l.cnt
+        FROM test1 t1
+        LEFT JOIN test2 t2 ON t2.b = t1.b
+        CROSS JOIN LATERAL (
+            SELECT COUNT(*) AS cnt
+            FROM test3 ta
+            LEFT JOIN test3 tb ON tb.b = t1.b
+        ) l
+        "#;
+        let expect_stmt = "";
+        test_it(
+            "lateral_with_left_join_upstream_does_not_flatten",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Positive no-regression pin for two aggregated LATERAL
+    /// siblings whose bodies have correlation only in WHERE (no
+    /// internal correlated LEFT JOIN, so neither attempts the
+    /// Flatten path — `has_outer_left_join_on` gates Flatten on the
+    /// presence of an outer-correlated LEFT JOIN inside the body).
+    /// Both bodies go through Resolve, which decorrelates each as a
+    /// grouped derived-table joined to the outer on the pinned
+    /// correlation column.  The new gates are orthogonal here —
+    /// neither candidate reaches the Flatten branch — and this test
+    /// pins that the gates' introduction did not perturb the
+    /// WHERE-only-correlation multi-sibling shape.
+    #[test]
+    fn lateral_aggregated_siblings_where_correlation_only_resolve() {
+        let original_stmt = r#"
+        SELECT a.k, l1.cnt1, l2.cnt2
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt1
+                 FROM qa.b AS b
+                 WHERE b.k = a.k
+             ) l1,
+             LATERAL (
+                 SELECT COUNT(*) AS cnt2
+                 FROM qa.c AS c
+                 WHERE c.k = a.k
+             ) l2
+        "#;
+        let expect_stmt = r#"SELECT "a"."k",
+            coalesce("l1"."cnt1", 0), coalesce("l2"."cnt2", 0)
+            FROM "qa"."a" AS "a"
+            LEFT OUTER JOIN (
+                SELECT count(*) AS "cnt1", "b"."k" AS "k"
+                FROM "qa"."b" AS "b"
+                GROUP BY "b"."k"
+            ) AS "l1" ON ("l1"."k" = "a"."k")
+            LEFT OUTER JOIN (
+                SELECT count(*) AS "cnt2", "c"."k" AS "k"
+                FROM "qa"."c" AS "c"
+                GROUP BY "c"."k"
+            ) AS "l2" ON ("l2"."k" = "a"."k")"#;
+        test_it(
+            "lateral_aggregated_siblings_where_correlation_only_resolve",
+            original_stmt,
+            expect_stmt,
+        );
+    }
+
+    /// Two LATERAL siblings, neither grouped.  No
+    /// `downstream_group_by_additions` are produced (the branch in
+    /// `check_group_by_compatibility` is skipped when the inner is
+    /// not aggregated).  Pre-existing shape; pins it stays
+    /// unchanged under the new gates.
+    #[test]
+    fn lateral_two_sibling_jointpos_no_grouped_bodies_unchanged() {
+        let original_stmt = r#"
+        SELECT t1.b, l1.x, l2.y
+        FROM test1 t1,
+             LATERAL (SELECT t2.b, t2.i AS x FROM test2 t2 WHERE t2.b = t1.b) l1,
+             LATERAL (SELECT t3.b, t3.i AS y FROM test3 t3 WHERE t3.b = t1.b) l2
+        "#;
+        let expect_stmt = r#"SELECT "t1"."b", "l1"."x", "l2"."y"
+            FROM "test1" AS "t1"
+            INNER JOIN (SELECT "t2"."b", "t2"."i" AS "x" FROM "test2" AS "t2") AS "l1" ON ("l1"."b" = "t1"."b")
+            INNER JOIN (SELECT "t3"."b", "t3"."i" AS "y" FROM "test3" AS "t3") AS "l2" ON ("l2"."b" = "t1"."b")"#;
+        test_it(
+            "lateral_two_sibling_jointpos_no_grouped_bodies_unchanged",
+            original_stmt,
+            expect_stmt,
         );
     }
 }
