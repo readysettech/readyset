@@ -3918,10 +3918,12 @@ fn outer_wf_inner_agg_grouped_bails() {
 /// now handled canonically by `check_grouped_engine_validation` inside
 /// `can_inline_subquery`.
 ///
-/// Additionally validates that `inline_from_item_position_checks`'s new
-/// aggregated-single-from-item guard correctly BLOCKS inlining when the base
-/// has a downstream join (proving the `invariant!` in `inline_from_item_in_place`
-/// is never reached via the eligibility path).
+/// Case B is a C.3 positive flip: the old guard rejected aggregated inlinables
+/// into multi-FROM bases.  Post-C.3 dedup, the unified eligibility surface
+/// (`apply_inline` + `check_join_partners_cardinality_preserving`) accepts
+/// when all downstream items are cardinality-preserving.  The scalar `cnt`
+/// subquery (COUNT(*) → 1 row) is cardinality-preserving, so `s` now inlines.
+/// The merged GROUP BY adds `cnt.c` to cover the non-aggregate outer projection.
 #[test]
 fn inner_agg_with_cardinality_preserving_scalar_join_inlines() {
     // Case A: single-FROM base — inlining works (passes position check)
@@ -3938,9 +3940,10 @@ fn inner_agg_with_cardinality_preserving_scalar_join_inlines() {
     "#;
     test_it("inner_agg_single_from_base_inlines", sql_a, expected_a);
 
-    // Case B: base has a downstream INNER JOIN — position check blocks inlining
-    // (agg inner + non-single-from-item base → reject to protect
-    // inline_from_item_in_place's structural invariant).
+    // Case B: base has a downstream INNER JOIN with a scalar (1-row) `cnt` subquery.
+    // Post-C.3 dedup, `s` inlines: `t` becomes a base table in a CROSS JOIN with `cnt`.
+    // The outer GROUP BY is expanded to include `cnt.c` (the non-aggregate outer
+    // projection from the scalar subquery that is now a FROM item).
     let sql_b = r#"
         SELECT "s"."k", "s"."sx", "cnt"."c"
         FROM (SELECT "t"."k", SUM("t"."x") AS "sx"
@@ -3948,17 +3951,19 @@ fn inner_agg_with_cardinality_preserving_scalar_join_inlines() {
               GROUP BY "t"."k") AS "s"
         INNER JOIN (SELECT COUNT(*) AS "c" FROM "v") AS "cnt" ON TRUE
     "#;
-    // Neither subquery inlines: `s` is blocked (agg + non-single-from-item
-    // base after cnt is present), and join normalization reorders to
-    // cnt CROSS JOIN s (ON TRUE becomes Empty after normalization).
+    // `s` inlines (C.3 positive flip): t is spliced in, GROUP BY expanded.
+    // `cnt` (aggregated, no-GROUP-BY) stays as a derived table.
     let expected_b = r#"
-        SELECT "s"."k", "s"."sx", "cnt"."c"
+        SELECT "t"."k", SUM("t"."x") AS "sx", "cnt"."c"
         FROM (SELECT count(*) AS "c" FROM "v") AS "cnt"
-        CROSS JOIN (SELECT "t"."k", SUM("t"."x") AS "sx"
-                    FROM "t"
-                    GROUP BY "t"."k") AS "s"
+        CROSS JOIN "t"
+        GROUP BY "t"."k", "cnt"."c"
     "#;
-    test_it("inner_agg_with_downstream_join_bails", sql_b, expected_b);
+    test_it(
+        "inner_agg_with_downstream_join_inlines_c3_flip",
+        sql_b,
+        expected_b,
+    );
 }
 
 /// Non-INNER RHS safety preserved: inlining a subquery on the RHS of a
@@ -4041,6 +4046,135 @@ fn dtr_lhs_path_non_leftmost_position_through_apply_inline() {
     "#;
     test_it(
         "dtr_lhs_path_non_leftmost_position_through_apply_inline",
+        original_text,
+        expect_text,
+    );
+}
+
+/// Negative: a LIMIT-bearing inlinable at the RHS of an INNER JOIN where the
+/// upstream LHS is a regular table.  Inlining would lift the inner LIMIT to
+/// the outer level — but the outer LIMIT then bounds the joined cross-product
+/// (`a × s`) rather than just `s`'s row set, changing the result count.
+///
+/// The post-C.2-dedup eligibility check (with the upstream-aware cardinality
+/// preserving check) correctly rejects this shape: `a` is a regular table,
+/// not `ExactlyOne`-eligible, so the inner LIMIT cannot be safely composed
+/// with the outer.  The rewriter leaves the derived table in place.
+///
+/// Defends against regressing back to the asymmetric downstream-only check
+/// that allowed this unsafe inlining post-C.2-dedup but pre-symmetric-fix.
+#[test]
+fn dtr_limit_inner_with_non_preserving_upstream_does_not_inline() {
+    let original_text = r#"
+        SELECT a.x, s.y
+        FROM test1 AS a
+        INNER JOIN (SELECT t.y FROM test2 AS t ORDER BY t.y LIMIT 10) AS s
+        ON a.k = s.y
+    "#;
+    // Rewriter normalises the ORDER BY null-ordering but leaves the derived
+    // table structure intact (inlining is rejected).
+    let expect_text = r#"
+        SELECT "a"."x", "s"."y"
+        FROM "test1" AS "a"
+        INNER JOIN (SELECT "t"."y" FROM "test2" AS "t" ORDER BY "t"."y" NULLS LAST LIMIT 10) AS "s"
+        ON ("a"."k" = "s"."y")
+    "#;
+    test_it(
+        "dtr_limit_inner_with_non_preserving_upstream_does_not_inline",
+        original_text,
+        expect_text,
+    );
+}
+
+/// C.3 dedup positive: an aggregated inlinable in the primary FROM position with
+/// a downstream scalar aggregate as an INNER JOIN partner (ExactlyOne → cardinality-
+/// preserving).
+///
+/// Before C.3 dedup, the `if ctx.is_inner_agg && !is_single_from_item!(base_stmt)`
+/// guard returned `Ok(None)` whenever the base was not a single-item FROM — even when
+/// all other FROM items were cardinality-preserving scalars.  Post-C.3 dedup,
+/// `check_join_partners_cardinality_preserving` accepts the shape.  The aggregated
+/// inlinable `s` is spliced into the base; `sc` (a scalar aggregate, no GROUP BY →
+/// 1 row) stays as a derived table.  The merged GROUP BY adds `sc.grand` to cover
+/// the non-aggregate outer projection referencing the still-present scalar subquery.
+#[test]
+fn dtr_c3_dedup_aggregated_multi_from_base_inlines() {
+    let original_text = r#"
+        SELECT s.k, s.total, sc.grand
+        FROM (SELECT t.k, SUM(t.x) AS total FROM test2 AS t GROUP BY t.k) AS s
+        INNER JOIN (SELECT SUM(t2.x) AS grand FROM test2 AS t2) AS sc ON TRUE
+    "#;
+    let expect_text = r#"
+        SELECT "t"."k", sum("t"."x") AS "total", "sc"."grand"
+        FROM (SELECT sum("t2"."x") AS "grand" FROM "test2" AS "t2") AS "sc"
+        CROSS JOIN "test2" AS "t"
+        GROUP BY "t"."k", "sc"."grand"
+    "#;
+    test_it(
+        "dtr_c3_dedup_aggregated_multi_from_base_inlines",
+        original_text,
+        expect_text,
+    );
+}
+
+/// C.2 + C.3 combined: aggregated inlinable with LIMIT in the primary FROM position,
+/// joined to a scalar aggregate (ExactlyOne).  Both C.2 (LIMIT guard) and C.3
+/// (multi-FROM aggregated guard) must be absent for this shape to inline.
+///
+/// The merged output retains LIMIT 50 (carried over from the inlinable via
+/// apply_inline), and the GROUP BY is expanded to include `sc.grand`.
+#[test]
+fn dtr_c2_c3_combined_aggregated_limit_inner_multi_from_base_inlines() {
+    let original_text = r#"
+        SELECT s.k, s.total, sc.grand
+        FROM (SELECT t.k, SUM(t.x) AS total FROM test2 AS t GROUP BY t.k LIMIT 50) AS s
+        INNER JOIN (SELECT SUM(t2.x) AS grand FROM test2 AS t2) AS sc ON TRUE
+    "#;
+    let expect_text = r#"
+        SELECT "t"."k", sum("t"."x") AS "total", "sc"."grand"
+        FROM (SELECT sum("t2"."x") AS "grand" FROM "test2" AS "t2") AS "sc"
+        CROSS JOIN "test2" AS "t"
+        GROUP BY "t"."k", "sc"."grand"
+        LIMIT 50
+    "#;
+    test_it(
+        "dtr_c2_c3_combined_aggregated_limit_inner_multi_from_base_inlines",
+        original_text,
+        expect_text,
+    );
+}
+
+/// Negative cardinality-barrier regression: a LIMIT-bearing inlinable (ORDER BY + LIMIT 10)
+/// at the RHS of an INNER JOIN where the outer SELECT contains a window function.
+///
+/// The outer WF triggers `check_cardinality_barrier` (WF barrier: §9) in the eligibility
+/// check — the outer context is cardinality-sensitive (WF partition/order semantics
+/// cannot tolerate an unexpectedly multiplied or truncated input set).  The inlinable
+/// must NOT be spliced in; it stays as a derived table.
+///
+/// This test pins the WF-barrier guard against future weakening: if
+/// `check_cardinality_barrier` is incorrectly relaxed, this test will flip to an
+/// inline and fail.
+#[test]
+fn dtr_topk_inner_with_outer_wf_does_not_inline() {
+    // The LIMIT-bearing `s` subquery must stay as a derived table because the outer
+    // SELECT has a ROW_NUMBER() window function → WF barrier blocks inlining.
+    let original_text = r#"
+        SELECT a.x, ROW_NUMBER() OVER (ORDER BY a.x) AS rn, s.y
+        FROM test1 AS a
+        INNER JOIN (SELECT t.y FROM test2 AS t ORDER BY t.y LIMIT 10) AS s
+        ON a.k = s.y
+    "#;
+    // The s subquery is preserved as a derived table; only the ORDER BY inside s is
+    // normalised (ASC NULLS LAST added by the parser).
+    let expect_text = r#"
+        SELECT "a"."x", ROW_NUMBER() OVER(ORDER BY "a"."x" ASC NULLS LAST) AS "rn", "s"."y"
+        FROM "test1" AS "a"
+        INNER JOIN (SELECT "t"."y" FROM "test2" AS "t" ORDER BY "t"."y" NULLS LAST LIMIT 10) AS "s"
+        ON ("a"."k" = "s"."y")
+    "#;
+    test_it(
+        "dtr_topk_inner_with_outer_wf_does_not_inline",
         original_text,
         expect_text,
     );

@@ -68,16 +68,20 @@ fn hoist_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
     stmt
 }
 
-// ─── Group 1: Basic hoisting from aggregated (non-inlinable) subqueries ─────────
+// ─── Group 1: Basic hoisting from aggregated (formerly non-inlinable) subqueries ────
 //
-// `derived_tables_rewrite_main` can inline simple non-aggregated derived tables,
-// so these tests use aggregated subqueries that the rewrite pass cannot flatten.
-// The hoist pass extracts the filters from the subquery and adds them to the
-// outer WHERE.
+// Prior to C.2 dedup, `derived_tables_rewrite_main` left LIMIT-bearing aggregated
+// subqueries as derived tables, and the hoist pass extracted parametrizable filters
+// from them.  After C.2 dedup, DTR now inlines these subqueries (LIMIT no longer
+// blocks the eligibility check for aggregated single-FROM inlinables), so the flat
+// merged SELECT already has the filter at the outermost level.  The hoist pass then
+// runs on an already-flat statement and is a no-op.  The expected shapes below
+// reflect the post-C.2-dedup, post-DTR-flatten output.
 
-/// A simple equality filter in the WHERE of an aggregated subquery is extracted to
-/// the outer WHERE.  `LIMIT` prevents `derived_tables_rewrite` from inlining the
-/// subquery, so the hoist pass is exercised directly.
+/// A simple equality filter in the WHERE of an aggregated subquery: post-C.2 dedup
+/// DTR flattens the subquery, merging the inner WHERE directly into the outer SELECT.
+/// Hoist then runs on the flat statement (no-op).  Final shape: flat aggregated SELECT
+/// with the filter in WHERE, not inside a derived-table wrapper.
 #[test]
 fn equality_filter_hoisted_from_agg_subquery_where() {
     assert_eq!(
@@ -85,16 +89,14 @@ fn equality_filter_hoisted_from_agg_subquery_where() {
             r#"SELECT sub.x, sub.total
                FROM (SELECT t.x, SUM(t.v) AS total FROM t WHERE t.x = $1 GROUP BY t.x LIMIT 100) AS sub"#,
         ),
-        parse_pg(
-            r#"SELECT sub.x, sub.total
-               FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x LIMIT 100) AS sub
-               WHERE (sub.x = $1)"#,
-        ),
+        parse_pg(r#"SELECT t.x, SUM(t.v) AS total FROM t WHERE (t.x = $1) GROUP BY t.x LIMIT 100"#,),
     );
 }
 
-/// A BETWEEN filter in the HAVING of an aggregated subquery is extracted to the outer WHERE.
-/// `LIMIT` prevents inlining so the subquery structure is preserved for the hoist pass.
+/// A BETWEEN filter in the HAVING of an aggregated subquery: post-C.2 dedup DTR
+/// flattens the subquery.  apply_inline promotes the HAVING filter (on a GROUP BY key)
+/// to WHERE during the merge; hoist is a no-op on the resulting flat SELECT.
+/// Final shape: flat aggregated SELECT with BETWEEN in WHERE, HAVING cleared.
 #[test]
 fn between_filter_hoisted_from_agg_subquery_having() {
     assert_eq!(
@@ -103,15 +105,15 @@ fn between_filter_hoisted_from_agg_subquery_having() {
                FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x BETWEEN $1 AND $2 LIMIT 100) AS sub"#,
         ),
         parse_pg(
-            r#"SELECT sub.x, sub.total
-               FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x LIMIT 100) AS sub
-               WHERE (sub.x BETWEEN $1 AND $2)"#,
+            r#"SELECT t.x, SUM(t.v) AS total FROM t WHERE (t.x BETWEEN $1 AND $2) GROUP BY t.x LIMIT 100"#,
         ),
     );
 }
 
-/// An IN-list filter in the HAVING of an aggregated subquery is extracted to the outer WHERE.
-/// `LIMIT` prevents inlining so the subquery structure is preserved for the hoist pass.
+/// An IN-list filter in the HAVING of an aggregated subquery: post-C.2 dedup DTR
+/// flattens the subquery.  apply_inline promotes the HAVING IN-list filter (on a
+/// GROUP BY key) to WHERE during the merge; hoist is a no-op on the resulting flat
+/// SELECT.  Final shape: flat aggregated SELECT with IN in WHERE, HAVING cleared.
 #[test]
 fn in_list_filter_hoisted_from_agg_subquery_having() {
     assert_eq!(
@@ -120,21 +122,27 @@ fn in_list_filter_hoisted_from_agg_subquery_having() {
                FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x IN ($1, $2, $3) LIMIT 100) AS sub"#,
         ),
         parse_pg(
-            r#"SELECT sub.x, sub.total
-               FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x LIMIT 100) AS sub
-               WHERE (sub.x IN ($1, $2, $3))"#,
+            r#"SELECT t.x, SUM(t.v) AS total FROM t WHERE (t.x IN ($1, $2, $3)) GROUP BY t.x LIMIT 100"#,
         ),
     );
 }
 
-/// A column-column comparison in an aggregated subquery HAVING is NOT parametrizable
-/// and must stay inside the subquery unchanged.  `LIMIT` prevents inlining.
+/// A column-column comparison in an aggregated subquery HAVING is NOT parametrizable.
+/// Post-C.2 dedup, DTR now inlines (LIMIT no longer blocks single-FROM aggregated
+/// inlinables), but the non-parametrizable HAVING stays in HAVING after the merge
+/// (apply_inline does not promote column=column predicates to WHERE).
+/// Final shape: flat aggregated SELECT with the HAVING intact, no outer wrapper.
 #[test]
 fn non_parametrizable_filter_stays_in_agg_subquery_having() {
-    // `x = y` compares two columns; neither side is a literal/placeholder → not extractable.
-    let sql = r#"SELECT sub.total
-                 FROM (SELECT SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x = t.y LIMIT 100) AS sub"#;
-    assert_eq!(hoist_pg(sql), parse_pg(sql));
+    // `x = y` compares two columns; neither side is a literal/placeholder → not
+    // promoted to WHERE by apply_inline, stays in HAVING of the merged flat SELECT.
+    assert_eq!(
+        hoist_pg(
+            r#"SELECT sub.total
+               FROM (SELECT SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x = t.y LIMIT 100) AS sub"#,
+        ),
+        parse_pg(r#"SELECT SUM(t.v) AS total FROM t GROUP BY t.x HAVING (t.x = t.y) LIMIT 100"#,),
+    );
 }
 
 // ─── Group 2: All-or-nothing — filters must not stop midway ───────────────────
@@ -411,10 +419,12 @@ fn mixed_having_split_correctly() {
 
 // ─── Group 8: Idempotency / no duplicates ─────────────────────────────────────
 
-/// Running the pass twice on a query with a non-inlinable aggregated subquery must not
-/// duplicate any predicate in the outer WHERE.  The HAVING is cleared on the first pass,
-/// so the second pass has nothing to extract.  `LIMIT` prevents `derived_tables_rewrite`
-/// from inlining the subquery.
+/// Running the pass twice must not duplicate any predicate.  Post-C.2 dedup,
+/// `derived_tables_rewrite_main` now inlines the LIMIT-bearing aggregated subquery,
+/// merging the HAVING filter into the flat SELECT's WHERE.  The first hoist call
+/// is a no-op (the flat SELECT has no hoistable subquery structure), and the second
+/// call is also a no-op.  The predicate `"t"."x" = $1` appears exactly once in
+/// the final WHERE of the merged flat statement.
 #[test]
 fn second_pass_does_not_duplicate_predicates() {
     let mut stmt = parse_pg(
@@ -424,19 +434,19 @@ fn second_pass_does_not_duplicate_predicates() {
     derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL)
         .expect("derived_tables_rewrite_main");
 
-    let changed_1 = hoist_parametrizable_filters(&mut stmt).expect("first hoist");
-    assert!(changed_1, "first pass should have rewritten");
-
+    // Post-C.2 dedup, DTR already flattened: hoist is a no-op on both passes.
+    let _changed_1 = hoist_parametrizable_filters(&mut stmt).expect("first hoist");
     let changed_2 = hoist_parametrizable_filters(&mut stmt).expect("second hoist");
     assert!(
         !changed_2,
-        "second pass should be a no-op (HAVING already cleared)"
+        "second pass should be a no-op (already flat after DTR inlining)"
     );
 
     // Verify the full predicate appears exactly once (not duplicated in WHERE).
-    // Count the complete expression to avoid matching the SELECT-list reference to sub.x.
+    // Post-flatten, the predicate is qualified by the source table `t`, not `sub`.
     let result_str = stmt.display(Dialect::PostgreSQL).to_string();
-    let predicate = r#""sub"."x" = $1"#;
+    println!("predicate must appear exactly once in outermost WHERE, got:\n{result_str}");
+    let predicate = r#""t"."x" = $1"#;
     let occurrences = result_str.matches(predicate).count();
     assert_eq!(
         occurrences, 1,
@@ -446,9 +456,10 @@ fn second_pass_does_not_duplicate_predicates() {
 
 // ─── Group 9: Correct alias qualification ─────────────────────────────────────
 
-/// When a filter is extracted from a non-inlinable aggregated subquery aliased as `sub_q`,
-/// the outer WHERE must reference `sub_q.x` — not the raw source table `t`.
-/// `LIMIT` prevents `derived_tables_rewrite` from inlining the subquery.
+/// Post-C.2 dedup: DTR inlines the LIMIT-bearing aggregated subquery (alias `sub_q`),
+/// merging the HAVING filter (on a GROUP BY key) into the outer WHERE as `t.x = $1`.
+/// The alias `sub_q` disappears in the flat merge; references now point to `t` directly.
+/// Hoist is a no-op on the resulting flat SELECT.
 #[test]
 fn hoisted_filter_is_qualified_with_subquery_alias() {
     assert_eq!(
@@ -456,11 +467,7 @@ fn hoisted_filter_is_qualified_with_subquery_alias() {
             r#"SELECT sub_q.x, sub_q.total
                FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x = $1 LIMIT 100) AS sub_q"#,
         ),
-        parse_pg(
-            r#"SELECT sub_q.x, sub_q.total
-               FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x LIMIT 100) AS sub_q
-               WHERE (sub_q.x = $1)"#,
-        ),
+        parse_pg(r#"SELECT t.x, SUM(t.v) AS total FROM t WHERE (t.x = $1) GROUP BY t.x LIMIT 100"#,),
     );
 }
 

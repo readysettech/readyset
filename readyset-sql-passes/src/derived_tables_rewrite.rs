@@ -244,20 +244,6 @@ fn can_inline_from_item(
         return Ok(None);
     }
 
-    // Reject LIMIT (TopK) subqueries.  `hoist_parametrizable_filters` —
-    // which runs after `derived_tables_rewrite` — relies on aggregated
-    // subqueries with LIMIT surviving this pass so it can project their
-    // predicates outward.  More broadly, LIMIT changes the row count of
-    // the inner result; inlining it into the outer scope changes when
-    // the LIMIT applies (pre- vs. post-join/filter) in ways that are
-    // hard to reason about generically.  `can_inline_subquery` has
-    // nuanced ORDER/LIMIT composition logic for the inline_leading and
-    // LATERAL paths; DTR conservatively rejects all LIMIT inner
-    // subqueries instead.
-    if !inl_stmt.limit_clause.is_empty() {
-        return Ok(None);
-    }
-
     let ext_to_int = match build_ext_to_int_fields_map(inl_stmt, inl_stmt_alias.clone()) {
         Ok(map) => map,
         Err(_) => return Ok(None),
@@ -285,21 +271,6 @@ fn can_inline_from_item(
         pre_hoist_lateral_at_most_one: None,
         preceding_flattened_lateral_aliases: None,
     };
-
-    // Reject aggregated inlinable + multi-FROM base.  `inline_from_item_in_place`
-    // (the DTR splice path) lifts the inner GROUP BY / HAVING into the base and
-    // requires the base to have exactly one top-level table and no joins — a
-    // structural precondition it enforces via an invariant.  Even when
-    // `can_inline_subquery`'s `check_downstream_joins_cardinality_preserving`
-    // would accept a cardinality-preserving scalar join downstream, the splice
-    // cannot absorb an aggregated inner into a multi-FROM base without
-    // additional support in the splice code.  This guard lives with the other DTR-specific
-    // pre-conditions rather than in `inline_from_item_position_checks`, since
-    // the precondition is tied to DTR's splice path, not to generic
-    // position-dependent eligibility.
-    if ctx.is_inner_agg && !is_single_from_item!(base_stmt) {
-        return Ok(None);
-    }
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
         return Ok(None);

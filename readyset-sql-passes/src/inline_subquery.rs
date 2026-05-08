@@ -37,9 +37,10 @@ use crate::rewrite_utils::{
     deep_columns_visitor, deep_columns_visitor_mut, expect_field_as_expr, expect_field_as_expr_mut,
     expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
     extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
-    get_select_item_alias, is_aggregated_expr, is_aggregation_or_grouped, is_always_true_filter,
-    is_simple_parametrizable_filter, outermost_expression, partition_correlated_predicates,
-    resolve_field_reference, split_expr, split_expr_mut, substitute_columns_in_expr,
+    get_from_item_reference_name, get_select_item_alias, is_aggregated_expr,
+    is_aggregation_or_grouped, is_always_true_filter, is_simple_parametrizable_filter,
+    outermost_expression, partition_correlated_predicates, resolve_field_reference, split_expr,
+    split_expr_mut, substitute_columns_in_expr,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -450,6 +451,58 @@ pub(crate) fn compute_downstream_for_position(
     }
 }
 
+/// Companion to [`compute_downstream_for_position`]: items that
+/// participate in the join cross-product **before** the inlinable's
+/// position.
+///
+/// `compute_downstream_for_position` returns only items joined AFTER the
+/// inlinable's position; that asymmetry is fine for the non-aggregated
+/// inlining case (the inlinable's rows pass through 1:1, so cardinality
+/// preservation only needs to be enforced for what gets joined to its
+/// result).  For an aggregated or LIMIT-bearing inlinable, the inlinable
+/// collapses its inputs.  Once inlined, that collapse applies to the
+/// full join cross-product — items *before* the inlinable also feed the
+/// aggregate, so they must be cardinality-preserving too.
+///
+/// Returns `(upstream_tables, upstream_joins)` — everything that
+/// contributes to the join cross-product at the inlinable's position:
+///
+/// - **LHS position** (`inl_from_item_ord_idx < base_stmt.tables.len()`):
+///   tables BEFORE the inlinable in the comma-separated FROM list.  No
+///   joins are upstream of an LHS-position inlinable — the JOIN list is
+///   applied to the cross-product of all `base_stmt.tables`, so any
+///   join appears AFTER the LHS-FROM list as a whole.
+/// - **RHS position** (the inlinable is the RHS of `base_stmt.join[jc_idx]`):
+///   all `base_stmt.tables` are upstream (the full LHS-FROM cross-
+///   product feeds the join chain), and `base_stmt.join[..jc_idx]`
+///   captures every join that runs before the one containing the
+///   inlinable.
+///
+/// The `None` arm of the RHS `match` is defensive: an
+/// `inl_from_item_ord_idx` that escapes both branches (LHS-OOB or RHS
+/// without a matching `find_rhs_join_clause` hit) shouldn't reach this
+/// helper.  If it does, falling back to "everything is upstream"
+/// (`tables[..]` + `join[..]`) lets the caller's cardinality check see
+/// the full FROM list and bail conservatively, rather than silently
+/// treating upstream as empty and masking the programming error as a
+/// valid pass.
+fn compute_upstream_for_position(
+    base_stmt: &SelectStatement,
+    inl_from_item_ord_idx: usize,
+) -> (&[TableExpr], &[JoinClause]) {
+    if inl_from_item_ord_idx < base_stmt.tables.len() {
+        return (&base_stmt.tables[..inl_from_item_ord_idx], &[]);
+    }
+    match find_rhs_join_clause(base_stmt, inl_from_item_ord_idx) {
+        Some((jc_idx, _)) => (&base_stmt.tables[..], &base_stmt.join[..jc_idx]),
+        // Defensive: an out-of-range RHS-position index shouldn't reach
+        // here; if it does, fall back to "everything is upstream" so the
+        // caller's cardinality check sees the full FROM list and bails
+        // conservatively rather than silently treating upstream as empty.
+        None => (&base_stmt.tables[..], &base_stmt.join[..]),
+    }
+}
+
 /// Shared cardinality-barrier eligibility predicate used by both
 /// [`can_inline_subquery`] and `derived_tables_rewrite::can_inline_from_item`.
 ///
@@ -718,20 +771,56 @@ fn is_on_nonrejecting(c: &JoinConstraint) -> bool {
     }
 }
 
-/// Verify that downstream joins do not change the row count.
+/// Verify that every FROM-item in `tables` + `joins` is a bounded-
+/// cardinality subquery — i.e. structurally guaranteed to produce 0..1
+/// or exactly 1 row.
 ///
-/// Only needed when the inlined subquery is aggregated or has LIMIT — in those
-/// cases, GROUP BY / LIMIT move to the outer level, and downstream joins that
-/// change cardinality would alter group membership or which rows survive.
+/// **Subquery-only.** Both loops require `as_sub_query_with_alias` to
+/// succeed.  Any plain-table `TableExpr` (a base relation, not a derived
+/// table) is rejected on the first iteration that encounters it.  This
+/// is intentional: plain tables can produce arbitrarily many rows, and
+/// once the aggregated/LIMIT-bearing inlinable's collapse applies to the
+/// joined cross-product, a plain-table FROM-item multiplies the
+/// aggregate's input set vs. the pre-flatten per-outer evaluation.
+/// There is no upstream/downstream wrinkle here — plain tables are
+/// unsafe in either direction.
 ///
-/// * CROSS / INNER joins: RHS must produce exactly 1 row.
-/// * LEFT joins: RHS may produce 0..1 rows.
-/// * Join constraints must be non-rejecting (ON TRUE / empty).
-fn downstream_joins_cardinality_preserving(
-    downstream_tables: &[TableExpr],
-    downstream_joins: &[JoinClause],
+/// **Direction-neutral in body, asymmetric at the dispatcher.**  The
+/// function itself doesn't know whether its arguments came from
+/// [`compute_downstream_for_position`] or [`compute_upstream_for_position`].
+/// It applies the same per-item shape check uniformly.  The asymmetry
+/// between the two directions is enforced **at the dispatcher**
+/// ([`check_join_partners_cardinality_preserving`]):
+///
+///   - **Downstream**: dispatcher passes downstream items directly.
+///     LEFT JOIN with `AtMostOne` RHS is safe — null-extension only
+///     adds 0..1 rows per inlinable-output row.
+///   - **Upstream**: dispatcher additionally rejects non-INNER upstream
+///     joins via an explicit `is_inner_join()` guard *before* invoking
+///     this helper.  Upstream LEFT JOIN with `AtMostOne` RHS would
+///     null-extend rows fed into the post-flatten aggregate, changing
+///     its input set vs. the pre-flatten per-outer evaluation.  See the
+///     `up_joins.iter().any(...)` guard in
+///     [`check_join_partners_cardinality_preserving`]'s canonical arm.
+///
+/// **Per-item shape requirements** (applied uniformly by this body):
+///
+///   * Tables (LHS-FROM-list entries): must each be a subquery with
+///     `is_exactly_one_card` body shape (aggregate-only-no-GROUP-BY →
+///     exactly 1 row).
+///   * Joins:
+///     - RHS must be a single subquery (else reject).
+///     - ON constraint must be non-rejecting (`Empty` / `ON TRUE`).
+///     - INNER joins: RHS must be `is_exactly_one_card`.
+///     - LEFT joins: RHS may be `is_at_most_one_deep` (0..1 rows).  As
+///       noted above, the dispatcher rejects this for the upstream
+///       direction; only downstream LEFT JOINs reach this branch in
+///       practice.
+fn from_items_cardinality_preserving(
+    tables: &[TableExpr],
+    joins: &[JoinClause],
 ) -> ReadySetResult<bool> {
-    for dt in downstream_tables {
+    for dt in tables {
         let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) else {
             return Ok(false);
         };
@@ -739,7 +828,7 @@ fn downstream_joins_cardinality_preserving(
             return Ok(false);
         }
     }
-    for jc in downstream_joins {
+    for jc in joins {
         let Ok(dt) = jc.right.table_exprs().exactly_one() else {
             return Ok(false);
         };
@@ -767,10 +856,10 @@ fn downstream_joins_cardinality_preserving(
     Ok(true)
 }
 
-/// Lower-level LATERAL variant of [`downstream_joins_cardinality_preserving`].
+/// Lower-level LATERAL variant of [`from_items_cardinality_preserving`].
 /// Symmetric with the canonical lower-level: accepts raw arguments rather than
 /// a full `&InliningContext`, and is called by the unified dispatcher
-/// `check_downstream_joins_cardinality_preserving` when the caller has
+/// `check_join_partners_cardinality_preserving` when the caller has
 /// populated all three LATERAL-scope `Option` fields on the context.
 ///
 /// Two relaxations vs. canonical:
@@ -779,18 +868,13 @@ fn downstream_joins_cardinality_preserving(
 ///   - Body cardinality signal: unions canonical structural checks with
 ///     pre-hoist set membership via [`is_lateral_friendly_exactly_one`] and
 ///     [`is_lateral_friendly_at_most_one`].
-fn downstream_joins_cardinality_preserving_lateral(
+fn from_items_cardinality_preserving_lateral(
     downstream_tables: &[TableExpr],
     downstream_joins: &[JoinClause],
     exactly_one_set: &HashSet<Relation>,
     at_most_one_set: &HashSet<Relation>,
     flattened_aliases: &HashSet<Relation>,
-    is_inner_agg: bool,
-    inner_limit_is_empty: bool,
 ) -> ReadySetResult<bool> {
-    if !is_inner_agg && inner_limit_is_empty {
-        return Ok(true);
-    }
     for dt in downstream_tables {
         if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
             return Ok(false);
@@ -815,6 +899,123 @@ fn downstream_joins_cardinality_preserving_lateral(
                 return Ok(false);
             }
         } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Collect the set of outer-scope relations referenced by `inner_stmt`'s
+/// correlation predicates (WHERE + inner JOIN ONs).  An "outer-scope
+/// relation" is one whose name does not appear in `inner_stmt`'s local
+/// FROM-items; such references can only be satisfied by the enclosing
+/// (outer) statement.
+///
+/// Used by the LATERAL-arm upstream check: a regular-table upstream item
+/// is safe to flatten past only if the LATERAL body's correlation
+/// predicates reference it, ensuring its distinguishing columns become
+/// post-flatten GROUP BY keys (preventing row-multiplication through the
+/// post-flatten aggregate).
+fn collect_body_correlation_outer_rels(
+    inner_stmt: &SelectStatement,
+) -> ReadySetResult<HashSet<Relation>> {
+    let locals = collect_local_from_items(inner_stmt)?;
+    let mut outer_rels: HashSet<Relation> = HashSet::new();
+    let mut extract = |expr: &Expr| -> ReadySetResult<()> {
+        let (corr, _) = partition_correlated_predicates(expr, &|rel| !locals.contains(rel));
+        if let Some(corr) = corr {
+            for (_local, correlated) in extract_correlation_keys(&corr, &locals)? {
+                if let Some(rel) = correlated.table {
+                    outer_rels.insert(rel);
+                }
+            }
+        }
+        Ok(())
+    };
+    if let Some(where_expr) = &inner_stmt.where_clause {
+        extract(where_expr)?;
+    }
+    for jc in &inner_stmt.join {
+        if let JoinConstraint::On(on_expr) = &jc.constraint {
+            extract(on_expr)?;
+        }
+    }
+    Ok(outer_rels)
+}
+
+/// Decide whether a single upstream FROM-item is safe to flatten past in
+/// the LATERAL arm.  An item is safe if any of:
+///
+///   - It is a subquery whose alias is in the pre-hoist exactly-one or
+///     at-most-one set (bounded-cardinality LATERAL body — sibling-chain
+///     case).
+///   - It is a subquery whose structural shape passes `is_exactly_one_card`
+///     or `is_at_most_one_deep` (bounded-cardinality DT).
+///   - It is a regular table whose relation name is referenced by the
+///     LATERAL body's correlation predicates (the body's GROUP BY
+///     additions will partition on its distinguishing columns post-
+///     flatten, preventing row-multiplication).
+fn is_upstream_item_safe_for_lateral_flatten(
+    item: &TableExpr,
+    body_correlation_outer_rels: &HashSet<Relation>,
+    exactly_one_set: &HashSet<Relation>,
+    at_most_one_set: &HashSet<Relation>,
+) -> ReadySetResult<bool> {
+    if let Some((rhs_stmt, alias)) = as_sub_query_with_alias(item) {
+        let alias_rel: Relation = alias.into();
+        if exactly_one_set.contains(&alias_rel) || at_most_one_set.contains(&alias_rel) {
+            return Ok(true);
+        }
+        if is_exactly_one_card(rhs_stmt)? {
+            return Ok(true);
+        }
+        if is_at_most_one_deep(rhs_stmt)? {
+            return Ok(true);
+        }
+    }
+    let item_rel = get_from_item_reference_name(item)?;
+    Ok(body_correlation_outer_rels.contains(&item_rel))
+}
+
+/// Validate that the items joined to the LATERAL's position from
+/// upstream (BEFORE the LATERAL in the FROM list) preserve cardinality
+/// once the LATERAL's aggregated body is hoisted to outer scope.  The
+/// downstream side is checked by [`from_items_cardinality_preserving_lateral`];
+/// this helper handles the upstream side.
+///
+/// Reject upstream joins that aren't INNER/CROSS: a LEFT-JOIN upstream
+/// can null-extend rows, and the interaction with the post-flatten
+/// aggregate is not analyzed here.
+fn upstream_items_safe_for_lateral_flatten(
+    upstream_tables: &[TableExpr],
+    upstream_joins: &[JoinClause],
+    body_correlation_outer_rels: &HashSet<Relation>,
+    exactly_one_set: &HashSet<Relation>,
+    at_most_one_set: &HashSet<Relation>,
+) -> ReadySetResult<bool> {
+    for item in upstream_tables {
+        if !is_upstream_item_safe_for_lateral_flatten(
+            item,
+            body_correlation_outer_rels,
+            exactly_one_set,
+            at_most_one_set,
+        )? {
+            return Ok(false);
+        }
+    }
+    for jc in upstream_joins {
+        if !jc.operator.is_inner_join() {
+            return Ok(false);
+        }
+        let Ok(item) = jc.right.table_exprs().exactly_one() else {
+            return Ok(false);
+        };
+        if !is_upstream_item_safe_for_lateral_flatten(
+            item,
+            body_correlation_outer_rels,
+            exactly_one_set,
+            at_most_one_set,
+        )? {
             return Ok(false);
         }
     }
@@ -1331,45 +1532,125 @@ fn is_lateral_friendly_at_most_one(
     is_at_most_one_deep(rhs_stmt)
 }
 
-/// Unified downstream-join cardinality-preservation dispatcher.
+/// Verify that the items joined to the inlinable's position preserve
+/// cardinality once the inlinable is spliced into them.
 ///
-/// Single entry point called unconditionally by `can_inline_subquery`.
-/// Dispatches to one of two lower-level helpers based on whether the caller
-/// has populated all three LATERAL-scope `Option` fields on `ctx`:
+/// Single entry point called unconditionally by `can_inline_subquery`.  The
+/// concrete set of items checked depends on the inlinable's cardinality
+/// profile:
+///
+/// **Dispatcher-level early-exit.**  A non-aggregated, non-LIMIT-bearing
+/// inner passes its inputs through 1:1 — neither downstream nor upstream
+/// items need cardinality-preservation checks.  The function returns
+/// `Ok(true)` immediately.  Both lower-level helpers below assume their
+/// callers have already decided a check is warranted (i.e. inner is
+/// aggregated or LIMIT-bearing).
+///
+/// For aggregated or LIMIT-bearing inners, the inlinable collapses its
+/// inputs; once inlined, that collapse applies to the full join cross-
+/// product, so both downstream AND upstream join partners must be
+/// cardinality-preserving.  Dispatched on whether the caller has
+/// populated all three LATERAL-scope `Option` fields on `ctx`:
 ///
 ///   - **LATERAL path** (`pre_hoist_lateral_exactly_one`,
 ///     `pre_hoist_lateral_at_most_one`, and
-///     `preceding_flattened_lateral_aliases` are all `Some`): delegates to
-///     [`downstream_joins_cardinality_preserving_lateral`], which accepts
-///     correlation-equality ON predicates and pre-hoist cardinality signals.
+///     `preceding_flattened_lateral_aliases` are all `Some`): delegates
+///     to [`from_items_cardinality_preserving_lateral`] for the
+///     downstream side (which accepts correlation-equality ON predicates
+///     and consults the pre-hoist cardinality signals).  Then runs an
+///     upstream check via [`upstream_items_safe_for_lateral_flatten`]:
+///     each upstream item must be a bounded-cardinality subquery
+///     (pre-hoist exactly-one / at-most-one set membership, or structural
+///     `is_exactly_one_card` / `is_at_most_one_deep`) OR a regular table
+///     whose relation name is referenced by the LATERAL body's
+///     correlation predicates.  The correlation-coverage relaxation
+///     matches the safety condition for the algebraic identity
+///     `A × (B ⟕_p C) ≡ (A × B) ⟕_p C` underlying the flatten — items
+///     the body's correlation references become post-flatten GROUP BY
+///     keys (via the `downstream_group_by_additions` plumbing) rather
+///     than row-multipliers.
 ///   - **Canonical path** (any field is `None`): non-LATERAL callers, or
-///     LATERAL callers before the pre-hoist signal is established.  Applies
-///     the early-exit (passes when inner is neither aggregated nor LIMIT-
-///     bearing) and delegates to [`downstream_joins_cardinality_preserving`].
-fn check_downstream_joins_cardinality_preserving(ctx: &InliningContext) -> ReadySetResult<bool> {
+///     LATERAL callers before the pre-hoist signal is established.
+///     Checks downstream items via [`from_items_cardinality_preserving`]
+///     and upstream items via the same helper after expanding the
+///     position via [`compute_upstream_for_position`].  Before invoking
+///     the helper on upstream joins, an explicit `is_inner_join()` guard
+///     rejects any non-INNER upstream join — the helper itself accepts
+///     LEFT JOIN with `AtMostOne` RHS (safe downstream), but the same
+///     shape upstream would null-extend rows fed into the post-flatten
+///     aggregate, changing its input set.  See
+///     [`from_items_cardinality_preserving`] for the per-item shape
+///     contract.
+fn check_join_partners_cardinality_preserving(ctx: &InliningContext) -> ReadySetResult<bool> {
+    // Early-exit: a non-aggregated, non-LIMIT-bearing inner passes its
+    // inputs through 1:1, so neither downstream nor upstream items need
+    // cardinality-preservation checks.  Single gate at the dispatcher
+    // level — both lower-levels assume their callers have already
+    // decided a check is warranted.
+    if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
+        return Ok(true);
+    }
     match (
         ctx.pre_hoist_lateral_exactly_one,
         ctx.pre_hoist_lateral_at_most_one,
         ctx.preceding_flattened_lateral_aliases,
     ) {
         (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) => {
-            downstream_joins_cardinality_preserving_lateral(
+            if !from_items_cardinality_preserving_lateral(
                 ctx.downstream_tables,
                 ctx.downstream_joins,
                 exactly_one_set,
                 at_most_one_set,
                 flattened_aliases,
-                ctx.is_inner_agg,
-                ctx.inner_stmt.limit_clause.is_empty(),
+            )? {
+                return Ok(false);
+            }
+            // For an aggregated or LIMIT-bearing inner the inlinable
+            // collapses its inputs; once flattened, that collapse
+            // applies to the full join cross-product, so upstream
+            // items joined BEFORE the LATERAL position must also be
+            // cardinality-preserving.  A regular-table upstream is
+            // accepted only if the body's correlation predicates
+            // reference it — its distinguishing columns then become
+            // post-flatten GROUP BY keys, preventing row-multiplication.
+            let (up_tables, up_joins) =
+                compute_upstream_for_position(ctx.outer_stmt, ctx.inl_from_item_ord_idx);
+            let body_corr_rels = collect_body_correlation_outer_rels(ctx.inner_stmt)?;
+            upstream_items_safe_for_lateral_flatten(
+                up_tables,
+                up_joins,
+                &body_corr_rels,
+                exactly_one_set,
+                at_most_one_set,
             )
         }
         _ => {
             // Non-LATERAL callers, or LATERAL callers before the pre-hoist
             // signal is established: fall through to the canonical lower-level.
-            if !ctx.is_inner_agg && ctx.inner_stmt.limit_clause.is_empty() {
-                return Ok(true);
+            // Both items joined AFTER (downstream) and items joined BEFORE
+            // (upstream) the inlinable must be cardinality-preserving: once
+            // inlined, the inner's collapse applies to the full join cross-
+            // product.  The asymmetric downstream-only check is insufficient
+            // when the inlinable lives at a non-leftmost position in a
+            // multi-FROM base.
+            if !from_items_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)? {
+                return Ok(false);
             }
-            downstream_joins_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)
+            let (up_tables, up_joins) =
+                compute_upstream_for_position(ctx.outer_stmt, ctx.inl_from_item_ord_idx);
+            // Upstream LEFT JOIN (or any other non-INNER join) would
+            // null-extend rows fed into the post-flatten aggregate,
+            // changing its input set vs. the pre-flatten per-outer
+            // evaluation.  `from_items_cardinality_preserving` accepts
+            // LEFT JOIN with `AtMostOne` RHS for the downstream
+            // direction (where null-extension only adds 0..1 rows to
+            // each inlinable-output row); for upstream the same shape
+            // is unsafe.  Mirror the LATERAL arm's policy and reject
+            // non-INNER upstream joins unconditionally.
+            if up_joins.iter().any(|jc| !jc.operator.is_inner_join()) {
+                return Ok(false);
+            }
+            from_items_cardinality_preserving(up_tables, up_joins)
         }
     }
 }
@@ -1499,7 +1780,7 @@ pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Optio
     if !check_mixed_scope_where_with_agg_limit(ctx)? {
         return Ok(None);
     }
-    if !check_downstream_joins_cardinality_preserving(ctx)? {
+    if !check_join_partners_cardinality_preserving(ctx)? {
         return Ok(None);
     }
     if !check_self_join(ctx)? {
