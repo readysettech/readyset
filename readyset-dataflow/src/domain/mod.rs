@@ -1970,20 +1970,17 @@ impl Domain {
             node_index,
         );
 
-        let shard = *self.shard.as_ref().unwrap_or(&0);
         // TODO(ENG-838): Don't recreate every single node on leader failure.
         // This requires us to overwrite the existing reader.
         let mut readers = self.readers.lock().unwrap();
         let addr = ReaderAddress {
             node: node_index,
             name: name.clone(),
-            shard,
         };
         if readers.insert(addr, read).is_some() {
             warn!(
                 ?node_index,
                 name = %name.display_unquoted(),
-                %shard,
                 "Overwrote existing reader at worker"
             );
         }
@@ -2020,17 +2017,15 @@ impl Domain {
             node_index,
         );
 
-        let shard = *self.shard.as_ref().unwrap_or(&0);
         // TODO(ENG-838): Don't recreate every single node on leader failure.
         // This requires us to overwrite the existing reader.
         let mut readers = self.readers.lock().unwrap();
         let addr = ReaderAddress {
             node: node_index,
             name,
-            shard,
         };
         if readers.insert(addr, read).is_some() {
-            warn!(?node_index, ?shard, "Overwrote existing reader at worker");
+            warn!(?node_index, "Overwrote existing reader at worker");
         }
 
         // make sure Reader is actually prepared to receive state

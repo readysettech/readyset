@@ -392,15 +392,13 @@ pub struct ViewRequest {
 }
 
 /// A [`ReaderAddress`] is a unique identifier of a reader, it consists of the reader node in the
-/// dataflow graph, the name of the reader and the shard index.
+/// dataflow graph and the name of the reader.
 #[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ReaderAddress {
     /// The index of the reader node in the dataflow graph
     pub node: petgraph::graph::NodeIndex,
     /// The name of the reader
     pub name: Relation,
-    /// The shard index
-    pub shard: usize,
 }
 
 /// Represents an eviction of a single key from some partially materialized index identified by the

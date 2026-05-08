@@ -1161,7 +1161,6 @@ impl Service<ViewQuery> for ReaderHandle {
                 target: ReaderAddress {
                     node: self.node,
                     name: self.name.clone(),
-                    shard: 0,
                 },
                 query,
             }))
@@ -1234,7 +1233,6 @@ impl ReaderHandle {
                 target: ReaderAddress {
                     node: self.node,
                     name: self.name.clone(),
-                    shard: 0,
                 },
             })))
             .await
@@ -1263,7 +1261,6 @@ impl ReaderHandle {
                 target: ReaderAddress {
                     node: self.node,
                     name: self.name.clone(),
-                    shard: 0,
                 },
             })))
             .await

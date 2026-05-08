@@ -1914,7 +1914,6 @@ async fn do_read<'a>(
             target: ReaderAddress {
                 node: *reader_handle.node(),
                 name: reader_handle.name().clone(),
-                shard: 0,
             },
             query: vq.clone(),
         });
