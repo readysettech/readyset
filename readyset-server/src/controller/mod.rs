@@ -2653,9 +2653,15 @@ mod tests {
         )
         .await;
         let with_cache = domain_set(&mut noria).await;
-        assert!(
-            with_cache.len() > baseline.len(),
-            "expected VALUES JOIN cache to add at least one domain \
+        // Post-REA-6613, the only new domain is the Reader's: the Constant co-locates with
+        // the Join (which itself inherits the Base's domain). Pre-change this delta was 2
+        // (the Constant got its own dedicated domain). Tightening this assertion is what
+        // ground-truth-tests REA-6613 end-to-end.
+        assert_eq!(
+            with_cache.len() - baseline.len(),
+            1,
+            "VALUES JOIN should add exactly one domain (the Reader); the Constant must \
+             co-locate with the Join, not get its own \
              (baseline={baseline:?}, with_cache={with_cache:?})",
         );
 
