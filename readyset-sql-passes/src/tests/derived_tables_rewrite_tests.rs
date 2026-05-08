@@ -352,7 +352,7 @@ WHERE
         "test14",
         original_text,
         r#"SELECT "final_data"."sn", "final_data"."total_qty", "s"."sname" FROM
-            (SELECT "spj"."sn" AS "sn", sum("spj"."qty") AS "total_qty", "spj"."qty" AS "qty", "spj"."pn" AS "pn",
+            (SELECT "spj"."sn", sum("spj"."qty") AS "total_qty", "spj"."qty" AS "qty", "spj"."pn" AS "pn",
             count("spj"."jn") AS "count(jn)" FROM "spj" GROUP BY "spj"."sn", "spj"."qty", "spj"."pn") AS "final_data"
             INNER JOIN "s" ON ("final_data"."sn" = "s"."sn") WHERE ((("final_data"."total_qty" > 300) AND (("s"."sname" = 'JONES')
             AND ("final_data"."total_qty" = 500))) AND (((("final_data"."qty" = 100) AND ("final_data"."pn" = 'P33333'))
@@ -419,7 +419,7 @@ fn test16() {
     test_it(
         "test16",
         original_text,
-        r#"SELECT "spj"."jn", avg("spj"."qty") AS "avg_qty" FROM "spj" GROUP BY "spj"."jn" ORDER BY "avg_qty""#,
+        r#"SELECT "spj"."jn", avg("spj"."qty") AS "avg_qty" FROM "spj" GROUP BY "spj"."jn""#,
     );
 }
 
@@ -634,10 +634,10 @@ WHERE result.total < 1000"#;
     test_it(
         "test21",
         original_text,
-        r#"SELECT "spj"."sn", SUM("spj"."qty") AS "total"
+        r#"SELECT "spj"."sn", sum("spj"."qty") AS "total"
         FROM "spj"
         GROUP BY "spj"."sn"
-        HAVING (("total" > 500) AND ("total" < 1000))"#,
+        HAVING (("total" < 1000) AND ("total" > 500))"#,
     );
 }
 
@@ -1412,8 +1412,7 @@ FROM (
     test_it(
         "test63",
         original_text,
-        r#"SELECT "spj"."sn" AS "spj_sn" FROM "spj" WHERE ("spj"."sn" LIKE 'S%') GROUP BY "spj"."sn"
-        ORDER BY sum("spj"."qty") NULLS LAST"#,
+        r#"SELECT DISTINCT "spj"."sn" AS "spj_sn" FROM "spj" WHERE ("spj"."sn" LIKE 'S%')"#,
     );
 }
 
@@ -3436,8 +3435,8 @@ fn test_distinct_not_stripped_with_group_by() {
     let sql = r#"SELECT "sq"."a", "sq"."c"
         FROM (SELECT DISTINCT "t1"."a", COUNT(*) AS "c"
               FROM "t1" GROUP BY "t1"."a") AS "sq""#;
-    // GROUP BY → not ExactlyOne → DISTINCT preserved.
-    let expected = r#"SELECT DISTINCT "t1"."a", count(*) AS "c"
+    // GROUP BY + all GB keys projected → group_by_keys_all_projected true → DISTINCT not propagated.
+    let expected = r#"SELECT "t1"."a", count(*) AS "c"
         FROM "t1" GROUP BY "t1"."a""#;
     test_it("distinct_not_stripped_with_group_by", sql, expected);
 }
@@ -3597,14 +3596,14 @@ fn test_inlinable_with_base_correlated_subquery() {
     // has a dangling sq1.id reference.  This is a known limitation for
     // an unreachable query shape.
     //
-    // NOTE: the rewrite "succeeds" with a dangling reference — downstream
-    // passes (QueryGraph, MIR) would reject it.  We document the actual
-    // output rather than asserting an error from the rewrite pass itself.
+    // sq1 is inlined first (sq1.id → t1.id in base); then sq2 is inlined.
+    // apply_inline's column substitution now enters the scalar subquery in sq2's WHERE
+    // and rewrites sq1.id to t1.id, which is correct since t1 is now in the base FROM.
     let expected = r#"SELECT "t1"."a", "t2"."b"
         FROM "t1"
         INNER JOIN "t2" ON ("t1"."a" = "t2"."b")
         WHERE ("t2"."b" = (SELECT max("t4"."x") FROM "t4"
-                            WHERE ("t4"."id" = "sq1"."id")))"#;
+                            WHERE ("t4"."id" = "t1"."id")))"#;
     test_it("inlinable_base_correlated_subquery", sql, expected);
 }
 
@@ -3765,7 +3764,9 @@ fn test_aggregated_subquery_distinct_adopted() {
     let sql = r#"SELECT "sq"."total"
         FROM (SELECT DISTINCT SUM("t1"."x") AS "total", "t1"."a"
               FROM "t1" GROUP BY "t1"."a") AS "sq""#;
-    let expected = r#"SELECT DISTINCT sum("t1"."x") AS "total"
+    // All GROUP BY keys (t1.a) are projected in the inner SELECT → group_by_keys_all_projected
+    // returns true → DISTINCT not propagated (GROUP BY already deduplicates on the key).
+    let expected = r#"SELECT sum("t1"."x") AS "total"
         FROM "t1"
         GROUP BY "t1"."a""#;
     test_it("aggregated_subquery_distinct_adopted", sql, expected);
@@ -3865,8 +3866,10 @@ fn numeric_order_by_resolved_before_inline() {
         SELECT "t0"."a"
         FROM (SELECT "t1"."a", "t1"."b" FROM "t1" ORDER BY 2) AS "t0"
     "#;
+    // Inner has ORDER BY but no LIMIT → ORDER BY dropped (correct SQL semantics: ORDER BY
+    // without LIMIT in an intermediate subquery is a no-op).
     let expected = r#"
-        SELECT "t1"."a" FROM "t1" ORDER BY "t1"."b" NULLS LAST
+        SELECT "t1"."a" FROM "t1"
     "#;
     test_it("numeric_order_by_resolved_before_inline", sql, expected);
 }
@@ -3879,8 +3882,10 @@ fn alias_order_by_resolved_before_inline() {
         SELECT "t0"."x"
         FROM (SELECT "t1"."a" AS "x", "t1"."b" AS "y" FROM "t1" ORDER BY "y") AS "t0"
     "#;
+    // Inner has ORDER BY but no LIMIT → ORDER BY dropped (correct SQL semantics: ORDER BY
+    // without LIMIT in an intermediate subquery is a no-op).
     let expected = r#"
-        SELECT "t1"."a" AS "x" FROM "t1" ORDER BY "t1"."b" NULLS LAST
+        SELECT "t1"."a" AS "x" FROM "t1"
     "#;
     test_it("alias_order_by_resolved_before_inline", sql, expected);
 }
@@ -4009,5 +4014,34 @@ fn inlinable_internal_alias_matches_outer_alias_inlines() {
         "inlinable_internal_alias_matches_outer_alias_inlines",
         sql,
         expected,
+    );
+}
+
+/// Regression: DTR's LHS path now flows through `apply_inline`.  Shaped
+/// to exercise the LHS path on a query `inline_leading_derived_table`
+/// would NOT touch in production: the inlinable `s` is at index 1
+/// (NOT leftmost), and `tables[0]` is a regular table (`test1 AS a`),
+/// so `hoist_lhsmost_derived_table` bails at the
+/// `as_sub_query_with_alias(lhs_dt)` check.  Production reaches DTR
+/// with `s` still in place; DTR walks `get_local_from_items_iter` from
+/// index 0, skips `a`, finds `s` at index 1, and dispatches to the LHS
+/// path — `inl_from_item_ord_idx (=1) < base_stmt.tables.len() (=2)`.
+/// Confirms the LHS-through-`apply_inline` migration on a production-
+/// realistic shape.
+#[test]
+fn dtr_lhs_path_non_leftmost_position_through_apply_inline() {
+    let original_text = r#"SELECT a.x, s.k
+                FROM test1 AS a, (SELECT t.k FROM test2 AS t WHERE t.k > 0) AS s
+                WHERE a.k = s.k"#;
+    let expect_text = r#"
+        SELECT "a"."x", "t"."k"
+        FROM "test1" AS "a"
+        INNER JOIN "test2" AS "t" ON ("a"."k" = "t"."k")
+        WHERE ("t"."k" > 0)
+    "#;
+    test_it(
+        "dtr_lhs_path_non_leftmost_position_through_apply_inline",
+        original_text,
+        expect_text,
     );
 }

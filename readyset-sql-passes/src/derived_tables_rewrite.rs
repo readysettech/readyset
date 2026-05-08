@@ -8,10 +8,8 @@ use crate::rewrite_joins::{
 };
 use crate::rewrite_utils::{
     OnAtom, add_expression_to_join_constraint, and_predicates_skip_true, as_sub_query_with_alias,
-    as_sub_query_with_alias_mut, build_ext_to_int_fields_map, classify_on_atom,
-    collect_outermost_columns_mut, columns_iter, conjoin_all_dedup,
-    default_alias_for_select_item_expression, expect_field_as_expr_mut,
-    expect_sub_query_with_alias, expect_sub_query_with_alias_mut, find_rhs_join_clause,
+    as_sub_query_with_alias_mut, build_ext_to_int_fields_map, classify_on_atom, columns_iter,
+    conjoin_all_dedup, expect_sub_query_with_alias_mut, find_rhs_join_clause,
     fix_groupby_without_aggregates, is_aggregation_or_grouped,
     make_aliases_distinct_from_base_statement, normalize_having_and_group_by, outermost_expression,
     resolve_field_reference, resolve_group_by_exprs, split_expr,
@@ -19,7 +17,7 @@ use crate::rewrite_utils::{
 use crate::unnest_subqueries::{NonNullSchema, agg_only_no_gby_cardinality};
 use crate::{get_local_from_items_iter, get_local_from_items_iter_mut, is_single_from_item};
 use itertools::Either;
-use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, invariant};
+use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::analysis::visit::Visitor;
 use readyset_sql::ast::JoinOperator::InnerJoin;
 use readyset_sql::ast::{
@@ -314,42 +312,6 @@ fn can_inline_from_item(
     Ok(Some(downstream_group_by_additions))
 }
 
-/// Substitutes all column references that appear in `ext_to_int_fields` with their mapped
-/// expressions throughout `base_stmt` (SELECT list, WHERE, JOIN ON, GROUP BY, HAVING, ORDER BY).
-///
-/// Also assigns synthetic aliases to any SELECT-list item whose visible name would change
-/// after substitution: if a column maps to a differently-named or non-column expression,
-/// an alias is injected to preserve the output column identity. At the top-level select,
-/// aliases are only added where the substitution would actually change the visible name.
-fn replace_columns_with_inlinable_expr(
-    base_stmt: &mut SelectStatement,
-    ext_to_int_fields: &HashMap<Column, Expr>,
-    is_top_select: bool,
-) -> ReadySetResult<()> {
-    for select_item in &mut base_stmt.fields {
-        let (expr, maybe_alias) = expect_field_as_expr_mut(select_item);
-        if maybe_alias.is_none()
-            && (!is_top_select
-                || matches!(expr, Expr::Column(col) if ext_to_int_fields.get(col).is_some_and(|e| match e {
-                    Expr::Column(inl_col) => col.name != inl_col.name,
-                    _ => true,
-                })))
-        {
-            *maybe_alias = Some(default_alias_for_select_item_expression(expr));
-        }
-    }
-
-    for expr in collect_outermost_columns_mut(base_stmt) {
-        if let Expr::Column(col) = expr
-            && let Some(inl_expr) = ext_to_int_fields.get(col)
-        {
-            *expr = inl_expr.clone();
-        }
-    }
-
-    Ok(())
-}
-
 /// Applies WHERE-to-ON filter migration and normalizes join constraints
 /// to enforce ReadySet's "two-table ON" invariant.
 fn migrate_and_normalize_joins(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
@@ -411,15 +373,40 @@ fn migrate_and_normalize_joins(stmt: &mut SelectStatement) -> ReadySetResult<boo
 /// passed in rather than recomputed here because `replace_columns_with_inlinable_expr`
 /// runs before this function (to avoid alias-collision bugs during WHERE/HAVING
 /// absorption), and substitution can change the aggregation classification of the base.
-fn inline_from_item_in_place(
+/// Splice the inlinable subquery's tables and joins into `base_stmt` at LHS-position.
+/// LHS-position means `inl_from_item_ord_idx < base_stmt.tables.len()`: the inlinable
+/// is part of the comma-separated FROM list, not on the RHS of a JOIN.
+///
+/// After this returns, `inl_stmt.tables` and `inl_stmt.join` are emptied and the
+/// caller can pass the (now-table-and-join-less) `inl_stmt` to `apply_inline` for
+/// the post-splice transformation.
+fn splice_lhs_in_place(
+    base_stmt: &mut SelectStatement,
+    inl_stmt: &mut SelectStatement,
+    inl_from_item_ord_idx: usize,
+) {
+    let inl_tables = mem::take(&mut inl_stmt.tables);
+    if inl_stmt.join.is_empty() {
+        // Splice inlined subquery's FROM items directly into base query tables.
+        base_stmt
+            .tables
+            .splice(inl_from_item_ord_idx..=inl_from_item_ord_idx, inl_tables);
+    } else {
+        // The subquery contains both FROM items and JOINs; lift both into base query.
+        base_stmt.tables.remove(inl_from_item_ord_idx);
+        base_stmt.tables.extend(inl_tables);
+        let inl_joins = mem::take(&mut inl_stmt.join);
+        base_stmt.join.splice(0..0, inl_joins);
+    }
+}
+
+fn inline_rhs_in_place(
     base_stmt: &mut SelectStatement,
     mut inl_from_item: TableExpr,
     inl_from_item_ord_idx: usize,
     is_inl_aggregated: bool,
     is_base_aggregated: bool,
 ) -> ReadySetResult<()> {
-    let is_single_from_item_base_select = base_stmt.join.is_empty() && base_stmt.tables.len() == 1;
-
     // Get the inlinable FROM item's statement
     let (inl_stmt, _) = expect_sub_query_with_alias_mut(&mut inl_from_item);
     let mut inl_stmt = mem::take(inl_stmt);
@@ -433,113 +420,87 @@ fn inline_from_item_in_place(
             and_predicates_skip_true(inl_stmt.where_clause.take(), having_as_where);
     }
 
-    // Based on the index, locate the item being inlined: `base_stmt.tables` (LHS) or `base_stmt.join` (RHS)
-    // Case 1: LHS inlining — the FROM item belongs to the base `tables` list (comma-separated FROM).
-    if inl_from_item_ord_idx < base_stmt.tables.len() {
-        let inl_tables = mem::take(&mut inl_stmt.tables);
-        if inl_stmt.join.is_empty() {
-            // Splice inlined subquery's FROM items directly into base query tables.
-            base_stmt
-                .tables
-                .splice(inl_from_item_ord_idx..=inl_from_item_ord_idx, inl_tables);
-        } else {
-            // The subquery contains both FROM items and JOINs; lift both into base query.
-            // Remove the subquery FROM item and extend tables with inlinable's tables
-            base_stmt.tables.remove(inl_from_item_ord_idx);
-            base_stmt.tables.extend(inl_tables);
+    // RHS inlining — the FROM item is inside a JOIN clause (JoinRightSide of some JoinClause).
 
-            // Insert inlinable joins at the bottom
-            let inl_joins = mem::take(&mut inl_stmt.join);
-            base_stmt.join.splice(0..0, inl_joins);
-        }
-    } else {
-        // Case 2: RHS inlining — the FROM item is inside a JOIN clause (JoinRightSide of some JoinClause).
+    // Collect the inlinable join structure.
+    let mut inl_joins = Vec::new();
 
-        // Collect the inlinable join structure.
-        let mut inl_joins = Vec::new();
+    // Locate the join clause and position inside the JoinRightSide where this FROM item lives.
+    // This lookup is based on flat ordinal index captured before inlining mutations.
+    let Some((jc_idx, inl_from_item_pos)) = find_rhs_join_clause(base_stmt, inl_from_item_ord_idx)
+    else {
+        internal!(
+            "Inlinable FROM item {} not found in join RHS at ordinal {}",
+            inl_from_item.display(Dialect::PostgreSQL),
+            inl_from_item_ord_idx
+        )
+    };
 
-        // Locate the join clause and position inside the JoinRightSide where this FROM item lives.
-        // This lookup is based on flat ordinal index captured before inlining mutations.
-        let Some((jc_idx, inl_from_item_pos)) =
-            find_rhs_join_clause(base_stmt, inl_from_item_ord_idx)
-        else {
-            internal!(
-                "Inlinable FROM item {} not found in join RHS at ordinal {}",
-                inl_from_item.display(Dialect::PostgreSQL),
-                inl_from_item_ord_idx
-            )
-        };
-
-        // Inline the inlinable FROM item's tables (the former LHS inside the inlinable) into the base RHS.
-        let mut inl_tables = mem::take(&mut inl_stmt.tables);
-        if let Some(replace_jc_right_with) = match &mut base_stmt.join[jc_idx].right {
-            JoinRightSide::Table(table) => {
-                // If the inlined subquery had only one FROM item, we can directly replace the slot.
-                if inl_tables.len() == 1 {
-                    *table = inl_tables.pop().expect("inl_tables verified non-empty");
-                    None
-                } else {
-                    Some(JoinRightSide::Tables(inl_tables))
-                }
+    // Inline the inlinable FROM item's tables (the former LHS inside the inlinable) into the base RHS.
+    let mut inl_tables = mem::take(&mut inl_stmt.tables);
+    if let Some(replace_jc_right_with) = match &mut base_stmt.join[jc_idx].right {
+        JoinRightSide::Table(table) => {
+            // If the inlined subquery had only one FROM item, we can directly replace the slot.
+            if inl_tables.len() == 1 {
+                *table = inl_tables.pop().expect("inl_tables verified non-empty");
+                None
+            } else {
+                Some(JoinRightSide::Tables(inl_tables))
             }
-            JoinRightSide::Tables(tables) => {
-                // If the inlined subquery had only one FROM item, we can directly replace the slot.
-                if inl_tables.len() == 1 {
-                    Some(JoinRightSide::Table(
-                        inl_tables.pop().expect("inl_tables verified non-empty"),
-                    ))
-                } else {
-                    tables.splice(inl_from_item_pos..=inl_from_item_pos, inl_tables);
-                    None
-                }
-            }
-        } {
-            base_stmt.join[jc_idx].right = replace_jc_right_with;
         }
-
-        // If after inlining, the base RHS becomes or remains a `JoinRightSide::Tables` structure,
-        // turn it into a chain of `JoinRightSide::Table` cross joined relations,
-        // preserving the 1st relation as the current RHS.
-        if let Some(new_rhs) = match &mut base_stmt.join[jc_idx].right {
-            JoinRightSide::Table(_) => {
-                // The post inlining base RHS is already a single relation construct.
+        JoinRightSide::Tables(tables) => {
+            // If the inlined subquery had only one FROM item, we can directly replace the slot.
+            if inl_tables.len() == 1 {
+                Some(JoinRightSide::Table(
+                    inl_tables.pop().expect("inl_tables verified non-empty"),
+                ))
+            } else {
+                tables.splice(inl_from_item_pos..=inl_from_item_pos, inl_tables);
                 None
             }
-            JoinRightSide::Tables(tables) => {
-                // Convert the nested Tables structure into a flat chain of cross-joined Table entries.
-                let mut rhs_tables_iter = mem::take(tables).into_iter();
-                // SAFETY: `JoinRightSide::Tables` invariant guarantees at least one element.
-                let first = rhs_tables_iter.next().expect("Tables variant is non-empty");
-                for tbl in rhs_tables_iter {
-                    inl_joins.push(JoinClause {
-                        operator: JoinOperator::InnerJoin,
-                        right: JoinRightSide::Table(tbl),
-                        constraint: JoinConstraint::Empty,
-                    });
-                }
-                Some(first)
+        }
+    } {
+        base_stmt.join[jc_idx].right = replace_jc_right_with;
+    }
+
+    // If after inlining, the base RHS becomes or remains a `JoinRightSide::Tables` structure,
+    // turn it into a chain of `JoinRightSide::Table` cross joined relations,
+    // preserving the 1st relation as the current RHS.
+    if let Some(new_rhs) = match &mut base_stmt.join[jc_idx].right {
+        JoinRightSide::Table(_) => {
+            // The post inlining base RHS is already a single relation construct.
+            None
+        }
+        JoinRightSide::Tables(tables) => {
+            // Convert the nested Tables structure into a flat chain of cross-joined Table entries.
+            let mut rhs_tables_iter = mem::take(tables).into_iter();
+            // SAFETY: `JoinRightSide::Tables` invariant guarantees at least one element.
+            let first = rhs_tables_iter.next().expect("Tables variant is non-empty");
+            for tbl in rhs_tables_iter {
+                inl_joins.push(JoinClause {
+                    operator: JoinOperator::InnerJoin,
+                    right: JoinRightSide::Table(tbl),
+                    constraint: JoinConstraint::Empty,
+                });
             }
-        } {
-            base_stmt.join[jc_idx].right = JoinRightSide::Table(new_rhs);
+            Some(first)
         }
+    } {
+        base_stmt.join[jc_idx].right = JoinRightSide::Table(new_rhs);
+    }
 
-        // Add the inlinable join structure after the synthetic cross-joins
-        inl_joins.extend(mem::take(&mut inl_stmt.join));
+    // Add the inlinable join structure after the synthetic cross-joins
+    inl_joins.extend(mem::take(&mut inl_stmt.join));
 
-        // Splice in inlinable join structure right after its position
-        if !inl_joins.is_empty() {
-            base_stmt.join.splice(jc_idx + 1..jc_idx + 1, inl_joins);
-        }
+    // Splice in inlinable join structure right after its position
+    if !inl_joins.is_empty() {
+        base_stmt.join.splice(jc_idx + 1..jc_idx + 1, inl_joins);
     }
 
     // Aggregated subquery: lift GROUP BY, HAVING, DISTINCT, and ORDER BY from the inlined
     // subquery into the base. The base's existing WHERE becomes part of HAVING (since it now
     // applies post-aggregation), and the subquery's WHERE replaces the base's WHERE.
     if is_inl_aggregated {
-        invariant!(
-            is_single_from_item_base_select,
-            "Expected single FROM base select"
-        );
         base_stmt.distinct = inl_stmt.distinct;
         base_stmt.having = mem::take(&mut inl_stmt.having);
         if let Some(base_stmt_where_expr) = &base_stmt.where_clause {
@@ -586,7 +547,7 @@ fn inline_from_item_in_place(
     //   we do not adopt the child's.
     // - Only when the parent is NOT aggregated and has NO ORDER BY do we adopt the
     //   child's ORDER BY to preserve presentation order.
-    if is_single_from_item_base_select
+    if is_single_from_item!(base_stmt)
         && !is_base_aggregated
         && base_stmt.order.is_none()
         && base_stmt.limit_clause.is_empty()
@@ -606,24 +567,21 @@ fn inline_from_item_in_place(
     Ok(())
 }
 
-/// Inlines the FROM item at `inl_from_item_ord_idx` into `base_stmt` in five ordered steps:
+/// Inlines the FROM item at `inl_from_item_ord_idx` into `base_stmt`.
 ///
-/// 1. **Rename aliases** — make all internal aliases distinct from the base statement to
-///    prevent name collisions after flattening.
-/// 2. **Hoist nontrivial ON predicates** — move ON-clause expressions that reference inlinable
-///    columns into WHERE, so they remain valid once the subquery alias disappears.
-/// 3. **Substitute columns** — replace all base-scope references to the former subquery alias
-///    with their actual underlying expressions.  This runs BEFORE structural splicing so that
-///    expressions absorbed from the inlinable (WHERE, HAVING, ORDER BY) are never exposed to
-///    substitution — they already use internal-scope names and must not be rewritten.
-/// 4. **Splice structure** — inline the subquery's tables, joins, WHERE, HAVING, and ORDER BY
-///    into `base_stmt` via [`inline_from_item_in_place`].
-/// 5. **Normalize joins** — migrate applicable WHERE predicates back to ON and canonicalize
-///    join constraint shapes.
+/// Dispatches by FROM-item position:
+/// - **LHS** (`inl_from_item_ord_idx < base_stmt.tables.len()`): splices tables/joins via
+///   [`splice_lhs_in_place`], then delegates post-splice transformation to [`apply_inline`].
+/// - **RHS** (JOIN right-hand side): substitutes columns first, then splices and transforms
+///   via [`inline_rhs_in_place`].
+///
+/// In both paths, nontrivial ON predicates referencing the inlinable are hoisted to WHERE
+/// before any structural mutation, and joins are normalized after inlining completes.
 fn inline_from_item(
     base_stmt: &mut SelectStatement,
     inl_from_item_ord_idx: usize,
     is_top_select: bool,
+    downstream_group_by_additions: Vec<Expr>,
 ) -> ReadySetResult<()> {
     let Some(inl_from_item) = get_local_from_items_iter_mut!(base_stmt).nth(inl_from_item_ord_idx)
     else {
@@ -641,6 +599,7 @@ fn inline_from_item(
         },
     );
 
+    // Dedupe inner aliases against the base.
     {
         let (inl_stmt, inl_alias) = expect_sub_query_with_alias_mut(&mut inl_from_item);
         let inl_alias = inl_alias.clone();
@@ -652,32 +611,52 @@ fn inline_from_item(
         )?;
     }
 
-    let (inl_stmt, inl_stmt_alias) = expect_sub_query_with_alias(&inl_from_item);
-    let ext_to_int_fields = build_ext_to_int_fields_map(inl_stmt, inl_stmt_alias)?;
-
-    // Snapshot aggregation flags BEFORE substitution — substitution can introduce
-    // aggregate expressions into the base (e.g., sq.total → SUM(t.amount)), which
-    // would change the is_aggregated classification.
-    let is_inl_aggregated = is_aggregation_or_grouped(inl_stmt)?;
+    // Build the InlineCandidate (also computes ext_to_int as a side effect).
+    let mut candidate = crate::inline_subquery::prepare_inline(inl_from_item)?;
+    let is_inl_aggregated = is_aggregation_or_grouped(&candidate.stmt)?;
     let is_base_aggregated = is_aggregation_or_grouped(base_stmt)?;
 
-    move_joins_on_nontrivial_expr_to_where(base_stmt, &ext_to_int_fields);
+    // Hoist nontrivial-ON predicates that reference the inlinable into WHERE.
+    move_joins_on_nontrivial_expr_to_where(base_stmt, &candidate.ext_to_int);
 
-    // Substitute BEFORE splicing: only base-scope columns are present at this point.
-    // The inlinable's WHERE/HAVING/ORDER BY (which use internal-scope names) have not
-    // been absorbed yet, so they cannot be incorrectly matched by the ext_to_int map.
-    replace_columns_with_inlinable_expr(base_stmt, &ext_to_int_fields, is_top_select)?;
+    // Dispatch by FROM-item position.
+    if inl_from_item_ord_idx < base_stmt.tables.len() {
+        // LHS path: splice tables/joins into base, then apply_inline (which does
+        // WHERE-migration, substitute, GROUP-BY/HAVING merge, ORDER-BY carry-up, LIMIT
+        // composition — all the post-splice transformations).
+        splice_lhs_in_place(base_stmt, &mut candidate.stmt, inl_from_item_ord_idx);
+        crate::inline_subquery::apply_inline(
+            base_stmt,
+            candidate,
+            is_top_select,
+            downstream_group_by_additions,
+        )?;
+    } else {
+        // RHS path: substitute first (inline_rhs_in_place doesn't), then RHS splice
+        // + bespoke RHS transformation in inline_rhs_in_place.
+        let inl_rel: Relation = candidate.alias.clone().into();
+        crate::inline_subquery::replace_columns_with_inlinable_expr(
+            base_stmt,
+            &inl_rel,
+            &candidate.ext_to_int,
+            is_top_select,
+        )?;
+        let inl_from_item = TableExpr {
+            inner: TableExprInner::Subquery(Box::new(candidate.stmt)),
+            alias: Some(candidate.alias),
+            column_aliases: vec![],
+        };
+        inline_rhs_in_place(
+            base_stmt,
+            inl_from_item,
+            inl_from_item_ord_idx,
+            is_inl_aggregated,
+            is_base_aggregated,
+        )?;
+    }
 
-    inline_from_item_in_place(
-        base_stmt,
-        inl_from_item,
-        inl_from_item_ord_idx,
-        is_inl_aggregated,
-        is_base_aggregated,
-    )?;
-
+    // Post-pass: normalize joins.
     migrate_and_normalize_joins(base_stmt)?;
-
     Ok(())
 }
 
@@ -695,15 +674,17 @@ fn try_inline_from_items(
         // 1. One inlining per pass
         // 2. Full re-walk after each pass
         // 3. No reuse across mutations
-        let mut inl_from_item_idx = None;
+        let mut inl_from_item_idx_and_additions: Option<(usize, Vec<Expr>)> = None;
         for (from_item_idx, from_item) in get_local_from_items_iter!(base_stmt).enumerate() {
-            if can_inline_from_item(base_stmt, from_item, from_item_idx, is_top_select)?.is_some() {
-                inl_from_item_idx = Some(from_item_idx);
+            if let Some(additions) =
+                can_inline_from_item(base_stmt, from_item, from_item_idx, is_top_select)?
+            {
+                inl_from_item_idx_and_additions = Some((from_item_idx, additions));
                 break;
             }
         }
-        if let Some(inl_from_item_idx) = inl_from_item_idx {
-            inline_from_item(base_stmt, inl_from_item_idx, is_top_select)?;
+        if let Some((inl_from_item_idx, additions)) = inl_from_item_idx_and_additions {
+            inline_from_item(base_stmt, inl_from_item_idx, is_top_select, additions)?;
             inlined_count += 1;
         } else {
             // We have no inlinable candidates.
