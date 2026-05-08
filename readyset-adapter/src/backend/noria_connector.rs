@@ -939,7 +939,12 @@ impl NoriaConnector {
     }
 
     /// Set the session timezone for TIMESTAMP conversion.
+    ///
+    /// Non-UTC values would silently localize cached results because the wire
+    /// writer does UTC-wallclock passthrough; `Backend::handle_set` is
+    /// responsible for gating on `SessionTimezone::is_utc()`.
     pub fn set_timezone(&mut self, tz: SessionTimezone) {
+        debug_assert!(tz.is_utc(), "non-UTC SessionTimezone bypassed is_utc gate");
         self.timezone = tz;
     }
 

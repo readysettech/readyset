@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use lazy_static::lazy_static;
 use readyset_adapter::backend::noria_connector::QueryResult;
 use readyset_adapter::backend::{SelectSchema, noria_connector};
-use readyset_adapter::{QueryHandler, SetBehavior};
+use readyset_adapter::{QueryHandler, SetBehavior, parse_timezone};
 use readyset_errors::ReadySetResult;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
@@ -319,7 +319,6 @@ lazy_static! {
                 PostgresParameterValue::literal("UTF8"),
                 PostgresParameterValue::literal("unicode"),
             ])),
-            ("timezone", AllowedParameterValue::literal("UTC")),
             ("datestyle", AllowedParameterValue::one_of([
                 PostgresParameterValue::literal("ISO"),
                 PostgresParameterValue::identifier("iso"),
@@ -333,7 +332,6 @@ lazy_static! {
                 PostgresParameterValue::literal(2),
                 PostgresParameterValue::literal(3),
             ])),
-            ("TimeZone",  AllowedParameterValue::literal("Etc/UTC")),
             ("bytea_output",  AllowedParameterValue::literal("hex")),
             ("transform_null_equals", AllowedParameterValue::literal(false)),
             ("backslash_quote", AllowedParameterValue::one_of([
@@ -369,56 +367,83 @@ impl QueryHandler for PostgreSqlQueryHandler {
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
         let behavior = SetBehavior::default();
         match stmt {
-            SetStatement::PostgresParameter(SetPostgresParameter { name, .. })
-                if ALLOWED_PARAMETERS_ANY_VALUE.contains(name.to_ascii_lowercase().as_str()) =>
-            {
-                behavior.unsupported(false)
-            }
-            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => match name
-                .as_str()
-            {
-                "autocommit" => {
-                    let enabled = match value {
-                        SetPostgresParameterValue::Default => true,
-                        SetPostgresParameterValue::Value(val) => ![
-                            PostgresParameterValue::literal(0),
-                            PostgresParameterValue::literal(false),
-                            PostgresParameterValue::identifier("off"),
-                        ]
-                        .contains(val),
-                    };
-                    behavior.set_autocommit(enabled)
+            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
+                // PG preserves case in double-quoted identifiers, so match
+                // against the lowercased name to converge `SET "TimeZone"`
+                // with `SET timezone`.
+                let name_lower = name.to_ascii_lowercase();
+                if ALLOWED_PARAMETERS_ANY_VALUE.contains(name_lower.as_str()) {
+                    return behavior.unsupported(false);
                 }
-                "search_path" => {
-                    let value_to_string = |value: &PostgresParameterValueInner| match value {
-                        PostgresParameterValueInner::Identifier(id) => id.clone(),
-                        PostgresParameterValueInner::Literal(Literal::String(s)) => s.into(),
-                        PostgresParameterValueInner::Literal(lit) => lit
-                            .display(readyset_sql::Dialect::PostgreSQL)
-                            .to_string()
-                            .into(),
-                    };
-
-                    let search_path = match value {
-                        SetPostgresParameterValue::Default => vec!["public".into()],
-                        SetPostgresParameterValue::Value(PostgresParameterValue::Single(val)) => {
-                            vec![value_to_string(val)]
+                match name_lower.as_str() {
+                    "autocommit" => {
+                        let enabled = match value {
+                            SetPostgresParameterValue::Default => true,
+                            SetPostgresParameterValue::Value(val) => ![
+                                PostgresParameterValue::literal(0),
+                                PostgresParameterValue::literal(false),
+                                PostgresParameterValue::identifier("off"),
+                            ]
+                            .contains(val),
+                        };
+                        behavior.set_autocommit(enabled)
+                    }
+                    // Non-UTC zones are flagged unsupported (cache results are
+                    // UTC-wallclock); the parsed value is still recorded so
+                    // future eval-side support can read it unchanged.
+                    "timezone" => {
+                        let s = match value {
+                            // `TO DEFAULT` resolves to the upstream config
+                            // default, which we can't inspect at SET time and
+                            // is frequently non-UTC.
+                            SetPostgresParameterValue::Default => {
+                                return behavior.unsupported(true);
+                            }
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Literal(Literal::String(s)),
+                            )) => s.as_str(),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Identifier(id),
+                            )) => id.as_str(),
+                            _ => return behavior.unsupported(true),
+                        };
+                        match parse_timezone(s) {
+                            Some(tz) if tz.is_utc() => behavior.set_timezone(tz),
+                            Some(tz) => behavior.set_timezone(tz).unsupported(true),
+                            None => behavior.unsupported(true),
                         }
-                        SetPostgresParameterValue::Value(PostgresParameterValue::List(vals)) => {
-                            vals.iter().map(value_to_string).collect()
-                        }
-                    };
+                    }
+                    "search_path" => {
+                        let value_to_string = |value: &PostgresParameterValueInner| match value {
+                            PostgresParameterValueInner::Identifier(id) => id.clone(),
+                            PostgresParameterValueInner::Literal(Literal::String(s)) => s.into(),
+                            PostgresParameterValueInner::Literal(lit) => lit
+                                .display(readyset_sql::Dialect::PostgreSQL)
+                                .to_string()
+                                .into(),
+                        };
 
-                    behavior.set_search_path(search_path)
-                }
-                _ => {
-                    if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(name.as_str()) {
-                        behavior.unsupported(!allowed_value.set_value_is_allowed(value))
-                    } else {
-                        behavior.unsupported(true)
+                        let search_path = match value {
+                            SetPostgresParameterValue::Default => vec!["public".into()],
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                val,
+                            )) => vec![value_to_string(val)],
+                            SetPostgresParameterValue::Value(PostgresParameterValue::List(
+                                vals,
+                            )) => vals.iter().map(value_to_string).collect(),
+                        };
+
+                        behavior.set_search_path(search_path)
+                    }
+                    other => {
+                        if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(other) {
+                            behavior.unsupported(!allowed_value.set_value_is_allowed(value))
+                        } else {
+                            behavior.unsupported(true)
+                        }
                     }
                 }
-            },
+            }
             SetStatement::Names(SetNames { charset, .. }) => {
                 let charset = charset.to_ascii_lowercase();
                 behavior.unsupported(!["utf8", "utf-8"].contains(&charset.as_str()))
@@ -457,6 +482,118 @@ mod tests {
     #[test]
     fn client_encoding_utf8_allowed() {
         is_proxy("SET client_encoding = 'UTF8'");
+    }
+
+    #[test]
+    fn set_time_zone_utc_equivalents_are_supported() {
+        for stmt in [
+            "SET timezone = 'UTC'",
+            "SET timezone = 'Etc/UTC'",
+            "SET timezone = 'utc'",
+            "SET timezone = 'etc/utc'",
+            "SET timezone = '+00:00'",
+            "SET timezone = 'Universal'",
+            "SET timezone = 'Zulu'",
+            "SET timezone = 'GMT'",
+            "SET timezone = 'Etc/GMT'",
+            "SET TimeZone = 'Etc/UTC'",
+            "SET TIMEZONE = 'UTC'",
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                !beh.unsupported,
+                "{stmt:?} should be supported (UTC-equivalent), got {beh:?}"
+            );
+            let tz = beh
+                .set_timezone
+                .unwrap_or_else(|| panic!("{stmt:?} should record a parsed timezone, got {beh:?}"));
+            assert!(
+                tz.is_utc(),
+                "{stmt:?} should record a UTC-equivalent timezone, got {tz:?}"
+            );
+        }
+    }
+
+    /// `TO DEFAULT` is unsupported because the upstream default is frequently
+    /// non-UTC and we can't read it at SET time.
+    #[test]
+    fn set_time_zone_default_is_unsupported() {
+        let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+            "SET timezone TO DEFAULT",
+        ));
+        assert!(
+            beh.unsupported,
+            "SET timezone TO DEFAULT must be unsupported (upstream default may not be UTC), got {beh:?}"
+        );
+        assert!(
+            beh.set_timezone.is_none(),
+            "DEFAULT carries no parsed value, set_timezone should stay None"
+        );
+    }
+
+    /// PG preserves case in double-quoted identifiers; `SET "TimeZone"` must
+    /// still dispatch to the `timezone` arm.
+    #[test]
+    fn set_time_zone_quoted_identifier_dispatches() {
+        let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+            "SET \"TimeZone\" = 'UTC'",
+        ));
+        assert!(
+            !beh.unsupported,
+            "quoted-identifier UTC SET should be supported, got {beh:?}"
+        );
+        let tz = beh
+            .set_timezone
+            .expect("quoted-identifier SET should record the parsed timezone");
+        assert!(tz.is_utc(), "expected UTC, got {tz:?}");
+
+        let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+            "SET \"TimeZone\" = 'America/New_York'",
+        ));
+        assert!(
+            beh.unsupported,
+            "quoted-identifier non-UTC SET should be unsupported, got {beh:?}"
+        );
+        assert!(
+            beh.set_timezone.is_some(),
+            "quoted-identifier non-UTC SET should still record the parsed timezone, got {beh:?}"
+        );
+    }
+
+    #[test]
+    fn set_time_zone_non_utc_is_unsupported() {
+        for stmt in [
+            "SET timezone = 'America/New_York'",
+            "SET timezone = 'Europe/London'",
+            "SET timezone = '+05:30'",
+            "SET TimeZone = 'us/eastern'",
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                beh.unsupported,
+                "{stmt:?} should be unsupported (non-UTC), got {beh:?}"
+            );
+            assert!(
+                beh.set_timezone.is_some(),
+                "{stmt:?} should still record the parsed timezone, got {beh:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_time_zone_unparseable_is_unsupported() {
+        for stmt in [
+            "SET timezone = 'Narnia/Cair_Paravel'",
+            "SET timezone = 'not a zone'",
+            "SET timezone = ''",
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(beh.unsupported, "{stmt:?} should be unsupported");
+            assert!(
+                beh.set_timezone.is_none(),
+                "{stmt:?} parsed nothing, set_timezone should stay None"
+            );
+        }
     }
 
     #[test]

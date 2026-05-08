@@ -5541,7 +5541,13 @@ where
             trace!(?encoding, "Setting results_encoding");
             connectors.noria.set_results_encoding(encoding);
         }
-        if let Some(tz) = set_timezone {
+        // The handler records `set_timezone` even for non-UTC values so a
+        // future eval-side fix can read it unchanged; only apply it here when
+        // the SET resolved to a UTC-equivalent zone — otherwise cached
+        // results (UTC-wallclock today) would be silently localized.
+        if let Some(tz) = set_timezone
+            && !unsupported
+        {
             trace!(?tz, "Setting timezone");
             connectors.noria.set_timezone(tz);
         }
