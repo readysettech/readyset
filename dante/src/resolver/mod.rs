@@ -9,7 +9,7 @@ pub(crate) mod schema;
 use data_generator::ColumnGenerationSpec;
 use readyset_sql::ast::{SelectSpecification, SqlIdentifier, SqlType};
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, ExampleCell};
 use crate::entropy::Entropy;
 use crate::state::{ColumnMeta, GenerationState, TableSchema};
 use crate::var::{UnionFind, VarId, VarKind};
@@ -221,6 +221,32 @@ pub enum ResolveError {
     EmptyTableSchema { table: SqlIdentifier },
 }
 
+/// One resolved example, ready for the oracle to materialize.
+#[derive(Debug, Clone)]
+pub struct ResolvedExample {
+    pub note: &'static str,
+    pub dialect: crate::constraint::DialectSupport,
+    pub row_overrides: Vec<RowOverride>,
+    pub param_overrides: Vec<ParamOverride>,
+}
+
+/// Row-level override: pin a specific column in a specific table to a value.
+#[derive(Debug, Clone)]
+pub struct RowOverride {
+    pub table: SqlIdentifier,
+    pub column: SqlIdentifier,
+    pub value: crate::constraint::ExampleValue,
+}
+
+/// Parameter override: pin a placeholder (by 0-based index) to a value.
+#[derive(Debug, Clone)]
+pub struct ParamOverride {
+    /// 0-based index into the query's placeholder list (placeholder $1
+    /// has `placeholder_index = 0`).
+    pub placeholder_index: usize,
+    pub value: crate::constraint::ExampleValue,
+}
+
 /// Output of the full resolution pipeline.
 #[derive(Debug)]
 pub struct ResolverOutput {
@@ -230,6 +256,93 @@ pub struct ResolverOutput {
     pub ddl: Vec<DdlStep>,
     /// Parameter metadata for data generation.
     pub params: Vec<ParamMeta>,
+    /// Resolved examples from `Constraint::Example` constraints.
+    pub examples: Vec<ResolvedExample>,
+}
+
+/// Phase-2 example resolution: walk `Constraint::Example` entries and emit
+/// `ResolvedExample` values with row/param overrides resolved against `env`
+/// and `param_map`.
+fn resolve_examples(
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    env: &Env,
+    param_map: &[Option<usize>],
+    pattern_name: &str,
+) -> Result<Vec<ResolvedExample>, ResolveError> {
+    let mut out = Vec::new();
+    for constraint in constraints {
+        let Constraint::Example {
+            note,
+            dialect,
+            cells,
+        } = constraint
+        else {
+            continue;
+        };
+        let mut row_overrides = Vec::new();
+        let mut param_overrides = Vec::new();
+        for ExampleCell { var, value } in cells {
+            let kind = var_kinds
+                .get(var.0)
+                .ok_or_else(|| ResolveError::Unbound(*var))?;
+            match kind {
+                VarKind::Column { .. } => {
+                    let binding = env.get(*var).ok_or_else(|| ResolveError::Unbound(*var))?;
+                    let Binding::Column {
+                        name: col_name,
+                        table_var,
+                        ..
+                    } = binding
+                    else {
+                        return Err(ResolveError::TypeMismatch {
+                            expected: "Column binding".into(),
+                            actual: format!("{binding:?}"),
+                        });
+                    };
+                    // Resolve the table name through the table's own binding.
+                    let table_binding = env
+                        .get(*table_var)
+                        .ok_or_else(|| ResolveError::Unbound(*table_var))?;
+                    let table_name = table_binding.effective_table_name().ok_or_else(|| {
+                        ResolveError::TypeMismatch {
+                            expected: "Table binding with effective name".into(),
+                            actual: format!("{table_binding:?}"),
+                        }
+                    })?;
+                    row_overrides.push(RowOverride {
+                        table: table_name.clone(),
+                        column: col_name.clone(),
+                        value: value.clone(),
+                    });
+                }
+                VarKind::Param { .. } => {
+                    let idx = param_map
+                        .get(var.0)
+                        .copied()
+                        .flatten()
+                        .ok_or_else(|| ResolveError::Unbound(*var))?;
+                    param_overrides.push(ParamOverride {
+                        placeholder_index: idx,
+                        value: value.clone(),
+                    });
+                }
+                _ => {
+                    return Err(ResolveError::TypeMismatch {
+                        expected: "VarKind::Column or VarKind::Param".into(),
+                        actual: format!("{kind:?} in pattern `{pattern_name}` (example `{note}`)"),
+                    });
+                }
+            }
+        }
+        out.push(ResolvedExample {
+            note,
+            dialect: *dialect,
+            row_overrides,
+            param_overrides,
+        });
+    }
+    Ok(out)
 }
 
 /// Full resolution pipeline: resolve schema constraints, then build AST.
@@ -239,6 +352,17 @@ pub fn resolve(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
 ) -> Result<ResolverOutput, ResolveError> {
+    resolve_named(constraints, var_kinds, state, entropy, "")
+}
+
+/// Full resolution pipeline with an optional pattern name for error messages.
+pub(crate) fn resolve_named(
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+    pattern_name: &str,
+) -> Result<ResolverOutput, ResolveError> {
     let (mut env, expanded) = resolve_schema(constraints, var_kinds, state, entropy)?;
 
     // Check if any constraint is a CompoundSelect — if so, use the compound path.
@@ -247,18 +371,24 @@ pub fn resolve(
         _ => None,
     });
 
-    let (query, params) = if let Some((operator, branches)) = compound {
+    let (query, params, param_map) = if let Some((operator, branches)) = compound {
         ast_builder::build_compound_select(
             &mut env, &expanded, var_kinds, operator, branches, state, entropy,
         )?
     } else {
-        let (stmt, params) =
+        let (stmt, params, param_map) =
             ast_builder::build_select(&mut env, &expanded, var_kinds, state, entropy)?;
-        (stmt.into(), params)
+        (stmt.into(), params, param_map)
     };
 
+    let examples = resolve_examples(constraints, var_kinds, &env, &param_map, pattern_name)?;
     let ddl = env.into_ddl_steps(state)?;
-    Ok(ResolverOutput { query, ddl, params })
+    Ok(ResolverOutput {
+        query,
+        ddl,
+        params,
+        examples,
+    })
 }
 
 /// Attempt to resolve a recipe against the current state.
@@ -274,7 +404,13 @@ pub fn try_resolve(
     entropy: &mut Entropy<'_>,
 ) -> Result<ResolverOutput, ResolveError> {
     let state_cp = state.checkpoint();
-    match resolve(&recipe.constraints, &recipe.var_kinds, state, entropy) {
+    match resolve_named(
+        &recipe.constraints,
+        &recipe.var_kinds,
+        state,
+        entropy,
+        recipe.name,
+    ) {
         Ok(output) => Ok(output),
         Err(e) => {
             state.restore(state_cp);
@@ -447,6 +583,246 @@ mod tests {
             0,
             "try_resolve must roll back state on Err"
         );
+    }
+
+    #[test]
+    fn phase2_resolves_example_column_cell_to_row_override() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::Dialect;
+
+        let mut b = PatternBuilder::new("p");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        b.example(
+            "row bait",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("42"),
+            }],
+        );
+        let pattern = b.build();
+
+        let recipe = pattern.to_recipe(0);
+        let config = crate::state::GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut gen_state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xC0DE);
+        let mut entropy = Entropy::new(&mut rng);
+        let resolved = resolve(
+            &recipe.constraints,
+            &recipe.var_kinds,
+            &mut gen_state,
+            &mut entropy,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.examples.len(), 1);
+        let ex = &resolved.examples[0];
+        assert_eq!(ex.note, "row bait");
+        assert_eq!(ex.row_overrides.len(), 1);
+        assert_eq!(ex.row_overrides[0].value, ExampleValue::Literal("42"));
+        assert_eq!(ex.param_overrides.len(), 0);
+    }
+
+    #[test]
+    fn phase2_resolves_example_param_cell_to_param_override() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::Dialect;
+        use readyset_sql::ast::BinaryOperator;
+
+        let mut b = PatternBuilder::new("p");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        let pv = b.where_param(c, t, BinaryOperator::Equal);
+        b.example(
+            "param bait",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: pv,
+                value: ExampleValue::Literal("99"),
+            }],
+        );
+        let pattern = b.build();
+
+        let recipe = pattern.to_recipe(0);
+        let config = crate::state::GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut gen_state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xC0DE);
+        let mut entropy = Entropy::new(&mut rng);
+        let resolved = resolve(
+            &recipe.constraints,
+            &recipe.var_kinds,
+            &mut gen_state,
+            &mut entropy,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.examples.len(), 1);
+        let ex = &resolved.examples[0];
+        assert_eq!(ex.param_overrides.len(), 1);
+        assert_eq!(ex.param_overrides[0].placeholder_index, 0);
+        assert_eq!(ex.param_overrides[0].value, ExampleValue::Literal("99"));
+    }
+
+    #[test]
+    fn resolve_examples_unbound_var_returns_err() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::Dialect;
+
+        // Build a pattern, then manually inject an Example cell that references
+        // VarId(99) which does not exist in this pattern's vars.
+        let mut b = PatternBuilder::new("p");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        let pattern = b.build();
+
+        let mut constraints = pattern.constraints.clone();
+        constraints.push(crate::constraint::Constraint::Example {
+            note: "bad",
+            dialect: DialectSupport::Both,
+            cells: vec![ExampleCell {
+                var: crate::var::VarId(99),
+                value: ExampleValue::Literal("1"),
+            }],
+        });
+
+        let config = crate::state::GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut gen_state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xCAFE);
+        let mut entropy = Entropy::new(&mut rng);
+        let err = resolve(&constraints, &pattern.vars, &mut gen_state, &mut entropy)
+            .expect_err("should fail with Unbound for out-of-range var");
+
+        assert!(
+            matches!(err, ResolveError::Unbound(v) if v.0 == 99),
+            "expected Unbound(VarId(99)), got {err:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_examples_type_mismatch_for_table_var_in_cell() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::Dialect;
+
+        // Build a pattern, then manually inject an Example cell pointing at a
+        // Relation var (not Column or Param) to trigger TypeMismatch.
+        let mut b = PatternBuilder::new("p");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        let pattern = b.build();
+
+        let mut constraints = pattern.constraints.clone();
+        // t is VarId(0) which has VarKind::Relation — invalid for Example cells.
+        constraints.push(crate::constraint::Constraint::Example {
+            note: "bad-kind",
+            dialect: DialectSupport::Both,
+            cells: vec![ExampleCell {
+                var: t,
+                value: ExampleValue::Literal("1"),
+            }],
+        });
+
+        let config = crate::state::GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut gen_state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xCAFE);
+        let mut entropy = Entropy::new(&mut rng);
+        let err = resolve(&constraints, &pattern.vars, &mut gen_state, &mut entropy)
+            .expect_err("should fail with TypeMismatch for Relation var in Example cell");
+
+        assert!(
+            matches!(err, ResolveError::TypeMismatch { .. }),
+            "expected TypeMismatch, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn two_where_params_assigned_distinct_placeholder_indices() {
+        // Two WhereParam vars must map to placeholder indices 0 and 1.
+        // Verified end-to-end through resolve_examples param_overrides.
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::Dialect;
+        use readyset_sql::ast::BinaryOperator;
+
+        let mut b = PatternBuilder::new("two_params");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        let p0 = b.where_param(c, t, BinaryOperator::Greater);
+        let p1 = b.where_param(c, t, BinaryOperator::Less);
+        b.example(
+            "range",
+            DialectSupport::Both,
+            vec![
+                ExampleCell {
+                    var: p0,
+                    value: ExampleValue::Literal("10"),
+                },
+                ExampleCell {
+                    var: p1,
+                    value: ExampleValue::Literal("20"),
+                },
+            ],
+        );
+        let pattern = b.build();
+
+        let recipe = pattern.to_recipe(0);
+        let config = crate::state::GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut gen_state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0xBEEF);
+        let mut entropy = Entropy::new(&mut rng);
+        let resolved = resolve(
+            &recipe.constraints,
+            &recipe.var_kinds,
+            &mut gen_state,
+            &mut entropy,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.params.len(), 2, "expected two params");
+        assert_eq!(resolved.examples.len(), 1);
+        let ex = &resolved.examples[0];
+        assert_eq!(ex.param_overrides.len(), 2, "expected two param overrides");
+        let mut indices: Vec<usize> = ex
+            .param_overrides
+            .iter()
+            .map(|po| po.placeholder_index)
+            .collect();
+        indices.sort();
+        assert_eq!(indices, vec![0, 1], "placeholder indices must be 0 and 1");
     }
 
     #[test]

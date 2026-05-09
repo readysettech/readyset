@@ -15,7 +15,9 @@ pub mod state;
 pub(crate) mod var;
 
 // Re-export primary API types for convenience.
-pub use generator::{ConstraintRegistry, DdlOutput, GenerateError, Generator, QueryOutput};
+pub use generator::{
+    ConstraintRegistry, DdlOutput, GenerateError, Generator, PatternRegistrationError, QueryOutput,
+};
 pub use resolver::{DdlStep, ParamMeta};
 pub use state::{GenerationState, GeneratorConfig};
 

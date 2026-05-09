@@ -19,8 +19,9 @@ use std::time::Duration;
 use antithesis_sdk::prelude::*;
 use anyhow::{Context, bail};
 use clap::Parser;
+use dante::constraint::ExampleValue;
 use dante::pattern::Pattern;
-use dante::resolver::{DdlStep, ParamMeta};
+use dante::resolver::{DdlStep, ParamMeta, ParamOverride, ResolvedExample, RowOverride};
 use dante::state::TableSchema;
 use dante::{Generator, GeneratorConfig};
 use data_generator::ColumnGenerator;
@@ -52,6 +53,11 @@ const CACHE_CREATE_BACKOFF: u64 = 2;
 /// statements at ~1KB/each ≈ 1MB resident, well under typical OOM thresholds
 /// for an Antithesis container even after a multi-million-statement run.
 const REPRO_RING_CAPACITY: usize = 1000;
+
+/// Retry schedule for Readyset SELECT comparisons. Readyset is eventually
+/// consistent: the first SELECT may create a cache that hasn't fully
+/// populated yet. Total sleep budget: ~29.5s across 9 retries.
+const RETRY_DELAYS_MS: &[u64] = &[500, 1000, 2000, 3000, 4000, 4000, 5000, 5000, 5000];
 
 /// Streamed reproduction log. The artifact reconstructs the *workload*, not
 /// server-side nondeterminism (CURRENT_TIMESTAMP, AUTO_INCREMENT, sequences,
@@ -146,19 +152,54 @@ impl ReproLog {
     /// Record a SELECT statement, inlining concrete parameter values into the
     /// SQL so the script is directly replayable. The raw placeholder form is
     /// preserved as a comment for cross-checking against the live execution.
-    fn record_select(&mut self, query_idx: usize, pattern: &str, sql: &str, params: &[Value]) {
+    ///
+    /// `example_ctx` carries the human-readable note and override summaries
+    /// when this SELECT is an example-targeted probe rather than the random
+    /// probe. The overrides are emitted as comments so triagers can replay the
+    /// exact bait that surfaced a divergence.
+    fn record_select(
+        &mut self,
+        query_idx: usize,
+        pattern: &str,
+        sql: &str,
+        params: &[Value],
+        example_ctx: Option<(&'static str, &[RowOverride], &[ParamOverride])>,
+    ) {
+        use std::fmt::Write as _;
         let inlined = inline_params(sql, params, self.dialect);
         let mut entry = format!("-- query_idx={query_idx} pattern={pattern}\n");
+        if let Some((note, row_overrides, param_overrides)) = example_ctx {
+            writeln!(entry, "-- example: {note}").expect("write to String never fails");
+            for o in row_overrides {
+                writeln!(
+                    entry,
+                    "--   row override: {}.{} = {}",
+                    o.table,
+                    o.column,
+                    fmt_example_value(&o.value)
+                )
+                .expect("write to String never fails");
+            }
+            for o in param_overrides {
+                writeln!(
+                    entry,
+                    "--   param override: ${} = {}",
+                    o.placeholder_index + 1,
+                    fmt_example_value(&o.value)
+                )
+                .expect("write to String never fails");
+            }
+        }
         if !params.is_empty() {
-            entry.push_str(&format!("-- raw: {sql}\n"));
+            writeln!(entry, "-- raw: {sql}").expect("write to String never fails");
             let vals = params
                 .iter()
                 .map(|v| format!("{v:?}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            entry.push_str(&format!("-- params: {vals}\n"));
+            writeln!(entry, "-- params: {vals}").expect("write to String never fails");
         }
-        entry.push_str(&format!("{inlined};"));
+        write!(entry, "{inlined};").expect("write to String never fails");
         self.push_entry(entry);
     }
 
@@ -288,17 +329,110 @@ fn table_schema_to_create_table(schema: &TableSchema) -> CreateTableStatement {
     }
 }
 
-/// Generate `rows_per_table` rows of data for a table, returning each row as a
-/// `Vec<DfValue>` with columns in schema order.
+/// Format an [`ExampleValue`] for human-readable repro-script comments.
+fn fmt_example_value(v: &ExampleValue) -> String {
+    match v {
+        ExampleValue::Literal(s) => s.to_string(),
+        ExampleValue::GenSpec(_) => "(generated)".to_string(),
+    }
+}
+
+/// Parse a SQL literal string into a [`DfValue`] for the given column type.
+///
+/// Used when materialising `ExampleValue::Literal` overrides into actual row data.
+/// Only handles the common scalar types; unsupported types fall back to
+/// `DfValue::None` (NULL) so the harness continues rather than panicking.
+fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    use readyset_decimal::Decimal;
+    use readyset_sql::ast::SqlType;
+    match sql_type {
+        SqlType::Int(_)
+        | SqlType::Int4
+        | SqlType::Int8
+        | SqlType::BigInt(_)
+        | SqlType::SmallInt(_)
+        | SqlType::TinyInt(_) => s
+            .trim()
+            .parse::<i64>()
+            .map(DfValue::Int)
+            .unwrap_or(DfValue::None),
+        SqlType::IntUnsigned(_)
+        | SqlType::BigIntUnsigned(_)
+        | SqlType::SmallIntUnsigned(_)
+        | SqlType::TinyIntUnsigned(_)
+        | SqlType::UnsignedInteger
+        | SqlType::Unsigned => s
+            .trim()
+            .parse::<u64>()
+            .map(DfValue::UnsignedInt)
+            .unwrap_or(DfValue::None),
+        // Decimal/Numeric must land as `DfValue::Numeric` so the INSERT path
+        // emits a true DECIMAL literal. Parsing as f64 silently demotes
+        // values like `2.6667` to `DfValue::Double`, which round-trips
+        // through PG/MySQL as a floating-point literal and breaks
+        // bug-bait examples that depend on exact decimal arithmetic.
+        SqlType::Decimal(_, _) | SqlType::Numeric(_) => Decimal::from_str(s.trim())
+            .map(|d| DfValue::Numeric(Arc::new(d)))
+            .unwrap_or(DfValue::None),
+        SqlType::Double | SqlType::Float | SqlType::Real => s
+            .trim()
+            .parse::<f64>()
+            .map(DfValue::Double)
+            .unwrap_or(DfValue::None),
+        _ => DfValue::from(s),
+    }
+}
+
+/// Draw from `generator`, retrying up to 32 times to avoid values in `exclude`.
+///
+/// If all 32 draws collide the last value is returned anyway — this is a
+/// best-effort avoidance for uniqueness columns, not a hard guarantee.
+fn sample_avoiding<R: Rng>(
+    generator: &mut ColumnGenerator,
+    exclude: &HashSet<String>,
+    rng: &mut R,
+) -> DfValue {
+    let mut last = generator.r#gen(rng);
+    for _ in 0..32 {
+        if !exclude.contains(&last.to_string()) {
+            return last;
+        }
+        last = generator.r#gen(rng);
+    }
+    last
+}
+
+/// Generate rows of data for a table, returning each row as a `Vec<DfValue>`
+/// with columns in schema order.
+///
+/// If `examples` is non-empty, one row is emitted per example using its
+/// `row_overrides` to pin specific column values. The remaining `random_fill`
+/// rows are produced by each column's `gen_spec`. Per-column exclude sets
+/// carry example `Literal` values into the random-fill draws so that
+/// `Unique`/`UniqueFrom` gen-specs don't collide with the bait.
 ///
 /// Each column gets its own sub-RNG seeded from `(parent_seed, column_name)` so
 /// the per-column data depends only on the seed and the column name, not on
 /// iteration order. Reordering schema columns must not change the rows
-/// produced for a given seed.
-fn generate_rows<R: Rng>(schema: &TableSchema, rows: usize, rng: &mut R) -> Vec<Vec<DfValue>> {
+/// produced for a given seed (for the random-fill portion).
+fn generate_rows<R: Rng>(
+    schema: &TableSchema,
+    random_fill: usize,
+    examples: &[&ResolvedExample],
+    rng: &mut R,
+) -> Vec<Vec<DfValue>> {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
+    // Per-column exclude sets accumulate Literal values from examples so
+    // random-fill draws don't collide with bait rows.
+    let col_count = schema.columns.len();
+    let mut excludes: Vec<HashSet<String>> = vec![HashSet::new(); col_count];
+
+    // Build per-column sub-RNGs (keyed by column name for determinism).
     let parent_seed = rng.next_u64();
     let mut generators: Vec<(ColumnGenerator, SmallRng)> = schema
         .columns
@@ -316,14 +450,61 @@ fn generate_rows<R: Rng>(schema: &TableSchema, rows: usize, rng: &mut R) -> Vec<
         })
         .collect();
 
-    (0..rows)
-        .map(|_| {
-            generators
-                .iter_mut()
-                .map(|(g, sub_rng)| g.r#gen(sub_rng))
-                .collect()
-        })
-        .collect()
+    let mut out: Vec<Vec<DfValue>> = Vec::with_capacity(examples.len() + random_fill);
+
+    // Emit one row per example.
+    for ex in examples {
+        let mut row = Vec::with_capacity(col_count);
+        for (idx, (col_name, col_meta)) in schema.columns.iter().enumerate() {
+            let override_for_col = ex
+                .row_overrides
+                .iter()
+                .find(|o| o.table == schema.name && o.column == *col_name);
+            match override_for_col {
+                Some(o) => match &o.value {
+                    ExampleValue::Literal(s) => {
+                        let v = parse_literal(s, &col_meta.sql_type);
+                        excludes[idx].insert(v.to_string());
+                        row.push(v);
+                    }
+                    ExampleValue::GenSpec(spec) => {
+                        let (ref mut col_gen, ref mut sub_rng) = generators[idx];
+                        // Temporarily override: create a one-shot generator
+                        // from the override spec and draw from it.
+                        let mut override_gen =
+                            spec.generator_for_col(col_meta.sql_type.clone(), sub_rng);
+                        let v = override_gen.r#gen(sub_rng);
+                        excludes[idx].insert(v.to_string());
+                        // Advance the main generator by one draw so column
+                        // sub-RNG state stays in sync with the example count.
+                        let _ = col_gen.r#gen(sub_rng);
+                        row.push(v);
+                    }
+                },
+                None => {
+                    let (ref mut col_gen, ref mut sub_rng) = generators[idx];
+                    let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
+                    excludes[idx].insert(v.to_string());
+                    row.push(v);
+                }
+            }
+        }
+        out.push(row);
+    }
+
+    // Random fill.
+    for _ in 0..random_fill {
+        let mut row = Vec::with_capacity(col_count);
+        for (idx, _) in schema.columns.iter().enumerate() {
+            let (ref mut col_gen, ref mut sub_rng) = generators[idx];
+            let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
+            excludes[idx].insert(v.to_string());
+            row.push(v);
+        }
+        out.push(row);
+    }
+
+    out
 }
 
 /// Build an [`InsertStatement`] for a batch of rows.
@@ -361,16 +542,137 @@ fn build_insert(schema: &TableSchema, data: &[Vec<DfValue>]) -> anyhow::Result<I
     })
 }
 
-/// Materialize concrete parameter values from [`ParamMeta`] descriptors.
-fn materialize_params<R: Rng>(params: &[ParamMeta], rng: &mut R) -> Vec<DfValue> {
-    let mut result = Vec::new();
-    for pm in params {
-        let mut generator = pm.gen_spec.generator_for_col(pm.sql_type.clone(), rng);
-        for _ in 0..pm.count {
-            result.push(generator.r#gen(rng));
+/// Return the total number of placeholder values across all [`ParamMeta`] descriptors.
+fn total_param_count(params: &[ParamMeta]) -> usize {
+    params.iter().map(|m| m.count as usize).sum()
+}
+
+/// Materialize concrete parameter values from [`ParamMeta`] descriptors, applying
+/// any per-placeholder [`ParamOverride`]s.  When an override is present for a given
+/// placeholder index its value takes precedence over the normal `gen_spec` draw.
+fn materialize_params_with_overrides<R: Rng>(
+    params: &[ParamMeta],
+    overrides: &[ParamOverride],
+    rng: &mut R,
+) -> Vec<DfValue> {
+    let mut out = Vec::with_capacity(total_param_count(params));
+    let mut placeholder_idx = 0usize;
+    for meta in params {
+        // One generator per ParamMeta keeps `Unique`/`UniqueFrom` state shared
+        // across all `meta.count` placeholders (e.g. IN (?, ?, ?)). Per-draw
+        // construction would reset that state and emit the same value for
+        // every placeholder in the slot.
+        let mut generator = meta.gen_spec.generator_for_col(meta.sql_type.clone(), rng);
+        for _ in 0..meta.count {
+            let override_for_idx = overrides
+                .iter()
+                .find(|o| o.placeholder_index == placeholder_idx);
+            let v = match override_for_idx {
+                Some(o) => match &o.value {
+                    ExampleValue::Literal(s) => parse_literal(s, &meta.sql_type),
+                    ExampleValue::GenSpec(spec) => {
+                        let mut override_gen = spec.generator_for_col(meta.sql_type.clone(), rng);
+                        override_gen.r#gen(rng)
+                    }
+                },
+                None => generator.r#gen(rng),
+            };
+            out.push(v);
+            placeholder_idx += 1;
         }
     }
-    result
+    out
+}
+
+/// Materialize concrete parameter values from [`ParamMeta`] descriptors.
+fn materialize_params<R: Rng>(params: &[ParamMeta], rng: &mut R) -> Vec<DfValue> {
+    materialize_params_with_overrides(params, &[], rng)
+}
+
+/// One SELECT probe: materialized parameters plus optional example annotation
+/// (note text and override summaries for repro-script comments).
+#[derive(Debug)]
+struct SelectProbe<'a> {
+    params: Vec<Value>,
+    /// `None` for the all-random probe; `Some(note)` for an example-targeted probe.
+    example_note: Option<&'static str>,
+    /// Row overrides from the originating [`ResolvedExample`] (empty for the random probe).
+    row_overrides: &'a [RowOverride],
+    /// Param overrides from the originating [`ResolvedExample`] (empty for the random probe).
+    param_overrides: &'a [ParamOverride],
+}
+
+/// Build the ordered list of SELECT probes for one query iteration.
+///
+/// Returns one probe per execution: the first is always an all-random probe
+/// (no overrides), followed by one probe per [`ResolvedExample`] with that
+/// example's [`ParamOverride`]s applied. Each probe carries an optional note
+/// string that identifies the example (or `None` for the random probe), plus
+/// clones of the example's row and parameter overrides for repro-script
+/// annotation.
+///
+/// Conversion from `DfValue` to `Value` can fail; errors are collected and
+/// the offending probe is silently dropped. If the random probe's conversion
+/// fails, returns empty vec; caller treats that as fatal. Example probe
+/// failures are silently dropped from the result.
+fn build_select_probes<'a, R: Rng>(
+    params: &[ParamMeta],
+    examples: &'a [ResolvedExample],
+    select_sql: &str,
+    rng: &mut R,
+) -> Vec<SelectProbe<'a>> {
+    let mut probes = Vec::with_capacity(1 + examples.len());
+
+    // Always emit one all-random probe first (no overrides).
+    let random_df = materialize_params_with_overrides(params, &[], rng);
+    match random_df
+        .into_iter()
+        .map(Value::try_from)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(vals) => probes.push(SelectProbe {
+            params: vals,
+            example_note: None,
+            row_overrides: &[],
+            param_overrides: &[],
+        }),
+        Err(err) => {
+            // Return an empty vec so the call site can surface this as a
+            // fatal error rather than silently skipping the probe.
+            warn!(
+                err = %format!("{err:#}"),
+                sql = %select_sql,
+                "skipping random probe: DfValue->Value conversion failed"
+            );
+        }
+    }
+
+    // One probe per example, with that example's param overrides.
+    for ex in examples {
+        let df = materialize_params_with_overrides(params, &ex.param_overrides, rng);
+        match df
+            .into_iter()
+            .map(Value::try_from)
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(vals) => probes.push(SelectProbe {
+                params: vals,
+                example_note: Some(ex.note),
+                row_overrides: &ex.row_overrides,
+                param_overrides: &ex.param_overrides,
+            }),
+            Err(err) => {
+                warn!(
+                    err = %format!("{err:#}"),
+                    sql = %select_sql,
+                    note = ex.note,
+                    "skipping example probe: DfValue->Value conversion failed"
+                );
+            }
+        }
+    }
+
+    probes
 }
 
 /// Tracks per-pattern generation and comparison outcomes across iterations.
@@ -551,6 +853,8 @@ async fn run_queries_body(
 ) -> anyhow::Result<(usize, usize)> {
     let config = GeneratorConfig {
         readyset_compatible: true,
+        // High column reuse so composed queries exercise shared columns
+        // across patterns.
         reuse_preference: 0.99,
         ..GeneratorConfig::default()
     };
@@ -625,8 +929,16 @@ async fn run_queries_body(
                     )
                     .await?;
 
-                    // Insert seed data.
-                    let rows = generate_rows(schema, rows_per_table, &mut entropy);
+                    // Insert seed data, including rows pinned by example
+                    // row_overrides for this table so that example-targeted
+                    // SELECTs have matching rows to hit.
+                    let examples_for_table: Vec<&ResolvedExample> = output
+                        .examples
+                        .iter()
+                        .filter(|ex| ex.row_overrides.iter().any(|o| o.table == *name))
+                        .collect();
+                    let rows =
+                        generate_rows(schema, rows_per_table, &examples_for_table, &mut entropy);
                     if !rows.is_empty() {
                         let insert = build_insert(schema, &rows)?;
                         let insert_sql = insert.display(dialect).to_string();
@@ -685,7 +997,7 @@ async fn run_queries_body(
                     let value = generator.r#gen(&mut entropy);
                     let lit: Literal = value.try_into().unwrap_or(Literal::Null);
                     // Bool columns get `Literal::Integer(0|1)` from the
-                    // data-generator (DfValue::Int → Literal::Integer);
+                    // data-generator (DfValue::Int -> Literal::Integer);
                     // Postgres rejects `bool_col = 1` with no implicit
                     // coercion. Project to `Literal::Boolean` so the
                     // dialect printer emits TRUE/FALSE on PG and 1/0
@@ -748,16 +1060,19 @@ async fn run_queries_body(
             }
         }
 
-        // Render SELECT and materialize params.
+        // Render SELECT and build per-probe parameter sets:
+        // one all-random probe plus one per ResolvedExample.
         let select_sql = output.query.display(dialect).to_string();
         let has_order_by = output.query.has_order_by();
         let has_limit = output.query.has_limit();
-        let concrete_params = materialize_params(&output.params, &mut entropy);
-        let params: Vec<Value> = concrete_params
-            .into_iter()
-            .map(Value::try_from)
-            .collect::<Result<_, _>>()
-            .with_context(|| format!("converting params for: {select_sql}"))?;
+        let select_probes =
+            build_select_probes(&output.params, &output.examples, &select_sql, &mut entropy);
+        // build_select_probes always includes at least the random probe, but
+        // if DfValue->Value conversion failed for it the vec would be empty.
+        // Surface that as a fatal error (same as the old `?` on the single-probe path).
+        if select_probes.is_empty() {
+            anyhow::bail!("all SELECT probes failed DfValue->Value conversion for: {select_sql}");
+        }
 
         // Compound SELECTs can't go through readyset's ad-hoc cache path; route
         // them through a VIEW + deep cache so the compound MIR path is
@@ -820,74 +1135,24 @@ async fn run_queries_body(
             select_sql.clone()
         };
 
-        debug!(%select_sql, param_count = params.len(), "executing SELECT on both");
-        repro.record_select(query_idx, pattern_name, &select_sql, &params);
-
-        // Execute on upstream (deterministic source of truth).
-        let upstream_results = match with_reconnect_on_drop(
-            upstream,
-            upstream_url,
-            "SELECT upstream",
-            async |c: &mut DatabaseConnection| execute_select(c, &select_sql, &params).await,
-        )
-        .await
-        {
-            Ok(results) => results,
-            Err(err) => match classify_error(&err) {
-                ErrorClass::Fatal => {
-                    return Err(err).context(format!("SELECT on upstream: {select_sql}"));
-                }
-                ErrorClass::UpstreamKnownLimit { code } => {
-                    warn!(
-                        query_idx,
-                        %select_sql,
-                        ?code,
-                        err = %format!("{err:#}"),
-                        "skipping query due to upstream planner limitation"
-                    );
-                    stats.entry(pattern_name).skipped += 1;
-                    continue;
-                }
-                ErrorClass::UpstreamGeneratorBug { code } => {
-                    error!(
-                        query_idx,
-                        %select_sql,
-                        ?code,
-                        err = %format!("{err:#}"),
-                        "upstream rejected query (likely generator bug)"
-                    );
-                    assert_unreachable!(
-                        "Upstream rejected generated query",
-                        &json!({
-                            "pattern": &pattern_name,
-                            "code": code,
-                        })
-                    );
-                    stats.entry(pattern_name).skipped += 1;
-                    continue;
-                }
-                ErrorClass::Other | ErrorClass::ReadysetTransient => {
-                    return Err(err).context(format!("SELECT on upstream: {select_sql}"));
-                }
-            },
-        };
-        let upstream_rows: Vec<Vec<Value>> = upstream_results;
-
         // LIMIT without ORDER BY produces non-deterministic row subsets that
         // can't meaningfully be compared between upstream and readyset.
+        // Handle this at query level (before the per-probe loop) so that one
+        // warmup execute exercises the cache path and all probes are skipped.
         if has_limit && !has_order_by {
             debug!(
                 query_idx,
                 %select_sql,
                 "skipping comparison: LIMIT without ORDER BY is non-deterministic"
             );
-            // Still execute on readyset to exercise the cache path.
+            // Warmup ReadySet with the first (random) probe's params.
+            let warmup_params = &select_probes[0].params;
             let _ = with_reconnect_on_drop(
                 readyset,
                 readyset_url,
                 "SELECT readyset (warmup)",
                 async |c: &mut DatabaseConnection| {
-                    execute_select(c, &readyset_select_sql, &params).await
+                    execute_select(c, &readyset_select_sql, warmup_params).await
                 },
             )
             .await;
@@ -895,15 +1160,90 @@ async fn run_queries_body(
             continue;
         }
 
-        // Readyset is eventually consistent: the first SELECT may create a
-        // cache that hasn't fully populated yet. Retry with backoff.
-        const RETRY_DELAYS_MS: &[u64] = &[500, 1000, 2000, 3000, 4000, 4000, 5000, 5000, 5000];
-        let mut last_mismatch: Option<String> = None;
-        let mut matched = false;
+        // Run one SELECT per probe: first the all-random probe, then one per
+        // ResolvedExample. Each probe is compared independently.
+        let mut query_matched_probes = 0usize;
+        let mut query_mismatched_probes = 0usize;
+        for probe in &select_probes {
+            let params = &probe.params;
+            let example_note = probe.example_note;
+            debug!(
+                %select_sql,
+                param_count = params.len(),
+                example_note,
+                "executing SELECT on both"
+            );
+            if let Some(note) = probe.example_note {
+                assert_reachable!(
+                    "Example probe dispatched",
+                    &json!({
+                        "pattern": pattern_name,
+                        "note": note,
+                    })
+                );
+            }
+            let example_ctx = probe
+                .example_note
+                .map(|note| (note, probe.row_overrides, probe.param_overrides));
+            repro.record_select(query_idx, pattern_name, &select_sql, params, example_ctx);
 
-        for attempt in 0..RETRY_DELAYS_MS.len() + 1 {
-            let readyset_results =
-                match execute_select(readyset, &readyset_select_sql, &params).await {
+            // Execute on upstream (deterministic source of truth).
+            let upstream_results = match with_reconnect_on_drop(
+                upstream,
+                upstream_url,
+                "SELECT upstream",
+                async |c: &mut DatabaseConnection| execute_select(c, &select_sql, params).await,
+            )
+            .await
+            {
+                Ok(results) => results,
+                Err(err) => match classify_error(&err) {
+                    ErrorClass::Fatal => {
+                        return Err(err).context(format!("SELECT on upstream: {select_sql}"));
+                    }
+                    ErrorClass::UpstreamKnownLimit { code } => {
+                        warn!(
+                            query_idx,
+                            %select_sql,
+                            ?code,
+                            err = %format!("{err:#}"),
+                            "skipping query due to upstream planner limitation"
+                        );
+                        stats.entry(pattern_name).skipped += 1;
+                        continue 'query;
+                    }
+                    ErrorClass::UpstreamGeneratorBug { code } => {
+                        error!(
+                            query_idx,
+                            %select_sql,
+                            ?code,
+                            err = %format!("{err:#}"),
+                            "upstream rejected query (likely generator bug)"
+                        );
+                        assert_unreachable!(
+                            "Upstream rejected generated query",
+                            &json!({
+                                "pattern": &pattern_name,
+                                "code": code,
+                            })
+                        );
+                        stats.entry(pattern_name).skipped += 1;
+                        continue 'query;
+                    }
+                    ErrorClass::Other | ErrorClass::ReadysetTransient => {
+                        return Err(err).context(format!("SELECT on upstream: {select_sql}"));
+                    }
+                },
+            };
+            let upstream_rows: Vec<Vec<Value>> = upstream_results;
+
+            let mut last_mismatch: Option<String> = None;
+            let mut matched = false;
+
+            for attempt in 0..RETRY_DELAYS_MS.len() + 1 {
+                let readyset_results = match execute_select(readyset, &readyset_select_sql, params)
+                    .await
+                {
                     Ok(r) => r,
                     Err(err) if is_connection_drop(&err) => {
                         warn!(
@@ -934,47 +1274,256 @@ async fn run_queries_body(
                         _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
                     },
                 };
-            let readyset_rows: Vec<Vec<Value>> = readyset_results;
+                let readyset_rows: Vec<Vec<Value>> = readyset_results;
 
-            match compare_results(&upstream_rows, &readyset_rows, has_order_by) {
-                ComparisonOutcome::Match => {
-                    matched = true;
-                    break;
+                match compare_results(&upstream_rows, &readyset_rows, has_order_by) {
+                    ComparisonOutcome::Match => {
+                        matched = true;
+                        break;
+                    }
+                    ComparisonOutcome::Mismatch { reason } => {
+                        last_mismatch = Some(format!(
+                            "Mismatch for query {query_idx}: {select_sql}\n{reason}"
+                        ));
+                    }
                 }
-                ComparisonOutcome::Mismatch { reason } => {
-                    last_mismatch = Some(format!(
-                        "Mismatch for query {query_idx}: {select_sql}\n{reason}"
-                    ));
+
+                if let Some(&delay_ms) = RETRY_DELAYS_MS.get(attempt) {
+                    let delay = Duration::from_millis(delay_ms);
+                    debug!(
+                        attempt,
+                        delay_ms = delay.as_millis(),
+                        "result mismatch, retrying after backoff"
+                    );
+                    tokio::time::sleep(delay).await;
                 }
             }
 
-            if let Some(&delay_ms) = RETRY_DELAYS_MS.get(attempt) {
-                let delay = Duration::from_millis(delay_ms);
+            if matched {
+                query_matched_probes += 1;
+            } else {
+                query_mismatched_probes += 1;
+                // `last_mismatch` is None when the entire retry budget was
+                // consumed by transient errors / connection drops without ever
+                // producing a comparable result. Surface them as separate
+                // Antithesis findings with low-cardinality payloads.
+                match last_mismatch {
+                    Some(mismatch_msg) => {
+                        assert_unreachable!(
+                            "Result mismatch between upstream and Readyset after retries",
+                            &json!({
+                                "pattern": &pattern_name,
+                                "example_note": example_note,
+                            })
+                        );
+                        if let Some(note) = example_note {
+                            assert_sometimes!(
+                                true,
+                                "Example probe found divergence",
+                                &json!({
+                                    "pattern": pattern_name,
+                                    "note": note,
+                                })
+                            );
+                        }
+                        error!(query_idx, "{mismatch_msg}");
+                    }
+                    None => {
+                        assert_unreachable!(
+                            "Readyset never converged within retry budget (all transient)",
+                            &json!({
+                                "pattern": &pattern_name,
+                                "example_note": example_note,
+                            })
+                        );
+                        warn!(
+                            query_idx,
+                            %pattern_name,
+                            example_note,
+                            "retry budget exhausted on transient errors"
+                        );
+                    }
+                }
+            }
+
+            // Sentinel-based autoparameterization probe for hoisting patterns.
+            // Only run on the random probe (example_note is None) to avoid
+            // duplicate autoparam signals with different pinned literals.
+            if example_note.is_none()
+                && matched
+                && Pattern::name_needs_literal_mode(pattern_name)
+                && !params.is_empty()
+            {
+                let (sentinel_sql, sentinels) = inline_sentinels(&select_sql, params, dialect);
                 debug!(
-                    attempt,
-                    delay_ms = delay.as_millis(),
-                    "result mismatch, retrying after backoff"
+                    query_idx,
+                    %sentinel_sql,
+                    sentinel_count = sentinels.len(),
+                    "probing autoparameterization with sentinels"
                 );
-                tokio::time::sleep(delay).await;
+
+                assert_reachable!(
+                    "Hoisting pattern sentinel probe executed",
+                    &json!({ "pattern": &pattern_name })
+                );
+
+                if let Some(sentinel_explain) = explain_create_cache(readyset, &sentinel_sql).await
+                {
+                    let (parameterized, not_parameterized) =
+                        classify_autoparameterization(&sentinel_explain.query_text, &sentinels);
+
+                    debug!(
+                        query_idx,
+                        %pattern_name,
+                        parameterized_count = parameterized.len(),
+                        not_parameterized_count = not_parameterized.len(),
+                        rewritten = %sentinel_explain.query_text,
+                        query_id = %sentinel_explain.query_id,
+                        "autoparameterization classification"
+                    );
+
+                    if !parameterized.is_empty() {
+                        assert_reachable!(
+                            "Hoisting pattern has autoparameterized literals",
+                            &json!({
+                                "pattern": &pattern_name,
+                                "parameterized_indices": &parameterized,
+                                "not_parameterized_indices": &not_parameterized,
+                            })
+                        );
+                    }
+
+                    // Only assert cache REUSE when EVERY literal was parameterized. With a mix of
+                    // parameterized and inline literals, varying the inline positions between the
+                    // two probe variants legitimately yields different caches — asserting reuse
+                    // there is a false positive.
+                    if should_assert_autoparam_reuse(&parameterized, &not_parameterized) {
+                        // Verify autoparameterization via EXPLAIN CREATE
+                        // CACHE on two literal variants with different concrete
+                        // values.  If readyset autoparameterizes both to the
+                        // same query ID, the feature is working: different
+                        // literals are normalized to the same cache entry.
+                        let literal_sql_1 = inline_params(&select_sql, params, dialect);
+
+                        let new_concrete = materialize_params(&output.params, &mut entropy);
+                        let new_params: Result<Vec<Value>, _> =
+                            new_concrete.into_iter().map(Value::try_from).collect();
+                        let new_params = match new_params {
+                            Ok(v) => v,
+                            Err(err) => {
+                                // Surface materialization failures as Antithesis
+                                // findings rather than silently skipping.
+                                warn!(
+                                    query_idx,
+                                    %pattern_name,
+                                    err = %format!("{err:#}"),
+                                    "skipping autoparam sentinel probe: param materialization failed"
+                                );
+                                assert_unreachable!(
+                                    "Param materialization failed during sentinel probe",
+                                    &json!({
+                                        "pattern": &pattern_name,
+                                    })
+                                );
+                                Vec::new()
+                            }
+                        };
+
+                        if !new_params.is_empty() {
+                            let literal_sql_2 = inline_params(&select_sql, &new_params, dialect);
+
+                            let explain_1 = explain_create_cache(readyset, &literal_sql_1).await;
+                            let explain_2 = explain_create_cache(readyset, &literal_sql_2).await;
+
+                            debug!(
+                                query_idx,
+                                %pattern_name,
+                                explain_1_id = explain_1.as_ref().map(|e| e.query_id.as_str()),
+                                explain_1_text =
+                                    explain_1.as_ref().map(|e| e.query_text.as_str()),
+                                explain_2_id = explain_2.as_ref().map(|e| e.query_id.as_str()),
+                                explain_2_text =
+                                    explain_2.as_ref().map(|e| e.query_text.as_str()),
+                                "autoparam probe: EXPLAIN CREATE CACHE results"
+                            );
+
+                            match (explain_1, explain_2) {
+                                (Some(e1), Some(e2)) if e1.query_id == e2.query_id => {
+                                    // Same query ID: the autoparameterization
+                                    // machinery maps both literal forms to the
+                                    // identical cache entry.
+                                    stats.entry(pattern_name).autoparam_confirmed += 1;
+                                    assert_reachable!(
+                                        "Autoparameterized cache reused for different literal values",
+                                        &json!({
+                                            "pattern": &pattern_name,
+                                            "query_id": &e1.query_id,
+                                            "query_text": &e1.query_text,
+                                        })
+                                    );
+                                }
+                                (Some(_), Some(_)) => {
+                                    // Different query IDs — autoparameterization
+                                    // produced different normalized forms for
+                                    // different literals.  This should not happen.
+                                    stats.entry(pattern_name).autoparam_none += 1;
+                                    assert_unreachable!(
+                                        "Autoparameterized query got different cache for different literals",
+                                        &json!({
+                                            "pattern": &pattern_name,
+                                        })
+                                    );
+                                }
+                                _ => {
+                                    // EXPLAIN CREATE CACHE failed for one or
+                                    // both variants — can't verify.
+                                    debug!(
+                                        query_idx,
+                                        %pattern_name,
+                                        "autoparam probe: EXPLAIN CREATE CACHE failed for a literal variant"
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        stats.entry(pattern_name).autoparam_none += 1;
+                        debug!(
+                            query_idx,
+                            %pattern_name,
+                            parameterized_count = parameterized.len(),
+                            not_parameterized_count = not_parameterized.len(),
+                            "skipping autoparam reuse probe: not all literals were parameterized"
+                        );
+                    }
+                }
             }
         }
 
-        // Check how the last readyset query was served.
+        // Update per-query counters once after all probes complete.
+        // Cache mode is per (pattern, query shape), not per probe.
         let cache_mode = query_cache_mode(readyset).await;
         stats.record_cache_mode(pattern_name, cache_mode);
 
+        let query_match_status = if query_mismatched_probes == 0 && query_matched_probes > 0 {
+            matched_count += 1;
+            stats.entry(pattern_name).matched += 1;
+            "matched"
+        } else if query_mismatched_probes > 0 {
+            mismatched_count += 1;
+            stats.entry(pattern_name).mismatched += 1;
+            "mismatched"
+        } else {
+            "neither"
+        };
         assert_reachable!(
             "Query comparison completed",
             &json!({
                 "pattern": &pattern_name,
-                "matched": matched,
+                "status": query_match_status,
                 "cache_mode": cache_mode.to_string(),
             })
         );
-
-        if matched {
-            matched_count += 1;
-            stats.entry(pattern_name).matched += 1;
+        if query_match_status == "matched" {
             assert_reachable!(
                 "Query results match between upstream and Readyset",
                 &json!({
@@ -983,172 +1532,6 @@ async fn run_queries_body(
                     "cache_mode": cache_mode.to_string(),
                 })
             );
-        } else {
-            mismatched_count += 1;
-            // `last_mismatch` is None when the entire retry budget was
-            // consumed by transient errors / connection drops without ever
-            // producing a comparable result. The previous `expect("must have
-            // mismatch")` panicked in that path, masking the real failure
-            // (Readyset never converged) as an oracle crash. Surface them as
-            // separate Antithesis findings with low-cardinality payloads.
-            stats.entry(pattern_name).mismatched += 1;
-            match last_mismatch {
-                Some(mismatch_msg) => {
-                    assert_unreachable!(
-                        "Result mismatch between upstream and Readyset after retries",
-                        &json!({ "pattern": &pattern_name })
-                    );
-                    error!(query_idx, "{mismatch_msg}");
-                }
-                None => {
-                    assert_unreachable!(
-                        "Readyset never converged within retry budget (all transient)",
-                        &json!({ "pattern": &pattern_name })
-                    );
-                    warn!(
-                        query_idx,
-                        %pattern_name,
-                        "retry budget exhausted on transient errors"
-                    );
-                }
-            }
-        }
-
-        // --- Sentinel-based autoparameterization probe for hoisting patterns ---
-        if matched && Pattern::name_needs_literal_mode(pattern_name) && !params.is_empty() {
-            let (sentinel_sql, sentinels) = inline_sentinels(&select_sql, &params, dialect);
-            debug!(
-                query_idx,
-                %sentinel_sql,
-                sentinel_count = sentinels.len(),
-                "probing autoparameterization with sentinels"
-            );
-
-            assert_reachable!(
-                "Hoisting pattern sentinel probe executed",
-                &json!({ "pattern": &pattern_name })
-            );
-
-            if let Some(sentinel_explain) = explain_create_cache(readyset, &sentinel_sql).await {
-                let (parameterized, not_parameterized) =
-                    classify_autoparameterization(&sentinel_explain.query_text, &sentinels);
-
-                debug!(
-                    query_idx,
-                    %pattern_name,
-                    parameterized_count = parameterized.len(),
-                    not_parameterized_count = not_parameterized.len(),
-                    rewritten = %sentinel_explain.query_text,
-                    query_id = %sentinel_explain.query_id,
-                    "autoparameterization classification"
-                );
-
-                if !parameterized.is_empty() {
-                    assert_reachable!(
-                        "Hoisting pattern has autoparameterized literals",
-                        &json!({
-                            "pattern": &pattern_name,
-                            "parameterized_indices": &parameterized,
-                            "not_parameterized_indices": &not_parameterized,
-                        })
-                    );
-
-                    // Verify autoparameterization via EXPLAIN CREATE
-                    // CACHE on two literal variants with different concrete
-                    // values.  If readyset autoparameterizes both to the
-                    // same query ID, the feature is working: different
-                    // literals are normalized to the same cache entry.
-                    let literal_sql_1 = inline_params(&select_sql, &params, dialect);
-
-                    let new_concrete = materialize_params(&output.params, &mut entropy);
-                    let new_params: Result<Vec<Value>, _> =
-                        new_concrete.into_iter().map(Value::try_from).collect();
-                    let new_params = match new_params {
-                        Ok(v) => v,
-                        Err(err) => {
-                            // Old code swallowed this with `unwrap_or_default`,
-                            // turning a generator/conversion bug into a
-                            // silent skip. Surface it as an Antithesis
-                            // assertion and skip the probe explicitly.
-                            warn!(
-                                query_idx,
-                                %pattern_name,
-                                err = %format!("{err:#}"),
-                                "skipping autoparam sentinel probe: param materialization failed"
-                            );
-                            assert_unreachable!(
-                                "Param materialization failed during sentinel probe",
-                                &json!({
-                                    "pattern": &pattern_name,
-                                })
-                            );
-                            Vec::new()
-                        }
-                    };
-
-                    if !new_params.is_empty() {
-                        let literal_sql_2 = inline_params(&select_sql, &new_params, dialect);
-
-                        let explain_1 = explain_create_cache(readyset, &literal_sql_1).await;
-                        let explain_2 = explain_create_cache(readyset, &literal_sql_2).await;
-
-                        debug!(
-                            query_idx,
-                            %pattern_name,
-                            explain_1_id = explain_1.as_ref().map(|e| e.query_id.as_str()),
-                            explain_1_text = explain_1.as_ref().map(|e| e.query_text.as_str()),
-                            explain_2_id = explain_2.as_ref().map(|e| e.query_id.as_str()),
-                            explain_2_text = explain_2.as_ref().map(|e| e.query_text.as_str()),
-                            "autoparam probe: EXPLAIN CREATE CACHE results"
-                        );
-
-                        match (explain_1, explain_2) {
-                            (Some(e1), Some(e2)) if e1.query_id == e2.query_id => {
-                                // Same query ID: the autoparameterization
-                                // machinery maps both literal forms to the
-                                // identical cache entry.
-                                stats.entry(pattern_name).autoparam_confirmed += 1;
-                                assert_reachable!(
-                                    "Autoparameterized cache reused for different literal values",
-                                    &json!({
-                                        "pattern": &pattern_name,
-                                        "query_id": &e1.query_id,
-                                        "query_text": &e1.query_text,
-                                    })
-                                );
-                            }
-                            (Some(_), Some(_)) => {
-                                // Different query IDs — autoparameterization
-                                // produced different normalized forms for
-                                // different literals.  This should not happen.
-                                stats.entry(pattern_name).autoparam_none += 1;
-                                assert_unreachable!(
-                                    "Autoparameterized query got different cache for different literals",
-                                    &json!({
-                                        "pattern": &pattern_name,
-                                    })
-                                );
-                            }
-                            _ => {
-                                // EXPLAIN CREATE CACHE failed for one or
-                                // both variants — can't verify.
-                                debug!(
-                                    query_idx,
-                                    %pattern_name,
-                                    "autoparam probe: EXPLAIN CREATE CACHE failed for a literal variant"
-                                );
-                            }
-                        }
-                    }
-                } else {
-                    stats.entry(pattern_name).autoparam_none += 1;
-                    debug!(
-                        query_idx,
-                        %pattern_name,
-                        "hoisting pattern had no autoparameterized literals"
-                    );
-                }
-            }
         }
     }
 
@@ -1488,7 +1871,7 @@ enum ComparisonOutcome {
 /// `(1,b),(2,a)`).
 ///
 /// Both sort and cell equality use [`Value::cmp_compat`] / [`Value::value_eq`]
-/// so cross-variant numeric values (`Integer` ↔ `UnsignedInteger` ↔
+/// so cross-variant numeric values (`Integer` <-> `UnsignedInteger` <->
 /// `Numeric`) and naive vs offset-aware datetimes that represent the same
 /// wall value sort into the same row positions and compare equal.
 fn compare_results(
@@ -1619,7 +2002,7 @@ fn classify_error(err: &anyhow::Error) -> ErrorClass {
                         // the `code` field stays None.
                         ErrorClass::UpstreamGeneratorBug { code: None }
                     } else {
-                        // No db error attached → IO/decoder/protocol failure.
+                        // No db error attached -- IO/decoder/protocol failure.
                         ErrorClass::Fatal
                     }
                 }
@@ -1790,6 +2173,18 @@ fn classify_autoparameterization(
         }
     }
     (parameterized, not_parameterized)
+}
+
+/// Whether the two-literal cache-reuse assertion is valid for a query.
+///
+/// Reuse can only be asserted when EVERY literal that varies between the two probe variants was
+/// autoparameterized. If any literal stays inline — e.g. a constant inside `substring(...)` /
+/// `month(...)`, or any position Readyset does not parameterize — then two literal variants
+/// legitimately canonicalize to DIFFERENT cache entries (the inline positions differ), so
+/// asserting reuse would be a false positive. Requires at least one parameterized literal so there
+/// is something to check.
+fn should_assert_autoparam_reuse(parameterized: &[usize], not_parameterized: &[usize]) -> bool {
+    !parameterized.is_empty() && not_parameterized.is_empty()
 }
 
 async fn query_cache_mode(readyset: &mut DatabaseConnection) -> CacheMode {
@@ -2386,7 +2781,7 @@ mod tests {
     fn generate_rows_produces_correct_count() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 50, &mut rng);
+        let rows = generate_rows(&schema, 50, &[], &mut rng);
         assert_eq!(rows.len(), 50);
         for row in &rows {
             assert_eq!(row.len(), 3, "row: {row:?}");
@@ -2397,7 +2792,7 @@ mod tests {
     fn generate_rows_unique_column_produces_unique_values() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 100, &mut rng);
+        let rows = generate_rows(&schema, 100, &[], &mut rng);
         let ids: Vec<&DfValue> = rows.iter().map(|r| &r[0]).collect();
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(
@@ -2428,8 +2823,8 @@ mod tests {
 
         let mut rng_ab = SmallRng::seed_from_u64(42);
         let mut rng_ba = SmallRng::seed_from_u64(42);
-        let rows_ab = generate_rows(&schema_ab, 5, &mut rng_ab);
-        let rows_ba = generate_rows(&schema_ba, 5, &mut rng_ba);
+        let rows_ab = generate_rows(&schema_ab, 5, &[], &mut rng_ab);
+        let rows_ba = generate_rows(&schema_ba, 5, &[], &mut rng_ba);
 
         for (row_ab, row_ba) in rows_ab.iter().zip(rows_ba.iter()) {
             // schema_ab positions: [a, b]; schema_ba positions: [b, a]
@@ -2448,7 +2843,7 @@ mod tests {
     fn build_insert_produces_valid_sql() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 5, &mut rng);
+        let rows = generate_rows(&schema, 5, &[], &mut rng);
         let insert = build_insert(&schema, &rows).expect("should build insert");
         let sql = insert.display(Dialect::MySQL).to_string();
 
@@ -2487,7 +2882,7 @@ mod tests {
     fn dfvalue_to_value_conversion() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 10, &mut rng);
+        let rows = generate_rows(&schema, 10, &[], &mut rng);
         for row in &rows {
             for val in row {
                 let result = Value::try_from(val.clone());
@@ -2521,7 +2916,7 @@ mod tests {
                         "expected CREATE TABLE, got: {sql}"
                     );
 
-                    let rows = generate_rows(schema, 10, &mut entropy);
+                    let rows = generate_rows(schema, 10, &[], &mut entropy);
                     assert_eq!(rows.len(), 10);
                     let insert = build_insert(schema, &rows).expect("should build insert");
                     let insert_sql = insert.display(Dialect::MySQL).to_string();
@@ -2650,6 +3045,17 @@ mod tests {
     /// query *text*, not a query ID.  A query ID like "q_abc123" never
     /// contains sentinel text, so every sentinel would be misclassified as
     /// "parameterized" regardless of whether autoparameterization happened.
+    #[test]
+    fn autoparam_reuse_only_asserted_when_all_literals_parameterized() {
+        // All literals parameterized: two variants normalize identically, so reuse is valid.
+        assert!(should_assert_autoparam_reuse(&[0, 1], &[]));
+        // Nothing parameterized: nothing to check.
+        assert!(!should_assert_autoparam_reuse(&[], &[0, 1]));
+        // Mixed (the false-positive case): literal 1 stays inline (e.g. inside substring()/
+        // month()), so varying it produces a different cache legitimately — must NOT assert.
+        assert!(!should_assert_autoparam_reuse(&[0], &[1]));
+    }
+
     #[test]
     fn classify_autoparameterization_rejects_false_positive_from_query_id() {
         let sentinels = vec![
@@ -2820,7 +3226,7 @@ mod tests {
 
     #[test]
     fn classify_error_mysql_io_is_fatal_not_generator_bug() {
-        // Connection drop → Fatal; not skippable, not a generator bug.
+        // Connection drop: Fatal; not skippable, not a generator bug.
         let io_err = mysql_async::Error::Io(mysql_async::IoError::Io(std::io::Error::other("eof")));
         let err = anyhow::Error::from(database_utils::DatabaseError::MySQL(io_err));
         assert_eq!(classify_error(&err), ErrorClass::Fatal);
@@ -3176,6 +3582,7 @@ mod tests {
             "single_parameter",
             "SELECT * FROM t WHERE c = ?",
             &[Value::Integer(99)],
+            None,
         );
         let body: String = log.recent.iter().cloned().collect::<Vec<_>>().join("\n");
         // Inlined form must be present so the script is replayable as-is.
@@ -3229,7 +3636,7 @@ mod tests {
             ReproLog::with_writer(path.clone(), Dialect::MySQL, "7".to_string()).expect("open");
         log.record_ddl(0, "CREATE TABLE t (a INT)");
         log.record_ddl(0, "INSERT INTO t (a) VALUES (1)");
-        log.record_select(1, "single_table", "SELECT a FROM t", &[]);
+        log.record_select(1, "single_table", "SELECT a FROM t", &[], None);
 
         let written = log.finish().expect("flush succeeds");
         let (out_path, n) = written.expect("path returned");
@@ -3267,5 +3674,252 @@ mod tests {
         assert!(body.contains("STMT 6"), "expected STMT 6: {body}");
         assert!(!body.contains("STMT 0"), "STMT 0 must be evicted: {body}");
         assert!(!body.contains("STMT 5"), "STMT 5 must be evicted: {body}");
+    }
+
+    fn test_int_int_schema() -> TableSchema {
+        let mut schema = TableSchema::new(SqlIdentifier::from("t"));
+        schema.add_column(
+            SqlIdentifier::from("c1"),
+            dante::state::ColumnMeta {
+                sql_type: readyset_sql::ast::SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Random,
+            },
+        );
+        schema.add_column(
+            SqlIdentifier::from("c2"),
+            dante::state::ColumnMeta {
+                sql_type: readyset_sql::ast::SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Random,
+            },
+        );
+        schema
+    }
+
+    fn test_rng() -> impl rand::Rng {
+        SmallRng::seed_from_u64(0xDEAD)
+    }
+
+    #[test]
+    fn generate_rows_emits_one_row_per_example_first() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ResolvedExample, RowOverride};
+
+        let schema = test_int_int_schema();
+        let mut rng = test_rng();
+        let example = ResolvedExample {
+            note: "bait",
+            dialect: dante::constraint::DialectSupport::Both,
+            row_overrides: vec![
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c1"),
+                    value: ExampleValue::Literal("8"),
+                },
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c2"),
+                    value: ExampleValue::Literal("3"),
+                },
+            ],
+            param_overrides: vec![],
+        };
+        let rows = generate_rows(&schema, 3, &[&example], &mut rng);
+        assert_eq!(rows.len(), 4, "1 example + 3 random fill");
+        // Row 0 must carry the example literals.
+        assert_eq!(rows[0][0].to_string(), "8");
+        assert_eq!(rows[0][1].to_string(), "3");
+    }
+
+    #[test]
+    fn generate_rows_random_fill_avoids_example_literal_on_unique_column() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ResolvedExample, RowOverride};
+
+        let mut schema = test_int_int_schema();
+        // Force c1 to UniqueFrom(0) so generated values are 0, 1, 2, ...
+        schema
+            .columns
+            .get_mut(&SqlIdentifier::from("c1"))
+            .expect("c1 exists")
+            .gen_spec = ColumnGenerationSpec::UniqueFrom(0);
+        let mut rng = test_rng();
+        let example = ResolvedExample {
+            note: "bait",
+            dialect: dante::constraint::DialectSupport::Both,
+            row_overrides: vec![RowOverride {
+                table: SqlIdentifier::from("t"),
+                column: SqlIdentifier::from("c1"),
+                value: ExampleValue::Literal("0"),
+            }],
+            param_overrides: vec![],
+        };
+        let rows = generate_rows(&schema, 5, &[&example], &mut rng);
+        assert_eq!(rows[0][0].to_string(), "0");
+        // Random fill must not collide with the example literal.
+        for row in &rows[1..] {
+            assert_ne!(
+                row[0].to_string(),
+                "0",
+                "random fill collided with example literal"
+            );
+        }
+    }
+
+    #[test]
+    fn materialize_params_uses_example_literal_when_present() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ParamMeta, ParamOverride};
+        use data_generator::ColumnGenerationSpec;
+        use readyset_sql::ast::SqlType;
+
+        let params = vec![ParamMeta {
+            sql_type: SqlType::Int(None),
+            gen_spec: ColumnGenerationSpec::Random,
+            count: 1,
+        }];
+        let overrides = vec![ParamOverride {
+            placeholder_index: 0,
+            value: ExampleValue::Literal("42"),
+        }];
+        let mut rng = test_rng();
+
+        let values = materialize_params_with_overrides(&params, &overrides, &mut rng);
+        assert_eq!(values.len(), 1);
+        assert_eq!(values[0].to_string(), "42");
+    }
+
+    // --- build_select_probes tests ---
+
+    #[test]
+    fn select_probes_no_examples_yields_one_random_probe() {
+        use data_generator::ColumnGenerationSpec;
+        use readyset_sql::ast::SqlType;
+
+        let params = vec![ParamMeta {
+            sql_type: SqlType::Int(None),
+            gen_spec: ColumnGenerationSpec::Random,
+            count: 1,
+        }];
+        let mut rng = test_rng();
+        let probes = build_select_probes(&params, &[], "SELECT 1", &mut rng);
+        assert_eq!(probes.len(), 1, "one random probe when no examples");
+        assert!(probes[0].example_note.is_none(), "random probe has no note");
+    }
+
+    #[test]
+    fn select_probes_one_example_yields_two_probes() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ParamMeta, ParamOverride, ResolvedExample};
+        use data_generator::ColumnGenerationSpec;
+        use readyset_sql::ast::SqlType;
+
+        let params = vec![ParamMeta {
+            sql_type: SqlType::Int(None),
+            gen_spec: ColumnGenerationSpec::Random,
+            count: 1,
+        }];
+        let example = ResolvedExample {
+            note: "div by zero bait",
+            dialect: dante::constraint::DialectSupport::Both,
+            row_overrides: vec![],
+            param_overrides: vec![ParamOverride {
+                placeholder_index: 0,
+                value: ExampleValue::Literal("0"),
+            }],
+        };
+        let examples = [example];
+        let mut rng = test_rng();
+        let probes = build_select_probes(&params, &examples, "SELECT 1", &mut rng);
+        assert_eq!(
+            probes.len(),
+            2,
+            "one random + one example probe (got {probes:?})"
+        );
+        assert!(probes[0].example_note.is_none(), "first probe is random");
+        assert_eq!(
+            probes[1].example_note,
+            Some("div by zero bait"),
+            "second probe carries note"
+        );
+        // Example probe must have the pinned value.
+        assert_eq!(probes[1].params[0].to_string(), "0");
+    }
+
+    #[test]
+    fn select_probes_two_examples_yields_three_probes() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ParamMeta, ParamOverride, ResolvedExample};
+        use data_generator::ColumnGenerationSpec;
+        use readyset_sql::ast::SqlType;
+
+        let params = vec![ParamMeta {
+            sql_type: SqlType::Int(None),
+            gen_spec: ColumnGenerationSpec::Random,
+            count: 1,
+        }];
+        let examples = vec![
+            ResolvedExample {
+                note: "bait A",
+                dialect: dante::constraint::DialectSupport::Both,
+                row_overrides: vec![],
+                param_overrides: vec![ParamOverride {
+                    placeholder_index: 0,
+                    value: ExampleValue::Literal("1"),
+                }],
+            },
+            ResolvedExample {
+                note: "bait B",
+                dialect: dante::constraint::DialectSupport::Both,
+                row_overrides: vec![],
+                param_overrides: vec![ParamOverride {
+                    placeholder_index: 0,
+                    value: ExampleValue::Literal("2"),
+                }],
+            },
+        ];
+        let mut rng = test_rng();
+        let probes = build_select_probes(&params, &examples, "SELECT 1", &mut rng);
+        assert_eq!(probes.len(), 3, "one random + two example probes");
+        assert!(probes[0].example_note.is_none());
+        assert_eq!(probes[1].example_note, Some("bait A"));
+        assert_eq!(probes[2].example_note, Some("bait B"));
+    }
+
+    #[test]
+    fn repro_record_select_includes_example_note_and_overrides() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ParamOverride, RowOverride};
+        use readyset_sql::ast::SqlIdentifier;
+
+        let mut log = ReproLog::new(Dialect::MySQL, "0".to_string());
+        let row_overrides = vec![RowOverride {
+            table: SqlIdentifier::from("t"),
+            column: SqlIdentifier::from("c1"),
+            value: ExampleValue::Literal("8"),
+        }];
+        let param_overrides = vec![ParamOverride {
+            placeholder_index: 0,
+            value: ExampleValue::Literal("2"),
+        }];
+        log.record_select(
+            0,
+            "int_div",
+            "SELECT c1 / ? FROM t",
+            &[Value::Integer(2)],
+            Some(("int/int divide bait", &row_overrides, &param_overrides)),
+        );
+        let body: String = log.recent.iter().cloned().collect::<Vec<_>>().join("\n");
+        assert!(
+            body.contains("-- example: int/int divide bait"),
+            "expected example note comment: {body}"
+        );
+        assert!(
+            body.contains("--   row override: t.c1"),
+            "expected row override comment: {body}"
+        );
+        assert!(
+            body.contains("--   param override: $1"),
+            "expected param override comment: {body}"
+        );
     }
 }

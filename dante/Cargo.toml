@@ -16,6 +16,8 @@ readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }
 
 [dev-dependencies]
+proptest = { workspace = true }
+rand = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 
 [lints]

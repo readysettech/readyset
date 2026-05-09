@@ -1288,6 +1288,7 @@ dependencies = [
  "antithesis_sdk",
  "data-generator",
  "indexmap 2.14.0",
+ "proptest",
  "rand 0.10.1",
  "readyset-data",
  "readyset-sql",

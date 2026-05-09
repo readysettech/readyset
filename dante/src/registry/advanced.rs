@@ -24,6 +24,110 @@ pub fn window_function() -> Pattern {
     b.build()
 }
 
+/// SELECT t.c0, RANK() OVER (PARTITION BY t.c1 ORDER BY t.c2 ASC) FROM t
+pub fn window_rank() -> Pattern {
+    let mut b = PatternBuilder::new("window_rank");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_partition = b.column(t);
+    let c_order = b.column(t);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.window_function(
+        WindowFn::Rank,
+        Some((c_partition, t)),
+        Some((c_order, t)),
+        Some(OrderType::OrderAscending),
+    );
+    b.tags(&["advanced", "window"]);
+    b.build()
+}
+
+/// SELECT t.c0, DENSE_RANK() OVER (PARTITION BY t.c1 ORDER BY t.c2 ASC) FROM t
+pub fn window_dense_rank() -> Pattern {
+    let mut b = PatternBuilder::new("window_dense_rank");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_partition = b.column(t);
+    let c_order = b.column(t);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.window_function(
+        WindowFn::DenseRank,
+        Some((c_partition, t)),
+        Some((c_order, t)),
+        Some(OrderType::OrderAscending),
+    );
+    b.tags(&["advanced", "window"]);
+    b.build()
+}
+
+/// SELECT t.c0, ROW_NUMBER() OVER (PARTITION BY t.c1 ORDER BY t.c2 ASC) FROM t
+/// WHERE t.c3 IN (?, ?, ?) — drives the post-lookup `RowNumber` aggregator.
+pub fn window_row_number_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("window_row_number_in_list");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_partition = b.column(t);
+    let c_order = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.window_function(
+        WindowFn::RowNumber,
+        Some((c_partition, t)),
+        Some((c_order, t)),
+        Some(OrderType::OrderAscending),
+    );
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["advanced", "window", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT t.c0, RANK() OVER (PARTITION BY t.c1 ORDER BY t.c2 ASC) FROM t
+/// WHERE t.c3 IN (?, ?, ?) — drives the post-lookup `Rank` aggregator.
+pub fn window_rank_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("window_rank_in_list");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_partition = b.column(t);
+    let c_order = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.window_function(
+        WindowFn::Rank,
+        Some((c_partition, t)),
+        Some((c_order, t)),
+        Some(OrderType::OrderAscending),
+    );
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["advanced", "window", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT t.c0, DENSE_RANK() OVER (PARTITION BY t.c1 ORDER BY t.c2 ASC) FROM t
+/// WHERE t.c3 IN (?, ?, ?) — drives the post-lookup `DenseRank` aggregator.
+pub fn window_dense_rank_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("window_dense_rank_in_list");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_partition = b.column(t);
+    let c_order = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.window_function(
+        WindowFn::DenseRank,
+        Some((c_partition, t)),
+        Some((c_order, t)),
+        Some(OrderType::OrderAscending),
+    );
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["advanced", "window", "post_lookup"]);
+    b.build()
+}
+
 /// SELECT DISTINCT t.c0 FROM t
 pub fn distinct() -> Pattern {
     let mut b = PatternBuilder::new("distinct");

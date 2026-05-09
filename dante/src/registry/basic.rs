@@ -61,7 +61,7 @@ mod tests {
         assert_eq!(p.name, "single_parameter");
         assert_eq!(p.tags, vec!["filter", "parameter"]);
         assert_eq!(p.min_depth, 0);
-        assert_eq!(p.num_vars(), 3); // table + 2 columns
+        assert_eq!(p.num_vars(), 4); // table + 2 columns + 1 param
     }
 
     #[test]

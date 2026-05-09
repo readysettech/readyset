@@ -23,12 +23,72 @@ pub enum TypeClass {
     Integer,
     /// Numeric types (INTEGER, DECIMAL, FLOAT, DOUBLE, etc.)
     Numeric,
+    /// Non-integer numeric types (FLOAT, DOUBLE, DECIMAL, NUMERIC).
+    /// Use this instead of `Numeric` when integer operands are invalid
+    /// for the operation (e.g., ROUND(col, n) in PostgreSQL only accepts
+    /// `numeric`, not `integer`).
+    Decimal,
+    /// Exact fixed-point numeric types ONLY (DECIMAL, NUMERIC) — excludes the
+    /// approximate types FLOAT/DOUBLE/REAL. Use when the operation is defined
+    /// only for `numeric`: PostgreSQL's two-arg `round(x, scale)` rejects
+    /// `round(double precision, integer)` / `round(real, integer)` (42883).
+    FixedPoint,
     /// String types (VARCHAR, TEXT, CHAR, etc.)
     String,
     /// Date/time types (DATE, DATETIME, TIMESTAMP, TIME)
     DateTime,
     /// Exact SQL type
     Exact(SqlType),
+}
+
+impl TypeClass {
+    /// Returns true if this type class accepts the given SQL type.
+    pub fn matches(&self, sql_type: &SqlType) -> bool {
+        match self {
+            TypeClass::Any => true,
+            TypeClass::Integer => matches!(
+                sql_type,
+                SqlType::Int(_)
+                    | SqlType::BigInt(_)
+                    | SqlType::SmallInt(_)
+                    | SqlType::TinyInt(_)
+                    | SqlType::MediumInt(_)
+            ),
+            TypeClass::Numeric => matches!(
+                sql_type,
+                SqlType::Int(_)
+                    | SqlType::BigInt(_)
+                    | SqlType::SmallInt(_)
+                    | SqlType::TinyInt(_)
+                    | SqlType::MediumInt(_)
+                    | SqlType::Float
+                    | SqlType::Double
+                    | SqlType::Real
+                    | SqlType::Decimal(_, _)
+                    | SqlType::Numeric(_)
+            ),
+            TypeClass::Decimal => matches!(
+                sql_type,
+                SqlType::Float
+                    | SqlType::Double
+                    | SqlType::Real
+                    | SqlType::Decimal(_, _)
+                    | SqlType::Numeric(_)
+            ),
+            TypeClass::FixedPoint => {
+                matches!(sql_type, SqlType::Decimal(_, _) | SqlType::Numeric(_))
+            }
+            TypeClass::String => matches!(
+                sql_type,
+                SqlType::VarChar(_) | SqlType::Char(_) | SqlType::Text | SqlType::TinyText
+            ),
+            TypeClass::DateTime => matches!(
+                sql_type,
+                SqlType::DateTime(_) | SqlType::Timestamp | SqlType::Date | SqlType::Time
+            ),
+            TypeClass::Exact(exact) => sql_type == exact,
+        }
+    }
 }
 
 /// Aggregate function specifier for `ProjectAggregate` and `Having` constraints.
@@ -103,7 +163,7 @@ pub enum SubqueryExprKind {
 /// What kind of relation-position subquery this is.
 ///
 /// Relation-position subqueries produce an outer relation that other
-/// constraints can reference by alias VarId — the resolver `env.bind`s the
+/// constraints can reference by alias VarId -- the resolver `env.bind`s the
 /// alias to a fresh SQL identifier (`cteN`, `sqN`, ...) so outer
 /// `From(alias)` / `ProjectColumn { table: alias, .. }` references resolve
 /// through env uniformly.
@@ -119,7 +179,7 @@ pub enum SubqueryRelationKind {
     FromSubquery,
 }
 
-/// What the right side of a JOIN is. Always a relation var — base table,
+/// What the right side of a JOIN is. Always a relation var -- base table,
 /// CTE alias, FROM-subquery alias, or `JoinTarget` SubqueryRelation alias.
 /// JOIN-subqueries and CTE joins are emitted as a sibling
 /// `Constraint::SubqueryRelation` whose alias var goes here.
@@ -150,12 +210,39 @@ impl DialectSupport {
     }
 }
 
+/// One cell of a [`Constraint::Example`]: pins a `VarId` to a literal SQL
+/// value or overrides its `ColumnGenerationSpec` for one example run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExampleCell {
+    /// A `VarId` whose `VarKind` is `Column { .. }` (-> row override) or
+    /// `Param { .. }` (-> param override). Any other kind is a
+    /// registration-time error.
+    pub var: VarId,
+    pub value: ExampleValue,
+}
+
+/// Value carried by an [`ExampleCell`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExampleValue {
+    /// SQL literal as it would appear in INSERT or as a bound parameter.
+    /// Dialect-shaped by the author (e.g., `'2025-01-01'` for MySQL vs
+    /// `DATE '2025-01-01'` for PG).
+    Literal(&'static str),
+    /// Override the var's normal `ColumnGenerationSpec` for this example's run.
+    ///
+    /// For `Column` vars: overrides the column's gen_spec for this
+    /// example's INSERTed row.
+    /// For `Param` vars: overrides the param's gen_spec for this example's
+    /// SELECT execution.
+    GenSpec(data_generator::ColumnGenerationSpec),
+}
+
 /// A single declarative assertion about the query being generated.
 ///
 /// Constraints are the primitive building blocks that patterns are composed
 /// from. The resolver processes a set of constraints to produce variable
 /// bindings and ultimately an AST.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constraint {
     // --- Schema-level ---
     /// Variable R must resolve to a relation (base table, alias, or derived).
@@ -200,6 +287,43 @@ pub enum Constraint {
         function: ScalarFn,
         args: Vec<(VarId, VarId)>,
     },
+    /// A binary-operator expression over two columns appears in the SELECT list.
+    /// Renders as `<left_table>.<left_col> <op> <right_table>.<right_col>`.
+    /// Used by `registry::expressions` patterns to exercise the dataflow
+    /// expression layer's coercion / arithmetic / comparison paths.
+    ProjectBinaryOp {
+        left_col: VarId,
+        left_table: VarId,
+        op: BinaryOperator,
+        right_col: VarId,
+        right_table: VarId,
+    },
+    /// `CAST(<table>.<col> AS <target_ty>)` in the SELECT list. Used by
+    /// `registry::expressions` cast patterns to exercise runtime coercion
+    /// (e.g. `Decimal(p1, s1) -> Decimal(p2, s2)`, `Int -> Numeric`).
+    ProjectCast {
+        col: VarId,
+        table: VarId,
+        target_ty: SqlType,
+    },
+    /// `WHERE <lookup_col> <cmp> (<left_col> <op> <right_col>)` --
+    /// comparison whose RHS is a binary-op expression. Surfaces the
+    /// lookup-key coercion bug class: RS evaluates the RHS expression
+    /// through the buggy `arithmetic_operation!` arm and then coerces the
+    /// result for comparison against `lookup_col`. The original motivating
+    /// case is `WHERE x = r / 3` where `x: DECIMAL` and `r: INT`; RS's
+    /// integer-divide produces `Int(2)`, coerces to `Numeric(2.0000)` at
+    /// lookup time, and matches the wrong row.
+    WhereLookupBinaryOp {
+        lookup_col: VarId,
+        lookup_table: VarId,
+        cmp: BinaryOperator,
+        left_col: VarId,
+        left_table: VarId,
+        op: BinaryOperator,
+        right_col: VarId,
+        right_table: VarId,
+    },
     /// A literal value appears in the SELECT list.
     ProjectLiteral { literal: LiteralKind },
     /// Column C is in the GROUP BY clause.
@@ -210,6 +334,8 @@ pub enum Constraint {
         col: VarId,
         table: VarId,
         op: BinaryOperator,
+        /// `VarKind::Param { col }` for the HAVING RHS placeholder.
+        param: VarId,
     },
     /// A parametrizable filter in HAVING on a GROUP BY key column.
     /// Unlike `Having` (which wraps an aggregate function), this emits
@@ -219,26 +345,43 @@ pub enum Constraint {
         col: VarId,
         table: VarId,
         op: BinaryOperator,
+        /// `VarKind::Param { col }` for the HAVING-on-GROUP-BY-key RHS.
+        param: VarId,
     },
     /// A WHERE filter with a parameter placeholder.
     WhereParam {
         col: VarId,
         table: VarId,
         op: BinaryOperator,
+        /// `VarKind::Param { col }` var that names this placeholder so
+        /// `Constraint::Example` cells can override it.
+        param: VarId,
     },
     /// An IN-list parameter filter.
     WhereInParam {
         col: VarId,
         table: VarId,
         num_values: u8,
+        /// One `VarKind::Param { col }` per placeholder slot. `params.len()`
+        /// must equal `num_values`.
+        params: Vec<VarId>,
     },
     /// A range parameter (col >= ? AND col <= ?).
-    WhereRangeParam { col: VarId, table: VarId },
+    WhereRangeParam {
+        col: VarId,
+        table: VarId,
+        /// `VarKind::Param { col }` for `col >= ?`.
+        lo: VarId,
+        /// `VarKind::Param { col }` for `col <= ?`.
+        hi: VarId,
+    },
     /// A LIKE/NOT LIKE filter.
     WhereLike {
         col: VarId,
         table: VarId,
         negated: bool,
+        /// `VarKind::Param { col }` for the LIKE pattern placeholder.
+        param: VarId,
     },
     /// An IS NULL / IS NOT NULL filter.
     WhereIsNull {
@@ -247,7 +390,14 @@ pub enum Constraint {
         negated: bool,
     },
     /// A BETWEEN filter with parameter placeholders.
-    WhereBetweenParam { col: VarId, table: VarId },
+    WhereBetweenParam {
+        col: VarId,
+        table: VarId,
+        /// `VarKind::Param { col }` for the BETWEEN lower bound.
+        lo: VarId,
+        /// `VarKind::Param { col }` for the BETWEEN upper bound.
+        hi: VarId,
+    },
     /// A column-vs-column comparison.
     WhereColumnCompare {
         left_col: VarId,
@@ -279,7 +429,7 @@ pub enum Constraint {
         constraints: Vec<Constraint>,
         shared_vars: Vec<VarId>,
     },
-    /// A relation-position subquery — the subquery produces an outer
+    /// A relation-position subquery -- the subquery produces an outer
     /// relation that other constraints reference by `alias`. The
     /// resolver binds `alias` to a fresh SQL identifier (`cteN`, etc.)
     /// so outer `From(alias)` / `ProjectColumn { table: alias, .. }`
@@ -318,6 +468,20 @@ pub enum Constraint {
         order_col: Option<(VarId, VarId)>,
         order_type: Option<OrderType>,
     },
+
+    /// Concrete (row + parameter) probe authored alongside a pattern's shape.
+    /// Examples don't influence the generated SQL -- they ride through the
+    /// resolver and are materialized into `ResolvedExample` overrides for the
+    /// oracle to insert + execute.
+    Example {
+        /// Human-readable note describing the bug shape this example surfaces.
+        note: &'static str,
+        /// Dialects this example applies to. Examples whose `dialect` excludes
+        /// the running dialect are dropped at `QueryOutput::from_resolver`.
+        dialect: DialectSupport,
+        /// Per-var bindings for this example.
+        cells: Vec<ExampleCell>,
+    },
 }
 
 impl Constraint {
@@ -340,18 +504,60 @@ impl Constraint {
             } => vec![*left_col, *right_col, *t],
             Constraint::ProjectColumn { col, table }
             | Constraint::GroupBy { col, table }
-            | Constraint::WhereRangeParam { col, table }
-            | Constraint::WhereBetweenParam { col, table } => vec![*col, *table],
-            Constraint::ProjectAggregate { col, table, .. }
-            | Constraint::Having { col, table, .. }
-            | Constraint::HavingKeyFilter { col, table, .. }
-            | Constraint::WhereParam { col, table, .. }
-            | Constraint::WhereInParam { col, table, .. }
-            | Constraint::WhereLike { col, table, .. }
             | Constraint::WhereIsNull { col, table, .. } => vec![*col, *table],
+            Constraint::ProjectAggregate { col, table, .. } => vec![*col, *table],
+            Constraint::WhereInParam {
+                col, table, params, ..
+            } => {
+                let mut ids = vec![*col, *table];
+                ids.extend(params.iter().copied());
+                ids
+            }
+            Constraint::WhereRangeParam { col, table, lo, hi }
+            | Constraint::WhereBetweenParam { col, table, lo, hi } => {
+                vec![*col, *table, *lo, *hi]
+            }
+            Constraint::WhereLike {
+                col, table, param, ..
+            } => vec![*col, *table, *param],
+            Constraint::Having {
+                col, table, param, ..
+            }
+            | Constraint::HavingKeyFilter {
+                col, table, param, ..
+            } => {
+                vec![*col, *table, *param]
+            }
+            Constraint::WhereParam {
+                col, table, param, ..
+            } => vec![*col, *table, *param],
             Constraint::ProjectFunction { args, .. } => {
                 args.iter().flat_map(|(c, t)| [*c, *t]).collect()
             }
+            Constraint::ProjectBinaryOp {
+                left_col,
+                left_table,
+                right_col,
+                right_table,
+                ..
+            } => vec![*left_col, *left_table, *right_col, *right_table],
+            Constraint::ProjectCast { col, table, .. } => vec![*col, *table],
+            Constraint::WhereLookupBinaryOp {
+                lookup_col,
+                lookup_table,
+                left_col,
+                left_table,
+                right_col,
+                right_table,
+                ..
+            } => vec![
+                *lookup_col,
+                *lookup_table,
+                *left_col,
+                *left_table,
+                *right_col,
+                *right_table,
+            ],
             Constraint::ProjectLiteral { .. } | Constraint::Limit { .. } | Constraint::Distinct => {
                 vec![]
             }
@@ -390,6 +596,7 @@ impl Constraint {
                 }
                 ids
             }
+            Constraint::Example { cells, .. } => cells.iter().map(|c| c.var).collect(),
         }
     }
 
@@ -442,6 +649,47 @@ impl Constraint {
                 function: function.clone(),
                 args: args.iter().map(|(c, t)| (f(*c), f(*t))).collect(),
             },
+            Constraint::ProjectBinaryOp {
+                left_col,
+                left_table,
+                op,
+                right_col,
+                right_table,
+            } => Constraint::ProjectBinaryOp {
+                left_col: f(*left_col),
+                left_table: f(*left_table),
+                op: *op,
+                right_col: f(*right_col),
+                right_table: f(*right_table),
+            },
+            Constraint::ProjectCast {
+                col,
+                table,
+                target_ty,
+            } => Constraint::ProjectCast {
+                col: f(*col),
+                table: f(*table),
+                target_ty: target_ty.clone(),
+            },
+            Constraint::WhereLookupBinaryOp {
+                lookup_col,
+                lookup_table,
+                cmp,
+                left_col,
+                left_table,
+                op,
+                right_col,
+                right_table,
+            } => Constraint::WhereLookupBinaryOp {
+                lookup_col: f(*lookup_col),
+                lookup_table: f(*lookup_table),
+                cmp: *cmp,
+                left_col: f(*left_col),
+                left_table: f(*left_table),
+                op: *op,
+                right_col: f(*right_col),
+                right_table: f(*right_table),
+            },
             Constraint::ProjectLiteral { literal } => Constraint::ProjectLiteral {
                 literal: literal.clone(),
             },
@@ -454,43 +702,63 @@ impl Constraint {
                 col,
                 table,
                 op,
+                param,
             } => Constraint::Having {
                 function: function.clone(),
                 col: f(*col),
                 table: f(*table),
                 op: *op,
+                param: f(*param),
             },
-            Constraint::HavingKeyFilter { col, table, op } => Constraint::HavingKeyFilter {
+            Constraint::HavingKeyFilter {
+                col,
+                table,
+                op,
+                param,
+            } => Constraint::HavingKeyFilter {
                 col: f(*col),
                 table: f(*table),
                 op: *op,
+                param: f(*param),
             },
-            Constraint::WhereParam { col, table, op } => Constraint::WhereParam {
+            Constraint::WhereParam {
+                col,
+                table,
+                op,
+                param,
+            } => Constraint::WhereParam {
                 col: f(*col),
                 table: f(*table),
                 op: *op,
+                param: f(*param),
             },
             Constraint::WhereInParam {
                 col,
                 table,
                 num_values,
+                params,
             } => Constraint::WhereInParam {
                 col: f(*col),
                 table: f(*table),
                 num_values: *num_values,
+                params: params.iter().copied().map(&f).collect(),
             },
-            Constraint::WhereRangeParam { col, table } => Constraint::WhereRangeParam {
+            Constraint::WhereRangeParam { col, table, lo, hi } => Constraint::WhereRangeParam {
                 col: f(*col),
                 table: f(*table),
+                lo: f(*lo),
+                hi: f(*hi),
             },
             Constraint::WhereLike {
                 col,
                 table,
                 negated,
+                param,
             } => Constraint::WhereLike {
                 col: f(*col),
                 table: f(*table),
                 negated: *negated,
+                param: f(*param),
             },
             Constraint::WhereIsNull {
                 col,
@@ -501,9 +769,11 @@ impl Constraint {
                 table: f(*table),
                 negated: *negated,
             },
-            Constraint::WhereBetweenParam { col, table } => Constraint::WhereBetweenParam {
+            Constraint::WhereBetweenParam { col, table, lo, hi } => Constraint::WhereBetweenParam {
                 col: f(*col),
                 table: f(*table),
+                lo: f(*lo),
+                hi: f(*hi),
             },
             Constraint::WhereColumnCompare {
                 left_col,
@@ -579,6 +849,21 @@ impl Constraint {
                 order_col: order_col.map(|(c, t)| (f(c), f(t))),
                 order_type: *order_type,
             },
+            Constraint::Example {
+                note,
+                dialect,
+                cells,
+            } => Constraint::Example {
+                note,
+                dialect: *dialect,
+                cells: cells
+                    .iter()
+                    .map(|c| ExampleCell {
+                        var: f(c.var),
+                        value: c.value.clone(),
+                    })
+                    .collect(),
+            },
         }
     }
 }
@@ -586,6 +871,47 @@ impl Constraint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::var::VarId;
+    use readyset_sql::ast::BinaryOperator;
+
+    #[test]
+    fn where_param_map_var_ids_shifts_param() {
+        let c = Constraint::WhereParam {
+            col: VarId(1),
+            table: VarId(0),
+            op: BinaryOperator::Equal,
+            param: VarId(2),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 10));
+        match shifted {
+            Constraint::WhereParam {
+                col,
+                table,
+                op: _,
+                param,
+            } => {
+                assert_eq!(col, VarId(11));
+                assert_eq!(table, VarId(10));
+                assert_eq!(param, VarId(12));
+            }
+            other => panic!("expected WhereParam, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn where_param_var_ids_includes_param() {
+        let c = Constraint::WhereParam {
+            col: VarId(1),
+            table: VarId(0),
+            op: BinaryOperator::Equal,
+            param: VarId(2),
+        };
+        let ids = c.var_ids();
+        assert!(
+            ids.contains(&VarId(2)),
+            "var_ids should include param: {ids:?}"
+        );
+    }
 
     #[test]
     fn constraint_schema_variants() {
@@ -629,11 +955,13 @@ mod tests {
             col: c,
             table: t,
             op: BinaryOperator::Greater,
+            param: VarId(2),
         };
         let _ = Constraint::HavingKeyFilter {
             col: c,
             table: t,
             op: BinaryOperator::Equal,
+            param: VarId(2),
         };
     }
 
@@ -647,24 +975,37 @@ mod tests {
             col: c,
             table: t,
             op: BinaryOperator::Equal,
+            param: VarId(3),
         };
         let _ = Constraint::WhereInParam {
             col: c,
             table: t,
             num_values: 3,
+            params: vec![VarId(3), VarId(4), VarId(5)],
         };
-        let _ = Constraint::WhereRangeParam { col: c, table: t };
+        let _ = Constraint::WhereRangeParam {
+            col: c,
+            table: t,
+            lo: VarId(3),
+            hi: VarId(4),
+        };
         let _ = Constraint::WhereLike {
             col: c,
             table: t,
             negated: false,
+            param: VarId(3),
         };
         let _ = Constraint::WhereIsNull {
             col: c,
             table: t,
             negated: true,
         };
-        let _ = Constraint::WhereBetweenParam { col: c, table: t };
+        let _ = Constraint::WhereBetweenParam {
+            col: c,
+            table: t,
+            lo: VarId(3),
+            hi: VarId(4),
+        };
         let _ = Constraint::WhereColumnCompare {
             left_col: c,
             left_table: t,
@@ -677,6 +1018,7 @@ mod tests {
                 col: c,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: VarId(3),
             }],
         };
     }
@@ -788,11 +1130,111 @@ mod tests {
             col: VarId(1),
             table: VarId(0),
             op: BinaryOperator::Equal,
+            param: VarId(2),
         };
         let debug = format!("{c:?}");
         assert!(debug.contains("WhereParam"));
         assert!(debug.contains("VarId(1)"));
         assert!(debug.contains("Equal"));
+    }
+
+    #[test]
+    fn where_in_param_map_var_ids_shifts_params() {
+        let c = Constraint::WhereInParam {
+            col: VarId(1),
+            table: VarId(0),
+            num_values: 2,
+            params: vec![VarId(2), VarId(3)],
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 5));
+        match shifted {
+            Constraint::WhereInParam { params, .. } => {
+                assert_eq!(params, vec![VarId(7), VarId(8)]);
+            }
+            other => panic!("expected WhereInParam, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn where_range_param_map_var_ids_shifts_lo_hi() {
+        let c = Constraint::WhereRangeParam {
+            col: VarId(1),
+            table: VarId(0),
+            lo: VarId(2),
+            hi: VarId(3),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 4));
+        match shifted {
+            Constraint::WhereRangeParam { lo, hi, .. } => {
+                assert_eq!(lo, VarId(6));
+                assert_eq!(hi, VarId(7));
+            }
+            other => panic!("expected WhereRangeParam, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn where_between_param_map_var_ids_shifts_lo_hi() {
+        let c = Constraint::WhereBetweenParam {
+            col: VarId(1),
+            table: VarId(0),
+            lo: VarId(2),
+            hi: VarId(3),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 4));
+        match shifted {
+            Constraint::WhereBetweenParam { lo, hi, .. } => {
+                assert_eq!(lo, VarId(6));
+                assert_eq!(hi, VarId(7));
+            }
+            other => panic!("expected WhereBetweenParam, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn where_like_map_var_ids_shifts_param() {
+        let c = Constraint::WhereLike {
+            col: VarId(1),
+            table: VarId(0),
+            negated: false,
+            param: VarId(2),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 3));
+        match shifted {
+            Constraint::WhereLike { param, .. } => assert_eq!(param, VarId(5)),
+            other => panic!("expected WhereLike, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn having_map_var_ids_shifts_param() {
+        let c = Constraint::Having {
+            function: AggregateFn::Count { distinct: false },
+            col: VarId(1),
+            table: VarId(0),
+            op: BinaryOperator::Equal,
+            param: VarId(2),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 3));
+        match shifted {
+            Constraint::Having { param, .. } => assert_eq!(param, VarId(5)),
+            other => panic!("expected Having, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn having_key_filter_map_var_ids_shifts_param() {
+        let c = Constraint::HavingKeyFilter {
+            col: VarId(1),
+            table: VarId(0),
+            op: BinaryOperator::Equal,
+            param: VarId(2),
+        };
+        let shifted = c.map_var_ids(&|v| VarId(v.0 + 3));
+        match shifted {
+            Constraint::HavingKeyFilter { param, .. } => assert_eq!(param, VarId(5)),
+            other => panic!("expected HavingKeyFilter, got {other:?}"),
+        }
     }
 
     #[test]
@@ -804,5 +1246,51 @@ mod tests {
             TypeClass::Exact(SqlType::Int(None)),
             TypeClass::Exact(SqlType::Int(None))
         );
+    }
+
+    #[test]
+    fn example_map_var_ids_shifts_cells() {
+        let ex = Constraint::Example {
+            note: "test",
+            dialect: DialectSupport::Both,
+            cells: vec![
+                ExampleCell {
+                    var: VarId(1),
+                    value: ExampleValue::Literal("8"),
+                },
+                ExampleCell {
+                    var: VarId(2),
+                    value: ExampleValue::Literal("3"),
+                },
+            ],
+        };
+        let shifted = ex.map_var_ids(&|v| VarId(v.0 + 10));
+        match shifted {
+            Constraint::Example { cells, .. } => {
+                assert_eq!(cells[0].var, VarId(11));
+                assert_eq!(cells[1].var, VarId(12));
+            }
+            other => panic!("expected Example, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn example_var_ids_returns_cell_vars() {
+        let ex = Constraint::Example {
+            note: "test",
+            dialect: DialectSupport::MySqlOnly,
+            cells: vec![
+                ExampleCell {
+                    var: VarId(5),
+                    value: ExampleValue::Literal("x"),
+                },
+                ExampleCell {
+                    var: VarId(7),
+                    value: ExampleValue::Literal("y"),
+                },
+            ],
+        };
+        let ids = ex.var_ids();
+        assert_eq!(ids, vec![VarId(5), VarId(7)]);
     }
 }

@@ -13,6 +13,34 @@ use crate::pattern::Pattern;
 use crate::resolver::{self, DdlStep, ResolverOutput};
 use crate::state::{ColumnMeta, GenerationState, GeneratorConfig, TableSchema};
 
+/// Error returned when a malformed pattern is passed to
+/// [`ConstraintRegistry::register`].
+#[derive(Debug, thiserror::Error)]
+pub enum PatternRegistrationError {
+    #[error(
+        "Constraint::Example cell in pattern `{pattern}`: \
+         var {var:?} (cell index {cell_index}) out of range \
+         (pattern has {num_vars} vars)"
+    )]
+    ExampleCellVarOutOfRange {
+        pattern: &'static str,
+        cell_index: usize,
+        var: crate::var::VarId,
+        num_vars: usize,
+    },
+    #[error(
+        "Constraint::Example cell in pattern `{pattern}`: \
+         var {var:?} (cell index {cell_index}) has VarKind::{kind}; \
+         cells must reference VarKind::Column or VarKind::Param"
+    )]
+    ExampleCellWrongVarKind {
+        pattern: &'static str,
+        cell_index: usize,
+        var: crate::var::VarId,
+        kind: &'static str,
+    },
+}
+
 /// Error type for query generation.
 #[derive(Debug, thiserror::Error)]
 pub enum GenerateError {
@@ -39,6 +67,9 @@ pub struct QueryOutput {
     pub params: Vec<resolver::ParamMeta>,
     /// Name of the pattern that generated this query.
     pub pattern_name: String,
+    /// Resolved examples from `Constraint::Example` constraints, filtered
+    /// to the running dialect.
+    pub examples: Vec<resolver::ResolvedExample>,
 }
 
 /// The output of a Mode 2 DDL-only generation.
@@ -51,12 +82,22 @@ pub struct DdlOutput {
 }
 
 impl QueryOutput {
-    fn from_resolver(ro: ResolverOutput, pattern_name: String) -> Self {
+    fn from_resolver(
+        ro: ResolverOutput,
+        pattern_name: String,
+        dialect: readyset_sql::Dialect,
+    ) -> Self {
+        let examples = ro
+            .examples
+            .into_iter()
+            .filter(|ex| ex.dialect.supports(dialect))
+            .collect();
         Self {
             query: ro.query,
             ddl: ro.ddl,
             params: ro.params,
             pattern_name,
+            examples,
         }
     }
 }
@@ -84,8 +125,44 @@ impl ConstraintRegistry {
     }
 
     /// Register a pattern.
-    pub fn register(&mut self, pattern: Pattern) {
+    ///
+    /// Returns `Err` if any `Constraint::Example` cell references a var that
+    /// is out of range or has the wrong `VarKind`.
+    pub fn register(&mut self, pattern: Pattern) -> Result<(), PatternRegistrationError> {
+        Self::validate_examples(&pattern)?;
         self.patterns.push(pattern);
+        Ok(())
+    }
+
+    fn validate_examples(pattern: &Pattern) -> Result<(), PatternRegistrationError> {
+        use crate::constraint::Constraint;
+        use crate::var::VarKind;
+
+        for constraint in &pattern.constraints {
+            let Constraint::Example { cells, .. } = constraint else {
+                continue;
+            };
+            for (cell_index, cell) in cells.iter().enumerate() {
+                if cell.var.0 >= pattern.vars.len() {
+                    return Err(PatternRegistrationError::ExampleCellVarOutOfRange {
+                        pattern: pattern.name,
+                        cell_index,
+                        var: cell.var,
+                        num_vars: pattern.vars.len(),
+                    });
+                }
+                let kind = &pattern.vars[cell.var.0];
+                if !matches!(kind, VarKind::Column { .. } | VarKind::Param { .. }) {
+                    return Err(PatternRegistrationError::ExampleCellWrongVarKind {
+                        pattern: pattern.name,
+                        cell_index,
+                        var: cell.var,
+                        kind: kind.discriminant_name(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Add a compatibility rule.
@@ -184,89 +261,211 @@ impl ConstraintRegistry {
         let mut reg = Self::new();
 
         // Basic patterns
-        reg.register(basic::single_table());
-        reg.register(basic::single_parameter());
-        reg.register(basic::project_literal());
+        reg.register(basic::single_table())
+            .expect("pattern is malformed");
+        reg.register(basic::single_parameter())
+            .expect("pattern is malformed");
+        reg.register(basic::project_literal())
+            .expect("pattern is malformed");
+
+        // Example-pinned bait patterns (exercise the full example pipeline)
+        reg.register(examples::int_int_divide_bait())
+            .expect("pattern is malformed");
 
         // Aggregate patterns
-        reg.register(aggregates::count());
-        reg.register(aggregates::sum());
-        reg.register(aggregates::avg());
-        reg.register(aggregates::min_max());
-        reg.register(aggregates::count_distinct());
-        reg.register(aggregates::aggregate_with_group_by());
-        reg.register(aggregates::having_clause());
-        // group_concat() and array_agg() yield non-deterministic per-group
-        // ordering without an inner `ORDER BY`. AggregateFn doesn't carry an
-        // inner ORDER BY today, so the harness gets false-positive mismatches
-        // on every output. Unregistered until the constraint model gains
-        // `AggregateFn::GroupConcat { order_by: Option<_> }`.
-        reg.register(aggregates::array_agg());
-        reg.register(aggregates::multi_aggregate());
-        reg.register(aggregates::in_list_aggregate());
+        reg.register(aggregates::count())
+            .expect("pattern is malformed");
+        reg.register(aggregates::sum())
+            .expect("pattern is malformed");
+        reg.register(aggregates::avg())
+            .expect("pattern is malformed");
+        reg.register(aggregates::min_max())
+            .expect("pattern is malformed");
+        reg.register(aggregates::count_distinct())
+            .expect("pattern is malformed");
+        reg.register(aggregates::aggregate_with_group_by())
+            .expect("pattern is malformed");
+        reg.register(aggregates::having_clause())
+            .expect("pattern is malformed");
+        // Bare `group_concat()` and bare `array_agg()` yield
+        // non-deterministic per-group ordering without an inner `ORDER BY`,
+        // so they're skipped until `AggregateFn` carries an
+        // `inner_order_by: Option<_>`. The grouped-by-PK variant uses each
+        // row's unique PK as the GROUP BY key, so every group has exactly
+        // one input row and the concat order is trivially fixed — that
+        // pattern still emits `MirNodeInner::Accumulator` so the
+        // Antithesis `Create dataflow node::Accumulator` reachability
+        // assertion fires on MySQL.
+        reg.register(aggregates::array_agg())
+            .expect("pattern is malformed");
+        reg.register(aggregates::group_concat_grouped())
+            .expect("pattern is malformed");
+        reg.register(aggregates::multi_aggregate())
+            .expect("pattern is malformed");
+        reg.register(aggregates::in_list_aggregate())
+            .expect("pattern is malformed");
+        // Max as a bare aggregate and as a post-lookup aggregate.
+        reg.register(aggregates::max())
+            .expect("pattern is malformed");
+        reg.register(aggregates::max_in_list())
+            .expect("pattern is malformed");
+        reg.register(aggregates::min_in_list())
+            .expect("pattern is malformed");
+        reg.register(aggregates::avg_in_list())
+            .expect("pattern is malformed");
+        reg.register(aggregates::count_in_list())
+            .expect("pattern is malformed");
 
         // Filter patterns
-        reg.register(filters::between());
-        reg.register(filters::in_list());
-        reg.register(filters::like());
-        reg.register(filters::is_null());
-        reg.register(filters::compound_where());
+        reg.register(filters::between())
+            .expect("pattern is malformed");
+        reg.register(filters::in_list())
+            .expect("pattern is malformed");
+        reg.register(filters::like()).expect("pattern is malformed");
+        reg.register(filters::is_null())
+            .expect("pattern is malformed");
+        reg.register(filters::compound_where())
+            .expect("pattern is malformed");
 
         // Join patterns
-        reg.register(joins::inner_join());
-        reg.register(joins::left_join());
-        reg.register(joins::self_join());
-        reg.register(joins::cross_join());
-        reg.register(joins::left_join_with_rhs_filter());
+        reg.register(joins::inner_join())
+            .expect("pattern is malformed");
+        reg.register(joins::left_join())
+            .expect("pattern is malformed");
+        reg.register(joins::self_join())
+            .expect("pattern is malformed");
+        reg.register(joins::cross_join())
+            .expect("pattern is malformed");
+        reg.register(joins::left_join_with_rhs_filter())
+            .expect("pattern is malformed");
 
         // Ordering patterns
-        reg.register(ordering::topk());
-        reg.register(ordering::order_by());
-        reg.register(ordering::paginate());
+        reg.register(ordering::topk())
+            .expect("pattern is malformed");
+        reg.register(ordering::order_by())
+            .expect("pattern is malformed");
+        reg.register(ordering::paginate())
+            .expect("pattern is malformed");
 
         // Subquery patterns
-        reg.register(subqueries::exists_subquery());
-        reg.register(subqueries::in_subquery());
-        reg.register(subqueries::scalar_subquery());
-        reg.register(subqueries::join_subquery());
+        reg.register(subqueries::exists_subquery())
+            .expect("pattern is malformed");
+        reg.register(subqueries::in_subquery())
+            .expect("pattern is malformed");
+        reg.register(subqueries::scalar_subquery())
+            .expect("pattern is malformed");
+        reg.register(subqueries::join_subquery())
+            .expect("pattern is malformed");
 
         // CTE patterns
-        reg.register(ctes::simple_cte());
-        reg.register(ctes::cte_with_join());
-        reg.register(ctes::cte_with_param());
+        reg.register(ctes::simple_cte())
+            .expect("pattern is malformed");
+        reg.register(ctes::cte_with_join())
+            .expect("pattern is malformed");
+        reg.register(ctes::cte_with_param())
+            .expect("pattern is malformed");
 
         // Hoisting patterns (exercise HoistParametrizableFilters pass)
-        reg.register(hoisting::aggregated_join_subquery_eq_filter());
-        reg.register(hoisting::aggregated_join_subquery_having_filter());
-        reg.register(hoisting::having_to_where_promotion());
-        reg.register(hoisting::from_subquery_filter());
+        reg.register(hoisting::aggregated_join_subquery_eq_filter())
+            .expect("pattern is malformed");
+        reg.register(hoisting::aggregated_join_subquery_having_filter())
+            .expect("pattern is malformed");
+        reg.register(hoisting::having_to_where_promotion())
+            .expect("pattern is malformed");
+        reg.register(hoisting::from_subquery_filter())
+            .expect("pattern is malformed");
 
         // Compound patterns
-        reg.register(compound::union_all_same_table());
+        reg.register(compound::union_all_same_table())
+            .expect("pattern is malformed");
         for class in [
             crate::constraint::TypeClass::Integer,
             crate::constraint::TypeClass::String,
             crate::constraint::TypeClass::DateTime,
         ] {
-            reg.register(compound::union_all_two_tables(class));
+            reg.register(compound::union_all_two_tables(class))
+                .expect("pattern is malformed");
         }
-        reg.register(compound::union_all_cross_type());
+        reg.register(compound::union_all_cross_type())
+            .expect("pattern is malformed");
 
         // Advanced patterns
-        reg.register(advanced::window_function());
-        reg.register(advanced::distinct());
-        reg.register(advanced::multi_join());
+        reg.register(advanced::window_function())
+            .expect("pattern is malformed");
+        reg.register(advanced::window_rank())
+            .expect("pattern is malformed");
+        reg.register(advanced::window_dense_rank())
+            .expect("pattern is malformed");
+        reg.register(advanced::window_row_number_in_list())
+            .expect("pattern is malformed");
+        reg.register(advanced::window_rank_in_list())
+            .expect("pattern is malformed");
+        reg.register(advanced::window_dense_rank_in_list())
+            .expect("pattern is malformed");
+        reg.register(advanced::distinct())
+            .expect("pattern is malformed");
+        reg.register(advanced::multi_join())
+            .expect("pattern is malformed");
 
         // Scalar function patterns
-        reg.register(functions::coalesce());
-        reg.register(functions::ifnull());
-        reg.register(functions::concat());
-        reg.register(functions::substring());
-        reg.register(functions::round());
-        reg.register(functions::length());
-        reg.register(functions::month());
-        reg.register(functions::dayofweek());
-        reg.register(functions::greatest());
+        reg.register(functions::coalesce())
+            .expect("pattern is malformed");
+        reg.register(functions::ifnull())
+            .expect("pattern is malformed");
+        reg.register(functions::concat())
+            .expect("pattern is malformed");
+        reg.register(functions::substring())
+            .expect("pattern is malformed");
+        reg.register(functions::round())
+            .expect("pattern is malformed");
+        reg.register(functions::length())
+            .expect("pattern is malformed");
+        reg.register(functions::month())
+            .expect("pattern is malformed");
+        reg.register(functions::dayofweek())
+            .expect("pattern is malformed");
+        reg.register(functions::greatest())
+            .expect("pattern is malformed");
+        reg.register(functions::upper())
+            .expect("pattern is malformed");
+        reg.register(functions::lower())
+            .expect("pattern is malformed");
+        reg.register(functions::upper_in_list())
+            .expect("pattern is malformed");
+        reg.register(functions::lower_in_list())
+            .expect("pattern is malformed");
+        reg.register(functions::substring_in_list())
+            .expect("pattern is malformed");
+
+        // Expression-eval patterns (tagged `expr_eval`)
+        reg.register(expressions::binary_op_int_int_add())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_int_int_subtract())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_int_int_multiply())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_int_int_divide())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_int_int_modulo())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_signed_unsigned_modulo())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_float_double_add())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_float_double_subtract())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_float_double_multiply())
+            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_float_double_divide())
+            .expect("pattern is malformed");
+        reg.register(expressions::cast_decimal_widen_to_narrow())
+            .expect("pattern is malformed");
+        reg.register(expressions::cast_decimal_to_bigint())
+            .expect("pattern is malformed");
+        reg.register(expressions::cast_float_to_double())
+            .expect("pattern is malformed");
+        reg.register(expressions::where_lookup_decimal_eq_int_div_int())
+            .expect("pattern is malformed");
 
         // Default compatibility rules
         for rule in default_rules() {
@@ -405,7 +604,8 @@ impl Generator {
 
             match resolver::try_resolve(&recipe, &mut self.state, entropy) {
                 Ok(output) => {
-                    return Ok(QueryOutput::from_resolver(output, full_name));
+                    let dialect = self.state.dialect();
+                    return Ok(QueryOutput::from_resolver(output, full_name, dialect));
                 }
                 Err(e) => {
                     attempted.push(format!("{full_name}: {e}"));
@@ -567,15 +767,17 @@ impl Generator {
             // if the pattern requires new DDL
             let state_cp = self.state.checkpoint();
 
-            match resolver::resolve(
+            match resolver::resolve_named(
                 &recipe.constraints,
                 &recipe.var_kinds,
                 &mut self.state,
                 entropy,
+                recipe.name,
             ) {
                 Ok(output) => {
                     if output.ddl.is_empty() {
-                        return Ok(QueryOutput::from_resolver(output, pattern_name));
+                        let dialect = self.state.dialect();
+                        return Ok(QueryOutput::from_resolver(output, pattern_name, dialect));
                     }
                     // Resolution produced DDL -- pattern needs new tables/columns.
                     // Roll back state since Mode 3 shouldn't modify schema.
@@ -696,8 +898,10 @@ mod tests {
     #[test]
     fn register_patterns() {
         let mut reg = ConstraintRegistry::new();
-        reg.register(crate::registry::basic::single_table());
-        reg.register(crate::registry::basic::single_parameter());
+        reg.register(crate::registry::basic::single_table())
+            .expect("pattern is malformed");
+        reg.register(crate::registry::basic::single_parameter())
+            .expect("pattern is malformed");
         assert_eq!(reg.len(), 2);
         assert!(!reg.is_empty());
     }
@@ -728,7 +932,8 @@ mod tests {
     #[test]
     fn pick_random_returns_pattern() {
         let mut reg = ConstraintRegistry::new();
-        reg.register(crate::registry::basic::single_table());
+        reg.register(crate::registry::basic::single_table())
+            .expect("pattern is malformed");
         let mut rng = SmallRng::seed_from_u64(42);
         let mut entropy = Entropy::new(&mut rng);
         let p = reg.pick_random(&mut entropy, &SelectionFilter::default(), Dialect::MySQL);
@@ -1953,5 +2158,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn register_errors_on_example_cell_wrong_kind() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue};
+        use crate::pattern::PatternBuilder;
+
+        let mut b = PatternBuilder::new("bad");
+        let t = b.table();
+        // Intentionally reference a Relation var (t), not a Column / Param.
+        b.example(
+            "bad cell",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: t,
+                value: ExampleValue::Literal("x"),
+            }],
+        );
+        let p = b.build();
+        let mut reg = ConstraintRegistry::new();
+        let err = reg.register(p).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PatternRegistrationError::ExampleCellWrongVarKind { .. }
+            ),
+            "expected ExampleCellWrongVarKind, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn register_errors_on_example_cell_var_out_of_range() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue};
+        use crate::pattern::PatternBuilder;
+        use crate::var::VarId;
+
+        let mut b = PatternBuilder::new("oob");
+        let t = b.table();
+        let _c = b.column(t);
+        // Reference a var that doesn't exist (well past the allocator's end).
+        b.example(
+            "oob cell",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: VarId(999),
+                value: ExampleValue::Literal("x"),
+            }],
+        );
+        let p = b.build();
+        let mut reg = ConstraintRegistry::new();
+        let err = reg.register(p).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PatternRegistrationError::ExampleCellVarOutOfRange { .. }
+            ),
+            "expected ExampleCellVarOutOfRange, got: {err:?}"
+        );
     }
 }

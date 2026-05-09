@@ -113,6 +113,9 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::ProjectColumn { .. }
         | Constraint::ProjectAggregate { .. }
         | Constraint::ProjectFunction { .. }
+        | Constraint::ProjectBinaryOp { .. }
+        | Constraint::ProjectCast { .. }
+        | Constraint::WhereLookupBinaryOp { .. }
         | Constraint::ProjectLiteral { .. }
         | Constraint::SubqueryExpr { .. }
         | Constraint::SubqueryRelation { .. }
@@ -130,6 +133,8 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::HavingKeyFilter { .. }
         | Constraint::Distinct
         | Constraint::WindowFunction { .. } => true,
+        // Examples are oracle-only metadata; they don't block compound composition.
+        Constraint::Example { .. } => false,
     }
 }
 
@@ -247,7 +252,7 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             reason: "limit CTE nesting depth to 2",
         },
         // Derived-relation sources (CTE alias, FROM-subquery alias) auto-expose
-        // their inner projections as outer SELECT columns at resolve time —
+        // their inner projections as outer SELECT columns at resolve time  --
         // the resolver's `Cte` / `FromSubquery` arms synthesize outer column
         // refs from `inner_query.fields` rather than from outer
         // `ProjectColumn` constraints. This means the
@@ -284,7 +289,7 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                 })
             }),
             reason: "derived-relation source (CTE / FROM-subquery alias) auto-exposes inner \
-                     projections that aren't tracked by the outer GROUP BY — composing with \
+                     projections that aren't tracked by the outer GROUP BY  -- composing with \
                      aggregate constraints produces queries MySQL rejects (only_full_group_by)",
         },
         // Hoisting patterns should not compose with each other.
@@ -358,7 +363,7 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             reason: "compound SELECT cannot be composed with other patterns",
         },
         // `HavingKeyFilter { col }` only makes sense when `col` is a
-        // GROUP BY key — otherwise MySQL `only_full_group_by` rejects the
+        // GROUP BY key  -- otherwise MySQL `only_full_group_by` rejects the
         // query at runtime. Reject the recipe at compose-time so the
         // failure is local to pattern composition rather than surfacing
         // as a remote MySQL error.
@@ -665,7 +670,7 @@ mod tests {
         use crate::constraint::{AggregateFn, SubqueryRelationKind};
 
         // A `Cte` or FROM-subquery alias auto-exposes its inner projections as
-        // outer SELECT columns at resolve time — those columns aren't tracked
+        // outer SELECT columns at resolve time  -- those columns aren't tracked
         // by `Constraint::ProjectColumn` at the outer level, so the
         // "ungrouped projection with aggregate" rule misses them. Mixing a
         // derived-relation source with aggregate constraints from a partner
@@ -673,7 +678,7 @@ mod tests {
         //
         //   SELECT count(t0.c1), sq.c0 FROM t0 CROSS JOIN sq GROUP BY t0.c1
         //
-        // where `sq.c0` is auto-exposed but not in GROUP BY — MySQL rejects
+        // where `sq.c0` is auto-exposed but not in GROUP BY  -- MySQL rejects
         // with code 1055.
         let rules = default_rules();
 
@@ -702,7 +707,7 @@ mod tests {
         ];
         assert!(
             check_rules(&rules, &cte_constraints, &[]).is_some(),
-            "CTE + ProjectAggregate must be rejected — derived alias auto-exposes \
+            "CTE + ProjectAggregate must be rejected  -- derived alias auto-exposes \
              inner projections that won't be in GROUP BY"
         );
 
@@ -735,7 +740,7 @@ mod tests {
     fn derived_relation_source_without_aggregate_allowed() {
         use crate::constraint::SubqueryRelationKind;
 
-        // A derived-relation source by itself — no aggregate composition —
+        // A derived-relation source by itself  -- no aggregate composition  --
         // is fine. The auto-exposed inner projections are the only outer
         // SELECT items, and there's no GROUP BY violation.
         let rules = default_rules();
@@ -766,7 +771,7 @@ mod tests {
 
         let rules = default_rules();
 
-        // ORDER BY col (VarId(2)) is NOT in the projection — should be rejected
+        // ORDER BY col (VarId(2)) is NOT in the projection  -- should be rejected
         let constraints = vec![
             Constraint::ProjectColumn {
                 col: VarId(1),
@@ -793,7 +798,7 @@ mod tests {
 
         let rules = default_rules();
 
-        // ORDER BY col (VarId(1)) IS in the projection — should be allowed
+        // ORDER BY col (VarId(1)) IS in the projection  -- should be allowed
         let constraints = vec![
             Constraint::ProjectColumn {
                 col: VarId(1),
@@ -824,8 +829,9 @@ mod tests {
                 col: VarId(1),
                 table: VarId(0),
                 op: readyset_sql::ast::BinaryOperator::Equal,
+                param: VarId(3),
             },
-            // Different column in GROUP BY — does NOT match the key filter.
+            // Different column in GROUP BY  -- does NOT match the key filter.
             Constraint::GroupBy {
                 col: VarId(2),
                 table: VarId(0),
@@ -845,8 +851,9 @@ mod tests {
                 col: VarId(1),
                 table: VarId(0),
                 op: readyset_sql::ast::BinaryOperator::Equal,
+                param: VarId(3),
             },
-            // Same column appears in GROUP BY → key filter is well-formed.
+            // Same column appears in GROUP BY -> key filter is well-formed.
             Constraint::GroupBy {
                 col: VarId(1),
                 table: VarId(0),
@@ -860,7 +867,7 @@ mod tests {
 
     #[test]
     fn forbids_compound_compose_fires_on_outer_filter() {
-        // CompoundSelect + outer WhereColumnCompare → reject. This variant
+        // CompoundSelect + outer WhereColumnCompare -> reject. This variant
         // was missing from the old hand-listed allowlist and would have
         // been silently dropped.
         let rules = default_rules();
@@ -981,6 +988,7 @@ mod tests {
                 col: VarId(1),
                 table: VarId(0),
                 num_values: 3,
+                params: vec![VarId(2), VarId(3), VarId(4)],
             },
         ];
         let result = check_rules(&rules, &constraints, &["distinct"]);

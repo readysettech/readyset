@@ -8,8 +8,8 @@ use readyset_sql::ast::{
 };
 
 use crate::constraint::{
-    AggregateFn, Constraint, DialectSupport, JoinRight, LiteralKind, ScalarFn, SubqueryExprKind,
-    SubqueryRelationKind, TypeClass, WindowFn,
+    AggregateFn, Constraint, DialectSupport, ExampleCell, JoinRight, LiteralKind, ScalarFn,
+    SubqueryExprKind, SubqueryRelationKind, TypeClass, WindowFn,
 };
 use crate::var::{VarAllocator, VarId, VarKind};
 
@@ -105,6 +105,7 @@ impl Pattern {
             num_vars: self.vars.len(),
             var_kinds,
             primary_table: VarId(self.primary_table.0 + var_offset),
+            name: self.name,
         }
     }
 
@@ -155,6 +156,10 @@ pub struct Recipe {
     /// pattern that allocates a non-table var first or never declares an
     /// outer `BaseTable`.
     pub primary_table: VarId,
+    /// Name of the originating pattern. Used for error messages in phase-2
+    /// example resolution. Set by `Pattern::to_recipe`; composed recipes
+    /// keep the base pattern's name via `Recipe::compose`.
+    pub name: &'static str,
 }
 
 impl Recipe {
@@ -308,6 +313,7 @@ impl Recipe {
             num_vars: self.num_vars + other_recipe.num_vars,
             var_kinds,
             primary_table: new_primary,
+            name: self.name,
         }
     }
 }
@@ -444,6 +450,62 @@ impl PatternBuilder {
             .push(Constraint::ProjectFunction { function, args });
     }
 
+    /// Project a binary-operator expression: `<left> <op> <right>` in the
+    /// SELECT list. Both operands are column references.
+    pub fn project_binary_op(
+        &mut self,
+        left: (VarId, VarId),
+        op: BinaryOperator,
+        right: (VarId, VarId),
+    ) {
+        self.constraints.push(Constraint::ProjectBinaryOp {
+            left_col: left.0,
+            left_table: left.1,
+            op,
+            right_col: right.0,
+            right_table: right.1,
+        });
+    }
+
+    /// Project a `CAST(<col> AS <target_ty>)` expression in the SELECT list.
+    pub fn project_cast(
+        &mut self,
+        col: VarId,
+        table: VarId,
+        target_ty: readyset_sql::ast::SqlType,
+    ) {
+        self.constraints.push(Constraint::ProjectCast {
+            col,
+            table,
+            target_ty,
+        });
+    }
+
+    /// `WHERE <lookup_col> <cmp> (<left_col> <op> <right_col>)`.
+    /// Surfaces the lookup-key coercion bug -- the comparator coerces the
+    /// expression result against `lookup_col`'s type before equality, so
+    /// the buggy `int / int -> Int(2)` from RS coerces back to
+    /// `Numeric(2.0000)` and incorrectly matches a `2.0000`-keyed row.
+    pub fn where_lookup_binary_op(
+        &mut self,
+        lookup: (VarId, VarId),
+        cmp: BinaryOperator,
+        left: (VarId, VarId),
+        op: BinaryOperator,
+        right: (VarId, VarId),
+    ) {
+        self.constraints.push(Constraint::WhereLookupBinaryOp {
+            lookup_col: lookup.0,
+            lookup_table: lookup.1,
+            cmp,
+            left_col: left.0,
+            left_table: left.1,
+            op,
+            right_col: right.0,
+            right_table: right.1,
+        });
+    }
+
     pub fn project_literal(&mut self, literal: LiteralKind) {
         self.constraints
             .push(Constraint::ProjectLiteral { literal });
@@ -453,46 +515,79 @@ impl PatternBuilder {
         self.constraints.push(Constraint::GroupBy { col, table });
     }
 
-    pub fn having(&mut self, function: AggregateFn, col: VarId, table: VarId, op: BinaryOperator) {
+    pub fn having(
+        &mut self,
+        function: AggregateFn,
+        col: VarId,
+        table: VarId,
+        op: BinaryOperator,
+    ) -> VarId {
+        let param = self.allocator.alloc(VarKind::Param { col });
         self.constraints.push(Constraint::Having {
             function,
             col,
             table,
             op,
+            param,
         });
+        param
     }
 
     /// Emit a `HavingKeyFilter` constraint — a parametrizable filter on a
     /// GROUP BY key column in the HAVING clause.
-    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
-        self.constraints
-            .push(Constraint::HavingKeyFilter { col, table, op });
+    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) -> VarId {
+        let param = self.allocator.alloc(VarKind::Param { col });
+        self.constraints.push(Constraint::HavingKeyFilter {
+            col,
+            table,
+            op,
+            param,
+        });
+        param
     }
 
-    pub fn where_param(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
-        self.constraints
-            .push(Constraint::WhereParam { col, table, op });
+    pub fn where_param(&mut self, col: VarId, table: VarId, op: BinaryOperator) -> VarId {
+        let param = self.allocator.alloc(VarKind::Param { col });
+        self.constraints.push(Constraint::WhereParam {
+            col,
+            table,
+            op,
+            param,
+        });
+        param
     }
 
-    pub fn where_in_param(&mut self, col: VarId, table: VarId, num_values: u8) {
+    pub fn where_in_param(&mut self, col: VarId, table: VarId, num_values: u8) -> Vec<VarId> {
+        let params: Vec<VarId> = (0..num_values)
+            .map(|_| self.allocator.alloc(VarKind::Param { col }))
+            .collect();
+        let ret = params.clone();
         self.constraints.push(Constraint::WhereInParam {
             col,
             table,
             num_values,
+            params,
         });
+        ret
     }
 
-    pub fn where_range_param(&mut self, col: VarId, table: VarId) {
+    pub fn where_range_param(&mut self, col: VarId, table: VarId) -> (VarId, VarId) {
+        let lo = self.allocator.alloc(VarKind::Param { col });
+        let hi = self.allocator.alloc(VarKind::Param { col });
         self.constraints
-            .push(Constraint::WhereRangeParam { col, table });
+            .push(Constraint::WhereRangeParam { col, table, lo, hi });
+        (lo, hi)
     }
 
-    pub fn where_like(&mut self, col: VarId, table: VarId, negated: bool) {
+    pub fn where_like(&mut self, col: VarId, table: VarId, negated: bool) -> VarId {
+        let param = self.allocator.alloc(VarKind::Param { col });
         self.constraints.push(Constraint::WhereLike {
             col,
             table,
             negated,
+            param,
         });
+        param
     }
 
     pub fn where_is_null(&mut self, col: VarId, table: VarId, negated: bool) {
@@ -503,9 +598,12 @@ impl PatternBuilder {
         });
     }
 
-    pub fn where_between_param(&mut self, col: VarId, table: VarId) {
+    pub fn where_between_param(&mut self, col: VarId, table: VarId) -> (VarId, VarId) {
+        let lo = self.allocator.alloc(VarKind::Param { col });
+        let hi = self.allocator.alloc(VarKind::Param { col });
         self.constraints
-            .push(Constraint::WhereBetweenParam { col, table });
+            .push(Constraint::WhereBetweenParam { col, table, lo, hi });
+        (lo, hi)
     }
 
     pub fn where_column_compare(
@@ -630,6 +728,24 @@ impl PatternBuilder {
     /// Set the dialect support.
     pub fn set_dialect_support(&mut self, ds: DialectSupport) {
         self.dialect_support = ds;
+    }
+
+    /// Attach a concrete (row + parameter) example probe to this pattern.
+    ///
+    /// Cells must reference vars whose `VarKind` is `Column { .. }` (-> row
+    /// override at INSERT) or `Param { .. }` (-> param override at SELECT).
+    /// Registration-time validation enforces this before fuzz runs.
+    pub fn example(
+        &mut self,
+        note: &'static str,
+        dialect: DialectSupport,
+        cells: Vec<ExampleCell>,
+    ) {
+        self.constraints.push(Constraint::Example {
+            note,
+            dialect,
+            cells,
+        });
     }
 
     /// Build the pattern, deriving `min_depth` and `num_vars` automatically.
@@ -757,9 +873,15 @@ impl<'a> SubqueryBuilder<'a> {
             .push(Constraint::ProjectColumn { col, table });
     }
 
-    pub fn where_param(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
-        self.constraints
-            .push(Constraint::WhereParam { col, table, op });
+    pub fn where_param(&mut self, col: VarId, table: VarId, op: BinaryOperator) -> VarId {
+        let param = self.outer.allocator.alloc(VarKind::Param { col });
+        self.constraints.push(Constraint::WhereParam {
+            col,
+            table,
+            op,
+            param,
+        });
+        param
     }
 
     pub fn project_aggregate(&mut self, function: AggregateFn, col: VarId, table: VarId) {
@@ -774,9 +896,15 @@ impl<'a> SubqueryBuilder<'a> {
         self.constraints.push(Constraint::GroupBy { col, table });
     }
 
-    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) {
-        self.constraints
-            .push(Constraint::HavingKeyFilter { col, table, op });
+    pub fn having_key_filter(&mut self, col: VarId, table: VarId, op: BinaryOperator) -> VarId {
+        let param = self.outer.allocator.alloc(VarKind::Param { col });
+        self.constraints.push(Constraint::HavingKeyFilter {
+            col,
+            table,
+            op,
+            param,
+        });
+        param
     }
 
     pub fn column_type_class(&mut self, col: VarId, type_class: TypeClass) {
@@ -947,18 +1075,58 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
         } => vec![*left_col, *right_col, *t],
         Constraint::ProjectColumn { col, table }
         | Constraint::GroupBy { col, table }
-        | Constraint::WhereRangeParam { col, table }
-        | Constraint::WhereBetweenParam { col, table } => vec![*col, *table],
-        Constraint::ProjectAggregate { col, table, .. }
-        | Constraint::Having { col, table, .. }
-        | Constraint::HavingKeyFilter { col, table, .. }
-        | Constraint::WhereParam { col, table, .. }
-        | Constraint::WhereInParam { col, table, .. }
-        | Constraint::WhereLike { col, table, .. }
         | Constraint::WhereIsNull { col, table, .. } => vec![*col, *table],
+        Constraint::ProjectAggregate { col, table, .. } => vec![*col, *table],
+        Constraint::WhereRangeParam { col, table, lo, hi }
+        | Constraint::WhereBetweenParam { col, table, lo, hi } => {
+            vec![*col, *table, *lo, *hi]
+        }
+        Constraint::WhereInParam {
+            col, table, params, ..
+        } => {
+            let mut ids = vec![*col, *table];
+            ids.extend(params.iter().copied());
+            ids
+        }
+        Constraint::WhereLike {
+            col, table, param, ..
+        } => vec![*col, *table, *param],
+        Constraint::Having {
+            col, table, param, ..
+        }
+        | Constraint::HavingKeyFilter {
+            col, table, param, ..
+        }
+        | Constraint::WhereParam {
+            col, table, param, ..
+        } => vec![*col, *table, *param],
         Constraint::ProjectFunction { args, .. } => {
             args.iter().flat_map(|(c, t)| [*c, *t]).collect()
         }
+        Constraint::ProjectBinaryOp {
+            left_col,
+            left_table,
+            right_col,
+            right_table,
+            ..
+        } => vec![*left_col, *left_table, *right_col, *right_table],
+        Constraint::ProjectCast { col, table, .. } => vec![*col, *table],
+        Constraint::WhereLookupBinaryOp {
+            lookup_col,
+            lookup_table,
+            left_col,
+            left_table,
+            right_col,
+            right_table,
+            ..
+        } => vec![
+            *lookup_col,
+            *lookup_table,
+            *left_col,
+            *left_table,
+            *right_col,
+            *right_table,
+        ],
         Constraint::ProjectLiteral { .. } | Constraint::Limit { .. } | Constraint::Distinct => {
             vec![]
         }
@@ -1000,6 +1168,8 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             ids.extend(fallback.iter().flat_map(constraint_var_ids));
             ids
         }
+        // Example constraints are resolved in resolve_examples; nothing to do here.
+        Constraint::Example { cells, .. } => cells.iter().map(|c| c.var).collect(),
     }
 }
 
@@ -1337,9 +1507,9 @@ mod tests {
 
         let pattern = b.build();
 
-        // outer_t, outer_col, inner_t, inner_col, plus the JoinTarget
-        // alias allocated by `commit_as_join`.
-        assert_eq!(pattern.num_vars(), 5);
+        // outer_t, outer_col, inner_t, inner_col, param (from where_param),
+        // plus the JoinTarget alias allocated by `commit_as_join`.
+        assert_eq!(pattern.num_vars(), 6);
         assert_eq!(pattern.min_depth, 1); // has one level of subquery
 
         // Inner constraints live on the SubqueryRelation { kind: JoinTarget }
@@ -1685,8 +1855,8 @@ mod tests {
 
         let recipe = base.to_recipe(0).compose(&addon);
 
-        // base has 2 vars, addon has 2 vars → 4 total
-        assert_eq!(recipe.num_vars, 4);
+        // base has 2 vars, addon has 4 vars (t, c, lo, hi) → 6 total
+        assert_eq!(recipe.num_vars, 6);
 
         // Should have WhereBetweenParam from addon
         assert!(
@@ -2214,5 +2384,69 @@ mod tests {
             sql.matches(" AS `").count() >= 2,
             "expected aliased self-join with two `AS` clauses: {sql}"
         );
+    }
+
+    #[test]
+    fn pattern_builder_example_appends_example_constraint() {
+        use crate::constraint::{ExampleCell, ExampleValue};
+
+        let mut b = PatternBuilder::new("ex");
+        let t = b.table();
+        let c = b.column(t);
+        b.example(
+            "int/int divide bait",
+            DialectSupport::MySqlOnly,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("8"),
+            }],
+        );
+        let p = b.build();
+        let example_count = p
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::Example { .. }))
+            .count();
+        assert_eq!(example_count, 1);
+    }
+
+    #[test]
+    fn pattern_builder_two_examples_both_appear_in_constraints() {
+        use crate::constraint::{ExampleCell, ExampleValue};
+
+        let mut b = PatternBuilder::new("two_ex");
+        let t = b.table();
+        let c = b.column(t);
+        b.example(
+            "first",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("1"),
+            }],
+        );
+        b.example(
+            "second",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("2"),
+            }],
+        );
+        let p = b.build();
+        let example_notes: Vec<_> = p
+            .constraints
+            .iter()
+            .filter_map(|c| {
+                if let Constraint::Example { note, .. } = c {
+                    Some(*note)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(example_notes.len(), 2);
+        assert!(example_notes.contains(&"first"));
+        assert!(example_notes.contains(&"second"));
     }
 }

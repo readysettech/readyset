@@ -335,6 +335,9 @@ fn column_role(col: VarId, constraints: &[Constraint]) -> ColumnRole {
             {
                 return ColumnRole::FilterKey;
             }
+            Constraint::WhereLookupBinaryOp { lookup_col: wc, .. } if *wc == col => {
+                return ColumnRole::FilterKey;
+            }
             _ => {}
         }
     }
@@ -580,39 +583,7 @@ fn resolve_not_eq(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError>
 
 /// Check if a SQL type matches a type class.
 fn type_matches(sql_type: &SqlType, type_class: &TypeClass) -> bool {
-    match type_class {
-        TypeClass::Any => true,
-        TypeClass::Integer => matches!(
-            sql_type,
-            SqlType::Int(_)
-                | SqlType::BigInt(_)
-                | SqlType::SmallInt(_)
-                | SqlType::TinyInt(_)
-                | SqlType::MediumInt(_)
-        ),
-        TypeClass::Numeric => matches!(
-            sql_type,
-            SqlType::Int(_)
-                | SqlType::BigInt(_)
-                | SqlType::SmallInt(_)
-                | SqlType::TinyInt(_)
-                | SqlType::MediumInt(_)
-                | SqlType::Float
-                | SqlType::Double
-                | SqlType::Real
-                | SqlType::Decimal(_, _)
-                | SqlType::Numeric(_)
-        ),
-        TypeClass::String => matches!(
-            sql_type,
-            SqlType::VarChar(_) | SqlType::Char(_) | SqlType::Text | SqlType::TinyText
-        ),
-        TypeClass::DateTime => matches!(
-            sql_type,
-            SqlType::DateTime(_) | SqlType::Timestamp | SqlType::Date | SqlType::Time
-        ),
-        TypeClass::Exact(exact) => sql_type == exact,
-    }
+    type_class.matches(sql_type)
 }
 
 /// Check if two SQL types are compatible (can be compared/joined).
@@ -666,6 +637,13 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Diale
             ])
             .cloned()
             .expect("numeric type slice is non-empty"),
+        TypeClass::Decimal => entropy
+            .choose(&[SqlType::Double, SqlType::Float])
+            .cloned()
+            .expect("decimal type slice is non-empty"),
+        // Exact fixed-point only — never FLOAT/DOUBLE, so e.g. round(x, scale)
+        // stays valid on PostgreSQL.
+        TypeClass::FixedPoint => SqlType::Decimal(10, 2),
         TypeClass::String => entropy
             .choose(&[SqlType::VarChar(Some(255)), SqlType::Text])
             .cloned()
@@ -1140,6 +1118,7 @@ mod tests {
                 col: c_filter,
                 table: t,
                 op: readyset_sql::ast::BinaryOperator::Equal,
+                param: VarId(3),
             },
         ];
         let var_kinds = vec![
@@ -1229,10 +1208,33 @@ mod tests {
             col: c,
             table: t,
             op: readyset_sql::ast::BinaryOperator::Equal,
+            param: VarId(2),
         }];
 
         assert_eq!(column_role(c, &constraints), ColumnRole::FilterKey);
         assert_eq!(column_role(t, &constraints), ColumnRole::General);
+    }
+
+    #[test]
+    fn column_role_detects_where_lookup_as_filter_key() {
+        let t = VarId(0);
+        let lookup = VarId(1);
+        let c1 = VarId(2);
+        let c2 = VarId(3);
+        let constraints = vec![Constraint::WhereLookupBinaryOp {
+            lookup_col: lookup,
+            lookup_table: t,
+            cmp: readyset_sql::ast::BinaryOperator::Equal,
+            left_col: c1,
+            left_table: t,
+            op: readyset_sql::ast::BinaryOperator::Divide,
+            right_col: c2,
+            right_table: t,
+        }];
+
+        assert_eq!(column_role(lookup, &constraints), ColumnRole::FilterKey);
+        assert_eq!(column_role(c1, &constraints), ColumnRole::General);
+        assert_eq!(column_role(c2, &constraints), ColumnRole::General);
     }
 
     #[test]
@@ -1645,6 +1647,7 @@ mod tests {
                         col: c_or,
                         table: t,
                         negated: false,
+                        param: VarId(3),
                     },
                 ],
                 vec![
@@ -1656,6 +1659,7 @@ mod tests {
                         col: c_or,
                         table: t,
                         op: readyset_sql::ast::BinaryOperator::Equal,
+                        param: VarId(3),
                     },
                 ],
             ),
@@ -1664,6 +1668,7 @@ mod tests {
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c_or },
         ];
 
         let config = GeneratorConfig::default();
@@ -1730,6 +1735,7 @@ mod tests {
                         col: c_or,
                         table: t,
                         negated: false,
+                        param: VarId(3),
                     },
                 ],
                 vec![
@@ -1741,6 +1747,7 @@ mod tests {
                         col: c_or,
                         table: t,
                         op: readyset_sql::ast::BinaryOperator::Equal,
+                        param: VarId(3),
                     },
                 ],
             ),
@@ -1749,6 +1756,7 @@ mod tests {
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c_or },
         ];
 
         let config = GeneratorConfig::default();

@@ -38,11 +38,7 @@ pub fn aggregated_join_subquery_eq_filter() -> Pattern {
     sq.project_column(c_group, t_inner);
     sq.project_aggregate(AggregateFn::Sum { distinct: false }, c_agg, t_inner);
     sq.group_by(c_group, t_inner);
-    sq.constraint(Constraint::WhereParam {
-        col: c_filter,
-        table: t_inner,
-        op: BinaryOperator::Equal,
-    });
+    sq.where_param(c_filter, t_inner, BinaryOperator::Equal);
     sq.commit_as_join(JoinOperator::InnerJoin, c_outer_join, c_group);
 
     b.from(t_outer);
@@ -130,11 +126,7 @@ pub fn from_subquery_filter() -> Pattern {
     sq.from(t_inner);
     sq.project_column(c_proj, t_inner);
     sq.project_column(c_filter, t_inner);
-    sq.constraint(Constraint::WhereParam {
-        col: c_filter,
-        table: t_inner,
-        op: BinaryOperator::Equal,
-    });
+    sq.where_param(c_filter, t_inner, BinaryOperator::Equal);
     let _derived_alias = sq.commit_as_from();
 
     b.tags(&["subquery", "inline_leading"]);

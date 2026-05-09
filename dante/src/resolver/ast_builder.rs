@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use data_generator::ColumnGenerationSpec;
 use readyset_sql::Dialect;
 use readyset_sql::ast::{
@@ -17,6 +19,16 @@ use crate::entropy::Entropy;
 use crate::state::GenerationState;
 use crate::var::{VarId, VarKind};
 
+/// Return type for functions that build a SELECT statement with parameter metadata
+/// and a VarId-to-placeholder-index map.
+type SelectBuildResult =
+    Result<(SelectStatement, Vec<ParamMeta>, Vec<Option<usize>>), ResolveError>;
+
+/// Return type for functions that build a compound SELECT statement with parameter
+/// metadata and a VarId-to-placeholder-index map.
+type CompoundBuildResult =
+    Result<(SelectSpecification, Vec<ParamMeta>, Vec<Option<usize>>), ResolveError>;
+
 /// Build a SelectStatement from resolved bindings and structural constraints.
 ///
 /// Top-level entry point: starts a fresh placeholder counter at `$1`, and
@@ -27,16 +39,19 @@ pub(super) fn build_select(
     var_kinds: &[VarKind],
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
-) -> Result<(SelectStatement, Vec<ParamMeta>), ResolveError> {
+) -> SelectBuildResult {
     let mut placeholder_idx: u32 = 1;
-    build_select_inner(
+    let mut param_map: Vec<Option<usize>> = vec![None; var_kinds.len()];
+    let (stmt, params) = build_select_inner(
         env,
         constraints,
         var_kinds,
         state,
         entropy,
         &mut placeholder_idx,
-    )
+        &mut param_map,
+    )?;
+    Ok((stmt, params, param_map))
 }
 
 /// Build a SelectStatement, threading a shared `placeholder_idx`.
@@ -57,6 +72,7 @@ fn build_select_inner(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
     placeholder_idx: &mut u32,
+    param_map: &mut [Option<usize>],
 ) -> Result<(SelectStatement, Vec<ParamMeta>), ResolveError> {
     let dialect = state.dialect();
     let mut ctes = Vec::new();
@@ -77,8 +93,7 @@ fn build_select_inner(
     // `SubqueryRelation { kind: JoinTarget, alias }`, keyed by the alias
     // VarId. The sibling `Join { right: JoinRight::Table(alias) }` looks
     // it up to emit `JOIN (SELECT ...) AS sqN`.
-    let mut join_subqueries: std::collections::HashMap<VarId, (SelectStatement, SqlIdentifier)> =
-        std::collections::HashMap::new();
+    let mut join_subqueries: HashMap<VarId, (SelectStatement, SqlIdentifier)> = HashMap::new();
 
     for c in constraints {
         match c {
@@ -140,10 +155,74 @@ fn build_select_inner(
                     alias: None,
                 });
             }
-            Constraint::WhereParam { col, table, op } => {
+            Constraint::ProjectBinaryOp {
+                left_col,
+                left_table,
+                op,
+                right_col,
+                right_table,
+            } => {
+                let (l_name, l_table) = get_col_table(env, *left_col, *left_table)?;
+                let (r_name, r_table) = get_col_table(env, *right_col, *right_table)?;
+                fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::BinaryOp {
+                        lhs: Box::new(make_column_expr(&l_name, &l_table)),
+                        op: *op,
+                        rhs: Box::new(make_column_expr(&r_name, &r_table)),
+                    },
+                    alias: None,
+                });
+            }
+            Constraint::ProjectCast {
+                col,
+                table,
+                target_ty,
+            } => {
+                let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Cast {
+                        expr: Box::new(make_column_expr(&col_name, &table_name)),
+                        ty: target_ty.clone(),
+                        style: readyset_sql::ast::CastStyle::As,
+                        array: false,
+                    },
+                    alias: None,
+                });
+            }
+            Constraint::WhereLookupBinaryOp {
+                lookup_col,
+                lookup_table,
+                cmp,
+                left_col,
+                left_table,
+                op,
+                right_col,
+                right_table,
+            } => {
+                let (lookup_name, lookup_tab) = get_col_table(env, *lookup_col, *lookup_table)?;
+                let (l_name, l_tab) = get_col_table(env, *left_col, *left_table)?;
+                let (r_name, r_tab) = get_col_table(env, *right_col, *right_table)?;
+                let rhs_expr = Expr::BinaryOp {
+                    lhs: Box::new(make_column_expr(&l_name, &l_tab)),
+                    op: *op,
+                    rhs: Box::new(make_column_expr(&r_name, &r_tab)),
+                };
+                where_clauses.push(Expr::BinaryOp {
+                    lhs: Box::new(make_column_expr(&lookup_name, &lookup_tab)),
+                    op: *cmp,
+                    rhs: Box::new(rhs_expr),
+                });
+            }
+            Constraint::WhereParam {
+                col,
+                table,
+                op,
+                param,
+            } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let placeholder = make_placeholder(dialect, placeholder_idx);
+                let placeholder =
+                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
                 where_clauses.push(Expr::BinaryOp {
                     lhs: Box::new(make_column_expr(&col_name, &table_name)),
                     op: *op,
@@ -159,15 +238,15 @@ fn build_select_inner(
                 col,
                 table,
                 num_values,
+                params: slot_vars,
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
                 let mut placeholders = Vec::new();
-                for _ in 0..*num_values {
-                    placeholders.push(Expr::Literal(Literal::Placeholder(make_placeholder(
-                        dialect,
-                        placeholder_idx,
-                    ))));
+                for slot_var in slot_vars {
+                    placeholders.push(Expr::Literal(Literal::Placeholder(
+                        make_and_record_placeholder(dialect, placeholder_idx, *slot_var, param_map),
+                    )));
                 }
                 where_clauses.push(Expr::In {
                     lhs: Box::new(make_column_expr(&col_name, &table_name)),
@@ -180,11 +259,11 @@ fn build_select_inner(
                     count: u32::from(*num_values),
                 });
             }
-            Constraint::WhereRangeParam { col, table } => {
+            Constraint::WhereRangeParam { col, table, lo, hi } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let p1 = make_placeholder(dialect, placeholder_idx);
-                let p2 = make_placeholder(dialect, placeholder_idx);
+                let p1 = make_and_record_placeholder(dialect, placeholder_idx, *lo, param_map);
+                let p2 = make_and_record_placeholder(dialect, placeholder_idx, *hi, param_map);
                 // col >= ? AND col <= ?
                 let ge = Expr::BinaryOp {
                     lhs: Box::new(make_column_expr(&col_name, &table_name)),
@@ -207,11 +286,11 @@ fn build_select_inner(
                     count: 2,
                 });
             }
-            Constraint::WhereBetweenParam { col, table } => {
+            Constraint::WhereBetweenParam { col, table, lo, hi } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let p1 = make_placeholder(dialect, placeholder_idx);
-                let p2 = make_placeholder(dialect, placeholder_idx);
+                let p1 = make_and_record_placeholder(dialect, placeholder_idx, *lo, param_map);
+                let p2 = make_and_record_placeholder(dialect, placeholder_idx, *hi, param_map);
                 where_clauses.push(Expr::Between {
                     operand: Box::new(make_column_expr(&col_name, &table_name)),
                     min: Box::new(Expr::Literal(Literal::Placeholder(p1))),
@@ -228,10 +307,12 @@ fn build_select_inner(
                 col,
                 table,
                 negated,
+                param,
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let placeholder = make_placeholder(dialect, placeholder_idx);
+                let placeholder =
+                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
                 let op = if *negated {
                     BinaryOperator::NotLike
                 } else {
@@ -284,10 +365,20 @@ fn build_select_inner(
                 let mut or_parts = Vec::new();
                 for cond in conditions {
                     match cond {
-                        Constraint::WhereParam { col, table, op } => {
+                        Constraint::WhereParam {
+                            col,
+                            table,
+                            op,
+                            param,
+                        } => {
                             let (col_name, table_name) = get_col_table(env, *col, *table)?;
                             let col_type = get_col_type(env, *col)?;
-                            let placeholder = make_placeholder(dialect, placeholder_idx);
+                            let placeholder = make_and_record_placeholder(
+                                dialect,
+                                placeholder_idx,
+                                *param,
+                                param_map,
+                            );
                             or_parts.push(Expr::BinaryOp {
                                 lhs: Box::new(make_column_expr(&col_name, &table_name)),
                                 op: *op,
@@ -435,11 +526,13 @@ fn build_select_inner(
                 col,
                 table,
                 op,
+                param,
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_expr = make_column_expr(&col_name, &table_name);
                 let func_expr = make_aggregate_expr(function, col_expr);
-                let placeholder = make_placeholder(dialect, placeholder_idx);
+                let placeholder =
+                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
                 let new_expr = Expr::BinaryOp {
                     lhs: Box::new(Expr::Call(func_expr)),
                     op: *op,
@@ -457,10 +550,16 @@ fn build_select_inner(
                     count: 1,
                 });
             }
-            Constraint::HavingKeyFilter { col, table, op } => {
+            Constraint::HavingKeyFilter {
+                col,
+                table,
+                op,
+                param,
+            } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_expr = make_column_expr(&col_name, &table_name);
-                let placeholder = make_placeholder(dialect, placeholder_idx);
+                let placeholder =
+                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
                 let new_expr = Expr::BinaryOp {
                     lhs: Box::new(col_expr),
                     op: *op,
@@ -487,6 +586,7 @@ fn build_select_inner(
                     state,
                     entropy,
                     placeholder_idx,
+                    param_map,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -548,6 +648,7 @@ fn build_select_inner(
                     state,
                     entropy,
                     placeholder_idx,
+                    param_map,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -585,6 +686,7 @@ fn build_select_inner(
                     state,
                     entropy,
                     placeholder_idx,
+                    param_map,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -616,6 +718,7 @@ fn build_select_inner(
                     state,
                     entropy,
                     placeholder_idx,
+                    param_map,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -708,6 +811,8 @@ fn build_select_inner(
             | Constraint::TypeCompatible(_, _)
             | Constraint::Eq(_, _)
             | Constraint::NotEq(_, _) => {}
+            // Example constraints are resolved in resolve_examples; nothing to do here.
+            Constraint::Example { .. } => {}
             // Or constraints should have been expanded by
             // `resolve_constraint_set` before reaching build_select. Hard
             // panic in release too — the old `debug_assert!(false)` was a
@@ -798,8 +903,9 @@ pub(super) fn build_compound_select(
     branches: &[Vec<Constraint>],
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
-) -> Result<(SelectSpecification, Vec<ParamMeta>), ResolveError> {
+) -> CompoundBuildResult {
     let mut all_params = Vec::new();
+    let mut all_param_map: Vec<Option<usize>> = vec![None; var_kinds.len()];
     let mut selects: Vec<(Option<CompoundSelectOperator>, SelectStatement)> = Vec::new();
 
     for (i, branch) in branches.iter().enumerate() {
@@ -809,13 +915,24 @@ pub(super) fn build_compound_select(
         // is preserved across the boundary so the outer caller sees every
         // statement the compound depends on.
         let pre = env.checkpoint();
-        let (stmt, branch_params) = build_select(env, branch, var_kinds, state, entropy)?;
+        let (stmt, branch_params, branch_param_map) =
+            build_select(env, branch, var_kinds, state, entropy)?;
         let new_ddl: Vec<_> = env.ddl_steps[pre.ddl_steps.len()..].to_vec();
         let new_tables: Vec<_> = env.new_tables[pre.new_tables.len()..].to_vec();
         env.restore(pre);
         env.ddl_steps.extend(new_ddl);
         env.new_tables.extend(new_tables);
         all_params.extend(branch_params);
+        for (idx, slot) in branch_param_map.iter().enumerate() {
+            if let Some(placeholder) = slot {
+                debug_assert!(
+                    all_param_map[idx].is_none(),
+                    "param VarId {} double-inserted across compound branches",
+                    idx
+                );
+                all_param_map[idx] = Some(*placeholder);
+            }
+        }
 
         let op = if i == 0 { None } else { Some(operator.clone()) };
         selects.push((op, stmt));
@@ -886,7 +1003,11 @@ pub(super) fn build_compound_select(
         limit_clause,
     };
 
-    Ok((SelectSpecification::Compound(compound), all_params))
+    Ok((
+        SelectSpecification::Compound(compound),
+        all_params,
+        all_param_map,
+    ))
 }
 
 /// Get the effective name from a Table binding (alias if present, else table name).
@@ -1048,6 +1169,22 @@ fn make_placeholder(dialect: Dialect, idx: &mut u32) -> ItemPlaceholder {
     p
 }
 
+/// Make a placeholder and record the VarId -> zero-based index mapping.
+///
+/// The zero-based index equals `*idx - 1` before the increment (i.e., the
+/// first placeholder gets index 0, the second gets 1, etc.).
+fn make_and_record_placeholder(
+    dialect: Dialect,
+    idx: &mut u32,
+    param: VarId,
+    param_map: &mut [Option<usize>],
+) -> ItemPlaceholder {
+    let zero_based = (*idx - 1) as usize;
+    let p = make_placeholder(dialect, idx);
+    param_map[param.0] = Some(zero_based);
+    p
+}
+
 /// Resolve inner subquery constraints to produce a SelectStatement.
 ///
 /// `outer_var_kinds` is the recipe-wide kind table indexed by absolute
@@ -1058,6 +1195,7 @@ fn make_placeholder(dialect: Dialect, idx: &mut u32) -> ItemPlaceholder {
 /// `placeholder_idx` is the shared parameter counter from the enclosing
 /// `build_select_inner` so PostgreSQL `$N` placeholders stay globally
 /// unique across the prepared statement.
+#[allow(clippy::too_many_arguments)]
 fn resolve_inner_subquery(
     inner_constraints: &[Constraint],
     outer_env: &mut Env,
@@ -1066,6 +1204,7 @@ fn resolve_inner_subquery(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
     placeholder_idx: &mut u32,
+    param_map: &mut [Option<usize>],
 ) -> Result<(SelectStatement, Vec<ParamMeta>, Vec<DdlStep>), ResolveError> {
     // Collect all VarIds referenced in inner constraints to size num_vars.
     let max_var = inner_constraints
@@ -1126,6 +1265,7 @@ fn resolve_inner_subquery(
         state,
         entropy,
         placeholder_idx,
+        param_map,
     )?;
 
     let ddl = inner_env.into_ddl_steps(state)?;
@@ -1158,6 +1298,7 @@ fn resolve_cte_inner_subquery(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
     placeholder_idx: &mut u32,
+    param_map: &mut [Option<usize>],
 ) -> Result<(SelectStatement, Vec<ParamMeta>, Vec<DdlStep>), ResolveError> {
     let max_var = inner_constraints
         .iter()
@@ -1203,6 +1344,7 @@ fn resolve_cte_inner_subquery(
         state,
         entropy,
         placeholder_idx,
+        param_map,
     )?;
 
     for v in 0..num_vars {
@@ -1536,9 +1678,14 @@ mod tests {
                 col: c,
                 table: t,
                 op: BinaryOperator::Greater,
+                param: VarId(2),
             },
         ];
-        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Param { col: c },
+        ];
         let (_sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
         assert_eq!(
             output.params.len(),
@@ -1588,17 +1735,21 @@ mod tests {
                 col: c_agg,
                 table: t,
                 op: BinaryOperator::Greater,
+                param: VarId(3),
             },
             Constraint::HavingKeyFilter {
                 col: c_grp,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: VarId(4),
             },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c_agg },
+            VarKind::Param { col: c_grp },
         ];
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
         assert!(
@@ -1647,18 +1798,22 @@ mod tests {
                 col: c_grp,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: VarId(3),
             },
             Constraint::Having {
                 function: AggregateFn::Count { distinct: false },
                 col: c_agg,
                 table: t,
                 op: BinaryOperator::Greater,
+                param: VarId(4),
             },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c_grp },
+            VarKind::Param { col: c_agg },
         ];
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
         assert!(
@@ -1748,6 +1903,7 @@ mod tests {
         // emitted a partial OR. The fix should surface a typed error.
         let t = VarId(0);
         let c = VarId(1);
+        let p = VarId(2);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c, table: t },
@@ -1759,12 +1915,17 @@ mod tests {
                         col: c,
                         table: t,
                         op: BinaryOperator::Equal,
+                        param: p,
                     },
                     Constraint::Eq(c, c),
                 ],
             },
         ];
-        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Param { col: c },
+        ];
         let err = resolve_to_err(constraints, var_kinds, Dialect::MySQL);
         assert!(
             matches!(err, ResolveError::Unsupported { location, .. } if location == "WhereOr"),
@@ -1779,6 +1940,7 @@ mod tests {
         // dropped, producing SQL missing the user-intended filter.
         let t = VarId(0);
         let c = VarId(1);
+        let p = VarId(2);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c, table: t },
@@ -1801,9 +1963,14 @@ mod tests {
                 col: c,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: p,
             },
         ];
-        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Param { col: c },
+        ];
         let err = resolve_to_err(constraints, var_kinds, Dialect::MySQL);
         assert!(
             matches!(
@@ -1904,6 +2071,7 @@ mod tests {
         let t = VarId(0);
         let c1 = VarId(1);
         let c2 = VarId(2);
+        let p = VarId(3);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c1, table: t },
@@ -1914,12 +2082,14 @@ mod tests {
                 col: c2,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: p,
             },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c2 },
         ];
 
         let (sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
@@ -1935,6 +2105,7 @@ mod tests {
         let t = VarId(0);
         let c1 = VarId(1);
         let c2 = VarId(2);
+        let p = VarId(3);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c1, table: t },
@@ -1945,12 +2116,14 @@ mod tests {
                 col: c2,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: p,
             },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c2 },
         ];
 
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
@@ -1964,6 +2137,8 @@ mod tests {
         let c1 = VarId(1);
         let c2 = VarId(2);
         let c3 = VarId(3);
+        let p0 = VarId(4);
+        let p1 = VarId(5);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c1, table: t },
@@ -1975,11 +2150,13 @@ mod tests {
                 col: c2,
                 table: t,
                 op: BinaryOperator::Equal,
+                param: p0,
             },
             Constraint::WhereParam {
                 col: c3,
                 table: t,
                 op: BinaryOperator::Greater,
+                param: p1,
             },
         ];
         let var_kinds = vec![
@@ -1987,6 +2164,8 @@ mod tests {
             VarKind::Column { table: t },
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c2 },
+            VarKind::Param { col: c3 },
         ];
 
         let (sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
@@ -2251,12 +2430,16 @@ mod tests {
                 col: c2,
                 table: t,
                 num_values: 3,
+                params: vec![VarId(3), VarId(4), VarId(5)],
             },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c2 },
+            VarKind::Param { col: c2 },
+            VarKind::Param { col: c2 },
         ];
 
         let (sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
@@ -2279,12 +2462,19 @@ mod tests {
             Constraint::ColumnExists { col: c2, table: t },
             Constraint::From(t),
             Constraint::ProjectColumn { col: c1, table: t },
-            Constraint::WhereBetweenParam { col: c2, table: t },
+            Constraint::WhereBetweenParam {
+                col: c2,
+                table: t,
+                lo: VarId(3),
+                hi: VarId(4),
+            },
         ];
         let var_kinds = vec![
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c2 },
+            VarKind::Param { col: c2 },
         ];
 
         let (sql, output) = resolve_to_sql(constraints, var_kinds, Dialect::PostgreSQL);
@@ -2473,6 +2663,8 @@ mod tests {
         let t = VarId(0);
         let c1 = VarId(1);
         let c2 = VarId(2);
+        let p0 = VarId(3);
+        let p1 = VarId(4);
         let constraints = vec![
             Constraint::BaseTable(t),
             Constraint::ColumnExists { col: c1, table: t },
@@ -2485,11 +2677,13 @@ mod tests {
                         col: c1,
                         table: t,
                         op: BinaryOperator::Equal,
+                        param: p0,
                     },
                     Constraint::WhereParam {
                         col: c2,
                         table: t,
                         op: BinaryOperator::Greater,
+                        param: p1,
                     },
                 ],
             },
@@ -2498,6 +2692,8 @@ mod tests {
             VarKind::Relation,
             VarKind::Column { table: t },
             VarKind::Column { table: t },
+            VarKind::Param { col: c1 },
+            VarKind::Param { col: c2 },
         ];
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
         assert!(sql.contains("OR"), "expected OR in: {sql}");

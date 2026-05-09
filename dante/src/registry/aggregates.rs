@@ -1,7 +1,7 @@
 //! Aggregate patterns: count, sum, avg, min/max, count_distinct, group_by,
 //! and dialect-specific aggregates (group_concat, array_agg).
 
-use readyset_sql::ast::BinaryOperator;
+use readyset_sql::ast::{BinaryOperator, OrderType};
 
 use crate::constraint::{AggregateFn, DialectSupport, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
@@ -109,6 +109,32 @@ pub fn group_concat() -> Pattern {
     b.build()
 }
 
+/// SELECT t.c0, GROUP_CONCAT(t.c1) FROM t GROUP BY t.c0 ORDER BY t.c0 ASC
+/// (MySQL only)
+///
+/// Deterministic-output variant of [`group_concat`]: GROUP BY on the
+/// auto-allocated PK (`c0` is `Unique`) means each group has exactly one
+/// source row, so the order of values within each `GROUP_CONCAT` string is
+/// trivially fixed. ORDER BY on the same PK then fixes the outer row
+/// order. The underlying MIR planner still emits `MirNodeInner::Accumulator`
+/// for the `GROUP_CONCAT`, so the `Create dataflow node::Accumulator`
+/// Antithesis assertion fires on MySQL just like `array_agg` does on
+/// PostgreSQL.
+pub fn group_concat_grouped() -> Pattern {
+    let mut b = PatternBuilder::new("group_concat_grouped");
+    let t = b.table();
+    let c_group = b.column(t);
+    let c_agg = b.column(t);
+    b.from(t);
+    b.project_column(c_group, t);
+    b.project_aggregate(AggregateFn::GroupConcat, c_agg, t);
+    b.group_by(c_group, t);
+    b.order_by(c_group, t, OrderType::OrderAscending, None);
+    b.set_dialect_support(DialectSupport::MySqlOnly);
+    b.tags(&["aggregate", "mysql_only", "group_concat", "accumulator"]);
+    b.build()
+}
+
 /// SELECT t.c3, COUNT(t.c1), SUM(t.c2) FROM t GROUP BY t.c3
 ///
 /// Multiple aggregates in one query trigger JoinAggregates dataflow nodes.
@@ -155,6 +181,90 @@ pub fn array_agg() -> Pattern {
     b.project_aggregate(AggregateFn::ArrayAgg, c, t);
     b.set_dialect_support(DialectSupport::PostgresOnly);
     b.tags(&["aggregate", "postgres_only"]);
+    b.build()
+}
+
+/// SELECT MAX(t.c) FROM t
+///
+/// `min_max` currently emits only `Min`; without a sibling for `Max` the
+/// `Aggregation::Max` dataflow-node assertion in Readyset never fires, and
+/// no path exists for `Post-lookup aggregate::Max` either. Pair this with
+/// `max_in_list` to cover both the aggregation and post-lookup paths.
+pub fn max() -> Pattern {
+    let mut b = PatternBuilder::new("max");
+    let t = b.table();
+    let c = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Max, c, t);
+    b.tags(&["aggregate"]);
+    b.build()
+}
+
+/// SELECT MAX(t.c1) FROM t WHERE t.c2 IN (?, ?, ?)
+///
+/// Combines `Max` with `WHERE IN` so the planner emits a post-lookup
+/// `Max` aggregator after the multi-key cache read.
+pub fn max_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("max_in_list");
+    let t = b.table();
+    let c_agg = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Max, c_agg, t);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["aggregate", "filter", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT MIN(t.c1) FROM t WHERE t.c2 IN (?, ?, ?)
+///
+/// Sibling of [`max_in_list`] for the `Min` post-lookup path. `min_max`
+/// already drives the bare-aggregation `Min` node; this variant
+/// specifically targets the post-lookup re-aggregation step.
+pub fn min_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("min_in_list");
+    let t = b.table();
+    let c_agg = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Min, c_agg, t);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["aggregate", "filter", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT AVG(t.c1) FROM t WHERE t.c2 IN (?, ?, ?)
+///
+/// Post-lookup average. `c1` is numeric to match `AVG`'s domain; `c2` is
+/// the IN-list filter.
+pub fn avg_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("avg_in_list");
+    let t = b.table();
+    let c_agg = b.column(t);
+    let c_filter = b.column(t);
+    b.column_type_class(c_agg, TypeClass::Numeric);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Avg { distinct: false }, c_agg, t);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["aggregate", "filter", "post_lookup", "numeric"]);
+    b.build()
+}
+
+/// SELECT COUNT(t.c1) FROM t WHERE t.c2 IN (?, ?, ?)
+///
+/// Mirror of [`avg_in_list`] for `Count`. We already drive
+/// `Post-lookup aggregate::Count` indirectly through the `Sum` path of
+/// `in_list_aggregate`, but a dedicated COUNT-only variant keeps the
+/// path covered if other patterns shift.
+pub fn count_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("count_in_list");
+    let t = b.table();
+    let c_agg = b.column(t);
+    let c_filter = b.column(t);
+    b.from(t);
+    b.project_aggregate(AggregateFn::Count { distinct: false }, c_agg, t);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["aggregate", "filter", "post_lookup"]);
     b.build()
 }
 

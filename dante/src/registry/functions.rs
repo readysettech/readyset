@@ -57,11 +57,17 @@ pub fn substring() -> Pattern {
 }
 
 /// SELECT ROUND(t.c, 2) FROM t
+///
+/// Constrained to exact fixed-point types (DECIMAL/NUMERIC) only. Postgres has
+/// no `round(integer, integer)` (qp:ncmgueclkkys) and ALSO no
+/// `round(double precision, integer)` / `round(real, integer)` — only
+/// `round(numeric, integer)` — so FLOAT/DOUBLE/REAL columns must be excluded
+/// too, or PG rejects the query with 42883. (qp:kdsnjpxcfwda)
 pub fn round() -> Pattern {
     let mut b = PatternBuilder::new("round");
     let t = b.table();
     let c = b.column(t);
-    b.column_type_class(c, TypeClass::Numeric);
+    b.column_type_class(c, TypeClass::FixedPoint);
     b.from(t);
     b.project_function(ScalarFn::Round, vec![(c, t)]);
     b.tags(&["function", "numeric"]);
@@ -117,6 +123,72 @@ pub fn greatest() -> Pattern {
     b.from(t);
     b.project_function(ScalarFn::Greatest, vec![(c1, t), (c2, t)]);
     b.tags(&["function", "numeric"]);
+    b.build()
+}
+
+/// SELECT UPPER(t.c) FROM t
+pub fn upper() -> Pattern {
+    let mut b = PatternBuilder::new("upper");
+    let t = b.table();
+    let c = b.column(t);
+    b.column_type_class(c, TypeClass::String);
+    b.from(t);
+    b.project_function(ScalarFn::Upper, vec![(c, t)]);
+    b.tags(&["function", "string"]);
+    b.build()
+}
+
+/// SELECT LOWER(t.c) FROM t
+pub fn lower() -> Pattern {
+    let mut b = PatternBuilder::new("lower");
+    let t = b.table();
+    let c = b.column(t);
+    b.column_type_class(c, TypeClass::String);
+    b.from(t);
+    b.project_function(ScalarFn::Lower, vec![(c, t)]);
+    b.tags(&["function", "string"]);
+    b.build()
+}
+
+/// SELECT UPPER(t.c1) FROM t WHERE t.c2 IN (?, ?, ?) — post-lookup Upper.
+pub fn upper_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("upper_in_list");
+    let t = b.table();
+    let c_fn = b.column(t);
+    let c_filter = b.column(t);
+    b.column_type_class(c_fn, TypeClass::String);
+    b.from(t);
+    b.project_function(ScalarFn::Upper, vec![(c_fn, t)]);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["function", "string", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT LOWER(t.c1) FROM t WHERE t.c2 IN (?, ?, ?) — post-lookup Lower.
+pub fn lower_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("lower_in_list");
+    let t = b.table();
+    let c_fn = b.column(t);
+    let c_filter = b.column(t);
+    b.column_type_class(c_fn, TypeClass::String);
+    b.from(t);
+    b.project_function(ScalarFn::Lower, vec![(c_fn, t)]);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["function", "string", "post_lookup"]);
+    b.build()
+}
+
+/// SELECT SUBSTRING(t.c1, 1, 10) FROM t WHERE t.c2 IN (?, ?, ?) — post-lookup Substring.
+pub fn substring_in_list() -> Pattern {
+    let mut b = PatternBuilder::new("substring_in_list");
+    let t = b.table();
+    let c_fn = b.column(t);
+    let c_filter = b.column(t);
+    b.column_type_class(c_fn, TypeClass::String);
+    b.from(t);
+    b.project_function(ScalarFn::Substring, vec![(c_fn, t)]);
+    b.where_in_param(c_filter, t, 3);
+    b.tags(&["function", "string", "post_lookup"]);
     b.build()
 }
 
@@ -222,5 +294,49 @@ mod tests {
             sql.to_uppercase().contains("GREATEST("),
             "expected GREATEST in sql: {sql}"
         );
+    }
+
+    // Postgres has no round(integer, integer) overload; only round(numeric,
+    // integer) is valid. The round() pattern must constrain its column to a
+    // non-integer numeric type so PG does not reject the generated query.
+    // (qp:ncmgueclkkys)
+    #[test]
+    fn round_column_is_not_integer_type() {
+        use readyset_sql::ast::SqlType;
+
+        use crate::constraint::Constraint;
+
+        let p = round();
+        // The pattern must have a ColumnTypeClass constraint on the ROUND
+        // column, and that type class must not match integer SQL types.
+        let type_class = p
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::ColumnTypeClass { type_class, .. } => Some(type_class.clone()),
+                _ => None,
+            })
+            .expect("round() must have a ColumnTypeClass constraint");
+
+        // PG's two-arg round only accepts `numeric`/`decimal` — NOT integer and
+        // NOT float/real/double precision. `round(double precision, integer)`
+        // and `round(real, integer)` both raise 42883. (qp:kdsnjpxcfwda)
+        let rejected_types = [
+            SqlType::Int(None),
+            SqlType::BigInt(None),
+            SqlType::SmallInt(None),
+            SqlType::Float,
+            SqlType::Double,
+            SqlType::Real,
+        ];
+        for t in &rejected_types {
+            assert!(
+                !type_class.matches(t),
+                "round() type class must not accept {t:?} (PG round(x, int) needs numeric)"
+            );
+        }
+        // It must still accept fixed-point numeric types.
+        assert!(type_class.matches(&SqlType::Decimal(10, 2)));
+        assert!(type_class.matches(&SqlType::Numeric(Some((10, Some(2))))));
     }
 }

@@ -86,7 +86,7 @@ mod tests {
         let p = between();
         assert_eq!(p.name, "between");
         assert!(p.tags.contains(&"filter"));
-        assert_eq!(p.num_vars(), 3); // table + 2 columns
+        assert_eq!(p.num_vars(), 5); // table + 2 columns + lo + hi params
     }
 
     #[test]

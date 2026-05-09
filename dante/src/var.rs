@@ -30,16 +30,21 @@ pub enum VarKind {
     Column { table: VarId },
     /// Resolves to a SQL type.
     SqlType,
+    /// Resolves to a `$N` placeholder in the generated query. The `col`
+    /// VarId is the column whose SQL type drives this placeholder's
+    /// `ParamMeta` (and is used for sanity-checking example overrides).
+    Param { col: VarId },
 }
 
 impl VarKind {
     /// Returns the discriminant name for kind-mismatch error messages.
-    fn discriminant_name(&self) -> &'static str {
+    pub(crate) fn discriminant_name(&self) -> &'static str {
         match self {
             VarKind::Relation => "Relation",
             VarKind::DerivedRelation => "DerivedRelation",
             VarKind::Column { .. } => "Column",
             VarKind::SqlType => "SqlType",
+            VarKind::Param { .. } => "Param",
         }
     }
 
@@ -411,5 +416,37 @@ mod tests {
         assert!(uf.same_set(2, 3));
         assert!(!uf.same_set(0, 2));
         assert!(!uf.same_set(1, 3));
+    }
+
+    #[test]
+    fn allocator_supports_param_kind() {
+        let mut alloc = VarAllocator::new();
+        let t = alloc.alloc(VarKind::Relation);
+        let c = alloc.alloc(VarKind::Column { table: t });
+        let p = alloc.alloc(VarKind::Param { col: c });
+
+        assert_eq!(alloc.kind(p), Some(&VarKind::Param { col: c }));
+        assert_eq!(alloc.kinds().len(), 3);
+    }
+
+    #[test]
+    fn union_find_param_with_relation_fails() {
+        let mut alloc = VarAllocator::new();
+        let t = alloc.alloc(VarKind::Relation);
+        let c = alloc.alloc(VarKind::Column { table: t });
+        let p = alloc.alloc(VarKind::Param { col: c });
+
+        let mut uf = UnionFind::new(alloc.len());
+        let err = uf.union(t.0, p.0, alloc.kinds()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UnifyError::KindMismatch {
+                    left_kind: "Relation",
+                    right_kind: "Param",
+                }
+            ),
+            "expected KindMismatch, got: {err:?}"
+        );
     }
 }

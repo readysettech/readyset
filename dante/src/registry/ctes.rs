@@ -77,11 +77,7 @@ pub fn cte_with_param() -> Pattern {
     sq.constraint(Constraint::NotEq(c_proj, c_filter));
     sq.from(t);
     sq.project_column(c_proj, t);
-    sq.constraint(Constraint::WhereParam {
-        col: c_filter,
-        table: t,
-        op: BinaryOperator::Equal,
-    });
+    sq.where_param(c_filter, t, BinaryOperator::Equal);
     let cte_alias = sq.commit_as_cte();
 
     // Outer query selects from the CTE alias.
