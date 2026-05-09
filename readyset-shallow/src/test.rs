@@ -41,7 +41,7 @@ fn test_ddl_req() -> CacheDDLRequest {
 fn create_test_cache<K, V>(
     manager: &CacheManager<K, V>,
     name: Option<Relation>,
-    query_id: Option<QueryId>,
+    query_id: QueryId,
     policy: EvictionPolicy,
 ) -> Result<(), ReadySetError>
 where
@@ -140,7 +140,12 @@ async fn test_create_cache_with_relation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
 
-    let result = create_test_cache(&manager, Some(relation.clone()), None, test_policy());
+    let result = create_test_cache(
+        &manager,
+        Some(relation.clone()),
+        QueryId::default(),
+        test_policy(),
+    );
     assert!(result.is_ok());
     assert!(manager.exists(Some(&relation), None));
 }
@@ -154,15 +159,15 @@ async fn test_list_caches_and_drop_all() {
     let query_id1 = QueryId::from_unparsed_select("SELECT * FROM test1");
     let query_id2 = QueryId::from_unparsed_select("SELECT * FROM test2");
 
-    create_test_cache(&manager, Some(relation1.clone()), None, test_policy()).unwrap();
-    create_test_cache(&manager, None, Some(query_id1), test_policy()).unwrap();
     create_test_cache(
         &manager,
-        Some(relation2.clone()),
-        Some(query_id2),
+        Some(relation1.clone()),
+        QueryId::default(),
         test_policy(),
     )
     .unwrap();
+    create_test_cache(&manager, None, query_id1, test_policy()).unwrap();
+    create_test_cache(&manager, Some(relation2.clone()), query_id2, test_policy()).unwrap();
 
     let all_caches = manager.list_caches(None, None);
     assert_eq!(all_caches.len(), 3);
@@ -173,7 +178,7 @@ async fn test_list_caches_and_drop_all() {
 
     let filtered = manager.list_caches(Some(query_id1), None);
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].query_id, Some(query_id1));
+    assert_eq!(filtered[0].query_id, query_id1);
 
     let filtered = manager.list_caches(Some(query_id1), Some(&relation1));
     assert_eq!(filtered.len(), 2);
@@ -194,7 +199,7 @@ async fn test_create_cache_with_query_id() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    let result = create_test_cache(&manager, None, Some(query_id), test_policy());
+    let result = create_test_cache(&manager, None, query_id, test_policy());
     assert!(result.is_ok());
     assert!(manager.exists(None, Some(&query_id)));
 }
@@ -205,12 +210,7 @@ async fn test_create_cache_with_both_identifiers() {
     let relation = test_relation("test_table");
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    let result = create_test_cache(
-        &manager,
-        Some(relation.clone()),
-        Some(query_id),
-        test_policy(),
-    );
+    let result = create_test_cache(&manager, Some(relation.clone()), query_id, test_policy());
     assert!(result.is_ok());
 
     assert!(manager.exists(Some(&relation), None));
@@ -219,21 +219,24 @@ async fn test_create_cache_with_both_identifiers() {
 }
 
 #[tokio::test]
-async fn test_create_cache_without_identifiers() {
-    let manager = CacheManager::<String, String>::new(None);
-
-    let result = create_test_cache(&manager, None, None, test_policy());
-    assert_matches!(result, Err(ReadySetError::Internal(_)));
-}
-
-#[tokio::test]
 async fn test_duplicate_cache_creation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
 
-    create_test_cache(&manager, Some(relation.clone()), None, test_policy()).unwrap();
+    create_test_cache(
+        &manager,
+        Some(relation.clone()),
+        QueryId::default(),
+        test_policy(),
+    )
+    .unwrap();
 
-    let result = create_test_cache(&manager, Some(relation.clone()), None, test_policy());
+    let result = create_test_cache(
+        &manager,
+        Some(relation.clone()),
+        QueryId::default(),
+        test_policy(),
+    );
     assert_matches!(result, Err(ReadySetError::ViewAlreadyExists(_)));
 }
 
@@ -242,7 +245,13 @@ async fn test_drop_cache_by_relation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
 
-    create_test_cache(&manager, Some(relation.clone()), None, test_policy()).unwrap();
+    create_test_cache(
+        &manager,
+        Some(relation.clone()),
+        QueryId::default(),
+        test_policy(),
+    )
+    .unwrap();
     assert!(manager.exists(Some(&relation), None));
 
     let result = manager.drop_cache(Some(&relation), None);
@@ -255,7 +264,7 @@ async fn test_drop_cache_by_query_id() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
     assert!(manager.exists(None, Some(&query_id)));
 
     let result = manager.drop_cache(None, Some(&query_id));
@@ -296,7 +305,7 @@ async fn test_get_or_start_insert_miss() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
@@ -306,7 +315,7 @@ async fn test_get_or_start_insert_hit() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -327,7 +336,7 @@ async fn test_cache_insert_guard_not_filled() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -348,7 +357,7 @@ async fn test_cache_insert_guard_filled_without_metadata() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -366,8 +375,8 @@ async fn test_cache_isolation() {
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
     let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
 
-    create_test_cache(&manager, None, Some(query_id_1), test_policy()).unwrap();
-    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
@@ -389,7 +398,8 @@ async fn test_concurrent_cache_creation() {
         let manager_clone = Arc::clone(&manager);
         let handle = tokio::spawn(async move {
             let relation = test_relation(&format!("table_{}", i));
-            create_test_cache(&manager_clone, Some(relation), None, test_policy())
+            let query_id = QueryId::from_unparsed_select(format!("SELECT {i}"));
+            create_test_cache(&manager_clone, Some(relation), query_id, test_policy())
         });
         handles.push(handle);
     }
@@ -414,7 +424,12 @@ async fn test_concurrent_cache_creation_same_name() {
         let manager_clone = Arc::clone(&manager);
         let relation_clone = relation.clone();
         let handle = tokio::spawn(async move {
-            create_test_cache(&manager_clone, Some(relation_clone), None, test_policy())
+            create_test_cache(
+                &manager_clone,
+                Some(relation_clone),
+                QueryId::default(),
+                test_policy(),
+            )
         });
         handles.push(handle);
     }
@@ -445,7 +460,7 @@ async fn test_concurrent_inserts_different_keys() {
     let manager = Arc::new(CacheManager::<String, String>::new(None));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let mut handles = Vec::new();
 
@@ -476,7 +491,7 @@ async fn test_concurrent_reads_and_writes() {
     let manager = Arc::new(CacheManager::<String, String>::new(None));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     for (i, key) in keys_iter(PRE_POPULATE).enumerate() {
         let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
@@ -528,7 +543,8 @@ async fn test_concurrent_create_and_drop() {
         let manager = Arc::clone(&manager);
         let handle = tokio::spawn(async move {
             let relation = test_relation(&format!("table_{}", i));
-            create_test_cache(&manager, Some(relation.clone()), None, test_policy()).unwrap();
+            let query_id = QueryId::from_unparsed_select(format!("SELECT {i}"));
+            create_test_cache(&manager, Some(relation.clone()), query_id, test_policy()).unwrap();
 
             sleep(Duration::from_millis(10)).await;
             manager.drop_cache(Some(&relation), None).unwrap();
@@ -552,7 +568,7 @@ async fn test_ttl_refresh_ahead() {
     create_test_cache(
         &manager,
         None,
-        Some(query_id),
+        query_id,
         EvictionPolicy::Ttl {
             ttl: Duration::from_secs(5),
         },
@@ -585,7 +601,7 @@ async fn test_ttl_expiration() {
     create_test_cache(
         &manager,
         None,
-        Some(query_id),
+        query_id,
         EvictionPolicy::Ttl {
             ttl: Duration::from_secs(5),
         },
@@ -611,7 +627,7 @@ async fn test_max_capacity_enforcement() {
     let manager = CacheManager::<String, String>::new(Some(1024));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     for key in keys_iter(COUNT) {
         let value = "x".repeat(100);
@@ -634,8 +650,8 @@ async fn test_multi_cache_capacity_sharing() {
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
     let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
 
-    create_test_cache(&manager, None, Some(query_id_1), test_policy()).unwrap();
-    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
 
     for key in keys_iter(COUNT) {
         let large_value = "x".repeat(100);
@@ -675,7 +691,7 @@ async fn test_cache_result_debug() {
     let debug_str = format!("{:?}", not_cached);
     assert!(debug_str.contains("NotCached"));
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let miss = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -697,7 +713,7 @@ async fn test_cache_insert_guard_debug() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(&manager, None, Some(query_id), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -724,7 +740,7 @@ async fn test_ttl_and_period_refresh() {
     create_test_cache(
         &manager,
         None,
-        Some(query_id),
+        query_id,
         EvictionPolicy::TtlAndPeriod {
             ttl: Duration::from_secs(10),
             refresh: Duration::from_secs(2),
@@ -759,7 +775,7 @@ async fn test_coalesce_concurrent_requests() {
     manager
         .create_cache(
             None,
-            Some(query_id),
+            query_id,
             test_stmt(),
             vec![],
             test_policy(),
@@ -830,7 +846,7 @@ async fn test_periodic_refresh_callback() {
     manager
         .create_cache(
             None,
-            Some(query_id),
+            query_id,
             test_stmt(),
             vec![],
             EvictionPolicy::TtlAndPeriod {
@@ -905,7 +921,7 @@ async fn test_slow_refresh_serves_stale_data() {
     manager
         .create_cache(
             None,
-            Some(query_id),
+            query_id,
             test_stmt(),
             vec![],
             EvictionPolicy::TtlAndPeriod {
@@ -994,8 +1010,8 @@ async fn test_flush_all_caches_clears_entries_preserves_definitions() {
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
     let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
 
-    create_test_cache(&manager, None, Some(query_id_1), test_policy()).unwrap();
-    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
@@ -1023,13 +1039,7 @@ async fn test_flush_cache_clears_entries_preserves_definition() {
     let relation = test_relation("my_cache");
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    create_test_cache(
-        &manager,
-        Some(relation.clone()),
-        Some(query_id),
-        test_policy(),
-    )
-    .unwrap();
+    create_test_cache(&manager, Some(relation.clone()), query_id, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
@@ -1056,11 +1066,11 @@ async fn test_flush_cache_only_affects_target() {
     create_test_cache(
         &manager,
         Some(relation_1.clone()),
-        Some(query_id_1),
+        query_id_1,
         test_policy(),
     )
     .unwrap();
-    create_test_cache(&manager, None, Some(query_id_2), test_policy()).unwrap();
+    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
 
     let result = manager
         .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)

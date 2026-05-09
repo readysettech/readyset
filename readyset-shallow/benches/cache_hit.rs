@@ -25,7 +25,7 @@ fn bench_cache_hit(c: &mut Criterion) {
     manager
         .create_cache(
             None,
-            Some(query_id),
+            query_id,
             ShallowCacheQuery::default(),
             vec![],
             EvictionPolicy::Ttl {
@@ -95,7 +95,7 @@ fn bench_cache_insert(c: &mut Criterion) {
     manager
         .create_cache(
             None,
-            Some(query_id),
+            query_id,
             ShallowCacheQuery::default(),
             vec![],
             EvictionPolicy::Ttl {

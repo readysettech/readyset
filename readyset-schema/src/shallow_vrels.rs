@@ -46,7 +46,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
     Box::pin(async move {
         let rows: VrelRows = Box::new(caches.into_iter().map(move |cache| {
             vec![
-                cache.query_id.map(|id| id.to_string()).into(),
+                cache.query_id.to_string().into(),
                 cache.name.map(|n| n.display_unquoted().to_string()).into(),
                 cache.query.display(dialect).to_string().into(),
                 cache.ttl_ms.into(),
@@ -79,7 +79,7 @@ fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
     Box::pin(async move {
         let rows: VrelRows = Box::new(entries.into_iter().map(move |entry| {
             vec![
-                entry.query_id.map(|id| id.to_string()).into(),
+                entry.query_id.to_string().into(),
                 format!("{:016x}", entry.entry_id).into(),
                 entry.last_accessed_ms.into(),
                 entry.last_refreshed_ms.into(),

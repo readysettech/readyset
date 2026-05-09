@@ -184,7 +184,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
 #[derive(Debug)]
 pub struct CacheInfo {
     pub name: Option<Relation>,
-    pub query_id: Option<QueryId>,
+    pub query_id: QueryId,
     pub query: ShallowCacheQuery,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub ttl_ms: Option<u64>,
@@ -201,7 +201,7 @@ pub struct CacheInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheEntryInfo {
     /// The query_id of the cache this entry belongs to.
-    pub query_id: Option<QueryId>,
+    pub query_id: QueryId,
     /// A hash of the entry's parameters, serving as a unique identifier within the cache.
     pub entry_id: u64,
     /// Last access time in milliseconds since UNIX_EPOCH.
@@ -254,7 +254,7 @@ where
     inner: InnerCache<K, V>,
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
-    query_id: Option<QueryId>,
+    query_id: QueryId,
     query: ShallowCacheQuery,
     schema_search_path: Vec<SqlIdentifier>,
     ttl_ms: Option<u64>,
@@ -294,7 +294,7 @@ where
         inner: InnerCache<K, V>,
         policy: EvictionPolicy,
         name: Option<Relation>,
-        query_id: Option<QueryId>,
+        query_id: QueryId,
         query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
         ddl_req: CacheDDLRequest,
@@ -324,11 +324,7 @@ where
             (None, None, None)
         };
 
-        let label = query_id
-            .as_ref()
-            .map(|q| q.to_string())
-            .or_else(|| name.as_ref().map(|n| n.name.to_string()))
-            .unwrap_or_default();
+        let label = query_id.to_string();
         let hit_counter = counter!(recorded::SHALLOW_HIT, "query_id" => label.clone());
         let miss_counter = counter!(recorded::SHALLOW_MISS, "query_id" => label);
 
@@ -668,7 +664,7 @@ where
         &self.name
     }
 
-    pub(crate) fn query_id(&self) -> &Option<QueryId> {
+    pub(crate) fn query_id(&self) -> &QueryId {
         &self.query_id
     }
 
@@ -737,7 +733,7 @@ mod tests {
             inner,
             policy,
             None,
-            None,
+            QueryId::default(),
             ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),
@@ -819,7 +815,7 @@ mod tests {
             Arc::clone(&inner),
             policy,
             None,
-            None,
+            QueryId::default(),
             stmt.clone(),
             vec![],
             test_ddl_req(),
@@ -831,7 +827,7 @@ mod tests {
             Arc::clone(&inner),
             policy,
             None,
-            None,
+            QueryId::default(),
             stmt.clone(),
             vec![],
             test_ddl_req(),
@@ -1057,7 +1053,7 @@ mod tests {
                 ttl: Duration::from_secs(60),
             },
             Some(relation.clone()),
-            Some(query_id),
+            query_id,
             ShallowCacheQuery::default(),
             vec![],
             test_ddl_req(),

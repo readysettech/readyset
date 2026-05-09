@@ -1397,10 +1397,7 @@ where
                 .into_iter()
                 .map(|entry| {
                     vec![
-                        entry
-                            .query_id
-                            .map(|id| id.to_string().into())
-                            .unwrap_or(DfValue::None),
+                        DfValue::from(entry.query_id.to_string()),
                         DfValue::from(format!("{:016x}", entry.entry_id)),
                         time_or_null(Some(entry.last_accessed_ms)).into(),
                         time_or_null(Some(entry.last_refreshed_ms)).into(),
@@ -3552,7 +3549,7 @@ where
 
         let res = state.shallow.create_cache(
             Some(name.clone()),
-            Some(query_id),
+            query_id,
             shallow.query.clone(),
             shallow.schema_search_path.clone(),
             resolve_eviction_policy(policy, settings.default_ttl_ms),
@@ -4012,7 +4009,7 @@ where
         {
             let none = || "None".to_string();
             warn!(
-                query_id = %query_id.map_or_else(none, |query_id| query_id.to_string()),
+                %query_id,
                 name = %name
                     .as_ref()
                     .map_or_else(none, |name| name.display(DB::SQL_DIALECT).to_string()),
@@ -4020,7 +4017,7 @@ where
                 "Dropping previously shallow-cached query",
             );
             state
-                .drop_shallow_cached_query(name.as_ref(), query_id, ddl_req)
+                .drop_shallow_cached_query(name.as_ref(), Some(query_id), ddl_req)
                 .await?;
         }
         Ok(())
@@ -4212,7 +4209,7 @@ where
                 ..
             } in state.shallow.list_caches(query_id, None)
             {
-                let query_id = query_id.map(|id| id.to_string());
+                let query_id = query_id.to_string();
                 let name = name
                     .map(|n| n.display_unquoted().to_string().into())
                     .unwrap_or("".into());
@@ -4233,15 +4230,13 @@ where
                     properties.to_string().into()
                 };
                 let count = state.metrics_handle.as_ref().map(|h| {
-                    query_id
-                        .as_ref()
-                        .and_then(|id| h.metrics_summary(id))
+                    h.metrics_summary(&query_id)
                         .unwrap_or_default()
                         .sample_count
                         .to_string()
                         .into()
                 });
-                let query_id = query_id.unwrap_or_default().into();
+                let query_id = query_id.into();
 
                 push_row(query_id, name, query, properties, count);
             }
@@ -6320,7 +6315,7 @@ where
 
     shallow.create_cache(
         Some(name),
-        Some(query_id),
+        query_id,
         select_stmt.clone(),
         schema_search_path.clone(),
         resolve_eviction_policy(stmt.policy, default_ttl_ms),

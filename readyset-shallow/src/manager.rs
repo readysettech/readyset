@@ -123,7 +123,7 @@ where
     pub fn create_cache(
         &self,
         name: Option<Relation>,
-        query_id: Option<QueryId>,
+        query_id: QueryId,
         query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
         policy: EvictionPolicy,
@@ -131,8 +131,7 @@ where
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
     ) -> ReadySetResult<()> {
-        Self::check_identifiers(name.as_ref(), query_id.as_ref())?;
-        let display_name = Self::format_name(name.as_ref(), query_id.as_ref());
+        let display_name = Self::format_name(name.as_ref(), Some(&query_id));
 
         let mut next_id = self
             .next_id
@@ -141,10 +140,7 @@ where
         let id = *next_id;
         *next_id += 1;
 
-        if self
-            .get_cache_id(name.as_ref(), query_id.as_ref())
-            .is_some()
-        {
+        if self.get_cache_id(name.as_ref(), Some(&query_id)).is_some() {
             return Err(ReadySetError::ViewAlreadyExists(display_name));
         }
 
@@ -163,13 +159,9 @@ where
         );
 
         if let Some(name) = name {
-            let guard = self.names.pin();
-            guard.insert(name, id);
+            self.names.pin().insert(name, id);
         }
-        if let Some(query_id) = query_id {
-            let guard = self.query_ids.pin();
-            guard.insert(query_id, id);
-        }
+        self.query_ids.pin().insert(query_id, id);
 
         self.caches.pin().insert(id, cache);
 
@@ -198,13 +190,9 @@ where
         cache.stop();
 
         if let Some(name) = cache.name() {
-            let names_guard = self.names.pin();
-            names_guard.remove(name);
+            self.names.pin().remove(name);
         }
-        if let Some(query_id) = cache.query_id() {
-            let queries_guard = self.query_ids.pin();
-            queries_guard.remove(query_id);
-        }
+        self.query_ids.pin().remove(cache.query_id());
 
         guard.remove(&id);
 
@@ -275,7 +263,7 @@ where
             .values()
             .filter(|cache| {
                 (query_id.is_none() && name.is_none())
-                    || *cache.query_id() == query_id
+                    || Some(*cache.query_id()) == query_id
                     || cache.name().as_ref() == name
             })
             .map(|cache| cache.get_info())
@@ -603,7 +591,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id_1),
+                query_id_1,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -616,7 +604,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id_2),
+                query_id_2,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -657,7 +645,7 @@ mod tests {
         assert_eq!(entries.len(), 2);
 
         // Verify both query_ids are present
-        let query_ids: Vec<_> = entries.iter().filter_map(|e| e.query_id).collect();
+        let query_ids: Vec<_> = entries.iter().map(|e| e.query_id).collect();
         assert!(query_ids.contains(&query_id_1));
         assert!(query_ids.contains(&query_id_2));
     }
@@ -673,7 +661,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id_1),
+                query_id_1,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -686,7 +674,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id_2),
+                query_id_2,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -723,12 +711,12 @@ mod tests {
         // Filter by query_id_1
         let entries = manager.list_entries(Some(query_id_1), None);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].query_id, Some(query_id_1));
+        assert_eq!(entries[0].query_id, query_id_1);
 
         // Filter by query_id_2
         let entries = manager.list_entries(Some(query_id_2), None);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].query_id, Some(query_id_2));
+        assert_eq!(entries[0].query_id, query_id_2);
     }
 
     #[tokio::test]
@@ -742,7 +730,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id_1),
+                query_id_1,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -777,7 +765,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id),
+                query_id,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
@@ -829,7 +817,7 @@ mod tests {
         manager
             .create_cache(
                 None,
-                Some(query_id),
+                query_id,
                 ShallowCacheQuery::default(),
                 vec![],
                 default_policy(),
