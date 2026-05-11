@@ -122,14 +122,11 @@ impl PersistentStateHandle {
         };
 
         let cf = db.cf_handle(&cf_name).unwrap();
-        // Create an iterator once, reuse it for each key
         let mut iter = db.raw_iterator_cf(&cf);
-        let mut iter_primary = if !is_primary {
+        let primary_cf = if !is_primary {
             Some(
-                db.raw_iterator_cf(
-                    &db.cf_handle(PK_CF)
-                        .expect("Primary key column family not found"),
-                ),
+                db.cf_handle(PK_CF)
+                    .expect("Primary key column family not found"),
             )
         } else {
             None
@@ -139,33 +136,52 @@ impl PersistentStateHandle {
             .zip(&is_unique_vec)
             .map(|(k, &is_unique)| {
                 let prefix = PersistentState::serialize_prefix(k);
-                let mut rows = Vec::new();
+                iter.seek(&prefix);
 
-                iter.seek(&prefix); // Find the next key
-
-                while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
-                    let val = match &mut iter_primary {
-                        Some(iter_primary) => {
-                            // If we have a primary iterator, it means this is a secondary index
-                            // and we need to lookup by the
-                            // primary key next
-                            iter_primary.seek(iter.value().unwrap());
-                            deserialize_row(iter_primary.value().unwrap())
+                match &primary_cf {
+                    // Primary index: the value IS the row.
+                    None => {
+                        let mut rows = Vec::new();
+                        while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
+                            rows.push(deserialize_row(iter.value().unwrap()));
+                            if is_unique {
+                                break;
+                            }
+                            iter.next();
                         }
-                        None => deserialize_row(iter.value().unwrap()),
-                    };
-
-                    rows.push(val);
-
-                    if is_unique {
-                        // We know that there is only one row for this index
-                        break;
+                        RecordResult::Owned(rows)
                     }
-
-                    iter.next();
+                    // Secondary index: gather primary-key refs for this input
+                    // key, then fetch the rows in one sorted MultiGet. Replaces
+                    // the previous per-row iter_primary.seek() (~5 µs each) with
+                    // a single batched call that lets RocksDB amortize SST and
+                    // bloom-filter traversal across all matches for the key.
+                    Some(pk_cf) => {
+                        let mut pk_refs: Vec<Box<[u8]>> = Vec::new();
+                        while iter.key().map(|k| k.starts_with(&prefix)).unwrap_or(false) {
+                            pk_refs.push(iter.value().unwrap().into());
+                            if is_unique {
+                                break;
+                            }
+                            iter.next();
+                        }
+                        // The secondary CF stores entries in lex order of
+                        // (group_cols, primary_key), so walking it produced
+                        // primary-key refs already sorted ascending — pass
+                        // `sorted_input = true` to MultiGet.
+                        let rows: Vec<Vec<DfValue>> = db
+                            .batched_multi_get_cf(pk_cf, &pk_refs, true)
+                            .into_iter()
+                            .map(|r| {
+                                deserialize_row(
+                                    r.expect("rocksdb multi_get failed")
+                                        .expect("Existing primary key"),
+                                )
+                            })
+                            .collect();
+                        RecordResult::Owned(rows)
+                    }
                 }
-
-                RecordResult::Owned(rows)
             })
             .collect()
     }
