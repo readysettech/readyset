@@ -16,6 +16,7 @@ use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
+use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
@@ -478,6 +479,7 @@ impl Controller {
         controller_http: ControllerConnectionPool,
         controller_rx: Receiver<ControllerRequest>,
         handle_rx: Receiver<HandleRequest>,
+        domain_exited_rx: UnboundedReceiver<ReplicaAddress>,
         our_descriptor: ControllerDescriptor,
         worker_descriptor: WorkerDescriptor,
         telemetry_sender: TelemetrySender,
@@ -498,8 +500,30 @@ impl Controller {
             table_status_rx,
             shutdown_rx.clone(),
         );
+
+        // Drain worker-reported domain exits in a dedicated task. Keeping this off the main
+        // `select!` loop is what prevents the worker from blocking on a controller-loopback
+        // call when the loop is busy in `controller_channel` work like `maybe_recreate_caches`.
+        // Supervised via `background_task_failed_tx` so a panic doesn't silently lose future
+        // notifications.
+        let inner = Arc::new(LeaderHandle::new());
+        let consumer = tokio::spawn(
+            domain_exited_consumer(domain_exited_rx, Arc::clone(&inner), shutdown_rx.clone())
+                .instrument(info_span!("domain_exited_consumer")),
+        );
+        {
+            let supervisor = background_task_failed_tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = consumer.await {
+                    let _ = supervisor
+                        .send(internal_err!("domain_exited_consumer task died: {e}"))
+                        .await;
+                }
+            });
+        }
+
         Self {
-            inner: Arc::new(LeaderHandle::new()),
+            inner,
             authority,
             http_rx: controller_rx,
             handle_rx,
@@ -1415,6 +1439,54 @@ impl Controller {
         }
 
         Ok(changelists)
+    }
+}
+
+/// Drains worker-reported domain-exit notifications and forwards each one to
+/// [`Leader::handle_failed_domain`] (which distinguishes intentional teardown from
+/// unexpected death by consulting its own state).
+///
+/// Runs in its own task so it is never starved by long-running work in the controller's main
+/// `select!` loop (notably `maybe_recreate_caches`, which performs multiple migrations
+/// back-to-back). [`Leader::handle_failed_domain`] internally `tokio::spawn`s its body and
+/// returns near-instantly, so each iteration is O(1) work plus the spawn.
+///
+/// `LeaderHandle::read()` is held across `handle_failed_domain(...).await` for the duration
+/// of that synchronous prefix. The codebase's leader-election write (`LeaderHandle::replace`)
+/// blocks if a reader is active; readers here drop their guard within one iteration so
+/// writer starvation is bounded by per-iteration cost.
+///
+/// Exits cleanly on shutdown, or when all senders are dropped (process tear-down).
+async fn domain_exited_consumer(
+    mut rx: UnboundedReceiver<ReplicaAddress>,
+    leader: Arc<LeaderHandle>,
+    mut shutdown_rx: ShutdownReceiver,
+) {
+    loop {
+        select! {
+            _ = shutdown_rx.recv() => {
+                debug!("domain_exited_consumer shutting down");
+                return;
+            }
+            msg = rx.recv() => {
+                let Some(addr) = msg else {
+                    debug!("domain_exited_consumer exiting: all senders dropped");
+                    return;
+                };
+                let guard = leader.read().await;
+                let Some(leader) = guard.as_ref() else {
+                    warn!(%addr, "Dropping domain-exit notification: no leader");
+                    continue;
+                };
+                // `handle_failed_domain` spawns its body and returns near-instantly. The
+                // `Err` arm is currently unreachable (the synchronous prefix can't fail)
+                // but is kept defensive — errors from the spawned body flow through
+                // `background_task_failed` independently.
+                if let Err(error) = leader.handle_failed_domain(addr).await {
+                    error!(%error, %addr, "Failed to dispatch domain-exit handler");
+                }
+            }
+        }
     }
 }
 

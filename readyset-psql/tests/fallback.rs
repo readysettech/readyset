@@ -2206,8 +2206,11 @@ mod failure_injection_tests {
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated", &queries).await;
 
-        let queries = handle.views().await.unwrap();
-        assert!(queries.contains_key(&"test_query".into()));
+        eventually!(matches!(handle.leader_ready().await, Ok(true)));
+        eventually! {
+            let queries = handle.views().await.unwrap();
+            queries.contains_key(&"test_query".into())
+        }
 
         let client = connect(config).await;
         assert_query_hits_readyset(&client, "SELECT * FROM users").await;
@@ -2250,9 +2253,12 @@ mod failure_injection_tests {
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_not_recreated", &queries).await;
 
-        let queries = handle.views().await.unwrap();
-        assert!(!queries.contains_key(&"dropped_query".into()));
-        assert!(queries.contains_key(&"cached_query".into()));
+        eventually!(matches!(handle.leader_ready().await, Ok(true)));
+        eventually! {
+            let queries = handle.views().await.unwrap();
+            !queries.contains_key(&"dropped_query".into())
+                && queries.contains_key(&"cached_query".into())
+        }
 
         let client = connect(config).await;
         assert_query_hits_readyset(&client, "SELECT * FROM users WHERE id = 2").await;
@@ -2276,9 +2282,12 @@ mod failure_injection_tests {
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_dropped_then_recreated", &queries).await;
 
-        let queries = handle.views().await.unwrap();
-        assert!(!queries.contains_key(&"dropped_query".into()));
-        assert!(queries.contains_key(&"cached_query".into()));
+        eventually!(matches!(handle.leader_ready().await, Ok(true)));
+        eventually! {
+            let queries = handle.views().await.unwrap();
+            !queries.contains_key(&"dropped_query".into())
+                && queries.contains_key(&"cached_query".into())
+        }
 
         let client = connect(config).await;
         assert_query_hits_readyset(&client, "SELECT * FROM users").await;

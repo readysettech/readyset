@@ -58,6 +58,7 @@ use futures_util::future::{Either, TryFutureExt};
 use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
+use readyset_client::internal::ReplicaAddress;
 use readyset_client::{
     ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, TableStatus, WorkerDescriptor,
 };
@@ -122,7 +123,7 @@ fn start_worker(
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     url: Url,
-    controller_http: ControllerConnectionPool,
+    domain_exited_tx: UnboundedSender<ReplicaAddress>,
     abort_on_task_failure: bool,
     readers: Readers,
     memory_limit: Option<usize>,
@@ -137,7 +138,7 @@ fn start_worker(
         listen_addr,
         external_addr,
         url.join("worker_request")?,
-        controller_http,
+        domain_exited_tx,
         readers,
         memory_limit,
         memory_check_frequency,
@@ -150,6 +151,7 @@ fn start_worker(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_controller(
     authority: Arc<Authority>,
     http_uri: Url,
@@ -158,6 +160,7 @@ fn start_controller(
     handle_rx: Receiver<HandleRequest>,
     controller_http: ControllerConnectionPool,
     controller_rx: Receiver<ControllerRequest>,
+    domain_exited_rx: UnboundedReceiver<ReplicaAddress>,
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
@@ -187,6 +190,7 @@ fn start_controller(
         controller_http,
         controller_rx,
         handle_rx,
+        domain_exited_rx,
         our_descriptor.clone(),
         worker_descriptor,
         telemetry_sender,
@@ -328,12 +332,15 @@ pub(crate) async fn start_instance_inner(
     maybe_wait_for_failpoint(rx).await;
 
     let controller_http = ReadySetHandle::make_pool();
+    let (domain_exited_tx, domain_exited_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ReplicaAddress>();
+
     start_worker(
         worker_rx,
         listen_addr,
         external_addr,
         http_uri.clone(),
-        controller_http.clone(),
+        domain_exited_tx,
         abort_on_task_failure,
         readers,
         memory_limit,
@@ -351,6 +358,7 @@ pub(crate) async fn start_instance_inner(
         handle_rx,
         controller_http,
         controller_rx,
+        domain_exited_rx,
         abort_on_task_failure,
         domain_scheduling_config,
         parsing_preset,

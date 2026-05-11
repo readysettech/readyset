@@ -36,7 +36,7 @@ use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet,
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::ReplicaAddress;
 use readyset_client::metrics::recorded;
-use readyset_client::{ControllerConnectionPool, TableStatus};
+use readyset_client::TableStatus;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::{select, time_scope};
@@ -186,8 +186,11 @@ pub struct Worker {
     domain_external: IpAddr,
     /// URL at which this worker can be contacted.
     url: Url,
-    /// Connection pool to whichever controller is presently leader.
-    controller_http: ControllerConnectionPool,
+    /// Reports replica-task exits to the controller (covers both controller-initiated
+    /// teardown and unexpected death). The receiver lives in a dedicated controller-side
+    /// task; `UnboundedSender::send` is synchronous and non-blocking, which is what
+    /// prevents the historical worker↔controller loopback deadlock.
+    domain_exited_tx: UnboundedSender<ReplicaAddress>,
     /// A store of the current state size of each domain, used for eviction purposes.
     state_sizes: Arc<Mutex<HashMap<ReplicaAddress, Arc<AtomicUsize>>>>,
     /// Read handles.
@@ -213,7 +216,7 @@ impl Worker {
         listen_addr: IpAddr,
         external_addr: SocketAddr,
         url: Url,
-        controller_http: ControllerConnectionPool,
+        domain_exited_tx: UnboundedSender<ReplicaAddress>,
         readers: Readers,
         memory_limit: Option<usize>,
         evict_interval: Option<Duration>,
@@ -230,7 +233,7 @@ impl Worker {
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
             url,
-            controller_http,
+            domain_exited_tx,
             readers,
             memory_limit: memory_limit.unwrap_or(usize::MAX),
             evict_interval,
@@ -469,19 +472,27 @@ impl Worker {
         }
     }
 
-    async fn handle_domain_future_completion(
-        &mut self,
+    /// Notify the controller that the replica-task at `addr` has exited (skipping cancellation,
+    /// which we treat as intentional teardown via `JoinHandle::abort`).
+    ///
+    /// `UnboundedSender::send` is synchronous and non-blocking — it does not yield in a way
+    /// that the `select!` could cancel — which is the property that prevents this path from
+    /// re-deadlocking against the controller's main loop. If the receiver is gone (consumer
+    /// task exited unexpectedly, or controller shutting down) the message is logged and
+    /// dropped; the consumer-task supervisor on the controller side will surface a panic via
+    /// `background_task_failed`.
+    fn notify_domain_exited(
+        &self,
         addr: ReplicaAddress,
-        result: Result<ReadySetResult<()>, JoinError>,
-    ) -> ReadySetResult<()> {
-        log_domain_result(addr, &result);
-
+        result: &Result<ReadySetResult<()>, JoinError>,
+    ) {
+        log_domain_result(addr, result);
         if matches!(result, Err(e) if e.is_cancelled()) {
-            return Ok(());
+            return;
         }
-
-        let mut controller = self.controller_http.use_connection().await?;
-        controller.domain_died(addr).await
+        if let Err(error) = self.domain_exited_tx.send(addr) {
+            warn!(%error, %addr, "domain-exited channel closed; not notifying controller");
+        }
     }
 
     /// Run the worker continuously, processing worker requests, heartbeats, and domain failures.
@@ -521,20 +532,7 @@ impl Worker {
                     self.evict_tick();
                 }
                 Some((result, replica_address)) = self.domain_wait_queue.next() => {
-                    if let Err(error) = self.handle_domain_future_completion(
-                        replica_address,
-                        result
-                    ).await
-                    {
-                        // If we can't notify the controller about the death of a domain, we have to
-                        // exit, since the cluster can no longer be considered healthy
-                        error!(
-                            %error,
-                            %replica_address,
-                            "Error notifying controller about the death of domain"
-                        );
-                        panic!("Could not notify controller about the death of domain")
-                    }
+                    self.notify_domain_exited(replica_address, &result);
                 }
             }
         }

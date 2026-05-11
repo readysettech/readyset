@@ -31,7 +31,7 @@ use crate::consensus::{Authority, AuthorityControl};
 use crate::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use crate::debug::stats;
 use crate::events::{ControllerEvent, ControllerEventsClient};
-use crate::internal::{DomainIndex, ReplicaAddress};
+use crate::internal::DomainIndex;
 use crate::query::QueryId;
 use crate::recipe::changelist::ChangeList;
 use crate::recipe::{CacheExpr, ExprInfo, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
@@ -1135,10 +1135,5 @@ impl ReadySetHandle {
     simple_request!(
         /// Set a failpoint with provided name and action
         failpoint(name: String, action: String,) -> ()
-    );
-
-    simple_request!(
-        /// Notify the controller that a running domain replica has died
-        domain_died(replica_address: ReplicaAddress) -> ()
     );
 }

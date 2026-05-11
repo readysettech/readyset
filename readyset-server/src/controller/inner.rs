@@ -859,11 +859,6 @@ impl Leader {
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(());
             }
-            (&Method::POST, "/domain_died") => {
-                let body = bincode::deserialize(&body)?;
-                self.handle_failed_domain(body).await?;
-                return_serialized!(());
-            }
             _ => Err(ReadySetError::UnknownEndpoint),
         }
     }
