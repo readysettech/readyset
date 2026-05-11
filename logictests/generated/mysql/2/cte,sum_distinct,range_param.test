@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_3`, `column_10`, `column_1`, `column_7`, `column_9`, `column_5`, `column_4`, `column_2`, `column_11`, `column_12`, `column_13`, `column_6`, `column_8`) VALUES (1683789830, 1113864903, 599390, -299442330, 267789602, -839547116, -2123677049, 1101051066, -842967272, 1628923869, 0, -595644994, 1560727289), (-1152745351, 2060682193, -1732931454, 1765797130, -1502664840, 732939457, -694772854, 812086996, 1383907500, 121344078, 1, 2109707596, -939470347), (-1184432823, 1817130764, -692685178, 1501312102, -1517582554, 1734073364, 178606485, 1335509273, -942439925, 1611280028, 2, -1762457216, 641151373), (1659504884, -2094479395, 643051802, -1851355324, 755217922, -787278179, 574912820, 989769891, 1364131251, -1600161724, 3, -191483935, 1347915358), (192212892, 249193925, 1966574383, 70783287, -377719654, -1557915464, -991675241, 1292035207, -245564101, 1945926254, 4, 245460614, -1062325288), (-1682540481, 1977684179, -1977253412, 98425848, -869268076, -478241034, 1553651262, 384922228, 1130743436, -1627685701, 5, 1538212858, -1902999840), (1019966721, -77700135, -753957814, -825754592, -760335595, -1813149066, 1552168566, -236662244, 1250090514, -656523074, 6, 1430548459, 1674013722), (-1009870440, -1553509662, -507286186, 1883789363, -452713563, -1866922676, -402269283, 1094767389, -807313255, -427907515, 7, -950954826, -1167465922), (-776450550, -887574392, -191737159, 1869112561, 254417257, 547281877, 533036998, -633512314, 1761355412, 552849522, 8, 888158578, 638267785), (-1063365275, 539246032, -1915725209, -1978762479, 548074916, 1441708157, 489157994, 1278474277, -107962536, -140183482, 9, -1917272734, -80812364)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_2`) AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
@@ -20,12 +20,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELE
 ----
 -2313930593
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -41,7 +41,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) SELE
 1683789830
 192212892
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -88,7 +88,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_13` = 4)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_2`) AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
@@ -99,12 +99,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELE
 ----
 -3512260025
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -117,7 +117,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) SELE
 ----
 1019966721
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----

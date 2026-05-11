@@ -6,7 +6,7 @@ CREATE TABLE t (column_3 INT, column_1 INT, column_2 INT, column_4 INT, PRIMARY 
 statement ok
 INSERT INTO t (column_1, column_4, column_2, column_3) VALUES (1, 2, 1, 1), (1, 3, 1, 1), (1, 4, 1, 1), (1, 5, 1, 1), (1, 6, 1, 1)
 
-query  nosort
+query  nosort error: Base\ table\ t\ reaches\ both\ sides\ of\ a\ join
 SELECT t.column_2 AS alias_1, t1.column_2 AS alias_2 FROM t INNER JOIN t AS t1 ON t.column_1 = t1.column_3
 ----
 1
@@ -67,7 +67,7 @@ statement ok
 DELETE FROM t WHERE (column_4 = 3)
 
 # REA-6472
-query  nosort error: The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Base\ table\ t\ reaches\ both\ sides\ of\ a\ join
 SELECT t.column_2 AS alias_1, t1.column_2 AS alias_2 FROM t INNER JOIN t AS t1 ON t.column_1 = t1.column_3
 ----
 1
@@ -88,3 +88,109 @@ SELECT t.column_2 AS alias_1, t1.column_2 AS alias_2 FROM t INNER JOIN t AS t1 O
 1
 1
 1
+
+# The equality lives in WHERE rather than ON, and the two sides reach different columns, so
+# the AST detector does not apply.  `convert_filters_to_join_keys` relocates it before the MIR
+# pass looks, which is what puts both inputs on one base with nothing between them.  Were it
+# left in WHERE the join would stay keyless, `add_bogokey_if_necessary` would give each input a
+# literal projection to stop at, and the shape would be admitted like the cross joins below.
+query  nosort error: Base\ table\ t\ reaches\ both\ sides\ of\ a\ join
+SELECT count(*) AS n FROM t, (SELECT t.column_1 AS ax FROM t) AS a WHERE t.column_4 = a.ax
+----
+0
+
+# A cross join over one base table reaches the pass with no key of its own:
+# `add_bogokey_if_necessary` gives it a constant one, and the literal-carrying projection that
+# carries it is what each lookup stops at.  The write reaches those two projections one at a
+# time, so each pair is emitted once and the query caches.
+query II nosort
+SELECT a.column_4 AS x, b.column_4 AS y FROM t AS a, t AS b WHERE a.column_4 = 4 AND b.column_4 = 5
+----
+4
+5
+
+# An inequality is a filter above the join rather than a key, so this arrives carrying the
+# same constant key a cross join does and caches for the same reason.
+query II nosort
+SELECT a.column_4 AS x, b.column_4 AS y FROM t AS a JOIN t AS b ON a.column_4 < b.column_4 WHERE a.column_4 = 5
+----
+5
+6
+
+# The two admitting cases above read once from a cache built on the then-current rows, so
+# they cannot observe the hazard this pass exists to refuse.  These repeat them with a write
+# after the cache exists and with no filter excluding the diagonal pair, which is the pair a
+# double-count would duplicate.  Three rows survive the deletes above, five after the insert.
+query I nosort
+SELECT count(*) AS n FROM t AS a, t AS b
+----
+9
+
+query I nosort
+SELECT count(*) AS n FROM t AS a JOIN t AS b ON a.column_4 < b.column_4
+----
+3
+
+statement ok
+INSERT INTO t (column_1, column_4, column_2, column_3) VALUES (1, 7, 1, 1), (1, 8, 1, 1)
+
+query I nosort
+SELECT count(*) AS n FROM t AS a, t AS b
+----
+25
+
+query I nosort
+SELECT count(*) AS n FROM t AS a JOIN t AS b ON a.column_4 < b.column_4
+----
+10
+
+# The shape the rule admits with a join in the stop position on both sides: two views, each
+# joining the shared base to a second table, joined to each other on the key they share.  A
+# lookup from either input resolves at that view's own join rather than at `t`, so the write
+# reaches the two of them one at a time.  Reaching this from one statement takes views: a FROM
+# subquery carrying only a join is inlined, which flattens it onto the base.
+statement ok
+CREATE TABLE u2 (id INT PRIMARY KEY, k INT)
+
+statement ok
+INSERT INTO u2 (id, k) VALUES (1, 1)
+
+statement ok
+CREATE VIEW va AS SELECT t.column_1 AS k, t.column_4 AS v FROM t JOIN u2 ON t.column_1 = u2.k
+
+statement ok
+CREATE VIEW vb AS SELECT t.column_1 AS k, t.column_4 AS v FROM t JOIN u2 ON t.column_1 = u2.k
+
+# Five rows of `t` carry column_1 = 1 and so reach both views, pairing twenty-five ways.
+query I nosort
+SELECT count(*) AS n FROM va AS a JOIN vb AS b ON a.k = b.k
+----
+25
+
+# A row landing on the key the join set already holds: the pair it makes with itself must be
+# emitted once, so this is thirty-six and not more.
+statement ok
+INSERT INTO t (column_1, column_4, column_2, column_3) VALUES (1, 9, 1, 1)
+
+query I nosort
+SELECT count(*) AS n FROM va AS a JOIN vb AS b ON a.k = b.k
+----
+36
+
+statement ok
+DELETE FROM t WHERE (column_4 = 9)
+
+query I nosort
+SELECT count(*) AS n FROM va AS a JOIN vb AS b ON a.k = b.k
+----
+25
+
+# A write that moves a key rather than only a payload: this row leaves both views, since `u2`
+# holds no k = 2.
+statement ok
+UPDATE t SET column_1 = 2 WHERE (column_4 = 4)
+
+query I nosort
+SELECT count(*) AS n FROM va AS a JOIN vb AS b ON a.k = b.k
+----
+16

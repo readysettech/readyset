@@ -11,8 +11,6 @@ mod predicate_pushup;
 mod prune_columns;
 mod pull_columns;
 mod pull_keys;
-// Wired into `MirQuery::rewrite` by the follow-up commit; only the tests exercise it here.
-#[allow(dead_code)]
 mod reject_self_joins;
 mod zerofill;
 
@@ -40,6 +38,8 @@ impl MirQuery<'_> {
         if dialect == readyset_sql::Dialect::MySQL {
             zerofill::refuse_unsupported_zerofill_uses(&self)?;
         }
+
+        reject_self_joins::reject_self_joins(&self)?;
 
         Ok(self)
     }

@@ -42,7 +42,7 @@ insert into hub values
 # Correlated EXISTS in INNER JOIN ON.  Move to WHERE, decorrelate via
 # existing WHERE-position machinery.  Only s rows whose city has at least
 # one matching j row are kept; equi-join on city aligns the rest.
-query IT rowsort
+query IT rowsort error: Base\ table\ j\ reaches\ both\ sides\ of\ a\ join
 select s.sn, s.city
 from s
 inner join j on s.city = j.city
@@ -175,7 +175,7 @@ NYC
 # independently; both equi-joins stay in their respective ONs.
 # min(threshold from cfg) = min(20, 5) = 5.  All s rows qualify since
 # their status values are all >= 5.
-query IT rowsort
+query IT rowsort error: Base\ table\ j\ reaches\ both\ sides\ of\ a\ join
 select s.sn, s.city
 from s
 inner join j on s.city = j.city

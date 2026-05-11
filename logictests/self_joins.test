@@ -11,7 +11,7 @@ values
 (5, 2, 'child b'),
 (6, 2, 'other child b');
 
-query I nosort
+query I nosort error: Base\ table\ t1\ reaches\ both\ sides\ of\ a\ join
 select count(*) from t1 child
 join t1 parent
 on child.parent_id = parent.id

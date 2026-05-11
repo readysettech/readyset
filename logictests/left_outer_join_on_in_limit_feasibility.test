@@ -27,7 +27,7 @@ insert into p values (10, 60), (20, 40);
 #   s1 pn10 in {10}     -> 1 -> sub.pn = p.pn -> p10 -> (1, 10)
 #   s2 pn20 not in {10} -> 0 -> null-extend           -> (2, NULL)
 #   s3 pn30 not in {10} -> 0 -> null-extend           -> (3, NULL)
-query II rowsort
+query II rowsort error: Base\ table\ p\ reaches\ both\ sides\ of\ a\ join
 select sub.sn, p.pn
 from (
   select s.sn, s.pn,

@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_8`, `column_5`, `column_10`, `column_6`, `column_4`, `column_7`, `column_2`, `column_9`, `column_13`, `column_1`, `column_11`, `column_12`, `column_3`) VALUES (112231737, 1370670932, 1471698496, 410639153, -1825821319, -307450793, 74082547, -1137729298, 0, -1662856442, 1694339847, -1139106320, -921100005), (1286809089, 1139534861, 45208200, -1099775982, -1354192464, 233696975, -1791001279, -1218896089, 1, -1927061953, -994433488, -1318580221, -1051554048), (-721070129, 1501522463, -1352785355, -122954936, 251919603, 921117871, 1068166617, -2050879549, 2, 1652126181, 1938614769, 1973153510, -879181968), (1571293335, 1204069770, 98178877, 735969560, -2017168435, -1270230519, 175328937, -1052332472, 3, -830907797, 221394820, -1207671601, -1265367900), (-641023480, 1770089836, 1460735820, 570971224, -1131334497, -1655028730, -741234420, 210094099, 4, 465655340, 1936051607, -1670755751, 641159254), (1495640610, 307333827, -26835149, -554627192, -1830048022, 689924830, 684270734, -2140783445, 5, -1831663800, 957099317, 2067113647, -1733360744), (-1709033884, 1573221144, 1876007609, -207184117, -1358662000, 1361628769, -1547765840, 249978206, 6, -631604388, 1019134913, 1483344527, -377379358), (-1453539651, 563367170, 1650335840, -1425741887, 1271466494, -2086405964, -1765792049, 684458918, 7, -1053247854, 1493059100, -424365996, 387700803), (1143216900, 410760087, -927009003, 869733099, -1080611696, 1450556575, 1093216817, 1029673003, 8, 1799366043, 799894701, 672572251, -335417487), (-71276527, -735861321, -197330199, -648418708, -436585293, -1952246220, 307033039, -1351280862, 9, 1757951697, -2043123525, -147864032, -556292834)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT avg(distinct `table_1`.`column_2`) AS `alias_2` FROM `table_1`) SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
@@ -19,12 +19,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) SELE
 ----
 -609079428.7000
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_4` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_4` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_4` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -37,7 +37,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_4` AS `alias_1` FROM `table_1`) SELE
 1271466494
 251919603
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT avg(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_4` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_4` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -81,7 +81,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_13` = 4)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT avg(distinct `table_1`.`column_2`) AS `alias_2` FROM `table_1`) SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
@@ -91,12 +91,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) SELE
 ----
 -522949924.0000
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_4` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_4` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_4` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -108,7 +108,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_4` AS `alias_1` FROM `table_1`) SELE
 ----
 1271466494
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT avg(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_4` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_4` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----

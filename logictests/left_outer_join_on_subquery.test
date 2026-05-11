@@ -56,7 +56,7 @@ insert into q.mm values (20, 200), (99, 999)
 #   s1 pn10 status100 (>50) -> p10  -> (1, 10)
 #   s2 pn20 status5   (<50) -> null -> (2, NULL)
 #   s3 pn30 status50  (=50) -> null -> (3, NULL)
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.status > (select avg(weight) from q.p)
@@ -100,7 +100,7 @@ NULL
 # Empty inner: avg over a no-row filter is NULL, so `s.status > NULL` is UNKNOWN
 # -> no p matches the ON -> every s row null-extends.  Guards the outer-join
 # NULL / 3VL boundary of the scalar-op wrap.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.status > (select avg(weight) from q.p where weight > 1000)
@@ -117,7 +117,7 @@ NULL
 # `p2.weight > 50` makes the correlated count discriminate: it is 0 for s2 even
 # though s2.pn=20 matches p20, so s2 null-extends.  Counts of q.p with pn=s.pn
 # AND weight>50: s1(pn10,w60)->1, s2(pn20,w40)->0, s3(pn30)->0.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and (select count(*) from q.p p2 where p2.pn = s.pn and p2.weight > 50) > 0
@@ -130,7 +130,7 @@ NULL
 NULL
 
 # A-correlated EXISTS: same equi-correlation + local filter on q.s -> wrap q.s.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and exists (select 1 from q.p p2 where p2.pn = s.pn and p2.weight > 50)
@@ -146,7 +146,7 @@ NULL
 # equality `s2.pn = p.pn` -> wrap q.p.  Local filter `s2.status > 50`: p10(pn10)
 # has s1(status 100) -> count 1; p20(pn20) has s2(status 5) -> count 0, so the
 # s2 row null-extends despite its pn=20 match.
-query II rowsort
+query II rowsort error: Base\ table\ q.s\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and (select count(*) from q.s s2 where s2.pn = p.pn and s2.status > 50) > 0
@@ -159,7 +159,7 @@ NULL
 NULL
 
 # B-correlated EXISTS: same equi-correlation + local filter on q.p -> wrap q.p.
-query II rowsort
+query II rowsort error: Base\ table\ q.s\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and exists (select 1 from q.s s2 where s2.pn = p.pn and s2.status > 50)
@@ -186,7 +186,7 @@ NULL
 # pn=s.pn AND weight>50:
 #   s1 pn10 w60>50 -> TRUE  -> j1 -> (1, 1000)
 #   s2 pn20 w40>50 -> FALSE -> null-extend -> (2, NULL)
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, j.jn
 from q.s
   join q.p on s.pn = p.pn
@@ -200,7 +200,7 @@ NULL
 
 # Partner-not-last, scalar-op predicate: same partner inference (q.s), different
 # admitted shape.  ON becomes `<alias>.sn = j.sn AND <alias>.__loj_c > 0`.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, j.jn
 from q.s
   join q.p on s.pn = p.pn
@@ -220,7 +220,7 @@ NULL
 # IN-subquery projected onto x's operand.  `s.pn IN (SELECT pn FROM q.p WHERE
 # weight > 50)` has x = s.pn, so `s` is wrapped.
 #   heavy pns (weight > 50) = {10}.  s.pn IN {10}: s1 -> p10; s2, s3 null-extend.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.pn in (select pn from q.p p2 where p2.weight > 50)
@@ -240,7 +240,7 @@ NULL
 #     s1 pn10 -> p.pn = 10 -> p10  -> (1, 10)
 #     s2 pn20 -> not in {10} -> null-extend -> (2, NULL)
 #     s3 pn30 -> not in {10} -> null-extend -> (3, NULL)
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.pn in (select pn from q.p p2 order by pn limit 1)
@@ -356,7 +356,7 @@ from q.s left join q.j on s.sn = j.sn
 # GROUP BY IN-subquery: kept verbatim, so grouping / HAVING semantics survive.
 #   {pn : sum(weight) > 50} over q.p = {10}.  s.pn IN {10}:
 #     s1 pn10 -> p10 -> (1, 10);  s2, s3 null-extend.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.pn in (select p2.pn from q.p p2 group by p2.pn having sum(p2.weight) > 50)
@@ -371,7 +371,7 @@ NULL
 # Aggregate IN-subquery (uncorrelated scalar set): kept verbatim.
 #   (select max(pn) from q.p) = {20}.  s.pn IN {20}:
 #     s2 pn20 -> p20 -> (2, 20);  s1, s3 null-extend.
-query II rowsort
+query II rowsort error: Base\ table\ q.p\ reaches\ both\ sides\ of\ a\ join
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.pn in (select max(p2.pn) from q.p p2)

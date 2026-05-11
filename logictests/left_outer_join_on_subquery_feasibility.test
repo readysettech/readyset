@@ -90,7 +90,7 @@ NULL
 #   Wrap A with a DT projecting the correlated scalar subquery result.
 #   j_count is 3 for NYC, 1 for LA, 0 for SF — j_count > 0 excludes SF —
 #   s(6,SF) gets ON=false — NULL-extended.
-query IT rowsort
+query IT rowsort error: Base\ table\ j\ reaches\ both\ sides\ of\ a\ join
 select sub.sn, j.city
 from (select s.sn, s.city, (select count(*) from j j2 where j2.city = s.city) as j_count from s) sub
 left join j on sub.city = j.city and sub.j_count > 0
@@ -127,7 +127,7 @@ NULL
 #   s_count: 2 for NYC (2 s rows), 3 for LA, 0 for SF (but SF not in j).
 #   All s_count > 1 in this data, so ON reduces to s.city = j.city.
 #   s(6,SF) still has no j match — NULL-extended.
-query IT rowsort
+query IT rowsort error: Base\ table\ s\ reaches\ both\ sides\ of\ a\ join
 select s.sn, sub.city
 from s left join (select j.jn, j.city, (select count(*) from s s2 where s2.city = j.city) as s_count from j) sub
 on s.city = sub.city and sub.s_count > 1
@@ -253,7 +253,7 @@ NULL
 #   s(4,LA): (4,LA).
 #   s(5,LA): (5,LA).
 #   s(6,SF): NULL-extended.
-query IT rowsort
+query IT rowsort error: Base\ table\ s\ reaches\ both\ sides\ of\ a\ join
 select s.sn, sub.city
 from s left join (select j.jn, j.city, (select count(*) from s s2 where s2.city = j.city) as s_count from j) sub
 on s.city = sub.city and sub.s_count > 2

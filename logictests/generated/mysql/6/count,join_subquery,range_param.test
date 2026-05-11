@@ -19,12 +19,12 @@ SELECT count(`table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELEC
 ----
 10
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 0
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_6`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -39,13 +39,13 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 749656794
 908217183
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_7`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_8` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
@@ -57,7 +57,7 @@ SELECT count(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELE
 ----
 4
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_8` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
@@ -93,12 +93,12 @@ SELECT count(`table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELEC
 ----
 5
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 0
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_6`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -110,13 +110,13 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 ----
 908217183
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_7`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_8` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
@@ -128,7 +128,7 @@ SELECT count(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELE
 ----
 1
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT count(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_8` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----

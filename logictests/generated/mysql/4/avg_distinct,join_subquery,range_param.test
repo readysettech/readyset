@@ -20,12 +20,12 @@ SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INN
 ----
 -69299278
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -41,7 +41,7 @@ SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 8499843
 982700756
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -96,12 +96,12 @@ SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INN
 ----
 -405291440
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -114,7 +114,7 @@ SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 561232857
 982700756
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----

@@ -378,7 +378,13 @@ select array(select upper(tag) from tags where d_id = d.id) from dogs d where d.
 ####
 
 # correlated array ctor with comma join (REA-6348)
-query T
+#
+# `tags` is named by the query itself as `t` and read again inside the constructor, so it
+# reaches both sides of a join through a relation that is not key-pinned.  Measured: when a
+# write batch adds rows matching `t.tag = 'yyy'`, this over-counts -- five rows where three
+# are right -- while the same comma join without the constructor is correct in that batch.
+# The refusal is the right answer until REA-6138 is fixed; the shape cannot be served.
+query T error: Base\ table\ tags\ reaches\ both\ sides\ of\ a\ join
 select array(select tag from tags where d_id = d.id order by tag) from dogs d, tags t where d.id = t.d_id and d.id = 2 and t.tag = 'yyy';
 ----
 {AAA,yyy,zzz}

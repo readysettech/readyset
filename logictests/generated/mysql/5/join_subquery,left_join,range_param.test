@@ -105,22 +105,22 @@ statement ok
 INSERT INTO `table_7` (`column_2`, `column_3`, `column_1`) VALUES (693048692, 0, 1273556061), (1883690281, 1, 888092054), (1670920222, 2, -1267852179), (1984660428, 3, -432617026), (2098362150, 4, -1144414085), (-303319576, 5, -685903696), (-368235761, 6, 212596667), (1026070380, 7, 359219702), (-234900130, 8, -1598702202), (1581707888, 9, -2056327062)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_2\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`) INNER JOIN (SELECT `table_2`.`column_3` AS `alias_3`, `table_3`.`column_2` AS `alias_4` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_1` = `table_3`.`column_1`)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_4\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_4` ON (`table_1`.`column_2` = `table_4`.`column_1`) INNER JOIN (SELECT `table_4`.`column_2` AS `alias_3` FROM `table_4`) AS alias_4 ON (`table_1`.`column_3` = `alias_4`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_2\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_2`.`column_4` AS `alias_1`, `table_5`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_1` = `table_5`.`column_1`) INNER JOIN (SELECT `table_2`.`column_5` AS `alias_3`, `table_6`.`column_2` AS `alias_4` FROM `table_2` LEFT JOIN `table_6` ON (`table_2`.`column_1` = `table_6`.`column_1`)) AS alias_5 ON (`table_2`.`column_1` = `alias_5`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_1` AS `alias_4` FROM `table_6` INNER JOIN (SELECT `table_6`.`column_3` AS `alias_1`, `table_7`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_7` ON (`table_6`.`column_1` = `table_7`.`column_1`)) AS alias_3 ON (`table_6`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
@@ -137,25 +137,25 @@ SELECT `table_6`.`column_1` AS `alias_3` FROM `table_6` INNER JOIN (SELECT `tabl
 627776766
 91814117
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_1` AS `alias_4` FROM `table_6` INNER JOIN (SELECT `table_6`.`column_4` AS `alias_1`, `table_8`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_8` ON (`table_6`.`column_1` = `table_8`.`column_1`)) AS alias_3 ON (`table_6`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_9\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_5` AS `alias_1`, `table_9`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_9` ON (`table_6`.`column_1` = `table_9`.`column_1`) INNER JOIN (SELECT `table_9`.`column_3` AS `alias_3`, `table_10`.`column_2` AS `alias_4` FROM `table_9` LEFT JOIN `table_10` ON (`table_9`.`column_2` = `table_10`.`column_1`)) AS alias_5 ON (`table_6`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_11\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_6` AS `alias_1`, `table_11`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_11` ON (`table_6`.`column_1` = `table_11`.`column_1`) INNER JOIN (SELECT `table_11`.`column_2` AS `alias_3` FROM `table_11`) AS alias_4 ON (`table_6`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_7` AS `alias_1`, `table_12`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_12` ON (`table_6`.`column_1` = `table_12`.`column_1`) INNER JOIN (SELECT `table_6`.`column_8` AS `alias_3`, `table_13`.`column_2` AS `alias_4` FROM `table_6` LEFT JOIN `table_13` ON (`table_6`.`column_1` = `table_13`.`column_1`)) AS alias_5 ON (`table_6`.`column_3` = `alias_5`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
@@ -421,22 +421,22 @@ statement ok
 DELETE FROM `table_7` WHERE (`column_3` = 4)
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_2\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`) INNER JOIN (SELECT `table_2`.`column_3` AS `alias_3`, `table_3`.`column_2` AS `alias_4` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_1` = `table_3`.`column_1`)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_4\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_3` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_4` ON (`table_1`.`column_2` = `table_4`.`column_1`) INNER JOIN (SELECT `table_4`.`column_2` AS `alias_3` FROM `table_4`) AS alias_4 ON (`table_1`.`column_3` = `alias_4`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_2\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_2`.`column_4` AS `alias_1`, `table_5`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_5` ON (`table_2`.`column_1` = `table_5`.`column_1`) INNER JOIN (SELECT `table_2`.`column_5` AS `alias_3`, `table_6`.`column_2` AS `alias_4` FROM `table_2` LEFT JOIN `table_6` ON (`table_2`.`column_1` = `table_6`.`column_1`)) AS alias_5 ON (`table_2`.`column_1` = `alias_5`.`alias_3`)
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_1` AS `alias_4` FROM `table_6` INNER JOIN (SELECT `table_6`.`column_3` AS `alias_1`, `table_7`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_7` ON (`table_6`.`column_1` = `table_7`.`column_1`)) AS alias_3 ON (`table_6`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
@@ -451,25 +451,25 @@ SELECT `table_6`.`column_1` AS `alias_3` FROM `table_6` INNER JOIN (SELECT `tabl
 1752876766
 91814117
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_1` AS `alias_4` FROM `table_6` INNER JOIN (SELECT `table_6`.`column_4` AS `alias_1`, `table_8`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_8` ON (`table_6`.`column_1` = `table_8`.`column_1`)) AS alias_3 ON (`table_6`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_9\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_5` AS `alias_1`, `table_9`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_9` ON (`table_6`.`column_1` = `table_9`.`column_1`) INNER JOIN (SELECT `table_9`.`column_3` AS `alias_3`, `table_10`.`column_2` AS `alias_4` FROM `table_9` LEFT JOIN `table_10` ON (`table_9`.`column_2` = `table_10`.`column_1`)) AS alias_5 ON (`table_6`.`column_1` = `alias_5`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_11\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_6` AS `alias_1`, `table_11`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_11` ON (`table_6`.`column_1` = `table_11`.`column_1`) INNER JOIN (SELECT `table_11`.`column_2` AS `alias_3` FROM `table_11`) AS alias_4 ON (`table_6`.`column_1` = `alias_4`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_6\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_6`.`column_7` AS `alias_1`, `table_12`.`column_2` AS `alias_2` FROM `table_6` LEFT JOIN `table_12` ON (`table_6`.`column_1` = `table_12`.`column_1`) INNER JOIN (SELECT `table_6`.`column_8` AS `alias_3`, `table_13`.`column_2` AS `alias_4` FROM `table_6` LEFT JOIN `table_13` ON (`table_6`.`column_1` = `table_13`.`column_1`)) AS alias_5 ON (`table_6`.`column_3` = `alias_5`.`alias_3`) WHERE (`table_6`.`column_1` > ?)
 ? = 10
 ----

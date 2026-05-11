@@ -19,12 +19,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_2` AS `alias_2` FROM `table_1`) SELE
 ----
 1882443182
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT max(`table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -39,13 +39,13 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 444620403
 823143351
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT max(`table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -57,7 +57,7 @@ WITH `alias_3` AS (SELECT `table_1`.`column_6` AS `alias_2` FROM `table_1`) SELE
 ----
 2011101060
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -93,12 +93,12 @@ WITH `alias_3` AS (SELECT `table_1`.`column_2` AS `alias_2` FROM `table_1`) SELE
 ----
 850319148
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT max(`table_1`.`column_6`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -110,13 +110,13 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 ----
 444620403
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT max(`table_1`.`column_7`) AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_9`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -128,7 +128,7 @@ WITH `alias_3` AS (SELECT `table_1`.`column_6` AS `alias_2` FROM `table_1`) SELE
 ----
 1849403318
 
-query  rowsort
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT max(`table_1`.`column_12`) AS `alias_2` FROM `table_1`) SELECT max(`table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
