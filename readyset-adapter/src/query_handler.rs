@@ -89,6 +89,16 @@ impl SessionTimezone {
             Self::System => false,
         }
     }
+
+    /// Construct a [`SessionTimezone::FixedOffset`] from a signed seconds-east-of-UTC value,
+    /// applying the same bounds as the textual parser (`-13:59..=+14:00`). Returns `None`
+    /// when the value falls outside that range or is otherwise an invalid `FixedOffset`.
+    pub fn from_fixed_offset_secs(east_secs: i32) -> Option<Self> {
+        if !(MIN_TZ_OFFSET_EAST_SECS..=MAX_TZ_OFFSET_EAST_SECS).contains(&east_secs) {
+            return None;
+        }
+        FixedOffset::east_opt(east_secs).map(Self::FixedOffset)
+    }
 }
 
 /// How we should be handling a SQL `SET` statement.

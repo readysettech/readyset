@@ -12,6 +12,18 @@ use readyset_sql::ast::{
     SetPostgresParameterValue, SetStatement, SqlQuery,
 };
 
+/// Parse PG's numeric `SET TimeZone = N` shorthand. PG documents this as
+/// "N hours behind UTC" — POSIX-style, sign-inverted relative to ISO 8601 —
+/// so `SET TimeZone = -8` resolves to ISO offset `+08:00`.
+fn parse_posix_hours_offset(n: f64) -> Option<readyset_adapter::SessionTimezone> {
+    if !n.is_finite() {
+        return None;
+    }
+    // `f64 as i32` saturates; `from_fixed_offset_secs` rejects out-of-range.
+    let east_secs = (-n * 3600.0).round() as i32;
+    readyset_adapter::SessionTimezone::from_fixed_offset_secs(east_secs)
+}
+
 enum AllowedParameterValue {
     Literal(PostgresParameterValue),
     OneOf(HashSet<PostgresParameterValue>),
@@ -392,22 +404,29 @@ impl QueryHandler for PostgreSqlQueryHandler {
                     // UTC-wallclock); the parsed value is still recorded so
                     // future eval-side support can read it unchanged.
                     "timezone" => {
-                        let s = match value {
+                        let parsed = match value {
                             // `TO DEFAULT` resolves to the upstream config
                             // default, which we can't inspect at SET time and
                             // is frequently non-UTC.
-                            SetPostgresParameterValue::Default => {
-                                return behavior.unsupported(true);
-                            }
+                            SetPostgresParameterValue::Default => None,
                             SetPostgresParameterValue::Value(PostgresParameterValue::Single(
                                 PostgresParameterValueInner::Literal(Literal::String(s)),
-                            )) => s.as_str(),
+                            )) => parse_timezone(s),
                             SetPostgresParameterValue::Value(PostgresParameterValue::Single(
                                 PostgresParameterValueInner::Identifier(id),
-                            )) => id.as_str(),
-                            _ => return behavior.unsupported(true),
+                            )) => parse_timezone(id.as_str()),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Literal(Literal::Integer(n)),
+                            )) => parse_posix_hours_offset(*n as f64),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Literal(Literal::UnsignedInteger(n)),
+                            )) => parse_posix_hours_offset(*n as f64),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Literal(Literal::Number(s)),
+                            )) => s.parse::<f64>().ok().and_then(parse_posix_hours_offset),
+                            _ => None,
                         };
-                        match parse_timezone(s) {
+                        match parsed {
                             Some(tz) if tz.is_utc() => behavior.set_timezone(tz),
                             Some(tz) => behavior.set_timezone(tz).unsupported(true),
                             None => behavior.unsupported(true),
@@ -558,6 +577,119 @@ mod tests {
             beh.set_timezone.is_some(),
             "quoted-identifier non-UTC SET should still record the parsed timezone, got {beh:?}"
         );
+    }
+
+    #[test]
+    fn set_time_zone_numeric_zero_is_utc() {
+        for stmt in ["SET TimeZone = 0", "SET TimeZone TO 0"] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                !beh.unsupported,
+                "{stmt:?} should be supported (UTC-equivalent), got {beh:?}"
+            );
+            let tz = beh
+                .set_timezone
+                .unwrap_or_else(|| panic!("{stmt:?} should record a parsed timezone"));
+            assert!(tz.is_utc(), "{stmt:?} should record UTC, got {tz:?}");
+        }
+    }
+
+    #[test]
+    fn set_time_zone_numeric_non_zero_is_unsupported_but_recorded() {
+        // POSIX-inverted: `SET TimeZone = -8` means UTC+8, `= 8` means UTC-8.
+        for (stmt, expected_offset_secs) in [
+            ("SET TimeZone = -8", 8 * 3600),
+            ("SET TimeZone = 8", -8 * 3600),
+            ("SET TimeZone = 5", -5 * 3600),
+            ("SET TimeZone TO -3", 3 * 3600),
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                beh.unsupported,
+                "{stmt:?} should be unsupported (non-UTC), got {beh:?}"
+            );
+            let expected = readyset_adapter::SessionTimezone::FixedOffset(
+                chrono::FixedOffset::east_opt(expected_offset_secs).unwrap(),
+            );
+            assert_eq!(
+                beh.set_timezone,
+                Some(expected),
+                "{stmt:?} should record FixedOffset({expected_offset_secs}s), got {beh:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_time_zone_numeric_out_of_range_is_unsupported() {
+        for stmt in [
+            "SET TimeZone = 99",
+            "SET TimeZone = -99",
+            "SET TimeZone = 15",
+            "SET TimeZone = -15",
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(beh.unsupported, "{stmt:?} should be unsupported");
+            assert!(
+                beh.set_timezone.is_none(),
+                "{stmt:?} parsed nothing, set_timezone should stay None, got {beh:?}"
+            );
+        }
+    }
+
+    /// Fractional numerics arrive as `Literal::Number` rather than `Literal::Integer`.
+    #[test]
+    fn set_time_zone_numeric_fractional_zero_is_utc() {
+        for stmt in [
+            "SET TimeZone = 0.0",
+            "SET TimeZone = -0.0",
+            "SET TimeZone TO 0.0",
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                !beh.unsupported,
+                "{stmt:?} should be supported (UTC-equivalent), got {beh:?}"
+            );
+            let tz = beh
+                .set_timezone
+                .unwrap_or_else(|| panic!("{stmt:?} should record a parsed timezone"));
+            assert!(tz.is_utc(), "{stmt:?} should record UTC, got {tz:?}");
+        }
+    }
+
+    #[test]
+    fn set_time_zone_numeric_fractional_non_zero_is_unsupported_but_recorded() {
+        for (stmt, expected_offset_secs) in [
+            ("SET TimeZone = 0.5", -1800),
+            ("SET TimeZone = -0.5", 1800),
+            ("SET TimeZone = -7.5", 27000),
+            ("SET TimeZone TO 5.5", -19800),
+        ] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(
+                beh.unsupported,
+                "{stmt:?} should be unsupported (non-UTC), got {beh:?}"
+            );
+            let expected = readyset_adapter::SessionTimezone::FixedOffset(
+                chrono::FixedOffset::east_opt(expected_offset_secs).unwrap(),
+            );
+            assert_eq!(
+                beh.set_timezone,
+                Some(expected),
+                "{stmt:?} should record FixedOffset({expected_offset_secs}s), got {beh:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_time_zone_numeric_fractional_out_of_range_is_unsupported() {
+        for stmt in ["SET TimeZone = 99.5", "SET TimeZone = -99.5"] {
+            let beh = PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(stmt));
+            assert!(beh.unsupported, "{stmt:?} should be unsupported");
+            assert!(
+                beh.set_timezone.is_none(),
+                "{stmt:?} parsed nothing, set_timezone should stay None, got {beh:?}"
+            );
+        }
     }
 
     #[test]
