@@ -2028,6 +2028,17 @@ fn parameter_column_in_query(state: &mut QueryState<'_>, query: &mut SelectState
     parameter_column_in_query_filtered(state, query, |_, _, _| true)
 }
 
+/// Returns true if `sql_type` has well-defined ordering semantics in `dialect`.
+///
+/// PostgreSQL's `json` type has no comparison operators, so a query that sorts
+/// or partitions on a `json` column errors at runtime. `jsonb` is unaffected.
+/// MySQL defines an ordering on its `JSON` type, so this filter is a no-op
+/// there. Used when picking columns for ORDER BY, window PARTITION BY, and
+/// window ORDER BY.
+fn is_orderable_in_dialect(sql_type: &SqlType, dialect: ParseDialect) -> bool {
+    !(dialect == ParseDialect::PostgreSQL && *sql_type == SqlType::Json)
+}
+
 impl QueryOperation {
     /// Returns true if this query operation is supported inside of subqueries. If this function
     /// returns false, `add_to_query` will not be called on this query operation when adding it to a
@@ -2462,6 +2473,7 @@ impl QueryOperation {
                 }
             }
             QueryOperation::TopK { order_type, limit } => {
+                let dialect = state.gen.dialect;
                 let table = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
@@ -2470,7 +2482,10 @@ impl QueryOperation {
                         .push(TableExpr::from(Relation::from(table.name.clone())));
                 }
 
-                let column_name = table.some_column_name();
+                let column_name = table.some_column_name_filtered(
+                    || SqlType::Int(None),
+                    |_, spec| is_orderable_in_dialect(&spec.sql_type, dialect),
+                );
                 let column = Column {
                     table: Some(table.name.clone().into()),
                     ..column_name.into()
@@ -2500,6 +2515,7 @@ impl QueryOperation {
                 limit,
                 page_number,
             } => {
+                let dialect = state.gen.dialect;
                 let table = state.some_table_in_query_mut(query);
 
                 if query.tables.is_empty() {
@@ -2508,7 +2524,10 @@ impl QueryOperation {
                         .push(TableExpr::from(Relation::from(table.name.clone())));
                 }
 
-                let column_name = table.some_column_name();
+                let column_name = table.some_column_name_filtered(
+                    || SqlType::Int(None),
+                    |_, spec| is_orderable_in_dialect(&spec.sql_type, dialect),
+                );
                 let column = Column {
                     table: Some(table.name.clone().into()),
                     ..column_name.into()
@@ -2558,6 +2577,7 @@ impl QueryOperation {
                     return;
                 }
 
+                let dialect = state.gen.dialect;
                 let table = state.some_table_in_query_mut(query);
                 let table_name = table.name.clone();
 
@@ -2608,7 +2628,12 @@ impl QueryOperation {
                 let mut make_column = || {
                     Expr::Column(Column {
                         table: Some(table_name.clone().into()),
-                        name: table.some_column_name().into(),
+                        name: table
+                            .some_column_name_filtered(
+                                || SqlType::Int(None),
+                                |_, spec| is_orderable_in_dialect(&spec.sql_type, dialect),
+                            )
+                            .into(),
                     })
                 };
 
