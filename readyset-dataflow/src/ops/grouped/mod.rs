@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -160,6 +159,22 @@ fn get_group_values(group_by: &[usize], row: &Record) -> Vec<DfValue> {
     group
 }
 
+struct Bucket<D> {
+    group_rs: Vec<Record>,
+    diffs: Vec<D>,
+    pos_neg_delta: i64,
+}
+
+impl<D> Default for Bucket<D> {
+    fn default() -> Self {
+        Self {
+            group_rs: Default::default(),
+            diffs: Default::default(),
+            pos_neg_delta: Default::default(),
+        }
+    }
+}
+
 impl<T: GroupedOperation + Send + 'static> Ingredient for GroupedOperator<T>
 where
     Self: Into<NodeOperator>,
@@ -248,18 +263,20 @@ where
         }
 
         let group_by = self.group_by.clone();
-        let cmp = |a: &Record, b: &Record| {
-            group_by
-                .iter()
-                .map(|&col| &a[col])
-                .cmp(group_by.iter().map(|&col| &b[col]))
-        };
 
-        // First, we want to be smart about multiple added/removed rows with same group.
-        // For example, if we get a -, then a +, for the same group, we don't want to
-        // execute two queries. We'll do this by sorting the batch by our group by.
-        let mut rs: Vec<_> = rs.into();
-        rs.sort_unstable_by(&cmp);
+        // Bucket records by their group_by values so each group is processed in a
+        // single handle_group call.
+        let mut buckets: HashMap<Vec<DfValue>, Bucket<<T as GroupedOperation>::Diff>> =
+            HashMap::new();
+        for r in rs {
+            let key: Vec<DfValue> = group_by.iter().map(|&i| r[i].clone()).collect();
+            let bucket = buckets.entry(key).or_default();
+            bucket
+                .diffs
+                .push(self.inner.to_diff(&r[..], r.is_positive())?);
+            bucket.pos_neg_delta += if r.is_positive() { 1 } else { -1 };
+            bucket.group_rs.push(r);
+        }
 
         // find the current value for this group
         let us = self.us.unwrap();
@@ -451,23 +468,14 @@ where
                 Ok(())
             };
 
-            let mut diffs = Vec::new();
-            let mut group_rs = Vec::new();
-            let mut pos_neg_delta = 0i64;
-            for r in rs {
-                if !group_rs.is_empty() && cmp(&group_rs[0], &r) != Ordering::Equal {
-                    handle_group(
-                        self,
-                        group_rs.drain(..),
-                        diffs.drain(..),
-                        std::mem::take(&mut pos_neg_delta),
-                    )?;
-                }
-                diffs.push(self.inner.to_diff(&r[..], r.is_positive())?);
-                pos_neg_delta += if r.is_positive() { 1 } else { -1 };
-                group_rs.push(r);
+            for (_, mut bucket) in buckets {
+                handle_group(
+                    self,
+                    bucket.group_rs.drain(..),
+                    bucket.diffs.drain(..),
+                    bucket.pos_neg_delta,
+                )?;
             }
-            handle_group(self, group_rs.drain(..), diffs.drain(..), pos_neg_delta)?;
         }
 
         Ok(ProcessingResult {
