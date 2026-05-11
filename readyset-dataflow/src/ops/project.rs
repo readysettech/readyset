@@ -164,6 +164,40 @@ mod tests {
     use super::*;
     use crate::ops;
 
+    /// `readyset-mir`'s `reject_self_joins` admits a join keyed on a constant because the
+    /// projection that carries the constant is not query-through, so a lookup into either input
+    /// stops there instead of falling through to the base both inputs read.  If this stops
+    /// holding, that pass starts admitting a shape that returns wrong rows after a write
+    /// (REA-6138), with nothing else to catch it.
+    #[test]
+    fn literal_emit_is_not_query_through() {
+        use Expr::{Column, Literal};
+
+        let columns_only = Project::new(
+            NodeIndex::new(0),
+            vec![Column {
+                index: 0,
+                ty: DfType::Unknown,
+            }],
+        );
+        assert!(columns_only.can_query_through());
+
+        let carries_a_literal = Project::new(
+            NodeIndex::new(0),
+            vec![
+                Column {
+                    index: 0,
+                    ty: DfType::Unknown,
+                },
+                Literal {
+                    val: 0.into(),
+                    ty: DfType::Unknown,
+                },
+            ],
+        );
+        assert!(!carries_a_literal.can_query_through());
+    }
+
     fn setup(materialized: bool, all: bool, add: bool) -> ops::test::MockGraph {
         let mut g = ops::test::MockGraph::new();
         let s = g.add_base("source", &["x", "y", "z"]);

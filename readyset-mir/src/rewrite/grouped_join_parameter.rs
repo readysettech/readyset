@@ -20,6 +20,13 @@ use crate::{Column, NodeIndex};
 /// Whether a join's lookup into `parent` reaches grouped state. Nodes that keep no state of their
 /// own are walked past to the materialization behind them. The walk reads the whole graph rather
 /// than this query's nodes, since a view's nodes belong to the view.
+///
+/// A projection carrying an expression and an `Identity` both keep state in dataflow and would
+/// stop a real lookup, but are stepped over here.  That only finds grouped state a lookup would
+/// never reach, so the pass refuses more than it needs to rather than less.
+///
+/// TODO: stop the walk where a lookup actually comes to rest.  That admits queries this
+/// currently declines, so it wants measuring on its own.
 fn lookup_reaches_grouped_state(query: &MirQuery<'_>, mut parent: NodeIndex) -> bool {
     loop {
         let Some(node) = query.graph.node_weight(parent) else {

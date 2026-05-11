@@ -11,6 +11,9 @@ mod predicate_pushup;
 mod prune_columns;
 mod pull_columns;
 mod pull_keys;
+// Wired into `MirQuery::rewrite` by the follow-up commit; only the tests exercise it here.
+#[allow(dead_code)]
+mod reject_self_joins;
 mod zerofill;
 
 impl MirQuery<'_> {
