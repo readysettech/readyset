@@ -1,0 +1,19 @@
+-- REA-6023: query results containing a TIMESTAMPTZ value, where the `query`
+-- record omits column types, should not panic the runner. Omitted column
+-- types route results through `compare_type_insensitive`, which previously
+-- panicked when it tried to round-trip a `TimestampTz` through
+-- `mysql_async::Value`. The runner now short-circuits to direct equality for
+-- types with no MySQL representation.
+statement ok
+DROP TABLE IF EXISTS "table_1"
+
+statement ok
+CREATE TABLE "table_1" ("column_1" TIMESTAMP WITH TIME ZONE)
+
+statement ok
+INSERT INTO "table_1" ("column_1") VALUES ('2020-01-19 12:30:45-05:00')
+
+query  rowsort
+SELECT date_trunc('hour', "table_1"."column_1") AS "alias_1" FROM "table_1"
+----
+2020-01-19 17:00:00 +00:00

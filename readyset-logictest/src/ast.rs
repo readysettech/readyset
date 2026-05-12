@@ -900,6 +900,10 @@ impl Value {
     pub fn compare_type_insensitive(&self, other: &Self) -> bool {
         match other.typ() {
             None => *self == Value::Null,
+            // PostgreSQL-specific variants have no `mysql_async::Value` round-trip
+            // (the conversions in either direction panic). Direct equality is what
+            // the round-trip is approximating anyway, so short-circuit here.
+            Some(Type::TimestampTz | Type::ByteArray) => self == other,
             Some(typ) => Self::from_mysql_value_with_type(mysql_async::Value::from(self), &typ)
                 .is_ok_and(|v| v == *other),
         }
@@ -1179,6 +1183,30 @@ mod tests {
     #[test]
     fn compare_result_value() {
         assert!(Value::Integer(9) > Value::Integer(10));
+    }
+
+    // REA-6023: `compare_type_insensitive` previously panicked on PostgreSQL-only
+    // variants (`TimestampTz`, `ByteArray`) because their `mysql_async::Value`
+    // round-trip is `unimplemented!()`. Direct equality is the right semantics.
+    #[test]
+    fn compare_type_insensitive_timestamptz() {
+        let ts = DateTime::parse_from_rfc3339("2020-01-19T17:00:00+00:00").unwrap();
+        let a = Value::TimestampTz(ts);
+        let b = Value::TimestampTz(ts);
+        assert!(a.compare_type_insensitive(&b));
+
+        let other = DateTime::parse_from_rfc3339("2020-01-19T18:00:00+00:00").unwrap();
+        assert!(!a.compare_type_insensitive(&Value::TimestampTz(other)));
+    }
+
+    #[test]
+    fn compare_type_insensitive_bytearray() {
+        let a = Value::ByteArray(vec![0xde, 0xad, 0xbe, 0xef]);
+        let b = Value::ByteArray(vec![0xde, 0xad, 0xbe, 0xef]);
+        assert!(a.compare_type_insensitive(&b));
+
+        let c = Value::ByteArray(vec![0xca, 0xfe]);
+        assert!(!a.compare_type_insensitive(&c));
     }
 
     #[test]
