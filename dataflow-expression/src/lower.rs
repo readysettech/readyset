@@ -31,12 +31,17 @@ pub trait LowerContext: Clone {
     fn resolve_type(&self, ty: Relation) -> Option<DfType>;
 }
 
-/// Resolve the output collation for CONCAT/CONCAT_WS by approximating MySQL's coercibility rules.
+/// Resolve a single common collation across a set of expressions.
 ///
-/// Column references have stronger collation affinity than literals or function results.
-/// When two args share the same affinity but differ in character set, UTF-8 wins as a superset.
-/// Non-text args are ignored for collation selection.
-fn resolve_concat_collation(args: &[&Expr], dialect: Dialect) -> Collation {
+/// Column references have stronger affinity than literals or function results, so a column's
+/// collation wins over a literal's. When two args share the same affinity but differ in character
+/// set, UTF-8 wins as a superset. Non-text args are ignored; if no arg is text the dialect default
+/// is returned.
+///
+/// Used both for the result collation of string-producing functions (CONCAT, etc.) and to pick a
+/// target collation when coercing operands of a comparison or other binary op so they share a
+/// single collation at evaluation time.
+fn resolve_collation(args: &[&Expr], dialect: Dialect) -> Collation {
     // Lower = stronger affinity. Columns beat everything else.
     const COLUMN: u8 = 0;
     const OTHER: u8 = 1;
@@ -555,7 +560,7 @@ impl BuiltinFunction {
                 let arg1 = next_arg()?;
                 let rest_args = args.by_ref().collect::<Vec<_>>();
                 let all_args: Vec<&Expr> = iter::once(&arg1).chain(&rest_args).collect();
-                let collation = resolve_concat_collation(&all_args, dialect);
+                let collation = resolve_collation(&all_args, dialect);
                 let ty = DfType::Text(collation);
                 (
                     Self::Concat(
@@ -579,7 +584,7 @@ impl BuiltinFunction {
                     .chain(iter::once(&arg2))
                     .chain(&rest_args)
                     .collect();
-                let collation = resolve_concat_collation(&all_args, dialect);
+                let collation = resolve_collation(&all_args, dialect);
                 let ty = DfType::Text(collation);
                 (
                     Self::ConcatWs(
