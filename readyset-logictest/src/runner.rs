@@ -87,6 +87,8 @@ pub struct RunOptions {
     /// DDL/DML statement failures still bail immediately since subsequent records depend on them.
     /// SELECT statement error failures are collected like query failures.
     pub no_fail_fast: bool,
+    /// Skip query-level `error:` pattern matching; see `--ignore-error-tags` on the CLI.
+    pub ignore_error_tags: bool,
     /// Per-query timeout. If a single query or statement execution takes longer than this, it will
     /// be aborted with a timeout error. This prevents hangs when domain threads panic and drop
     /// response channels.
@@ -108,6 +110,7 @@ impl RunOptions {
             parsing_preset: ParsingPreset::for_tests(),
             verbose: false,
             no_fail_fast: false,
+            ignore_error_tags: false,
             query_timeout: Duration::from_secs(60),
             script_timeout: None,
         }
@@ -640,6 +643,10 @@ impl TestScript {
         opts: &RunOptions,
     ) -> anyhow::Result<()> {
         let result = self.run_query_inner(query, conn, is_readyset, opts).await;
+
+        if opts.ignore_error_tags {
+            return result;
+        }
 
         if let Some(error_pattern) = &query.expected_error {
             match result {

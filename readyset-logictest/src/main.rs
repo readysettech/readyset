@@ -324,6 +324,21 @@ struct Verify {
     #[arg(long, alias = "nff", env = "LOGICTEST_NO_FAIL_FAST")]
     no_fail_fast: bool,
 
+    /// Ignore the `error:` pattern on every query — execute the query, compare its rows
+    /// against the recorded result section as normal, and report success or failure based
+    /// on the row comparison instead of whether the error pattern matched.
+    ///
+    /// Generated logictests use `error:` directives to record Readyset-specific rejection
+    /// messages (e.g. unsupported-query errors). When verifying recorded results against a
+    /// pure upstream database those patterns are not meaningful, but the recorded row
+    /// section still is: an upstream that returns different rows than what was recorded is
+    /// exactly the divergence we want to detect.
+    ///
+    /// Statement-level `statement error` records and queries without `error:` directives
+    /// are unaffected.
+    #[arg(long, env = "LOGICTEST_IGNORE_ERROR_TAGS")]
+    ignore_error_tags: bool,
+
     /// Per-query timeout in seconds. If a single query or statement execution takes longer than
     /// this, it will be aborted with a timeout error. Prevents hangs when domain threads panic.
     #[arg(long, default_value = "60")]
@@ -558,6 +573,7 @@ impl From<&Verify> for RunOptions {
             time: verify.time,
             verbose: verify.verbose,
             no_fail_fast: verify.no_fail_fast,
+            ignore_error_tags: verify.ignore_error_tags,
             query_timeout: Duration::from_secs(verify.query_timeout),
             script_timeout: Some(Duration::from_secs(verify.script_timeout)),
         }
