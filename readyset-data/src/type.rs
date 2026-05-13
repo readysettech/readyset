@@ -695,6 +695,18 @@ impl DfType {
         }
     }
 
+    /// Returns a copy of this type with the given collation, for text types. Non-text types
+    /// are returned unchanged.
+    #[inline]
+    pub fn with_collation(&self, c: Collation) -> Self {
+        match self {
+            Self::Text(_) => Self::Text(c),
+            Self::Char(n, _) => Self::Char(*n, c),
+            Self::VarChar(n, _) => Self::VarChar(*n, c),
+            other => other.clone(),
+        }
+    }
+
     /// Returns the deepest nested type in [`DfType::Array`], otherwise returns `self`.
     #[inline]
     pub fn innermost_array_type(&self) -> &Self {

@@ -78,6 +78,42 @@ fn resolve_collation(args: &[&Expr], dialect: Dialect) -> Collation {
     Collation::unwrap_or_default(best_collation, dialect)
 }
 
+/// Overlay a single resolved collation onto the type-coercion targets returned by
+/// [`BinaryOperator::argument_type_coercions`] when both sides of a binary op are or become
+/// text. Returns updated coercion targets that force a cast on either side whose collation
+/// differs from the resolved target.
+///
+/// This is what keeps the hash short-circuit in `DfValue`'s `PartialEq` for `Text` sound: both
+/// operands are guaranteed to share a single collation at evaluation time, so their
+/// `collation_hash` values agree on every pair that compares equal under that collation.
+fn apply_collation_coercion(
+    (left, left_coerce): (&Expr, Option<&DfType>),
+    (right, right_coerce): (&Expr, Option<&DfType>),
+    dialect: Dialect,
+) -> (Option<DfType>, Option<DfType>) {
+    let post_left = left_coerce.unwrap_or_else(|| left.ty());
+    let post_right = right_coerce.unwrap_or_else(|| right.ty());
+
+    if !post_left.is_any_text() || !post_right.is_any_text() {
+        return (left_coerce.cloned(), right_coerce.cloned());
+    }
+
+    let target = resolve_collation(&[left, right], dialect);
+
+    let adjust = |orig: Option<&DfType>, post: &DfType| -> Option<DfType> {
+        if post.collation() == Some(target) {
+            orig.cloned()
+        } else {
+            Some(post.with_collation(target))
+        }
+    };
+
+    (
+        adjust(left_coerce, post_left),
+        adjust(right_coerce, post_right),
+    )
+}
+
 /// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
 ///
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
@@ -1083,14 +1119,17 @@ impl BinaryOperator {
         }
     }
 
-    /// Given the types of the lhs and rhs expressions for this binary operator, if either side
-    /// needs to be coerced before evaluation, returns the type that it should be coerced to
+    /// Given the lhs and rhs expressions for this binary operator, if either side needs to be
+    /// coerced before evaluation, returns the type that it should be coerced to.
     pub(crate) fn argument_type_coercions(
         &self,
-        left_type: &DfType,
-        right_type: &DfType,
+        left: &Expr,
+        right: &Expr,
         dialect: Dialect,
     ) -> ReadySetResult<(Option<DfType>, Option<DfType>)> {
+        let left_type = left.ty();
+        let right_type = right.ty();
+
         enum Side {
             Left,
             Right,
@@ -1132,32 +1171,29 @@ impl BinaryOperator {
             };
 
         use BinaryOperator::*;
-        match self {
+        let (left_coerce, right_coerce) = match self {
             Add | Subtract | Multiply | Divide | Modulo | And | Or | Is => match dialect.engine() {
-                SqlEngine::PostgreSQL => Ok((None, None)),
+                SqlEngine::PostgreSQL => (None, None),
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
-                    Ok((Some(ty.clone()), Some(ty)))
+                    (Some(ty.clone()), Some(ty))
                 }
             },
 
             Greater | GreaterOrEqual | Less | LessOrEqual => match dialect.engine() {
-                SqlEngine::PostgreSQL => {
-                    let (l, r) = pg_array_coercion(left_type, right_type);
-                    Ok((l, r))
-                }
+                SqlEngine::PostgreSQL => pg_array_coercion(left_type, right_type),
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
-                    Ok((Some(ty.clone()), Some(ty)))
+                    (Some(ty.clone()), Some(ty))
                 }
             },
 
-            Like | ILike => Ok((
+            Like | ILike => (
                 coerce_to_text_type(left_type),
                 coerce_to_text_type(right_type),
-            )),
+            ),
 
-            AtTimeZone => Ok((
+            AtTimeZone => (
                 if left_type.is_date_and_time() {
                     None
                 } else if matches!(left_type, DfType::Unknown) || left_type.is_any_text() {
@@ -1170,23 +1206,23 @@ impl BinaryOperator {
                     return error(Left, "String literal, timestamp or timestamptz");
                 },
                 None,
-            )),
+            ),
 
             Equal => match dialect.engine() {
                 SqlEngine::PostgreSQL => {
                     let (l, r) = pg_array_coercion(left_type, right_type);
                     if l.is_some() || r.is_some() {
-                        Ok((l, r))
+                        (l, r)
                     } else {
                         // Non-array Equal: coerce right to left's type to handle
                         // cases like Unknown vs concrete type. Not needed for
                         // ordering comparisons which return (None, None) here.
-                        Ok((None, Some(left_type.clone())))
+                        (None, Some(left_type.clone()))
                     }
                 }
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
-                    Ok((Some(ty.clone()), Some(ty)))
+                    (Some(ty.clone()), Some(ty))
                 }
             },
 
@@ -1194,7 +1230,7 @@ impl BinaryOperator {
                 if left_type.is_known() && !left_type.is_jsonb() {
                     return error(Left, "JSONB");
                 }
-                Ok((None, Some(DfType::DEFAULT_TEXT)))
+                (None, Some(DfType::DEFAULT_TEXT))
             }
             JsonAnyExists
             | JsonAllExists
@@ -1210,16 +1246,15 @@ impl BinaryOperator {
                 {
                     return error(Right, "TEXT[]");
                 }
-                Ok((
+                (
                     Some(DfType::DEFAULT_TEXT),
                     Some(DfType::Array(Box::new(DfType::DEFAULT_TEXT))),
-                ))
+                )
             }
             ArrayContains | ArrayContainedIn | ArrayConcat | ArrayOverlap => {
-                let (l, r) = pg_array_coercion(left_type, right_type);
-                Ok((l, r))
+                pg_array_coercion(left_type, right_type)
             }
-            StringConcat => Ok((Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT))),
+            StringConcat => (Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT)),
             JsonConcat | JsonContains | JsonContainedIn => {
                 if left_type.is_known() && !left_type.is_jsonb() {
                     return error(Left, "JSONB");
@@ -1229,22 +1264,28 @@ impl BinaryOperator {
                     return error(Right, "JSONB");
                 }
 
-                Ok((Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT)))
+                (Some(DfType::DEFAULT_TEXT), Some(DfType::DEFAULT_TEXT))
             }
-            JsonKeyExtract | JsonKeyExtractText => Ok((Some(DfType::DEFAULT_TEXT), None)),
+            JsonKeyExtract | JsonKeyExtractText => (Some(DfType::DEFAULT_TEXT), None),
 
             JsonSubtract => {
                 if left_type.is_known() && !left_type.is_jsonb() {
                     return error(Left, "JSONB");
                 }
 
-                Ok((None, None))
+                (None, None)
             }
 
             JsonPathExtract | JsonPathExtractUnquote => {
                 unsupported!("'{self}' operator not implemented yet for MySQL")
             }
-        }
+        };
+
+        Ok(apply_collation_coercion(
+            (left, left_coerce.as_ref()),
+            (right, right_coerce.as_ref()),
+            dialect,
+        ))
     }
 
     /// Returns this operator's output type given its input types, or
@@ -1610,7 +1651,7 @@ impl Expr {
 
                 let out = op.output_type(dialect, left.ty(), right.ty())?;
                 let (left_coerce_target, right_coerce_target) =
-                    op.argument_type_coercions(left.ty(), right.ty(), dialect)?;
+                    op.argument_type_coercions(&left, &right, dialect)?;
 
                 if let Some(ty) = left_coerce_target {
                     if ty != out {
@@ -1770,7 +1811,7 @@ impl Expr {
                         // inserted rather than comparing mismatched types at
                         // eval time.
                         let (left_coerce, right_coerce) = BinaryOperator::Equal
-                            .argument_type_coercions(left.ty(), right.ty(), dialect)?;
+                            .argument_type_coercions(&left, &right, dialect)?;
                         if let Some(ty) = left_coerce {
                             left = Box::new(Self::Cast {
                                 expr: left,
@@ -1972,8 +2013,15 @@ impl Expr {
             invalid_query!("op ANY/ALL (array) requires the operator to yield a boolean")
         }
 
+        // ANY/ALL applies the operator between lhs and each array member, so feed a synthetic
+        // expr of the member type as the rhs for coercion purposes. A Literal makes it count as
+        // a non-column reference in collation-affinity resolution.
+        let right_member_expr = Expr::Literal {
+            val: DfValue::None,
+            ty: right_member_ty.clone(),
+        };
         let (left_coerce_target, right_coerce_target) =
-            op.argument_type_coercions(left.ty(), right_member_ty, dialect)?;
+            op.argument_type_coercions(&left, &right_member_expr, dialect)?;
 
         if let Some(ty) = left_coerce_target {
             left = Box::new(Self::Cast {
@@ -2912,12 +2960,19 @@ pub(crate) mod tests {
             DfType::Array(Box::new(DfType::Int))
         }
 
+        fn lit_expr(ty: DfType) -> Expr {
+            Expr::Literal {
+                val: DfValue::None,
+                ty,
+            }
+        }
+
         #[test]
         fn equal_coerces_right_text_to_array() {
             let (left, right) = BinaryOperator::Equal
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2929,8 +2984,8 @@ pub(crate) mod tests {
         fn equal_coerces_left_text_to_array() {
             let (left, right) = BinaryOperator::Equal
                 .argument_type_coercions(
-                    &DfType::DEFAULT_TEXT,
-                    &int_array_type(),
+                    &lit_expr(DfType::DEFAULT_TEXT),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2942,8 +2997,8 @@ pub(crate) mod tests {
         fn greater_coerces_right_text_to_array() {
             let (left, right) = BinaryOperator::Greater
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2955,8 +3010,8 @@ pub(crate) mod tests {
         fn less_coerces_left_text_to_array() {
             let (left, right) = BinaryOperator::Less
                 .argument_type_coercions(
-                    &DfType::DEFAULT_TEXT,
-                    &int_array_type(),
+                    &lit_expr(DfType::DEFAULT_TEXT),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2968,8 +3023,8 @@ pub(crate) mod tests {
         fn no_coercion_when_both_arrays() {
             let (left, right) = BinaryOperator::Greater
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &int_array_type(),
+                    &lit_expr(int_array_type()),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2981,8 +3036,8 @@ pub(crate) mod tests {
         fn greater_coerces_right_unknown_to_array() {
             let (left, right) = BinaryOperator::Greater
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::Unknown,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::Unknown),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -2994,8 +3049,8 @@ pub(crate) mod tests {
         fn equal_coerces_right_unknown_to_array() {
             let (left, right) = BinaryOperator::Equal
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::Unknown,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::Unknown),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3007,8 +3062,8 @@ pub(crate) mod tests {
         fn less_coerces_right_unknown_to_array() {
             let (left, right) = BinaryOperator::Less
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::Unknown,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::Unknown),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3020,8 +3075,8 @@ pub(crate) mod tests {
         fn greater_or_equal_coerces_left_text_to_array() {
             let (left, right) = BinaryOperator::GreaterOrEqual
                 .argument_type_coercions(
-                    &DfType::DEFAULT_TEXT,
-                    &int_array_type(),
+                    &lit_expr(DfType::DEFAULT_TEXT),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3033,8 +3088,8 @@ pub(crate) mod tests {
         fn less_or_equal_coerces_right_text_to_array() {
             let (left, right) = BinaryOperator::LessOrEqual
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3047,8 +3102,8 @@ pub(crate) mod tests {
             // Is (IS/IS NOT) should not trigger array coercion
             let (left, right) = BinaryOperator::Is
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3061,8 +3116,8 @@ pub(crate) mod tests {
             // For non-array Equal on PostgreSQL, right is coerced to left's type
             let (left, right) = BinaryOperator::Equal
                 .argument_type_coercions(
-                    &DfType::Int,
-                    &DfType::Unknown,
+                    &lit_expr(DfType::Int),
+                    &lit_expr(DfType::Unknown),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3075,8 +3130,8 @@ pub(crate) mod tests {
             // For non-array Greater on PostgreSQL, no coercion
             let (left, right) = BinaryOperator::Greater
                 .argument_type_coercions(
-                    &DfType::Int,
-                    &DfType::Unknown,
+                    &lit_expr(DfType::Int),
+                    &lit_expr(DfType::Unknown),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3088,8 +3143,8 @@ pub(crate) mod tests {
         fn array_contains_coerces_right_text_to_array() {
             let (left, right) = BinaryOperator::ArrayContains
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3101,8 +3156,8 @@ pub(crate) mod tests {
         fn array_contained_in_coerces_left_text_to_array() {
             let (left, right) = BinaryOperator::ArrayContainedIn
                 .argument_type_coercions(
-                    &DfType::DEFAULT_TEXT,
-                    &int_array_type(),
+                    &lit_expr(DfType::DEFAULT_TEXT),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3114,8 +3169,8 @@ pub(crate) mod tests {
         fn array_concat_coerces_right_text_to_array() {
             let (left, right) = BinaryOperator::ArrayConcat
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &DfType::DEFAULT_TEXT,
+                    &lit_expr(int_array_type()),
+                    &lit_expr(DfType::DEFAULT_TEXT),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
@@ -3127,13 +3182,82 @@ pub(crate) mod tests {
         fn array_contains_no_coercion_when_both_arrays() {
             let (left, right) = BinaryOperator::ArrayContains
                 .argument_type_coercions(
-                    &int_array_type(),
-                    &int_array_type(),
+                    &lit_expr(int_array_type()),
+                    &lit_expr(int_array_type()),
                     Dialect::DEFAULT_POSTGRESQL,
                 )
                 .unwrap();
             assert_eq!(left, None);
             assert_eq!(right, None);
+        }
+    }
+
+    mod collation_coercions {
+        use pretty_assertions::assert_eq;
+        use readyset_data::Collation;
+
+        use super::*;
+
+        fn column_expr(ty: DfType) -> Expr {
+            Expr::Column { index: 0, ty }
+        }
+
+        fn text_lit_expr(collation: Collation) -> Expr {
+            Expr::Literal {
+                val: DfValue::None,
+                ty: DfType::Text(collation),
+            }
+        }
+
+        #[test]
+        fn equal_column_beats_literal_on_either_side() {
+            // MySQL: 'literal' (Utf8AiCi, OTHER) = col_binary (Binary, COLUMN).
+            // The column's collation wins regardless of which side it's on.
+            let lit = text_lit_expr(Collation::Utf8AiCi);
+            let col = column_expr(DfType::Text(Collation::Binary));
+            let expected = (
+                Some(DfType::Text(Collation::Binary)),
+                Some(DfType::Text(Collation::Binary)),
+            );
+            assert_eq!(
+                BinaryOperator::Equal
+                    .argument_type_coercions(&lit, &col, Dialect::DEFAULT_MYSQL)
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(
+                BinaryOperator::Equal
+                    .argument_type_coercions(&col, &lit, Dialect::DEFAULT_MYSQL)
+                    .unwrap(),
+                expected
+            );
+        }
+
+        #[test]
+        fn like_preserves_column_collation() {
+            // MySQL: col (Utf8AiCi) LIKE 'pattern' (Utf8). Without the overlay both
+            // sides would land in DEFAULT_TEXT (Utf8); with it the pattern picks up
+            // the column's collation and the column itself needs no further cast.
+            let left = column_expr(DfType::Text(Collation::Utf8AiCi));
+            let right = text_lit_expr(Collation::Utf8);
+            let (l, r) = BinaryOperator::Like
+                .argument_type_coercions(&left, &right, Dialect::DEFAULT_MYSQL)
+                .unwrap();
+            assert_eq!(l, None);
+            assert_eq!(r, Some(DfType::Text(Collation::Utf8AiCi)));
+        }
+
+        #[test]
+        fn greater_two_text_columns_picks_utf8() {
+            // Two columns of equal affinity but different charsets: UTF-8 wins as
+            // superset.
+            let left = column_expr(DfType::Text(Collation::Latin1SwedishCi));
+            let right = column_expr(DfType::Text(Collation::Utf8AiCi));
+            let (l, r) = BinaryOperator::Greater
+                .argument_type_coercions(&left, &right, Dialect::DEFAULT_MYSQL)
+                .unwrap();
+            assert_eq!(l, Some(DfType::Text(Collation::Utf8AiCi)));
+            assert_eq!(r, Some(DfType::Text(Collation::Utf8AiCi)));
         }
     }
 
