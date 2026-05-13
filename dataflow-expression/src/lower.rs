@@ -99,18 +99,16 @@ fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
     };
 
     // > 4. If the non-unknown inputs are not all of the same type category, fail.
-    if types
+    if let Some(mismatched) = types
         .iter()
         .skip(1)
         .filter(|t| t.is_known())
-        .any(|t| t.pg_category() != first_known_type.pg_category())
+        .find(|t| t.pg_category() != first_known_type.pg_category())
     {
         return Err(invalid_query_err!(
             "Cannot coerce type {} to type {}",
-            first_ty,
-            types
-                .get(1)
-                .expect("can't get here unless we have at least 2 types")
+            first_known_type,
+            mismatched
         ));
     }
 
@@ -3183,27 +3181,42 @@ pub(crate) mod tests {
         // Integer and date are in different type categories and cannot be coerced
         let expr = parse_expr(ParserDialect::PostgreSQL, "ARRAY[1, DATE('1999-12-31')]").unwrap();
         let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
-        assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("Cannot coerce type"),
+            err.contains("Cannot coerce type Int to type Date"),
             "unexpected error message: {err}"
         );
     }
 
     #[test]
     fn nested_array_incompatible_element_types_rejected() {
-        // The exact case from the ticket: nested arrays with mixed integer and date
+        // The exact case from the ticket: nested arrays with mixed integer and date.
+        // The category mismatch is at index 3 of the inner array, so the error must
+        // name `Date`, not `types[1]` (REA-6624).
         let expr = parse_expr(
             ParserDialect::PostgreSQL,
             "ARRAY[[1, 2, 3, 4], [1, 2, 3, DATE('1999-12-31')]]",
         )
         .unwrap();
         let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
-        assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("Cannot coerce type"),
+            err.contains("Cannot coerce type Int to type Date"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    /// REA-6624: when a `LEAST`/`GREATEST` call mixes type categories past
+    /// position 1, the error must name the actual offending type -- not blindly
+    /// echo `types[0]` and `types[1]`, which would produce "Int to Int" here.
+    #[test]
+    fn least_reports_actual_mismatched_type() {
+        let expr =
+            parse_expr(ParserDialect::PostgreSQL, "LEAST(1, 2, DATE('1999-12-31'))").unwrap();
+        let result = Expr::lower(expr, Dialect::DEFAULT_POSTGRESQL, &no_op_lower_context());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Cannot coerce type Int to type Date"),
             "unexpected error message: {err}"
         );
     }
