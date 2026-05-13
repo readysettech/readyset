@@ -1236,7 +1236,7 @@ mod tests {
     use readyset_sql::ast::{Column, Relation, SqlQuery};
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::{parse_query, parse_select};
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     /* How to create and populate the tables used in the test module:
     *
        create table test (auth_id uuid, i int, b int, t text, dt date);
@@ -1259,15 +1259,50 @@ mod tests {
         }
     }
 
-    struct NoUniqueSchema;
+    /// Test-corpus convention: every relation has a single-column unique
+    /// key on each of these names.  The names listed here are the
+    /// columns the LATERAL test corpus uses as join/correlation keys
+    /// where the underlying real table would actually declare a PK or
+    /// UNIQUE NOT NULL constraint on that column — `k`, `sn`, `jn`, `pn`
+    /// are PK columns in the `qa.*` schema; `id`, `auth_id`, `rownum`
+    /// match analogous identifiers in the legacy `test`/`DataTypes`
+    /// fixtures.  Content columns like `b`, `t` are intentionally NOT
+    /// listed: tests that correlate via content columns over regular-
+    /// table upstreams must use `test_it_with_unique_schema` with an
+    /// `ExplicitUniqueSchema` declaring exactly what's intended, so
+    /// schema-aware checks aren't silently masked by a lying stub.
+    struct PermissiveTestUniqueSchema;
 
-    impl UniqueColumnsSchema for NoUniqueSchema {
-        fn unique_columns_of(&self, _: &Relation) -> Option<HashSet<Column>> {
-            None
+    impl UniqueColumnsSchema for PermissiveTestUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            let pk_names = ["k", "sn", "jn", "pn", "id", "auth_id", "rownum"];
+            Some(
+                pk_names
+                    .iter()
+                    .map(|n| Column {
+                        name: (*n).into(),
+                        table: Some(rel.clone()),
+                    })
+                    .collect(),
+            )
         }
     }
 
     fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
+        test_it_with_unique_schema(
+            test_name,
+            original_text,
+            expect_text,
+            &PermissiveTestUniqueSchema,
+        );
+    }
+
+    fn test_it_with_unique_schema<U: UniqueColumnsSchema>(
+        test_name: &str,
+        original_text: &str,
+        expect_text: &str,
+        unique_cols_schema: &U,
+    ) {
         let mut stmt = match parse_query(Dialect::PostgreSQL, original_text) {
             Ok(SqlQuery::Select(stmt)) => stmt,
             Err(e) => panic!("> {test_name}: ORIGINAL STATEMENT PARSE ERROR: {e}"),
@@ -1276,7 +1311,7 @@ mod tests {
 
         let mut ctx = UnnestContext {
             schema: &NonNullSchemaMoke {},
-            unique_cols_schema: &NoUniqueSchema,
+            unique_cols_schema,
             probes: ProbeRegistry::new(),
             pre_hoist_lateral_exactly_one: HashSet::new(),
             pre_hoist_lateral_at_most_one: HashSet::new(),
@@ -2727,6 +2762,139 @@ FROM
             "lateral_two_sibling_jointpos_no_grouped_bodies_unchanged",
             original_stmt,
             expect_stmt,
+        );
+    }
+
+    /// Stub `UniqueColumnsSchema` that returns whatever the test
+    /// declares — used by the schema-aware upstream-check tests below.
+    struct ExplicitUniqueSchema {
+        cols: HashMap<Relation, HashSet<Column>>,
+    }
+
+    impl UniqueColumnsSchema for ExplicitUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            self.cols.get(rel).cloned()
+        }
+    }
+
+    fn mk_qualified_col(schema: &str, table: &str, name: &str) -> Column {
+        Column {
+            name: name.into(),
+            table: Some(Relation {
+                name: table.into(),
+                schema: Some(schema.into()),
+            }),
+        }
+    }
+
+    fn mk_qualified_rel(schema: &str, table: &str) -> Relation {
+        Relation {
+            name: table.into(),
+            schema: Some(schema.into()),
+        }
+    }
+
+    /// Positive: AtMostOne LATERAL body (correlation-pinned GROUP BY)
+    /// correlated on `qa.a.k`, where the catalog declares `qa.a.k` as
+    /// a single-column unique key.  The upstream check finds the
+    /// intersection between body-correlation columns `{a.k}` and the
+    /// table's unique columns `{a.k}`, accepts `qa.a` as superkey-
+    /// covered, and the flatten proceeds.  AtMostOne is the only
+    /// aggregated-body cardinality admitted to the Flatten path
+    /// (ExactlyOne would drop outer rows pre-vs-post, see
+    /// `aggregate_only_lateral_with_internal_left_join_bail`).
+    #[test]
+    fn lateral_upstream_with_unique_correlation_column_flattens() {
+        let schema = ExplicitUniqueSchema {
+            cols: HashMap::from([(
+                mk_qualified_rel("qa", "a"),
+                HashSet::from([mk_qualified_col("qa", "a", "k")]),
+            )]),
+        };
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "b"."k", "a"."k""#;
+        test_it_with_unique_schema(
+            "lateral_upstream_with_unique_correlation_column_flattens",
+            original_text,
+            expected_text,
+            &schema,
+        );
+    }
+
+    /// Negative: same query as the positive test, but the catalog
+    /// declares NO unique columns for `qa.a`.  Without proof that the
+    /// correlation column is a superkey, the flatten would
+    /// row-multiply through a non-unique-key duplicate, so the
+    /// upstream check rejects and the rewrite errors.
+    #[test]
+    fn lateral_upstream_without_known_unique_key_does_not_flatten() {
+        let schema = ExplicitUniqueSchema {
+            cols: HashMap::new(),
+        };
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expect_text = "";
+        test_it_with_unique_schema(
+            "lateral_upstream_without_known_unique_key_does_not_flatten",
+            original_text,
+            expect_text,
+            &schema,
+        );
+    }
+
+    /// Negative: catalog declares `qa.a.k` as the unique column, but
+    /// the LATERAL body correlates on `a.dt` (a non-unique attribute).
+    /// The intersection between body-correlation columns `{a.dt}` and
+    /// the table's unique columns `{a.k}` is empty, so the upstream
+    /// check rejects.
+    #[test]
+    fn lateral_upstream_correlation_on_non_unique_column_does_not_flatten() {
+        let schema = ExplicitUniqueSchema {
+            cols: HashMap::from([(
+                mk_qualified_rel("qa", "a"),
+                HashSet::from([mk_qualified_col("qa", "a", "k")]),
+            )]),
+        };
+        let original_text = r#"
+        SELECT a.dt, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.dt, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.dt = a.dt
+                 WHERE b.dt = a.dt
+                 GROUP BY b.dt
+             ) AS l1
+        "#;
+        let expect_text = "";
+        test_it_with_unique_schema(
+            "lateral_upstream_correlation_on_non_unique_column_does_not_flatten",
+            original_text,
+            expect_text,
+            &schema,
         );
     }
 }

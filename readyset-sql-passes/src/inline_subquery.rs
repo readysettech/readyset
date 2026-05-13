@@ -112,9 +112,9 @@ pub(crate) struct InliningContext<'a, U: UniqueColumnsSchema> {
     /// Unique-column catalog, plumbed from the orchestrator.  `Some` only when
     /// the caller has schema context (LATERAL path via `absorb_flatten`).
     /// Non-LATERAL callers (DTR, `inline_leading_derived_table`) pass `None`
-    /// because they do not need the catalog in this commit.
-    // Populated now, consumed in the next commit's eligibility check.
-    #[allow(dead_code)]
+    /// because their eligibility checks do not consult the catalog.  Consumed
+    /// by the LATERAL-arm upstream-cardinality check to require column-level
+    /// superkey coverage of correlated regular-table upstreams.
     pub(crate) unique_cols_schema: Option<&'a U>,
 }
 
@@ -914,28 +914,33 @@ fn from_items_cardinality_preserving_lateral(
     Ok(true)
 }
 
-/// Collect the set of outer-scope relations referenced by `inner_stmt`'s
-/// correlation predicates (WHERE + inner JOIN ONs).  An "outer-scope
-/// relation" is one whose name does not appear in `inner_stmt`'s local
-/// FROM-items; such references can only be satisfied by the enclosing
-/// (outer) statement.
+/// Collect the columns of outer-scope relations referenced by
+/// `inner_stmt`'s correlation predicates (WHERE + inner JOIN ONs),
+/// grouped by relation.  An "outer-scope relation" is one whose name
+/// does not appear in `inner_stmt`'s local FROM-items; such references
+/// can only be satisfied by the enclosing (outer) statement.
 ///
-/// Used by the LATERAL-arm upstream check: a regular-table upstream item
-/// is safe to flatten past only if the LATERAL body's correlation
-/// predicates reference it, ensuring its distinguishing columns become
-/// post-flatten GROUP BY keys (preventing row-multiplication through the
-/// post-flatten aggregate).
-fn collect_body_correlation_outer_rels(
+/// Used by the LATERAL-arm upstream check: a regular-table upstream
+/// item is safe to flatten past only if the LATERAL body's correlation
+/// predicates reference a superkey-covering subset of its columns —
+/// otherwise the body's GROUP BY additions cannot partition rows back
+/// to the table's per-row identity, and the flatten row-multiplies
+/// through the post-flatten aggregate.
+fn collect_body_correlation_outer_cols(
     inner_stmt: &SelectStatement,
-) -> ReadySetResult<HashSet<Relation>> {
+) -> ReadySetResult<HashMap<Relation, HashSet<Column>>> {
     let locals = collect_local_from_items(inner_stmt)?;
-    let mut outer_rels: HashSet<Relation> = HashSet::new();
+    let mut by_rel: HashMap<Relation, HashSet<Column>> = HashMap::new();
     let mut extract = |expr: &Expr| -> ReadySetResult<()> {
         let (corr, _) = partition_correlated_predicates(expr, &|rel| !locals.contains(rel));
         if let Some(corr) = corr {
             for (_local, correlated) in extract_correlation_keys(&corr, &locals)? {
-                if let Some(rel) = correlated.table {
-                    outer_rels.insert(rel);
+                // `extract_correlation_keys` only matches `col = col`
+                // shapes where BOTH sides have `Some(table)` (see its
+                // `is_column_eq_column` visitor), so this `Some` arm
+                // always fires.  Guard kept for defensive readability.
+                if let Some(rel) = correlated.table.clone() {
+                    by_rel.entry(rel).or_default().insert(correlated);
                 }
             }
         }
@@ -949,26 +954,31 @@ fn collect_body_correlation_outer_rels(
             extract(on_expr)?;
         }
     }
-    Ok(outer_rels)
+    Ok(by_rel)
 }
 
-/// Decide whether a single upstream FROM-item is safe to flatten past in
-/// the LATERAL arm.  An item is safe if any of:
+/// Decide whether a single upstream FROM-item is safe to flatten past
+/// in the LATERAL arm.  An item is safe if any of:
 ///
 ///   - It is a subquery whose alias is in the pre-hoist exactly-one or
-///     at-most-one set (bounded-cardinality LATERAL body — sibling-chain
-///     case).
-///   - It is a subquery whose structural shape passes `is_exactly_one_card`
-///     or `is_at_most_one_deep` (bounded-cardinality DT).
-///   - It is a regular table whose relation name is referenced by the
-///     LATERAL body's correlation predicates (the body's GROUP BY
-///     additions will partition on its distinguishing columns post-
-///     flatten, preventing row-multiplication).
-fn is_upstream_item_safe_for_lateral_flatten(
+///     at-most-one set (bounded-cardinality LATERAL body — sibling-
+///     chain case).
+///   - It is a subquery whose structural shape passes
+///     `is_exactly_one_card` or `is_at_most_one_deep` (bounded-
+///     cardinality DT).
+///   - It is a regular table whose body-correlation columns include at
+///     least one column known by `unique_cols_schema` to be a single-
+///     column unique key of that table.  The correlation columns then
+///     form a superkey of the upstream table; the body's GROUP BY
+///     additions partition rows by that key post-flatten, preserving
+///     per-row identity and preventing row-multiplication through the
+///     post-flatten aggregate.
+fn is_upstream_item_safe_for_lateral_flatten<U: UniqueColumnsSchema>(
     item: &TableExpr,
-    body_correlation_outer_rels: &HashSet<Relation>,
+    body_correlation_outer_cols: &HashMap<Relation, HashSet<Column>>,
     exactly_one_set: &HashSet<Relation>,
     at_most_one_set: &HashSet<Relation>,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     if let Some((rhs_stmt, alias)) = as_sub_query_with_alias(item) {
         let alias_rel: Relation = alias.into();
@@ -982,8 +992,43 @@ fn is_upstream_item_safe_for_lateral_flatten(
             return Ok(true);
         }
     }
-    let item_rel = get_from_item_reference_name(item)?;
-    Ok(body_correlation_outer_rels.contains(&item_rel))
+    // Regular table.  `body_correlation_outer_cols` keys by the
+    // reference name (alias if present, base table name otherwise),
+    // matching how the body's correlation predicates name the outer
+    // relation.  The unique-column catalog keys by the base table
+    // name, since the orchestrator builds it from `BaseSchemasContext`.
+    // Resolve both before checking for a single-column superkey
+    // overlap.
+    let item_ref_rel = get_from_item_reference_name(item)?;
+    let Some(corr_cols) = body_correlation_outer_cols.get(&item_ref_rel) else {
+        return Ok(false);
+    };
+    let TableExpr {
+        inner: TableExprInner::Table(base_rel),
+        ..
+    } = item
+    else {
+        return Ok(false);
+    };
+    let Some(unique_cols) = unique_cols_schema.unique_columns_of(base_rel) else {
+        return Ok(false);
+    };
+    // TODO: composite-key coverage.  The catalog stores only single-
+    // column unique keys (`UniqueColumnsSchemaImpl::from` filters
+    // composite PK/UNIQUE entries — see `known_core_limitations.md`
+    // invariant 15).  A table with `PRIMARY KEY (a, b)` whose LATERAL
+    // body correlates on BOTH `a` AND `b` is semantically safe to
+    // flatten (the composite is the key, post-flatten GROUP BY on the
+    // pair preserves identity), but lands in the reject branch below
+    // because neither `a` nor `b` is individually unique.  Closing this
+    // gap requires extending the catalog to expose composite keys and
+    // checking subset-superkey coverage here.
+    Ok(corr_cols.iter().any(|c| {
+        unique_cols.contains(&Column {
+            name: c.name.clone(),
+            table: Some(base_rel.clone()),
+        })
+    }))
 }
 
 /// Validate that the items joined to the LATERAL's position from
@@ -995,19 +1040,21 @@ fn is_upstream_item_safe_for_lateral_flatten(
 /// Reject upstream joins that aren't INNER/CROSS: a LEFT-JOIN upstream
 /// can null-extend rows, and the interaction with the post-flatten
 /// aggregate is not analyzed here.
-fn upstream_items_safe_for_lateral_flatten(
+fn upstream_items_safe_for_lateral_flatten<U: UniqueColumnsSchema>(
     upstream_tables: &[TableExpr],
     upstream_joins: &[JoinClause],
-    body_correlation_outer_rels: &HashSet<Relation>,
+    body_correlation_outer_cols: &HashMap<Relation, HashSet<Column>>,
     exactly_one_set: &HashSet<Relation>,
     at_most_one_set: &HashSet<Relation>,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     for item in upstream_tables {
         if !is_upstream_item_safe_for_lateral_flatten(
             item,
-            body_correlation_outer_rels,
+            body_correlation_outer_cols,
             exactly_one_set,
             at_most_one_set,
+            unique_cols_schema,
         )? {
             return Ok(false);
         }
@@ -1021,9 +1068,10 @@ fn upstream_items_safe_for_lateral_flatten(
         };
         if !is_upstream_item_safe_for_lateral_flatten(
             item,
-            body_correlation_outer_rels,
+            body_correlation_outer_cols,
             exactly_one_set,
             at_most_one_set,
+            unique_cols_schema,
         )? {
             return Ok(false);
         }
@@ -1581,25 +1629,31 @@ fn is_lateral_friendly_at_most_one(
 /// inputs; once inlined, that collapse applies to the full join cross-
 /// product, so both downstream AND upstream join partners must be
 /// cardinality-preserving.  Dispatched on whether the caller has
-/// populated all three LATERAL-scope `Option` fields on `ctx`:
+/// populated all four LATERAL-scope `Option` fields on `ctx` (the
+/// three pre-hoist signal fields and the unique-column catalog):
 ///
 ///   - **LATERAL path** (`pre_hoist_lateral_exactly_one`,
-///     `pre_hoist_lateral_at_most_one`, and
-///     `preceding_flattened_lateral_aliases` are all `Some`): delegates
-///     to [`from_items_cardinality_preserving_lateral`] for the
-///     downstream side (which accepts correlation-equality ON predicates
-///     and consults the pre-hoist cardinality signals).  Then runs an
+///     `pre_hoist_lateral_at_most_one`,
+///     `preceding_flattened_lateral_aliases`, and `unique_cols_schema`
+///     are all `Some`): delegates to
+///     [`from_items_cardinality_preserving_lateral`] for the downstream
+///     side (which accepts correlation-equality ON predicates and
+///     consults the pre-hoist cardinality signals).  Then runs an
 ///     upstream check via [`upstream_items_safe_for_lateral_flatten`]:
 ///     each upstream item must be a bounded-cardinality subquery
-///     (pre-hoist exactly-one / at-most-one set membership, or structural
-///     `is_exactly_one_card` / `is_at_most_one_deep`) OR a regular table
-///     whose relation name is referenced by the LATERAL body's
-///     correlation predicates.  The correlation-coverage relaxation
-///     matches the safety condition for the algebraic identity
-///     `A × (B ⟕_p C) ≡ (A × B) ⟕_p C` underlying the flatten — items
-///     the body's correlation references become post-flatten GROUP BY
-///     keys (via the `downstream_group_by_additions` plumbing) rather
-///     than row-multipliers.
+///     (pre-hoist exactly-one / at-most-one set membership, or
+///     structural `is_exactly_one_card` / `is_at_most_one_deep`) OR a
+///     regular table whose body-correlation columns include at least
+///     one column known by `unique_cols_schema` to be a single-column
+///     unique key — covering a superkey of the table.  The superkey-
+///     coverage requirement matches the safety condition for the
+///     algebraic identity `A × (B ⟕_p C) ≡ (A × B) ⟕_p C` underlying
+///     the flatten: only when the upstream's distinguishing column
+///     becomes a post-flatten GROUP BY key (via the
+///     `downstream_group_by_additions` plumbing) is the per-outer-row
+///     LATERAL semantics preserved under the join reorder.  Items
+///     correlated only by a non-unique subset would row-multiply
+///     through the post-flatten aggregate.
 ///   - **Canonical path** (any field is `None`): non-LATERAL callers, or
 ///     LATERAL callers before the pre-hoist signal is established.
 ///     Checks downstream items via [`from_items_cardinality_preserving`]
@@ -1627,8 +1681,14 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
         ctx.pre_hoist_lateral_exactly_one,
         ctx.pre_hoist_lateral_at_most_one,
         ctx.preceding_flattened_lateral_aliases,
+        ctx.unique_cols_schema,
     ) {
-        (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) => {
+        (
+            Some(exactly_one_set),
+            Some(at_most_one_set),
+            Some(flattened_aliases),
+            Some(unique_cols_schema),
+        ) => {
             if !from_items_cardinality_preserving_lateral(
                 ctx.downstream_tables,
                 ctx.downstream_joins,
@@ -1644,17 +1704,20 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
             // items joined BEFORE the LATERAL position must also be
             // cardinality-preserving.  A regular-table upstream is
             // accepted only if the body's correlation predicates
-            // reference it — its distinguishing columns then become
-            // post-flatten GROUP BY keys, preventing row-multiplication.
+            // cover a superkey of that table (i.e., a column known to
+            // be a single-column unique key) — its distinguishing
+            // column then becomes a post-flatten GROUP BY key,
+            // preventing row-multiplication.
             let (up_tables, up_joins) =
                 compute_upstream_for_position(ctx.outer_stmt, ctx.inl_from_item_ord_idx);
-            let body_corr_rels = collect_body_correlation_outer_rels(ctx.inner_stmt)?;
+            let body_corr_cols = collect_body_correlation_outer_cols(ctx.inner_stmt)?;
             upstream_items_safe_for_lateral_flatten(
                 up_tables,
                 up_joins,
-                &body_corr_rels,
+                &body_corr_cols,
                 exactly_one_set,
                 at_most_one_set,
+                unique_cols_schema,
             )
         }
         _ => {
