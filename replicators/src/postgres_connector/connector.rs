@@ -786,35 +786,40 @@ fn select_ack_lsn(
             let lsn = Lsn::try_from(&offset)?;
             Ok((Some(lsn), Some(lsn)))
         }
-        Err(e) => match cached {
-            Some(cached_lsn) => {
-                antithesis_sdk::assert_sometimes!(
-                    true,
-                    "min_persisted_replication_offset RPC failed with cached LSN available",
-                    &serde_json::json!({})
-                );
-                warn!(
-                    error = %e,
-                    cached = %cached_lsn,
-                    "min_persisted_replication_offset RPC failed; re-acking last \
-                     successful LSN",
-                );
-                Ok((Some(cached_lsn), Some(cached_lsn)))
-            }
-            None => {
-                antithesis_sdk::assert_sometimes!(
-                    true,
-                    "min_persisted_replication_offset RPC failed with no cached LSN",
-                    &serde_json::json!({})
-                );
-                warn!(
-                    error = %e,
-                    "min_persisted_replication_offset RPC failed and no cached LSN \
-                     is available; skipping standby status update",
-                );
-                Ok((None, None))
-            }
-        },
+        Err(e) => {
+            // Acking an LSN promises Postgres it may purge WAL up to that point, so a
+            // failed RPC must never advance the ack: re-ack the last confirmed frontier
+            // if we have one, otherwise skip the update entirely.
+            let (lsn_to_ack, new_cache) = match cached {
+                Some(cached_lsn) => {
+                    warn!(
+                        error = %e,
+                        cached = %cached_lsn,
+                        "min_persisted_replication_offset RPC failed; re-acking last \
+                         successful LSN",
+                    );
+                    (Some(cached_lsn), Some(cached_lsn))
+                }
+                None => {
+                    warn!(
+                        error = %e,
+                        "min_persisted_replication_offset RPC failed and no cached LSN \
+                         is available; skipping standby status update",
+                    );
+                    (None, None)
+                }
+            };
+            antithesis_sdk::assert_always!(
+                lsn_to_ack == cached,
+                "min_persisted RPC failure never advances the acked LSN past the \
+                 last confirmed frontier",
+                &serde_json::json!({
+                    "cached": cached.map(|c| c.to_string()),
+                    "acked": lsn_to_ack.map(|l| l.to_string()),
+                })
+            );
+            Ok((lsn_to_ack, new_cache))
+        }
     }
 }
 
