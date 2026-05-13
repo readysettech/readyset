@@ -1,4 +1,5 @@
 use crate::detect_problematic_self_joins::contains_problematic_self_joins;
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::lateral_join::unnest_lateral_subqueries;
 use crate::rewrite_utils::{
     NO_REWRITES_STATUS, OnAtom, RewriteStatus, SINGLE_REWRITE_STATUS,
@@ -108,8 +109,9 @@ pub(crate) trait NonNullSchema {
     fn not_null_columns_of(&self, rel: &Relation) -> HashSet<Column>;
 }
 
-pub(crate) struct UnnestContext<'a> {
+pub(crate) struct UnnestContext<'a, U: UniqueColumnsSchema> {
     pub(crate) schema: &'a dyn NonNullSchema,
+    pub(crate) unique_cols_schema: &'a U,
     pub(crate) probes: ProbeRegistry,
     // Pre-hoist hints keyed by LATERAL alias (as Relations)
     pub(crate) pre_hoist_lateral_exactly_one: HashSet<Relation>,
@@ -133,13 +135,21 @@ pub(crate) struct UnnestContext<'a> {
 }
 
 pub trait UnnestSubqueries: Sized {
-    fn unnest_subqueries<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
+    fn unnest_subqueries<C: BaseSchemasContext, U: UniqueColumnsSchema>(
+        &mut self,
+        ctx: C,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl UnnestSubqueries for SelectStatement {
-    fn unnest_subqueries<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
+    fn unnest_subqueries<C: BaseSchemasContext, U: UniqueColumnsSchema>(
+        &mut self,
+        ctx: C,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self> {
         let schema = NonNullSchemaImpl::from(ctx);
-        if unnest_subqueries_main(self, &schema)?.has_rewrites() {
+        if unnest_subqueries_main(self, &schema, unique_cols_schema)?.has_rewrites() {
             trace!(target: "unnest_subqueries",
                 statement = %self.display(Dialect::PostgreSQL),
                 ">Decorrelated statement"
@@ -152,12 +162,14 @@ impl UnnestSubqueries for SelectStatement {
 // The entry point for the entire unnesting pass.
 // **NOTE**: This IS NOT a helper function to use internally.
 // This is the main entry point and should be called once per statement.
-pub(crate) fn unnest_subqueries_main(
+pub(crate) fn unnest_subqueries_main<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     schema: &dyn NonNullSchema,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<RewriteStatus> {
     let mut ctx = UnnestContext {
         schema,
+        unique_cols_schema,
         probes: ProbeRegistry::new(),
         pre_hoist_lateral_exactly_one: HashSet::new(),
         pre_hoist_lateral_at_most_one: HashSet::new(),
@@ -1848,9 +1860,9 @@ fn turn_into_not_eq_scalar(subquery_desc: &mut SubqueryPredicateDesc) {
     }
 }
 
-fn unnest_subqueries_in_where(
+fn unnest_subqueries_in_where<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
     let Some(where_expr) = &stmt.where_clause else {
         return Ok(NO_REWRITES_STATUS);
@@ -2038,7 +2050,7 @@ fn unnest_subqueries_in_where(
             let lhs = lhs.clone();
 
             apply_3vl_guard = Some(
-                move |base_stmt: &mut SelectStatement, ctx: &mut UnnestContext| {
+                move |base_stmt: &mut SelectStatement, ctx: &mut UnnestContext<U>| {
                     let is_lhs_null_free = is_select_expr_null_free(&lhs, base_stmt, ctx.schema)?;
                     if !is_lhs_null_free || !rhs_ctx.is_null_free() {
                         Some(add_3vl_for_not_in_where_subquery(
@@ -2141,9 +2153,9 @@ fn assert_local_columns_are_grouped(
     Ok(())
 }
 
-fn unnest_subqueries_in_fields(
+fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
     let mut rewrite_status = RewriteStatus::default();
 
@@ -2270,7 +2282,8 @@ fn unnest_subqueries_in_fields(
                             let is_not_in = subquery_desc.negated;
 
                             Either::Right(
-                                move |base_stmt: &mut SelectStatement, ctx: &mut UnnestContext| {
+                                move |base_stmt: &mut SelectStatement,
+                                      ctx: &mut UnnestContext<U>| {
                                     let is_lhs_null_free =
                                         is_select_expr_null_free(&lhs, base_stmt, ctx.schema)?;
                                     if is_lhs_null_free && rhs_ctx.is_null_free() {
@@ -2338,9 +2351,9 @@ fn unnest_subqueries_in_fields(
 //  - WHERE should always be done first, as the replacement joins are simulating rows filtering,
 //  - The select-list should apply after, as their replacement joins never filter
 //  - LATERAL should be the last operation.
-pub(crate) fn unnest_all_subqueries(
+pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
     // Subqueries in HAVING are not supported (known_core_limitations.md §4.3).
     // Reject early with a clean user-facing error rather than letting the subquery
@@ -2401,9 +2414,9 @@ fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<b
 /// grouped-with-correlation bodies are different shapes, and conflating
 /// them on the ExactlyOne side would silently corrupt the COALESCE-zero
 /// promotion in `get_join_operator_for_lateral`.
-pub(crate) fn collect_pre_hoist_lateral_hints(
+pub(crate) fn collect_pre_hoist_lateral_hints<U: UniqueColumnsSchema>(
     stmt: &SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<()> {
     for (tab_expr_idx, tab_expr) in get_local_from_items_iter!(stmt).enumerate() {
         if let Some((inner, alias)) = as_sub_query_with_alias(tab_expr) {

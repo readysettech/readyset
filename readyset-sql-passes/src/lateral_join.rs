@@ -1,3 +1,4 @@
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::get_local_from_items_iter_mut;
 use crate::inline_subquery::{
     InlineCandidate, apply_inline, can_inline_subquery, compute_downstream_for_position,
@@ -323,7 +324,7 @@ fn has_outer_left_join_on(stmt: &SelectStatement, local_tables: &HashSet<Relatio
 /// `apply_inline`. The caller pushes the returned value into its deferred
 /// queue.
 #[allow(clippy::too_many_arguments)]
-fn absorb_flatten(
+fn absorb_flatten<'a, U: UniqueColumnsSchema>(
     mut prepared: InlineCandidate,
     outer_stmt: &SelectStatement,
     inl_from_item_ord_idx: usize,
@@ -331,8 +332,9 @@ fn absorb_flatten(
     out_joins: &mut Vec<JoinClause>,
     preceding_from_items: &mut HashSet<Relation>,
     preceding_to_rhs: &mut Vec<Relation>,
-    pre_hoist_lateral_exactly_one: &HashSet<Relation>,
-    pre_hoist_lateral_at_most_one: &HashSet<Relation>,
+    pre_hoist_lateral_exactly_one: &'a HashSet<Relation>,
+    pre_hoist_lateral_at_most_one: &'a HashSet<Relation>,
+    unique_cols_schema: &'a U,
 ) -> ReadySetResult<(InlineCandidate, Vec<Expr>)> {
     let (ds_tables, ds_joins) = compute_downstream_for_position(outer_stmt, inl_from_item_ord_idx);
 
@@ -361,6 +363,7 @@ fn absorb_flatten(
         pre_hoist_lateral_exactly_one: Some(pre_hoist_lateral_exactly_one),
         pre_hoist_lateral_at_most_one: Some(pre_hoist_lateral_at_most_one),
         preceding_flattened_lateral_aliases: Some(preceding_from_items),
+        unique_cols_schema: Some(unique_cols_schema),
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
@@ -412,11 +415,11 @@ fn absorb_flatten(
 ///  • Move RHS-internal correlated atoms from JOIN .. ON to WHERE so TOP‑K partitioning sees correlation.
 ///  • Rewrite TOP‑K (ORDER/LIMIT) to ROW_NUMBER filters (RN ≤ N), clearing raw ORDER/LIMIT for the legacy guard.
 /// This ensures the legacy `contain_subqueries_with_limit_clause` check will pass for sanitized LATERAL bodies.
-fn try_resolve_as_lateral_subquery(
+fn try_resolve_as_lateral_subquery<U: UniqueColumnsSchema>(
     from_item: &mut TableExpr,
     preceding_from_items: &HashSet<Relation>,
     preceding_to_rhs: &[Relation],
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
     allow_flatten: bool,
     allow_aggregated_flatten: &mut bool,
 ) -> ReadySetResult<(bool, Option<LateralResolution>)> {
@@ -589,11 +592,11 @@ fn build_select_count_zero_mappings_recursive(
 }
 
 /// Selects the join operator for a rewritten LATERAL subquery.
-fn get_join_operator_for_lateral(
+fn get_join_operator_for_lateral<U: UniqueColumnsSchema>(
     tab_expr: &TableExpr,
     join_operator: JoinOperator,
     join_constraint: &JoinConstraint,
-    ctx: &UnnestContext,
+    ctx: &UnnestContext<U>,
     fields_map: &mut HashMap<Column, ReadySetResult<Expr>>,
 ) -> ReadySetResult<JoinOperator> {
     let Some((stmt, alias)) = as_sub_query_with_alias(tab_expr) else {
@@ -827,9 +830,9 @@ fn get_rhs_referenced_in_join_expression(jc: &JoinClause) -> ReadySetResult<Opti
 /// Converts all LATERAL subqueries in the FROM and JOIN clauses to regular joins,
 /// updating join constraints and projections as needed to maintain semantic equivalence.
 /// Return `true` if any transformation happened to the statement itself or any of its inner subqueries.
-fn resolve_lateral_subqueries(
+fn resolve_lateral_subqueries<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
     let mut rewrite_status = RewriteStatus::default();
 
@@ -979,6 +982,7 @@ fn resolve_lateral_subqueries(
                     &mut preceding_to_rhs,
                     &ctx.pre_hoist_lateral_exactly_one,
                     &ctx.pre_hoist_lateral_at_most_one,
+                    ctx.unique_cols_schema,
                 )?);
                 had_lateral = true;
                 rewrite_status.rewrite();
@@ -1106,6 +1110,7 @@ fn resolve_lateral_subqueries(
                         &mut preceding_to_rhs,
                         &ctx.pre_hoist_lateral_exactly_one,
                         &ctx.pre_hoist_lateral_at_most_one,
+                        ctx.unique_cols_schema,
                     )?);
                     rewrite_status.rewrite();
                 }
@@ -1215,15 +1220,16 @@ fn resolve_lateral_subqueries(
 /// **IMPORTANT**: This rewrite pass must be called after the schema resolution, star expansion
 /// and JoinConstraint::USING expansion passes.
 #[inline]
-pub(crate) fn unnest_lateral_subqueries(
+pub(crate) fn unnest_lateral_subqueries<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &mut UnnestContext,
+    ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
     resolve_lateral_subqueries(stmt, ctx)
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::drop_redundant_join::UniqueColumnsSchema;
     use crate::lateral_join::unnest_lateral_subqueries;
     use crate::unnest_subqueries::{NonNullSchema, UnnestContext, collect_pre_hoist_lateral_hints};
     use crate::unnest_subqueries_3vl::ProbeRegistry;
@@ -1253,6 +1259,14 @@ mod tests {
         }
     }
 
+    struct NoUniqueSchema;
+
+    impl UniqueColumnsSchema for NoUniqueSchema {
+        fn unique_columns_of(&self, _: &Relation) -> Option<HashSet<Column>> {
+            None
+        }
+    }
+
     fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
         let mut stmt = match parse_query(Dialect::PostgreSQL, original_text) {
             Ok(SqlQuery::Select(stmt)) => stmt,
@@ -1262,6 +1276,7 @@ mod tests {
 
         let mut ctx = UnnestContext {
             schema: &NonNullSchemaMoke {},
+            unique_cols_schema: &NoUniqueSchema,
             probes: ProbeRegistry::new(),
             pre_hoist_lateral_exactly_one: HashSet::new(),
             pre_hoist_lateral_at_most_one: HashSet::new(),
@@ -2276,8 +2291,7 @@ FROM
     /// ExactlyOne body returns one row per outer with `cnt=0` (count
     /// over empty input is 0, not no rows).  The new gate rejects
     /// ExactlyOne flatten unconditionally; the candidate falls through
-    /// to Resolve, which rejects per §5.2 of
-    /// `known_core_limitations.md` (correlated structure inside
+    /// to Resolve, which rejects per §5.2 (correlated structure inside
     /// LEFT JOIN ON cannot be moved out), so the rewrite bails.
     #[test]
     fn aggregate_only_lateral_with_internal_left_join_bail() {
@@ -2333,8 +2347,7 @@ FROM
     /// LEFT-JOIN bail.  Same body shape, same unsoundness pre-this-
     /// commit; the JOIN-loop call site of
     /// `try_resolve_as_lateral_subquery` is exercised instead of the
-    /// comma-loop site.  Resolve rejects per §5.2 of
-    /// `known_core_limitations.md`.
+    /// comma-loop site.  Resolve rejects per §5.2.
     #[test]
     fn aggregate_only_lateral_in_join_position_bail() {
         let original_text = r#"
@@ -2484,7 +2497,10 @@ FROM
                   ) AS "l1"
               ) AS "l"
         "#;
-        let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN (SELECT "spj"."pn", "spj"."jn" AS "jn", "spj"."sn" AS "sn" FROM "spj") AS "l1" ON ("l1"."jn" = "j"."jn")) AS "l" ON ("l"."sn" = "s"."sn")"#;
+        let expected_text = r#"SELECT "s"."sn", "l"."x" FROM "s" INNER JOIN
+        (SELECT "l1"."pn" AS "x", "l1"."sn" AS "sn" FROM "j" INNER JOIN
+        (SELECT "spj"."pn", "spj"."jn" AS "jn", "spj"."sn" AS "sn" FROM "spj") AS "l1" ON ("l1"."jn" = "j"."jn")) AS "l"
+        ON ("l"."sn" = "s"."sn")"#;
         test_it(
             "nested_lateral_parent_and_grandparent_correlation",
             original_text,
@@ -2496,8 +2512,7 @@ FROM
     /// composition rejection.  Two correlated LATERAL bodies, each
     /// with an internal LEFT JOIN that uses outer correlation.  Body
     /// shape forces the Flatten path (Resolve cannot decorrelate
-    /// correlated LEFT JOINs per §5.2 of
-    /// `known_core_limitations.md`).  `l1` is correlation-pinned
+    /// correlated LEFT JOINs per §5.2).  `l1` is correlation-pinned
     /// (AtMostOne) and gets the first aggregated-flatten slot.  `l2`
     /// is aggregate-only-no-GROUP-BY (ExactlyOne); the new gates
     /// reject it twice (ExactlyOne never admitted, plus composition
@@ -2533,8 +2548,7 @@ FROM
     /// Three-sibling variant of the multi-aggregated-LATERAL bail.
     /// `l1` claims the only aggregated-flatten slot; `l2` and `l3`
     /// are both denied and fall through to Resolve, which rejects
-    /// the correlated LEFT JOIN per §5.2 of
-    /// `known_core_limitations.md`.
+    /// the correlated LEFT JOIN per §5.2.
     #[test]
     fn lateral_three_aggregated_siblings_with_correlated_left_join_bail() {
         let original_stmt = r#"

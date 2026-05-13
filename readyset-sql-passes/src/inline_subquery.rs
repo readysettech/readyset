@@ -30,6 +30,7 @@
 use crate::derived_tables_rewrite::{
     can_inline_left_join_rhs_safe, can_move_joins_on_nontrivial_expr_to_where,
 };
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::rewrite_utils::{
     OnAtom, and_predicates_skip_true, are_group_by_keys_pinned_by_correlation,
     as_sub_query_with_alias, build_ext_to_int_fields_map, classify_on_atom,
@@ -85,7 +86,7 @@ pub(crate) struct InlineCandidate {
 /// `derived_tables_rewrite::can_inline_from_item`'s agg + multi-FROM guard
 /// uses `ctx.is_inner_agg` instead of re-calling
 /// `is_aggregation_or_grouped(inl_stmt)?`).
-pub(crate) struct InliningContext<'a> {
+pub(crate) struct InliningContext<'a, U: UniqueColumnsSchema> {
     pub(crate) inner_stmt: &'a SelectStatement,
     pub(crate) outer_stmt: &'a SelectStatement,
     pub(crate) inner_alias: &'a SqlIdentifier,
@@ -107,6 +108,14 @@ pub(crate) struct InliningContext<'a> {
     pub(crate) pre_hoist_lateral_exactly_one: Option<&'a HashSet<Relation>>,
     pub(crate) pre_hoist_lateral_at_most_one: Option<&'a HashSet<Relation>>,
     pub(crate) preceding_flattened_lateral_aliases: Option<&'a HashSet<Relation>>,
+
+    /// Unique-column catalog, plumbed from the orchestrator.  `Some` only when
+    /// the caller has schema context (LATERAL path via `absorb_flatten`).
+    /// Non-LATERAL callers (DTR, `inline_leading_derived_table`) pass `None`
+    /// because they do not need the catalog in this commit.
+    // Populated now, consumed in the next commit's eligibility check.
+    #[allow(dead_code)]
+    pub(crate) unique_cols_schema: Option<&'a U>,
 }
 
 /// Extract the inner statement from a `TableExpr` subquery and build the
@@ -1033,7 +1042,9 @@ fn upstream_items_safe_for_lateral_flatten(
 /// Delegates to `window_functions_block_inlining`, which returns `true`
 /// when the combination is unsafe — we invert that to the "accept"
 /// convention every check uses here.
-fn check_window_function_interaction(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_window_function_interaction<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     let blocked = window_functions_block_inlining(ctx.outer_stmt, &ctx.inner_rel, ctx.ext_to_int)?;
     Ok(!blocked)
 }
@@ -1042,7 +1053,9 @@ fn check_window_function_interaction(ctx: &InliningContext) -> ReadySetResult<bo
 /// statement are aggregated/grouped (or DISTINCT), hoisting the inner's
 /// aggregation into the outer produces nested aggregate expressions the
 /// engine cannot plan.
-fn check_nested_aggregation(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_nested_aggregation<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     Ok(!(ctx.is_inner_agg && ctx.is_outer_agg))
 }
 
@@ -1053,7 +1066,9 @@ fn check_nested_aggregation(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// (the downstream `fix_groupby_without_aggregates` pass converts the
 /// latter to DISTINCT, matching each GROUP BY key against a complete
 /// SELECT field verbatim).
-fn check_grouped_engine_validation(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     let Some(group_by) = &ctx.inner_stmt.group_by else {
         return Ok(true);
     };
@@ -1149,8 +1164,8 @@ fn check_grouped_engine_validation(ctx: &InliningContext) -> ReadySetResult<bool
 /// post-inline GROUP BY by `check_group_by_compatibility`) is rejected
 /// here even though downstream would accept it.  Strictly safe
 /// over-rejection; tightening is a future improvement.
-fn check_outer_order_against_inner_group_by(
-    ctx: &InliningContext,
+fn check_outer_order_against_inner_group_by<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
     group_by: &GroupByClause,
 ) -> ReadySetResult<bool> {
     let Some(order) = &ctx.outer_stmt.order else {
@@ -1306,7 +1321,9 @@ fn is_agg_derived_outputs(
 /// Returns `None` on rejection, `Some(additions)` on accept — the
 /// additions are threaded out as the return value of the overall
 /// `can_inline_subquery` call.
-fn check_group_by_compatibility(ctx: &InliningContext) -> ReadySetResult<Option<Vec<Expr>>> {
+fn check_group_by_compatibility<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<Option<Vec<Expr>>> {
     let mut downstream_group_by_additions: Vec<Expr> = Vec::new();
 
     if ctx.is_inner_agg && !ctx.is_outer_agg {
@@ -1347,7 +1364,9 @@ fn check_group_by_compatibility(ctx: &InliningContext) -> ReadySetResult<Option<
 /// Cardinality-barrier check.  Delegates to
 /// `cardinality_barrier_blocks_inlining`; inverts the "blocks" result to
 /// the "accept" convention.
-fn check_cardinality_barrier(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_cardinality_barrier<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     let blocked = cardinality_barrier_blocks_inlining(
         ctx.outer_stmt,
         ctx.inner_stmt,
@@ -1360,7 +1379,9 @@ fn check_cardinality_barrier(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// ORDER BY / LIMIT safety check.  When the inner has a LIMIT, ORDER BY
 /// semantics have to align or be carryable — otherwise the inlining would
 /// reorder rows post-limit in ways that change which rows survive.
-fn check_order_limit_safety(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_order_limit_safety<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     if ctx.inner_stmt.limit_clause.is_empty() {
         return Ok(true);
     }
@@ -1395,7 +1416,9 @@ fn check_order_limit_safety(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// both the limit and offset values must be numeric literals — otherwise
 /// we cannot algebraically compose them into a single LIMIT/OFFSET at the
 /// outer.
-fn check_limit_composition(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_limit_composition<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     if ctx.inner_stmt.limit_clause.is_empty() || ctx.outer_stmt.limit_clause.is_empty() {
         return Ok(true);
     }
@@ -1417,7 +1440,9 @@ fn check_limit_composition(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// LHS-only conjuncts that include a subquery (would end up in HAVING,
 /// which §4.3 forbids).  And: LHS-only conjuncts when inner has LIMIT
 /// (same HAVING unsupportability; also TOP-K changes row set).
-fn check_mixed_scope_where_with_agg_limit(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_mixed_scope_where_with_agg_limit<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     let Some(where_expr) = &ctx.outer_stmt.where_clause else {
         return Ok(true);
     };
@@ -1491,7 +1516,10 @@ fn is_on_nonrejecting_or_lateral_correlation(
 /// outer's cardinality.
 ///
 /// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
-/// considered.
+/// considered.  Extending this acceptance to regular-table RHS based on
+/// schema-known single-column unique keys is the scope of a future
+/// downstream-broadening change; the catalog plumbed through
+/// `InliningContext::unique_cols_schema` is the seam.
 fn is_lateral_friendly_exactly_one(
     dt: &TableExpr,
     exactly_one_set: &HashSet<Relation>,
@@ -1516,7 +1544,10 @@ fn is_lateral_friendly_exactly_one(
 /// cardinality.
 ///
 /// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
-/// considered.
+/// considered.  Extending this acceptance to regular-table RHS based on
+/// schema-known single-column unique keys is the scope of a future
+/// downstream-broadening change; the catalog plumbed through
+/// `InliningContext::unique_cols_schema` is the seam.
 fn is_lateral_friendly_at_most_one(
     dt: &TableExpr,
     exactly_one_set: &HashSet<Relation>,
@@ -1581,7 +1612,9 @@ fn is_lateral_friendly_at_most_one(
 ///     aggregate, changing its input set.  See
 ///     [`from_items_cardinality_preserving`] for the per-item shape
 ///     contract.
-fn check_join_partners_cardinality_preserving(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     // Early-exit: a non-aggregated, non-LIMIT-bearing inner passes its
     // inputs through 1:1, so neither downstream nor upstream items need
     // cardinality-preservation checks.  Single gate at the dispatcher
@@ -1657,7 +1690,7 @@ fn check_join_partners_cardinality_preserving(ctx: &InliningContext) -> ReadySet
 
 /// Self-join detection.  Reject if inlining would introduce the same base
 /// table twice in the outer FROM.
-fn check_self_join(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_self_join<U: UniqueColumnsSchema>(ctx: &InliningContext<U>) -> ReadySetResult<bool> {
     Ok(!would_create_self_join(
         ctx.outer_stmt,
         ctx.inner_stmt,
@@ -1669,7 +1702,9 @@ fn check_self_join(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// item (not the inlinable itself) references a column from the inlinable's
 /// alias that maps to a non-column expression after rebinding — such a
 /// reference would break downstream unnesting.
-fn check_downstream_non_trivial_lhs_output(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_downstream_non_trivial_lhs_output<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     Ok(!downstream_reference_non_trivial_lhs_output(
         ctx.outer_stmt,
         ctx.inner_alias,
@@ -1682,7 +1717,9 @@ fn check_downstream_non_trivial_lhs_output(ctx: &InliningContext) -> ReadySetRes
 ///
 /// Caller-gated via `ctx.skip_unnesting_guard` — post-`unnest_subqueries`
 /// callers (specifically `derived_tables_rewrite`) pass `true` to opt out.
-fn check_unnesting_guards(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_unnesting_guards<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     if ctx.skip_unnesting_guard {
         return Ok(true);
     }
@@ -1712,7 +1749,9 @@ fn check_unnesting_guards(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// structural `TRUE` placeholder — carved out for
 /// `is_supported_join_condition`, but `contains_select` remains active
 /// (subqueries in ON are universally unsupported).
-fn check_post_substitution_on_shape(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_post_substitution_on_shape<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     for jc in &ctx.outer_stmt.join {
         if let JoinConstraint::On(expr) = &jc.constraint {
             let substituted = substitute_columns_in_expr(expr, ctx.ext_to_int, ctx.is_top_select)?;
@@ -1738,7 +1777,9 @@ fn check_post_substitution_on_shape(ctx: &InliningContext) -> ReadySetResult<boo
 /// ON → WHERE safety check.  After inlining, some base ON conditions may
 /// need to migrate to WHERE; reject if that migration would leave a
 /// non-trivial ON that shape-normalization cannot repair.
-fn check_on_to_where_safety(ctx: &InliningContext) -> ReadySetResult<bool> {
+fn check_on_to_where_safety<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<bool> {
     can_move_joins_on_nontrivial_expr_to_where(ctx.outer_stmt, ctx.ext_to_int)
 }
 
@@ -1755,7 +1796,9 @@ fn check_on_to_where_safety(ctx: &InliningContext) -> ReadySetResult<bool> {
 /// Caller-preference flags on [`InliningContext`] (e.g.
 /// `skip_unnesting_guard`) tune the check sequence without requiring
 /// callers to compose the individual checks themselves.
-pub(crate) fn can_inline_subquery(ctx: &InliningContext) -> ReadySetResult<Option<Vec<Expr>>> {
+pub(crate) fn can_inline_subquery<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+) -> ReadySetResult<Option<Vec<Expr>>> {
     if !check_window_function_interaction(ctx)? {
         return Ok(None);
     }

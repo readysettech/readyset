@@ -251,7 +251,9 @@ fn can_inline_from_item(
 
     let (ds_tables, ds_joins) = compute_downstream_for_position(base_stmt, inl_from_item_ord_idx);
 
-    let ctx = crate::inline_subquery::InliningContext {
+    let ctx = crate::inline_subquery::InliningContext::<
+        crate::drop_redundant_join::UniqueColumnsSchemaImpl,
+    > {
         inner_stmt: inl_stmt,
         outer_stmt: base_stmt,
         inner_alias: &inl_stmt_alias,
@@ -270,6 +272,7 @@ fn can_inline_from_item(
         pre_hoist_lateral_exactly_one: None,
         pre_hoist_lateral_at_most_one: None,
         preceding_flattened_lateral_aliases: None,
+        unique_cols_schema: None,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {

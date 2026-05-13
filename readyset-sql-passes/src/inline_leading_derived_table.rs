@@ -328,7 +328,9 @@ fn hoist_lhsmost_derived_table(
     // window functions, nested aggregation, GROUP BY compat, ORDER/LIMIT,
     // cardinality, self-join, downstream non-trivial output, unnesting guards.
     // Leftmost position — downstream = everything after position 0.
-    let ctx = crate::inline_subquery::InliningContext {
+    let ctx = crate::inline_subquery::InliningContext::<
+        crate::drop_redundant_join::UniqueColumnsSchemaImpl,
+    > {
         inner_stmt: lhs_stmt,
         outer_stmt: stmt,
         inner_alias: &lhs_alias,
@@ -344,6 +346,7 @@ fn hoist_lhsmost_derived_table(
         pre_hoist_lateral_exactly_one: None,
         pre_hoist_lateral_at_most_one: None,
         preceding_flattened_lateral_aliases: None,
+        unique_cols_schema: None,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {

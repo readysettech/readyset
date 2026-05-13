@@ -121,8 +121,9 @@ fn rewrite_statement(
     let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql_text)?;
 
     stmt.rewrite_array_constructors()?;
-    drop_redundant_self_joins_main(&mut stmt, &SpjUniqueSchema::default())?;
-    unnest_subqueries_main(&mut stmt, &*schema_guard)?;
+    let unique_schema = SpjUniqueSchema::default();
+    drop_redundant_self_joins_main(&mut stmt, &unique_schema)?;
+    unnest_subqueries_main(&mut stmt, &*schema_guard, &unique_schema)?;
 
     Ok(stmt)
 }

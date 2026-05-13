@@ -28,7 +28,7 @@ use tracing::{trace, trace_span, warn};
 
 use crate::derived_tables_rewrite::DerivedTablesRewrite;
 use crate::disallow_row::DisallowRow as _;
-use crate::drop_redundant_join::DropRedundantSelfJoin as _;
+use crate::drop_redundant_join::{DropRedundantSelfJoin as _, UniqueColumnsSchemaImpl};
 use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
@@ -325,11 +325,12 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
                 query.rewrite_array_constructors()?;
                 trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
-                query.drop_redundant_join(&context)?;
+                let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
+                query.drop_redundant_join(&unique_cols_schema)?;
                 trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
                 query.inline_leading_derived_table()?;
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
-                query.unnest_subqueries(&context)?;
+                query.unnest_subqueries(&context, &unique_cols_schema)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
                 query.derived_tables_rewrite(flags.dialect)?;
                 trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));

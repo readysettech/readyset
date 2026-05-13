@@ -17,22 +17,27 @@ use std::collections::{HashMap, HashSet};
 use std::{iter, mem};
 
 pub trait DropRedundantSelfJoin: Sized {
-    fn drop_redundant_join<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self>;
+    fn drop_redundant_join<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl DropRedundantSelfJoin for SelectStatement {
-    fn drop_redundant_join<C: BaseSchemasContext>(&mut self, ctx: C) -> ReadySetResult<&mut Self> {
-        let unique_cols_schema = UniqueColumnsSchemaImpl::from(ctx);
-        drop_redundant_self_joins_main(self, &unique_cols_schema)?;
+    fn drop_redundant_join<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self> {
+        drop_redundant_self_joins_main(self, unique_cols_schema)?;
         Ok(self)
     }
 }
 
-pub trait UniqueColumnsSchema {
+pub(crate) trait UniqueColumnsSchema {
     fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>>;
 }
 
-struct UniqueColumnsSchemaImpl {
+pub(crate) struct UniqueColumnsSchemaImpl {
     unique_cols_schema: HashMap<Relation, HashSet<Column>>,
 }
 
@@ -90,11 +95,11 @@ impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
     }
 }
 
-struct DropRedundantJoinContext<'a> {
-    unique_cols_schema: &'a dyn UniqueColumnsSchema,
+struct DropRedundantJoinContext<'a, U: UniqueColumnsSchema> {
+    unique_cols_schema: &'a U,
 }
 
-impl<'a> DropRedundantJoinContext<'a> {
+impl<U: UniqueColumnsSchema> DropRedundantJoinContext<'_, U> {
     fn is_unique_column(&self, table: &Relation, name: &SqlIdentifier) -> bool {
         if let Some(unique_cols) = self.unique_cols_schema.unique_columns_of(table)
             && unique_cols.contains(&Column {
@@ -109,9 +114,9 @@ impl<'a> DropRedundantJoinContext<'a> {
     }
 }
 
-pub(crate) fn drop_redundant_self_joins_main(
+pub(crate) fn drop_redundant_self_joins_main<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    unique_cols_schema: &dyn UniqueColumnsSchema,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<()> {
     let ctx = DropRedundantJoinContext { unique_cols_schema };
     drop_redundant_self_joins(stmt, &ctx)?;
@@ -131,13 +136,13 @@ pub(crate) fn drop_redundant_self_joins_main(
 ///
 /// If all checks pass, we know that every LHS key value comes from the same base key column
 /// as the RHS, and the LEFT join on that key cannot remove LHS rows.
-fn lhs_is_subset_of_rhs(
+fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
     base_stmt: &SelectStatement,
     lhs_rel: &Relation,
     lhs_col: &Column,
     rhs_rel: &Relation,
     rhs_col: &Column,
-    ctx: &DropRedundantJoinContext,
+    ctx: &DropRedundantJoinContext<U>,
 ) -> ReadySetResult<bool> {
     let mut maybe_lhs_table_expr = None;
     let mut maybe_rhs_table_expr = None;
@@ -310,9 +315,9 @@ fn rebind_rhs_refs(
 /// self-join and its associated scan.
 ///
 /// The function recurses into nested subqueries first to handle this pattern bottom-up.
-fn drop_redundant_self_joins(
+fn drop_redundant_self_joins<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
-    ctx: &DropRedundantJoinContext,
+    ctx: &DropRedundantJoinContext<U>,
 ) -> ReadySetResult<bool> {
     let mut any_rewrite = false;
 
