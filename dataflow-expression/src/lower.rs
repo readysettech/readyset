@@ -658,13 +658,18 @@ impl BuiltinFunction {
                 antithesis_sdk::assert_reachable!(
                     r#"{"id":"Built-in function","sub":"split_part","tags":["exclude-nightly"]}"#
                 );
+                let string = next_arg()?;
+                let delimiter = next_arg()?;
+                let field = next_arg()?;
+                let collation = resolve_collation(&[&string, &delimiter], dialect);
+                let ty = DfType::Text(collation);
                 (
                     Self::SplitPart(
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
-                        cast(next_arg()?, DfType::Int),
+                        cast(string, ty.clone()),
+                        cast(delimiter, ty.clone()),
+                        cast(field, DfType::Int),
                     ),
-                    DfType::DEFAULT_TEXT,
+                    ty,
                 )
             }
             "greatest" | "least" => {
@@ -715,17 +720,25 @@ impl BuiltinFunction {
                     r#"{"id":"Built-in function","sub":"array_to_string","tags":["exclude-nightly"]}"#
                 );
                 let array_arg = next_arg()?;
+                let delimiter = next_arg()?;
+                let null_string = next_arg().ok();
                 let elem_ty = match array_arg.ty() {
                     DfType::Array(t) => (**t).clone(),
                     _ => DfType::Unknown,
                 };
+                let mut collation_args: Vec<&Expr> = vec![&delimiter];
+                if let Some(ref n) = null_string {
+                    collation_args.push(n);
+                }
+                let collation = resolve_collation(&collation_args, dialect);
+                let ty = DfType::Text(collation);
                 (
                     Self::ArrayToString(
                         cast(array_arg, DfType::Array(Box::new(elem_ty))),
-                        next_arg()?,
-                        next_arg().ok(),
+                        cast(delimiter, ty.clone()),
+                        null_string.map(|n| cast(n, ty.clone())),
                     ),
-                    DfType::DEFAULT_TEXT,
+                    ty,
                 )
             }
             "date_trunc" => {
@@ -2779,14 +2792,22 @@ pub(crate) mod tests {
                         shape: vec![1],
                         ty: DfType::Array(Box::new(DfType::Int))
                     },
-                    Expr::Literal {
-                        val: ",".into(),
-                        ty: DfType::Unknown
+                    Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: ",".into(),
+                            ty: DfType::Unknown,
+                        }),
+                        ty: DfType::DEFAULT_TEXT,
+                        null_on_failure: false,
                     },
-                    Some(Expr::Literal {
-                        val: "*".into(),
-                        ty: DfType::Unknown
-                    })
+                    Some(Expr::Cast {
+                        expr: Box::new(Expr::Literal {
+                            val: "*".into(),
+                            ty: DfType::Unknown,
+                        }),
+                        ty: DfType::DEFAULT_TEXT,
+                        null_on_failure: false,
+                    }),
                 )),
                 ty: DfType::DEFAULT_TEXT
             }
