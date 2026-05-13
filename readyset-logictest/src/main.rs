@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
@@ -443,7 +444,7 @@ impl Verify {
     #[tokio::main]
     async fn run(&self) -> anyhow::Result<()> {
         let result = Arc::new(Mutex::new(VerifyResult::default()));
-        let mut tasks = FuturesUnordered::new();
+        let mut tasks: FuturesUnordered<tokio::task::JoinHandle<()>> = FuturesUnordered::new();
 
         let max_tasks = if self.replication_url.is_some() {
             // Cannot parallelize tests when replicating because each test reuses the same db
@@ -452,18 +453,38 @@ impl Verify {
             self.tasks
         };
 
+        // Pool of free task indices, used to derive per-task upstream database names so concurrent
+        // scripts do not race on DROP/CREATE DATABASE. Each spawned task takes one index on entry
+        // and returns it on exit.
+        let free_slots: Arc<Mutex<VecDeque<usize>>> =
+            Arc::new(Mutex::new((0..max_tasks).collect()));
+
         for InputFile {
             name,
             data,
             expected_result,
         } in InputFiles::try_from(&self.input_opts)?
         {
+            if tasks.len() >= max_tasks {
+                // Wait for one of the in-flight tasks to finish (and return its slot) before
+                // claiming a new index for the next script.
+                tasks.select_next_some().await.unwrap();
+            }
+
+            let task_idx = free_slots
+                .lock()
+                .await
+                .pop_front()
+                .expect("a slot must be free after awaiting on FuturesUnordered");
+
             let mut script = TestScript::read(name.clone(), data)
                 .with_context(|| format!("Reading {}", name.to_string_lossy()))?;
-            let run_opts: RunOptions = self.into();
+            let mut run_opts: RunOptions = self.into();
+            run_opts.task_idx = task_idx;
             let result = Arc::clone(&result);
             let rename_passing = self.rename_passing;
             let rename_failing = self.rename_failing;
+            let free_slots = Arc::clone(&free_slots);
 
             tasks.push(tokio::spawn(async move {
                 let test_started = Instant::now();
@@ -538,13 +559,9 @@ impl Verify {
                         result.lock().await.passes += 1;
                     }
                 }
-            }));
 
-            if tasks.len() >= max_tasks {
-                // We want to limit the number of concurrent tests, so we wait for one of the
-                // current tasks to finish first
-                tasks.select_next_some().await.unwrap();
-            }
+                free_slots.lock().await.push_back(task_idx);
+            }));
         }
 
         while !tasks.is_empty() {
@@ -576,6 +593,7 @@ impl From<&Verify> for RunOptions {
             ignore_error_tags: verify.ignore_error_tags,
             query_timeout: Duration::from_secs(verify.query_timeout),
             script_timeout: Some(Duration::from_secs(verify.script_timeout)),
+            task_idx: 0,
         }
     }
 }

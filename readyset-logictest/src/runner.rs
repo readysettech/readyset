@@ -96,6 +96,10 @@ pub struct RunOptions {
     /// Per-script timeout. If set, the script will stop processing new records after this duration
     /// and report any accumulated failures (in no-fail-fast mode) along with the timeout.
     pub script_timeout: Option<Duration>,
+    /// Index of the runner task executing this script. Used to derive a per-task upstream database
+    /// name (`<db_name>_<task_idx>`) so concurrent scripts do not race on DROP/CREATE DATABASE
+    /// against the shared upstream.
+    pub task_idx: usize,
 }
 
 impl RunOptions {
@@ -113,8 +117,22 @@ impl RunOptions {
             ignore_error_tags: false,
             query_timeout: Duration::from_secs(60),
             script_timeout: None,
+            task_idx: 0,
         }
     }
+}
+
+/// Return a copy of `base` with its database name suffixed by `_<task_idx>`.
+///
+/// Each concurrent runner task uses a distinct upstream database so that DROP/CREATE DATABASE
+/// in [`recreate_test_database`] does not race across tasks sharing the same upstream server.
+pub fn per_task_db_url(base: &DatabaseURL, task_idx: usize) -> DatabaseURL {
+    let base_name = base
+        .db_name()
+        .expect("--database-url must specify a database name");
+    let mut url = base.clone();
+    url.set_db_name(format!("{base_name}_{task_idx}"));
+    url
 }
 
 fn is_select_statement(command: &str) -> bool {
@@ -259,12 +277,21 @@ impl TestScript {
         &self.path
     }
 
-    pub async fn run(&mut self, opts: RunOptions) -> anyhow::Result<()> {
+    pub async fn run(&mut self, mut opts: RunOptions) -> anyhow::Result<()> {
         info!(path = ?self.path, "Running test script");
 
         // Check filename to determine migration mode.
         // Check comments on MigrationMode for details.
         let out_of_band_migration = self.path.to_string_lossy().contains(".oob.");
+
+        // Suffix the upstream database name with the runner task index so concurrent tasks do not
+        // race on DROP/CREATE DATABASE. Replication mode is left untouched because it already
+        // serializes test execution to a single task (see `max_tasks` in main.rs).
+        if !opts.upstream_database_is_readyset {
+            if let Some(upstream_url) = opts.upstream_database_url.as_mut() {
+                *upstream_url = per_task_db_url(upstream_url, opts.task_idx);
+            }
+        }
 
         // Recreate the test database, unless this is a long-lived remote readyset instance (e.g.
         // running under Antithesis) in which case the state needs to be managed/reset externally;
@@ -803,5 +830,38 @@ impl TestScript {
     /// Get a reference to the test script's records (without line numbers).
     pub fn records(&self) -> Vec<&Record> {
         self.records.iter().map(|(_, r)| r).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_task_db_url_suffixes_db_name_mysql() {
+        let base: DatabaseURL = "mysql://root:noria@localhost:3306/noria_upstream"
+            .parse()
+            .unwrap();
+        let url = per_task_db_url(&base, 3);
+        assert_eq!(url.db_name(), Some("noria_upstream_3"));
+    }
+
+    #[test]
+    fn per_task_db_url_suffixes_db_name_postgres() {
+        let base: DatabaseURL = "postgresql://postgres:noria@localhost:5432/noria_upstream"
+            .parse()
+            .unwrap();
+        let url = per_task_db_url(&base, 7);
+        assert_eq!(url.db_name(), Some("noria_upstream_7"));
+    }
+
+    #[test]
+    fn per_task_db_url_preserves_other_url_components() {
+        let base: DatabaseURL = "postgresql://postgres:noria@localhost:5432/noria_upstream"
+            .parse()
+            .unwrap();
+        let url = per_task_db_url(&base, 0);
+        assert!(url.is_postgres());
+        assert_eq!(url.db_name(), Some("noria_upstream_0"));
     }
 }
