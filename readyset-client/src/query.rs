@@ -11,6 +11,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::ser::{SerializeSeq, SerializeTuple};
+use serde::{Deserialize, Serialize, Serializer};
+use vec1::Vec1;
+
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
@@ -21,9 +25,6 @@ use readyset_sql_passes::adapter_rewrites::anonymize_shallow_query;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
-use serde::ser::{SerializeSeq, SerializeTuple};
-use serde::{Deserialize, Serialize, Serializer};
-use vec1::Vec1;
 
 use schema_catalog::SchemaGeneration;
 
@@ -33,9 +34,7 @@ use crate::{PlaceholderIdx, ShallowViewRequest, ViewCreateRequest};
 /// `s1_query_id == s2_query_id` **only if** `s1 == s2`. This means that the unparsed,
 /// pre-adapter-rewrite version of a SELECT statement will not have the same `QueryId` as the
 /// parsed, rewritten version of the same SELECT statement.
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord,
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct QueryId(u64);
 
@@ -56,6 +55,11 @@ impl QueryId {
         schema_search_path: &[SqlIdentifier],
     ) -> Self {
         QueryId(hash(&(query, schema_search_path)))
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn random() -> Self {
+        QueryId(rand::random())
     }
 }
 

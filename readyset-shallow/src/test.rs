@@ -143,7 +143,7 @@ async fn test_create_cache_with_relation() {
     let result = create_test_cache(
         &manager,
         Some(relation.clone()),
-        QueryId::default(),
+        QueryId::random(),
         test_policy(),
     );
     assert!(result.is_ok());
@@ -162,7 +162,7 @@ async fn test_list_caches_and_drop_all() {
     create_test_cache(
         &manager,
         Some(relation1.clone()),
-        QueryId::default(),
+        QueryId::random(),
         test_policy(),
     )
     .unwrap();
@@ -226,7 +226,7 @@ async fn test_duplicate_cache_creation() {
     create_test_cache(
         &manager,
         Some(relation.clone()),
-        QueryId::default(),
+        QueryId::random(),
         test_policy(),
     )
     .unwrap();
@@ -234,7 +234,7 @@ async fn test_duplicate_cache_creation() {
     let result = create_test_cache(
         &manager,
         Some(relation.clone()),
-        QueryId::default(),
+        QueryId::random(),
         test_policy(),
     );
     assert_matches!(result, Err(ReadySetError::ViewAlreadyExists(_)));
@@ -248,7 +248,7 @@ async fn test_drop_cache_by_relation() {
     create_test_cache(
         &manager,
         Some(relation.clone()),
-        QueryId::default(),
+        QueryId::random(),
         test_policy(),
     )
     .unwrap();
@@ -427,7 +427,7 @@ async fn test_concurrent_cache_creation_same_name() {
             create_test_cache(
                 &manager_clone,
                 Some(relation_clone),
-                QueryId::default(),
+                QueryId::random(),
                 test_policy(),
             )
         });
