@@ -179,7 +179,7 @@ impl Aggregator {
             DfType::Double => Ok(DfValue::Double(Default::default())),
             DfType::Float => Ok(DfValue::Float(Default::default())),
             DfType::Numeric { .. } => Ok(DfValue::Numeric(Default::default())),
-            DfType::Text { .. } => Ok(DfValue::from("" /* TODO(aspen): Use collation here */)),
+            DfType::Text(c) => Ok(DfValue::from_str_and_collation("", *c)),
             e => unsupported!("Unsupported output type for aggregation: {}", e),
         }
     }

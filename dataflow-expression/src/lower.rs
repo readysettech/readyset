@@ -703,6 +703,11 @@ impl BuiltinFunction {
                     }
                 };
 
+                let arg_refs: Vec<&Expr> = iter::once(&arg1).chain(rest_args.iter()).collect();
+                let target_collation = resolve_collation(&arg_refs, dialect);
+                let compare_as = compare_as.with_collation(target_collation);
+                let ty = ty.with_collation(target_collation);
+
                 let mut args = Vec1::with_capacity(arg1, rest_args.len() + 1);
                 args.extend(rest_args);
 
@@ -1789,6 +1794,9 @@ impl Expr {
                     branches.iter().map(|branch| branch.body.ty()),
                     else_expr.ty(),
                 );
+                let mut arg_refs: Vec<&Expr> = branches.iter().map(|b| &b.body).collect();
+                arg_refs.push(&else_expr);
+                let ty = ty.with_collation(resolve_collation(&arg_refs, dialect));
                 if let DfType::Unknown = ty {
                     Err(unsupported_err!(
                         "Can not infer result type for CASE expression"
@@ -1948,6 +1956,9 @@ impl Expr {
                 let mut ty =
                     // Array exprs are only supported for postgresql
                     unify_postgres_types(elements.iter().map(|expr| expr.ty()).collect())?;
+
+                let elem_refs: Vec<&Expr> = elements.iter().collect();
+                ty = ty.with_collation(resolve_collation(&elem_refs, dialect));
 
                 for _ in &shape {
                     ty = DfType::Array(Box::new(ty));
@@ -2460,28 +2471,26 @@ pub(crate) mod tests {
                 .ty(),
             &DfType::BigInt
         );
-        // All-unknown branches resolve to DEFAULT_TEXT (PostgreSQL rule 3:
-        // "If all inputs are of type unknown, resolve as type text")
+        // All-unknown branches resolve to text in the dialect's default collation.
         assert_eq!(
             get_case_result_type("case when 1=1 then NULL end")
                 .unwrap()
                 .ty(),
-            &DfType::DEFAULT_TEXT
+            &MYSQL_TEXT
         );
-        // Incompatible THEN expressions — falls back to DEFAULT_TEXT via
-        // infer_case_result_type (dialect-unaware fallback, not from the literal)
+        // Incompatible THEN expressions — falls back to text in the dialect default.
         assert_eq!(
             get_case_result_type("case when 1=1 then 2 when 2=2 then 'ABC' end")
                 .unwrap()
                 .ty(),
-            &DfType::DEFAULT_TEXT
+            &MYSQL_TEXT
         );
-        // Incompatible THEN and ELSE expressions — same dialect-unaware fallback
+        // Incompatible THEN and ELSE expressions — same fallback.
         assert_eq!(
             get_case_result_type("case when 1=1 then 2 else 'ABC' end")
                 .unwrap()
                 .ty(),
-            &DfType::DEFAULT_TEXT
+            &MYSQL_TEXT
         );
 
         // PostgreSQL: all-string-literal CASE branches resolve to text without
@@ -2634,12 +2643,12 @@ pub(crate) mod tests {
         compares_as(
             vec![12u64.into(), "123".into()],
             Dialect::DEFAULT_MYSQL,
-            DfType::DEFAULT_TEXT,
+            MYSQL_TEXT,
         );
         compares_as(
             vec!["A".into(), "b".into(), 1.into()],
             Dialect::DEFAULT_MYSQL,
-            DfType::DEFAULT_TEXT,
+            MYSQL_TEXT,
         );
     }
 
