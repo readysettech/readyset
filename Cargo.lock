@@ -6662,6 +6662,7 @@ dependencies = [
  "replication-offset",
  "replicators",
  "reqwest 0.13.3",
+ "rmp-serde",
  "rusty-fork",
  "schema-catalog",
  "serde",
@@ -6829,7 +6830,6 @@ dependencies = [
  "failpoint-client",
  "readyset-client",
  "readyset-server",
- "serde_json",
  "tokio",
 ]
 

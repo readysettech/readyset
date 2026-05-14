@@ -111,6 +111,14 @@ fn reachable_from(graph: &Graph, start: NodeIndex, direction: Direction) -> Hash
 /// This structure holds all the dataflow state.
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
+///
+/// # Wire format
+///
+/// Persisted to the Authority's RocksDB via `rmp_serde::to_vec`. Removing or
+/// reordering any serde-included field breaks decoding of every older
+/// payload. See the matching warning above `Config` in
+/// `readyset-server/src/lib.rs` for the full policy and the compat-shim
+/// recipe.
 #[serde_as]
 #[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize)]

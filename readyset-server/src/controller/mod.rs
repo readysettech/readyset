@@ -57,6 +57,7 @@ pub(crate) mod migrate;
 mod mir_to_flow;
 pub(crate) mod replication;
 pub(crate) mod schema;
+pub mod snapshot_compat;
 pub(crate) mod sql;
 mod state;
 pub(crate) mod table_status;
@@ -101,6 +102,15 @@ pub struct NodeRestrictionKey {
 /// - The full state of the graph, including both [`MIR`][] and the dataflow graph itself
 ///
 /// [`MIR`]: readyset_mir
+///
+/// # Wire format
+///
+/// Persisted to the Authority's RocksDB via `rmp_serde::to_vec` — adding or
+/// removing fields here, or in any type reachable through `config` /
+/// `dataflow_state`, breaks decoding of every older payload and causes the
+/// controller to hard-crash at boot. See the warning above `Config` in
+/// `readyset-server/src/lib.rs` for the full policy and the compat-shim
+/// recipe.
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ControllerState {
     /// The user-provided configuration for the cluster

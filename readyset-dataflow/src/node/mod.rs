@@ -90,6 +90,15 @@ impl Column {
     }
 }
 
+/// A node in the dataflow graph.
+///
+/// # Wire format
+///
+/// `Node` lives inside the `ingredients: Graph` field of `DfState`, which the
+/// Authority persists to RocksDB via `rmp_serde::to_vec`. Removing or
+/// reordering any serde-included field here breaks decoding of every older
+/// payload. See the warning above `Config` in `readyset-server/src/lib.rs`
+/// for the full policy and the compat-shim recipe.
 #[must_use]
 #[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize)]
@@ -141,6 +150,26 @@ impl Node {
             #[allow(deprecated)]
             sharded_by: crate::Sharding::None,
         }
+    }
+
+    /// Test-only accessor for the deprecated `sharded_by` field. Used by the
+    /// state-snapshot backwards-compatibility infrastructure to verify that
+    /// the `Sharding` variant index round-trips through `rmp_serde`. Do not
+    /// consult at runtime.
+    #[doc(hidden)]
+    #[allow(deprecated)]
+    pub fn sharded_by_for_compat_test(&self) -> crate::Sharding {
+        self.sharded_by
+    }
+
+    /// Test-only mutator for the deprecated `sharded_by` field. Used by the
+    /// state-snapshot backwards-compatibility infrastructure to seed nodes
+    /// that mirror the shape of pre-removal persisted graphs. Do not set at
+    /// runtime.
+    #[doc(hidden)]
+    #[allow(deprecated)]
+    pub fn set_sharded_by_for_compat_test(&mut self, s: crate::Sharding) {
+        self.sharded_by = s;
     }
 
     pub fn mirror<NT: Into<NodeType>>(&self, n: NT) -> Node {

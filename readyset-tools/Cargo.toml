@@ -9,7 +9,6 @@ edition = "2024"
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 failpoint-client = { path = "../failpoint-client" }
-serde_json = { workspace = true }
 readyset-client = { path = "../readyset-client" }
 tokio = { workspace = true, features = ["full"] }
 readyset-server = { path = "../readyset-server" }
@@ -23,8 +22,8 @@ name = "controller_request"
 path = "src/controller_request.rs"
 
 [[bin]]
-name = "make_config_json"
-path = "src/make_config_json.rs"
+name = "make_state_snapshot"
+path = "src/make_state_snapshot.rs"
 
 [[bin]]
 name = "failpoint"
