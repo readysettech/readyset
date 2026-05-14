@@ -112,6 +112,7 @@ fn reachable_from(graph: &Graph, start: NodeIndex, direction: Direction) -> Hash
 /// It's meant to be handled exclusively by the [`DfStateHandle`], which is the structure
 /// that guarantees thread-safe access to it.
 #[serde_as]
+#[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DfState {
     pub(super) ingredients: Graph,
@@ -122,6 +123,12 @@ pub struct DfState {
     /// when domains are reclaimed via [`Self::reclaim_orphaned_domains`]; `next_domain()` always
     /// hands out a new index.
     pub(super) ndomains: usize,
+
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never consulted
+    /// at runtime.
+    #[serde(default)]
+    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+    pub(super) sharding: Option<usize>,
 
     pub(super) domain_config: DomainConfig,
 
@@ -198,6 +205,8 @@ impl DfState {
             ingredients,
             source,
             ndomains,
+            #[allow(deprecated)]
+            sharding: None,
             domain_config,
             persistence,
             materializations,

@@ -91,6 +91,7 @@ impl Column {
 }
 
 #[must_use]
+#[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     name: Relation,
@@ -108,6 +109,12 @@ pub struct Node {
     taken: bool,
 
     pub purge: bool,
+
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime.
+    #[serde(default)]
+    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+    sharded_by: crate::Sharding,
 }
 
 // constructors
@@ -130,6 +137,9 @@ impl Node {
             taken: false,
 
             purge: false,
+
+            #[allow(deprecated)]
+            sharded_by: crate::Sharding::None,
         }
     }
 

@@ -437,8 +437,14 @@ use serde::{Deserialize, Serialize};
 // ```
 // cargo run --bin make_config_json
 // ```
+#[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never consulted
+    /// at runtime.
+    #[serde(default)]
+    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+    pub(crate) sharding: Option<usize>,
     #[serde(default)]
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
@@ -474,6 +480,8 @@ fn default_background_recovery_interval() -> Duration {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            #[allow(deprecated)]
+            sharding: None,
             materialization_config: Default::default(),
             domain_config: DomainConfig {
                 aggressively_update_state_sizes: false,

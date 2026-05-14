@@ -54,6 +54,21 @@ pub use crate::payload::{
 use crate::prelude::{Executor, Upcall};
 pub use crate::processing::LookupIndex;
 
+/// Kept only so older persisted `ControllerState` payloads (which include `Node.sharded_by`) can
+/// still be deserialized. Never consulted at runtime — sharding was removed and the variants are
+/// preserved purely so MessagePack-compact decoding of pre-removal graphs still works.
+#[doc(hidden)]
+#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
+#[allow(deprecated)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize, Default)]
+pub enum Sharding {
+    #[default]
+    None,
+    ForcedNone,
+    Random(usize),
+    ByColumn(usize, usize),
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum EvictionKind {
     // unused, kept for backward compatibility, synonym for lru
