@@ -44,6 +44,17 @@ macro_rules! try_cast_or_none {
     }};
 }
 
+/// Build a text [`DfValue`] using the collation from a result type. The eval side of a
+/// string-producing builtin must honor the collation that lowering already picked via
+/// [`crate::lower::resolve_collation`] so that downstream `PartialEq` short-circuits on
+/// `collation_hash` agree across operands.
+fn text_with_collation(s: &str, ty: &DfType) -> ReadySetResult<DfValue> {
+    let Some(collation) = ty.collation() else {
+        internal!("text-producing builtin given non-text result type {ty:?}");
+    };
+    Ok(DfValue::from_str_and_collation(s, collation))
+}
+
 /// Returns the type of data stored in a JSON value as a string.
 fn get_json_value_type(json: &serde_json::Value) -> &'static str {
     match json {
@@ -1182,7 +1193,7 @@ impl BuiltinFunction {
                     s.push_str((&val).try_into()?)
                 }
 
-                Ok(s.into())
+                text_with_collation(&s, ty)
             }
             BuiltinFunction::ConcatWs(separator, first_arg, rest_args) => {
                 let separator = <&str>::try_from(&non_null!(separator.eval(record)?))?.to_owned();
@@ -1210,7 +1221,7 @@ impl BuiltinFunction {
                     }
                 }
 
-                Ok(result.into())
+                text_with_collation(&result, ty)
             }
             BuiltinFunction::Substring(string, from, len) => {
                 let string = non_null!(string.eval(record)?);
@@ -1269,21 +1280,20 @@ impl BuiltinFunction {
                         let parts = parts.collect::<Vec<_>>();
                         let rfield = -field as usize;
                         if rfield >= parts.len() {
-                            return Ok("".into());
+                            return text_with_collation("", ty);
                         }
-                        Ok(parts
-                            .get(parts.len() - rfield)
-                            .copied()
-                            .unwrap_or("")
-                            .into())
+                        text_with_collation(
+                            parts.get(parts.len() - rfield).copied().unwrap_or(""),
+                            ty,
+                        )
                     }
                     Ordering::Equal => Err(invalid_query_err!("field position must not be zero")),
-                    Ordering::Greater => {
-                        Ok(parts
+                    Ordering::Greater => text_with_collation(
+                        parts
                             .nth((field - 1/* 1-indexed */).try_into().unwrap())
-                            .unwrap_or("")
-                            .into())
-                    }
+                            .unwrap_or(""),
+                        ty,
+                    ),
                 }
             }
             BuiltinFunction::Greatest { args, compare_as } => {
@@ -1330,7 +1340,7 @@ impl BuiltinFunction {
                     }
                 }
 
-                Ok(res.into())
+                text_with_collation(&res, ty)
             }
             BuiltinFunction::DateTrunc(precision, source) => {
                 let precision =
@@ -2304,7 +2314,13 @@ mod tests {
             MySQL,
         );
         let res = expr.eval::<DfValue>(&[]).unwrap();
-        assert_eq!(res, "First name,Second name,Last Name".into());
+        assert_eq!(
+            res,
+            DfValue::from_str_and_collation(
+                "First name,Second name,Last Name",
+                Collation::Utf8AiCi,
+            ),
+        );
 
         let expr = parse_and_lower("concat_ws(',', '', 'b', 'c')", MySQL);
         let res = expr.eval::<DfValue>(&[]).unwrap();
@@ -2313,13 +2329,15 @@ mod tests {
 
     #[test]
     fn concat_ws_with_nulls() {
+        let expected = DfValue::from_str_and_collation("First name,Last Name", Collation::Utf8AiCi);
+
         let expr = parse_and_lower("concat_ws(',', 'First name', null, 'Last Name')", MySQL);
         let res = expr.eval::<DfValue>(&[]).unwrap();
-        assert_eq!(res, "First name,Last Name".into());
+        assert_eq!(res, expected);
 
         let expr = parse_and_lower("concat_ws(',', null, 'First name', 'Last Name')", MySQL);
         let res = expr.eval::<DfValue>(&[]).unwrap();
-        assert_eq!(res, "First name,Last Name".into());
+        assert_eq!(res, expected);
     }
 
     #[test]
