@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 use common::IndexType;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use readyset_data::DfValue;
 use replication_offset::ReplicationOffset;
 use rocksdb::DB;
@@ -122,7 +123,6 @@ impl PersistentStateHandle {
         };
 
         let cf = db.cf_handle(&cf_name).unwrap();
-        let mut iter = db.raw_iterator_cf(&cf);
         let primary_cf = if !is_primary {
             Some(
                 db.cf_handle(PK_CF)
@@ -132,9 +132,10 @@ impl PersistentStateHandle {
             None
         };
 
-        keys.iter()
-            .zip(&is_unique_vec)
+        keys.par_iter()
+            .zip(is_unique_vec.par_iter())
             .map(|(k, &is_unique)| {
+                let mut iter = db.raw_iterator_cf(&cf);
                 let prefix = PersistentState::serialize_prefix(k);
                 iter.seek(&prefix);
 
