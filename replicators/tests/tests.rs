@@ -2137,14 +2137,15 @@ async fn mysql_binlog_transaction_compression() {
         )
         .await
         .unwrap();
+    let teapot = |s: &str| DfValue::from_str_and_collation(s, Collation::Utf8AiCi);
     check_results!(
         ctx,
         "binlog_compression_test",
         "mysql_binlog_transaction_compression",
         &[
-            &[DfValue::Int(1), DfValue::Text("I am a small teapot".into())],
-            &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
-            &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
+            &[DfValue::Int(1), teapot("I am a small teapot")],
+            &[DfValue::Int(3), teapot("I am a big teapot")],
+            &[DfValue::Int(4), teapot("I am a tiny teapot")],
         ],
     );
     check_results!(
@@ -2152,9 +2153,9 @@ async fn mysql_binlog_transaction_compression() {
         "binlog_compression_test2",
         "mysql_binlog_transaction_compression2",
         &[
-            &[DfValue::Int(1), DfValue::Text("I am a small teapot".into())],
-            &[DfValue::Int(3), DfValue::Text("I am a big teapot".into())],
-            &[DfValue::Int(4), DfValue::Text("I am a tiny teapot".into())],
+            &[DfValue::Int(1), teapot("I am a small teapot")],
+            &[DfValue::Int(3), teapot("I am a big teapot")],
+            &[DfValue::Int(4), teapot("I am a tiny teapot")],
         ],
     );
 
