@@ -1231,7 +1231,7 @@ pub(crate) fn unnest_lateral_subqueries<U: UniqueColumnsSchema>(
 mod tests {
     use crate::drop_redundant_join::UniqueColumnsSchema;
     use crate::lateral_join::unnest_lateral_subqueries;
-    use crate::unnest_subqueries::{NonNullSchema, UnnestContext, collect_pre_hoist_lateral_hints};
+    use crate::unnest_subqueries::{NonNullSchema, UnnestContext, collect_lateral_hints};
     use crate::unnest_subqueries_3vl::ProbeRegistry;
     use readyset_sql::ast::{Column, Relation, SqlQuery};
     use readyset_sql::{Dialect, DialectDisplay};
@@ -1322,7 +1322,7 @@ mod tests {
         // Mirror `unnest_subqueries_main`'s pre-pass so LATERAL pre-hoist
         // hints (consumed by `lateral_flatten_safe` and the LATERAL downstream-cardinality
         // variant) are populated before rewriting.
-        collect_pre_hoist_lateral_hints(&stmt, &mut ctx)
+        collect_lateral_hints(&stmt, &mut ctx)
             .unwrap_or_else(|e| panic!("> {test_name}: PRE-HOIST HINT COLLECTION ERROR: {e}"));
 
         match unnest_lateral_subqueries(&mut stmt, &mut ctx) {

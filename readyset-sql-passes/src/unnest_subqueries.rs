@@ -180,13 +180,43 @@ pub(crate) fn unnest_subqueries_main<U: UniqueColumnsSchema>(
 
     let mut rewrite_status = RewriteStatus::default();
 
-    // Collect pre-hoist LATERAL hints (ExactlyOne + original ON triviality) before any reshaping
-    collect_pre_hoist_lateral_hints(&*stmt, &mut ctx)?;
+    // Collect LATERAL hints from the **pre-hoist** AST.  Pre-hoist
+    // visibility is load-bearing for the ExactlyOne classification
+    // (aggregate-only-no-GROUP-BY) on TOP-K-bearing bodies:
+    // `rewrite_top_k_for_lateral` (called by the hoister below)
+    // materializes LIMIT/ORDER via partitioned `ROW_NUMBER`, which
+    // injects a window function into SELECT — destroying the
+    // aggregate-only-no-GROUP-BY shape that consumers like
+    // `get_join_operator_for_lateral`'s COALESCE-zero promotion rely on.
+    // The `lateral_trivial_on` classification (outer-wrap JOIN ON
+    // shape) is also captured here.
+    collect_lateral_hints(stmt, &mut ctx)?;
 
     // Run the hoister; it also handles TOP-K in nested derived tables
     if hoist_correlated_from_nested_and_rewrite_top_k(stmt)? {
         rewrite_status.rewrite();
     }
+
+    // Refresh LATERAL hints against the **post-hoist** AST.  The
+    // hoist's `move_correlated_constraints_from_join_to_where` lifts
+    // correlated INNER JOIN ON predicates into WHERE, so a body whose
+    // correlation lived only in JOIN ON (invisible to the pre-hoist
+    // `is_correlation_pinned_at_most_one` classifier, which inspects
+    // WHERE) now qualifies as AtMostOne.  Closes the I3 pass-ordering
+    // gap documented in `known_core_limitations.md` §5.5.
+    //
+    // Set inserts are additive — the pre-hoist call's entries are
+    // preserved; this call only adds.  Both timings are needed because
+    // each classifier's structural property is preserved (never added)
+    // by the hoist:
+    //   - ExactlyOne: aggregate-only-no-GBY shape is captured pre-hoist
+    //     (the hoist may demote via TOP-K materialization but never
+    //     promotes a non-agg body to agg).
+    //   - AtMostOne: correlation-pinned GROUP BY shape is captured
+    //     post-hoist (the hoist may promote via JOIN ON → WHERE move
+    //     but never demotes by removing GROUP BY).
+    //   - trivial_on: outer-wrap JOIN ON, untouched by either timing.
+    collect_lateral_hints(stmt, &mut ctx)?;
 
     // Rewrite supported cases of subqueries found in `lateral` FROM, WHERE and select list
     let rewrite_status_1 = unnest_all_subqueries(stmt, &mut ctx)?;
@@ -2432,7 +2462,7 @@ fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<b
     are_group_by_keys_pinned_by_correlation(&cols_set, stmt)
 }
 
-/// Walk the statement and collect, for each LATERAL subquery, three pre-hoist hints:
+/// Walk the statement and collect, for each LATERAL subquery, three hints:
 ///  (1) whether its body is agg-only/no-GBY and **ExactlyOne** (wrapper-aware),
 ///  (2) whether its body is correlation-pinned **AtMostOne** GROUP BY, and
 ///  (3) whether its original ON was trivial (Empty / ON TRUE / comma segment).
@@ -2441,14 +2471,14 @@ fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<b
 /// grouped-with-correlation bodies are different shapes, and conflating
 /// them on the ExactlyOne side would silently corrupt the COALESCE-zero
 /// promotion in `get_join_operator_for_lateral`.
-pub(crate) fn collect_pre_hoist_lateral_hints<U: UniqueColumnsSchema>(
+pub(crate) fn collect_lateral_hints<U: UniqueColumnsSchema>(
     stmt: &SelectStatement,
     ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<()> {
     for (tab_expr_idx, tab_expr) in get_local_from_items_iter!(stmt).enumerate() {
         if let Some((inner, alias)) = as_sub_query_with_alias(tab_expr) {
             // Recurse first to collect nested hints
-            collect_pre_hoist_lateral_hints(inner, ctx)?;
+            collect_lateral_hints(inner, ctx)?;
 
             if inner.lateral {
                 let alias_rel: Relation = alias.clone().into();
