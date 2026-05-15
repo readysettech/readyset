@@ -94,6 +94,7 @@ pub struct IndexBuildContext {
     name: SqlIdentifier,
     table: Option<Relation>,
     default_options: rocksdb::Options,
+    block_cache_bytes: usize,
     table_status_tx: Option<UnboundedSender<(Relation, TableStatus)>>,
     index_build_status: Arc<AtomicIndexBuildStatus>,
     /// Cooperative shutdown flag. The domain sets this to request cancellation;
@@ -266,7 +267,7 @@ impl IndexBuildContext {
 
             if let Err(e) = db.create_cf(
                 &cf_name,
-                &index_params.make_rocksdb_options(&self.default_options),
+                &index_params.make_rocksdb_options(&self.default_options, self.block_cache_bytes),
             ) {
                 // Cleanup already-created column families
                 for idx in &created {
@@ -629,7 +630,12 @@ impl IndexBuildContext {
         let db_path = db.path().to_path_buf();
 
         // Open sidekick DB with matching CFs
-        let sidekick = open_sidekick(&db_path, pending_indices, &self.default_options)?;
+        let sidekick = open_sidekick(
+            &db_path,
+            pending_indices,
+            &self.default_options,
+            self.block_cache_bytes,
+        )?;
         let snapshot = db.snapshot();
 
         // Scan snapshot -> sidekick
@@ -892,6 +898,7 @@ impl PersistentState {
             name: self.name.clone(),
             table: self.table.clone(),
             default_options: self.default_options.clone(),
+            block_cache_bytes: self.block_cache_bytes,
             table_status_tx: self.table_status_tx.clone(),
             index_build_status: self.index_build_status.clone(),
             shutdown_requested: self.shutdown_requested.clone(),
@@ -1211,6 +1218,7 @@ fn open_sidekick(
     primary_db_path: &std::path::Path,
     pending_indices: &[PersistentIndex],
     base_options: &rocksdb::Options,
+    cache_bytes: usize,
 ) -> ReadySetResult<SidekickDb> {
     cleanup_sidekick_directories(primary_db_path);
 
@@ -1261,7 +1269,7 @@ fn open_sidekick(
     )];
     for idx in pending_indices {
         let index_params = IndexParams::from(&idx.index);
-        let mut cf_opts = index_params.make_rocksdb_options(base_options);
+        let mut cf_opts = index_params.make_rocksdb_options(base_options, cache_bytes);
 
         // VectorRep: O(1) append during writes, single std::sort at flush.
         // Eliminates the 35% CPU cost of SkipList::FindLessThan in
@@ -1344,7 +1352,8 @@ impl IndexBuildContext {
                 .map_err(|e| internal_err!("Failed to flush sidekick CF '{cf_name}': {e}"))?;
 
             // Build CF-specific options (includes custom comparator for BTreeMap).
-            let cf_options = IndexParams::from(&idx.index).make_rocksdb_options(base_options);
+            let cf_options = IndexParams::from(&idx.index)
+                .make_rocksdb_options(base_options, self.block_cache_bytes);
 
             // Optimized read options for sequential scan: large readahead,
             // no block cache (ephemeral DB), and async I/O for prefetch.
@@ -1517,7 +1526,12 @@ impl IndexBuildContext {
 
         // Open a sidekick and scan into it -- same as production.
         // This keeps the primary's WAL clean (no disable_wal gaps).
-        let sidekick = open_sidekick(&db_path, &pending_indices, &self.default_options)?;
+        let sidekick = open_sidekick(
+            &db_path,
+            &pending_indices,
+            &self.default_options,
+            self.block_cache_bytes,
+        )?;
 
         PersistentState::populate_secondary_from_iter(
             &sidekick.db,

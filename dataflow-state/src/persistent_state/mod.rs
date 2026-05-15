@@ -73,7 +73,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fmt, fs};
@@ -150,6 +150,34 @@ const WORKING_DIR: &str = "readyset.tmp";
 
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
+
+/// Default capacity for the shared rocksdb block cache, in bytes.
+///
+/// Sized as a starting point that works for typical deployments rather than a theoretical
+/// optimum. Override via `PersistenceParameters::block_cache_bytes`.
+pub(crate) fn default_block_cache_bytes() -> usize {
+    1024 * 1024 * 1024
+}
+
+/// Process-wide shared rocksdb block cache. One LRU is allocated and reused by
+/// every [`PersistentState`] instance so the cache budget can be set globally
+/// rather than per-table.
+///
+/// Without this, each PersistentState's rocksdb instance gets its own default
+/// 32 MB cache, which for any non-trivial cached query is small enough to
+/// produce sub-1% hit ratios and constant LZ4 decompression churn.
+static SHARED_BLOCK_CACHE: OnceLock<rocksdb::Cache> = OnceLock::new();
+
+/// Returns the process-wide rocksdb block cache, lazily allocating it with `bytes` capacity on
+/// first call. Subsequent calls return the existing cache regardless of `bytes`; in a real
+/// deployment this is benign because every [`PersistentState`] reads from the same
+/// [`PersistenceParameters`].
+fn shared_block_cache(bytes: usize) -> &'static rocksdb::Cache {
+    SHARED_BLOCK_CACHE.get_or_init(|| {
+        info!(bytes, "Initializing shared rocksdb block cache");
+        rocksdb::Cache::new_lru_cache(bytes)
+    })
+}
 
 /// Delete any working/temp files from the last process run. Normally, those files
 /// will be cleaned up on process exit, but if readyset crashes or fails, delete them
@@ -281,7 +309,12 @@ impl FromStr for DurabilityMode {
 }
 
 /// Parameters to control the operation of GroupCommitQueue.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// `PartialEq`/`Eq` deliberately ignore `block_cache_bytes` because it is ephemeral runtime
+/// config sourced fresh from CLI on each process startup, not durable state. Including it in
+/// equality would make the leader-election config-drift check fire on every startup whenever
+/// the operator sets a non-default `--rocksdb-block-cache-mb`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PersistenceParameters {
     /// Whether the output files should be deleted when the GroupCommitQueue is dropped.
     pub mode: DurabilityMode,
@@ -297,7 +330,35 @@ pub struct PersistenceParameters {
     /// set to 0, the WAL will be flushed and synced to disk with every write
     #[serde(default)]
     pub wal_flush_interval_seconds: u64,
+    /// Capacity of the process-wide shared rocksdb block cache, in bytes. The `default` attribute
+    /// keeps deserialization forward-compatible with older authority snapshots that lack the
+    /// field. Round-tripping is required because `DomainBuilder` carries this struct via bincode
+    /// to worker tasks, and bincode-skipped fields would arrive as the default on the worker.
+    #[serde(default = "default_block_cache_bytes")]
+    pub block_cache_bytes: usize,
 }
+
+impl PartialEq for PersistenceParameters {
+    fn eq(&self, other: &Self) -> bool {
+        // Destructure so adding a new field forces a deliberate decision about whether it
+        // participates in equality.
+        let Self {
+            mode,
+            db_filename_prefix,
+            storage_dir,
+            working_temp_dir,
+            wal_flush_interval_seconds,
+            block_cache_bytes: _,
+        } = self;
+        *mode == other.mode
+            && *db_filename_prefix == other.db_filename_prefix
+            && *storage_dir == other.storage_dir
+            && *working_temp_dir == other.working_temp_dir
+            && *wal_flush_interval_seconds == other.wal_flush_interval_seconds
+    }
+}
+
+impl Eq for PersistenceParameters {}
 
 impl Default for PersistenceParameters {
     fn default() -> Self {
@@ -307,6 +368,7 @@ impl Default for PersistenceParameters {
             storage_dir: None,
             working_temp_dir: None,
             wal_flush_interval_seconds: 0,
+            block_cache_bytes: default_block_cache_bytes(),
         }
     }
 }
@@ -341,6 +403,7 @@ impl PersistenceParameters {
             storage_dir,
             working_temp_dir,
             wal_flush_interval_seconds,
+            block_cache_bytes: default_block_cache_bytes(),
         }
     }
 
@@ -485,6 +548,9 @@ pub struct PersistentState {
     /// The relation when PersistenceType::BaseTable.
     table: Option<Relation>,
     default_options: rocksdb::Options,
+    /// Capacity of the process-wide shared rocksdb block cache, in bytes. Captured at
+    /// construction time so per-CF options can re-apply the same cache via [`shared_block_cache`].
+    block_cache_bytes: usize,
     db: PersistentStateHandle,
     // The list of all the indices that are defined as unique in the schema for this table
     unique_keys: Vec<Box<[usize]>>,
@@ -1331,17 +1397,18 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.set_write_buffer_size(32 * 1024 * 1024);
     opts.set_db_write_buffer_size(128 * 1024 * 1024);
 
-    let block_opts = block_based_options(true);
+    let block_opts = block_based_options(true, params.block_cache_bytes);
     opts.set_block_based_table_factory(&block_opts);
 
     opts
 }
 
 /// Creates a standard set of `BlockBasedOptions`.
-fn block_based_options(set_filter: bool) -> BlockBasedOptions {
+fn block_based_options(set_filter: bool, cache_bytes: usize) -> BlockBasedOptions {
     let mut block_opts = BlockBasedOptions::default();
     block_opts.set_block_size(32 * 1024);
     block_opts.set_optimize_filters_for_memory(true);
+    block_opts.set_block_cache(shared_block_cache(cache_bytes));
 
     if set_filter {
         // "9.9" is the recommended value from the rocksdb docs
@@ -1399,13 +1466,17 @@ impl IndexParams {
     /// Construct a set of rocksdb Options for column families with this set of params, based on the
     /// given set of `base_options`.
     #[allow(clippy::unreachable)] // Checked at construction
-    fn make_rocksdb_options(&self, base_options: &rocksdb::Options) -> rocksdb::Options {
+    fn make_rocksdb_options(
+        &self,
+        base_options: &rocksdb::Options,
+        cache_bytes: usize,
+    ) -> rocksdb::Options {
         let mut opts = base_options.clone();
         match self.index_type {
             // For hash map indices, optimize for point queries and in-prefix range iteration, but
             // don't allow cross-prefix range iteration.
             IndexType::HashMap => {
-                let block_opts = block_based_options(true);
+                let block_opts = block_based_options(true, cache_bytes);
                 opts.set_block_based_table_factory(&block_opts);
 
                 // We're either going to be doing direct point lookups, in the case of unique
@@ -1882,7 +1953,8 @@ impl PersistentState {
                             let cf_id: usize = cf_name.parse().map_err(|_| Error::BadDbFormat)?;
                             let index_params =
                                 cf_index_params.get(cf_id).ok_or(Error::BadDbFormat)?;
-                            index_params.make_rocksdb_options(&default_options)
+                            index_params
+                                .make_rocksdb_options(&default_options, params.block_cache_bytes)
                         },
                     ))
                 })
@@ -1966,7 +2038,8 @@ impl PersistentState {
                     // This column family was dropped, but index remains
                     db.create_cf(
                         &index.column_family,
-                        &IndexParams::from(&index.index).make_rocksdb_options(&default_options),
+                        &IndexParams::from(&index.index)
+                            .make_rocksdb_options(&default_options, params.block_cache_bytes),
                     )?;
                 }
             }
@@ -2004,6 +2077,7 @@ impl PersistentState {
             name,
             table,
             default_options,
+            block_cache_bytes: params.block_cache_bytes,
             seq: 0,
             unique_keys,
             epoch: meta.epoch,
@@ -2068,7 +2142,7 @@ impl PersistentState {
         let index_params = IndexParams::new(IndexType::HashMap, columns.len());
         self.db.db().create_cf(
             PK_CF,
-            &index_params.make_rocksdb_options(&self.default_options),
+            &index_params.make_rocksdb_options(&self.default_options, self.block_cache_bytes),
         )?;
 
         Ok(())
@@ -2109,7 +2183,7 @@ impl PersistentState {
             .db()
             .create_cf(
                 PK_CF,
-                &index_params.make_rocksdb_options(&self.default_options),
+                &index_params.make_rocksdb_options(&self.default_options, self.block_cache_bytes),
             )
             .map_err(|e| internal_err!("Failed to create primary index CF: {e}"))?;
 
@@ -2151,7 +2225,7 @@ impl PersistentState {
             let index_params = IndexParams::from(&pi.index);
             db.create_cf(
                 &pi.column_family,
-                &index_params.make_rocksdb_options(&self.default_options),
+                &index_params.make_rocksdb_options(&self.default_options, self.block_cache_bytes),
             )
             .unwrap();
         }
@@ -2525,7 +2599,8 @@ impl PersistentState {
 
             db.create_cf(
                 cf_name,
-                &IndexParams::from(index).make_rocksdb_options(&self.default_options),
+                &IndexParams::from(index)
+                    .make_rocksdb_options(&self.default_options, self.block_cache_bytes),
             )
             .unwrap();
 
