@@ -13,7 +13,7 @@ use std::mem;
 use readyset_data::{AvgScaleMode, DfType, DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
 use readyset_post_lookup::{PostLookupColumn, PostLookupDecomposition, PostLookupPlan};
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::post_processing::post_lookup::iter::{ResultIterator, Results};
 use crate::schema::{ColumnSchema, SelectSchema};
@@ -135,26 +135,32 @@ pub fn apply_post_lookup_to_prepared_schema(
 /// 1. Computes the final aggregate value from source columns (e.g. `SUM/COUNT`)
 /// 2. Places the computed value at the original result position
 /// 3. Removes columns that were added by the decomposition (e.g. extra COUNT)
-/// 4. Coerces the recomposed value to the schema's target type
-/// 5. Updates the schema to match
+///
+/// `schema` is the pre-decompose reader schema, used to look up source column
+/// types for the recompose calculation. The client-facing schema is rebuilt
+/// independently via [`transform_schema`].
 ///
 /// Pass-through when `plan` is empty.
-pub fn postprocess_decompositions<'a>(
+pub fn postprocess_decompositions(
     rows: ResultIterator,
-    schema: SelectSchema<'a>,
+    schema: &[ColumnSchema],
     plan: &PostLookupPlan,
     dialect: Dialect,
-) -> ReadySetResult<(ResultIterator, SelectSchema<'a>)> {
+) -> ReadySetResult<ResultIterator> {
     if plan.is_empty() {
-        return Ok((rows, schema));
+        return Ok(rows);
     }
 
     let decompositions = plan.decompositions();
     let column_plan = plan.column_plan();
-    let columns_to_remove = plan.columns_to_remove();
 
-    let result_types = compute_result_types(decompositions, &schema.schema, dialect)?;
+    let result_types = compute_result_types(decompositions, schema, dialect)?;
 
+    // Kept materialized deliberately. A recompose failure must surface as a
+    // synchronous Err so the read can fall back to upstream instead of serving
+    // a wrong answer. A streaming adapter would surface it too late to fall
+    // back, after the read commits and rows are on the wire. See REA-6627
+    // (iceboxed) for the full rationale.
     let mut transformed_rows: Vec<Vec<DfValue>> = Vec::new();
     let mut computed: Vec<DfValue> = Vec::with_capacity(decompositions.len());
     for mut row in rows {
@@ -200,58 +206,7 @@ pub fn postprocess_decompositions<'a>(
         transformed_rows.push(out_row);
     }
 
-    // Build output schema/aliases. Schema types must be set before coercion
-    // below and before column removal (`result_index` is pre-removal).
-    let mut new_schema_vec = schema.schema.into_owned();
-    let mut new_columns_vec = schema.columns.into_owned();
-    for (d, (ty, _)) in decompositions.iter().zip(result_types) {
-        if d.result_index < new_schema_vec.len() {
-            new_schema_vec[d.result_index].column_type = ty;
-        }
-        if d.result_index < new_columns_vec.len() {
-            new_columns_vec[d.result_index] = d.original_alias.clone();
-        }
-    }
-
-    for d in decompositions {
-        if d.result_index < new_schema_vec.len() {
-            let target_type = &new_schema_vec[d.result_index].column_type;
-            for row in &mut transformed_rows {
-                if let Some(val) = row.get(d.result_index).filter(|val| **val != DfValue::None) {
-                    match val.coerce_to(target_type, &DfType::Double) {
-                        Ok(coerced) => row[d.result_index] = coerced,
-                        Err(e) => {
-                            warn!(
-                                %e,
-                                ?val,
-                                ?target_type,
-                                result_index = d.result_index,
-                                "post-lookup decomposition: coercion failed, replacing with NULL"
-                            );
-                            row[d.result_index] = DfValue::None;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for &idx in columns_to_remove.iter().rev() {
-        if idx < new_schema_vec.len() {
-            new_schema_vec.remove(idx);
-        }
-        if idx < new_columns_vec.len() {
-            new_columns_vec.remove(idx);
-        }
-    }
-
-    Ok((
-        ResultIterator::owned(vec![Results::new(transformed_rows)]),
-        SelectSchema {
-            schema: Cow::Owned(new_schema_vec),
-            columns: Cow::Owned(new_columns_vec),
-        },
-    ))
+    Ok(ResultIterator::owned(vec![Results::new(transformed_rows)]))
 }
 
 #[cfg(test)]
@@ -321,8 +276,8 @@ mod tests {
         let rows = make_rows(vec![]);
         let plan = PostLookupPlan::new(vec![], 0);
 
-        let (rows, _schema) =
-            postprocess_decompositions(rows, schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
+        let rows = postprocess_decompositions(rows, &schema.schema, &plan, Dialect::DEFAULT_MYSQL)
+            .unwrap();
         assert!(rows.into_vec().is_empty());
     }
 
@@ -342,8 +297,9 @@ mod tests {
         ]]);
         let plan = PostLookupPlan::new(vec![avg_decomposition(0, 0, 1, 2, "avg_x")], 3);
 
-        let (rows, schema) =
-            postprocess_decompositions(rows, schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
+        let rows = postprocess_decompositions(rows, &schema.schema, &plan, Dialect::DEFAULT_MYSQL)
+            .unwrap();
+        let schema = transform_schema(schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         let data = rows.into_vec();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0].len(), 1, "COUNT and MIN columns should be stripped");
@@ -376,8 +332,9 @@ mod tests {
         ]]);
         let plan = PostLookupPlan::new(vec![avg_decomposition(1, 1, 3, 4, "avg_x")], 5);
 
-        let (rows, schema) =
-            postprocess_decompositions(rows, schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
+        let rows = postprocess_decompositions(rows, &schema.schema, &plan, Dialect::DEFAULT_MYSQL)
+            .unwrap();
+        let schema = transform_schema(schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         let data = rows.into_vec();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0].len(), 3);
@@ -420,8 +377,9 @@ mod tests {
             6,
         );
 
-        let (rows, schema) =
-            postprocess_decompositions(rows, schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
+        let rows = postprocess_decompositions(rows, &schema.schema, &plan, Dialect::DEFAULT_MYSQL)
+            .unwrap();
+        let schema = transform_schema(schema, &plan, Dialect::DEFAULT_MYSQL).unwrap();
         let data = rows.into_vec();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0].len(), 2);
@@ -452,8 +410,10 @@ mod tests {
         ]]);
         let plan = PostLookupPlan::new(vec![avg_decomposition(0, 0, 1, 2, "avg_x")], 3);
 
-        let (_rows, schema) =
-            postprocess_decompositions(rows, schema, &plan, Dialect::DEFAULT_POSTGRESQL).unwrap();
+        let _rows =
+            postprocess_decompositions(rows, &schema.schema, &plan, Dialect::DEFAULT_POSTGRESQL)
+                .unwrap();
+        let schema = transform_schema(schema, &plan, Dialect::DEFAULT_POSTGRESQL).unwrap();
         assert_eq!(schema.schema.len(), 1);
         assert_eq!(schema.schema[0].column_type, DfType::DEFAULT_NUMERIC);
     }

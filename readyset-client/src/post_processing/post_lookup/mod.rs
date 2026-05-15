@@ -14,7 +14,7 @@ use dataflow_expression::Expr;
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
 
-use crate::schema::SelectSchema;
+use crate::schema::ColumnSchema;
 
 pub use decompose::{
     apply_post_lookup_to_prepared_schema, postprocess_decompositions, transform_schema,
@@ -33,17 +33,21 @@ pub use spec::{
 /// textual order of the calls below. `filter` is routed inside
 /// [`ResultIterator::pipeline`] so it applies with the correct semantics relative
 /// to aggregation; everything else is an outer stage.
+///
+/// `result_schema` is the pre-decompose reader schema used by the recompose stage
+/// to look up source column types. The client-facing schema is rebuilt
+/// independently on the adapter via [`transform_schema`].
 #[allow(clippy::too_many_arguments)]
-pub fn run_post_processing_pipeline<'a>(
+pub fn run_post_processing_pipeline(
     rows: SharedResults,
-    schema: SelectSchema<'a>,
+    result_schema: &[ColumnSchema],
     post_lookup: &PostLookup,
     plan: Option<&PostLookupPlan>,
     limit: Option<usize>,
     offset: Option<usize>,
     filter: Option<Expr>,
     dialect: Dialect,
-) -> ReadySetResult<(ResultIterator, SelectSchema<'a>)> {
+) -> ReadySetResult<ResultIterator> {
     let rows = ResultIterator::pipeline(
         rows,
         post_lookup.order_by.as_ref(),
@@ -52,9 +56,11 @@ pub fn run_post_processing_pipeline<'a>(
         post_lookup.default_row.as_ref(),
     );
 
-    let (rows, schema) = match plan {
-        Some(plan) if !plan.is_empty() => postprocess_decompositions(rows, schema, plan, dialect)?,
-        _ => (rows, schema),
+    let rows = match plan {
+        Some(plan) if !plan.is_empty() => {
+            postprocess_decompositions(rows, result_schema, plan, dialect)?
+        }
+        _ => rows,
     };
 
     // Dedup runs *after* recompose so the HashSet sees recomposed `AVG` values,
@@ -70,13 +76,11 @@ pub fn run_post_processing_pipeline<'a>(
         .with_offset(offset)
         .with_projection(post_lookup.returned_cols.as_deref());
 
-    Ok((rows, schema))
+    Ok(rows)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     use readyset_data::{DfType, DfValue};
     use readyset_post_lookup::{PostLookupAggregateKind, PostLookupDecomposition, SourceColumn};
     use readyset_sql::ast::{Column, SqlIdentifier};
@@ -106,15 +110,6 @@ mod tests {
         }
     }
 
-    fn select_schema(cols: Vec<(&str, DfType)>) -> SelectSchema<'static> {
-        let columns: Vec<SqlIdentifier> = cols.iter().map(|(n, _)| (*n).into()).collect();
-        let schema: Vec<ColumnSchema> = cols.into_iter().map(|(n, t)| col_schema(n, t)).collect();
-        SelectSchema {
-            schema: Cow::Owned(schema),
-            columns: Cow::Owned(columns),
-        }
-    }
-
     /// Baseline: no plan, no distinct, no aggregates; rows in, rows out.
     #[test]
     fn empty_plan_passes_rows_through() {
@@ -123,9 +118,9 @@ mod tests {
             vec![DfValue::from(2i64), DfValue::from("b")],
         ]]);
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            select_schema(vec![]),
+            &[],
             &PostLookup::default(),
             None,
             None,
@@ -133,8 +128,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0], vec![DfValue::from(1i64), DfValue::from("a")]);
@@ -156,9 +151,9 @@ mod tests {
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            select_schema(vec![]),
+            &[],
             &post_lookup,
             None,
             Some(2),
@@ -166,8 +161,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0][0], DfValue::from(2i64));
@@ -187,9 +182,9 @@ mod tests {
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            select_schema(vec![]),
+            &[],
             &post_lookup,
             None,
             None,
@@ -197,8 +192,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows.len(), 2);
     }
@@ -222,9 +217,9 @@ mod tests {
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            select_schema(vec![]),
+            &[],
             &post_lookup,
             None,
             None,
@@ -232,8 +227,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows.len(), 2);
     }
@@ -273,16 +268,16 @@ mod tests {
             DfValue::Int(2),
             DfValue::Int(3),
         ]]]);
-        let schema = select_schema(vec![
-            ("sum_x", DfType::BigInt),
-            ("count_x", DfType::BigInt),
-            ("min_x", DfType::Int),
-        ]);
+        let result_schema = vec![
+            col_schema("sum_x", DfType::BigInt),
+            col_schema("count_x", DfType::BigInt),
+            col_schema("min_x", DfType::Int),
+        ];
         let plan = avg_plan(0, 1, 2, "avg_x");
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            schema,
+            &result_schema,
             &PostLookup::default(),
             Some(&plan),
             None,
@@ -290,8 +285,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].len(), 1, "COUNT and MIN stripped");
@@ -309,20 +304,20 @@ mod tests {
             vec![DfValue::Int(10), DfValue::Int(2), DfValue::Int(3)], // AVG = 5
             vec![DfValue::Int(20), DfValue::Int(4), DfValue::Int(3)], // AVG = 5
         ]]);
-        let schema = select_schema(vec![
-            ("sum_x", DfType::BigInt),
-            ("count_x", DfType::BigInt),
-            ("min_x", DfType::Int),
-        ]);
+        let result_schema = vec![
+            col_schema("sum_x", DfType::BigInt),
+            col_schema("count_x", DfType::BigInt),
+            col_schema("min_x", DfType::Int),
+        ];
         let plan = avg_plan(0, 1, 2, "avg_x");
         let post_lookup = PostLookup {
             distinct: PostLookupDistinct::HashBased,
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            schema,
+            &result_schema,
             &post_lookup,
             Some(&plan),
             None,
@@ -330,8 +325,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(
             rows.len(),
@@ -341,7 +336,9 @@ mod tests {
         assert_eq!(rows[0][0], DfValue::try_from(5.0_f64).unwrap());
     }
 
-    /// Empty input + `default_row` set yields the default row exactly once.
+    /// An empty `data` set with `default_row` set yields the default row exactly
+    /// once. Regression guard for the builder collapse: the orchestrator must
+    /// not double-emit.
     #[test]
     fn empty_input_emits_default_row_once() {
         let default = std::sync::Arc::new(Box::new([DfValue::Int(42)]) as Box<[DfValue]>);
@@ -350,9 +347,9 @@ mod tests {
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             shared(vec![vec![]]),
-            select_schema(vec![]),
+            &[],
             &post_lookup,
             None,
             None,
@@ -360,8 +357,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert_eq!(rows, vec![vec![DfValue::Int(42)]]);
     }
@@ -378,9 +375,9 @@ mod tests {
             ..PostLookup::default()
         };
 
-        let (rows, _schema) = run_post_processing_pipeline(
+        let rows = run_post_processing_pipeline(
             data,
-            select_schema(vec![]),
+            &[],
             &post_lookup,
             None,
             None,
@@ -388,8 +385,8 @@ mod tests {
             None,
             Dialect::DEFAULT_MYSQL,
         )
-        .unwrap();
-        let rows = rows.into_vec();
+        .unwrap()
+        .into_vec();
 
         assert!(rows.iter().all(|r| r.len() == 2));
     }

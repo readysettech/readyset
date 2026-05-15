@@ -22,7 +22,7 @@ use pin_project::pin_project;
 use readyset_client::post_processing::{
     run_post_processing_pipeline, ReadReplyStats, ResultIterator,
 };
-use readyset_client::schema::{ColumnSchema, SelectSchema};
+use readyset_client::schema::ColumnSchema;
 use readyset_client::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReaderAddress, Tagged, ViewQuery,
 };
@@ -41,17 +41,6 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::StreamExt;
 use tower::Service;
 use tracing::{error, warn};
-
-/// Build a [`SelectSchema`] from the optional pre-decomposition schema shipped in
-/// [`ViewQuery::result_schema`]. The orchestrator only inspects `schema.schema` (column
-/// types) for recompose, so the `columns` (aliases) field is left empty; the adapter
-/// independently rebuilds the client-facing column list.
-fn initial_select_schema(result_schema: Option<&[ColumnSchema]>) -> SelectSchema<'static> {
-    SelectSchema {
-        schema: std::borrow::Cow::Owned(result_schema.map(<[_]>::to_vec).unwrap_or_default()),
-        columns: std::borrow::Cow::Owned(Vec::new()),
-    }
-}
 
 const WAIT_BEFORE_WARNING: Duration = Duration::from_secs(7);
 
@@ -228,9 +217,9 @@ impl ReadRequestHandler {
                 // immediately
                 self.hit_ctr.increment(1);
 
-                let (results, _schema) = match run_post_processing_pipeline(
+                let results = match run_post_processing_pipeline(
                     hit,
-                    initial_select_schema(result_schema.as_deref()),
+                    result_schema.as_deref().unwrap_or(&[]),
                     &reader.post_lookup,
                     post_lookup_plan.as_ref(),
                     limit,
@@ -553,9 +542,9 @@ impl BlockingRead {
             Err(_) => return Poll::Ready(Err(ReadySetError::ServerShuttingDown)),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
-                let (results, _schema) = match run_post_processing_pipeline(
+                let results = match run_post_processing_pipeline(
                     hit,
-                    initial_select_schema(self.result_schema.as_deref()),
+                    self.result_schema.as_deref().unwrap_or(&[]),
                     &reader.post_lookup,
                     self.post_lookup_plan.as_ref(),
                     self.limit,
