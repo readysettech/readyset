@@ -7,7 +7,7 @@ use chrono::DateTime;
 use mysql_time::MySqlTime;
 use readyset_decimal::Decimal;
 use serde::de::{EnumAccess, VariantAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer};
 use serde_bytes::{ByteBuf, Bytes};
 use strum::{EnumString, FromRepr, VariantNames};
 
@@ -33,30 +33,6 @@ enum Variant {
 enum TextOrTinyText {
     Text(Text),
     TinyText(TinyText),
-}
-
-/// Wrapper struct that allows serializing a reference to a `str` as if it were a text [`DfValue`]
-pub struct TextRef<'a>(pub &'a str);
-
-impl Serialize for TextRef<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let bytes = self.0.as_bytes();
-        // Match `DfValue::Serialize`: TinyText writes a placeholder hash since the type has no
-        // room to store one; full Text writes the real collation hash.
-        let hash = if bytes.len() > crate::text::TINYTEXT_WIDTH {
-            Collation::Utf8.key_hash(self.0)
-        } else {
-            0
-        };
-        serialize_variant(
-            serializer,
-            Variant::Text,
-            &(Collation::Utf8, Bytes::new(bytes), hash),
-        )
-    }
 }
 
 #[inline(always)]
@@ -334,14 +310,6 @@ mod tests {
             <&str>::try_from(&input).unwrap()
         );
         assert_eq!(rt.collation(), input.collation());
-    }
-
-    #[tags(no_retry)]
-    #[proptest]
-    fn text_ref_serializes_same_as_text_value(s: String) {
-        let text_ref = bincode::serialize(&TextRef(&s)).unwrap();
-        let text_value = bincode::serialize(&DfValue::from(s)).unwrap();
-        assert_eq!(text_ref, text_value);
     }
 
     #[tags(no_retry)]

@@ -1,6 +1,6 @@
 use common::DfValue;
 use derive_more::From;
-use readyset_data::{Bound, BoundedRange, RangeBounds, TextRef};
+use readyset_data::{Bound, BoundedRange, RangeBounds};
 use serde::ser::{SerializeSeq, SerializeTuple};
 use serde::Serialize;
 use test_strategy::Arbitrary;
@@ -111,10 +111,7 @@ impl Serialize for PointKey {
         macro_rules! serialize_val {
             ($ser: ident, $v: ident) => {{
                 let val = $v.transform_for_serialized_key();
-                match val.as_str() {
-                    Some(s) => $ser.serialize_element(&TextRef(s))?, // Don't serialize collation
-                    None => $ser.serialize_element(val.as_ref())?,
-                }
+                $ser.serialize_element(val.as_ref())?;
             }};
         }
 
