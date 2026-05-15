@@ -1331,7 +1331,7 @@ fn base_options(params: &PersistenceParameters) -> rocksdb::Options {
     opts.set_write_buffer_size(32 * 1024 * 1024);
     opts.set_db_write_buffer_size(128 * 1024 * 1024);
 
-    let block_opts = block_based_options(false);
+    let block_opts = block_based_options(true);
     opts.set_block_based_table_factory(&block_opts);
 
     opts
