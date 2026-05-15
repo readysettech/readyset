@@ -52,38 +52,52 @@ impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
         let mut unique_cols_schema = HashMap::new();
 
         for (rel, body) in ctx.base_schemas() {
-            let mut unique_cols = body
-                .fields
-                .iter()
-                .filter_map(|col_spec| {
-                    if (col_spec.constraints.contains(&ColumnConstraint::NotNull)
-                        && col_spec.constraints.contains(&ColumnConstraint::Unique))
-                        || col_spec.constraints.contains(&ColumnConstraint::PrimaryKey)
-                    {
-                        Some(col_spec.column.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<HashSet<_>>();
+            // Single walk over body.fields populates both sets:
+            //   - `unique_cols`: columns that are individually unique-and-non-null
+            //     via inline constraints (NotNull+Unique together, or PrimaryKey).
+            //   - `not_null_cols`: columns proven non-null by inline NotNull or
+            //     PrimaryKey.  Used below to gate table-level UNIQUE acceptance.
+            let mut unique_cols = HashSet::new();
+            let mut not_null_cols = HashSet::new();
+            for col_spec in &body.fields {
+                let has_not_null = col_spec.constraints.contains(&ColumnConstraint::NotNull);
+                let has_unique = col_spec.constraints.contains(&ColumnConstraint::Unique);
+                let has_pk = col_spec.constraints.contains(&ColumnConstraint::PrimaryKey);
+                if has_not_null || has_pk {
+                    not_null_cols.insert(col_spec.column.clone());
+                }
+                if (has_not_null && has_unique) || has_pk {
+                    unique_cols.insert(col_spec.column.clone());
+                }
+            }
 
             if let Some(keys) = &body.keys {
                 // Only single-column PK/UNIQUE keys guarantee individual column
                 // uniqueness.  A composite key like UNIQUE(a, b) only guarantees
                 // the *pair* is unique — neither `a` nor `b` alone is unique.
-                unique_cols.extend(
-                    keys.iter()
-                        .filter_map(|key| {
-                            if key.is_primary_key() || key.is_unique_key() {
-                                let cols = key.get_columns();
-                                if cols.len() == 1 { Some(cols) } else { None }
-                            } else {
-                                None
-                            }
-                        })
-                        .flat_map(|cols| cols.into_iter().cloned())
-                        .collect::<HashSet<_>>(),
-                );
+                //
+                // Table-level UNIQUE without NOT NULL is NOT a superkey: SQL
+                // allows multiple NULL rows in a nullable UNIQUE column
+                // (NULLS DISTINCT default), so the column does not uniquely
+                // identify rows.  `NULLS NOT DISTINCT` (Postgres 15+) limits
+                // the count of NULL rows but does not change `NULL = NULL`
+                // evaluation in join ON predicates — still UNKNOWN.  Gate
+                // table-level UNIQUE acceptance on a proven NOT NULL fact
+                // for the column.  Table-level PRIMARY KEY implies NOT NULL
+                // by SQL semantics and is accepted unconditionally.
+                unique_cols.extend(keys.iter().filter_map(|key| {
+                    let cols = key.get_columns();
+                    if cols.len() != 1 {
+                        return None;
+                    }
+                    let col: &Column = cols[0];
+                    if key.is_primary_key() || (key.is_unique_key() && not_null_cols.contains(col))
+                    {
+                        Some(col.clone())
+                    } else {
+                        None
+                    }
+                }));
             }
 
             if !unique_cols.is_empty() {
@@ -583,6 +597,86 @@ mod tests {
             .unique_columns_of(&rel)
             .expect("inline UNIQUE+NOT NULL table should have unique columns");
         assert!(unique.contains(&mk_col("t", "email")));
+    }
+
+    /// Table-level UNIQUE on a column with inline NOT NULL: the column is a
+    /// true superkey and must be recognized.  Covers DDL patterns like
+    /// `username VARCHAR(100) NOT NULL, UNIQUE KEY u_username (username)`
+    /// (common in Laravel-style migrations and named-constraint schemas).
+    #[test]
+    fn table_level_unique_on_inline_not_null_column_is_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "username", vec![ColumnConstraint::NotNull])],
+            vec![TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "username"))],
+                index_type: None,
+                nulls_distinct: None,
+            }],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl
+            .unique_columns_of(&rel)
+            .expect("table-level UNIQUE on inline-NOT-NULL column should be unique");
+        assert!(unique.contains(&mk_col("t", "username")));
+    }
+
+    /// Table-level UNIQUE on a column without NOT NULL is NOT a superkey.
+    /// SQL allows multiple NULL rows in a nullable UNIQUE column (NULLS
+    /// DISTINCT default); the column does not uniquely identify rows, so
+    /// treating it as a superkey would cause wrong-results in callers like
+    /// `drop_redundant_join` and `is_upstream_item_safe_for_lateral_flatten`
+    /// (post-flatten GROUP BY would collapse multiple NULL-key outer rows
+    /// into one group).
+    #[test]
+    fn table_level_unique_on_nullable_column_is_not_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "filename", vec![])],
+            vec![TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "filename"))],
+                index_type: None,
+                nulls_distinct: None,
+            }],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl.unique_columns_of(&rel);
+        assert!(
+            unique.is_none() || !unique.as_ref().unwrap().contains(&mk_col("t", "filename")),
+            "nullable table-level UNIQUE column should NOT be treated as a superkey"
+        );
+    }
+
+    /// `NULLS NOT DISTINCT` (Postgres 15+) limits the count of NULL rows but
+    /// does not change `NULL = NULL` evaluation in join ON predicates (still
+    /// UNKNOWN per SQL three-valued logic).  The column can still hold a
+    /// NULL value, so it is not a superkey for join-elimination purposes.
+    #[test]
+    fn table_level_unique_nulls_not_distinct_without_not_null_is_not_unique() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "id", vec![])],
+            vec![TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "id"))],
+                index_type: None,
+                nulls_distinct: Some(readyset_sql::ast::NullsDistinct::NotDistinct),
+            }],
+        );
+        let schema_impl = UniqueColumnsSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let unique = schema_impl.unique_columns_of(&rel);
+        assert!(
+            unique.is_none() || !unique.as_ref().unwrap().contains(&mk_col("t", "id")),
+            "NULLS NOT DISTINCT without NOT NULL should NOT be treated as a superkey"
+        );
     }
 
     #[test]
