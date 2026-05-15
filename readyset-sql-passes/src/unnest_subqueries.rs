@@ -205,7 +205,7 @@ impl<C: BaseSchemasContext> From<C> for NonNullSchemaImpl {
         };
 
         for (rel, body) in ctx.base_schemas() {
-            let nonnull_cols = body
+            let mut nonnull_cols = body
                 .fields
                 .iter()
                 .filter_map(|col_spec| {
@@ -218,6 +218,33 @@ impl<C: BaseSchemasContext> From<C> for NonNullSchemaImpl {
                     }
                 })
                 .collect::<HashSet<_>>();
+
+            // Table-level PRIMARY KEY implies NOT NULL for every column in
+            // the key.  Unlike table-level UNIQUE (which alone does not
+            // guarantee per-column non-nullness), the SQL standard requires
+            // every member of a PRIMARY KEY — even composite — to be
+            // individually NOT NULL.  Without this walk, schemas using the
+            // `CREATE TABLE t (id INT, PRIMARY KEY(id))` form (column
+            // declarations bare, key declared at the table level) would
+            // miss the NOT NULL fact entirely and downstream nullability
+            // inference in correlated-subquery analysis would
+            // over-conservatively treat `id` as nullable.
+            //
+            // Table-level UNIQUE is intentionally NOT added here: UNIQUE
+            // alone permits multiple NULL rows under the SQL `NULLS
+            // DISTINCT` default, and `NULLS NOT DISTINCT` only limits the
+            // count of NULL rows without making the column non-null in
+            // expression semantics.
+            if let Some(keys) = &body.keys {
+                for key in keys {
+                    if key.is_primary_key() {
+                        for col in key.get_columns() {
+                            nonnull_cols.insert(col.clone());
+                        }
+                    }
+                }
+            }
+
             if !nonnull_cols.is_empty() {
                 schema.nonnull_schema.insert(rel.clone(), nonnull_cols);
             }
@@ -2463,4 +2490,155 @@ pub(crate) fn collect_pre_hoist_lateral_hints<U: UniqueColumnsSchema>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod nonnull_schema_impl_tests {
+    use super::*;
+    use readyset_sql::ast::{
+        ColumnSpecification, CreateTableBody, IndexKeyPart, SqlType, TableKey,
+    };
+
+    /// Build a minimal `CreateTableBody` with the given column names, inline
+    /// constraints, and table-level keys.  Mirrors the helper in
+    /// `drop_redundant_join`'s test module.
+    fn make_body(
+        cols: &[(&str, &str, Vec<ColumnConstraint>)],
+        keys: Vec<TableKey>,
+    ) -> CreateTableBody {
+        CreateTableBody {
+            fields: cols
+                .iter()
+                .map(|(table, name, constraints)| ColumnSpecification {
+                    column: Column {
+                        name: (*name).into(),
+                        table: Some(Relation::from(*table)),
+                    },
+                    sql_type: SqlType::Int(None),
+                    constraints: constraints.clone(),
+                    generated: None,
+                    comment: None,
+                    invisible: false,
+                })
+                .collect(),
+            keys: if keys.is_empty() { None } else { Some(keys) },
+        }
+    }
+
+    fn mk_col(table: &str, name: &str) -> Column {
+        Column {
+            name: name.into(),
+            table: Some(Relation::from(table)),
+        }
+    }
+
+    /// Inline `PRIMARY KEY` on a single column produces a NOT NULL entry.
+    /// Baseline coverage of the existing field-walk branch.
+    #[test]
+    fn inline_pk_column_is_not_null() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "id", vec![ColumnConstraint::PrimaryKey]),
+                ("t", "name", vec![]),
+            ],
+            vec![],
+        );
+        let schema = NonNullSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let nn = schema.not_null_columns_of(&rel);
+        assert!(nn.contains(&mk_col("t", "id")));
+        assert!(!nn.contains(&mk_col("t", "name")));
+    }
+
+    /// Inline `NOT NULL` produces a NOT NULL entry.  Baseline coverage of
+    /// the existing field-walk branch.
+    #[test]
+    fn inline_not_null_column_is_not_null() {
+        let rel: Relation = "t".into();
+        let body = make_body(&[("t", "email", vec![ColumnConstraint::NotNull])], vec![]);
+        let schema = NonNullSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        assert!(
+            schema
+                .not_null_columns_of(&rel)
+                .contains(&mk_col("t", "email"))
+        );
+    }
+
+    /// Single-column table-level `PRIMARY KEY` produces a NOT NULL entry.
+    /// Pins the table-level PK walk.  Without it, schemas using the
+    /// `CREATE TABLE t (id INT, PRIMARY KEY(id))` form miss the NOT NULL
+    /// fact entirely.
+    #[test]
+    fn table_level_pk_single_column_is_not_null() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "id", vec![]), ("t", "name", vec![])],
+            vec![TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "id"))],
+            }],
+        );
+        let schema = NonNullSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let nn = schema.not_null_columns_of(&rel);
+        assert!(nn.contains(&mk_col("t", "id")));
+        assert!(!nn.contains(&mk_col("t", "name")));
+    }
+
+    /// Composite table-level `PRIMARY KEY` produces a NOT NULL entry for
+    /// EVERY column member.  Asymmetric vs `UniqueColumnsSchemaImpl`: a
+    /// composite UNIQUE does NOT imply per-column uniqueness, but a
+    /// composite PRIMARY KEY DOES imply per-column NOT NULL (SQL standard).
+    #[test]
+    fn table_level_composite_pk_all_columns_are_not_null() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "tenant_id", vec![]),
+                ("t", "row_id", vec![]),
+                ("t", "data", vec![]),
+            ],
+            vec![TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![
+                    IndexKeyPart::Column(mk_col("t", "tenant_id")),
+                    IndexKeyPart::Column(mk_col("t", "row_id")),
+                ],
+            }],
+        );
+        let schema = NonNullSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        let nn = schema.not_null_columns_of(&rel);
+        assert!(nn.contains(&mk_col("t", "tenant_id")));
+        assert!(nn.contains(&mk_col("t", "row_id")));
+        assert!(!nn.contains(&mk_col("t", "data")));
+    }
+
+    /// Table-level `UNIQUE` alone does NOT produce a NOT NULL entry.
+    /// UNIQUE permits multiple NULL rows under `NULLS DISTINCT` (the SQL
+    /// default), and `NULLS NOT DISTINCT` only limits the count, not the
+    /// nullability.  Pins the asymmetry against the PK branch.
+    #[test]
+    fn table_level_unique_alone_is_not_not_null() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[("t", "id", vec![])],
+            vec![TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: vec![IndexKeyPart::Column(mk_col("t", "id"))],
+                index_type: None,
+                nulls_distinct: None,
+            }],
+        );
+        let schema = NonNullSchemaImpl::from(HashMap::from([(rel.clone(), body)]));
+        assert!(
+            !schema
+                .not_null_columns_of(&rel)
+                .contains(&mk_col("t", "id"))
+        );
+    }
 }
