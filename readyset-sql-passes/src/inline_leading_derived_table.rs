@@ -95,9 +95,10 @@ use crate::inline_subquery::{
 };
 use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
-    as_sub_query_with_alias, build_ext_to_int_fields_map, expect_sub_query_with_alias_mut,
-    get_from_item_reference_name, hoist_parametrizable_join_filters_to_where,
-    is_aggregation_or_grouped, make_aliases_distinct_from_base_statement,
+    as_sub_query_with_alias, as_sub_query_with_alias_mut, build_ext_to_int_fields_map,
+    expect_sub_query_with_alias_mut, get_from_item_reference_name,
+    hoist_parametrizable_join_filters_to_where, is_aggregation_or_grouped,
+    make_aliases_distinct_from_base_statement,
 };
 use itertools::Either;
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
@@ -309,6 +310,32 @@ fn hoist_lhsmost_derived_table(
     stmt: &mut SelectStatement,
     is_top_select: bool,
 ) -> ReadySetResult<bool> {
+    // Normalize LATERAL at position 0.  The flag's only expressive
+    // capability is correlation to preceding FROM siblings — which do not
+    // exist at position 0.  Correlation to outer-enclosing scopes works
+    // for any FROM-item subquery without LATERAL (regular correlated-
+    // subquery semantics), so clearing the flag here is observationally
+    // a no-op for query evaluation.
+    //
+    // Downstream, `unnest_lateral_subqueries` treats LATERAL bodies via
+    // the Flatten/Resolve paths; the Flatten precondition
+    // `has_outer_left_join_on` would otherwise admit position-0 LATERAL
+    // bodies whose internal LEFT JOIN ON references an outer-enclosing
+    // (grandparent) column, applying the algebraic identity
+    // `A × (B ⟕_p C) ≡ (A × B) ⟕_p C` with empty `A` — a malformed
+    // application of the identity.  Clearing the flag here routes such
+    // bodies through the regular FROM-subquery path
+    // (`derived_tables_rewrite`), which is the correct handling.
+    //
+    // This normalization runs at every left-spine level the pass
+    // descends to (per `hoist_lhsmost_derived_table_rewrite_impl`'s
+    // recursion), so every reachable position-0 subquery gets normalized.
+    if let Some(lhs_dt) = stmt.tables.first_mut()
+        && let Some((inner_stmt, _)) = as_sub_query_with_alias_mut(lhs_dt)
+    {
+        inner_stmt.lateral = false;
+    }
+
     let Some(lhs_dt) = stmt.tables.first() else {
         return Ok(false);
     };
@@ -1468,7 +1495,6 @@ mod tests {
             expected_text,
         );
     }
-
     /// Outer SELECT references a GROUP BY key of the inner grouped DT.
     /// Previously rejected by `is_agg_derived_outputs.all()` because
     /// `s.k` maps to `t.k` (a column reference, not aggregate).  Now
@@ -1584,6 +1610,27 @@ mod tests {
             "outer_order_by_unrelated_column_bails",
             original_text,
             expected_text,
+        );
+    }
+
+    /// `LATERAL` at position 0 is structurally a no-op: position 0 has
+    /// no preceding FROM siblings to correlate with, and correlation to
+    /// outer-enclosing scopes does not require the flag.  Verify the
+    /// pass clears it.  Body contains a window function so the
+    /// eligibility check bails (no hoist); the only AST change between
+    /// input and output is the cleared LATERAL flag.
+    #[test]
+    fn position_0_lateral_flag_is_cleared_independent_of_hoisting() {
+        let original = r#"
+        SELECT s.x, s.rn
+        FROM LATERAL (SELECT t.x, row_number() over() AS rn FROM t) AS s"#;
+        let expected = r#"
+        SELECT s.x, s.rn
+        FROM (SELECT t.x, row_number() over() AS rn FROM t) AS s"#;
+        test_it(
+            "position_0_lateral_flag_is_cleared_independent_of_hoisting",
+            original,
+            expected,
         );
     }
 }
