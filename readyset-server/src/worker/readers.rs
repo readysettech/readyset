@@ -172,6 +172,7 @@ impl ReadRequestHandler {
             filter,
             limit,
             offset,
+            dialect: _,
         } = query;
 
         macro_rules! reply_with_ok {

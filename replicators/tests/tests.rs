@@ -548,7 +548,7 @@ impl TestHandle {
             .await?
             .into_reader_handle()
             .unwrap();
-        let results = getter.lookup(&[0.into()]).await?;
+        let results = getter.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await?;
         let mut results = results.into_vec();
         results.sort(); // Simple `lookup` does not sort the results, so we just sort them ourselves
         Ok(results)
@@ -5525,7 +5525,7 @@ async fn get_results_for_query_inner(
         .await?
         .into_reader_handle()
         .unwrap();
-    let results = getter.lookup(&[0.into()]).await?;
+    let results = getter.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await?;
     let mut results = results.into_vec();
     results.sort();
     Ok(results)

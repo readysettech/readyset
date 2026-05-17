@@ -95,7 +95,10 @@
 //!         .unwrap();
 //!     // looking up article 42 should yield the article we inserted with a vote count of 1
 //!     assert_eq!(
-//!         awvc.lookup(&[aid.into()]).await.unwrap().into_vec(),
+//!         awvc.lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
+//!             .await
+//!             .unwrap()
+//!             .into_vec(),
 //!         vec![vec![
 //!             DfValue::from(aid),
 //!             title.try_into().unwrap(),

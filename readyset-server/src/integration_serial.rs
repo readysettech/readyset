@@ -110,7 +110,10 @@ async fn it_works_basic_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -123,7 +126,11 @@ async fn it_works_basic_impl() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
 
@@ -148,7 +155,10 @@ async fn it_works_basic_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -246,7 +256,10 @@ async fn it_works_basic_standalone_impl() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -264,7 +277,11 @@ async fn it_works_basic_standalone_impl() {
     // Check that everything was restored properly
     let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(
         res,
         vec![vec![id.clone(), 2.into()], vec![id.clone(), 4.into()]]

@@ -4,6 +4,7 @@ use clap::Parser;
 use clap::builder::NonEmptyStringValueParser;
 use readyset_client::ReadySetHandle;
 use readyset_client::consensus::AuthorityType;
+use readyset_data::Dialect;
 
 #[derive(Parser)]
 #[command(name = "view_checker")]
@@ -32,7 +33,7 @@ impl ViewChecker {
 
         println!("Waiting for noria");
         let mut getter = handle.view(self.query).await?.into_reader_handle().unwrap();
-        let results = getter.lookup(&[0.into()]).await?;
+        let results = getter.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await?;
         println!("Results: {results:?}");
 
         Ok(())

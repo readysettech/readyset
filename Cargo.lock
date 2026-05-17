@@ -6877,6 +6877,7 @@ dependencies = [
  "clap",
  "failpoint-client",
  "readyset-client",
+ "readyset-data",
  "readyset-server",
  "tokio",
 ]

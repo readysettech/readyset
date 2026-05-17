@@ -1188,15 +1188,20 @@ pub struct ViewQuery {
     pub limit: Option<usize>,
     /// An optional offset to skip the given number of rows from the beginning of the result set
     pub offset: Option<usize>,
+    /// SQL dialect for any downstream stage that needs to pick types based on dialect (e.g.
+    /// recompose of decomposed aggregates). Always populated by the caller so post-lookup
+    /// stages can't silently inherit a `MySQL` default for PostgreSQL clients.
+    pub dialect: Dialect,
 }
 
-impl From<Vec<KeyComparison>> for ViewQuery {
-    fn from(key_comparisons: Vec<KeyComparison>) -> Self {
+impl From<(Vec<KeyComparison>, Dialect)> for ViewQuery {
+    fn from((key_comparisons, dialect): (Vec<KeyComparison>, Dialect)) -> Self {
         Self {
             key_comparisons,
             filter: None,
             limit: None,
             offset: None,
+            dialect,
         }
     }
 }
@@ -1351,18 +1356,24 @@ impl ReaderHandle {
     }
 
     /// Retrieve the query results for the given parameter value.
-    pub async fn lookup(&mut self, key: &[DfValue]) -> ReadySetResult<ResultIterator> {
+    pub async fn lookup(
+        &mut self,
+        key: &[DfValue],
+        dialect: Dialect,
+    ) -> ReadySetResult<ResultIterator> {
         let key = Vec1::try_from_vec(key.into())
             .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
-        self.multi_lookup(vec![KeyComparison::Equal(key)]).await
+        self.multi_lookup(vec![KeyComparison::Equal(key)], dialect)
+            .await
     }
 
     /// Retrieve the query results for the given parameter values.
     pub async fn multi_lookup(
         &mut self,
         key_comparisons: Vec<KeyComparison>,
+        dialect: Dialect,
     ) -> ReadySetResult<ResultIterator> {
-        self.raw_lookup(key_comparisons.into()).await
+        self.raw_lookup((key_comparisons, dialect).into()).await
     }
 
     /// Build a [`ViewQuery`] for performing a lookup against this [`ReaderHandle`]
@@ -1402,6 +1413,7 @@ impl ReaderHandle {
             }),
             limit,
             offset,
+            dialect,
         })
     }
 }

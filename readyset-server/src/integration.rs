@@ -101,7 +101,7 @@ async fn it_completes() {
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 2.into()]])
@@ -110,7 +110,7 @@ async fn it_completes() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |res| {
             assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -120,7 +120,7 @@ async fn it_completes() {
     muta.delete(vec![id.clone()]).await.unwrap();
     eventually!(
         run_test: {
-            cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec()
+            cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 4.into()]])
@@ -154,7 +154,7 @@ async fn base_mutation() {
     write.insert(vec![1.into(), 2.into()]).await.unwrap();
     eventually!(
         run_test: {
-            read.lookup(&[1.into()]).await.unwrap().into_vec()
+            read.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 2.into()]])
@@ -168,7 +168,7 @@ async fn base_mutation() {
         .unwrap();
     eventually!(
         run_test: {
-            read.lookup(&[1.into()]).await.unwrap().into_vec()
+            read.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 3.into()]])
@@ -185,7 +185,7 @@ async fn base_mutation() {
         .unwrap();
     eventually!(
         run_test: {
-            read.lookup(&[1.into()]).await.unwrap().into_vec()
+            read.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 4.into()]])
@@ -202,7 +202,7 @@ async fn base_mutation() {
         .unwrap();
     eventually!(
         run_test: {
-            read.lookup(&[1.into()]).await.unwrap().into_vec()
+            read.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 5.into()]])
@@ -212,7 +212,7 @@ async fn base_mutation() {
     // delete should, well, delete
     write.delete(vec![1.into()]).await.unwrap();
     eventually!(read
-        .lookup(&[1.into()])
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -228,7 +228,7 @@ async fn base_mutation() {
         .unwrap();
     eventually!(
         run_test: {
-            read.lookup(&[1.into()]).await.unwrap().into_vec()
+            read.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert_eq!(results, vec![vec![1.into(), 2.into()]])
@@ -238,7 +238,7 @@ async fn base_mutation() {
     // truncate deletes everything
     write.truncate().await.unwrap();
     eventually!(read
-        .lookup(&[1.into()])
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -279,11 +279,17 @@ async fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 2.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        bq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -292,11 +298,17 @@ async fn shared_interdomain_ancestor() {
     muta.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        bq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 4.into()]]
     );
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 4.into()]]
     );
 
@@ -337,7 +349,11 @@ async fn it_works_w_mat() {
 
     // send a query to c
     // we should see all the a values
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -352,7 +368,11 @@ async fn it_works_w_mat() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 6);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -408,7 +428,11 @@ async fn it_works_w_partial_mat() {
     assert_eq!(cq.len().await.unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -457,7 +481,11 @@ async fn it_works_w_partial_mat_below_empty() {
     assert_eq!(cq.len().await.unwrap(), 0);
 
     // now do some reads
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.iter().any(|r| *r == vec![id.clone(), 1.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
@@ -504,7 +532,10 @@ async fn it_works_deletion() {
     muta.insert(vec![1.into(), 2.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        cq.lookup(&[1.into()]).await.unwrap().into_vec(),
+        cq.lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -514,7 +545,11 @@ async fn it_works_deletion() {
         .unwrap();
     sleep().await;
 
-    let res = cq.lookup(&[1.into()]).await.unwrap().into_vec();
+    let res = cq
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![1.into(), 2.into()]));
     assert!(res.contains(&vec![1.into(), 4.into()]));
@@ -523,7 +558,10 @@ async fn it_works_deletion() {
     muta.delete(vec![2.into()]).await.unwrap();
     sleep().await;
     assert_eq!(
-        cq.lookup(&[1.into()]).await.unwrap().into_vec(),
+        cq.lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -571,7 +609,11 @@ async fn delete_row() {
     sleep().await;
 
     assert_eq!(
-        all_rows.lookup(&[0.into()]).await.unwrap().into_vec(),
+        all_rows
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![
             vec![DfValue::from(1), DfValue::from(2), DfValue::from(3)],
             vec![DfValue::from(4), DfValue::from(5), DfValue::from(6)],
@@ -615,9 +657,12 @@ async fn it_works_with_sql_recipe() {
 
     // Retrieve the result of the count query:
     let result = getter
-        .lookup(&[TinyText::try_new("Volvo", Collation::Utf8AiCi)
-            .unwrap()
-            .into()])
+        .lookup(
+            &[TinyText::try_new("Volvo", Collation::Utf8AiCi)
+                .unwrap()
+                .into()],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -666,11 +711,19 @@ async fn it_works_with_vote() {
 
     sleep().await;
 
-    let rs = awvc.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let rs = awvc
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(rs.len(), 1);
     assert_eq!(rs[0], vec![0i64.into(), "Article".into(), 1.into()]);
 
-    let empty = awvc.lookup(&[1i64.into()]).await.unwrap().into_vec();
+    let empty = awvc
+        .lookup(&[1i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(empty.len(), 1);
     assert_eq!(empty[0], vec![1i64.into(), "Article".into(), DfValue::None]);
 
@@ -698,13 +751,13 @@ async fn it_works_with_identical_queries() {
     let aid = 1u64;
 
     assert!(aq1
-        .lookup(&[aid.into()])
+        .lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
         .is_empty());
     assert!(aq2
-        .lookup(&[aid.into()])
+        .lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -712,7 +765,11 @@ async fn it_works_with_identical_queries() {
     article.insert(vec![aid.into()]).await.unwrap();
     sleep().await;
 
-    let result = aq2.lookup(&[aid.into()]).await.unwrap().into_vec();
+    let result = aq2
+        .lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0], vec![aid.into()]);
 
@@ -753,11 +810,19 @@ async fn it_works_with_double_query_through() {
 
     sleep().await;
 
-    let rs = getter.lookup(&[1i64.into()]).await.unwrap().into_vec();
+    let rs = getter
+        .lookup(&[1i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(rs.len(), 1);
     assert_eq!(rs[0], vec![1i64.into(), 5.into()]);
 
-    let empty = getter.lookup(&[2i64.into()]).await.unwrap().into_vec();
+    let empty = getter
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(empty.len(), 0);
 
     shutdown_tx.shutdown().await;
@@ -812,11 +877,19 @@ async fn it_works_with_duplicate_subquery() {
 
     sleep().await;
 
-    let rs = getter.lookup(&[1i64.into()]).await.unwrap().into_vec();
+    let rs = getter
+        .lookup(&[1i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(rs.len(), 1);
     assert_eq!(rs[0], vec![1i64.into(), 5.into()]);
 
-    let empty = getter.lookup(&[2i64.into()]).await.unwrap().into_vec();
+    let empty = getter
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(empty.len(), 0);
 
     shutdown_tx.shutdown().await;
@@ -869,7 +942,11 @@ async fn left_join_subquery_count_parameterized() {
     sleep().await;
 
     // Warm the cache with an initial lookup (correctness covered by logictests).
-    let rs = getter.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let rs = getter
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(rs[0][0], readyset_data::DfValue::Int(2));
 
     // Incremental update: insert spj row (sn=3, qty=30) so s.sn=3 now matches.
@@ -879,7 +956,11 @@ async fn left_join_subquery_count_parameterized() {
 
     sleep().await;
 
-    let rs = getter.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let rs = getter
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(
         rs[0][0],
         readyset_data::DfValue::Int(3),
@@ -887,7 +968,11 @@ async fn left_join_subquery_count_parameterized() {
         rs[0]
     );
 
-    let rs = getter.lookup(&[1i64.into()]).await.unwrap().into_vec();
+    let rs = getter
+        .lookup(&[1i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(
         rs[0][0],
         readyset_data::DfValue::Int(3),
@@ -927,7 +1012,7 @@ async fn it_works_with_reads_before_writes() {
     let uid = 10;
 
     assert!(awvc
-        .lookup(&[aid.into()])
+        .lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -938,7 +1023,11 @@ async fn it_works_with_reads_before_writes() {
     vote.insert(vec![aid.into(), uid.into()]).await.unwrap();
     sleep().await;
 
-    let result = awvc.lookup(&[aid.into()]).await.unwrap().into_vec();
+    let result = awvc
+        .lookup(&[aid.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0], vec![aid.into(), uid.into()]);
 
@@ -988,7 +1077,11 @@ async fn forced_shuffle_despite_same_shard() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[cid.into()]).await.unwrap().into_vec();
+    let result = getter
+        .lookup(&[cid.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 
@@ -1035,7 +1128,11 @@ async fn double_shuffle() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[cid.into()]).await.unwrap().into_vec();
+    let result = getter
+        .lookup(&[cid.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], price.into());
 
@@ -1074,7 +1171,11 @@ async fn it_works_with_arithmetic_aliases() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[pid.into()]).await.unwrap().into_vec();
+    let result = getter
+        .lookup(&[pid.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][1], (price / 100).into());
 
@@ -1151,7 +1252,11 @@ async fn it_recovers_persisted_bases() {
         // Make sure that the new graph contains the old writes
         for i in 1..10 {
             let price = i * 10;
-            let result = getter.lookup(&[i.into()]).await.unwrap().into_vec();
+            let result = getter
+                .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec();
             assert_eq!(result.len(), 1);
             assert_eq!(result[0][0], price.into());
         }
@@ -1218,7 +1323,11 @@ async fn mutator_churn() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()]).await.unwrap().into_vec(),
+            vc_state
+                .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec(),
             vec![vec![i.into(), votes.into()]]
         );
     }
@@ -1296,7 +1405,11 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
             .unwrap()
             .into_reader_handle()
             .unwrap();
-        let result = getter.lookup(&[i.into()]).await.unwrap().into_vec();
+        let result = getter
+            .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0], i.into());
     }
@@ -1338,7 +1451,7 @@ async fn it_works_with_simple_arithmetic() {
 
     // Retrieve the result of the count query:
     let result = getter
-        .lookup(slice::from_ref(&id))
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec();
@@ -1378,7 +1491,7 @@ async fn it_works_with_multiple_arithmetic_expressions() {
 
     // Retrieve the result of the count query:
     let result = getter
-        .lookup(slice::from_ref(&id))
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec();
@@ -1441,7 +1554,11 @@ async fn it_works_with_join_arithmetic() {
     sleep().await;
 
     // Retrieve the result of the count query:
-    let result = getter.lookup(&[id.into()]).await.unwrap().into_vec();
+    let result = getter
+        .lookup(&[id.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(
         result[0][0],
@@ -1476,7 +1593,11 @@ async fn it_works_with_function_arithmetic() {
     // Let writes propagate:
     sleep().await;
 
-    let result = getter.lookup(&[0.into()]).await.unwrap().into_vec();
+    let result = getter
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0][0], DfValue::from(max_price * 2));
 
@@ -1559,7 +1680,7 @@ async fn votes() {
     // query articles to see that it was updated
     assert_eq!(
         articleq
-            .lookup(slice::from_ref(&a1))
+            .lookup(slice::from_ref(&a1), Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec(),
@@ -1576,7 +1697,7 @@ async fn votes() {
     // and that the old one is still present
     assert_eq!(
         articleq
-            .lookup(slice::from_ref(&a1))
+            .lookup(slice::from_ref(&a1), Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec(),
@@ -1584,7 +1705,7 @@ async fn votes() {
     );
     assert_eq!(
         articleq
-            .lookup(slice::from_ref(&a2))
+            .lookup(slice::from_ref(&a2), Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec(),
@@ -1598,12 +1719,20 @@ async fn votes() {
     sleep().await;
 
     // query vote count to see that the count was updated
-    let res = vcq.lookup(slice::from_ref(&a1)).await.unwrap().into_vec();
+    let res = vcq
+        .lookup(slice::from_ref(&a1), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().all(|r| r[0] == a1.clone() && r[1] == 1.into()));
     assert_eq!(res.len(), 1);
 
     // check that article 1 appears in the join view with a vote count of one
-    let res = endq.lookup(slice::from_ref(&a1)).await.unwrap().into_vec();
+    let res = endq
+        .lookup(slice::from_ref(&a1), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(
         res.iter()
             .any(|r| r[0] == a1.clone() && r[1] == 2.into() && r[2] == 1.into()),
@@ -1612,7 +1741,11 @@ async fn votes() {
     assert_eq!(res.len(), 1);
 
     // check that article 2 doesn't have any votes
-    let res = endq.lookup(slice::from_ref(&a2)).await.unwrap().into_vec();
+    let res = endq
+        .lookup(slice::from_ref(&a2), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.len() <= 1); // could be 1 if we had zero-rows
 
     shutdown_tx.shutdown().await;
@@ -1652,7 +1785,10 @@ async fn empty_migration() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -1663,7 +1799,11 @@ async fn empty_migration() {
     sleep().await;
 
     // check that value was updated again
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.iter().any(|r| *r == vec![id.clone(), 2.into()]));
     assert!(res.iter().any(|r| *r == vec![id.clone(), 4.into()]));
 
@@ -1695,7 +1835,10 @@ async fn simple_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -1719,7 +1862,10 @@ async fn simple_migration() {
 
     // check that b got it
     assert_eq!(
-        bq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -1752,7 +1898,10 @@ async fn add_columns() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), "y".into()]]
     );
 
@@ -1768,7 +1917,11 @@ async fn add_columns() {
     sleep().await;
 
     // check that a got it, and added the new, third column's default
-    let res = aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1781,7 +1934,11 @@ async fn add_columns() {
     sleep().await;
 
     // check that a got it, and included the third column
-    let res = aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert!(res.contains(&vec![id.clone(), "y".into()]));
     assert!(res.contains(&vec![id.clone(), "z".into(), 3.into()]));
@@ -1852,7 +2009,11 @@ async fn migrate_added_columns() {
 
     // we should now see the pre-migration write and the old post-migration write with the default
     // value, and the new post-migration write with the value it contained.
-    let res = bq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = bq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 3);
     assert_eq!(
         res.iter()
@@ -1891,7 +2052,11 @@ async fn migrate_drop_columns() {
 
     // check that it's there
     sleep().await;
-    let res = aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 1);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
 
@@ -1909,7 +2074,11 @@ async fn migrate_drop_columns() {
 
     // so two rows now!
     sleep().await;
-    let res = aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), "bx".into()]));
     assert!(res.contains(&vec![id.clone(), "b".into()]));
@@ -1931,7 +2100,11 @@ async fn migrate_drop_columns() {
     muta2.insert(vec![id.clone()]).await.unwrap();
     sleep().await;
 
-    let res = aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = aq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 5);
     // NOTE: if we *hadn't* read bx and b above, they would have also have c because it would have
     // been added when the lookups caused partial backfills.
@@ -1986,7 +2159,12 @@ async fn key_on_added() {
 
     // make sure we can read (may trigger a replay)
     let mut bq = g.view("x").await.unwrap().into_reader_handle().unwrap();
-    assert!(bq.lookup(&[3.into()]).await.unwrap().into_vec().is_empty());
+    assert!(bq
+        .lookup(&[3.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec()
+        .is_empty());
 
     shutdown_tx.shutdown().await;
 }
@@ -2087,7 +2265,10 @@ async fn replay_during_replay() {
     let mut r = g.view("end").await.unwrap().into_reader_handle().unwrap();
 
     assert_eq!(
-        r.lookup(&[1.into()]).await.unwrap().into_vec(),
+        r.lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), "a".into()]]
     );
 
@@ -2103,7 +2284,11 @@ async fn replay_during_replay() {
     // second is partial and empty, so any read should trigger a replay.
     // though that shouldn't interact with target in any way.
     assert_eq!(
-        second.lookup(&["a".into()]).await.unwrap().into_vec(),
+        second
+            .lookup(&["a".into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec!["a".into(), 1.into()]]
     );
 
@@ -2113,7 +2298,11 @@ async fn replay_during_replay() {
     // "a" value for which u has a hole. that record is then going to be forwarded to *both*
     // children, and it'll be interesting to see what the join then does.
     assert_eq!(
-        second.lookup(&["b".into()]).await.unwrap().into_vec(),
+        second
+            .lookup(&["b".into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec!["b".into(), 2.into()]]
     );
 
@@ -2124,7 +2313,10 @@ async fn replay_during_replay() {
 
     // what happens if we now query for 2?
     assert_eq!(
-        r.lookup(&[2.into()]).await.unwrap().into_vec(),
+        r.lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![2.into(), "b".into()], vec![2.into(), "b".into()]]
     );
 
@@ -2158,8 +2350,8 @@ async fn replay_multiple_keys_then_write() {
     .await
     .unwrap();
 
-    q.lookup(&[1.into()]).await.unwrap();
-    q.lookup(&[2.into()]).await.unwrap();
+    q.lookup(&[1.into()], Dialect::DEFAULT_MYSQL).await.unwrap();
+    q.lookup(&[2.into()], Dialect::DEFAULT_MYSQL).await.unwrap();
 
     t.update(
         vec![DfValue::from(1)],
@@ -2170,7 +2362,11 @@ async fn replay_multiple_keys_then_write() {
 
     sleep().await;
 
-    let res = &q.lookup(&[1.into()]).await.unwrap().into_vec()[0];
+    let res = &q
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec()[0];
 
     assert_eq!(*res, vec![DfValue::from(1), DfValue::from(2)]);
 
@@ -2242,7 +2438,10 @@ async fn full_aggregation_with_bogokey() {
 
     // send a query to aggregation materialization
     assert_eq!(
-        aggq.lookup(&[0.into()]).await.unwrap().into_vec(),
+        aggq.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![0.into(), 3.into()]]
     );
 
@@ -2254,7 +2453,10 @@ async fn full_aggregation_with_bogokey() {
 
     // check that value was updated again
     assert_eq!(
-        aggq.lookup(&[0.into()]).await.unwrap().into_vec(),
+        aggq.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![0.into(), 4.into()]]
     );
 
@@ -2316,7 +2518,11 @@ async fn pkey_then_full_table_with_bogokey() {
 
     // Looking up post with id 1 should return the correct post.
     assert_eq!(
-        by_id.lookup(&[1.into()]).await.unwrap().into_vec(),
+        by_id
+            .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![DfValue::from(1), DfValue::from("post 1")]]
     );
 
@@ -2325,7 +2531,11 @@ async fn pkey_then_full_table_with_bogokey() {
         .map(|n| vec![n.into(), format!("post {n}").into()])
         .collect();
     assert_eq!(
-        all_posts.lookup(&[0.into()]).await.unwrap().into_vec(),
+        all_posts
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         rows_with_bogokey
     );
 
@@ -2403,17 +2613,27 @@ async fn materialization_frontier() {
     let one = 1.into();
     let two = 2.into();
     assert_eq!(
-        r.lookup(&[one]).await.unwrap().into_vec(),
+        r.lookup(&[one], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), "Hello world #1".into(), 2.into()]]
     );
     assert_eq!(
-        r.lookup(&[two]).await.unwrap().into_vec(),
+        r.lookup(&[two], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![2.into(), "Hello world #2".into(), 3.into()]]
     );
 
     for _ in 0..1_000 {
         for &id in &[1, 2] {
-            let r = r.lookup(&[id.into()]).await.unwrap().into_vec();
+            let r = r
+                .lookup(&[id.into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec();
             match id {
                 1 => {
                     assert_eq!(r, vec![vec![1.into(), "Hello world #1".into(), 2.into()]]);
@@ -2464,7 +2684,10 @@ async fn crossing_migration() {
     sleep().await;
 
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -2472,7 +2695,11 @@ async fn crossing_migration() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
 
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -2505,7 +2732,10 @@ async fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        aq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        aq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -2529,7 +2759,10 @@ async fn independent_domain_migration() {
 
     // check that a got it
     assert_eq!(
-        bq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        bq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 4.into()]]
     );
 
@@ -2570,7 +2803,10 @@ async fn domain_amend_migration() {
     sleep().await;
 
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![id.clone(), 2.into()]]
     );
 
@@ -2578,7 +2814,11 @@ async fn domain_amend_migration() {
     mutb.insert(vec![id.clone(), 4.into()]).await.unwrap();
     sleep().await;
 
-    let res = cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec();
+    let res = cq
+        .lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res.len(), 2);
     assert!(res.contains(&vec![id.clone(), 2.into()]));
     assert!(res.contains(&vec![id.clone(), 4.into()]));
@@ -2688,7 +2928,11 @@ async fn do_full_vote_migration(old_puts_after: bool) {
     let mut last = g.view("awvc").await.unwrap().into_reader_handle().unwrap();
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&[i.into()]).await.unwrap().into_vec();
+        let rows = last
+            .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -2768,7 +3012,11 @@ async fn do_full_vote_migration(old_puts_after: bool) {
 
     thread::sleep(get_settle_time().checked_mul(3).unwrap());
     for i in 0..n {
-        let rows = last.lookup(&[i.into()]).await.unwrap().into_vec();
+        let rows = last
+            .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
         assert!(!rows.is_empty(), "every article should be voted for");
         assert_eq!(rows.len(), 1, "every article should have only one entry");
         let row = rows.into_iter().next().unwrap();
@@ -2890,11 +3138,19 @@ async fn live_writes() {
     // check that all writes happened the right number of times
     for i in 0..ids {
         assert_eq!(
-            vc_state.lookup(&[i.into()]).await.unwrap().into_vec(),
+            vc_state
+                .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec(),
             vec![vec![i.into(), votes.into()]]
         );
         assert_eq!(
-            vc2_state.lookup(&[i.into()]).await.unwrap().into_vec(),
+            vc2_state
+                .lookup(&[i.into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec(),
             vec![vec![i.into(), Decimal::from(votes).into()]]
         );
     }
@@ -2952,18 +3208,30 @@ async fn state_replay_migration_query() {
     // if all went according to plan, the join should now be fully populated!
     // there are (/should be) two records in a with x == 1
     // they may appear in any order
-    let res = out.lookup(&[1.into()]).await.unwrap().into_vec();
+    let res = out
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(res.contains(&vec![1.into(), "a".into(), "n".into()]));
     assert!(res.contains(&vec![1.into(), "b".into(), "n".into()]));
 
     // there are (/should be) one record in a with x == 2
     assert_eq!(
-        out.lookup(&[2.into()]).await.unwrap().into_vec(),
+        out.lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![2.into(), "c".into(), "o".into()]]
     );
 
     // there are (/should be) no records with x == 3
-    assert!(out.lookup(&[3.into()]).await.unwrap().into_vec().is_empty());
+    assert!(out
+        .lookup(&[3.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec()
+        .is_empty());
 
     shutdown_tx.shutdown().await;
 }
@@ -3130,7 +3398,10 @@ async fn node_removal() {
 
     // send a query to c
     assert_eq!(
-        cq.lookup(slice::from_ref(&id)).await.unwrap().into_vec(),
+        cq.lookup(slice::from_ref(&id), Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         vec![vec![1.into(), 2.into()]]
     );
 
@@ -3198,8 +3469,22 @@ async fn remove_query() {
         .unwrap();
     sleep().await;
 
-    assert_eq!(qa.lookup(&[0.into()]).await.unwrap().into_vec().len(), 2);
-    assert_eq!(qb.lookup(&[0.into()]).await.unwrap().into_vec().len(), 1);
+    assert_eq!(
+        qa.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec()
+            .len(),
+        2
+    );
+    assert_eq!(
+        qb.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec()
+            .len(),
+        1
+    );
 
     // Remove qb and check that the graph still functions as expected.
     eventually! {
@@ -3216,7 +3501,11 @@ async fn remove_query() {
         .unwrap();
     sleep().await;
 
-    match qb.lookup(&[0.into()]).await.unwrap_err() {
+    match qb
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap_err()
+    {
         // FIXME(eta): this sucks and should be looking for ViewNotYetAvailable.
         readyset_errors::ReadySetError::ViewError { .. } => {}
         e => unreachable!("{:?}", e),
@@ -3232,18 +3521,24 @@ macro_rules! get {
         // try both O:)
         let aid: DfValue = TinyText::try_new($aid, Collation::Utf8AiCi).unwrap().into();
         let mut v = $private
-            .lookup(&[$uid.into(), aid.clone()])
+            .lookup(&[$uid.into(), aid.clone()], Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec();
         v.append(
             &mut $private
-                .lookup(&[aid.clone(), $uid.into()])
+                .lookup(&[aid.clone(), $uid.into()], Dialect::DEFAULT_MYSQL)
                 .await
                 .unwrap()
                 .into_vec(),
         );
-        v.append(&mut $public.lookup(&[aid]).await.unwrap().into_vec());
+        v.append(
+            &mut $public
+                .lookup(&[aid], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap()
+                .into_vec(),
+        );
         eprintln!("check {} as {}: {:?}", $aid, $uid, v);
         v
     }};
@@ -3405,7 +3700,7 @@ async fn union_basic() {
     let mut query = g.view("query").await.unwrap().into_reader_handle().unwrap();
     let result_ids: Vec<i32> = sorted(
         query
-            .lookup(&[0.into()])
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec()
@@ -3456,7 +3751,7 @@ async fn union_all_basic() {
     let mut query = g.view("query").await.unwrap().into_reader_handle().unwrap();
     let result_ids: Vec<i32> = sorted(
         query
-            .lookup(&[0.into()])
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
             .await
             .unwrap()
             .into_vec()
@@ -3515,7 +3810,10 @@ async fn between() {
     sleep().await;
 
     let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
-    let res = between_query.lookup(&[0.into()]).await.unwrap();
+    let res = between_query
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let rows: Vec<Vec<DfValue>> = res.into();
     assert_eq!(rows, expected);
 
@@ -3563,9 +3861,12 @@ async fn between_parameterized() {
 
     let expected: Vec<Vec<DfValue>> = (3..6).map(|i| vec![DfValue::from(i)]).collect();
     let rows = q
-        .multi_lookup(vec![KeyComparison::from_range(
-            &(vec1![DfValue::from(3)]..=vec1![DfValue::from(5)]),
-        )])
+        .multi_lookup(
+            vec![KeyComparison::from_range(
+                &(vec1![DfValue::from(3)]..=vec1![DfValue::from(5)]),
+            )],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -3608,7 +3909,10 @@ async fn topk_updates() {
 
     sleep().await;
 
-    let res = top_posts.lookup(&[0.into()]).await.unwrap();
+    let res = top_posts
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let mut rows: Vec<Vec<DfValue>> = res.into();
     rows.sort();
     assert_eq!(
@@ -3622,7 +3926,10 @@ async fn topk_updates() {
 
     sleep().await;
 
-    let res = top_posts.lookup(&[0.into()]).await.unwrap();
+    let res = top_posts
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let mut rows: Vec<Vec<DfValue>> = res.into();
     rows.sort();
     assert_eq!(
@@ -3703,7 +4010,7 @@ async fn topk_with_join_aggregate_order_by() {
 
     eventually!(
         run_test: {
-            top_depts.lookup(&[0i64.into()]).await.unwrap().into_vec()
+            top_depts.lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |rows| {
             assert_eq!(
@@ -3787,7 +4094,7 @@ async fn topk_non_grouped_select_column() {
 
     eventually!(
         run_test: {
-            top_categories.lookup(&[0i64.into()]).await.unwrap().into_vec()
+            top_categories.lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |rows| {
             assert_eq!(
@@ -3859,10 +4166,13 @@ async fn simple_pagination() {
     );
 
     let mut a_page1: Vec<Vec<DfValue>> = q
-        .lookup(&[
-            TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
-            0.into(),
-        ])
+        .lookup(
+            &[
+                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                0.into(),
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into();
@@ -3877,10 +4187,13 @@ async fn simple_pagination() {
     );
 
     let mut a_page2: Vec<Vec<DfValue>> = q
-        .lookup(&[
-            TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
-            1.into(),
-        ])
+        .lookup(
+            &[
+                TinyText::try_new("a", Collation::Utf8AiCi).unwrap().into(),
+                1.into(),
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into();
@@ -3895,10 +4208,13 @@ async fn simple_pagination() {
     );
 
     let mut b_page1: Vec<Vec<DfValue>> = q
-        .lookup(&[
-            TinyText::try_new("b", Collation::Utf8AiCi).unwrap().into(),
-            0.into(),
-        ])
+        .lookup(
+            &[
+                TinyText::try_new("b", Collation::Utf8AiCi).unwrap().into(),
+                0.into(),
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into();
@@ -4080,7 +4396,7 @@ async fn test_join_with_reused_column_name() {
         .into_reader_handle()
         .unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0i32.into()])
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4151,7 +4467,7 @@ async fn test_join_with_reused_column_name_with_param() {
         .into_reader_handle()
         .unwrap();
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1i32.into()])
+        .lookup(&[1i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4221,7 +4537,7 @@ async fn self_join_basic() {
         .unwrap();
     assert_eq!(query.columns(), vec!["user", "agreer"]);
     let results: Vec<(i32, i32)> = query
-        .lookup(&[0i32.into()])
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4276,7 +4592,7 @@ async fn self_join_param() {
     let mut query = g.view("fof").await.unwrap().into_reader_handle().unwrap();
     assert_eq!(query.columns(), vec!["user", "fof"]);
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1i32.into()])
+        .lookup(&[1i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4305,7 +4621,7 @@ async fn self_join_param() {
     // assert_eq!(query.columns(), vec!["user", "fof"]);
 
     let results: Vec<(i32, i32)> = query
-        .lookup(&[1i32.into()])
+        .lookup(&[1i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4355,9 +4671,10 @@ async fn non_sql_materialized_range_query() {
     sleep().await;
 
     let res = reader
-        .multi_lookup(vec![
-            (vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()
-        ])
+        .multi_lookup(
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -4401,9 +4718,10 @@ async fn non_sql_range_upquery() {
     sleep().await;
 
     let res = reader
-        .multi_lookup(vec![
-            (vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()
-        ])
+        .multi_lookup(
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -4506,18 +4824,27 @@ async fn range_upquery_after_point_queries() {
 
     // Do some point queries so we get keys covered by our range
     assert_eq!(
-        &*hash_reader.lookup(&[3.into()]).await.unwrap().into_vec(),
+        &*hash_reader
+            .lookup(&[3.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         &[vec![DfValue::from(3), DfValue::from(3), DfValue::from(30)]]
     );
     assert_eq!(
-        &*hash_reader.lookup(&[3.into()]).await.unwrap().into_vec(),
+        &*hash_reader
+            .lookup(&[3.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec(),
         &[vec![DfValue::from(3), DfValue::from(3), DfValue::from(30)]]
     );
 
     let res = btree_reader
-        .multi_lookup(vec![
-            (vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()
-        ])
+        .multi_lookup(
+            vec![(vec1![DfValue::from(2)]..vec1![DfValue::from(5)]).into()],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap()
         .into_vec();
@@ -4623,7 +4950,11 @@ async fn same_table_columns_inequal() {
     sleep().await;
 
     let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
-    let res = q.lookup(&[0i32.into()]).await.unwrap().into_vec();
+    let res = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(
         res,
         vec![
@@ -4742,6 +5073,7 @@ async fn post_read_ilike() {
             }),
             limit: None,
             offset: None,
+            dialect: Dialect::DEFAULT_MYSQL,
         })
         .await
         .unwrap()
@@ -4790,7 +5122,7 @@ async fn cast_projection() {
     let mut view = g.view("user").await.unwrap().into_reader_handle().unwrap();
 
     let result = view
-        .lookup(&[1i32.into()])
+        .lookup(&[1i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -4835,7 +5167,12 @@ async fn aggregate_expression() {
 
     sleep().await;
 
-    let res = &q.lookup(&[0i32.into()]).await.unwrap().into_vec().remove(0);
+    let res = &q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec()
+        .remove(0);
 
     assert_eq!(get_col!(q, res, "max_num"), &DfValue::from(100));
 
@@ -4918,7 +5255,11 @@ async fn post_join_filter() {
 
     sleep().await;
 
-    let mut res: Vec<_> = q.lookup(&[0.into()]).await.unwrap().into();
+    let mut res: Vec<_> = q
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into();
     res.sort();
 
     assert_eq!(
@@ -4982,7 +5323,11 @@ async fn duplicate_column_names() {
 
     sleep().await;
 
-    let mut res: Vec<_> = q.lookup(&[0.into()]).await.unwrap().into();
+    let mut res: Vec<_> = q
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into();
     res.sort();
 
     assert_eq!(
@@ -5032,7 +5377,11 @@ async fn filter_on_expression() {
 
     sleep().await;
 
-    let res = &q.lookup(&[0i32.into()]).await.unwrap().into_vec();
+    let res = &q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     assert_eq!(get_col!(q, res[0], "id"), &DfValue::from(1));
 
@@ -5124,7 +5473,7 @@ async fn compound_join_key() {
     sleep().await;
 
     let res = q
-        .lookup(&[0i32.into()])
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_iter()
@@ -5167,7 +5516,12 @@ async fn left_join_null() {
 
     sleep().await;
 
-    let num_res = q.lookup(&[0.into()]).await.unwrap().into_iter().count();
+    let num_res = q
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_iter()
+        .count();
     assert_eq!(num_res, 2);
 
     shutdown_tx.shutdown().await;
@@ -5212,7 +5566,10 @@ async fn overlapping_indices() {
 
     sleep().await;
 
-    let rows = q.lookup(&[3i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[3i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5270,7 +5627,7 @@ async fn aggregate_after_filter_non_equality() {
     sleep().await;
 
     let res = q
-        .lookup(&[0i32.into()])
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
         .await
         .unwrap()
         .into_vec()
@@ -5330,7 +5687,11 @@ async fn join_simple_cte() {
 
     sleep().await;
 
-    let res = view.lookup(&[0i32.into()]).await.unwrap().into_vec();
+    let res = view
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(get_col!(view, res[0], "name"), &DfValue::from("four"));
 
     shutdown_tx.shutdown().await;
@@ -5392,7 +5753,10 @@ async fn multiple_aggregate_sum() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5446,7 +5810,10 @@ async fn multiple_aggregate_same_col() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5501,7 +5868,10 @@ async fn multiple_aggregate_over_two() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5558,7 +5928,10 @@ async fn multiple_aggregate_with_expressions() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5613,7 +5986,10 @@ async fn multiple_aggregate_reuse() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5648,7 +6024,10 @@ async fn multiple_aggregate_reuse() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5763,7 +6142,11 @@ async fn simple_enum() {
     let lookup_keys = (0..3)
         .map(|k| KeyComparison::Equal(vec1![k.into()]))
         .collect();
-    let result = getter.multi_lookup(lookup_keys).await.unwrap().into_vec();
+    let result = getter
+        .multi_lookup(lookup_keys, Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let result_type = getter
         .schema()
@@ -5826,7 +6209,10 @@ async fn round_int_to_int() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5871,7 +6257,10 @@ async fn round_float_to_float() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5916,7 +6305,10 @@ async fn round_float() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -5959,7 +6351,10 @@ async fn round_with_precision_float() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6002,7 +6397,10 @@ async fn round_bigint_to_bigint() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6045,7 +6443,10 @@ async fn round_unsignedint_to_unsignedint() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6084,7 +6485,10 @@ async fn round_unsignedbigint_to_unsignedbitint() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6129,7 +6533,10 @@ async fn round_with_no_precision() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6180,7 +6587,10 @@ async fn distinct_select_works() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6222,7 +6632,10 @@ async fn partial_distinct() {
 
     macro_rules! do_lookup {
         ($q: expr, $k: expr) => {{
-            let rows = $q.lookup(&[($k as i32).into()]).await.unwrap();
+            let rows = $q
+                .lookup(&[($k as i32).into()], Dialect::DEFAULT_MYSQL)
+                .await
+                .unwrap();
             rows.into_iter()
                 .map(|r| get_col!(q, r, "value", i32))
                 .sorted()
@@ -6289,7 +6702,10 @@ async fn partial_distinct_multi() {
 
     sleep().await;
 
-    let rows = q.lookup(&[(0_i32).into()]).await.unwrap();
+    let rows = q
+        .lookup(&[(0_i32).into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| {
@@ -6341,7 +6757,10 @@ async fn distinct_select_multi_col() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6396,7 +6815,10 @@ async fn join_straddled_columns() {
 
     sleep().await;
 
-    let rows = q.lookup(&[1i32.into(), 1i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[1i32.into(), 1i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6456,9 +6878,12 @@ async fn straddled_join_range_query() {
     eprintln!("{}", g.graphviz(Default::default()).await.unwrap());
 
     let rows = q
-        .multi_lookup(vec![KeyComparison::Range(
-            vec1![1i32.into(), 1i32.into()].range_from(),
-        )])
+        .multi_lookup(
+            vec![KeyComparison::Range(
+                vec1![1i32.into(), 1i32.into()].range_from(),
+            )],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap();
 
@@ -6510,9 +6935,12 @@ async fn overlapping_range_queries() {
         tokio::spawn(async move {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
-                .multi_lookup(vec![KeyComparison::Range(
-                    vec1![DfValue::from(m * 10)].range_from_inclusive(),
-                )])
+                .multi_lookup(
+                    vec![KeyComparison::Range(
+                        vec1![DfValue::from(m * 10)].range_from_inclusive(),
+                    )],
+                    Dialect::DEFAULT_MYSQL,
+                )
                 .await
                 .unwrap();
 
@@ -6582,9 +7010,12 @@ async fn overlapping_remapped_range_queries() {
         tokio::spawn(async move {
             let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
             let results = q
-                .multi_lookup(vec![KeyComparison::Range(
-                    vec1![DfValue::from(m * 10), DfValue::from(m * 10)].range_from_inclusive(),
-                )])
+                .multi_lookup(
+                    vec![KeyComparison::Range(
+                        vec1![DfValue::from(m * 10), DfValue::from(m * 10)].range_from_inclusive(),
+                    )],
+                    Dialect::DEFAULT_MYSQL,
+                )
                 .await
                 .unwrap();
 
@@ -6656,7 +7087,10 @@ async fn range_query_through_union() {
     .unwrap();
 
     let rows = q
-        .multi_lookup(vec![KeyComparison::Range(vec1![1.into()].range_from())])
+        .multi_lookup(
+            vec![KeyComparison::Range(vec1![1.into()].range_from())],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap();
 
@@ -6749,20 +7183,23 @@ async fn mixed_inclusive_range_and_equality() {
     );
 
     let rows = q
-        .multi_lookup(vec![KeyComparison::from_range(
-            &(vec1![
-                DfValue::from(4i32),
-                DfValue::from(2i32),
-                DfValue::from(1i32),
-                DfValue::from(3i32)
-            ]
-                ..=vec1![
+        .multi_lookup(
+            vec![KeyComparison::from_range(
+                &(vec1![
                     DfValue::from(4i32),
                     DfValue::from(2i32),
-                    DfValue::from(i32::MAX),
-                    DfValue::from(i32::MAX)
-                ]),
-        )])
+                    DfValue::from(1i32),
+                    DfValue::from(3i32)
+                ]
+                    ..=vec1![
+                        DfValue::from(4i32),
+                        DfValue::from(2i32),
+                        DfValue::from(i32::MAX),
+                        DfValue::from(i32::MAX)
+                    ]),
+            )],
+            Dialect::DEFAULT_MYSQL,
+        )
         .await
         .unwrap();
 
@@ -6825,7 +7262,10 @@ async fn group_by_agg_col_count() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6876,7 +7316,10 @@ async fn group_by_agg_col_multi() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6936,7 +7379,10 @@ async fn group_by_agg_col_with_join() {
 
     sleep().await;
 
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let res = rows
         .into_iter()
@@ -6968,7 +7414,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| i32::try_from(&r[0]).unwrap())
@@ -6983,7 +7432,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| i32::try_from(&r[0]).unwrap())
@@ -6998,7 +7450,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| r.into_iter().map(|v| i32::try_from(v).unwrap()).collect())
@@ -7013,7 +7468,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::None, DfValue::Int(0)]]);
 
@@ -7024,7 +7482,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
@@ -7048,7 +7509,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| i32::try_from(&r[0]).unwrap())
@@ -7062,7 +7526,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| i32::try_from(&r[0]).unwrap())
@@ -7076,7 +7543,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows
         .into_iter()
         .map(|r| r.into_iter().map(|v| i32::try_from(v).unwrap()).collect())
@@ -7090,7 +7560,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(res, vec![vec![DfValue::Int(0), DfValue::Int(3)]]);
 
@@ -7100,7 +7573,10 @@ async fn count_emit_zero() {
         .unwrap()
         .into_reader_handle()
         .unwrap();
-    let rows = q.lookup(&[0i32.into()]).await.unwrap();
+    let rows = q
+        .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     let res = rows.into_iter().collect::<Vec<Vec<DfValue>>>();
     assert_eq!(
         res,
@@ -7158,14 +7634,22 @@ async fn partial_join_on_one_parent() {
 
     let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
 
-    let res1 = q.lookup(&[DfValue::from(1i32)]).await.unwrap().into_vec();
+    let res1 = q
+        .lookup(&[DfValue::from(1i32)], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res1.len(), 25);
 
     t2.delete(vec![DfValue::from(1i32)]).await.unwrap();
 
     sleep().await;
 
-    let res2 = q.lookup(&[DfValue::from(1i32)]).await.unwrap().into_vec();
+    let res2 = q
+        .lookup(&[DfValue::from(1i32)], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res2.len(), 20);
 
     shutdown_tx.shutdown().await;
@@ -7251,7 +7735,7 @@ async fn aggressive_eviction_impl() {
             .map(|k| KeyComparison::Equal(vec1::Vec1::new(DfValue::Int(k))))
             .collect();
 
-        let vq = ViewQuery::from(keys.clone());
+        let vq = ViewQuery::from((keys.clone(), Dialect::DEFAULT_MYSQL));
 
         let r = view.raw_lookup(vq).await.unwrap().into_vec();
         assert_eq!(r.len(), LIMIT);
@@ -7267,10 +7751,13 @@ async fn aggressive_eviction_range_impl() {
 
     for i in (0..500).rev() {
         let offset = i % 10;
-        let vq = ViewQuery::from(vec![KeyComparison::Range((
-            Bound::Included(vec1![DfValue::Int(offset)]),
-            Bound::Excluded(vec1![DfValue::Int(offset + 20)]),
-        ))]);
+        let vq = ViewQuery::from((
+            vec![KeyComparison::Range((
+                Bound::Included(vec1![DfValue::Int(offset)]),
+                Bound::Excluded(vec1![DfValue::Int(offset + 20)]),
+            ))],
+            Dialect::DEFAULT_MYSQL,
+        ));
 
         let r = view.raw_lookup(vq).await.unwrap().into_vec();
         assert_eq!(r.len(), LIMIT);
@@ -7358,10 +7845,18 @@ async fn partial_ingress_above_full_reader() {
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
     let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
-    let r1 = g1.lookup(&[2i64.into()]).await.unwrap().into_vec();
+    let r1 = g1
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
-    let r2 = g2.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let r2 = g2
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     assert_eq!(
         r1,
@@ -7436,7 +7931,11 @@ async fn reroutes_recursively() {
     sleep().await;
 
     let mut getter = g.view("q4").await.unwrap().into_reader_handle().unwrap();
-    let res = getter.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let res = getter
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res[0][0], 1.into());
     assert_eq!(res[0][1], 1.into());
     assert_eq!(res[0][2], 1.into());
@@ -7491,13 +7990,25 @@ async fn reroutes_two_children_at_once() {
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
     let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
-    let r1 = g1.lookup(&[2i64.into()]).await.unwrap().into_vec();
+    let r1 = g1
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
-    let r2 = g2.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let r2 = g2
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
-    let r3 = g3.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let r3 = g3
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     assert_eq!(
         r1,
@@ -7547,13 +8058,22 @@ async fn reroutes_same_migration() {
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
     let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
-    let r1 = g1.lookup(&[2i64.into()]).await.unwrap();
+    let r1 = g1
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
-    let r2 = g2.lookup(&[0i64.into()]).await.unwrap();
+    let r2 = g2
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
-    let r3 = g3.lookup(&[0i64.into()]).await.unwrap();
+    let r3 = g3
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
 
     assert_eq!(
         r1.into_vec(),
@@ -7622,13 +8142,25 @@ async fn reroutes_dependent_children() {
     m2.insert(vec![3.into(), 3.into()]).await.unwrap();
 
     let mut g1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
-    let r1 = g1.lookup(&[2i64.into()]).await.unwrap().into_vec();
+    let r1 = g1
+        .lookup(&[2i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let mut g2 = g.view("q2").await.unwrap().into_reader_handle().unwrap();
-    let r2 = g2.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let r2 = g2
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     let mut g3 = g.view("q3").await.unwrap().into_reader_handle().unwrap();
-    let r3 = g3.lookup(&[0i64.into()]).await.unwrap().into_vec();
+    let r3 = g3
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     assert_eq!(
         r1,
@@ -7689,8 +8221,14 @@ async fn reroutes_count() {
 
     sleep().await;
 
-    let r1 = g1.lookup(&[1i64.into()]).await.unwrap();
-    let r2 = g2.lookup(&[0i64.into()]).await.unwrap();
+    let r1 = g1
+        .lookup(&[1i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
+    let r2 = g2
+        .lookup(&[0i64.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     assert_eq!(r1.into_vec(), vec![vec![DfValue::Int(2)]]);
     assert_eq!(
         r2.into_vec(),
@@ -7813,7 +8351,11 @@ async fn it_recovers_fully_materialized() {
         let mut getter = g.view("tv").await.unwrap().into_reader_handle().unwrap();
 
         // Make sure that the new graph contains the old writes
-        let result = getter.lookup(&[0.into()]).await.unwrap().into_vec();
+        let result = getter
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
         assert_eq!(result.len(), 3);
         assert_eq!(
             result,
@@ -7835,7 +8377,11 @@ async fn it_recovers_fully_materialized() {
     {
         let mut getter = g.view("tv").await.unwrap().into_reader_handle().unwrap();
         // Make sure that the new graph contains the old writes
-        let result = getter.lookup(&[0.into()]).await.unwrap().into_vec();
+        let result = getter
+            .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
         assert_eq!(
             result,
             vec![
@@ -7959,7 +8505,7 @@ async fn simple_drop_tables_with_data() {
 
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     eventually!(run_test: {
-        view.lookup(&[0.into()]).await.unwrap().into_vec()
+        view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
     }, then_assert: |results| {
         assert!(!results.is_empty());
         assert_eq!(results[0][0], 11.into());
@@ -7995,7 +8541,11 @@ async fn simple_drop_tables_with_data() {
     sleep().await;
 
     let mut view = g.view("t2").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()]).await.unwrap().into_vec();
+    let results = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(results.is_empty());
 
     shutdown_tx.shutdown().await;
@@ -8042,7 +8592,11 @@ async fn simple_drop_tables_with_persisted_data() {
     table_1.insert(vec![12.into()]).await.unwrap();
 
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()]).await.unwrap().into_vec();
+    let results = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], 11.into());
     assert_eq!(results[1][0], 12.into());
@@ -8079,7 +8633,10 @@ async fn simple_drop_tables_with_persisted_data() {
     sleep().await;
 
     let mut view = g.view("t2").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()]).await.unwrap();
+    let results = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap();
     assert!(results.into_vec().is_empty());
 
     shutdown_tx.shutdown().await;
@@ -8135,7 +8692,7 @@ async fn drop_and_recreate_different_columns() {
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
     eventually!(
         run_test: {
-            view.lookup(&[0.into()]).await.unwrap().into_vec()
+            view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert!(!results.is_empty());
@@ -8261,8 +8818,16 @@ async fn multiple_simultaneous_migrations() {
     let mut q1 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
     let mut q2 = g.view("q1").await.unwrap().into_reader_handle().unwrap();
 
-    let res1 = q1.lookup(&[1.into()]).await.unwrap().into_vec();
-    let res2 = q2.lookup(&[3.into()]).await.unwrap().into_vec();
+    let res1 = q1
+        .lookup(&[1.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
+    let res2 = q2
+        .lookup(&[3.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
 
     assert_eq!(res1, vec![vec![1.into(), 2.into()]]);
     assert_eq!(res2, vec![vec![3.into(), 4.into()]]);
@@ -8409,7 +8974,7 @@ async fn read_from_dropped_query() {
             .is_ok()
     }
 
-    let view_res = view.lookup(&[0.into()]).await;
+    let view_res = view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await;
     assert!(view_res.is_err());
     assert!(view_res.err().unwrap().caused_by_view_destroyed());
 
@@ -8458,7 +9023,11 @@ async fn double_create_table_with_multiple_modifications() {
     };
 
     let mut view = g.view("t1").await.unwrap().into_reader_handle().unwrap();
-    let results = view.lookup(&[0.into()]).await.unwrap().into_vec();
+    let results = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(results.is_empty());
 
     let mut table = g.table("table_1").await.unwrap();
@@ -8474,7 +9043,11 @@ async fn double_create_table_with_multiple_modifications() {
         .unwrap();
 
     sleep().await;
-    let results = view.lookup(&[0.into()]).await.unwrap().into_vec();
+    let results = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert!(!results.is_empty());
     assert_eq!(results[0][0], "11".into());
     assert_eq!(results[1][0], "21".into());
@@ -8521,7 +9094,7 @@ async fn double_identical_create_table() {
 
     eventually!(
         run_test: {
-            view.lookup(&[0.into()]).await.unwrap().into_vec()
+            view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |results| {
             assert!(!results.is_empty());
@@ -8586,7 +9159,7 @@ async fn multiple_schemas_explicit() {
 
     eventually!(
         run_test: {
-            q.lookup(&[0.into()]).await.unwrap().into_vec()
+            q.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await.unwrap().into_vec()
         },
         then_assert: |res| {
             assert_eq!(
@@ -8629,7 +9202,11 @@ async fn multiple_aggregates_and_predicates() {
     .unwrap();
 
     let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
-    let res = q.lookup(&[0.into()]).await.unwrap().into_vec();
+    let res = q
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1), DfValue::from(4)]]);
 
     shutdown_tx.shutdown().await;
@@ -8782,7 +9359,11 @@ async fn evict_single() {
     let mut t = g.table("t1").await.unwrap();
     let mut rh = g.view("q").await.unwrap().into_reader_handle().unwrap();
     t.insert(vec![1.into(), 2.into()]).await.unwrap();
-    let res = rh.lookup(&[2.into()]).await.unwrap().into_vec();
+    let res = rh
+        .lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1)]]);
 
     // Call /evict_random and ensure we get the key we just looked up. Ignores the Tag and
@@ -8798,7 +9379,11 @@ async fn evict_single() {
         .is_none());
 
     // Lookup again to fill the hole
-    let res = rh.lookup(&[2.into()]).await.unwrap().into_vec();
+    let res = rh
+        .lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1)]]);
 
     // Evicting by key should now succeed
@@ -8806,7 +9391,11 @@ async fn evict_single() {
     assert_eq!(eviction.key, vec![2.into()]);
 
     // Make sure nothing went so wrong that we can't lookup again
-    let res = rh.lookup(&[2.into()]).await.unwrap().into_vec();
+    let res = rh
+        .lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1)]]);
 
     shutdown_tx.shutdown().await;
@@ -8855,7 +9444,11 @@ async fn evict_single_intermediate_state() {
     let mut t = g.table("t1").await.unwrap();
     let mut rh = g.view("q").await.unwrap().into_reader_handle().unwrap();
     t.insert(vec![1.into(), 2.into()]).await.unwrap();
-    let res = rh.lookup(&[2.into()]).await.unwrap().into_vec();
+    let res = rh
+        .lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(Decimal::new(10, 1))]]);
 
     // Call /evict_random and ensure we get the key we just looked up. Ignores the Tag and
@@ -8886,7 +9479,11 @@ async fn evict_single_intermediate_state() {
         .is_none());
 
     // Lookup again to fill the hole
-    let res = rh.lookup(&[2.into()]).await.unwrap().into_vec();
+    let res = rh
+        .lookup(&[2.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(Decimal::new(10, 1))]]);
 
     // Evicting by key should now succeed

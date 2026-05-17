@@ -369,7 +369,7 @@ impl TestHandle {
             .await?
             .into_reader_handle()
             .unwrap();
-        let results = getter.lookup(&[0.into()]).await?;
+        let results = getter.lookup(&[0.into()], Dialect::DEFAULT_MYSQL).await?;
         let mut results = results.into_vec();
         results.sort();
         Ok(results)
