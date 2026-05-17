@@ -19,13 +19,16 @@ use futures::pin_mut;
 use futures_util::future::TryFutureExt;
 use metrics::{counter, histogram, Counter};
 use pin_project::pin_project;
-use readyset_client::results::ResultIterator;
+use readyset_client::post_processing::{
+    run_post_processing_pipeline, ReadReplyStats, ResultIterator,
+};
+use readyset_client::schema::{ColumnSchema, SelectSchema};
 use readyset_client::{
-    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
-    ViewQuery,
+    KeyComparison, LookupResult, ReadQuery, ReadReply, ReaderAddress, Tagged, ViewQuery,
 };
 use readyset_errors::internal_err;
 use readyset_multiplex::server;
+use readyset_post_lookup::PostLookupPlan;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -38,6 +41,17 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio_stream::StreamExt;
 use tower::Service;
 use tracing::{error, warn};
+
+/// Build a [`SelectSchema`] from the optional pre-decomposition schema shipped in
+/// [`ViewQuery::result_schema`]. The orchestrator only inspects `schema.schema` (column
+/// types) for recompose, so the `columns` (aliases) field is left empty; the adapter
+/// independently rebuilds the client-facing column list.
+fn initial_select_schema(result_schema: Option<&[ColumnSchema]>) -> SelectSchema<'static> {
+    SelectSchema {
+        schema: std::borrow::Cow::Owned(result_schema.map(<[_]>::to_vec).unwrap_or_default()),
+        columns: std::borrow::Cow::Owned(Vec::new()),
+    }
+}
 
 const WAIT_BEFORE_WARNING: Duration = Duration::from_secs(7);
 
@@ -172,7 +186,9 @@ impl ReadRequestHandler {
             filter,
             limit,
             offset,
-            dialect: _,
+            post_lookup_plan,
+            result_schema,
+            dialect,
         } = query;
 
         macro_rules! reply_with_ok {
@@ -212,7 +228,19 @@ impl ReadRequestHandler {
                 // immediately
                 self.hit_ctr.increment(1);
 
-                let results = ResultIterator::new(hit, &reader.post_lookup, limit, offset, filter);
+                let (results, _schema) = match run_post_processing_pipeline(
+                    hit,
+                    initial_select_schema(result_schema.as_deref()),
+                    &reader.post_lookup,
+                    post_lookup_plan.as_ref(),
+                    limit,
+                    offset,
+                    filter,
+                    dialect,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => reply_with_error!(e),
+                };
 
                 let results = if raw_result {
                     ServerReadReplyBatch::Unserialized(results)
@@ -244,6 +272,9 @@ impl ReadRequestHandler {
             limit,
             offset,
             filter,
+            post_lookup_plan,
+            result_schema,
+            dialect,
             upquery_timeout: self.upquery_timeout,
             raw_result,
             receiver,
@@ -277,6 +308,32 @@ impl ReadRequestHandler {
             tag,
             v: ReadReply::Keys(reader.keys()),
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl readyset_client::read::LocalReader for ReadRequestHandler {
+    async fn read_local(
+        &mut self,
+        target: ReaderAddress,
+        query: ViewQuery,
+    ) -> ReadySetResult<ResultIterator> {
+        // Tag is a request-correlation ID for the multiplexed RPC stream; for
+        // in-process calls there's no multiplexing and the caller discards the
+        // tag from the response, so any value works.
+        let result = match self.handle_normal_read_query(0, target, query, true) {
+            CallResult::Immediate(r) => r?,
+            CallResult::Async(chan) => chan.await?,
+        };
+        result
+            .v
+            .into_normal()
+            .ok_or_else(|| internal_err!("Unexpected response type from reader service"))??
+            .results
+            .pop()
+            .ok_or_else(|| internal_err!("Expected a single result set for local reader"))?
+            .into_unserialized()
+            .ok_or_else(|| internal_err!("local reader returned a serialized result"))
     }
 }
 
@@ -447,6 +504,12 @@ pub struct BlockingRead {
     limit: Option<usize>,
     offset: Option<usize>,
     filter: Option<DfExpr>,
+    /// See [`ViewQuery::post_lookup_plan`].
+    post_lookup_plan: Option<PostLookupPlan>,
+    /// See [`ViewQuery::result_schema`].
+    result_schema: Option<Vec<ColumnSchema>>,
+    /// See [`ViewQuery::dialect`].
+    dialect: dataflow_expression::Dialect,
     first: time::Instant,
     warned: bool,
     upquery_timeout: Duration,
@@ -484,13 +547,19 @@ impl BlockingRead {
             Err(_) => return Poll::Ready(Err(ReadySetError::ServerShuttingDown)),
             Ok(hit) => {
                 // We hit on all keys, and there is no consistency miss, can return results
-                let results = ResultIterator::new(
+                let (results, _schema) = match run_post_processing_pipeline(
                     hit,
+                    initial_select_schema(self.result_schema.as_deref()),
                     &reader.post_lookup,
+                    self.post_lookup_plan.as_ref(),
                     self.limit,
                     self.offset,
                     self.filter.take(),
-                );
+                    self.dialect,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => return Poll::Ready(Err(e)),
+                };
 
                 let results = if self.raw_result {
                     ServerReadReplyBatch::Unserialized(results)
@@ -566,8 +635,8 @@ fn get_reader_from_cache<'a>(
 
 #[cfg(test)]
 mod readreply {
-    use readyset_client::results::SharedResults;
-    use readyset_client::{LookupResult, ReadReply, ReadReplyStats, Tagged};
+    use readyset_client::post_processing::{ReadReplyStats, ResultIterator, SharedResults};
+    use readyset_client::{LookupResult, ReadReply, Tagged};
     use readyset_data::DfValue;
     use readyset_errors::ReadySetError;
 
@@ -582,9 +651,9 @@ mod readreply {
                         .iter()
                         .cloned()
                         .map(|d| {
-                            ServerReadReplyBatch::serialize(ResultIterator::new(
+                            ServerReadReplyBatch::serialize(ResultIterator::pipeline(
                                 [d].into(),
-                                &Default::default(),
+                                None,
                                 None,
                                 None,
                                 None,
@@ -747,9 +816,9 @@ mod readreply {
                         .iter()
                         .cloned()
                         .map(|d| {
-                            ServerReadReplyBatch::serialize(ResultIterator::new(
+                            ServerReadReplyBatch::serialize(ResultIterator::pipeline(
                                 [d].into(),
-                                &Default::default(),
+                                None,
                                 None,
                                 None,
                                 None,

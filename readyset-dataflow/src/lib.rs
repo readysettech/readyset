@@ -58,17 +58,20 @@ pub type Readers = Arc<Mutex<ReaderMap>>;
 
 pub type DomainConfig = domain::Config;
 
+/// Operations to perform on rows before insertion into a reader or after a lookup.
+///
+/// Bundles pre-insertion ordering and post-lookup processing into a single spec
+/// that travels with the reader node at migration time.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
-/// Operations to perform on rows before insertion into a reader or after a lookup
 pub struct ReaderProcessing {
-    /// Pre processing on rows prior to insertion into a reader
+    /// Pre processing on rows prior to insertion into a reader.
     pub pre_processing: PreInsertion,
-    /// Post processing on result sets after a lookup is finished
+    /// Post processing on result sets after a lookup is finished.
     pub post_processing: PostLookup,
 }
 
 impl ReaderProcessing {
-    /// Constructs a new [`ReaderProcessing`]
+    /// Constructs a new [`ReaderProcessing`].
     pub fn new(
         order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
         limit: Option<usize>,
@@ -98,20 +101,7 @@ impl ReaderProcessing {
             distinct,
         };
 
-        let pre_processing = PreInsertion {
-            order_by: post_processing.order_by.clone(),
-            group_by: match &post_processing.distinct {
-                // Sorted dedup needs per-key rows sorted by all projected columns
-                // so the k-way merge produces globally sorted output for dedup.
-                PostLookupDistinct::Sorted { dedup_aggregates } => {
-                    Some(dedup_aggregates.group_by.clone())
-                }
-                _ => post_processing
-                    .aggregates
-                    .as_ref()
-                    .map(|v| v.group_by.clone()),
-            },
-        };
+        let pre_processing = PreInsertion::from_post_lookup(&post_processing);
 
         Ok(ReaderProcessing {
             pre_processing,

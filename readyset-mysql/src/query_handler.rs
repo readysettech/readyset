@@ -9,9 +9,8 @@ use readyset_adapter::backend::noria_connector::QueryResult;
 #[cfg(test)]
 use readyset_adapter::SessionTimezone;
 use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior};
-use readyset_client::results::Results;
-use readyset_client::schema::SelectSchema;
-use readyset_client::ColumnSchema;
+use readyset_client::post_processing::Results;
+use readyset_client::schema::{ColumnSchema, SelectSchema};
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{

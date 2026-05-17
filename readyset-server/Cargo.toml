@@ -32,6 +32,7 @@ redact_sensitive = ["readyset-util/redact_sensitive"]
 anyhow = { workspace = true }
 antithesis_sdk = { workspace = true }
 async-bincode = { workspace = true }
+async-trait = { workspace = true }
 axum = { workspace = true }
 base64 = { workspace = true }
 bimap = { workspace = true, features = ["serde"] }
@@ -93,6 +94,7 @@ readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-metrics = { path = "../readyset-metrics" }
 readyset-multiplex = { path = "../readyset-multiplex" }
+readyset-post-lookup = { path = "../readyset-post-lookup" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

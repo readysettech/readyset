@@ -591,7 +591,7 @@ impl SingleReadHandle {
 
 #[cfg(test)]
 mod tests {
-    use readyset_client::results::SharedRows;
+    use readyset_client::post_processing::SharedRows;
     use readyset_data::Bound;
 
     use super::*;

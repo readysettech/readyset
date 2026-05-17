@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use futures::{Stream, ready};
 use ps::{PsqlSrvRow, PsqlValue, TransferFormat};
 use psql_srv as ps;
-use readyset_client::results::ResultIterator;
+use readyset_client::post_processing::ResultIterator;
 use readyset_data::DfValue;
 use readyset_shallow::{CacheInsertGuard, PostgreSqlMetadata, QueryMetadata};
 use tokio_postgres::types::Type;
@@ -400,8 +400,8 @@ mod tests {
 
     use futures::{StreamExt, TryStreamExt};
     use psql_srv::PsqlValue;
-    use readyset_client::ColumnSchema;
-    use readyset_client::results::Results;
+    use readyset_client::post_processing::Results;
+    use readyset_client::schema::ColumnSchema;
     use readyset_data::{DfType, DfValue};
 
     use super::*;

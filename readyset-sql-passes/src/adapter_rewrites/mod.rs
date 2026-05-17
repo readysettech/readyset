@@ -1,7 +1,7 @@
 mod auto_cache_eligibility;
 mod autoparam_exclusions;
 mod autoparameterize;
-mod post_lookup_decomposition;
+pub mod post_lookup_decomposition;
 mod shallow_cache_rewrites;
 
 use std::borrow::Cow;

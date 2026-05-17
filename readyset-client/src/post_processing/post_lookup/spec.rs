@@ -1,3 +1,8 @@
+//! Static specification of the operations to perform on reader lookup results.
+//!
+//! These types are what the reader node stores and what downstream iterators
+//! consume. The execution lives in [`crate::post_processing::post_lookup::iter`].
+
 use std::cmp;
 use std::fmt::{self, Debug, Write};
 use std::sync::Arc;

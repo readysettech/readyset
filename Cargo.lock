@@ -6614,6 +6614,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "serde",
 ]
 
 [[package]]
@@ -6741,6 +6742,7 @@ dependencies = [
  "anyhow",
  "assert_approx_eq",
  "async-bincode",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "bimap",
@@ -6787,6 +6789,7 @@ dependencies = [
  "readyset-metrics",
  "readyset-mir",
  "readyset-multiplex",
+ "readyset-post-lookup",
  "readyset-sql",
  "readyset-sql-parsing",
  "readyset-sql-passes",

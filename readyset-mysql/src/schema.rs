@@ -1,6 +1,6 @@
 #![warn(clippy::panic)]
 
-use readyset_client::{ColumnBase, ColumnSchema};
+use readyset_client::schema::{ColumnBase, ColumnSchema};
 use readyset_data::DfType;
 use readyset_errors::{unsupported, ReadySetResult};
 use readyset_sql::ast::{ColumnConstraint, Relation, SqlType};

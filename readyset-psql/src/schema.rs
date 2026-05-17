@@ -18,7 +18,7 @@ impl TryFrom<SelectSchema<'_>> for Vec<ps::Column> {
     }
 }
 
-pub struct NoriaSchema<'a>(pub &'a [readyset_client::ColumnSchema]);
+pub struct NoriaSchema<'a>(pub &'a [readyset_client::schema::ColumnSchema]);
 
 impl<'a> TryFrom<NoriaSchema<'a>> for Vec<pgsql::types::Type> {
     type Error = Error;

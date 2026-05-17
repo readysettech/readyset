@@ -1,12 +1,27 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use dataflow_expression::grouped::accumulator::AccumulationOp;
 use readyset_client::post_processing::{
-    PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
+    effective_aggregates, PostLookup, PostLookupAggregate, PostLookupAggregateFunction,
+    PostLookupAggregates, ResultIterator, SharedResults,
 };
-use readyset_client::results::{ResultIterator, SharedResults};
 use readyset_data::DfValue;
 use readyset_sql::ast::DistinctOption;
 use smallvec::SmallVec;
+
+/// Drive `data` through the inner iterator pipeline configured by `post_lookup`,
+/// matching how the production orchestrator wires aggregation. Outer-stage
+/// builders (`with_limit`, `with_projection`, ...) are no-ops because the
+/// benches' `PostLookup` leaves those fields `None`.
+fn run_pipeline(data: SharedResults, post_lookup: &PostLookup) -> Vec<Vec<DfValue>> {
+    ResultIterator::pipeline(
+        data,
+        post_lookup.order_by.as_ref(),
+        effective_aggregates(post_lookup),
+        None,
+        post_lookup.default_row.as_ref(),
+    )
+    .into_vec()
+}
 
 // ---------------------------------------------------------------------------
 // Data generators
@@ -205,11 +220,7 @@ fn bench_string_agg(c: &mut Criterion) {
                 |b, _| {
                     b.iter_batched(
                         || data.clone(),
-                        |d| {
-                            black_box(
-                                ResultIterator::new(d, &post_lookup, None, None, None).into_vec(),
-                            )
-                        },
+                        |d| black_box(run_pipeline(d, &post_lookup)),
                         BatchSize::SmallInput,
                     )
                 },
@@ -234,11 +245,7 @@ fn bench_array_agg(c: &mut Criterion) {
                 |b, _| {
                     b.iter_batched(
                         || data.clone(),
-                        |d| {
-                            black_box(
-                                ResultIterator::new(d, &post_lookup, None, None, None).into_vec(),
-                            )
-                        },
+                        |d| black_box(run_pipeline(d, &post_lookup)),
                         BatchSize::SmallInput,
                     )
                 },
@@ -258,7 +265,7 @@ fn bench_group_concat(c: &mut Criterion) {
     group.bench_function("50_keys_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });
@@ -279,7 +286,7 @@ fn bench_string_agg_with_group_by(c: &mut Criterion) {
     group.bench_function("50_keys_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });
@@ -305,9 +312,7 @@ fn bench_string_agg_single_key(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -335,9 +340,7 @@ fn bench_string_agg_distinct(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -365,9 +368,7 @@ fn bench_string_agg_long_values(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -391,7 +392,7 @@ fn bench_string_agg_group_by_merge(c: &mut Criterion) {
     group.bench_function("50_keys_5_groups_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });
@@ -421,11 +422,7 @@ fn bench_string_agg_raw(c: &mut Criterion) {
                 |b, _| {
                     b.iter_batched(
                         || data.clone(),
-                        |d| {
-                            black_box(
-                                ResultIterator::new(d, &post_lookup, None, None, None).into_vec(),
-                            )
-                        },
+                        |d| black_box(run_pipeline(d, &post_lookup)),
                         BatchSize::SmallInput,
                     )
                 },
@@ -450,11 +447,7 @@ fn bench_array_agg_raw(c: &mut Criterion) {
                 |b, _| {
                     b.iter_batched(
                         || data.clone(),
-                        |d| {
-                            black_box(
-                                ResultIterator::new(d, &post_lookup, None, None, None).into_vec(),
-                            )
-                        },
+                        |d| black_box(run_pipeline(d, &post_lookup)),
                         BatchSize::SmallInput,
                     )
                 },
@@ -474,7 +467,7 @@ fn bench_group_concat_raw(c: &mut Criterion) {
     group.bench_function("50_keys_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });
@@ -495,7 +488,7 @@ fn bench_string_agg_with_group_by_raw(c: &mut Criterion) {
     group.bench_function("50_keys_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });
@@ -521,9 +514,7 @@ fn bench_string_agg_single_key_raw(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -551,9 +542,7 @@ fn bench_string_agg_distinct_raw(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -581,9 +570,7 @@ fn bench_string_agg_long_values_raw(c: &mut Criterion) {
             |b, _| {
                 b.iter_batched(
                     || data.clone(),
-                    |d| {
-                        black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec())
-                    },
+                    |d| black_box(run_pipeline(d, &post_lookup)),
                     BatchSize::SmallInput,
                 )
             },
@@ -607,7 +594,7 @@ fn bench_string_agg_group_by_merge_raw(c: &mut Criterion) {
     group.bench_function("50_keys_5_groups_20_vals", |b| {
         b.iter_batched(
             || data.clone(),
-            |d| black_box(ResultIterator::new(d, &post_lookup, None, None, None).into_vec()),
+            |d| black_box(run_pipeline(d, &post_lookup)),
             BatchSize::SmallInput,
         )
     });

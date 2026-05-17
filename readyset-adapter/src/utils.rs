@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use readyset_client::{ColumnSchema, Modification, Operation};
+use readyset_client::schema::ColumnSchema;
+use readyset_client::{Modification, Operation};
 use readyset_data::{Collation, DfType, DfValue, Dialect, TimestampTz};
 use readyset_errors::{
     ReadySetResult, bad_request_err, invalid_query, invalid_query_err, invariant, invariant_eq,

@@ -5073,6 +5073,8 @@ async fn post_read_ilike() {
             }),
             limit: None,
             offset: None,
+            post_lookup_plan: None,
+            result_schema: None,
             dialect: Dialect::DEFAULT_MYSQL,
         })
         .await

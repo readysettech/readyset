@@ -8,8 +8,8 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::ParsedCommand;
-use readyset_client::ColumnSchema;
-use readyset_client::results::{ResultIterator, Results};
+use readyset_client::post_processing::{ResultIterator, Results};
+use readyset_client::schema::ColumnSchema;
 use readyset_data::DfType;
 use readyset_shallow::QueryMetadata;
 use readyset_sql::ast::{self, SqlIdentifier};

@@ -244,6 +244,7 @@ mod controller;
 pub mod events;
 pub mod post_processing;
 pub mod query;
+pub mod read;
 pub mod recipe;
 pub mod schema;
 pub mod status;
@@ -284,13 +285,6 @@ use crate::internal::*;
 /// The prelude contains most of the types needed in everyday operation.
 pub mod prelude {
     pub use super::{ReadySetHandle, Table, View};
-}
-
-/// Wrapper types for ReadySet query results.
-pub mod results {
-    pub use super::post_processing::{
-        Key, ResultIterator, Results, Row, SharedResults, SharedRows,
-    };
 }
 
 task_local! {
@@ -363,7 +357,7 @@ pub use crate::table::{
 };
 pub use crate::view::{
     KeyComparison, KeyComparisonRef, LookupResult, ReadQuery, ReadReply, ReadReplyBatch,
-    ReadReplyStats, ReplayKeys, ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
+    ReplayKeys, ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
 };
 
 pub mod builders {

@@ -1,5 +1,5 @@
 use dataflow::prelude::*;
-use readyset_client::{ColumnBase, ColumnSchema};
+use readyset_client::schema::{ColumnBase, ColumnSchema};
 use readyset_data::DfType;
 use readyset_sql::ast::Column;
 use tracing::trace;

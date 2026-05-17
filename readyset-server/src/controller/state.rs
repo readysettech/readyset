@@ -46,9 +46,9 @@ use readyset_client::internal::MaterializationStatus;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::{CacheExpr, ExprInfo, ExtendRecipeSpec};
+use readyset_client::schema::ViewSchema;
 use readyset_client::{
     PersistencePoint, SingleKeyEviction, TableStatus, ViewCreateRequest, ViewFilter, ViewRequest,
-    ViewSchema,
 };
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::{

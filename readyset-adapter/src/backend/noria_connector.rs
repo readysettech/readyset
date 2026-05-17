@@ -6,17 +6,13 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use readyset_client::internal::LocalNodeIndex;
-use readyset_client::post_processing::post_lookup::{
-    apply_post_lookup_type_transforms, postprocess_decompositions, remove_post_lookup_columns,
-};
+use readyset_client::post_processing::{ResultIterator, Results};
 use readyset_client::query::QueryId;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
-use readyset_client::results::{ResultIterator, Results};
-use readyset_client::schema::SelectSchema;
+use readyset_client::schema::{ColumnSchema, SchemaType, SelectSchema};
 use readyset_client::{
-    ColumnSchema, GraphvizOptions, ReadQuery, ReaderAddress, ReaderHandle, ReadySetHandle,
-    SchemaType, Table, TableOperation, View, ViewCreateRequest, ViewQuery,
+    GraphvizOptions, ReadySetHandle, Table, TableOperation, View, ViewCreateRequest,
 };
 use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
@@ -25,7 +21,7 @@ use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invariant_eq, table_err, unsupported,
     unsupported_err,
 };
-use readyset_server::worker::readers::{CallResult, ReadRequestHandler};
+use readyset_server::worker::readers::ReadRequestHandler;
 use readyset_sql::ast::{
     self, ColumnConstraint, CreateViewStatement, DeleteStatement, Expr, InsertStatement, Relation,
     SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, TrxCachePolicy,
@@ -1562,15 +1558,14 @@ impl NoriaConnector {
 
             let mut schema = getter_schema.schema(SchemaType::ReturnedSchema).to_vec();
 
-            // Apply PostLookupPlan type transformations so the prepared-statement
-            // RowDescription matches what postprocess_decompositions returns at
-            // execute time. Without this, decomposed AVG columns would be
-            // described as INT8 (the SUM column type) but sent as NUMERIC.
-            let plan = statement.processed_query_params.post_lookup_plan();
-            if !plan.is_empty() {
-                apply_post_lookup_type_transforms(&mut schema, plan, self.dialect)?;
-                remove_post_lookup_columns(&mut schema, plan);
-            }
+            // Align the prepared-statement RowDescription with what
+            // postprocess_decompositions will emit at execute time
+            // (widen decomposed AVG types, strip helper columns).
+            readyset_client::post_processing::apply_post_lookup_to_prepared_schema(
+                &mut schema,
+                statement.processed_query_params.post_lookup_plan(),
+                self.dialect,
+            )?;
 
             PreparedSelectTypes::Schema(SelectPrepareResultInner { params, schema })
         } else {
@@ -1632,14 +1627,30 @@ impl NoriaConnector {
         let view_failed = self.failed_views.take(qname.as_ref()).is_some();
         let getter = self.inner.get_noria_view(&qname, view_failed).await?;
 
-        let res = do_read(
-            getter,
-            processed_query_params.as_ref(),
-            params,
-            self.read_request_handler.as_mut(),
-            self.dialect,
-        )
-        .await;
+        let plan = processed_query_params.post_lookup_plan();
+        let (limit, offset) = processed_query_params.limit_offset_params(params)?;
+        let raw_keys = processed_query_params.make_keys(params)?;
+        // When a manually parameterized cache serves this query, the incoming values at the
+        // frozen positions must equal the cache's inline literals -- otherwise the cache is
+        // specialized on different constants and this read is a miss for it -- and are stripped
+        // so the key matches the cache's parameter order.
+        let res = match processed_query_params.apply_frozen(raw_keys)? {
+            Some(raw_keys) => {
+                readyset_client::read::read_cache(
+                    getter,
+                    self.read_request_handler
+                        .as_mut()
+                        .map(|r| r as &mut dyn readyset_client::read::LocalReader),
+                    raw_keys,
+                    limit,
+                    offset,
+                    plan,
+                    self.dialect,
+                )
+                .await
+            }
+            None => Err(ReadySetError::NoCacheForQuery),
+        };
 
         if res.is_err() {
             self.failed_views.insert(qname.clone().into_owned());
@@ -1658,7 +1669,10 @@ impl NoriaConnector {
             qname.display_unquoted().to_string(),
         )));
 
-        Ok(res.result)
+        Ok(QueryResult::Select {
+            rows: res.rows,
+            schema: res.schema,
+        })
     }
 
     pub(crate) async fn handle_create_view<'a>(
@@ -1716,116 +1730,4 @@ impl NoriaConnector {
             .map(|names| names.into_iter().nth(0).unwrap())?
             .map(|info| info.name().clone()))
     }
-}
-
-/// Creates keys from processed query params, gets the select statement binops, and calls
-/// View::build_view_query.
-fn build_view_query<'a>(
-    getter: &'a mut View,
-    processed_query_params: &DfQueryParameters,
-    params: &[DfValue],
-    dialect: Dialect,
-) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
-    let (limit, offset) = processed_query_params.limit_offset_params(params)?;
-    let raw_keys = processed_query_params.make_keys(params)?;
-    // When a manually parameterized cache serves this query, the incoming values at the frozen
-    // positions must equal the cache's inline literals -- otherwise the cache is specialized on
-    // different constants and this read is a miss for it -- and are stripped so the key matches
-    // the cache's parameter order.
-    let Some(raw_keys) = processed_query_params.apply_frozen(raw_keys)? else {
-        return Ok(None);
-    };
-
-    getter.build_view_query(raw_keys, limit, offset, dialect)
-}
-
-struct ReadResult<'a> {
-    result: QueryResult<'a>,
-    num_keys: u64,
-    cache_misses: u64,
-}
-
-/// Run the supplied [`SelectStatement`] on the supplied [`View`]
-/// Assumption: the [`View`] was created for that specific [`SelectStatement`]
-async fn do_read<'a>(
-    getter: &'a mut View,
-    processed_query_params: &DfQueryParameters,
-    params: &[DfValue],
-    read_request_handler: Option<&'a mut ReadRequestHandler>,
-    dialect: Dialect,
-) -> ReadySetResult<ReadResult<'a>> {
-    let (reader_handle, vq) =
-        match build_view_query(getter, processed_query_params, params, dialect)? {
-            Some(res) => res,
-            None => return Err(ReadySetError::NoCacheForQuery),
-        };
-
-    let num_keys = vq.key_comparisons.len() as u64;
-
-    let data = if let Some(rh) = read_request_handler {
-        let request = readyset_client::Tagged::from(ReadQuery::Normal {
-            target: ReaderAddress {
-                node: *reader_handle.node(),
-                name: reader_handle.name().clone(),
-            },
-            query: vq.clone(),
-        });
-
-        // Query the local reader if it is a read query, otherwise default to the traditional
-        // View API.
-        let tag = request.tag;
-        if let ReadQuery::Normal { target, query } = request.v {
-            // Issue a normal read query returning the raw unserialized results.
-            let result = match rh.handle_normal_read_query(tag, target, query, true) {
-                CallResult::Immediate(result) => result?,
-                CallResult::Async(chan) => chan.await?,
-            };
-
-            result
-                .v
-                .into_normal()
-                .ok_or_else(|| internal_err!("Unexpected response type from reader service"))??
-                .results
-                .pop()
-                .ok_or_else(|| internal_err!("Expected a single result set for local reader"))?
-                .into_unserialized()
-                .ok_or_else(|| internal_err!("Expected unserialized result for local reader"))?
-        } else {
-            reader_handle.raw_lookup(vq).await?
-        }
-    } else {
-        reader_handle.raw_lookup(vq).await?
-    };
-
-    let cache_misses = data.total_stats().map(|s| s.cache_misses).unwrap_or(0);
-
-    trace!("select::complete");
-
-    let result = QueryResult::from_iter(
-        SelectSchema {
-            schema: Cow::Borrowed(
-                reader_handle
-                    .schema()
-                    .unwrap()
-                    .schema(SchemaType::ReturnedSchema),
-            ), /* Safe because we already unwrapped above */
-            columns: Cow::Borrowed(reader_handle.columns()),
-        },
-        data,
-    );
-
-    let plan = processed_query_params.post_lookup_plan();
-    let result = match result {
-        QueryResult::Select { rows, schema } => {
-            let (rows, schema) = postprocess_decompositions(rows, schema, plan, dialect)?;
-            QueryResult::Select { rows, schema }
-        }
-        other => other,
-    };
-
-    Ok(ReadResult {
-        result,
-        num_keys,
-        cache_misses,
-    })
 }

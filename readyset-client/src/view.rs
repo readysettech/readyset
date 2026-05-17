@@ -48,8 +48,8 @@ use tracing::{debug_span, error, trace};
 use tracing_futures::Instrument;
 use vec1::{vec1, Vec1};
 
-use crate::post_processing::{ResultIterator, Results};
-use crate::schema::{SchemaType, ViewSchema};
+use crate::post_processing::{PostLookupPlan, ReadReplyStats, ResultIterator, Results};
+use crate::schema::{ColumnSchema, SchemaType, ViewSchema};
 use crate::{ReaderAddress, Tagged, Tagger};
 
 /// Index of a key column as it exists in the underlying state. During a migration this will be
@@ -944,22 +944,6 @@ impl<D> LookupResult<D> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
-pub struct ReadReplyStats {
-    /// The count of cache misses which have occurred
-    pub cache_misses: u64,
-}
-
-impl ReadReplyStats {
-    /// Creates a new [`ReadReplyStats`]
-    #[must_use]
-    pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            cache_misses: self.cache_misses + other.cache_misses,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ReadReply<D = ReadReplyBatch> {
     /// A reply to a normal lookup request
@@ -1188,8 +1172,20 @@ pub struct ViewQuery {
     pub limit: Option<usize>,
     /// An optional offset to skip the given number of rows from the beginning of the result set
     pub offset: Option<usize>,
-    /// SQL dialect for any downstream stage that needs to pick types based on dialect (e.g.
-    /// recompose of decomposed aggregates). Always populated by the caller so post-lookup
+    /// Aggregate-decomposition plan (e.g. `AVG` to `SUM/COUNT/MIN`) the server applies after
+    /// post-lookup aggregation to recompose original aggregates and coerce types. `None` for
+    /// queries with no decomposition.
+    pub post_lookup_plan: Option<PostLookupPlan>,
+    /// Reader schema for the rows the server is about to yield, in the *pre-decomposition*
+    /// shape. Used by the server's recompose stage to compute coercion target types and to
+    /// produce the post-decomposition schema. `None` whenever `post_lookup_plan` is `None`.
+    ///
+    /// TODO: a follow-up commit will fold the relevant type info into [`PostLookupPlan`]
+    /// itself so this field can be dropped.
+    pub result_schema: Option<Vec<ColumnSchema>>,
+    /// SQL dialect for the recompose stage to pick the right output type for decomposed
+    /// aggregates (e.g. MySQL widens AVG of ints to `Numeric{14,4}`; PostgreSQL uses
+    /// `Numeric` or `Double`). Always populated by the adapter so future post-lookup
     /// stages can't silently inherit a `MySQL` default for PostgreSQL clients.
     pub dialect: Dialect,
 }
@@ -1201,6 +1197,8 @@ impl From<(Vec<KeyComparison>, Dialect)> for ViewQuery {
             filter: None,
             limit: None,
             offset: None,
+            post_lookup_plan: None,
+            result_schema: None,
             dialect,
         }
     }
@@ -1377,6 +1375,7 @@ impl ReaderHandle {
     }
 
     /// Build a [`ViewQuery`] for performing a lookup against this [`ReaderHandle`]
+    #[allow(clippy::too_many_arguments)]
     fn build_view_query(
         &self,
         key_remap: Option<&HashMap<PlaceholderIdx, Literal>>,
@@ -1384,6 +1383,8 @@ impl ReaderHandle {
         limit: Option<usize>,
         offset: Option<usize>,
         dialect: Dialect,
+        post_lookup_plan: Option<PostLookupPlan>,
+        result_schema: Option<Vec<ColumnSchema>>,
     ) -> ReadySetResult<ViewQuery> {
         trace!("select::lookup");
 
@@ -1413,6 +1414,8 @@ impl ReaderHandle {
             }),
             limit,
             offset,
+            post_lookup_plan,
+            result_schema,
             dialect,
         })
     }
@@ -1707,6 +1710,8 @@ impl ReusedReaderHandle {
         limit: Option<usize>,
         offset: Option<usize>,
         dialect: Dialect,
+        post_lookup_plan: Option<PostLookupPlan>,
+        result_schema: Option<Vec<ColumnSchema>>,
     ) -> ReadySetResult<Option<ViewQuery>> {
         // If any placeholders in our query correspond to inlined values in the migrated query,
         // verify that we are executing our query with these values.
@@ -1733,7 +1738,15 @@ impl ReusedReaderHandle {
         };
 
         self.reader_handle
-            .build_view_query(Some(&self.key_remapping), raw_keys, limit, offset, dialect)
+            .build_view_query(
+                Some(&self.key_remapping),
+                raw_keys,
+                limit,
+                offset,
+                dialect,
+                post_lookup_plan,
+                result_schema,
+            )
             .map(Some)
     }
 }
@@ -1749,17 +1762,34 @@ impl View {
         limit: Option<usize>,
         offset: Option<usize>,
         dialect: Dialect,
+        post_lookup_plan: Option<PostLookupPlan>,
+        result_schema: Option<Vec<ColumnSchema>>,
     ) -> ReadySetResult<Option<(&mut ReaderHandle, ViewQuery)>> {
         // If any placeholders in our query correspond to inlined values in the migrated query,
         // verify that we are executing our query with these values.
         match self {
             View::Single(handle) => handle
-                .build_view_query(None, raw_keys, limit, offset, dialect)
+                .build_view_query(
+                    None,
+                    raw_keys,
+                    limit,
+                    offset,
+                    dialect,
+                    post_lookup_plan,
+                    result_schema,
+                )
                 .map(|vq| Some((handle, vq))),
             View::MultipleReused(handles) => {
                 let mut last_error = None;
                 for reused_handle in handles {
-                    match reused_handle.build_view_query(raw_keys.clone(), limit, offset, dialect) {
+                    match reused_handle.build_view_query(
+                        raw_keys.clone(),
+                        limit,
+                        offset,
+                        dialect,
+                        post_lookup_plan.clone(),
+                        result_schema.clone(),
+                    ) {
                         Ok(Some(vq)) => {
                             return Ok(Some((reused_handle.inner_mut(), vq)));
                         }
@@ -1893,8 +1923,6 @@ impl std::ops::DerefMut for ReadReplyBatch {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::SqlType;
-
     use super::*;
     use crate::schema::{ColumnBase, ColumnSchema};
 
@@ -2094,6 +2122,7 @@ mod tests {
         use std::net::{IpAddr, Ipv4Addr};
 
         use dataflow_expression::Dialect as DfDialect;
+        use readyset_sql::ast::SqlType;
         use readyset_sql::{ast::Column, Dialect};
         use vec1::vec1;
 
@@ -2200,7 +2229,7 @@ mod tests {
                 Dialect::PostgreSQL => DfDialect::DEFAULT_POSTGRESQL,
             };
             let mut view = View::Single(reader_handle);
-            view.build_view_query(raw_keys, limit, offset, dataflow_dialect)
+            view.build_view_query(raw_keys, limit, offset, dataflow_dialect, None, None)
                 .unwrap()
                 .unwrap()
                 .1

@@ -92,11 +92,11 @@ use readyset_client::consensus::mcp_tokens::{
     McpToken, McpTokenScope as AuthorityMcpTokenScope, McpTokenStore,
 };
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+use readyset_client::post_processing::Results;
 use readyset_client::recipe::CacheExpr;
-use readyset_client::results::Results;
-use readyset_client::schema::SelectSchema;
+use readyset_client::schema::{ColumnSchema, SelectSchema};
 use readyset_client::status::CacheProperties;
-use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest};
+use readyset_client::{CacheMode, PlaceholderIdx, ViewCreateRequest};
 use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{

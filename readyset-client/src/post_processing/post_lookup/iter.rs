@@ -1,12 +1,13 @@
-use std::cmp;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use dataflow_expression::{grouped::accumulator::AccumulatorData, Expr};
+use dataflow_expression::grouped::accumulator::AccumulatorData;
+use dataflow_expression::Expr;
 use metrics::histogram;
 use readyset_data::DfValue;
 use readyset_sql::ast::{NullOrder, OrderType};
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
@@ -14,7 +15,23 @@ use tournament_kway::{Comparator, StreamingTournament};
 use crate::post_processing::post_lookup::spec::{
     PostLookup, PostLookupAggregates, PostLookupDistinct,
 };
-use crate::ReadReplyStats;
+
+/// Stats returned with a reader read reply.
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
+pub struct ReadReplyStats {
+    /// The count of cache misses which have occurred
+    pub cache_misses: u64,
+}
+
+impl ReadReplyStats {
+    /// Creates a new [`ReadReplyStats`]
+    #[must_use]
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            cache_misses: self.cache_misses + other.cache_misses,
+        }
+    }
+}
 
 /// A lookup key into a reader
 pub type Key = Box<[DfValue]>;
@@ -71,8 +88,8 @@ pub struct ResultIterator {
     non_empty: bool,
     /// A filter expression to ignore rows that don't match
     filter: Option<Expr>,
-    /// How many columns to return
-    cols: usize,
+    /// How many columns to return; `None` means emit the row unchanged.
+    cols: Option<usize>,
     /// Set of already-emitted rows for DISTINCT deduplication
     /// Only allocated when needed i.e. when dedup uses Unsorted/Hash-based approach
     seen: Option<HashSet<Vec<DfValue>>>,
@@ -157,48 +174,53 @@ struct AggregateIterator {
     has_raw: bool,
 }
 
+/// Pick the [`PostLookupAggregates`] the iterator pipeline should aggregate by.
+///
+/// `Sorted` `DISTINCT` injects a synthetic aggregate (group-by all projected columns,
+/// no aggregate functions) so the existing merge-then-collapse machinery handles it
+/// for free. Otherwise the real `aggregates` from the spec, or `None` if neither
+/// applies. Invariant: `Sorted` is never combined with real aggregates (enforced by
+/// `ReaderProcessing::new`).
+pub fn effective_aggregates(post_lookup: &PostLookup) -> Option<&PostLookupAggregates> {
+    match &post_lookup.distinct {
+        PostLookupDistinct::Sorted { dedup_aggregates } => {
+            debug_assert!(post_lookup.aggregates.is_none());
+            debug_assert!(!dedup_aggregates.group_by.is_empty());
+            Some(dedup_aggregates)
+        }
+        _ => post_lookup.aggregates.as_ref(),
+    }
+}
+
 impl ResultIterator {
-    /// Create a new [`ResultIterator`] from a set of [`SharedRows`] and a [`PostLookup`].
-    /// Each individual set of [`SharedRows`] is assumed sorted in regards to the provided
-    /// [`PostLookup`], otherwise the iteration order may break.
-    /// The parameter for `adapter_limit` is used to override any limit set in the `PostLookup`
-    /// provided, in case the adapter requesting this result thinks it needs a different number of
-    /// rows.
-    pub fn new(
+    /// Build the iterator's *inner* pipeline (k-way merge + aggregation), routing
+    /// `filter` and `default_row` to the level that gives them the right semantics:
+    ///
+    /// - When an aggregate is set up, `filter` is pushed *into* the `AggregateIterator`
+    ///   so it gates raw rows before they're aggregated (`WHERE` semantics).
+    /// - In the eager `(order_by, aggregate)` branch, `default_row` is attached to the
+    ///   temp iterator so `into_vec` materialises the default into the sorted output
+    ///   when the inner is empty.
+    /// - Otherwise both fall through to the outer iterator's fields.
+    ///
+    /// Limit, offset, projection, and hash-dedup remain outer stages; chain them via
+    /// [`with_limit`](Self::with_limit), [`with_offset`](Self::with_offset),
+    /// [`with_projection`](Self::with_projection), and
+    /// [`with_hash_dedup`](Self::with_hash_dedup). The orchestrator
+    /// [`crate::post_processing::post_lookup::run_post_processing_pipeline`] is the
+    /// canonical place to see the full sequence.
+    ///
+    /// `effective_aggregates` is what the caller picks via [`effective_aggregates`]: real
+    /// `PostLookupAggregates` for aggregating queries, the synthetic dedup aggregate for
+    /// `Sorted` `DISTINCT`, or `None` otherwise. `Sorted` dedup is handled here because it
+    /// folds into the merge; `HashBased` dedup is a *separate* outer stage.
+    pub fn pipeline(
         data: SharedResults,
-        post_lookup: &PostLookup,
-        adapter_limit: Option<usize>,
-        offset: Option<usize>,
+        order_by: Option<&Vec<(usize, OrderType, NullOrder)>>,
+        effective_aggregates: Option<&PostLookupAggregates>,
         mut filter: Option<Expr>,
+        default_row: Option<&Arc<Row>>,
     ) -> Self {
-        let PostLookup {
-            order_by,
-            limit,
-            returned_cols,
-            aggregates,
-            default_row,
-            distinct,
-        } = post_lookup;
-
-        let limit = adapter_limit.or(*limit); // Limit specifies total number of results to return
-
-        // For the Sorted dedup strategy (DISTINCT without aggregates), inject a synthetic
-        // PostLookupAggregates that merge-sorts by all projected columns with no aggregate
-        // functions. The AggregateIterator collapses consecutive duplicate rows, giving
-        // streaming O(1)-memory dedup. See PostLookupDistinct for the full rationale.
-        // Invariant: Sorted DISTINCT is never combined with real aggregates
-        // (enforced by ReaderProcessing::new()).
-        let effective_aggregates = match distinct {
-            PostLookupDistinct::Sorted { dedup_aggregates } => {
-                debug_assert!(aggregates.is_none());
-                debug_assert!(!dedup_aggregates.group_by.is_empty());
-                Some(dedup_aggregates)
-            }
-            _ => aggregates.as_ref(),
-        };
-
-        let use_hash_dedup = matches!(distinct, PostLookupDistinct::HashBased);
-
         let inner = match (order_by, effective_aggregates) {
             // No data in the result set, so return as simply as possible.
             (_, _) if data.is_empty() => ResultIteratorInner::MultiKey(MultiKeyIterator::new(data)),
@@ -312,6 +334,9 @@ impl ResultIterator {
                     .iter()
                     .all(|s| { s.is_sorted_by(|a, b| comparator.cmp(a, b).is_le()) }));
 
+                // `default_row` rides on the temp iterator: when the aggregate
+                // produces no rows, `into_vec` materialises the default into the
+                // sorted output before the outer-stage builders see it.
                 let temp_iter = ResultIterator {
                     inner: ResultIteratorInner::MultiKeyAggregateMerge(AggregateIterator {
                         inner: Box::new(ResultIteratorInner::MultiKeyMerge(MergeIterator::new(
@@ -324,39 +349,14 @@ impl ResultIterator {
                     }),
                     limit: None,
                     offset: None,
-                    default_row: default_row.clone(),
+                    default_row: default_row.cloned(),
                     non_empty: false,
                     filter: None,
-                    cols: usize::MAX,
+                    cols: None,
                     seen: None,
                 };
 
                 let mut results = temp_iter.into_vec();
-
-                // HashBased DISTINCT dedup: remove duplicate rows before sorting.
-                // Project to returned_cols before hashing, so rows that differ only
-                // in non-projected columns (e.g. GROUP BY keys not in SELECT) collapse.
-                //
-                // Memory note: the HashSet grows to O(unique_rows). This is acceptable
-                // here because `results` is already fully materialized (the entire
-                // post-aggregation output is in memory), so the HashSet adds at most
-                // a constant factor. The number of unique rows is bounded by the number
-                // of aggregate groups, which is typically much smaller than the raw row
-                // count. For pathological cases, monitor the
-                // POST_LOOKUP_DISTINCT_HASH_SET_SIZE metric.
-                if use_hash_dedup {
-                    let cols = returned_cols
-                        .as_ref()
-                        .map(|r| r.len())
-                        .unwrap_or(usize::MAX);
-                    let mut seen = HashSet::with_capacity(results.len());
-                    results.retain(|row| {
-                        let projected = &row[..cols.min(row.len())];
-                        seen.insert(projected.to_vec())
-                    });
-                    histogram!(metric::POST_LOOKUP_DISTINCT_HASH_SET_SIZE)
-                        .record(seen.len() as f64);
-                }
 
                 results.sort_by(|a, b| {
                     order_by
@@ -369,28 +369,8 @@ impl ResultIterator {
                         .fold(Ordering::Equal, |acc, next| acc.then(next))
                 });
 
-                match (limit, offset) {
-                    (Some(limit), Some(offset)) => {
-                        if offset >= results.len() {
-                            results.clear();
-                        } else {
-                            results.drain(cmp::min(offset + limit, results.len())..);
-                            results.drain(..offset);
-                        }
-                    }
-                    (Some(limit), None) => {
-                        results.drain(cmp::min(results.len(), limit)..);
-                    }
-                    (None, Some(offset)) => {
-                        if offset >= results.len() {
-                            results.clear();
-                        } else {
-                            results.drain(..offset);
-                        }
-                    }
-                    (None, None) => (),
-                }
-
+                // The outer-stage builders (`with_hash_dedup`, `with_limit`, `with_offset`,
+                // `with_projection`) apply on top of this owned result.
                 return ResultIterator::owned(vec![Results {
                     results,
                     stats: None,
@@ -400,23 +380,46 @@ impl ResultIterator {
 
         ResultIterator {
             inner,
-            limit,
-            offset,
-            default_row: default_row.clone(),
+            limit: None,
+            offset: None,
+            default_row: default_row.cloned(),
             non_empty: false,
-            // When aggregates (group_by) is present, filtering is processed by the inner
-            // aggregating iterator, and its value here would be `None`.
+            // Filter is `None` here whenever the inner is an `AggregateIterator` (we
+            // routed it inside above so it gates raw rows pre-aggregation); otherwise
+            // it sits on the outer iterator and runs per emitted row.
             filter,
-            cols: returned_cols
-                .as_ref()
-                .map(|r| r.len())
-                .unwrap_or(usize::MAX),
-            seen: if use_hash_dedup {
-                Some(HashSet::new())
-            } else {
-                None
-            },
+            cols: None,
+            seen: None,
         }
+    }
+
+    /// Set the row count cap; `None` clears it.
+    pub fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Skip this many rows from the beginning of the output; `None` clears it.
+    pub fn with_offset(mut self, offset: Option<usize>) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Truncate each emitted row to this many columns. `None` keeps the row width unchanged.
+    pub fn with_projection(mut self, returned_cols: Option<&[usize]>) -> Self {
+        self.cols = returned_cols.map(|r| r.len());
+        self
+    }
+
+    /// Engage HashBased `DISTINCT` dedup over the rows this iterator yields.
+    ///
+    /// The same `seen` HashSet machinery the iterator already uses for dedup,
+    /// just exposed as a stage so the orchestrator can place it relative to
+    /// other stages (notably `postprocess_decompositions`). Streaming, no extra
+    /// materialization.
+    pub fn with_hash_dedup(mut self) -> Self {
+        self.seen = Some(HashSet::new());
+        self
     }
 
     /// Create from owned data
@@ -432,7 +435,7 @@ impl ResultIterator {
             default_row: None,
             non_empty: false,
             filter: None,
-            cols: usize::MAX,
+            cols: None,
             seen: None,
         }
     }
@@ -478,7 +481,8 @@ impl ResultIterator {
             // monitor the POST_LOOKUP_DISTINCT_HASH_SET_SIZE metric.
             if let Some(ref mut seen) = self.seen {
                 if let Some(row) = self.inner.get() {
-                    let projected = &row[..self.cols.min(row.len())];
+                    let width = self.cols.unwrap_or(row.len()).min(row.len());
+                    let projected = &row[..width];
                     if !seen.insert(projected.to_vec()) {
                         continue;
                     }
@@ -729,13 +733,13 @@ impl StreamingIterator for AggregateIterator {
                 for (holder, agg) in holders.iter_mut().zip(&self.aggregate.aggregates) {
                     let col = agg.column;
                     match holder {
-                        AggregateHolder::Simple(ref mut current) => {
+                        AggregateHolder::Simple(current) => {
                             *current = agg
                                 .function
                                 .apply(current, &row[col])
                                 .expect("Apply failed");
                         }
-                        AggregateHolder::Accumulated(ref mut data) => {
+                        AggregateHolder::Accumulated(data) => {
                             if agg.raw_values {
                                 agg.function
                                     .apply_raw_accumulated(data, &row[col])
@@ -842,13 +846,9 @@ impl StreamingIterator for ResultIterator {
             self.inner
                 .get()
                 .or_else(|| self.default_row.as_ref().map(|r| &r[..]))
-                .map(|row| {
-                    // Why is there no slice truncate?
-                    if row.len() <= self.cols {
-                        row
-                    } else {
-                        &row[..self.cols]
-                    }
+                .map(|row| match self.cols {
+                    Some(cols) if cols < row.len() => &row[..cols],
+                    _ => row,
                 })
         }
     }
@@ -938,8 +938,25 @@ mod tests {
         }
     }
 
-    fn collect_results(data: SharedResults, post_lookup: &PostLookup) -> Vec<Vec<DfValue>> {
-        ResultIterator::new(data, post_lookup, None, None, None).into_vec()
+    fn collect_results(
+        data: SharedResults,
+        post_lookup: &PostLookup,
+        offset: Option<usize>,
+    ) -> Vec<Vec<DfValue>> {
+        let mut iter = ResultIterator::pipeline(
+            data,
+            post_lookup.order_by.as_ref(),
+            effective_aggregates(post_lookup),
+            None,
+            post_lookup.default_row.as_ref(),
+        );
+        if matches!(post_lookup.distinct, PostLookupDistinct::HashBased) {
+            iter = iter.with_hash_dedup();
+        }
+        iter.with_limit(post_lookup.limit)
+            .with_offset(offset)
+            .with_projection(post_lookup.returned_cols.as_deref())
+            .into_vec()
     }
 
     #[test]
@@ -959,7 +976,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         for val in &["a", "b", "c", "d", "e"] {
@@ -993,7 +1010,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         match &results[0][1] {
             DfValue::Array(arr) => {
@@ -1017,7 +1034,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0][1], DfValue::from("a,b"));
     }
@@ -1040,7 +1057,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
         let g1 = &results[0];
         let g2 = &results[1];
@@ -1068,7 +1085,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         assert!(merged.contains("x") && merged.contains("y") && merged.contains("z"));
@@ -1093,7 +1110,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         // BUG: "a,b" was split into "a" and "b", so we get 3 parts instead of 2.
@@ -1123,7 +1140,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         let parts: Vec<&str> = merged.split(',').collect();
@@ -1152,7 +1169,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0][1], DfValue::from("only_one"));
         assert_eq!(results[1][1], DfValue::from("also_one"));
@@ -1184,7 +1201,7 @@ mod tests {
             aggregates: vec![make_raw_string_agg_agg(",")],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         for val in &["a", "b", "c", "d", "e"] {
@@ -1204,7 +1221,7 @@ mod tests {
             aggregates: vec![make_raw_string_agg_agg(",")],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let val = results[0][1].to_string();
         assert!(val.contains("x") && val.contains("y") && val.contains("z"));
@@ -1224,7 +1241,7 @@ mod tests {
             aggregates: vec![make_raw_string_agg_agg(",")],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
         let g1 = results[0][1].to_string();
         let g2 = results[1][1].to_string();
@@ -1246,7 +1263,7 @@ mod tests {
             aggregates: vec![make_raw_string_agg_agg(",")],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         // With raw path, "a,b" stays as one value, so result is "a,b,c" (2 original values)
@@ -1269,7 +1286,7 @@ mod tests {
             }],
         });
 
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         let merged = results[0][1].to_string();
         let parts: Vec<&str> = merged.split(',').collect();
@@ -1302,7 +1319,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
         let mut vals: Vec<i64> = results
             .iter()
@@ -1334,7 +1351,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 3);
     }
 
@@ -1363,7 +1380,7 @@ mod tests {
             }),
             distinct: PostLookupDistinct::HashBased,
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 4);
     }
 
@@ -1394,7 +1411,7 @@ mod tests {
             }),
             distinct: PostLookupDistinct::HashBased,
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
     }
 
@@ -1414,7 +1431,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 0);
     }
 
@@ -1438,7 +1455,7 @@ mod tests {
             }),
             distinct: PostLookupDistinct::HashBased,
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
         assert_eq!(i64::try_from(&results[0][0]).expect("int"), 42);
     }
@@ -1465,7 +1482,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
     }
 
@@ -1492,7 +1509,7 @@ mod tests {
             }),
             distinct: PostLookupDistinct::HashBased,
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 4);
         let col1_vals: Vec<i64> = results
             .iter()
@@ -1525,7 +1542,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 3);
         let vals: Vec<i64> = results
             .iter()
@@ -1558,7 +1575,7 @@ mod tests {
                 },
             },
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 2);
     }
 
@@ -1588,7 +1605,7 @@ mod tests {
             }),
             distinct: PostLookupDistinct::HashBased,
         };
-        let results = collect_results(data, &post_lookup);
+        let results = collect_results(data, &post_lookup, None);
         assert_eq!(results.len(), 1);
     }
 }

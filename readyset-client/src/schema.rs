@@ -1,3 +1,16 @@
+//! Schema types that travel with a reader's result set.
+//!
+//! [`ColumnSchema`] describes one column: its name, type, and (for columns
+//! projected from a base table) the source column details. [`SelectSchema`]
+//! bundles a list of column schemas with the client-facing column aliases for
+//! the whole result set.  [`ViewSchema`] is the reader-side schema of a
+//! cached view, carrying both the columns projected at the reader node and
+//! the subset returned to the client.
+//!
+//! These types are produced when the adapter compiles a cached query and
+//! consumed wherever result rows are shaped for the client (wire-protocol
+//! serialization, post-lookup decomposition recompose, etc.).
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -102,29 +115,32 @@ impl SelectSchema<'_> {
     }
 }
 
-/// A `ViewSchema` is used to describe the columns of a stored ReadySet
-/// view as a vector of columns. The ViewSchema contains a vector with all
-/// projected columns and a vector with columns returned to the client.
+/// Reader-side schema of a cached view.
+///
+/// A `ViewSchema` describes the columns of a stored Readyset view as two
+/// aligned vectors: one for all columns projected at the reader node and
+/// one for the subset returned to the client.  Callers pick which via
+/// [`SchemaType`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewSchema {
     /// The set of columns returned to the client when executing this query.
     returned_cols: Vec<ColumnSchema>,
-    /// The set of columns projected at the noria flowgraph reader node.
+    /// The set of columns projected at the reader node.
     projected_cols: Vec<ColumnSchema>,
 }
 
-/// SchemaType is passed to most ViewSchema functions to select between the two
-/// schemas contained in the ViewSchema struct.
+/// Selector passed to [`ViewSchema`] methods to pick between the two
+/// schemas a `ViewSchema` carries.
 pub enum SchemaType {
-    /// Used to select the schema returned to the client when executing this
-    /// query.
+    /// The schema returned to the client when executing this query.
     ReturnedSchema,
-    /// Used to select the schema projected at the noria flowgraph reader node.
+    /// The schema projected at the reader node.
     ProjectedSchema,
 }
 
 impl ViewSchema {
-    /// Create a ViewSchema from returned and projected column schema vectors
+    /// Build a [`ViewSchema`] from the returned and projected column
+    /// schemas.
     pub fn new(returned_cols: Vec<ColumnSchema>, projected_cols: Vec<ColumnSchema>) -> ViewSchema {
         ViewSchema {
             returned_cols,
@@ -132,7 +148,7 @@ impl ViewSchema {
         }
     }
 
-    /// Get the schema specified by the schema type
+    /// Get the schema specified by the schema type.
     pub fn schema(&self, schema_type: SchemaType) -> &[ColumnSchema] {
         match schema_type {
             SchemaType::ReturnedSchema => &self.returned_cols,
@@ -140,7 +156,8 @@ impl ViewSchema {
         }
     }
 
-    /// Return a vector specifying the types of the columns for the requested indices
+    /// Return the types of the columns at the given indices in the
+    /// selected schema.
     pub fn col_types<I>(&self, indices: I, schema_type: SchemaType) -> ReadySetResult<Vec<&DfType>>
     where
         I: IntoIterator<Item = usize>,
@@ -153,8 +170,9 @@ impl ViewSchema {
             .ok_or_else(|| internal_err!("Schema expects valid column indices"))
     }
 
-    /// Convert the given iterator [`Columns`] to a `Vec` of [`ColumnSchema`]. The columns match if
-    /// either the column name matches (the alias) or the real base name
+    /// Map the given [`Column`]s to their [`ColumnSchema`]s in the
+    /// selected schema, matching on either the column alias or the base
+    /// column name.
     pub fn to_cols<'a, 'b, T>(
         &'a self,
         cols: T,
@@ -183,9 +201,9 @@ impl ViewSchema {
             .collect()
     }
 
-    /// Get the indices of the columns in the schema that correspond to the list of provided
-    /// [`readyset_sql::ast::Column`]. The columns match if either the column name matches (the
-    /// alias) or the real base name
+    /// Get the positions in the selected schema of the given
+    /// [`Column`]s.  Matches on either the column alias or the base
+    /// column name.
     pub fn indices_for_cols<'a, T>(
         &self,
         cols: T,
