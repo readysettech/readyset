@@ -101,6 +101,7 @@ impl Builder {
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
         ));
+        builder.set_upquery_timeout(Duration::from_millis(opts.upquery_timeout_ms));
 
         builder.set_replication_strategy(opts.domain_replication_options.into());
         builder.set_verbose_domain_metrics(opts.verbose_domain_metrics);

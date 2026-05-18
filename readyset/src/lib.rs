@@ -1438,6 +1438,9 @@ where
             None
         };
 
+        let upquery_timeout =
+            Duration::from_millis(options.server_worker_options.upquery_timeout_ms);
+
         // Run a readyset-server instance within this adapter.
         let internal_server_handle = if options.deployment_mode.has_reader_nodes() {
             let authority = options.authority.clone();
@@ -1735,7 +1738,7 @@ where
                 // When the `BlockingRead` completes, tell the future to resolve with ack.
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
                 rt.handle().spawn(retry_misses(rx));
-                ReadRequestHandler::new(readers.clone(), tx, Duration::from_secs(5))
+                ReadRequestHandler::new(readers.clone(), tx, upquery_timeout)
             });
 
             let upstream_config = Arc::clone(&upstream_config);

@@ -657,6 +657,14 @@ pub struct WorkerOptions {
     )]
     pub rocksdb_block_cache_mb: u64,
 
+    /// How long, in milliseconds, a reader will wait for an in-flight upquery before bailing out
+    /// with `UpqueryTimeout`. The adapter treats `UpqueryTimeout` as a fall-through to upstream,
+    /// so smaller values bound head-of-line blocking on slow upqueries at the cost of letting
+    /// some in-flight upqueries miss their deadline. A value of `0` falls through immediately
+    /// on miss (cache-warming still happens in the background).
+    #[arg(long, env = "UPQUERY_TIMEOUT_MS", default_value = "5000", hide = true)]
+    pub upquery_timeout_ms: u64,
+
     /// Whether to emit verbose metrics for the domains on this worker. This should be used very
     /// sparingly, as the metrics emitted will have high label cardinality and can be quite
     /// expensive!
