@@ -827,11 +827,9 @@ pub enum ReadQuery {
 
 /// The result of a lookup to a view.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum LookupResult<D> {
-    /// The view query was executed in non-blocking mode and resulted in a cache miss.
-    NonBlockingMiss,
-    /// The results of the view query lookup.
-    Results(Vec<D>, ReadReplyStats),
+pub struct LookupResult<D> {
+    pub results: Vec<D>,
+    pub stats: ReadReplyStats,
 }
 
 impl<D> LookupResult<D> {
@@ -840,20 +838,10 @@ impl<D> LookupResult<D> {
     where
         F: FnMut(D, &ReadReplyStats) -> U,
     {
-        match self {
-            Self::NonBlockingMiss => LookupResult::NonBlockingMiss,
-            Self::Results(d, stats) => {
-                LookupResult::Results(d.into_iter().map(|d| f(d, &stats)).collect(), stats)
-            }
-        }
-    }
-
-    /// Converts a lookup result into the inner `Results` type.
-    pub fn into_results(self) -> Option<Vec<D>> {
-        if let Self::Results(v, _) = self {
-            Some(v)
-        } else {
-            None
+        let Self { results, stats } = self;
+        LookupResult {
+            results: results.into_iter().map(|d| f(d, &stats)).collect(),
+            stats,
         }
     }
 }
@@ -1137,8 +1125,6 @@ pub enum View {
 pub struct ViewQuery {
     /// Key comparisons to read with.
     pub key_comparisons: Vec<KeyComparison>,
-    /// Whether the query should block.
-    pub block: bool,
     /// Expression to use to filter values after they're returned from the underlying reader.
     ///
     /// This expression will be evaluated on each of the rows returned from the reader, and any
@@ -1152,11 +1138,10 @@ pub struct ViewQuery {
     pub offset: Option<usize>,
 }
 
-impl From<(Vec<KeyComparison>, bool)> for ViewQuery {
-    fn from((key_comparisons, block): (Vec<KeyComparison>, bool)) -> Self {
+impl From<Vec<KeyComparison>> for ViewQuery {
+    fn from(key_comparisons: Vec<KeyComparison>) -> Self {
         Self {
             key_comparisons,
-            block,
             filter: None,
             limit: None,
             offset: None,
@@ -1270,7 +1255,6 @@ impl Service<ViewQuery> for ReaderHandle {
                         },
                         query: ViewQuery {
                             key_comparisons: shard_queries,
-                            block: query.block,
                             filter: query.filter.clone(),
                             limit: query.limit,
                             offset: query.offset,
@@ -1292,22 +1276,17 @@ impl Service<ViewQuery> for ReaderHandle {
                 .collect::<FuturesUnordered<_>>()
                 .try_collect::<Vec<LookupResult<ReadReplyBatch>>>()
                 .map_ok(move |e| {
-                    // Flatten this to a single LookupResult<Results>.
                     e.into_iter().fold(
-                        LookupResult::Results(Vec::new(), ReadReplyStats::default()),
+                        LookupResult {
+                            results: Vec::new(),
+                            stats: ReadReplyStats::default(),
+                        },
                         |mut acc, x| {
-                            if let LookupResult::Results(d, _) = &mut acc {
-                                match x {
-                                    LookupResult::NonBlockingMiss => {
-                                        return LookupResult::NonBlockingMiss;
-                                    }
-                                    LookupResult::Results(u, stats) => {
-                                        d.extend(u.into_iter().map(|rows| {
-                                            Results::with_stats(rows.into(), stats.clone())
-                                        }));
-                                    }
-                                }
-                            }
+                            acc.results.extend(
+                                x.results
+                                    .into_iter()
+                                    .map(|rows| Results::with_stats(rows.into(), x.stats.clone())),
+                            );
                             acc
                         },
                     )
@@ -1436,49 +1415,35 @@ impl ReaderHandle {
 
     /// Issue a raw `ViewQuery` against this view, and return the results.
     ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
-    /// missing state will be backfilled (asynchronously if `block` is `false`).
+    /// Blocks until the reader can satisfy all requested keys or the server-side upquery timeout
+    /// fires (in which case the call returns [`ReadySetError::UpqueryTimeout`]).
     pub async fn raw_lookup(&mut self, query: ViewQuery) -> ReadySetResult<ResultIterator> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;
-        match self.call(query).await? {
-            LookupResult::NonBlockingMiss => Err(ReadySetError::ReaderMissingKey),
-            LookupResult::Results(results, _) => Ok(ResultIterator::owned(results)),
-        }
+        Ok(ResultIterator::owned(self.call(query).await?.results))
     }
 
     /// Retrieve the query results for the given parameter value.
-    ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    pub async fn lookup(&mut self, key: &[DfValue], block: bool) -> ReadySetResult<ResultIterator> {
+    pub async fn lookup(&mut self, key: &[DfValue]) -> ReadySetResult<ResultIterator> {
         let key = Vec1::try_from_vec(key.into())
             .map_err(|_| view_err(self.node, ReadySetError::EmptyKey))?;
-        self.multi_lookup(vec![KeyComparison::Equal(key)], block)
-            .await
+        self.multi_lookup(vec![KeyComparison::Equal(key)]).await
     }
 
     /// Retrieve the query results for the given parameter values.
-    ///
-    /// The method will block if the results are not yet available only when `block` is `true`.
-    /// If `block` is false, misses will be returned as empty results. Any requested keys that have
-    /// missing state will be backfilled (asynchronously if `block` is `false`).
     pub async fn multi_lookup(
         &mut self,
         key_comparisons: Vec<KeyComparison>,
-        block: bool,
     ) -> ReadySetResult<ResultIterator> {
-        self.raw_lookup((key_comparisons, block).into()).await
+        self.raw_lookup(key_comparisons.into()).await
     }
 
     /// Build a [`ViewQuery`] for performing a lookup against this [`ReaderHandle`]
-    #[allow(clippy::too_many_arguments)]
     fn build_view_query(
         &self,
         key_remap: Option<&HashMap<PlaceholderIdx, Literal>>,
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<ViewQuery> {
         trace!("select::lookup");
@@ -1501,7 +1466,6 @@ impl ReaderHandle {
 
         Ok(ViewQuery {
             key_comparisons: keys,
-            block: blocking_read,
             filter: filters.into_iter().reduce(|expr1, expr2| DfExpr::Op {
                 left: Box::new(expr1),
                 op: DfBinaryOperator::And,
@@ -1797,13 +1761,11 @@ impl ReusedReaderHandle {
     }
 
     /// Build a view query
-    #[allow(clippy::too_many_arguments)]
     fn build_view_query(
         &self,
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<Option<ViewQuery>> {
         // If any placeholders in our query correspond to inlined values in the migrated query,
@@ -1831,14 +1793,7 @@ impl ReusedReaderHandle {
         };
 
         self.reader_handle
-            .build_view_query(
-                Some(&self.key_remapping),
-                raw_keys,
-                limit,
-                offset,
-                blocking_read,
-                dialect,
-            )
+            .build_view_query(Some(&self.key_remapping), raw_keys, limit, offset, dialect)
             .map(Some)
     }
 }
@@ -1848,31 +1803,23 @@ impl View {
     /// [`View::MultipleReused`], then we will find a [`ReaderHandle`] for the first Reader that can
     /// satisfy the given keys or return None. Also returns a reference to the [`ReaderHandle`] to
     /// indicate which handle the [`ViewQuery`] corresponds to.
-    #[allow(clippy::too_many_arguments)]
     pub fn build_view_query(
         &mut self,
         raw_keys: Vec<Cow<'_, [DfValue]>>,
         limit: Option<usize>,
         offset: Option<usize>,
-        blocking_read: bool,
         dialect: Dialect,
     ) -> ReadySetResult<Option<(&mut ReaderHandle, ViewQuery)>> {
         // If any placeholders in our query correspond to inlined values in the migrated query,
         // verify that we are executing our query with these values.
         match self {
             View::Single(handle) => handle
-                .build_view_query(None, raw_keys, limit, offset, blocking_read, dialect)
+                .build_view_query(None, raw_keys, limit, offset, dialect)
                 .map(|vq| Some((handle, vq))),
             View::MultipleReused(handles) => {
                 let mut last_error = None;
                 for reused_handle in handles {
-                    match reused_handle.build_view_query(
-                        raw_keys.clone(),
-                        limit,
-                        offset,
-                        blocking_read,
-                        dialect,
-                    ) {
+                    match reused_handle.build_view_query(raw_keys.clone(), limit, offset, dialect) {
                         Ok(Some(vq)) => {
                             return Ok(Some((reused_handle.inner_mut(), vq)));
                         }
@@ -2128,7 +2075,7 @@ mod tests {
                 Dialect::PostgreSQL => DfDialect::DEFAULT_POSTGRESQL,
             };
             let mut view = View::Single(reader_handle);
-            view.build_view_query(raw_keys, limit, offset, true, dataflow_dialect)
+            view.build_view_query(raw_keys, limit, offset, dataflow_dialect)
                 .unwrap()
                 .unwrap()
                 .1

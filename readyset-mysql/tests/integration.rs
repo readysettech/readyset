@@ -7,7 +7,6 @@ use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use mysql_async::{params, Conn, Row, Value};
-use readyset_adapter::backend::noria_connector::ReadBehavior;
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
@@ -2019,10 +2018,10 @@ async fn show_readyset_version() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn simple_nonblocking_select() {
+async fn select_falls_through_on_zero_upquery_timeout() {
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .replicate(false)
-        .read_behavior(ReadBehavior::NonBlocking)
+        .upquery_timeout(Duration::ZERO)
         .build::<MySQLAdapter>()
         .await;
     let mut conn = Conn::new(opts).await.unwrap();
@@ -2038,9 +2037,10 @@ async fn simple_nonblocking_select() {
 
     let res: Result<Vec<mysql_async::Row>, _> =
         conn.exec("SELECT * FROM test WHERE x = 4", ()).await;
-    assert_eq!(
-        last_query_info(&mut conn).await.noria_error,
-        ReadySetError::ReaderMissingKey.to_string()
+    let noria_error = last_query_info(&mut conn).await.noria_error;
+    assert!(
+        noria_error.contains(&ReadySetError::UpqueryTimeout.to_string()),
+        "expected noria_error to mention upquery timeout, got: {noria_error}"
     );
     res.unwrap_err();
 

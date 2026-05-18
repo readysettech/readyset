@@ -271,9 +271,6 @@ pub struct NoriaConnector {
     /// but on subsequent requests, do not use a failed view.
     failed_views: HashSet<Relation>,
 
-    /// How to handle issuing reads against ReadySet. See [`ReadBehavior`].
-    read_behavior: ReadBehavior,
-
     /// A read request handler that may be used to service reads from readers
     /// on the same server.
     read_request_handler: request_handler::LocalReadHandler,
@@ -327,22 +324,6 @@ mod request_handler {
     unsafe impl Sync for LocalReadHandler {}
 }
 
-/// The read behavior used when executing a read against ReadySet.
-#[derive(Clone, Copy)]
-pub enum ReadBehavior {
-    /// If ReadySet is unable to immediately service the read due to a cache miss, block on the
-    /// response.
-    Blocking,
-    /// If ReadySet is unable to immediately service the read, return an error.
-    NonBlocking,
-}
-
-impl ReadBehavior {
-    fn is_blocking(&self) -> bool {
-        matches!(self, Self::Blocking)
-    }
-}
-
 /// Provides the necessary context to execute a select statement against noria, either for a
 /// prepared or an ad-hoc query
 #[allow(clippy::large_enum_variant)]
@@ -367,7 +348,6 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         view_name_cache: LocalCache<ViewCreateRequest, Relation>,
         view_cache: LocalCache<Relation, View>,
-        read_behavior: ReadBehavior,
         dialect: Dialect,
         parse_dialect: readyset_sql::Dialect,
         schema_search_path: Vec<SqlIdentifier>,
@@ -378,7 +358,6 @@ impl NoriaConnector {
             auto_increments,
             view_name_cache,
             view_cache,
-            read_behavior,
             None,
             dialect,
             parse_dialect,
@@ -394,7 +373,6 @@ impl NoriaConnector {
         auto_increments: Arc<RwLock<HashMap<Relation, atomic::AtomicUsize>>>,
         view_name_cache: LocalCache<ViewCreateRequest, Relation>,
         view_cache: LocalCache<Relation, View>,
-        read_behavior: ReadBehavior,
         read_request_handler: Option<ReadRequestHandler>,
         dialect: Dialect,
         parse_dialect: readyset_sql::Dialect,
@@ -408,7 +386,6 @@ impl NoriaConnector {
             auto_increments,
             view_name_cache,
             failed_views: HashSet::new(),
-            read_behavior,
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
             dialect,
             parse_dialect,
@@ -1634,7 +1611,6 @@ impl NoriaConnector {
             getter,
             processed_query_params.as_ref(),
             params,
-            self.read_behavior,
             self.read_request_handler.as_mut(),
             self.dialect,
         )
@@ -1914,19 +1890,12 @@ fn build_view_query<'a>(
     getter: &'a mut View,
     processed_query_params: &DfQueryParameters,
     params: &[DfValue],
-    read_behavior: ReadBehavior,
     dialect: Dialect,
 ) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
     let raw_keys = processed_query_params.make_keys(params)?;
 
-    getter.build_view_query(
-        raw_keys,
-        limit,
-        offset,
-        read_behavior.is_blocking(),
-        dialect,
-    )
+    getter.build_view_query(raw_keys, limit, offset, dialect)
 }
 
 struct ReadResult<'a> {
@@ -1937,25 +1906,18 @@ struct ReadResult<'a> {
 
 /// Run the supplied [`SelectStatement`] on the supplied [`View`]
 /// Assumption: the [`View`] was created for that specific [`SelectStatement`]
-#[allow(clippy::too_many_arguments)]
 async fn do_read<'a>(
     getter: &'a mut View,
     processed_query_params: &DfQueryParameters,
     params: &[DfValue],
-    read_behavior: ReadBehavior,
     read_request_handler: Option<&'a mut ReadRequestHandler>,
     dialect: Dialect,
 ) -> ReadySetResult<ReadResult<'a>> {
-    let (reader_handle, vq) = match build_view_query(
-        getter,
-        processed_query_params,
-        params,
-        read_behavior,
-        dialect,
-    )? {
-        Some(res) => res,
-        None => return Err(ReadySetError::NoCacheForQuery),
-    };
+    let (reader_handle, vq) =
+        match build_view_query(getter, processed_query_params, params, dialect)? {
+            Some(res) => res,
+            None => return Err(ReadySetError::NoCacheForQuery),
+        };
 
     let num_keys = vq.key_comparisons.len() as u64;
 
@@ -1983,12 +1945,11 @@ async fn do_read<'a>(
                 .v
                 .into_normal()
                 .ok_or_else(|| internal_err!("Unexpected response type from reader service"))??
-                .into_results()
-                .ok_or(ReadySetError::ReaderMissingKey)?
+                .results
                 .pop()
                 .ok_or_else(|| internal_err!("Expected a single result set for local reader"))?
                 .into_unserialized()
-                .expect("Requested raw result")
+                .ok_or_else(|| internal_err!("Expected unserialized result for local reader"))?
         } else {
             reader_handle.raw_lookup(vq).await?
         }

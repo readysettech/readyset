@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
 use mysql_srv::{AuthCache, AuthPlugin};
-use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
+use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
@@ -219,7 +219,7 @@ pub struct TestBuilder {
     fallback: FallbackBehavior,
     partial: bool,
     wait_for_backend: bool,
-    read_behavior: ReadBehavior,
+    upquery_timeout: Duration,
     migration_mode: MigrationMode,
     migration_style: MigrationStyle,
     recreate_database: bool,
@@ -254,7 +254,7 @@ impl TestBuilder {
             fallback: Default::default(),
             partial: true,
             wait_for_backend: true,
-            read_behavior: ReadBehavior::Blocking,
+            upquery_timeout: Duration::from_secs(5),
             migration_mode: MigrationMode::InRequestPath,
             migration_style: MigrationStyle::InRequestPath,
             recreate_database: true,
@@ -326,8 +326,11 @@ impl TestBuilder {
         self
     }
 
-    pub fn read_behavior(mut self, read_behavior: ReadBehavior) -> Self {
-        self.read_behavior = read_behavior;
+    /// Set how long the server-side wait channel will wait for an upquery to complete before
+    /// returning `UpqueryTimeout`. Zero models the legacy non-blocking-reads behavior (immediate
+    /// fall-through on miss).
+    pub fn upquery_timeout(mut self, upquery_timeout: Duration) -> Self {
+        self.upquery_timeout = upquery_timeout;
         self
     }
 
@@ -473,6 +476,7 @@ impl TestBuilder {
         builder.set_mixed_comparisons(self.mixed_comparisons);
         builder.set_parsing_preset(self.parsing_preset);
         builder.set_dialect(A::DIALECT);
+        builder.set_upquery_timeout(self.upquery_timeout);
 
         if !self.partial {
             builder.disable_partial();
@@ -644,7 +648,6 @@ impl TestBuilder {
                         auto_increments,
                         view_name_cache.new_local(),
                         view_cache.new_local(),
-                        self.read_behavior,
                         A::EXPR_DIALECT,
                         A::DIALECT,
                         sys_props.search_path,

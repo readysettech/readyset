@@ -119,10 +119,7 @@ impl serde::Serialize for ServerReadReplyBatch {
     }
 }
 
-type Reply = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>;
-
-/// An Ack to resolve a blocking read.
-pub type Ack = Option<oneshot::Sender<Reply>>;
+pub type Reply = ReadySetResult<Tagged<ReadReply<ServerReadReplyBatch>>>;
 
 /// Creates a handler that can be used to perform read queries against a set of
 /// Readers.
@@ -130,7 +127,7 @@ pub type Ack = Option<oneshot::Sender<Reply>>;
 pub struct ReadRequestHandler {
     global_readers: Readers,
     readers_cache: ReaderMap,
-    wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
+    wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, oneshot::Sender<Reply>)>,
     miss_ctr: metrics::Counter,
     hit_ctr: metrics::Counter,
     upquery_timeout: Duration,
@@ -148,7 +145,7 @@ impl ReadRequestHandler {
     /// Creates a new request handler that can be used to query Readers.
     pub fn new(
         readers: Readers,
-        wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, Ack)>,
+        wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, oneshot::Sender<Reply>)>,
         upquery_timeout: Duration,
     ) -> Self {
         Self {
@@ -172,7 +169,6 @@ impl ReadRequestHandler {
     ) -> CallResult<impl Future<Output = Reply>> {
         let ViewQuery {
             key_comparisons,
-            block,
             filter,
             limit,
             offset,
@@ -223,10 +219,10 @@ impl ReadRequestHandler {
                     ServerReadReplyBatch::serialize(results)
                 };
 
-                reply_with_ok!(LookupResult::Results(
-                    vec![results],
-                    ReadReplyStats::default()
-                ));
+                reply_with_ok!(LookupResult {
+                    results: vec![results],
+                    stats: ReadReplyStats::default(),
+                });
             }
         };
 
@@ -253,22 +249,15 @@ impl ReadRequestHandler {
             eviction_epoch: reader.eviction_epoch(),
         };
 
-        if !block {
-            let _ = self.wait.send((read, None));
-            reply_with_ok!(LookupResult::NonBlockingMiss);
-        } else {
-            set_failpoint!(failpoints::READER_BEFORE_BLOCKING);
-            let (tx, rx) = oneshot::channel();
+        set_failpoint!(failpoints::READER_BEFORE_BLOCKING);
+        let (tx, rx) = oneshot::channel();
 
-            let r = self.wait.send((read, Some(tx)));
-
-            if r.is_err() {
-                // we're shutting down
-                return CallResult::Immediate(Err(ReadySetError::ServerShuttingDown));
-            }
-
-            CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err!("{e}")), |o| o))
+        if self.wait.send((read, tx)).is_err() {
+            // we're shutting down
+            return CallResult::Immediate(Err(ReadySetError::ServerShuttingDown));
         }
+
+        CallResult::Async(rx.map_ok_or_else(|e| Err(internal_err!("{e}")), |o| o))
     }
 
     fn handle_size_query(&mut self, tag: u32, target: &ReaderAddress) -> Reply {
@@ -331,7 +320,7 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
 
 /// A spawned task responsible for repeating reads that could not be immediately served from cache,
 /// until they succeed.
-pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
+pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, oneshot::Sender<Reply>)>) {
     let upquery_hist = metrics::histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
     let upquery_timeout_ctr = metrics::counter!(recorded::SERVER_VIEW_UPQUERY_TIMEOUT);
     let mut reader_cache: ReaderMap = Default::default();
@@ -371,9 +360,7 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
                         v: ReadReply::Normal(Err(e)),
                     }),
                 };
-                if let Some(a) = ack {
-                    let _ = a.send(reply);
-                };
+                let _ = ack.send(reply);
                 break;
             }
         }
@@ -402,7 +389,8 @@ pub(crate) async fn listen(
 
         // future that ensures all blocking reads are handled in FIFO order
         // and avoid hogging the executors with read retries
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
+        let (tx, rx) =
+            tokio::sync::mpsc::unbounded_channel::<(BlockingRead, oneshot::Sender<Reply>)>();
         let mut retry_misses_shutdown_rx = shutdown_rx.clone();
         tokio::spawn(async move {
             tokio::select! {
@@ -511,10 +499,10 @@ impl BlockingRead {
 
                 return Poll::Ready(Ok(Tagged {
                     tag: self.tag,
-                    v: ReadReply::Normal(Ok(LookupResult::Results(
-                        vec![results],
-                        ReadReplyStats::default(),
-                    ))),
+                    v: ReadReply::Normal(Ok(LookupResult {
+                        results: vec![results],
+                        stats: ReadReplyStats::default(),
+                    })),
                 }));
             }
         };
@@ -588,8 +576,9 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
-                    data.iter()
+                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult {
+                    results: data
+                        .iter()
                         .cloned()
                         .map(|d| {
                             ServerReadReplyBatch::serialize(ResultIterator::new(
@@ -601,8 +590,8 @@ mod readreply {
                             ))
                         })
                         .collect(),
-                    ReadReplyStats::default(),
-                ))),
+                    stats: ReadReplyStats::default(),
+                })),
             })
             .unwrap(),
         )
@@ -610,7 +599,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
+                v: ReadReply::Normal(Ok(LookupResult { results: got, .. })),
                 tag: 32,
             } => {
                 assert_eq!(got.len(), data.len());
@@ -631,10 +620,10 @@ mod readreply {
         let got: Tagged<ReadReply> = bincode::deserialize(
             &bincode::serialize(&Tagged {
                 tag: 32,
-                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
-                    Vec::new(),
-                    ReadReplyStats::default(),
-                ))),
+                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult {
+                    results: Vec::new(),
+                    stats: ReadReplyStats::default(),
+                })),
             })
             .unwrap(),
         )
@@ -642,7 +631,7 @@ mod readreply {
 
         match got {
             Tagged {
-                v: ReadReply::Normal(Ok(LookupResult::Results(data, _))),
+                v: ReadReply::Normal(Ok(LookupResult { results: data, .. })),
                 tag: 32,
             } => {
                 assert!(data.is_empty());
@@ -752,8 +741,9 @@ mod readreply {
         for tag in 0..10 {
             w.send(Tagged {
                 tag,
-                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult::Results(
-                    data.iter()
+                v: ReadReply::Normal::<ServerReadReplyBatch>(Ok(LookupResult {
+                    results: data
+                        .iter()
                         .cloned()
                         .map(|d| {
                             ServerReadReplyBatch::serialize(ResultIterator::new(
@@ -765,8 +755,8 @@ mod readreply {
                             ))
                         })
                         .collect(),
-                    ReadReplyStats::default(),
-                ))),
+                    stats: ReadReplyStats::default(),
+                })),
             })
             .await
             .unwrap();
@@ -781,7 +771,7 @@ mod readreply {
 
             match got {
                 Tagged {
-                    v: ReadReply::Normal(Ok(LookupResult::Results(got, _))),
+                    v: ReadReply::Normal(Ok(LookupResult { results: got, .. })),
                     tag: t,
                 } => {
                     assert_eq!(tag, t);

@@ -25,7 +25,7 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
-use readyset_adapter::backend::noria_connector::{NoriaConnector, ReadBehavior};
+use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::migration_handler::MigrationHandler;
@@ -53,7 +53,7 @@ use readyset_metrics::init_global_recorder;
 use readyset_query_logger::QueryLogger;
 use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
-use readyset_server::worker::readers::{retry_misses, Ack, BlockingRead, ReadRequestHandler};
+use readyset_server::worker::readers::{retry_misses, BlockingRead, ReadRequestHandler, Reply};
 use readyset_server::WorkerOptions;
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
@@ -375,10 +375,6 @@ pub struct Options {
         default_value = "0"
     )]
     fallback_recovery_seconds: u64,
-
-    /// Whether to use non-blocking or blocking reads against the cache.
-    #[arg(long, env = "NON_BLOCKING_READS", hide = true)]
-    non_blocking_reads: bool,
 
     /// Percentage of memory-limit to allocate for shallow cache (0.0-100.0).
     /// Only applies when memory-limit is set. If not specified, shallow cache has no memory limit.
@@ -1164,14 +1160,6 @@ where
             rt.handle().spawn(report_allocator_metrics(alloc_shutdown));
         }
 
-        let noria_read_behavior = if options.non_blocking_reads {
-            rs_connect.in_scope(|| info!("Will perform NonBlocking Reads"));
-            ReadBehavior::NonBlocking
-        } else {
-            rs_connect.in_scope(|| info!("Will perform Blocking Reads"));
-            ReadBehavior::Blocking
-        };
-
         let telemetry_sender = rt.block_on(async {
             let proxied_queries_reporter =
                 Arc::new(ProxiedQueriesReporter::new(query_status_cache));
@@ -1299,7 +1287,6 @@ where
                         auto_increments,
                         view_name_cache.new_local(),
                         view_cache.new_local(),
-                        noria_read_behavior,
                         expr_dialect,
                         parse_dialect,
                         sys_props.search_path,
@@ -1734,9 +1721,10 @@ where
 
             // Initialize the reader layer for the adapter.
             let r = options.deployment_mode.has_reader_nodes().then(|| {
-                // Create a task that repeatedly polls BlockingRead's every `RETRY_TIMEOUT`.
-                // When the `BlockingRead` completes, tell the future to resolve with ack.
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(BlockingRead, Ack)>();
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(
+                    BlockingRead,
+                    tokio::sync::oneshot::Sender<Reply>,
+                )>();
                 rt.handle().spawn(retry_misses(rx));
                 ReadRequestHandler::new(readers.clone(), tx, upquery_timeout)
             });
@@ -1772,7 +1760,6 @@ where
                                     auto_increments,
                                     view_name_cache.new_local(),
                                     view_cache.new_local(),
-                                    noria_read_behavior,
                                     r,
                                     expr_dialect,
                                     parse_dialect,

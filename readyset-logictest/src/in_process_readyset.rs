@@ -12,7 +12,7 @@ use database_utils::{
 use itertools::Itertools as _;
 use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::{
-    backend::{noria_connector::ReadBehavior, MigrationMode, NoriaConnector},
+    backend::{MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
     shallow_refresh_pool::ShallowRefreshPool,
     upstream_database::LazyUpstream,
@@ -129,7 +129,6 @@ async fn setup_adapter(
             auto_increments,
             view_name_cache.new_local(),
             view_cache.new_local(),
-            ReadBehavior::Blocking,
             match database_type {
                 DatabaseType::MySQL => readyset_data::Dialect::DEFAULT_MYSQL,
                 DatabaseType::PostgreSQL => readyset_data::Dialect::DEFAULT_POSTGRESQL,
