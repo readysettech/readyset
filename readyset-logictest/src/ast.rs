@@ -218,7 +218,6 @@ pub enum Value {
     Text(String),
     Integer(i64),
     UnsignedInteger(u64),
-    Real(i64, u64),
     DateTime(NaiveDateTime),
     Time(MySqlTime),
     TimestampTz(DateTime<FixedOffset>),
@@ -309,7 +308,6 @@ impl From<Value> for mysql_async::Value {
             Value::Text(x) => x.into(),
             Value::Integer(x) => x.into(),
             Value::UnsignedInteger(x) => x.into(),
-            Value::Real(i, f) => (i as f64 + ((f as f64) / 1_000_000_000.0)).into(),
             Value::Numeric(d) => d.to_string().into(),
             Value::Null => mysql_async::Value::NULL,
             Value::DateTime(dt) => mysql_async::Value::from(dt),
@@ -361,14 +359,6 @@ impl pgsql::types::ToSql for Value {
                 Type::INT8 => (*x as i64).to_sql(ty, out),
                 _ => panic!("unexpected type {ty:?} for UnsignedInteger"),
             },
-            Value::Real(i, f) => {
-                let val = *i as f64 + ((*f as f64) / 1_000_000_000.0);
-                match *ty {
-                    Type::FLOAT4 => (val as f32).to_sql(ty, out),
-                    Type::FLOAT8 => val.to_sql(ty, out),
-                    _ => panic!("unexpected type {ty:?} for Real"),
-                }
-            }
             Value::Numeric(d) => match *ty {
                 Type::NUMERIC => d.to_sql(ty, out),
                 // Parsed numeric literals and `From<f64>`/`From<f32>` produce `Numeric`, so
@@ -615,11 +605,6 @@ impl Display for Value {
             }
             Self::Integer(i) => write!(f, "{i}"),
             Self::UnsignedInteger(i) => write!(f, "{i}"),
-            Self::Real(whole, frac) => {
-                write!(f, "{whole}.")?;
-                let frac = frac.to_string();
-                write!(f, "{}", &frac[..(cmp::min(frac.len(), 3))])
-            }
             Self::Numeric(d) => {
                 // TODO(fran): We will probably need to extend our NUMERIC
                 //  implementation to correctly support the precision and scale,
@@ -767,7 +752,6 @@ impl Value {
             Self::Text(_) => Some(Type::Text),
             Self::Integer(_) => Some(Type::Integer),
             Self::UnsignedInteger(_) => Some(Type::UnsignedInteger),
-            Self::Real(_, _) => Some(Type::Real),
             Self::Numeric(_) => Some(Type::Numeric),
             Self::DateTime(_) => Some(Type::Date),
             Self::Time(_) => Some(Type::Time),
@@ -871,7 +855,6 @@ impl Value {
             (Self::Text(_), Type::Text)
             | (Self::Integer(_), Type::Integer)
             | (Self::UnsignedInteger(_), Type::UnsignedInteger)
-            | (Self::Real(_, _), Type::Real)
             | (Self::Numeric(_), Type::Numeric)
             | (Self::DateTime(_), Type::Date)
             | (Self::Time(_), Type::Time)
@@ -914,26 +897,25 @@ impl Value {
                     .map_err(|e| anyhow!("Numeric to Integer: {e}"))?,
             ))),
             (Self::Integer(i), Type::Numeric) => Ok(Cow::Owned(Self::Numeric(Decimal::from(*i)))),
-            (Self::Integer(i), Type::Real) => Ok(Cow::Owned(Self::Real(*i, 0))),
+            (Self::Integer(i), Type::Real) => Ok(Cow::Owned(Self::Numeric(Decimal::from(*i)))),
             (Self::Numeric(dec), Type::Real) => {
-                let whole: i64 = dec
+                // `query R` results are recorded at f64 precision (the historical wire type
+                // for `Type::Real`). Both expected and actual Numerics must round through
+                // f64 here so a wider-scale upstream Numeric still compares equal to the
+                // recorded value.
+                let f: f64 = dec
                     .try_into()
-                    .map_err(|e| anyhow!("Numeric to Real whole: {e}"))?;
-                let frac_signed: i64 = (dec.fract() * Decimal::from(1_000_000_000))
-                    .try_into()
-                    .map_err(|e| anyhow!("Numeric to Real frac: {e}"))?;
-                Ok(Cow::Owned(Self::Real(whole, frac_signed.unsigned_abs())))
+                    .map_err(|e| anyhow!("Numeric to Real f64: {e}"))?;
+                Ok(Cow::Owned(Self::Numeric(numeric_from_float_repr(
+                    f.is_nan(),
+                    f.is_infinite(),
+                    f.is_sign_positive(),
+                    f.to_string(),
+                ))))
             }
             (Self::Integer(i), Type::Json) => Ok(Cow::Owned(Self::Json(JsonValue::from(*i)))),
             (Self::UnsignedInteger(u), Type::Json) => {
                 Ok(Cow::Owned(Self::Json(JsonValue::from(*u))))
-            }
-            (Self::Real(whole, frac), Type::Json) => {
-                let sign = if *whole < 0 { -1.0 } else { 1.0 };
-                let magnitude = whole.abs() as f64 + (*frac as f64) / 1_000_000_000.0;
-                let num = serde_json::Number::from_f64(sign * magnitude)
-                    .ok_or_else(|| anyhow!("Invalid float value"))?;
-                Ok(Cow::Owned(Self::Json(JsonValue::Number(num))))
             }
             (Self::Numeric(dec), Type::Json) => Ok(Cow::Owned(Self::Json(Self::parse_json_value(
                 &dec.to_string(),
@@ -953,20 +935,6 @@ impl Value {
                 FixedOffset::east_opt(0).unwrap().from_utc_datetime(ndt),
             ))),
             (Self::Numeric(dec), Type::Text) => Ok(Cow::Owned(Self::Text(dec.to_string()))),
-            (Self::Real(whole, frac), Type::Text) => {
-                let frac_str = frac.to_string();
-                let padded_frac = if frac_str.len() < 9 {
-                    format!("{:0>9}", frac_str)
-                } else {
-                    frac_str
-                };
-                let trimmed = padded_frac.trim_end_matches('0');
-                if trimmed.is_empty() {
-                    Ok(Cow::Owned(Self::Text(format!("{}.", whole))))
-                } else {
-                    Ok(Cow::Owned(Self::Text(format!("{}.{trimmed}", whole))))
-                }
-            }
             (Self::Json(json), Type::Text) => Ok(Cow::Owned(Self::Text(json.to_string()))),
             (Self::TimestampTz(ts), Type::Text) => {
                 Ok(Cow::Owned(Self::Text(ts.naive_local().to_string())))
@@ -1168,7 +1136,7 @@ pub struct Query {
     /// When set, the test expects the query to fail (wrong results, prepare/execute error, or
     /// proxied to upstream). The optional pattern is matched as a regex against the error message.
     /// The test passes if the query fails (optionally matching the pattern) and fails if it
-    /// succeeds (indicating the bug is fixed — remove the `error` tag).
+    /// succeeds (indicating the bug is fixed; remove the `error` tag).
     pub expected_error: Option<String>,
 }
 
