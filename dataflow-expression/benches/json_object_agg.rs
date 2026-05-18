@@ -42,10 +42,10 @@ fn bench_apply(c: &mut Criterion) {
     let mut group = c.benchmark_group("json_object_agg/apply");
 
     for n in [10, 25, 50, 100, 200] {
-        let (op, data, _) = build_accumulator(n);
+        let (op, mut data, _) = build_accumulator(n);
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
-            b.iter(|| op.apply(&data).expect("apply failed"));
+            b.iter(|| op.apply(&mut data).expect("apply failed"));
         });
     }
 
@@ -113,7 +113,7 @@ fn bench_delete_all_rows(c: &mut Criterion) {
                     for v in &values {
                         data.remove(&op, v.clone()).expect("remove failed");
                         // apply() is called after each mutation in the real dataflow
-                        op.apply(&data).expect("apply failed");
+                        op.apply(&mut data).expect("apply failed");
                     }
                 },
                 criterion::BatchSize::SmallInput,
@@ -139,7 +139,7 @@ fn bench_apply_int_values(c: &mut Criterion) {
         }
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
-            b.iter(|| op.apply(&data).expect("apply failed"));
+            b.iter(|| op.apply(&mut data).expect("apply failed"));
         });
     }
 
@@ -179,10 +179,10 @@ fn bench_apply_large(c: &mut Criterion) {
     let mut group = c.benchmark_group("json_object_agg/apply_large");
 
     for n in [10, 25, 55] {
-        let (op, data, _) = build_large_accumulator(n);
+        let (op, mut data, _) = build_large_accumulator(n);
 
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
-            b.iter(|| op.apply(&data).expect("apply failed"));
+            b.iter(|| op.apply(&mut data).expect("apply failed"));
         });
     }
 
@@ -200,7 +200,7 @@ fn bench_delete_all_large(c: &mut Criterion) {
                 |(op, mut data, values)| {
                     for v in &values {
                         data.remove(&op, v.clone()).expect("remove failed");
-                        op.apply(&data).expect("apply failed");
+                        op.apply(&mut data).expect("apply failed");
                     }
                 },
                 criterion::BatchSize::LargeInput,

@@ -180,9 +180,9 @@ impl GroupedOperation for Accumulator {
             }
         }
         let output_value = if self.skip_finalization {
-            self.op.emit_raw(&prev_state.data)
+            self.op.emit_raw(&mut prev_state.data)
         } else {
-            self.op.apply(&prev_state.data)?
+            self.op.apply(&mut prev_state.data)?
         };
         prev_state.last_output = Some(output_value.clone());
         last_state.insert(group, prev_state);

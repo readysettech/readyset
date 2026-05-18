@@ -221,7 +221,7 @@ impl AccumulationOp {
         }
     }
 
-    fn apply_array_agg(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
+    fn apply_array_agg(&self, data: &mut AccumulatorData) -> ReadySetResult<DfValue> {
         // PostgreSQL: ARRAY_AGG() over zero rows returns NULL, not an empty array.
         // (ARRAY(SELECT ...) constructors return empty arrays, but those are rewritten
         // as COALESCE(array_agg(...), ARRAY[]) which handles the NULL-to-empty conversion.)
@@ -238,10 +238,9 @@ impl AccumulationOp {
                     std::iter::repeat_n(k.value.clone(), repeat_count)
                 })
                 .collect(),
-            AccumulatorData::Ordered(v) => {
-                let mut sorted: Vec<_> = v.iter().collect();
-                sorted.sort_unstable();
-                sorted.into_iter().map(|k| k.value.clone()).collect()
+            AccumulatorData::Ordered { values, order_by } => {
+                sort_values_by_order(values, *order_by);
+                values.clone()
             }
         };
 
@@ -269,7 +268,7 @@ impl AccumulationOp {
 
     fn apply_group_concat(
         &self,
-        data: &AccumulatorData,
+        data: &mut AccumulatorData,
         separator: &str,
         max_len: Option<usize>,
     ) -> ReadySetResult<DfValue> {
@@ -314,14 +313,13 @@ impl AccumulationOp {
                     }
                 }
             }
-            AccumulatorData::Ordered(v) => {
-                let mut sorted: Vec<_> = v.iter().collect();
-                sorted.sort_unstable();
-                for k in &sorted {
+            AccumulatorData::Ordered { values, order_by } => {
+                sort_values_by_order(values, *order_by);
+                for v in values.iter() {
                     if !first {
                         result.push_str(separator);
                     }
-                    result.push_str(&k.to_string());
+                    result.push_str(&v.to_string());
                     first = false;
                     if let Some(max) = max_len {
                         if result.len() >= max {
@@ -337,12 +335,12 @@ impl AccumulationOp {
 
     fn apply_json_object_agg(
         &self,
-        data: &AccumulatorData,
+        data: &mut AccumulatorData,
         allow_duplicate_keys: bool,
     ) -> ReadySetResult<DfValue> {
         let data = match data {
             AccumulatorData::Simple(v) => v,
-            AccumulatorData::DistinctOrdered(_) | AccumulatorData::Ordered(_) => {
+            AccumulatorData::DistinctOrdered(_) | AccumulatorData::Ordered { .. } => {
                 internal!("Unsupported AccumulatorData type for json_object_agg")
             }
         };
@@ -385,7 +383,7 @@ impl AccumulationOp {
     /// values with `Collation::Utf8`). Without this, MySQL's default `Utf8AiCi`
     /// collation causes the BTreeMap to merge values that differ only in case
     /// (e.g. `"aaa"` and `"AAA"`).
-    pub fn emit_raw(&self, data: &AccumulatorData) -> DfValue {
+    pub fn emit_raw(&self, data: &mut AccumulatorData) -> DfValue {
         if data.is_empty() {
             return DfValue::Array(std::sync::Arc::new(readyset_data::Array::from(vec![])));
         }
@@ -400,13 +398,9 @@ impl AccumulationOp {
                     std::iter::repeat_n(normalized, repeat_count)
                 })
                 .collect(),
-            AccumulatorData::Ordered(v) => {
-                let mut sorted: Vec<_> = v.iter().collect();
-                sorted.sort_unstable();
-                sorted
-                    .iter()
-                    .map(|k| Self::normalize_collation(&k.value))
-                    .collect()
+            AccumulatorData::Ordered { values, order_by } => {
+                sort_values_by_order(values, *order_by);
+                values.iter().map(Self::normalize_collation).collect()
             }
         };
 
@@ -426,7 +420,7 @@ impl AccumulationOp {
         }
     }
 
-    pub fn apply(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
+    pub fn apply(&self, data: &mut AccumulatorData) -> ReadySetResult<DfValue> {
         match self {
             AccumulationOp::ArrayAgg { .. } => self.apply_array_agg(data),
             AccumulationOp::GroupConcat { separator, .. } => {
@@ -536,7 +530,25 @@ pub enum AccumulatorData {
 
     /// Non-distinct ordered accumulation using a Vec with deferred sorting at finalization.
     /// More cache-friendly than BTreeMap for bulk inserts (O(1) push vs O(log n) tree insert).
-    Ordered(Vec<OrderableDfValue>),
+    /// `order_by` lives on the variant rather than on each element so it doesn't bloat the
+    /// per-element size or branch inside the per-comparison sort kernel.
+    Ordered {
+        values: Vec<DfValue>,
+        order_by: Option<(OrderType, NullOrder)>,
+    },
+}
+
+/// Sort a slice of `DfValue` according to an optional `(OrderType, NullOrder)`. Hoists the
+/// Option pattern-match out of the per-comparison closure.
+fn sort_values_by_order(values: &mut [DfValue], order_by: Option<(OrderType, NullOrder)>) {
+    match order_by {
+        Some((order_type, null_order)) => values.sort_unstable_by(|a, b| {
+            null_order
+                .apply(a.is_none(), b.is_none())
+                .then(order_type.apply(a.cmp(b)))
+        }),
+        None => values.sort_unstable(),
+    }
 }
 
 /// A wrapper for DfValue + order_by information.
@@ -610,12 +622,8 @@ impl AccumulatorData {
                             map.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
                         }
                     }
-                    AccumulatorData::Ordered(vec) => {
-                        let order_by = op.order_by();
-                        vec.extend(arr.values().cloned().map(|val| OrderableDfValue {
-                            value: val,
-                            order_by,
-                        }));
+                    AccumulatorData::Ordered { values, .. } => {
+                        values.extend(arr.values().cloned());
                     }
                 }
                 Ok(())
@@ -650,9 +658,8 @@ impl AccumulatorData {
                 let key = OrderableDfValue { value, order_by };
                 v.entry(key).and_modify(|cnt| *cnt += 1).or_insert(1);
             }
-            AccumulatorData::Ordered(v) => {
-                let order_by = op.order_by();
-                v.push(OrderableDfValue { value, order_by });
+            AccumulatorData::Ordered { values, .. } => {
+                values.push(value);
             }
         }
         Ok(())
@@ -695,16 +702,12 @@ impl AccumulatorData {
                     }
                 };
             }
-            AccumulatorData::Ordered(v) => {
-                let key = OrderableDfValue {
-                    value,
-                    order_by: op.order_by(),
-                };
-                let item_pos = v
+            AccumulatorData::Ordered { values, .. } => {
+                let item_pos = values
                     .iter()
-                    .rposition(|x| x == &key)
+                    .rposition(|x| x == &value)
                     .ok_or_else(|| internal_err!("accumulator couldn't remove value from data"))?;
-                v.swap_remove(item_pos);
+                values.swap_remove(item_pos);
             }
         }
 
@@ -715,7 +718,7 @@ impl AccumulatorData {
         match self {
             AccumulatorData::Simple(v) => v.is_empty(),
             AccumulatorData::DistinctOrdered(v) => v.is_empty(),
-            AccumulatorData::Ordered(v) => v.is_empty(),
+            AccumulatorData::Ordered { values, .. } => values.is_empty(),
         }
     }
 }
@@ -737,7 +740,10 @@ impl From<&AccumulationOp> for AccumulatorData {
                 if *distinct == DistinctOption::IsDistinct {
                     AccumulatorData::DistinctOrdered(Default::default())
                 } else if order_by.is_some() {
-                    AccumulatorData::Ordered(Default::default())
+                    AccumulatorData::Ordered {
+                        values: Vec::new(),
+                        order_by: *order_by,
+                    }
                 } else {
                     AccumulatorData::Simple(Default::default())
                 }
@@ -1033,7 +1039,7 @@ mod tests {
             data.add(&op, make_json_object("a", "1")).unwrap();
             data.add(&op, make_json_object("b", "2")).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, r#"{"a":"1","b":"2"}"#);
         }
@@ -1050,7 +1056,7 @@ mod tests {
             // Remove the middle element
             data.remove(&op, make_json_object("b", "2")).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, r#"{"a":"1","c":"3"}"#);
         }
@@ -1073,7 +1079,7 @@ mod tests {
             data.add(&op, make_json_object("a", "1")).unwrap();
             data.add(&op, make_json_object("a", "2")).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             // jsonb_object_agg deduplicates: last value wins
             assert_eq!(result_str, r#"{"a":"2"}"#);
@@ -1087,7 +1093,7 @@ mod tests {
             data.add(&op, make_json_object_int("x", 42)).unwrap();
             data.add(&op, make_json_object_int("y", 99)).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, r#"{"x":42,"y":99}"#);
         }
@@ -1095,9 +1101,9 @@ mod tests {
         #[test]
         fn empty_data_produces_empty_object() {
             let op = make_json_obj_op(true);
-            let data = AccumulatorData::from(&op);
+            let mut data = AccumulatorData::from(&op);
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, "{}");
         }
@@ -1115,7 +1121,7 @@ mod tests {
             data.add(&op, DfValue::from(r#"{"a":{"nested":true}}"#))
                 .unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, r#"{"a":"{\"nested\":true}"}"#);
         }
@@ -1127,7 +1133,7 @@ mod tests {
 
             data.add(&op, DfValue::from(r#"{"a":null}"#)).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str: String = (&result).try_into().unwrap();
             assert_eq!(result_str, r#"{"a":null}"#);
         }
@@ -1146,9 +1152,9 @@ mod tests {
             // If AccumulatorData somehow contains non-Array elements,
             // extract_json_kv_for_serial should return an error.
             let op = make_json_obj_op(true);
-            let data = AccumulatorData::Simple(vec![DfValue::from(r#"{"a":"1"}"#)]);
+            let mut data = AccumulatorData::Simple(vec![DfValue::from(r#"{"a":"1"}"#)]);
 
-            let result = op.apply(&data);
+            let result = op.apply(&mut data);
             assert!(result.is_err());
         }
 
@@ -1168,7 +1174,7 @@ mod tests {
                 data.add(&op, part).unwrap();
             }
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             let result_str = result.as_str().expect("should be text");
             // BTreeMap ordering: alpha, beta, gamma
             assert_eq!(
@@ -1207,12 +1213,12 @@ mod tests {
             }
 
             // emit_raw produces a DfValue::Array of [key, value] arrays
-            let raw = op.emit_raw(&data);
+            let raw = op.emit_raw(&mut data);
 
             // Simulate post-lookup: add_raw into a fresh accumulator, then apply
             let mut post_data = AccumulatorData::Simple(vec![]);
             post_data.add_raw(&op, &raw).unwrap();
-            let result = op.apply(&post_data).unwrap();
+            let result = op.apply(&mut post_data).unwrap();
             let result_str = result.as_str().expect("should be text");
             assert_eq!(result_str, r#"{"x":"1","y":"2","z":"3"}"#);
         }
@@ -1225,17 +1231,17 @@ mod tests {
 
             let mut data1 = AccumulatorData::Simple(vec![]);
             data1.add(&op, make_json_object("a", "first")).unwrap();
-            let raw1 = op.emit_raw(&data1);
+            let raw1 = op.emit_raw(&mut data1);
 
             let mut data2 = AccumulatorData::Simple(vec![]);
             data2.add(&op, make_json_object("a", "second")).unwrap();
-            let raw2 = op.emit_raw(&data2);
+            let raw2 = op.emit_raw(&mut data2);
 
             let mut merged = AccumulatorData::Simple(vec![]);
             merged.add_raw(&op, &raw1).unwrap();
             merged.add_raw(&op, &raw2).unwrap();
 
-            let result = op.apply(&merged).unwrap();
+            let result = op.apply(&mut merged).unwrap();
             let result_str = result.as_str().expect("should be text");
             // allow_duplicate_keys=true preserves both entries
             assert_eq!(result_str, r#"{"a":"first","a":"second"}"#);
@@ -1248,7 +1254,7 @@ mod tests {
             let mut data = AccumulatorData::Simple(vec![]);
             data.add(&op, make_json_object("k", "one")).unwrap();
             data.add(&op, make_json_object("k", "two")).unwrap();
-            let raw = op.emit_raw(&data);
+            let raw = op.emit_raw(&mut data);
 
             let result = finalize_raw_json(true, &raw).unwrap();
             let result_str = result.as_str().expect("should be text");
@@ -1269,18 +1275,18 @@ mod tests {
             let mut data1 = AccumulatorData::Simple(vec![]);
             data1.add(&op, make_json_object("a", "1")).unwrap();
             data1.add(&op, make_json_object("b", "2")).unwrap();
-            let raw1 = op.emit_raw(&data1);
+            let raw1 = op.emit_raw(&mut data1);
 
             let mut data2 = AccumulatorData::Simple(vec![]);
             data2.add(&op, make_json_object("c", "3")).unwrap();
-            let raw2 = op.emit_raw(&data2);
+            let raw2 = op.emit_raw(&mut data2);
 
             // Merge via add_raw
             let mut merged = AccumulatorData::Simple(vec![]);
             merged.add_raw(&op, &raw1).unwrap();
             merged.add_raw(&op, &raw2).unwrap();
 
-            let result = op.apply(&merged).unwrap();
+            let result = op.apply(&mut merged).unwrap();
             let result_str = result.as_str().expect("should be text");
             assert_eq!(result_str, r#"{"a":"1","b":"2","c":"3"}"#);
         }
@@ -1327,7 +1333,7 @@ mod tests {
                     }
 
                     // Finalize to JSON string
-                    let finalized = op.apply(&data).unwrap();
+                    let finalized = op.apply(&mut data).unwrap();
                     let finalized_str = finalized.as_str().expect("should be text");
 
                     // split() it back
@@ -1339,7 +1345,7 @@ mod tests {
                     for part in parts {
                         rebuilt.add(&op, part).unwrap();
                     }
-                    let result = op.apply(&rebuilt).unwrap();
+                    let result = op.apply(&mut rebuilt).unwrap();
                     let result_str = result.as_str().expect("should be text");
 
                     // Round-trip should produce identical JSON
@@ -1358,13 +1364,13 @@ mod tests {
                     }
 
                     // Finalize the original
-                    let expected = op.apply(&data).unwrap();
+                    let expected = op.apply(&mut data).unwrap();
 
                     // emit_raw -> add_raw -> apply
-                    let raw = op.emit_raw(&data);
+                    let raw = op.emit_raw(&mut data);
                     let mut rebuilt = AccumulatorData::Simple(vec![]);
                     rebuilt.add_raw(&op, &raw).unwrap();
-                    let result = op.apply(&rebuilt).unwrap();
+                    let result = op.apply(&mut rebuilt).unwrap();
 
                     prop_assert_eq!(
                         expected.as_str().expect("text"),
@@ -1502,13 +1508,11 @@ mod tests {
                 distinct: DistinctOption::NotDistinct,
                 order_by,
             };
-            let data = AccumulatorData::Ordered(
-                input
-                    .into_iter()
-                    .map(|value| OrderableDfValue { value, order_by })
-                    .collect(),
-            );
-            let got: Vec<_> = match op.emit_raw(&data) {
+            let mut data = AccumulatorData::Ordered {
+                values: input,
+                order_by,
+            };
+            let got: Vec<_> = match op.emit_raw(&mut data) {
                 DfValue::Array(arr) => arr.values().cloned().collect(),
                 other => panic!("Expected Array, got {:?}", other),
             };
@@ -1522,13 +1526,13 @@ mod tests {
                 distinct: false.into(),
                 order_by: None,
             };
-            let data = make_simple_data(vec![
+            let mut data = make_simple_data(vec![
                 DfValue::from("a"),
                 DfValue::from("b"),
                 DfValue::from("c"),
             ]);
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             match result {
                 DfValue::Array(arr) => {
                     let vals: Vec<_> = arr.values().cloned().collect();
@@ -1548,12 +1552,12 @@ mod tests {
                 distinct: true.into(),
                 order_by: None,
             };
-            let data = make_distinct_ordered_data(
+            let mut data = make_distinct_ordered_data(
                 vec![(DfValue::from("a"), 3), (DfValue::from("b"), 2)],
                 None,
             );
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             match result {
                 DfValue::Array(arr) => {
                     let vals: Vec<_> = arr.values().cloned().collect();
@@ -1570,12 +1574,12 @@ mod tests {
                 distinct: false.into(),
                 order_by: Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
             };
-            let data = make_distinct_ordered_data(
+            let mut data = make_distinct_ordered_data(
                 vec![(DfValue::from("a"), 2), (DfValue::from("b"), 1)],
                 Some((OrderType::OrderAscending, NullOrder::NullsFirst)),
             );
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             match result {
                 DfValue::Array(arr) => {
                     let vals: Vec<_> = arr.values().cloned().collect();
@@ -1641,9 +1645,9 @@ mod tests {
                 distinct: false.into(),
                 order_by: None,
             };
-            let data = make_simple_data(vec![]);
+            let mut data = make_simple_data(vec![]);
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             match result {
                 DfValue::Array(arr) => {
                     assert_eq!(arr.values().count(), 0);
@@ -1660,12 +1664,12 @@ mod tests {
                 order_by: None,
             };
             // Simulate MySQL-origin values with Utf8AiCi collation
-            let data = make_simple_data(vec![
+            let mut data = make_simple_data(vec![
                 DfValue::from_str_and_collation("aaa", Collation::Utf8AiCi),
                 DfValue::from_str_and_collation("AAA", Collation::Utf8AiCi),
             ]);
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             let arr = match result {
                 DfValue::Array(arr) => arr,
                 other => panic!("Expected Array, got {:?}", other),
@@ -1690,7 +1694,7 @@ mod tests {
             // Note: with Utf8AiCi, "aaa" and "AAA" would be the same key in the
             // BTreeMap, so we only insert one of them here. In practice, the
             // dataflow accumulator already deduplicates per-key.
-            let data = make_distinct_ordered_data(
+            let mut data = make_distinct_ordered_data(
                 vec![
                     (
                         DfValue::from_str_and_collation("aaa", Collation::Utf8AiCi),
@@ -1704,7 +1708,7 @@ mod tests {
                 None,
             );
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             let arr = match result {
                 DfValue::Array(arr) => arr,
                 other => panic!("Expected Array, got {:?}", other),
@@ -1723,9 +1727,9 @@ mod tests {
                 distinct: false.into(),
                 order_by: None,
             };
-            let data = make_simple_data(vec![DfValue::Int(1), DfValue::Int(2), DfValue::None]);
+            let mut data = make_simple_data(vec![DfValue::Int(1), DfValue::Int(2), DfValue::None]);
 
-            let result = op.emit_raw(&data);
+            let result = op.emit_raw(&mut data);
             let arr = match result {
                 DfValue::Array(arr) => arr,
                 other => panic!("Expected Array, got {:?}", other),
@@ -1764,7 +1768,7 @@ mod tests {
             acc_data.add_raw(&op, &key2_values).unwrap();
 
             // With Utf8 collation (post-normalization), "aaa" and "AAA" are distinct
-            let result = op.apply(&acc_data).unwrap();
+            let result = op.apply(&mut acc_data).unwrap();
             let result_str = result.as_str().expect("should be text");
             // Should contain all 4 values
             let parts: Vec<&str> = result_str.split("::").collect();
@@ -1805,7 +1809,7 @@ mod tests {
             acc_data.add_raw(&op, &key2_values).unwrap();
 
             // With Utf8AiCi, "aaa" and "AAA" are equal — BTreeMap merges them
-            let result = op.apply(&acc_data).unwrap();
+            let result = op.apply(&mut acc_data).unwrap();
             let result_str = result.as_str().expect("should be text");
             let parts: Vec<&str> = result_str.split("::").collect();
             // Only 3 values: AAA was merged into aaa
@@ -1846,7 +1850,7 @@ mod tests {
             for v in inputs {
                 data.add(&op, v).unwrap();
             }
-            match op.apply(&data).unwrap() {
+            match op.apply(&mut data).unwrap() {
                 DfValue::Array(arr) => {
                     assert_eq!(arr.num_dimensions(), dims);
                     assert_eq!(arr.to_string(), expected);
@@ -1868,7 +1872,7 @@ mod tests {
             data.add(&op, make_array_val(vec![1, 2])).unwrap();
             data.add(&op, make_array_val(vec![3, 4])).unwrap();
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             match &result {
                 DfValue::Array(arr) => {
                     assert_eq!(arr.num_dimensions(), 2);
@@ -1885,7 +1889,7 @@ mod tests {
             data.add(&op, make_array_val(vec![1, 2])).unwrap();
             data.add(&op, DfValue::from(42)).unwrap();
 
-            let result = op.apply(&data);
+            let result = op.apply(&mut data);
             assert!(result.is_err());
         }
 
@@ -1896,7 +1900,7 @@ mod tests {
             data.add(&op, make_array_val(vec![1, 2])).unwrap();
             data.add(&op, make_array_val(vec![3])).unwrap();
 
-            let result = op.apply(&data);
+            let result = op.apply(&mut data);
             assert!(result.is_err());
         }
 
@@ -1909,7 +1913,7 @@ mod tests {
             data.add(&op, make_array_val(vec![1, 2])).unwrap();
             data.add(&op, make_array_val(vec![3, 4])).unwrap();
 
-            let original = op.apply(&data).unwrap();
+            let original = op.apply(&mut data).unwrap();
 
             // Split and re-accumulate
             let parts = op.split(&original).unwrap();
@@ -1923,7 +1927,7 @@ mod tests {
             for p in parts {
                 data2.add(&op, p).unwrap();
             }
-            let roundtripped = op.apply(&data2).unwrap();
+            let roundtripped = op.apply(&mut data2).unwrap();
             assert_eq!(original, roundtripped);
         }
 
@@ -1935,7 +1939,7 @@ mod tests {
             data.add(&op, DfValue::from(2)).unwrap();
             data.add(&op, DfValue::from(3)).unwrap();
 
-            let original = op.apply(&data).unwrap();
+            let original = op.apply(&mut data).unwrap();
             let parts = op.split(&original).unwrap();
             assert_eq!(parts.len(), 3);
             assert_eq!(
@@ -1994,7 +1998,7 @@ mod tests {
             data.add(&op, make_array_val(vec![1, 2])).unwrap();
             data.add(&op, make_array_val(vec![3, 4])).unwrap(); // duplicate
 
-            let result = op.apply(&data).unwrap();
+            let result = op.apply(&mut data).unwrap();
             match &result {
                 DfValue::Array(arr) => {
                     assert_eq!(arr.num_dimensions(), 2);
@@ -2042,7 +2046,7 @@ mod tests {
             data.add(&op, DfValue::from(format!("val_{i:05}"))).unwrap();
         }
 
-        let result = op.apply(&data).unwrap();
+        let result = op.apply(&mut data).unwrap();
         let result_str = result.to_string();
         assert!(
             result_str.len() <= 1024,
@@ -2071,7 +2075,7 @@ mod tests {
             data.add(&op, DfValue::from(format!("val_{i:05}"))).unwrap();
         }
 
-        let result = op.apply(&data).unwrap();
+        let result = op.apply(&mut data).unwrap();
         let result_str = result.to_string();
         // Full untruncated output: 200 * 9 (val_NNNNN) + 199 * 1 (,) = 1999 chars
         assert!(
@@ -2092,7 +2096,7 @@ mod tests {
         data.add(&op, DfValue::from("hello")).unwrap();
         data.add(&op, DfValue::from("world")).unwrap();
 
-        let result = op.apply(&data).unwrap();
+        let result = op.apply(&mut data).unwrap();
         let result_str = result.to_string();
         // Under limit — should NOT be truncated
         assert_eq!(result_str, "hello,world");
@@ -2103,7 +2107,7 @@ mod tests {
         for s in inputs {
             data.add(&op, DfValue::from(s)).unwrap();
         }
-        assert_eq!(op.apply(&data).unwrap().to_string(), expected);
+        assert_eq!(op.apply(&mut data).unwrap().to_string(), expected);
     }
 
     #[test]
@@ -2146,7 +2150,7 @@ mod tests {
             data.add(&op, DfValue::from("éé")).unwrap();
         }
 
-        let result = op.apply(&data).unwrap();
+        let result = op.apply(&mut data).unwrap();
         let result_str = result.to_string();
         assert!(result_str.len() <= 1024);
         // Must be valid UTF-8 (would panic on invalid)

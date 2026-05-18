@@ -93,7 +93,7 @@ impl PostLookupAggregateFunction {
         }
     }
 
-    pub fn finish(&self, data: &AccumulatorData) -> ReadySetResult<DfValue> {
+    pub fn finish(&self, data: &mut AccumulatorData) -> ReadySetResult<DfValue> {
         match self {
             PostLookupAggregateFunction::ArrayAgg { op }
             | PostLookupAggregateFunction::GroupConcat { op }
@@ -161,7 +161,7 @@ impl PostLookupAggregateFunction {
                 // Distinct/ordered: fall through to full accumulator path.
                 let mut acc_data: AccumulatorData = op.into();
                 acc_data.add_raw(op, value)?;
-                op.apply(&acc_data)
+                op.apply(&mut acc_data)
             }
             PostLookupAggregateFunction::GroupConcat { op }
             | PostLookupAggregateFunction::StringAgg { op } => {
@@ -172,7 +172,7 @@ impl PostLookupAggregateFunction {
                 // Distinct/ordered: fall through to full accumulator path.
                 let mut acc_data: AccumulatorData = op.into();
                 acc_data.add_raw(op, value)?;
-                op.apply(&acc_data)
+                op.apply(&mut acc_data)
             }
             PostLookupAggregateFunction::JsonObjectAgg { op } => {
                 // json_object_agg is always non-distinct, non-ordered.

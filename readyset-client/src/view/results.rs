@@ -646,9 +646,9 @@ impl AggregateHolder {
     fn finish(self, function: &dataflow_expression::PostLookupAggregateFunction) -> DfValue {
         match self {
             AggregateHolder::Simple(v) => v,
-            AggregateHolder::Accumulated(data) => {
-                function.finish(&data).expect("Accumulated data expected")
-            }
+            AggregateHolder::Accumulated(mut data) => function
+                .finish(&mut data)
+                .expect("Accumulated data expected"),
         }
     }
 }
