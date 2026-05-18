@@ -1468,4 +1468,122 @@ mod tests {
             expected_text,
         );
     }
+
+    /// Outer SELECT references a GROUP BY key of the inner grouped DT.
+    /// Previously rejected by `is_agg_derived_outputs.all()` because
+    /// `s.k` maps to `t.k` (a column reference, not aggregate).  Now
+    /// accepted via the membership-only check.
+    #[test]
+    fn outer_select_references_inner_group_by_key_inlines() {
+        let original_text = r#"
+        SELECT s.k, s.total
+        FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) AS s
+        ORDER BY s.k
+        "#;
+        let expected_text = r#"
+        SELECT "t"."k", sum("t"."x") AS "total"
+        FROM "t"
+        GROUP BY "t"."k"
+        ORDER BY "t"."k" ASC NULLS LAST
+        "#;
+        test_it(
+            "outer_select_references_inner_group_by_key_inlines",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Outer SELECT references a compound expression mixing a GROUP BY
+    /// key column and an aggregate-derived column from a grouped inner
+    /// (e.g., `s.k + s.total` where `s.k` maps to a GROUP BY key and
+    /// `s.total` maps to `SUM(t.x)`).  Previously rejected by
+    /// `is_agg_derived_outputs.all(is_aggregated)` because `s.k` maps
+    /// to the non-aggregated `t.k`.  Now accepted via the membership-
+    /// only check (both columns are projected by the inner; upstream
+    /// `validate_group_by_semantics` already guarantees the post-inline
+    /// expression is grouped-query-valid).
+    #[test]
+    fn outer_select_references_compound_grouped_expression_inlines() {
+        let original_text = r#"
+        SELECT s.k + s.total AS combined
+        FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) AS s
+        "#;
+        let expected_text = r#"
+        SELECT ("t"."k" + sum("t"."x")) AS "combined"
+        FROM "t"
+        GROUP BY "t"."k"
+        "#;
+        test_it(
+            "outer_select_references_compound_grouped_expression_inlines",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Outer SELECT references an inner column not projected by the
+    /// inner DT.  Must still bail (the membership check fails).
+    #[test]
+    fn outer_select_references_unprojected_inner_column_bails() {
+        let original_text = r#"
+        SELECT s.unprojected
+        FROM (SELECT t.k FROM t GROUP BY t.k) AS s
+        "#;
+        let expected_text = original_text;
+        test_it(
+            "outer_select_references_unprojected_inner_column_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Outer ORDER BY references a non-inner-relation column that
+    /// becomes a GROUP BY addition post-inline.  Previously rejected
+    /// because the ORDER BY check only compared against the inner's
+    /// GROUP BY.  Now accepted via the threaded additions.  Shape:
+    /// aggregated DT with an ExactlyOne scalar sibling, comma-joined,
+    /// outer ORDER BY by the scalar.
+    #[test]
+    fn outer_order_by_non_inner_relation_in_additions_inlines() {
+        let original_text = r#"
+        SELECT s.total, sc.x
+        FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) AS s,
+             (SELECT MAX(u.y) AS x FROM u) AS sc
+        ORDER BY sc.x
+        "#;
+        let expected_text = r#"
+        SELECT sum("t"."x") AS "total", "sc"."x"
+        FROM "t"
+        CROSS JOIN (SELECT max("u"."y") AS "x" FROM "u") AS "sc"
+        GROUP BY "t"."k", "sc"."x"
+        ORDER BY "sc"."x" ASC NULLS LAST
+        "#;
+        test_it(
+            "outer_order_by_non_inner_relation_in_additions_inlines",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Outer ORDER BY references a column outside the post-inline
+    /// grouping set — neither in the inner GROUP BY, an addition, an
+    /// aggregate, nor a SELECT alias.  Must still bail.  Shape:
+    /// aggregated DT with a scalar sibling, outer ORDER BY by a
+    /// non-GROUP-BY column of the sibling (not an `Expr::Column` of
+    /// either relation matching anything in the post-inline grouping
+    /// set).
+    #[test]
+    fn outer_order_by_unrelated_column_bails() {
+        let original_text = r#"
+        SELECT s.total, sc.x
+        FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) AS s,
+             (SELECT MAX(u.y) AS x, u.z FROM u GROUP BY u.z) AS sc
+        ORDER BY sc.z
+        "#;
+        let expected_text = original_text;
+        test_it(
+            "outer_order_by_unrelated_column_bails",
+            original_text,
+            expected_text,
+        );
+    }
 }

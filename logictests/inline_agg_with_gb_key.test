@@ -1,0 +1,17 @@
+# Outer SELECT references both aggregate-derived and GROUP BY key
+# columns from an inner grouped subquery.  The rewrite previously
+# over-rejected this shape; it now inlines cleanly.
+
+statement ok
+CREATE TABLE t (k INT, x INT);
+
+statement ok
+INSERT INTO t VALUES (1, 10), (1, 20), (2, 5)
+
+query II nosort
+SELECT s.k, s.total FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) s ORDER BY s.k
+----
+1
+30
+2
+5

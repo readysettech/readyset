@@ -1,0 +1,26 @@
+# Outer ORDER BY references a non-inner-relation column (an
+# ExactlyOne scalar subquery sibling) that becomes a GROUP BY
+# addition post-inline.
+
+statement ok
+CREATE TABLE t (k INT, x INT)
+
+statement ok
+CREATE TABLE u (y INT)
+
+statement ok
+INSERT INTO t VALUES (1, 10), (1, 20), (2, 5)
+
+statement ok
+INSERT INTO u VALUES (7), (3), (5)
+
+query II rowsort
+SELECT s.total, sc.x
+FROM (SELECT t.k, SUM(t.x) AS total FROM t GROUP BY t.k) s,
+     (SELECT MAX(u.y) AS x FROM u) sc
+ORDER BY sc.x
+----
+30
+7
+5
+7

@@ -1116,6 +1116,7 @@ fn check_nested_aggregation<U: UniqueColumnsSchema>(
 /// SELECT field verbatim).
 fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
     ctx: &InliningContext<U>,
+    downstream_group_by_additions: &[Expr],
 ) -> ReadySetResult<bool> {
     let Some(group_by) = &ctx.inner_stmt.group_by else {
         return Ok(true);
@@ -1165,7 +1166,7 @@ fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
     // an aggregating query post-inline).
     if ctx.is_inner_agg
         && !ctx.is_outer_agg
-        && !check_outer_order_against_inner_group_by(ctx, group_by)?
+        && !check_outer_order_against_inner_group_by(ctx, group_by, downstream_group_by_additions)?
     {
         return Ok(false);
     }
@@ -1202,19 +1203,17 @@ fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
 /// `FieldReference::Numeric(_)` outer ORDER BY items are accepted as-is:
 /// numeric SELECT positions are preserved by the inlining pipeline.
 ///
-/// **Conservative scope.** One intentional narrowing vs. the downstream
-/// pass: condition (1) compares only against `inner_stmt.group_by` and
-/// not against the `downstream_group_by_additions` collected by
-/// `check_group_by_compatibility` — bare-column references to non-inner
-/// relations that get appended to the post-inline GROUP BY.  This helper
-/// does not see those additions, so an outer ORDER BY of the form
-/// `other_rel.col` (where `other_rel.col` would be added to the
-/// post-inline GROUP BY by `check_group_by_compatibility`) is rejected
-/// here even though downstream would accept it.  Strictly safe
-/// over-rejection; tightening is a future improvement.
+/// Condition (1) compares the substituted outer ORDER BY field against
+/// both (i) the inner's GROUP BY fields and (ii) `downstream_group_by_additions`
+/// (bare-column references to non-inner relations that get appended to
+/// the post-inline GROUP BY).  Both placements form the post-inline
+/// grouping key set; the cardinality-preservation invariant enforced by
+/// `check_join_partners_cardinality_preserving` ensures the additions
+/// are constant per group, making them safe ORDER BY targets.
 fn check_outer_order_against_inner_group_by<U: UniqueColumnsSchema>(
     ctx: &InliningContext<U>,
     group_by: &GroupByClause,
+    downstream_group_by_additions: &[Expr],
 ) -> ReadySetResult<bool> {
     let Some(order) = &ctx.outer_stmt.order else {
         return Ok(true);
@@ -1256,8 +1255,12 @@ fn check_outer_order_against_inner_group_by<U: UniqueColumnsSchema>(
             substitute_columns_in_expr(order_expr, ctx.ext_to_int, ctx.is_top_select)?;
         let substituted_field = FieldReference::Expr(substituted_order.clone());
 
-        // (a) literal-equal to a GROUP BY field of the inner.
-        let in_group_by = group_by.fields.contains(&substituted_field);
+        // (a) literal-equal to a GROUP BY field of the inner, OR
+        // matches a `downstream_group_by_additions` entry (a bare
+        // non-inner-relation column appended to the post-inline
+        // GROUP BY).
+        let in_group_by = group_by.fields.contains(&substituted_field)
+            || downstream_group_by_additions.contains(&substituted_order);
 
         // (b) substituted ORDER BY expression matches a post-inline
         //     aggregate-containing SELECT field — either by structural
@@ -1299,54 +1302,32 @@ fn check_outer_order_against_inner_group_by<U: UniqueColumnsSchema>(
     Ok(true)
 }
 
-/// Returns `true` if every `lhs_rel` column referenced by `expr` maps to an
-/// aggregated inner expression.
+/// Returns `true` if every `lhs_rel` column referenced by `expr` is
+/// projected by the inner (present in `outer_to_inner_fields`).
 ///
-/// Used by `check_group_by_compatibility` to accept mixed expressions in the
-/// outer SELECT over a grouped inner only when **every** `lhs_rel` column in
-/// the expression is aggregate-derived.  This is deliberately conservative
-/// and stricter than standard SQL requires.
+/// Soundness rationale: this function is invoked only when the inner
+/// statement is aggregated/grouped (gated by
+/// `check_group_by_compatibility`).  For a grouped inner,
+/// `validate_query_semantics::validate_group_by_semantics` (the
+/// adapter pipeline pass that runs upstream of all inlining) has
+/// already enforced that every SELECT field's column reference is one
+/// of: inside an aggregate, in the GROUP BY, an alias reference to a
+/// SELECT field, or a correlated outer-scope reference.  Therefore
+/// any mapped expression in `outer_to_inner_fields` is, by upstream
+/// validation, already a legitimate form for the post-inline grouped
+/// outer.  Pure membership check is sufficient.
 ///
-/// **Known over-restriction / follow-up.**  SQL accepts any grouped-query
-/// SELECT expression whose every column reference is **either** aggregate-
-/// derived **or** a `GROUP BY` key of the grouping.  The current predicate
-/// rejects valid cases like:
-///
-/// ```sql
-/// -- inner = SELECT k, SUM(x) AS sum FROM t GROUP BY k
-/// SELECT s.sum + s.k FROM (...) s  -- SUM(x) + k over GROUP BY k → valid
-/// SELECT s.k1 + s.k2  FROM (...) s  -- k1 + k2 over GROUP BY k1, k2 → valid
-/// ```
-///
-/// The principled fix would change the `.all()` predicate to
-/// `is_aggregated || is_gb_key`, which requires threading the inner's
-/// `group_by` clause into this helper and comparing each column's mapped
-/// expression against the grouping key set.  That's a signature change and
-/// a behavior change for all `can_inline_subquery` callers, so it belongs
-/// in its own commit with dedicated tests — not bundled with the current
-/// eligibility-convergence stack.  Until then, the conservative rejection
-/// silently over-rejects mixed-expression SELECT fields involving both
-/// aggregates and GROUP BY keys.
+/// WF-projection concerns are caught upstream by
+/// `check_window_function_interaction` (the first check in
+/// `can_inline_subquery`), not by this helper.
 fn is_agg_derived_outputs(
     expr: &Expr,
     lhs_rel: &Relation,
     outer_to_inner_fields: &HashMap<Column, Expr>,
 ) -> ReadySetResult<bool> {
     Ok(columns_iter(expr)
-        .filter_map(|col| {
-            if crate::is_column_of!(col, *lhs_rel) {
-                Some(col.clone())
-            } else {
-                None
-            }
-        })
-        .all(|col| {
-            if let Some(e) = outer_to_inner_fields.get(&col) {
-                is_aggregated_expr(e).is_ok_and(|is_agg| is_agg)
-            } else {
-                false
-            }
-        }))
+        .filter(|col| is_column_of!(col, *lhs_rel))
+        .all(|col| outer_to_inner_fields.contains_key(col)))
 }
 
 /// GROUP BY compatibility check — grouped inner into non-grouped outer.
@@ -1395,7 +1376,7 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
         for fe in &ctx.outer_stmt.fields {
             let (fe_expr, _) = expect_field_as_expr(fe);
             if let Expr::Column(c) = fe_expr
-                && crate::is_column_of!(c, ctx.inner_rel)
+                && is_column_of!(c, ctx.inner_rel)
             {
                 // Simple `inner_rel.col` reference: OK.
             } else if refs_rel_anywhere(fe_expr, &ctx.inner_rel)?
@@ -1871,7 +1852,7 @@ pub(crate) fn can_inline_subquery<U: UniqueColumnsSchema>(
     let Some(downstream_group_by_additions) = check_group_by_compatibility(ctx)? else {
         return Ok(None);
     };
-    if !check_grouped_engine_validation(ctx)? {
+    if !check_grouped_engine_validation(ctx, &downstream_group_by_additions)? {
         return Ok(None);
     }
     if !check_cardinality_barrier(ctx)? {
