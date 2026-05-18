@@ -39,9 +39,6 @@ use tokio_stream::StreamExt;
 use tower::Service;
 use tracing::{error, warn};
 
-/// Retry consistency missed reads every this often.
-const RETRY_TIMEOUT: Duration = Duration::from_micros(100);
-
 const WAIT_BEFORE_WARNING: Duration = Duration::from_secs(7);
 
 /// A batch of records either intended for local consumption only via the
@@ -210,7 +207,7 @@ impl ReadRequestHandler {
             Err(LookupError::Destroyed) => reply_with_error!(ReadySetError::ViewDestroyed),
             Err(LookupError::Error(e)) => reply_with_error!(e),
             // We missed some keys
-            Err(LookupError::Miss((misses, notifier))) => (misses, Some(notifier)),
+            Err(LookupError::Miss((misses, notifier))) => (misses, notifier),
             // We hit on all keys, but there is a consistency miss. This just counts as a miss,
             // but no keys needs triggering.
             Ok(hit) => {
@@ -340,24 +337,38 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
 
     while let Some((mut pending, ack)) = rx.recv().await {
         loop {
-            if let Some(recv) = &mut pending.receiver {
-                // If a receiver is available (on miss) then we simply wait for a notification that
-                // a hole has been filled, then recheck
-                let _ = recv.recv().await;
-                while !recv.is_empty() {
-                    // This drains all the messages from the notifier so we don't get woken right up
-                    // again
-                    let _ = recv.try_recv();
+            // Race the reader-update notifier against the upquery deadline so the timeout
+            // fires reliably even on quiet readers.
+            let remaining = pending
+                .upquery_timeout
+                .saturating_sub(pending.first.elapsed());
+            tokio::select! {
+                _ = pending.receiver.recv() => {
+                    // Drain queued notifications so we don't immediately re-wake on the same
+                    // state.
+                    while !pending.receiver.is_empty() {
+                        let _ = pending.receiver.try_recv();
+                    }
                 }
-            } else {
-                // For consistency misses we don't get notifications, so check periodically
-                tokio::time::sleep(RETRY_TIMEOUT).await;
+                _ = tokio::time::sleep(remaining) => {}
             }
 
             if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                 upquery_hist.record(pending.first.elapsed().as_micros() as f64);
+                // Reader-level errors (UpqueryTimeout, ServerShuttingDown, ...) must travel
+                // back in-band as `ReadReply::Normal(Err(_))`. Returning them as the outer
+                // `Reply` error makes the multiplex server treat them as a service failure
+                // and tear down the TCP connection -- every other in-flight RPC on that
+                // connection then sees `ClientDropped`.
+                let reply = match res {
+                    Ok(reply) => Ok(reply),
+                    Err(e) => Ok(Tagged {
+                        tag: pending.tag,
+                        v: ReadReply::Normal(Err(e)),
+                    }),
+                };
                 if let Some(a) = ack {
-                    let _ = a.send(res);
+                    let _ = a.send(reply);
                 };
                 break;
             }
@@ -447,7 +458,7 @@ pub struct BlockingRead {
     warned: bool,
     upquery_timeout: Duration,
     raw_result: bool,
-    receiver: Option<ReaderUpdatedNotifier>,
+    receiver: ReaderUpdatedNotifier,
     eviction_epoch: usize,
 }
 
@@ -504,7 +515,6 @@ impl BlockingRead {
             }
         };
 
-        // Check if we reached a warning timeout
         if self.first.elapsed() > WAIT_BEFORE_WARNING && !self.warned {
             warn!(
                 reader = %target.name.display_unquoted(),
