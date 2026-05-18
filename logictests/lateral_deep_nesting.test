@@ -1,0 +1,42 @@
+# 3-level LATERAL chain with great-grandparent correlation.
+# Verifies end-to-end correctness against upstream reference.
+
+statement ok
+CREATE TABLE outer_t (k INT PRIMARY KEY, sn INT)
+
+statement ok
+CREATE TABLE mid_t (sn INT, jn INT)
+
+statement ok
+CREATE TABLE inner_t (sn INT, jn INT, qty INT)
+
+statement ok
+INSERT INTO outer_t VALUES (1, 10), (2, 20)
+
+statement ok
+INSERT INTO mid_t VALUES (10, 100), (10, 101), (20, 200)
+
+statement ok
+INSERT INTO inner_t VALUES (10, 100, 5), (10, 100, 7), (10, 101, 3), (20, 200, 9)
+
+query II nosort
+SELECT outer_t.k, mid.cnt
+FROM outer_t,
+     LATERAL (
+       SELECT lvl2.sn, COUNT(*) AS cnt
+       FROM mid_t AS lvl2,
+            LATERAL (
+              SELECT inner_t.qty
+              FROM inner_t
+              WHERE inner_t.jn = lvl2.jn
+                AND inner_t.sn = outer_t.sn
+            ) AS lvl3
+       WHERE lvl2.sn = outer_t.sn
+       GROUP BY lvl2.sn
+     ) AS mid
+ORDER BY outer_t.k
+----
+1
+3
+2
+1

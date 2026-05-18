@@ -2897,4 +2897,144 @@ FROM
             &schema,
         );
     }
+
+    /// 3-level LATERAL chain where the mid level is aggregated AND
+    /// itself correlates with the great-grandparent.  Pure Resolved
+    /// path (no flatten — no outer-correlated LEFT JOIN ON).  The
+    /// engine handles this by cascading INNER JOINs, lifting the
+    /// innermost `spj.sn` to an auxiliary `sn0` projection that the
+    /// outer scope joins against `s.sn`, alongside the mid scope's
+    /// own `lvl2.sn = s.sn` correlation.  Both lifted ONs land at
+    /// the outermost join, producing a correct semantically-
+    /// equivalent rewrite for the 3-level great-grandparent shape.
+    #[test]
+    fn nested_lateral_three_levels_great_grandparent_correlation() {
+        let original_text = r#"
+            SELECT "s"."sn", "mid"."cnt"
+            FROM "s",
+              LATERAL (
+                SELECT "lvl2"."sn", COUNT(*) AS "cnt"
+                FROM "j" AS "lvl2",
+                  LATERAL (
+                    SELECT "spj"."qty"
+                    FROM "spj"
+                    WHERE "spj"."jn" = "lvl2"."jn"
+                      AND "spj"."sn" = "s"."sn"
+                  ) AS "lvl3"
+                WHERE "lvl2"."sn" = "s"."sn"
+                GROUP BY "lvl2"."sn"
+              ) AS "mid"
+        "#;
+        let expected_text = r#"
+            SELECT "s"."sn", "mid"."cnt"
+            FROM "s" INNER JOIN (
+                SELECT "lvl2"."sn", count(*) AS "cnt", "lvl3"."sn" AS "sn0"
+                FROM "j" AS "lvl2" INNER JOIN (
+                    SELECT "spj"."qty", "spj"."sn" AS "sn", "spj"."jn" AS "jn"
+                    FROM "spj"
+                ) AS "lvl3" ON ("lvl3"."jn" = "lvl2"."jn")
+                GROUP BY "lvl2"."sn", "lvl3"."sn"
+            ) AS "mid" ON (("mid"."sn" = "s"."sn") AND ("mid"."sn0" = "s"."sn"))
+        "#;
+        test_it(
+            "nested_lateral_three_levels_great_grandparent_correlation",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// LATERAL body with outer-correlated LEFT JOIN that triggers the
+    /// Flatten path.  Verifies that `absorb_flatten` correctly composes
+    /// the outer-correlated LEFT JOIN ON predicate when lifting the
+    /// LATERAL body into the outer FROM.  Post-flatten, `"s"."sn"` is
+    /// added to the GROUP BY for cardinality preservation.
+    #[test]
+    fn lateral_body_with_outer_correlated_left_join_flattens() {
+        let original_text = r#"
+            SELECT "s"."sn", "mid"."cnt"
+            FROM "s",
+              LATERAL (
+                SELECT "lvl2"."sn", COUNT(*) AS "cnt"
+                FROM "j" AS "lvl2"
+                LEFT JOIN "p" AS "p_outer" ON "p_outer"."pn" = "s"."pn"
+                WHERE "lvl2"."sn" = "s"."sn"
+                GROUP BY "lvl2"."sn"
+              ) AS "mid"
+        "#;
+        let expected_text = r#"
+            SELECT "s"."sn", count(*) AS "cnt"
+            FROM "s", "j" AS "lvl2"
+              LEFT JOIN "p" AS "p_outer" ON ("p_outer"."pn" = "s"."pn")
+            WHERE ("lvl2"."sn" = "s"."sn")
+            GROUP BY "lvl2"."sn", "s"."sn"
+        "#;
+        test_it(
+            "lateral_body_with_outer_correlated_left_join_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// 4-level LATERAL chain to stress chained Resolve composition
+    /// through 4 levels of recursion.  Pure Resolved path.
+    ///
+    /// Pins a current rewriter output that produces an `INNER JOIN`
+    /// with no `ON` clause at the innermost level (between `p` and
+    /// the lifted `lvl4` subquery).  The semantically-relevant
+    /// correlations from the innermost body (`j.jn = spj.jn`,
+    /// `j.sn = s.sn`) are correctly lifted to enclosing ON predicates
+    /// via `sn0` auxiliary projections; the local `lvl4` join has no
+    /// local correlation to carry as ON.  The ON-less `INNER JOIN` is
+    /// non-standard SQL syntax and may not round-trip through some
+    /// parsers — this test pins the current behaviour so future work
+    /// can decide whether to emit `CROSS JOIN`/`INNER JOIN ON TRUE`
+    /// instead.
+    #[test]
+    fn nested_lateral_four_levels_no_flatten() {
+        let original_text = r#"
+            SELECT "s"."sn", "l1"."cnt"
+            FROM "s",
+              LATERAL (
+                SELECT "spj"."sn", COUNT(*) AS "cnt"
+                FROM "spj",
+                  LATERAL (
+                    SELECT "p"."pn"
+                    FROM "p",
+                      LATERAL (
+                        SELECT "j"."jn"
+                        FROM "j"
+                        WHERE "j"."jn" = "spj"."jn"
+                          AND "j"."sn" = "s"."sn"
+                      ) AS "lvl4"
+                    WHERE "p"."sn" = "spj"."sn"
+                  ) AS "lvl3"
+                WHERE "spj"."sn" = "s"."sn"
+                GROUP BY "spj"."sn"
+              ) AS "l1"
+        "#;
+        let expected_text = r#"
+            SELECT "s"."sn", "l1"."cnt"
+            FROM "s" INNER JOIN (
+                SELECT "spj"."sn", count(*) AS "cnt", "lvl3"."sn" AS "sn0"
+                FROM "spj" INNER JOIN (
+                    SELECT "p"."pn",
+                           "lvl4"."jn" AS "jn",
+                           "lvl4"."sn" AS "sn",
+                           "p"."sn"   AS "sn0"
+                    FROM "p" INNER JOIN (
+                        SELECT "j"."jn", "j"."sn" AS "sn"
+                        FROM "j"
+                    ) AS "lvl4"
+                ) AS "lvl3" ON (("lvl3"."sn0" = "spj"."sn")
+                           AND ("lvl3"."jn"  = "spj"."jn"))
+                GROUP BY "spj"."sn", "lvl3"."sn"
+            ) AS "l1" ON (("l1"."sn"  = "s"."sn")
+                      AND ("l1"."sn0" = "s"."sn"))
+        "#;
+        test_it(
+            "nested_lateral_four_levels_no_flatten",
+            original_text,
+            expected_text,
+        );
+    }
 }
