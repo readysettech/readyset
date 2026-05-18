@@ -646,6 +646,17 @@ pub struct WorkerOptions {
     )]
     pub background_recovery_interval_seconds: u64,
 
+    /// Total capacity of the process-wide rocksdb block cache, in MiB. The cache is shared
+    /// across all PersistentState instances; sizing it well is the single biggest lever for
+    /// dataflow read performance on non-trivial cached queries. Default 1024 MiB.
+    #[arg(
+        long,
+        env = "ROCKSDB_BLOCK_CACHE_MB",
+        default_value = "1024",
+        hide = true
+    )]
+    pub rocksdb_block_cache_mb: u64,
+
     /// Whether to emit verbose metrics for the domains on this worker. This should be used very
     /// sparingly, as the metrics emitted will have high label cardinality and can be quite
     /// expensive!

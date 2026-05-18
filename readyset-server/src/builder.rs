@@ -111,7 +111,7 @@ impl Builder {
             builder.set_volume_id(volume_id);
         }
 
-        let persistence_params = PersistenceParameters::new(
+        let mut persistence_params = PersistenceParameters::new(
             opts.durability,
             Some(deployment.into()),
             Some(deployment_dir),
@@ -122,6 +122,7 @@ impl Builder {
                 .status_update_interval_secs
                 .into(),
         );
+        persistence_params.block_cache_bytes = (opts.rocksdb_block_cache_mb as usize) * 1024 * 1024;
         builder.set_persistence(persistence_params);
 
         builder.set_replicator_config(opts.replicator_config);
