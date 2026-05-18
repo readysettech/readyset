@@ -39,9 +39,9 @@ use crate::rewrite_utils::{
     expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
     extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
     get_from_item_reference_name, get_select_item_alias, is_aggregated_expr,
-    is_aggregation_or_grouped, is_always_true_filter, is_simple_parametrizable_filter,
-    outermost_expression, partition_correlated_predicates, resolve_field_reference, split_expr,
-    split_expr_mut, substitute_columns_in_expr,
+    is_aggregation_or_grouped, is_always_true_filter, is_column_eq_column,
+    is_simple_parametrizable_filter, outermost_expression, partition_correlated_predicates,
+    resolve_field_reference, split_expr, split_expr_mut, substitute_columns_in_expr,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -863,6 +863,66 @@ fn from_items_cardinality_preserving(
         }
     }
     Ok(true)
+}
+
+/// Returns `true` if `on_expr` pins `item` (a regular table) to at most
+/// one row via a single-column unique-key match.  Walks AND-conjuncts in
+/// `on_expr`; for each cross-table equality `lhs.col = rhs.col` (or
+/// symmetric), checks whether the column belonging to `item`'s base
+/// relation is a single-column unique key in the catalog.  Any matching
+/// equality is sufficient — additional predicates in `on_expr` only
+/// further constrain.
+///
+/// Returns `false` if `item` isn't a regular table, if the catalog has
+/// no unique-cols entry for the table, or if no cross-equality in
+/// `on_expr` references a unique column of the table.
+///
+/// Intended for future use by LATERAL flatten downstream-cardinality
+/// checks to admit regular-table RHS at LEFT JOIN positions.  Mirrors
+/// the upstream-side cardinality argument used by
+/// [`is_upstream_item_safe_for_lateral_flatten`].
+#[allow(dead_code)]
+fn is_join_pinned_to_unique_key<U: UniqueColumnsSchema>(
+    item: &TableExpr,
+    on_expr: &Expr,
+    unique_cols_schema: &U,
+) -> ReadySetResult<bool> {
+    let TableExpr {
+        inner: TableExprInner::Table(base_rel),
+        ..
+    } = item
+    else {
+        return Ok(false);
+    };
+    let Some(unique_cols) = unique_cols_schema.unique_columns_of(base_rel) else {
+        return Ok(false);
+    };
+    let item_ref_rel = get_from_item_reference_name(item)?;
+    // Walk every top-level AND conjunct.  `is_column_eq_column` matches
+    // only a bare `col = col` shape, so AND-trees must be enumerated by
+    // the caller.
+    let mut conjuncts = Vec::new();
+    split_expr(on_expr, &|_| true, &mut conjuncts);
+    for conjunct in &conjuncts {
+        if is_column_eq_column(conjunct, |lhs_col, rhs_col| {
+            let item_side_col = if lhs_col.table.as_ref() == Some(&item_ref_rel) {
+                Some(lhs_col)
+            } else if rhs_col.table.as_ref() == Some(&item_ref_rel) {
+                Some(rhs_col)
+            } else {
+                None
+            };
+            item_side_col.is_some_and(|col| {
+                unique_cols.contains(&Column {
+                    name: col.name.clone(),
+                    table: Some(base_rel.clone()),
+                })
+            })
+        }) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Lower-level LATERAL variant of [`from_items_cardinality_preserving`].
@@ -2146,4 +2206,125 @@ pub(crate) fn apply_inline(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod is_join_pinned_to_unique_key_tests {
+    use super::*;
+    use readyset_sql::ast::{JoinConstraint, JoinRightSide};
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    /// Mock catalog: `addr` has a single-column unique key on `id`.
+    struct AddrIdUniqueSchema;
+
+    impl UniqueColumnsSchema for AddrIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "addr" {
+                let col = Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                };
+                Some(HashSet::from([col]))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Empty catalog — no table has any unique key.
+    struct EmptyUniqueSchema;
+
+    impl UniqueColumnsSchema for EmptyUniqueSchema {
+        fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+            None
+        }
+    }
+
+    fn parse_select(sql: &str) -> SelectStatement {
+        parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+            .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"))
+    }
+
+    /// Extract the (RHS table-expr, ON expr) of the first join in `stmt`.
+    fn first_join_rhs_and_on(stmt: &SelectStatement) -> (&TableExpr, &Expr) {
+        let join = stmt
+            .join
+            .first()
+            .unwrap_or_else(|| panic!("expected a JOIN clause"));
+        let item = match &join.right {
+            JoinRightSide::Table(t) => t,
+            other => panic!("expected table RHS, got {other:?}"),
+        };
+        let on = match &join.constraint {
+            JoinConstraint::On(e) => e,
+            other => panic!("expected ON constraint, got {other:?}"),
+        };
+        (item, on)
+    }
+
+    #[test]
+    fn accepts_pk_match() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               LEFT JOIN "addr" ON "addr"."id" = "outer_t"."addr_id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
+            "PK match should pin the join"
+        );
+    }
+
+    #[test]
+    fn rejects_non_unique_column_match() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               LEFT JOIN "addr" ON "addr"."region" = "outer_t"."region""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            !is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
+            "non-unique column match should not pin"
+        );
+    }
+
+    #[test]
+    fn rejects_table_not_in_catalog() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               LEFT JOIN "addr" ON "addr"."id" = "outer_t"."addr_id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            !is_join_pinned_to_unique_key(item, on, &EmptyUniqueSchema).unwrap(),
+            "table without catalog entry should not pin"
+        );
+    }
+
+    #[test]
+    fn accepts_pk_match_with_additional_predicates() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               LEFT JOIN "addr" ON "addr"."id" = "outer_t"."addr_id"
+                                  AND "addr"."status" = 'active'"#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
+            "PK match should pin even with additional predicates"
+        );
+    }
+
+    #[test]
+    fn accepts_pk_match_with_rhs_side() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               LEFT JOIN "addr" ON "outer_t"."addr_id" = "addr"."id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
+            "PK match should pin the join when item-side is on RHS of equality"
+        );
+    }
 }
