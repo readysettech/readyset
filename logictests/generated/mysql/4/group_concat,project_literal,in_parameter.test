@@ -19,7 +19,7 @@ SELECT 1 AS alias_1
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1, 1 AS alias_2 FROM table_1
@@ -35,15 +37,15 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1, 1 AS alias_2 FR
 a, a, a, a, a
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT 1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -52,14 +54,16 @@ SELECT 1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 1
 1
 1
+1
+1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1, 1 AS alias_2 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 1
 
 statement ok
@@ -81,7 +85,7 @@ SELECT 1 AS alias_1
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -89,6 +93,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 1
 2
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1, 1 AS alias_2 FROM table_1
@@ -96,15 +101,15 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1, 1 AS alias_2 FR
 a, a, a
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT 1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -112,12 +117,13 @@ SELECT 1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ----
 1
 1
+1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1, 1 AS alias_2 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 1

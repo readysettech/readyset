@@ -12,7 +12,7 @@ INSERT INTO `table_1` (`column_32`, `column_1`, `column_20`, `column_7`, `column
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--13473851.4000
+-13473851.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` < `table_1`.`column_2`)
@@ -50,23 +50,23 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` < `table_1`.`column_3`) GROUP BY `table_1`.`column_2`
 ----
--538023500.0000
+-538023500
 -2120797904
-1780192772.0000
+1780192772
 1496049069
-908889813.5000
+908889813.5
 1
-984581641.0000
+984581641
 -225745146
 
 query RI rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` < `table_1`.`column_2`) GROUP BY `table_1`.`column_4`
 ----
--1461886719.0000
 -1461886719
--789484171.0000
+-1461886719
 -789484171
-205211330.0000
+-789484171
+205211330
 205211330
 
 # REA-6472
@@ -74,18 +74,30 @@ SELECT avg(`table_1`.`column_4`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`
 query error: AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate in this context \(e\.g\. nested in expressions, HAVING, ORDER BY, or subqueries\)
 SELECT round(avg(`table_1`.`column_5`), 4) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` < 1) GROUP BY `table_1`.`column_4`
 ----
+1377133725.0000
+-1892997711
+-1223864970.0000
+-789484171
+-95508645.0000
+-1461886719
 
 # REA-6472
 # REA-6557
 query error: AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate in this context \(e\.g\. nested in expressions, HAVING, ORDER BY, or subqueries\)
 SELECT round(avg(`table_1`.`column_6`), 4) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` < 1) GROUP BY `table_1`.`column_4`
 ----
+-1802885392.0000
+-1892997711
+-1995191318.0000
+-789484171
+-48239571.0000
+-1461886719
 
 query R rowsort
 SELECT avg(`table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
-1063571056.5000
+1063571056.5
 
 query  rowsort
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_6`) OR (`table_1`.`column_4` < `table_1`.`column_6`))
@@ -183,22 +195,22 @@ SELECT `table_1`.`column_4` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 query RII rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) OR (`table_1`.`column_4` < `table_1`.`column_3`)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
--1429181977.5000
+-1429181977.5
 1
 1
--341933075.0000
+-341933075
 205211330
 205211330
--473362743.0000
+-473362743
 -789484171
 -789484171
-1064806383.0000
+1064806383
 -1461886719
 -1461886719
-1481337992.0000
+1481337992
 1658315252
 1658315252
-69609564.0000
+69609564
 -1892997711
 -1892997711
 
@@ -207,26 +219,35 @@ SELECT avg(`table_1`.`column_8`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`
 query error: AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate in this context \(e\.g\. nested in expressions, HAVING, ORDER BY, or subqueries\)
 SELECT round(avg(`table_1`.`column_9`), 4) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) AND (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
+1094009166.0000
+-1892997711
+-1892997711
+406507419.0000
+-789484171
+-789484171
+-711553952.0000
+-1461886719
+-1461886719
 
 query RII rowsort
 SELECT avg(`table_1`.`column_10`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
--120063911.0000
+-120063911
 1
 1
--1836409050.0000
+-1836409050
 1658315252
 1658315252
--2005915153.0000
+-2005915153
 -789484171
 -789484171
-1213086417.0000
+1213086417
 -1461886719
 -1461886719
-1386130998.0000
+1386130998
 -1892997711
 -1892997711
-462600550.0000
+462600550
 205211330
 205211330
 
@@ -234,9 +255,9 @@ query RI rowsort
 SELECT avg(`table_1`.`column_11`) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
--1890891996.0000
+-1890891996
 205211330
-1621509664.0000
+1621509664
 1658315252
 
 # REA-6472
@@ -244,27 +265,36 @@ SELECT avg(`table_1`.`column_11`) AS `alias_1`, `table_1`.`column_4` AS `alias_2
 query error: AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate in this context \(e\.g\. nested in expressions, HAVING, ORDER BY, or subqueries\)
 SELECT round(avg(`table_1`.`column_12`), 4) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) AND (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
+1396864885.0000
+-1892997711
+-1892997711
+-715091706.0000
+-789484171
+-789484171
+2062866502.0000
+-1461886719
+-1461886719
 
 # REA-6472
 query RII rowsort
 SELECT avg(`table_1`.`column_13`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_3`) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
--1091272162.0000
+-1091272162
 -1892997711
 -1892997711
--1097361146.0000
+-1097361146
 -1461886719
 -1461886719
--156935041.5000
+-156935041.5
 1
 1
--772495722.0000
+-772495722
 1658315252
 1658315252
-2017250506.0000
+2017250506
 -789484171
 -789484171
-284439577.0000
+284439577
 205211330
 205211330
 
@@ -272,19 +302,19 @@ query RI rowsort
 SELECT avg(`table_1`.`column_14`) AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` < `table_1`.`column_14`) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
-1681433037.0000
+1681433037
 1658315252
 
 query RII rowsort
 SELECT avg(`table_1`.`column_15`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` < 1) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
--608709768.0000
+-608709768
 -1461886719
 -1461886719
-1764409932.0000
+1764409932
 -1892997711
 -1892997711
-333680710.0000
+333680710
 -789484171
 -789484171
 
@@ -394,23 +424,35 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM
 query error: AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate in this context \(e\.g\. nested in expressions, HAVING, ORDER BY, or subqueries\)
 SELECT round(avg(`table_1`.`column_18`), 4) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < `table_1`.`column_1`)) AND (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
+-1535354514.0000
+-1892997711
+-1892997711
+-1892997711
+-1350825330.0000
+-789484171
+-789484171
+-789484171
+1203448768.0000
+-1461886719
+-1461886719
+-1461886719
 
 query RIII rowsort
 SELECT avg(`table_1`.`column_19`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < `table_1`.`column_1`)) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
--1358980159.0000
+-1358980159
 -1461886719
 -1461886719
 -1461886719
-1325363801.0000
+1325363801
 -789484171
 -789484171
 -789484171
-1918146307.0000
+1918146307
 -1892997711
 -1892997711
 -1892997711
-912663588.0000
+912663588
 205211330
 205211330
 205211330
@@ -419,22 +461,22 @@ query RII rowsort
 SELECT avg(`table_1`.`column_20`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < `table_1`.`column_1`)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
-1719600711.0000
+1719600711
 205211330
 205211330
 
 query RIII rowsort
 SELECT avg(`table_1`.`column_21`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) AND (`table_1`.`column_4` < 1)) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
--1240331651.0000
+-1240331651
 -1892997711
 -1892997711
 -1892997711
-1727459656.0000
+1727459656
 -1461886719
 -1461886719
 -1461886719
-1947024238.0000
+1947024238
 -789484171
 -789484171
 -789484171
@@ -448,22 +490,22 @@ query RII rowsort
 SELECT avg(`table_1`.`column_23`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
-1864228241.0000
+1864228241
 205211330
 205211330
 
 query RIII rowsort
 SELECT avg(`table_1`.`column_24`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) AND (`table_1`.`column_4` < 1)) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
--171247159.0000
+-171247159
 -1461886719
 -1461886719
 -1461886719
--896825045.0000
+-896825045
 -789484171
 -789484171
 -789484171
-1802245029.0000
+1802245029
 -1892997711
 -1892997711
 -1892997711
@@ -477,7 +519,7 @@ query RII rowsort
 SELECT avg(`table_1`.`column_26`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
-1453640493.0000
+1453640493
 205211330
 205211330
 
@@ -528,17 +570,17 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 query RIIII rowsort
 SELECT avg(`table_1`.`column_28`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, `table_1`.`column_4` AS `alias_4`, `table_1`.`column_4` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_4` < `table_1`.`column_1`) OR (`table_1`.`column_4` < `table_1`.`column_1`)) AND (`table_1`.`column_4` < 1)) OR (`table_1`.`column_4` < 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
--1212437254.0000
+-1212437254
 -789484171
 -789484171
 -789484171
 -789484171
--2039664105.0000
+-2039664105
 -1892997711
 -1892997711
 -1892997711
 -1892997711
-117551113.0000
+117551113
 -1461886719
 -1461886719
 -1461886719
@@ -553,11 +595,11 @@ query RIII rowsort
 SELECT avg(`table_1`.`column_30`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_1` < `table_1`.`column_20`) OR (`table_1`.`column_1` < `table_1`.`column_20`)) OR (`table_1`.`column_1` < 1)) AND (`table_1`.`column_1` > ?)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ? = 10
 ----
--1374004397.0000
+-1374004397
 301392754
 301392754
 301392754
--819720859.0000
+-819720859
 290450865
 290450865
 290450865

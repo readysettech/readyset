@@ -31,15 +31,15 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RR rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
-426160909.2000
--220894780.5000
+426160909.2
+-220894780.5
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
 SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
--977478775.0000
+-977478775
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -104,7 +104,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
--543661702.0000
+-543661702
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

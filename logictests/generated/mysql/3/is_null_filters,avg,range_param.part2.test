@@ -415,7 +415,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 NULL
 NULL
 NULL
--6401310.5000
+-6401310.5
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_5` > ?))

@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_9`, `column_7`, `column_5`, `column_8`, `column_1
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--469290355.9000
+-469290355.9
 
 query  rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -47,7 +47,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
--897240338.5000
+-897240338.5
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -81,7 +81,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--101217217.4000
+-101217217.4
 
 query  rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -101,8 +101,8 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RR rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--53778942.6000
-164557997.2000
+-53778942.6
+164557997.2
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

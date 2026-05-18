@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_9`, `column_8`, `column_5`, `column_6`, `column_2
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--347614926.4000
+-347614926.4
 
 query  rowsort
 SELECT sum(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -33,7 +33,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, sum(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--399944808.4000
+-399944808.4
 2739629989
 
 # REA-6472
@@ -41,7 +41,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
-1026358844.0000
+1026358844
 
 query  rowsort
 SELECT sum(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
@@ -54,7 +54,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1`, sum(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
-289247638.0000
+289247638
 6112093608
 
 statement ok
@@ -81,7 +81,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--271989130.2000
+-271989130.2
 
 query  rowsort
 SELECT sum(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -100,7 +100,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, sum(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--263817176.6000
+-263817176.6
 2213628985
 
 # REA-6472
@@ -108,7 +108,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_5`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
-1087880275.0000
+1087880275
 
 query  rowsort
 SELECT sum(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
@@ -121,5 +121,5 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1`, sum(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
 ? = 10
 ----
-201771780.0000
+201771780
 5241278993

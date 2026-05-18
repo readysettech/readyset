@@ -27,7 +27,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--68285514.1000
+-68285514.1
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -43,7 +43,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT DISTINCT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
--211152682.4000
+-211152682.4
 
 query  rowsort
 SELECT DISTINCT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -59,7 +59,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
-1595889525.0000
+1595889525
 
 query  rowsort error: SELECT\ DISTINCT\ with\ AVG\ and\ post\-lookup\ aggregation\ is\ not\ supported
 SELECT DISTINCT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
@@ -126,7 +126,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
-1430314811.0000
+1430314811
 
 query  rowsort error: SELECT\ DISTINCT\ with\ AVG\ and\ post\-lookup\ aggregation\ is\ not\ supported
 SELECT DISTINCT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)

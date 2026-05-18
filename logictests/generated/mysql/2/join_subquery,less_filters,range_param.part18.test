@@ -485,6 +485,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -498,6 +502,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -562,6 +570,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -575,6 +587,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -605,6 +621,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -618,6 +638,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -648,6 +672,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -712,6 +740,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -742,6 +774,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -772,6 +808,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -819,6 +859,10 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -1473194636
 -1473194636
 -1473194636
+-323527174
+-323527174
+-323527174
+-323527174
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported

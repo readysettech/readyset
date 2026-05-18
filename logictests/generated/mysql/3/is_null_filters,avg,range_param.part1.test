@@ -420,22 +420,22 @@ SELECT `table_1`.`column_9` AS `alias_1`, `table_1`.`column_9` AS `alias_2`, avg
 ----
 -2054592479
 -2054592479
-1315252872.0000
+1315252872
 -77691971
 -77691971
-2094559822.0000
+2094559822
 107874689
 107874689
--1551384713.0000
+-1551384713
 1791693438
 1791693438
--587676919.0000
+-587676919
 1985922622
 1985922622
--147695428.0000
+-147695428
 NULL
 NULL
--483199546.4000
+-483199546.4
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?))
@@ -480,7 +480,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `ta
 NULL
 NULL
 NULL
--23825514.8000
+-23825514.8
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_5` > ?))
@@ -536,7 +536,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, avg(`table_1`.`column_21`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`
 ----
-24 values hashing to 8da8b9da7f98e75b06ed20640b2ae4e6
+24 values hashing to 8cbbb5106f4ab0255de7cbb30e733b9e
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?))
@@ -580,7 +580,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, avg(`table_1`.`column_24`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`
 ----
-24 values hashing to 47a20a529fc30ad209a83f96fb3ed5e7
+24 values hashing to 1bbb4c3be1c9c7f783a7ffc6cb0bcdd1
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?))
@@ -653,7 +653,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, `table_1`.`column_5` AS `alias_4`, avg(`table_1`.`column_28`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`, `table_1`.`column_5`
 ----
-30 values hashing to e690bfc43c50727ae494a49974d00b45
+30 values hashing to 652aad713e0f3ffd6647af95bce3308e
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3`, `table_1`.`column_5` AS `alias_4` FROM `table_1` WHERE (((((`table_1`.`column_5` IS NULL) AND (`table_1`.`column_5` IS NOT NULL)) OR (`table_1`.`column_5` IS NULL)) OR (`table_1`.`column_5` IS NOT NULL)) AND (`table_1`.`column_5` > ?))

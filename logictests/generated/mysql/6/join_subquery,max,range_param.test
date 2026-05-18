@@ -91,10 +91,10 @@ SELECT max(`table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT 
 ----
 1346288186
 
-query  rowsort
+query  rowsort error: values returned
 SELECT max(`table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
-1925746051
+1902816340
 
 query  rowsort
 SELECT max(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT max(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)

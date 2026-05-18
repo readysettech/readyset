@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_7`, `column_5`, `column_1`, `column_8`, `column_9
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--122649133.1000
+-122649133.1
 
 query  nosort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10
@@ -86,7 +86,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--1275427647.0000
+-1275427647
 
 query  nosort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_3` DESC LIMIT 10
@@ -145,23 +145,23 @@ query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recip
 SELECT ROUND(avg(`table_1`.`column_6`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
--38431686.0000
--1525728460.0000
-86087327.0000
-643537637.0000
--1432651255.0000
--1604896066.0000
--109258426.0000
+-38431686
+-1525728460
+86087327
+643537637
+-1432651255
+-1604896066
+-109258426
 
 # REA-6472
 query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
 SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
-2140589378.0000
-1748209894.0000
-1719904653.0000
-175039353.0000
+2140589378
+1748209894
+1719904653
+175039353
 
 query  nosort
 SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) ORDER BY `table_1`.`column_7` DESC LIMIT 10
@@ -177,10 +177,10 @@ query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recip
 SELECT ROUND(avg(`table_1`.`column_8`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
--1489805124.0000
--1271909918.0000
--2089085629.0000
-830719173.0000
+-1489805124
+-1271909918
+-2089085629
+830719173
 
 statement ok
 DELETE FROM `table_1` WHERE (`column_9` = 0)
@@ -256,7 +256,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_4`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--1248869427.0000
+-1248869427
 
 query  nosort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_3` DESC LIMIT 10
@@ -297,17 +297,17 @@ query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recip
 SELECT ROUND(avg(`table_1`.`column_6`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?) GROUP BY `table_1`.`column_3` ORDER BY `table_1`.`column_3` ASC LIMIT 10
 ? = 10
 ----
--1525728460.0000
-86087327.0000
--1432651255.0000
+-1525728460
+86087327
+-1432651255
 
 # REA-6472
 query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
 SELECT ROUND(avg(`table_1`.`column_7`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
-1748209894.0000
-175039353.0000
+1748209894
+175039353
 
 query  nosort
 SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) ORDER BY `table_1`.`column_7` DESC LIMIT 10
@@ -321,5 +321,5 @@ query  nosort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recip
 SELECT ROUND(avg(`table_1`.`column_8`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_7` > ?) GROUP BY `table_1`.`column_7` ORDER BY `table_1`.`column_7` DESC LIMIT 10
 ? = 10
 ----
--1271909918.0000
-830719173.0000
+-1271909918
+830719173

@@ -44,7 +44,7 @@ INSERT INTO `table_1` (`column_2`, `column_1`, `column_3`) VALUES (-764915158, 5
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-516670353.1000
+516670353.1
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` INNER JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`)
@@ -189,7 +189,7 @@ DELETE FROM `table_1` WHERE (`column_3` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-597843909.0000
+597843909
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` INNER JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`)

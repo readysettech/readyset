@@ -80,7 +80,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--293199591.6000
+-293199591.6
 
 query  rowsort
 SELECT sum(`table_1`.`column_2`) AS `alias_1` FROM `table_1`

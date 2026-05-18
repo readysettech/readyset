@@ -32,7 +32,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, min(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--22267125.7000
+-22267125.7
 -1163140472
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -96,7 +96,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, min(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--180118335.2000
+-180118335.2
 -674266111
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

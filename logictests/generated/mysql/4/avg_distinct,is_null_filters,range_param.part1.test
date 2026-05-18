@@ -11,7 +11,7 @@ INSERT INTO `table_1` (`column_1`, `column_31`, `column_2`, `column_22`, `column
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-239307168.6000
+239307168.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)
@@ -66,35 +66,35 @@ NULL
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` IS NOT NULL) GROUP BY `table_1`.`column_2`
 ----
--1343335842.0000
+-1343335842
 -953236345
--1647260920.0000
+-1647260920
 271245456
--68602021.0000
+-68602021
 1194823873
-1129459475.0000
+1129459475
 -1646741046
-1397925148.0000
+1397925148
 -622470698
 
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` IS NULL) GROUP BY `table_1`.`column_2`
 ----
-955326894.0000
+955326894
 NULL
 
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_5`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` IS NOT NULL) GROUP BY `table_1`.`column_2`
 ----
--1030294283.0000
+-1030294283
 -953236345
--1392861343.0000
+-1392861343
 -622470698
--338436578.0000
+-338436578
 -1646741046
--560160837.0000
+-560160837
 1194823873
-372303574.0000
+372303574
 271245456
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -239,7 +239,7 @@ SELECT avg(distinct `table_1`.`column_7`) AS `alias_1`, `table_1`.`column_2` AS 
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_8`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
--263346124.4000
+-263346124.4
 NULL
 NULL
 
@@ -247,22 +247,22 @@ NULL
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_9`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
--104263003.6000
+-104263003.6
 NULL
 NULL
--1581754686.0000
+-1581754686
 -1030294283
 -1030294283
--543402371.0000
+-543402371
 -338436578
 -338436578
--735890516.0000
+-735890516
 -1392861343
 -1392861343
-1494205797.0000
+1494205797
 -560160837
 -560160837
-1517170028.0000
+1517170028
 372303574
 372303574
 
@@ -275,41 +275,41 @@ SELECT avg(distinct `table_1`.`column_10`) AS `alias_1`, `table_1`.`column_5` AS
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_11`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
--1255721463.0000
+-1255721463
 -560160837
 -560160837
--1262859266.4000
+-1262859266.4
 NULL
 NULL
--894643279.0000
+-894643279
 372303574
 372303574
-1481087747.0000
+1481087747
 -1030294283
 -1030294283
-208036546.0000
+208036546
 -1392861343
 -1392861343
-864115552.0000
+864115552
 -338436578
 -338436578
 
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_12`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NOT NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
--1319178970.0000
+-1319178970
 -1030294283
 -1030294283
--1858794055.0000
+-1858794055
 -1392861343
 -1392861343
-1770226452.0000
+1770226452
 -338436578
 -338436578
-460685322.0000
+460685322
 372303574
 372303574
-794188412.0000
+794188412
 -560160837
 -560160837
 
@@ -324,22 +324,22 @@ SELECT avg(distinct `table_1`.`column_13`) AS `alias_1`, `table_1`.`column_5` AS
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_14`) AS `alias_1`, `table_1`.`column_5` AS `alias_2`, `table_1`.`column_5` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NOT NULL)) GROUP BY `table_1`.`column_5`, `table_1`.`column_5`
 ----
--119352097.8000
+-119352097.8
 NULL
 NULL
--1311987884.0000
+-1311987884
 -338436578
 -338436578
--1668802843.0000
+-1668802843
 372303574
 372303574
-1174471792.0000
+1174471792
 -560160837
 -560160837
-1738780928.0000
+1738780928
 -1030294283
 -1030294283
-64560619.0000
+64560619
 -1392861343
 -1392861343
 
@@ -465,7 +465,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 query RIII rowsort
 SELECT avg(distinct `table_1`.`column_17`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ----
--118387368.4000
+-118387368.4
 NULL
 NULL
 NULL
@@ -473,23 +473,23 @@ NULL
 query RIII rowsort
 SELECT avg(distinct `table_1`.`column_18`) AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL)) GROUP BY `table_1`.`column_1`, `table_1`.`column_1`, `table_1`.`column_1`
 ----
--1590577471.0000
+-1590577471
 1431202313
 1431202313
 1431202313
--1739096459.0000
+-1739096459
 745320957
 745320957
 745320957
--977932298.0000
+-977932298
 -643226780
 -643226780
 -643226780
-1789906353.0000
+1789906353
 -869793436
 -869793436
 -869793436
-31772071.0000
+31772071
 533032789
 533032789
 533032789
@@ -502,7 +502,7 @@ SELECT avg(distinct `table_1`.`column_19`) AS `alias_1`, `table_1`.`column_1` AS
 query  rowsort
 SELECT avg(distinct `table_1`.`column_20`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3`, `table_1`.`column_20` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_20` IS NULL) OR (`table_1`.`column_20` IS NULL)) OR (`table_1`.`column_20` IS NOT NULL)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`, `table_1`.`column_20`
 ----
-24 values hashing to c6a31428d1ac774843734ea1312739d0
+24 values hashing to 0fd2e59c1aef41873016a00cdf48bbff
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_21`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_20` IS NULL) OR (`table_1`.`column_20` IS NULL)) AND (`table_1`.`column_20` > ?)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`
@@ -520,7 +520,7 @@ SELECT avg(distinct `table_1`.`column_22`) AS `alias_1`, `table_1`.`column_20` A
 query RIII rowsort
 SELECT avg(distinct `table_1`.`column_23`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3`, `table_1`.`column_20` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_20` IS NOT NULL) OR (`table_1`.`column_20` IS NULL)) OR (`table_1`.`column_20` IS NOT NULL)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`, `table_1`.`column_20`
 ----
-24 values hashing to c104a4c289d07a66ca8e195db3ccdffc
+24 values hashing to b4792271b350a8441b8da450cbb12319
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_24`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_20` IS NOT NULL) OR (`table_1`.`column_20` IS NULL)) AND (`table_1`.`column_20` > ?)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`
@@ -583,7 +583,7 @@ SELECT `table_1`.`column_20` AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `
 query RIIII rowsort
 SELECT avg(distinct `table_1`.`column_27`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3`, `table_1`.`column_20` AS `alias_4`, `table_1`.`column_20` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_20` IS NULL) AND (`table_1`.`column_20` IS NOT NULL)) OR (`table_1`.`column_20` IS NULL)) OR (`table_1`.`column_20` IS NOT NULL)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`, `table_1`.`column_20`, `table_1`.`column_20`
 ----
-30 values hashing to 332651b9ecadc542f1151a865248b87e
+30 values hashing to 73aab737b871da347fc1a53bcec3e078
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_28`) AS `alias_1`, `table_1`.`column_20` AS `alias_2`, `table_1`.`column_20` AS `alias_3`, `table_1`.`column_20` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_20` IS NULL) AND (`table_1`.`column_20` IS NOT NULL)) OR (`table_1`.`column_20` IS NULL)) AND (`table_1`.`column_20` > ?)) GROUP BY `table_1`.`column_20`, `table_1`.`column_20`, `table_1`.`column_20`

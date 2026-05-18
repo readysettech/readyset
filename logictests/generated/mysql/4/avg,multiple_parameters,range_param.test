@@ -12,7 +12,7 @@ INSERT INTO `table_1` (`column_5`, `column_1`, `column_2`, `column_3`, `column_4
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-158012412.9000
+158012412.9
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` = ?) AND (`table_1`.`column_1` = ?))
@@ -42,7 +42,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
--363466565.0000
+-363466565
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` = ?) AND (`table_1`.`column_2` = ?)) AND (`table_1`.`column_2` > ?))
@@ -84,7 +84,7 @@ DELETE FROM `table_1` WHERE (`column_5` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--675191984.4000
+-675191984.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` = ?) AND (`table_1`.`column_1` = ?))
@@ -110,7 +110,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
--809702791.5000
+-809702791.5
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (((`table_1`.`column_2` = ?) AND (`table_1`.`column_2` = ?)) AND (`table_1`.`column_2` > ?))

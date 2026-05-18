@@ -119,6 +119,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -127,6 +129,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -165,6 +169,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -173,6 +179,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -191,6 +199,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -199,6 +209,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -217,6 +229,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -255,6 +269,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -273,6 +289,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -291,6 +309,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -319,6 +339,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -357,6 +379,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -405,6 +429,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -413,6 +439,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -451,6 +479,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -459,6 +489,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -477,6 +509,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -485,6 +519,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -503,6 +539,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -541,6 +579,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -559,6 +599,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -577,6 +619,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -605,6 +649,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -643,6 +689,8 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM
 ----
 1696165105
 1696165105
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -692,6 +740,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -701,6 +753,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -749,6 +805,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -758,6 +818,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -780,6 +844,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -789,6 +857,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -811,6 +883,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -859,6 +935,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -881,6 +961,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -903,6 +987,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -938,6 +1026,10 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 1696165105
 1696165105
 1696165105
+706568143
+706568143
+706568143
+706568143
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported

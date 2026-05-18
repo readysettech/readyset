@@ -155,7 +155,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_1`.`column_8`)) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
--628707011.0000
+-628707011
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))
@@ -291,13 +291,13 @@ SELECT `table_1`.`column_9` AS `alias_1`, ROUND(avg(`table_1`.`column_12`)) AS `
 ? = 10
 ----
 1099990818
-950615729.0000
+950615729
 2090755030
-1327693685.0000
+1327693685
 355562703
-2135036325.0000
+2135036325
 855833706
-944412151.0000
+944412151
 
 query  rowsort
 SELECT `table_1`.`column_9` AS `alias_1`, `table_1`.`column_9` AS `alias_2`, `table_1`.`column_9` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_9` > `table_1`.`column_10`) AND (`table_1`.`column_9` > 1)) OR (`table_1`.`column_9` > 1))
@@ -390,13 +390,13 @@ SELECT `table_1`.`column_9` AS `alias_1`, ROUND(avg(`table_1`.`column_15`)) AS `
 ? = 10
 ----
 1099990818
--1611287477.0000
+-1611287477
 2090755030
-57046878.0000
+57046878
 355562703
--515885196.0000
+-515885196
 855833706
--1839317354.0000
+-1839317354
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, avg(`table_1`.`column_16`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_13` > 1) OR (`table_1`.`column_13` > 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`
@@ -433,13 +433,13 @@ SELECT `table_1`.`column_13` AS `alias_1`, ROUND(avg(`table_1`.`column_17`)) AS 
 ? = 10
 ----
 488404444
-385154726.0000
+385154726
 5998753
--300028422.0000
+-300028422
 659011894
-296883363.0000
+296883363
 82521551
--1135883643.0000
+-1135883643
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -447,13 +447,13 @@ SELECT `table_1`.`column_13` AS `alias_1`, ROUND(avg(`table_1`.`column_18`)) AS 
 ? = 10
 ----
 488404444
-1322938004.0000
+1322938004
 5998753
-256327572.0000
+256327572
 659011894
--1668963729.0000
+-1668963729
 82521551
--625324725.0000
+-625324725
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, `table_1`.`column_13` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_13` > `table_1`.`column_11`) OR (`table_1`.`column_13` > `table_1`.`column_11`)) AND (`table_1`.`column_13` > 1)) OR (`table_1`.`column_13` > 1))
@@ -553,13 +553,13 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
--1518933591.0000
+-1518933591
 659011894
 659011894
-697080607.0000
+697080607
 82521551
 82521551
--2039237909.0000
+-2039237909
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, avg(`table_1`.`column_22`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` > `table_1`.`column_11`) AND (`table_1`.`column_13` > 1)) OR (`table_1`.`column_13` > 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
@@ -605,13 +605,13 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
-1489705188.0000
+1489705188
 659011894
 659011894
--1388624205.0000
+-1388624205
 82521551
 82521551
--1151197608.0000
+-1151197608
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -620,16 +620,16 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
-994149248.0000
+994149248
 5998753
 5998753
--1479350193.0000
+-1479350193
 659011894
 659011894
--521765983.0000
+-521765983
 82521551
 82521551
-2141926217.0000
+2141926217
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, avg(`table_1`.`column_25`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` > `table_1`.`column_11`) AND (`table_1`.`column_13` > 1)) OR (`table_1`.`column_13` > 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
@@ -675,13 +675,13 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
-297557228.0000
+297557228
 659011894
 659011894
--1791673971.0000
+-1791673971
 82521551
 82521551
-161234362.0000
+161234362
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -690,16 +690,16 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
--714145215.0000
+-714145215
 5998753
 5998753
--1318838171.0000
+-1318838171
 659011894
 659011894
--1954182105.0000
+-1954182105
 82521551
 82521551
-1911892980.0000
+1911892980
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -708,16 +708,16 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, R
 ----
 488404444
 488404444
--523586600.0000
+-523586600
 5998753
 5998753
-784246180.0000
+784246180
 659011894
 659011894
--1895888244.0000
+-1895888244
 82521551
 82521551
-494614543.0000
+494614543
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, `table_1`.`column_13` AS `alias_4`, avg(`table_1`.`column_29`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_13` > `table_1`.`column_11`) OR (`table_1`.`column_13` > `table_1`.`column_11`)) AND (`table_1`.`column_13` > 1)) OR (`table_1`.`column_13` > 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
@@ -772,15 +772,15 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 488404444
 488404444
 488404444
--913910666.0000
+-913910666
 659011894
 659011894
 659011894
-232609980.0000
+232609980
 82521551
 82521551
 82521551
-489380920.0000
+489380920
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -790,19 +790,19 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 488404444
 488404444
 488404444
--136807459.0000
+-136807459
 5998753
 5998753
 5998753
--1025441401.0000
+-1025441401
 659011894
 659011894
 659011894
-303329175.0000
+303329175
 82521551
 82521551
 82521551
-341758540.0000
+341758540
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -812,19 +812,19 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 488404444
 488404444
 488404444
--319571100.0000
+-319571100
 5998753
 5998753
 5998753
--612601594.0000
+-612601594
 659011894
 659011894
 659011894
--1975343428.0000
+-1975343428
 82521551
 82521551
 82521551
--905515773.0000
+-905515773
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -834,19 +834,19 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 488404444
 488404444
 488404444
--1973403001.0000
+-1973403001
 5998753
 5998753
 5998753
-1835994013.0000
+1835994013
 659011894
 659011894
 659011894
--898830881.0000
+-898830881
 82521551
 82521551
 82521551
--1948096698.0000
+-1948096698
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -857,19 +857,19 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 488404444
 488404444
 488404444
--1803086684.0000
+-1803086684
 5998753
 5998753
 5998753
 5998753
--1419963048.0000
+-1419963048
 659011894
 659011894
 659011894
 659011894
-1415803460.0000
+1415803460
 82521551
 82521551
 82521551
 82521551
--222152602.0000
+-222152602

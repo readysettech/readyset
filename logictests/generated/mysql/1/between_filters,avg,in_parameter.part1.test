@@ -121,7 +121,7 @@ SELECT table_1.column_2 AS alias_1, avg(table_1.column_4) AS alias_2 FROM table_
 1
 1.0000
 2
-0.0000
+0
 
 query  rowsort
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE (table_1.column_1 BETWEEN 1 AND 5 AND table_1.column_1 IN (?, ?, ?))
@@ -152,7 +152,7 @@ query  rowsort
 SELECT table_1.column_1 AS alias_1, avg(table_1.column_5) AS alias_2 FROM table_1 WHERE table_1.column_1 NOT BETWEEN 1 AND 5 GROUP BY table_1.column_1
 ----
 0
-0.0000
+0
 
 query  rowsort
 SELECT table_1.column_5 AS alias_1 FROM table_1 WHERE (table_1.column_5 NOT BETWEEN 1 AND 5 AND table_1.column_5 IN (?, ?, ?))
@@ -188,7 +188,7 @@ SELECT ROUND(ROUND(ROUND(avg(table_1.column_7)))) AS alias_1 FROM table_1 WHERE 
 ? = 1
 ? = 2
 ----
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_5 AS alias_1, table_1.column_5 AS alias_2, table_1.column_5 AS alias_3 FROM table_1 WHERE ((table_1.column_5 NOT BETWEEN 1 AND 5 AND table_1.column_5 BETWEEN 1 AND 5) OR table_1.column_5 NOT BETWEEN 1 AND 5)
@@ -297,7 +297,7 @@ SELECT table_1.column_4 AS alias_1, ROUND(ROUND(ROUND(avg(table_1.column_11)))) 
 ? = 2
 ----
 0
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_4 AS alias_1, table_1.column_4 AS alias_2, table_1.column_4 AS alias_3 FROM table_1 WHERE ((table_1.column_4 BETWEEN 1 AND 5 OR table_1.column_4 NOT BETWEEN 1 AND 5) OR table_1.column_4 BETWEEN 1 AND 5)
@@ -381,9 +381,9 @@ SELECT table_1.column_4 AS alias_1, ROUND(ROUND(ROUND(avg(table_1.column_14)))) 
 ? = 2
 ----
 1
-1.0000
+1
 2
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_4 AS alias_1, table_1.column_4 AS alias_2, avg(table_1.column_15) AS alias_3 FROM table_1 WHERE (table_1.column_4 NOT BETWEEN 1 AND 5 OR table_1.column_4 BETWEEN 1 AND 5) GROUP BY table_1.column_4, table_1.column_4
@@ -423,7 +423,7 @@ SELECT table_1.column_6 AS alias_1, ROUND(ROUND(ROUND(avg(table_1.column_16)))) 
 ? = 2
 ----
 0
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -433,9 +433,9 @@ SELECT table_1.column_6 AS alias_1, ROUND(ROUND(ROUND(avg(table_1.column_17)))) 
 ? = 2
 ----
 1
-1.0000
+1
 2
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, table_1.column_6 AS alias_3, table_1.column_6 AS alias_4 FROM table_1 WHERE (((table_1.column_6 NOT BETWEEN 1 AND 5 AND table_1.column_6 BETWEEN 1 AND 5) OR table_1.column_6 NOT BETWEEN 1 AND 5) OR table_1.column_6 BETWEEN 1 AND 5)
@@ -565,7 +565,7 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, ROUND(ROUND(ROU
 ----
 0
 0
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -576,13 +576,13 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, ROUND(ROUND(ROU
 ----
 0
 0
-1.0000
 1
 1
-1.0000
+1
+1
 2
 2
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, table_1.column_6 AS alias_3, avg(table_1.column_24) AS alias_4 FROM table_1 WHERE ((table_1.column_6 BETWEEN 1 AND 5 OR table_1.column_6 NOT BETWEEN 1 AND 5) OR table_1.column_6 BETWEEN 1 AND 5) GROUP BY table_1.column_6, table_1.column_6, table_1.column_6
@@ -631,13 +631,13 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, ROUND(ROUND(ROU
 ----
 0
 0
-1.0000
 1
 1
-1.0000
+1
+1
 2
 2
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -648,10 +648,10 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, ROUND(ROUND(ROU
 ----
 1
 1
-1.0000
+1
 2
 2
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -662,13 +662,13 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, ROUND(ROUND(ROU
 ----
 0
 0
-1.0000
 1
 1
-1.0000
+1
+1
 2
 2
-1.0000
+1
 
 query  rowsort
 SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, table_1.column_6 AS alias_3, table_1.column_6 AS alias_4, avg(table_1.column_28) AS alias_5 FROM table_1 WHERE (((table_1.column_6 NOT BETWEEN 1 AND 5 AND table_1.column_6 BETWEEN 1 AND 5) OR table_1.column_6 NOT BETWEEN 1 AND 5) OR table_1.column_6 BETWEEN 1 AND 5) GROUP BY table_1.column_6, table_1.column_6, table_1.column_6, table_1.column_6
@@ -726,7 +726,7 @@ SELECT table_1.column_6 AS alias_1, table_1.column_6 AS alias_2, table_1.column_
 0
 0
 0
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -738,11 +738,11 @@ SELECT table_1.column_12 AS alias_1, table_1.column_12 AS alias_2, table_1.colum
 1
 1
 1
-1.0000
+1
 2
 2
 2
-2.0000
+2
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -754,15 +754,15 @@ SELECT table_1.column_30 AS alias_1, table_1.column_30 AS alias_2, table_1.colum
 0
 0
 0
-1.0000
 1
 1
 1
-1.0000
+1
+1
 2
 2
 2
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -774,15 +774,15 @@ SELECT table_1.column_30 AS alias_1, table_1.column_30 AS alias_2, table_1.colum
 0
 0
 0
-1.0000
 1
 1
 1
-1.0000
+1
+1
 2
 2
 2
-1.0000
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -795,14 +795,14 @@ SELECT table_1.column_30 AS alias_1, table_1.column_30 AS alias_2, table_1.colum
 0
 0
 0
-1.0000
 1
 1
 1
 1
-1.0000
+1
+1
 2
 2
 2
 2
-1.0000
+1

@@ -189,7 +189,7 @@ DELETE FROM `table_5` WHERE (`column_3` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--318841380.2000
+-318841380.2
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` INNER JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`)

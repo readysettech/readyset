@@ -12,7 +12,7 @@ INSERT INTO `table_1` (`column_3`, `column_2`, `column_9`, `column_7`, `column_6
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-181934743.6000
+181934743.6
 
 query  rowsort
 SELECT count(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -34,14 +34,14 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, count(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--106037722.1000
+-106037722.1
 10
 
 query R rowsort
 SELECT avg(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
-554689458.8000
+554689458.8
 
 query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
@@ -79,7 +79,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--113538263.0000
+-113538263
 
 query  rowsort
 SELECT count(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -97,7 +97,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, count(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
-95806266.6000
+95806266.6
 5
 
 query R rowsort

@@ -83,13 +83,13 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1, table_1.column_
 a, a
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL))
@@ -150,13 +150,15 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_6 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
 0
+1
+1
 2
 
 query  rowsort
@@ -181,13 +183,15 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NULL
 ----
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_6 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
 0
+1
+1
 2
 
 query  rowsort
@@ -256,7 +260,7 @@ a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_14 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_12 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
@@ -266,6 +270,8 @@ a
 0
 a
 2
+a, a
+1
 
 query  rowsort
 SELECT group_concat(table_1.column_15 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2
@@ -292,7 +298,7 @@ SELECT group_concat(table_1.column_16 separator ', ') AS alias_1, table_1.column
 a
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_17 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_10 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
@@ -302,6 +308,8 @@ a
 0
 a
 2
+a, a
+1
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL))
@@ -362,7 +370,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -370,6 +378,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 2
 2
 NULL
@@ -394,7 +406,7 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -402,12 +414,16 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 2
 2
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -415,10 +431,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -426,6 +446,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 2
 2
 NULL
@@ -493,7 +517,7 @@ a
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_23 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -508,6 +532,9 @@ a
 a
 NULL
 NULL
+a, a
+1
+1
 
 query  rowsort
 SELECT group_concat(table_1.column_24 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
@@ -529,7 +556,7 @@ a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_25 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -544,8 +571,11 @@ a
 a
 NULL
 NULL
+a, a
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_26 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -557,8 +587,11 @@ a
 a
 2
 2
+a, a
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_27 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -573,6 +606,9 @@ a
 a
 NULL
 NULL
+a, a
+1
+1
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL))
@@ -608,7 +644,7 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -617,11 +653,17 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
+1
+1
+1
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -630,6 +672,12 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
+1
+1
+1
 2
 2
 2
@@ -637,7 +685,7 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -646,6 +694,12 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
+1
+1
+1
 2
 2
 2
@@ -688,7 +742,7 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_30 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -702,8 +756,12 @@ a
 2
 2
 2
+a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_31 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -721,8 +779,12 @@ a
 NULL
 NULL
 NULL
+a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_32 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -740,8 +802,12 @@ a
 NULL
 NULL
 NULL
+a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -751,6 +817,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
+1
+1
+1
+1
+1
 2
 2
 2
@@ -760,7 +834,7 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_33 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -781,6 +855,11 @@ NULL
 NULL
 NULL
 NULL
+a, a
+1
+1
+1
+1
 
 statement ok
 DELETE FROM table_1 WHERE (column_34 = 0)
@@ -854,13 +933,13 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1, table_1.column_
 a
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL))
@@ -909,12 +988,13 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_6 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
 2
 
 query  rowsort
@@ -935,12 +1015,13 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NULL
 ----
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_6 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
 2
 
 query  rowsort
@@ -1000,12 +1081,14 @@ a
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_14 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_12 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+1
 a
 2
 
@@ -1031,12 +1114,14 @@ SELECT group_concat(table_1.column_16 separator ', ') AS alias_1, table_1.column
 a
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_17 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 IS NOT NULL) AND table_1.column_10 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+1
 a
 2
 
@@ -1087,12 +1172,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 2
 2
 NULL
@@ -1111,32 +1198,38 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 2
 2
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_10 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 2
 2
 NULL
@@ -1196,12 +1289,15 @@ a
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_23 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+1
+1
 a
 2
 2
@@ -1225,35 +1321,44 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_25 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
+1
+1
+a
 2
 2
 a
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_26 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
+1
+1
+a
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_27 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 IS NULL) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+1
+1
 a
 2
 2
@@ -1287,22 +1392,28 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
+1
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
+1
 2
 2
 2
@@ -1310,12 +1421,15 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_20 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
+1
 2
 2
 2
@@ -1353,24 +1467,32 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_30 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
+1
+1
+1
+a
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_31 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
+1
+1
+1
+a
 2
 2
 2
@@ -1379,13 +1501,17 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_32 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 IS NOT NULL) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
+1
+1
+1
+a
 2
 2
 2
@@ -1394,12 +1520,16 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
+1
+1
 2
 2
 2
@@ -1409,12 +1539,17 @@ NULL
 NULL
 NULL
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_33 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE (((((table_1.column_2 IS NULL) AND (table_1.column_2 IS NOT NULL)) OR (table_1.column_2 IS NULL)) OR (table_1.column_2 IS NOT NULL)) AND table_1.column_29 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+1
+1
+1
+1
 a
 2
 2

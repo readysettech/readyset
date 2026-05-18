@@ -241,16 +241,16 @@ SELECT avg(distinct `table_1`.`column_9`) AS `alias_1`, `table_1`.`column_3` AS 
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` != `table_1`.`column_2`) OR (`table_1`.`column_3` != 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
--1104351823.0000
+-1104351823
 -1469951117
 -1469951117
--646417105.5000
+-646417105.5
 1
 1
-534715413.0000
+534715413
 -749623208
 -749623208
-919666013.0000
+919666013
 -2128529393
 -2128529393
 

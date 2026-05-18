@@ -19,7 +19,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 2, a, 1, a, 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT count(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator ', ') AS alias_2 FROM table_1
@@ -79,7 +81,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 1, a, 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -87,6 +89,7 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 ----
 0
 1
+a
 
 query  rowsort
 SELECT count(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator ', ') AS alias_2 FROM table_1

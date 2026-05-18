@@ -34,7 +34,7 @@ query IR rowsort
 SELECT sum(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 -5821201286
--450576679.8000
+-450576679.8
 
 query  rowsort
 SELECT sum(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
@@ -97,7 +97,7 @@ query IR rowsort
 SELECT sum(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 -3256613790
--939659144.6000
+-939659144.6
 
 query  rowsort
 SELECT sum(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)

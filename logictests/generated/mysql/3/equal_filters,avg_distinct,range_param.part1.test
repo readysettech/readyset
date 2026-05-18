@@ -147,7 +147,7 @@ query IR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, avg(distinct `table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` = 1) GROUP BY `table_1`.`column_1`
 ----
 1
--217815220.6000
+-217815220.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` = 1) AND (`table_1`.`column_1` > ?))
@@ -364,7 +364,7 @@ SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, `
 1
 1
 1
--668928074.4000
+-668928074.4
 
 query  rowsort
 SELECT `table_1`.`column_18` AS `alias_1`, `table_1`.`column_18` AS `alias_2`, `table_1`.`column_18` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_18` = `table_1`.`column_8`) OR (`table_1`.`column_18` = `table_1`.`column_8`)) OR (`table_1`.`column_18` = 1)) AND (`table_1`.`column_18` > ?))

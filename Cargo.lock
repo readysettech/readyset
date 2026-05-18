@@ -6472,6 +6472,7 @@ dependencies = [
  "regex",
  "schema-catalog",
  "serde_json",
+ "test-utils",
  "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",

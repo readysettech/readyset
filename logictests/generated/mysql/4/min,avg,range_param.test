@@ -18,7 +18,7 @@ SELECT min(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--13214325.7000
+-13214325.7
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)

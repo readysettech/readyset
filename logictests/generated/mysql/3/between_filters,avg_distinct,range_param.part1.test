@@ -48,7 +48,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_
 query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--342611478.4000
+-342611478.4
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -282,7 +282,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `ta
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(distinct `table_1`.`column_9`) AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ----
-30 values hashing to 8f0809852051ed3ce6cd320ddef55409
+30 values hashing to 65c8cb71fcad34f7cb296361fff98b66
 
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?))
@@ -302,7 +302,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg(distinct `table_1`.`column_10`) AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`
 ----
-30 values hashing to 462535f0c3b828de74698b5be4fa6729
+30 values hashing to 4fd9616371a2796da82d5d959935b54d
 
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?))
@@ -343,7 +343,7 @@ SELECT `table_1`.`column_11` AS `alias_1`, `table_1`.`column_11` AS `alias_2`, `
 query  rowsort
 SELECT `table_1`.`column_11` AS `alias_1`, `table_1`.`column_11` AS `alias_2`, avg(distinct `table_1`.`column_12`) AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_11` BETWEEN 1 AND 5 OR `table_1`.`column_11` NOT BETWEEN 1 AND 5) GROUP BY `table_1`.`column_11`, `table_1`.`column_11`
 ----
-30 values hashing to 12b2235c70f00083e40fdb7b9edd71d6
+30 values hashing to 57a7d283a5efb96e1894443a0aa27264
 
 query  rowsort
 SELECT `table_1`.`column_11` AS `alias_1`, `table_1`.`column_11` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_11` BETWEEN 1 AND 5 OR `table_1`.`column_11` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_11` > ?))
@@ -378,7 +378,7 @@ SELECT `table_1`.`column_11` AS `alias_1`, avg(distinct `table_1`.`column_14`) A
 query  rowsort
 SELECT `table_1`.`column_11` AS `alias_1`, `table_1`.`column_11` AS `alias_2`, avg(distinct `table_1`.`column_15`) AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_11` NOT BETWEEN 1 AND 5 OR `table_1`.`column_11` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_11`, `table_1`.`column_11`
 ----
-30 values hashing to 965396ee7602dccf35a0c578024dc3dc
+30 values hashing to 08939750a5c833010c4b7db4a40c1289
 
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?))
@@ -425,7 +425,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `ta
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3`, avg(distinct `table_1`.`column_18`) AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 AND `table_1`.`column_6` BETWEEN 1 AND 5) OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`, `table_1`.`column_6`
 ----
-40 values hashing to 3f6a1bc101c28c6fa3a279596e4382c1
+40 values hashing to dd5171073657b6c5b58aead3727bc972
 
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_6` NOT BETWEEN 1 AND 5 AND `table_1`.`column_6` BETWEEN 1 AND 5) OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?))
@@ -465,7 +465,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3`, avg(distinct `table_1`.`column_21`) AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) OR `table_1`.`column_6` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`, `table_1`.`column_6`
 ----
-40 values hashing to e22692e2db1057f530791b35b83237d5
+40 values hashing to 45a55e6df57c0443432de2ead6ad296d
 
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_6` NOT BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) OR `table_1`.`column_6` BETWEEN 1 AND 5) AND (`table_1`.`column_6` > ?))
@@ -532,7 +532,7 @@ SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, avg
 query  rowsort
 SELECT `table_1`.`column_6` AS `alias_1`, `table_1`.`column_6` AS `alias_2`, `table_1`.`column_6` AS `alias_3`, avg(distinct `table_1`.`column_24`) AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_6` BETWEEN 1 AND 5 OR `table_1`.`column_6` NOT BETWEEN 1 AND 5) OR `table_1`.`column_6` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_6`, `table_1`.`column_6`, `table_1`.`column_6`
 ----
-40 values hashing to f4453417a57671bab0c40b7646a287cd
+40 values hashing to 1853e30c56adc20e3cd58b86f9ed20d2
 
 query  rowsort
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_24` BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?))
@@ -608,7 +608,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, a
 query  rowsort
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, `table_1`.`column_27` AS `alias_4`, avg(distinct `table_1`.`column_28`) AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) OR `table_1`.`column_27` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`
 ----
-50 values hashing to 208930fee1d64f5eaeed172508838f0e
+50 values hashing to b5bb2ff650c83e10dbb40fcad8ce6ba4
 
 query  rowsort
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, `table_1`.`column_27` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) OR `table_1`.`column_27` BETWEEN 1 AND 5) AND (`table_1`.`column_27` > ?))
@@ -636,7 +636,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, avg(distinct `table_1`.`column_29`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`
 ? = 10
 ----
-24 values hashing to 60f91a2c1dd53202afa53c8c4fbc1d30
+24 values hashing to 79ec96406d548379b4617cc5b6edddaa
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -649,18 +649,18 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, avg(distinct `table_1`.`column_31`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_24` NOT BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
-24 values hashing to ed8d0e694b10947232b3f97d934731d3
+24 values hashing to 386b684bfa8c6a1f1be1f1f9198ecb58
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, avg(distinct `table_1`.`column_32`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_24` BETWEEN 1 AND 5 OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
-24 values hashing to 75ab898fb88ce274929e75e29fa59cc5
+24 values hashing to ebc25b297ebfe55d6775442b18b93ff0
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `table_1`.`column_24` AS `alias_3`, `table_1`.`column_24` AS `alias_4`, avg(distinct `table_1`.`column_33`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_24` NOT BETWEEN 1 AND 5 AND `table_1`.`column_24` BETWEEN 1 AND 5) OR `table_1`.`column_24` NOT BETWEEN 1 AND 5) OR `table_1`.`column_24` BETWEEN 1 AND 5) AND (`table_1`.`column_24` > ?)) GROUP BY `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`, `table_1`.`column_24`
 ? = 10
 ----
-30 values hashing to 705e73a60323f161281564c7ca917f37
+30 values hashing to 2f90dd557ba546b1c55bbc9bd0468a2e

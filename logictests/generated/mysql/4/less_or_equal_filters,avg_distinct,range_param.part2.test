@@ -52,7 +52,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
--80595663.7500
+-80595663.75
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
@@ -100,11 +100,11 @@ query IR rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= `table_1`.`column_2`) GROUP BY `table_1`.`column_3`
 ----
 -1241438989
--1645258747.0000
+-1645258747
 -575081962
-985652497.0000
+985652497
 1
--1656657030.0000
+-1656657030
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_2`) AND (`table_1`.`column_3` > ?))
@@ -139,11 +139,11 @@ query IR rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= `table_1`.`column_2`) GROUP BY `table_1`.`column_3`
 ----
 -1241438989
-396600397.0000
+396600397
 -575081962
--397064507.0000
+-397064507
 1
-933667376.0000
+933667376
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_2`) AND (`table_1`.`column_3` > ?))
@@ -165,6 +165,12 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_3` AS `alias_1`, avg(distinct `table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= 1) GROUP BY `table_1`.`column_3`
 ----
+-1241438989
+907458183.0000
+-575081962
+807272148.0000
+1
+1042778415.5000
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` <= 1) AND (`table_1`.`column_3` > ?))
@@ -174,6 +180,12 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_3` AS `alias_1`, avg(distinct `table_1`.`column_7`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` <= 1) GROUP BY `table_1`.`column_3`
 ----
+-1241438989
+-1766678483.0000
+-575081962
+19377637.0000
+1
+-292996529.0000
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` <= 1) AND (`table_1`.`column_3` > ?))
@@ -220,10 +232,10 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, avg
 ----
 -1241438989
 -1241438989
-555440856.0000
+555440856
 1
 1
--1151279046.0000
+-1151279046
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_3` <= `table_1`.`column_9`) OR (`table_1`.`column_3` <= `table_1`.`column_9`)) AND (`table_1`.`column_3` > ?))
@@ -249,6 +261,12 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `ta
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, avg(distinct `table_1`.`column_10`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_9`) AND (`table_1`.`column_3` <= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
+-1241438989
+-1241438989
+189282181.0000
+-575081962
+-575081962
+510123092.0000
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_3` <= `table_1`.`column_9`) AND (`table_1`.`column_3` <= 1)) AND (`table_1`.`column_3` > ?))
@@ -260,13 +278,13 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, avg
 ----
 -1241438989
 -1241438989
--622980178.0000
+-622980178
 -575081962
 -575081962
--1146392327.0000
+-1146392327
 1
 1
-1431633294.5000
+1431633294.5
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_3` <= `table_1`.`column_9`) OR (`table_1`.`column_3` <= 1)) AND (`table_1`.`column_3` > ?))
@@ -297,6 +315,12 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `ta
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, avg(distinct `table_1`.`column_13`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` <= `table_1`.`column_9`) AND (`table_1`.`column_3` <= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
+-1241438989
+-1241438989
+-1126139633.0000
+-575081962
+-575081962
+415564128.0000
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_3` <= `table_1`.`column_13`) AND (`table_1`.`column_3` <= 1)) AND (`table_1`.`column_3` > ?))
@@ -308,13 +332,13 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, avg
 ----
 -1241438989
 -1241438989
--165977215.0000
+-165977215
 -575081962
 -575081962
--2128793100.0000
+-2128793100
 1
 1
--550487328.0000
+-550487328
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_3` <= `table_1`.`column_13`) OR (`table_1`.`column_3` <= 1)) AND (`table_1`.`column_3` > ?))
@@ -333,10 +357,10 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, a
 ----
 -1126139633
 -1126139633
-501955173.0000
+501955173
 1
 1
--363152579.0000
+-363152579
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_13` <= 1) OR (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))
@@ -372,6 +396,14 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, avg(distinct `table_1`.`column_19`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_13` <= `table_1`.`column_15`) OR (`table_1`.`column_13` <= `table_1`.`column_15`)) AND (`table_1`.`column_13` <= 1)) GROUP BY `table_1`.`column_13`, `table_1`.`column_13`, `table_1`.`column_13`
 ----
+-1126139633
+-1126139633
+-1126139633
+52564062.0000
+1
+1
+1
+-344375953.0000
 
 query III rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` <= `table_1`.`column_15`) OR (`table_1`.`column_13` <= `table_1`.`column_15`)) AND (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))
@@ -384,11 +416,11 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 -1126139633
 -1126139633
 -1126139633
-2124812171.0000
+2124812171
 1
 1
 1
-836825179.5000
+836825179.5
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` <= `table_1`.`column_15`) OR (`table_1`.`column_13` <= `table_1`.`column_15`)) OR (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))
@@ -406,11 +438,11 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 -1126139633
 -1126139633
 -1126139633
--1867849645.0000
+-1867849645
 1
 1
 1
-279975322.0000
+279975322
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` <= `table_1`.`column_15`) AND (`table_1`.`column_13` <= 1)) OR (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))
@@ -433,11 +465,11 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 -1126139633
 -1126139633
 -1126139633
-895687079.0000
+895687079
 1
 1
 1
-934492155.0000
+934492155
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` <= `table_1`.`column_15`) AND (`table_1`.`column_13` <= 1)) OR (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))
@@ -466,12 +498,12 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 -1126139633
 -1126139633
 -1126139633
--1920851971.0000
+-1920851971
 1
 1
 1
 1
-17458193.5000
+17458193.5
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3`, `table_1`.`column_13` AS `alias_4` FROM `table_1` WHERE (((((`table_1`.`column_13` <= `table_1`.`column_25`) OR (`table_1`.`column_13` <= `table_1`.`column_25`)) AND (`table_1`.`column_13` <= 1)) OR (`table_1`.`column_13` <= 1)) AND (`table_1`.`column_13` > ?))

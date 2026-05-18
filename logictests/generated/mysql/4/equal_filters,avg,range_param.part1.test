@@ -48,7 +48,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
--255484686.3000
+-255484686.3
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -106,7 +106,7 @@ query IR rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` = `table_1`.`column_3`) GROUP BY `table_1`.`column_2`
 ----
 1
--882044275.8000
+-882044275.8
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` = `table_1`.`column_4`) AND (`table_1`.`column_3` > ?))
@@ -159,7 +159,7 @@ query IR rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, avg(`table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` = 1) GROUP BY `table_1`.`column_3`
 ----
 1
--621690891.8000
+-621690891.8
 
 query  rowsort
 SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_3` = 1) AND (`table_1`.`column_3` > ?))
@@ -170,7 +170,7 @@ query IR rowsort
 SELECT `table_1`.`column_3` AS `alias_1`, avg(`table_1`.`column_7`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` = 1) GROUP BY `table_1`.`column_3`
 ----
 1
-1.0000
+1
 
 query  rowsort
 SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_7` = 1) AND (`table_1`.`column_7` > ?))
@@ -181,7 +181,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
--561969671.5000
+-561969671.5
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` = `table_1`.`column_8`) OR (`table_1`.`column_1` = `table_1`.`column_8`)) AND (`table_1`.`column_1` = 1))
@@ -248,7 +248,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, avg
 ----
 1
 1
-486261999.8000
+486261999.8
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` = `table_1`.`column_10`) OR (`table_1`.`column_1` = 1)) AND (`table_1`.`column_1` > ?))
@@ -293,7 +293,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, avg
 ----
 1
 1
--401243174.0000
+-401243174
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` = `table_1`.`column_10`) OR (`table_1`.`column_1` = 1)) AND (`table_1`.`column_1` > ?))
@@ -311,7 +311,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, a
 ----
 1
 1
--97848909.6000
+-97848909.6
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_13` = 1) OR (`table_1`.`column_13` = 1)) AND (`table_1`.`column_13` > ?))
@@ -368,7 +368,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 1
 1
 1
--450521237.2000
+-450521237.2
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` = `table_1`.`column_15`) OR (`table_1`.`column_13` = `table_1`.`column_15`)) OR (`table_1`.`column_13` = 1)) AND (`table_1`.`column_13` > ?))
@@ -386,7 +386,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 1
 1
 1
-74301177.6000
+74301177.6
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` = `table_1`.`column_15`) AND (`table_1`.`column_13` = 1)) OR (`table_1`.`column_13` = 1)) AND (`table_1`.`column_13` > ?))
@@ -409,7 +409,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, `
 1
 1
 1
-1.0000
+1
 
 query  rowsort
 SELECT `table_1`.`column_25` AS `alias_1`, `table_1`.`column_25` AS `alias_2`, `table_1`.`column_25` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_25` = `table_1`.`column_24`) AND (`table_1`.`column_25` = 1)) OR (`table_1`.`column_25` = 1)) AND (`table_1`.`column_25` > ?))
@@ -439,7 +439,7 @@ SELECT `table_1`.`column_25` AS `alias_1`, `table_1`.`column_25` AS `alias_2`, `
 1
 1
 1
--97918906.2000
+-97918906.2
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((((`table_1`.`column_1` = `table_1`.`column_24`) OR (`table_1`.`column_1` = `table_1`.`column_24`)) AND (`table_1`.`column_1` = 1)) OR (`table_1`.`column_1` = 1)) AND (`table_1`.`column_1` > ?))

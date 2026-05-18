@@ -87,17 +87,17 @@ SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, `table_1`.`column_3` AS 
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` != `table_1`.`column_4`) GROUP BY `table_1`.`column_3`
 ----
--480719068.0000
+-480719068
 -2128529393
--533946601.6000
+-533946601.6
 1
-111123801.0000
+111123801
 -1469951117
-145448720.0000
+145448720
 824498424
-1514522422.0000
+1514522422
 -749623208
-1555391886.0000
+1555391886
 -736513842
 
 query  rowsort
@@ -276,22 +276,22 @@ SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 query RII rowsort
 SELECT avg(distinct `table_1`.`column_8`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` != `table_1`.`column_2`) OR (`table_1`.`column_3` != `table_1`.`column_2`)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
--1375171073.0000
+-1375171073
 -749623208
 -749623208
--220552311.8000
+-220552311.8
 1
 1
--499645731.0000
+-499645731
 824498424
 824498424
-1182646265.0000
+1182646265
 -2128529393
 -2128529393
-1188112669.0000
+1188112669
 -736513842
 -736513842
-2000058123.0000
+2000058123
 -1469951117
 -1469951117
 
@@ -555,7 +555,7 @@ SELECT avg(distinct `table_1`.`column_18`) AS `alias_1`, `table_1`.`column_3` AS
 query  rowsort
 SELECT avg(distinct `table_1`.`column_19`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3`, `table_1`.`column_3` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_3` != `table_1`.`column_8`) OR (`table_1`.`column_3` != `table_1`.`column_8`)) OR (`table_1`.`column_3` != 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`, `table_1`.`column_3`
 ----
-24 values hashing to fbb0fc8893decd81d369f06bf5d08a92
+24 values hashing to a9ff9bfafe1af93807ca6356d8aa59bb
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_20`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_3` != `table_1`.`column_8`) OR (`table_1`.`column_3` != `table_1`.`column_8`)) AND (`table_1`.`column_3` > ?)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
@@ -712,7 +712,7 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `ta
 query  rowsort
 SELECT avg(distinct `table_1`.`column_28`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3`, `table_1`.`column_3` AS `alias_4`, `table_1`.`column_3` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_3` != `table_1`.`column_8`) OR (`table_1`.`column_3` != `table_1`.`column_8`)) AND (`table_1`.`column_3` != 1)) OR (`table_1`.`column_3` != 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`, `table_1`.`column_3`, `table_1`.`column_3`
 ----
-25 values hashing to e7bf06ba291275b2d5e5c69343e48611
+25 values hashing to 0dea2a0dd8c00f64fb3028a6fbf50c54
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_29`) AS `alias_1`, `table_1`.`column_21` AS `alias_2`, `table_1`.`column_21` AS `alias_3`, `table_1`.`column_21` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_21` != `table_1`.`column_23`) OR (`table_1`.`column_21` != `table_1`.`column_23`)) AND (`table_1`.`column_21` != 1)) AND (`table_1`.`column_21` > ?)) GROUP BY `table_1`.`column_21`, `table_1`.`column_21`, `table_1`.`column_21`

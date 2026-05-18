@@ -53,13 +53,13 @@ SELECT min(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_4 IN (
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, min(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 1
 
 statement ok
@@ -113,11 +113,11 @@ SELECT min(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_4 IN (
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, min(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 1

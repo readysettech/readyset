@@ -44,7 +44,7 @@ INSERT INTO `table_5` (`column_1`, `column_2`, `column_3`) VALUES (-651232890, 1
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
-580098449.2000
+580098449.2
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`)
@@ -84,7 +84,7 @@ SELECT `table_2`.`column_2` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_2` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
-30 values hashing to e13a86bd6b85638f5d9bc30bea6cfff6
+30 values hashing to 052c5feb5e6509ab79388f114856d9f3
 
 # REA-6472
 query R rowsort
@@ -115,7 +115,7 @@ query RII rowsort error: Wrong\ number\ of\ results\ returned
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
-21 values hashing to 8a6b309f90ac374c00106077fde0f34c
+21 values hashing to 3194c52d5a00e74d51416b64d24bc69f
 
 statement ok
 DELETE FROM `table_3` WHERE (`column_5` = 0)
@@ -221,7 +221,7 @@ DELETE FROM `table_5` WHERE (`column_3` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--16993334.8000
+-16993334.8
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, `table_2`.`column_2` AS `alias_2` FROM `table_1` LEFT JOIN `table_2` ON (`table_1`.`column_1` = `table_2`.`column_1`)
@@ -247,19 +247,19 @@ SELECT `table_2`.`column_2` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 query RII rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1`, `table_2`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_2` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
--1704205715.0000
+-1704205715
 1366490851
 NULL
--411756412.0000
+-411756412
 -1500077453
 NULL
-1417996016.0000
+1417996016
 -1074602933
 NULL
-185486871.0000
+185486871
 356444993
 NULL
-2145860668.0000
+2145860668
 -773574785
 NULL
 
@@ -267,7 +267,7 @@ query R rowsort
 SELECT avg(`table_2`.`column_5`) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
 ? = 10
 ----
--1273795617.0000
+-1273795617
 
 query  rowsort
 SELECT `table_2`.`column_6` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_4` ON (`table_2`.`column_3` = `table_4`.`column_1`) WHERE (`table_2`.`column_3` > ?)
@@ -285,15 +285,15 @@ query RII rowsort error: The\ number\ of\ values\ returned\ does\ not\ match
 SELECT avg(`table_3`.`column_3`) AS `alias_1`, `table_3`.`column_4` AS `alias_2`, `table_5`.`column_2` AS `alias_3` FROM `table_3` LEFT JOIN `table_5` ON (`table_3`.`column_3` = `table_5`.`column_1`) WHERE (`table_3`.`column_4` > ?) GROUP BY `table_3`.`column_4`, `table_5`.`column_2`
 ? = 10
 ----
--1472801019.0000
+-1472801019
 524418938
 NULL
-390684208.0000
+390684208
 1338514963
 NULL
-715953263.0000
+715953263
 2872765
 NULL
-995478249.0000
+995478249
 1021903035
 NULL

@@ -25,6 +25,7 @@ use nom::IResult;
 use nom_locate::LocatedSpan;
 use nom_sql::to_nom_result;
 use readyset_data::TimestampTz;
+use readyset_decimal::Decimal;
 
 use crate::ast::*;
 
@@ -124,6 +125,7 @@ fn column_type(i: &[u8]) -> IResult<&[u8], Type> {
         map(tag("I"), |_| Type::Integer),
         map(tag("UI"), |_| Type::UnsignedInteger),
         map(tag("R"), |_| Type::Real),
+        map(tag("F"), |_| Type::Numeric),
         map(tag("D"), |_| Type::Date),
         map(tag("M"), |_| Type::Time),
         map(tag("Z"), |_| Type::TimestampTz),
@@ -177,12 +179,11 @@ fn hash_results(i: &[u8]) -> IResult<&[u8], QueryResults> {
 }
 
 fn float(i: &[u8]) -> IResult<&[u8], Value> {
-    let (i, v) = map_parser(
-        recognize(tuple((opt(tag("-")), digit1, tag("."), digit1))),
-        nom::number::complete::double,
-    )(i)?;
-
-    Ok((i, Value::from(v)))
+    let (i, slice) = recognize(tuple((opt(tag("-")), digit1, tag("."), digit1)))(i)?;
+    let err = || nom::Err::Error(nom::error::Error::new(slice, nom::error::ErrorKind::Verify));
+    let s = std::str::from_utf8(slice).map_err(|_| err())?;
+    let dec = Decimal::from_str(s).map_err(|_| err())?;
+    Ok((i, Value::Numeric(dec)))
 }
 
 fn integer(i: &[u8]) -> IResult<&[u8], i64> {
@@ -940,7 +941,7 @@ SELECT * FROM t2
     #[test]
     fn float_trailing_zeros() {
         let input = b"0.7500";
-        let expected = Value::from(0.75_f64);
+        let expected = Value::Numeric(Decimal::from_str("0.7500").unwrap());
         assert_eq!(complete(float)(input).unwrap().1, expected);
     }
 
@@ -1066,5 +1067,31 @@ select x - 1 from t1
                 ..Default::default()
             })]
         )
+    }
+
+    #[test]
+    fn column_type_tag_f_parses_as_numeric() {
+        let (_, types) = super::column_types(b"F").unwrap();
+        assert_eq!(types, vec![Type::Numeric]);
+    }
+
+    #[test]
+    fn float_rule_preserves_scale() {
+        for s in [
+            "-123.4500",
+            "-691179223.7500",
+            "0.0000",
+            "-0.0001",
+            "12345.000000001",
+        ] {
+            let mut input = s.as_bytes().to_vec();
+            input.push(b'\n');
+            let (_, v) = super::value(&input).unwrap();
+            assert_eq!(
+                v,
+                Value::Numeric(Decimal::from_str(s).unwrap()),
+                "parsing {s:?}",
+            );
+        }
     }
 }

@@ -57,6 +57,9 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 schema-catalog = { path = "../schema-catalog" }
 
+[dev-dependencies]
+test-utils = { path = "../test-utils" }
+
 [features]
 default = ["in-process-readyset"]
 in-process-readyset = [

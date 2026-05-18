@@ -19,7 +19,7 @@ SELECT avg(table_1.column_2) AS alias_1 FROM table_1
 ----
 1.0000
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, avg(table_1.column_4) AS alias_2 FROM table_1
@@ -42,7 +44,7 @@ SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-2, 0, 1
+2, a, 0, a, 1
 
 # REA-6472
 query  rowsort
@@ -54,13 +56,13 @@ SELECT avg(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_6 IN (
 1.0000
 
 # REA-6472
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, avg(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 1.0000
 
 statement ok
@@ -82,7 +84,7 @@ SELECT avg(table_1.column_2) AS alias_1 FROM table_1
 ----
 1.0000
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -90,6 +92,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 0
 1
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, avg(table_1.column_4) AS alias_2 FROM table_1
@@ -97,13 +100,13 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, avg(table_1.col
 a, a, a
 1.0000
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-0, 1
+0, a, 1
 
 # REA-6472
 query  rowsort
@@ -115,11 +118,11 @@ SELECT avg(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_6 IN (
 0.6667
 
 # REA-6472
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, avg(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 1.0000

@@ -53,7 +53,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--1158566959.4000
+-1158566959.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -242,7 +242,7 @@ SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2`, avg
 ----
 NULL
 NULL
--370901027.5000
+-370901027.5
 
 query  rowsort
 SELECT `table_1`.`column_5` AS `alias_1`, `table_1`.`column_5` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_5` IS NULL) OR (`table_1`.`column_5` IS NULL)) AND (`table_1`.`column_5` > ?))
@@ -360,16 +360,16 @@ SELECT `table_1`.`column_10` AS `alias_1`, `table_1`.`column_10` AS `alias_2`, a
 ----
 -2129885738
 -2129885738
--1316217813.0000
+-1316217813
 1557193195
 1557193195
-984014594.0000
+984014594
 1768583113
 1768583113
-2124683557.0000
+2124683557
 NULL
 NULL
--640754095.5000
+-640754095.5
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_13` IS NULL) OR (`table_1`.`column_13` IS NOT NULL)) AND (`table_1`.`column_13` > ?))
@@ -421,7 +421,7 @@ SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `
 NULL
 NULL
 NULL
--1471975422.5000
+-1471975422.5
 
 query  rowsort
 SELECT `table_1`.`column_13` AS `alias_1`, `table_1`.`column_13` AS `alias_2`, `table_1`.`column_13` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_13` IS NULL) AND (`table_1`.`column_13` IS NOT NULL)) OR (`table_1`.`column_13` IS NULL)) AND (`table_1`.`column_13` > ?))

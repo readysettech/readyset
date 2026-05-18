@@ -17,7 +17,7 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
-747308052.8000
+747308052.8
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -48,7 +48,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
-496487987.0000
+496487987
 
 query  rowsort
 SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
@@ -85,7 +85,7 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
-1639532282.6000
+1639532282.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -113,7 +113,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
 ? = 10
 ----
-323527159.6000
+323527159.6
 
 query  rowsort
 SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)

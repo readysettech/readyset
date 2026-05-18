@@ -26,7 +26,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 1, a, 2, a, 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -35,6 +35,8 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 0
 1
 2
+a
+a
 
 # REA-6472
 query  rowsort error: Incorrect\ values\ returned
@@ -43,9 +45,9 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-0, 1, 2
+0, a, 1, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 IN (?, ?, ?) AND table_1.column_2 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -57,16 +59,18 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 IN (?, ?
 0
 1
 2
+a
+a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHERE (table_1.column_3 IN (?, ?, ?) AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -75,7 +79,7 @@ SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 statement ok
 DELETE FROM table_1 WHERE (column_6 = 0)
@@ -101,7 +105,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 2, a, 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -109,6 +113,7 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 ----
 0
 2
+a
 
 # REA-6472
 query  rowsort error: Incorrect\ values\ returned
@@ -117,9 +122,9 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-1, 2
+1, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 IN (?, ?, ?) AND table_1.column_2 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -130,16 +135,17 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 IN (?, ?
 ----
 0
 2
+a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHERE (table_1.column_3 IN (?, ?, ?) AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -148,4 +154,4 @@ SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a

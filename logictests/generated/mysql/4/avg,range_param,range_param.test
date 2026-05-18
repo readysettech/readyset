@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_3`, `column_1`, `column_2`, `column_5`, `column_4
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--42097855.8000
+-42097855.8
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)

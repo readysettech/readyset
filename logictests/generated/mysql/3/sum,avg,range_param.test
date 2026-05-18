@@ -46,7 +46,7 @@ query R rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
--543102776.6000
+-543102776.6
 
 query  rowsort
 SELECT sum(`table_1`.`column_7`) AS `alias_1`, avg(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_8` > ?)
@@ -84,7 +84,7 @@ SELECT sum(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--172473033.2000
+-172473033.2
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)

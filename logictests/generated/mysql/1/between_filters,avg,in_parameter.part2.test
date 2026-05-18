@@ -106,7 +106,7 @@ SELECT table_1.column_2 AS alias_1, avg(table_1.column_4) AS alias_2 FROM table_
 1
 1.0000
 2
-0.0000
+0
 
 query  rowsort
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE (table_1.column_1 BETWEEN 1 AND 5 AND table_1.column_1 IN (?, ?, ?))

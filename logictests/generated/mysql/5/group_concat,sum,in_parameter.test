@@ -19,7 +19,7 @@ SELECT sum(table_1.column_2) AS alias_1 FROM table_1
 ----
 5
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, sum(table_1.column_4) AS alias_2 FROM table_1
@@ -51,14 +53,14 @@ SELECT sum(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_2 IN (
 ----
 5
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, sum(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
-3
+a, a, a, a, a
+5
 
 statement ok
 DELETE FROM table_1 WHERE (column_9 = 0)
@@ -79,7 +81,7 @@ SELECT sum(table_1.column_2) AS alias_1 FROM table_1
 ----
 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -87,6 +89,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 0
 2
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, sum(table_1.column_4) AS alias_2 FROM table_1
@@ -110,11 +113,11 @@ SELECT sum(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_2 IN (
 ----
 3
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, sum(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
-2
+a, a, a
+3

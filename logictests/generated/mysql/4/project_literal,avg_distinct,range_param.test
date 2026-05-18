@@ -18,7 +18,7 @@ SELECT 1 AS `alias_1`
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--75671395.1000
+-75671395.1
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -35,7 +35,7 @@ query IR rowsort
 SELECT 1 AS `alias_1`, avg(distinct `table_1`.`column_2`) AS `alias_2` FROM `table_1`
 ----
 1
--243112801.3000
+-243112801.3
 
 query  rowsort
 SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -89,7 +89,7 @@ SELECT 1 AS `alias_1`
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--577899868.4000
+-577899868.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)

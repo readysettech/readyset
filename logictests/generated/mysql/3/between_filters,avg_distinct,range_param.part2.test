@@ -53,7 +53,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_
 query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--1121434713.6000
+-1121434713.6
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -635,7 +635,7 @@ SELECT `table_1`.`column_24` AS `alias_1`, `table_1`.`column_24` AS `alias_2`, a
 query  rowsort
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, `table_1`.`column_27` AS `alias_4`, avg(distinct `table_1`.`column_28`) AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) OR `table_1`.`column_27` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`, `table_1`.`column_27`
 ----
-25 values hashing to f8065d6e52c5168e28e830f3a98e7e9d
+25 values hashing to bf91bdda99e15c684b74f965409b1941
 
 query  rowsort
 SELECT `table_1`.`column_27` AS `alias_1`, `table_1`.`column_27` AS `alias_2`, `table_1`.`column_27` AS `alias_3`, `table_1`.`column_27` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_27` NOT BETWEEN 1 AND 5 AND `table_1`.`column_27` BETWEEN 1 AND 5) OR `table_1`.`column_27` NOT BETWEEN 1 AND 5) OR `table_1`.`column_27` BETWEEN 1 AND 5) AND (`table_1`.`column_27` > ?))

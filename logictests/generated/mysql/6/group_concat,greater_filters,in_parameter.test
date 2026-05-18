@@ -68,13 +68,13 @@ SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, table_1.column_
 ----
 
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 > table_1.column_3) OR (table_1.column_2 > table_1.column_3))
@@ -521,13 +521,13 @@ SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, table_1.column_
 ----
 
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 > table_1.column_3) OR (table_1.column_2 > table_1.column_3))

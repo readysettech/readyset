@@ -21,7 +21,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE (table_1.column_1 = ?)
 a
 a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -30,6 +30,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1 WHERE (table_1.column_2 = ?)
@@ -44,25 +46,27 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-1, 0, 2
+1, a, 0, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE ((table_1.column_3 = ?) AND table_1.column_3 IN (?, ?, ?))
 ? = a
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+a
 
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE ((table_1.column_3 = ?) AND table_1.column_3 IN (?, ?, ?))
 ? = a
 ? = 0
 ? = 1
 ? = 2
 ----
-NULL
+a, a
 
 statement ok
 DELETE FROM table_1 WHERE (column_5 = 0)
@@ -84,7 +88,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE (table_1.column_1 = ?)
 ----
 a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -92,6 +96,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 1
 2
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1 WHERE (table_1.column_2 = ?)
@@ -99,28 +104,29 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1 WHE
 ----
 a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-0, 2
+0, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE ((table_1.column_3 = ?) AND table_1.column_3 IN (?, ?, ?))
 ? = a
 ? = 0
 ? = 1
 ? = 2
 ----
+a
 
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE ((table_1.column_3 = ?) AND table_1.column_3 IN (?, ?, ?))
 ? = a
 ? = 0
 ? = 1
 ? = 2
 ----
-NULL
+a

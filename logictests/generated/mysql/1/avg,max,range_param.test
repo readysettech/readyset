@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_3`, `column_4`, `column_1`, `column_6`, `column_8
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--684482810.2000
+-684482810.2
 
 query  rowsort
 SELECT max(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -40,7 +40,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(ROUND(avg(`table_1`.`column_5`))) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--102630355.0000
+-102630355
 
 query  rowsort
 SELECT max(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
@@ -53,7 +53,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(ROUND(avg(`table_1`.`column_7`))) AS `alias_1`, max(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
-321598702.0000
+321598702
 1702094313
 
 statement ok
@@ -80,7 +80,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--1417716516.4000
+-1417716516.4
 
 query  rowsort
 SELECT max(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -106,7 +106,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(ROUND(avg(`table_1`.`column_5`))) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
--1348761840.0000
+-1348761840
 
 query  rowsort
 SELECT max(`table_1`.`column_6`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
@@ -119,5 +119,5 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(ROUND(avg(`table_1`.`column_7`))) AS `alias_1`, max(`table_1`.`column_8`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
-607766618.0000
+607766618
 1702094313

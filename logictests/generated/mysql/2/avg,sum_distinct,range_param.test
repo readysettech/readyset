@@ -34,7 +34,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, sum(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--1053113746.1000
+-1053113746.1
 -2649383417
 
 query  rowsort
@@ -99,7 +99,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, sum(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--1401482732.2000
+-1401482732.2
 -133164577
 
 query  rowsort

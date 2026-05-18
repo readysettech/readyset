@@ -27,7 +27,7 @@ DELETE FROM `table_1` WHERE (`column_34` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--446184966.4000
+-446184966.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)

@@ -69,7 +69,7 @@ NULL
 query R rowsort
 SELECT avg(distinct `table_2`.`column_3`) AS `alias_1` FROM `table_2`
 ----
--17420085.7000
+-17420085.7
 
 query  rowsort
 SELECT `table_2`.`column_1` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_1` > ?)
@@ -84,7 +84,7 @@ SELECT `table_2`.`column_1` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 query  rowsort
 SELECT `table_2`.`column_4` AS `alias_1`, `table_3`.`column_2` AS `alias_2`, avg(distinct `table_2`.`column_5`) AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_1` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
-30 values hashing to fe75374b10a93052f1f8a253b90d67ef
+30 values hashing to 945ca724a8b6c431a760ffc3ebd799f1
 
 query  rowsort
 SELECT `table_2`.`column_6` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_2` LEFT JOIN `table_4` ON (`table_2`.`column_4` = `table_4`.`column_1`) WHERE (`table_2`.`column_6` > ?)

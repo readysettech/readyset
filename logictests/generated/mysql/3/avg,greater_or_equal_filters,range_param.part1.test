@@ -12,7 +12,7 @@ INSERT INTO `table_1` (`column_21`, `column_3`, `column_19`, `column_7`, `column
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--685262188.5000
+-685262188.5
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` >= `table_1`.`column_2`)
@@ -96,13 +96,13 @@ SELECT avg(`table_1`.`column_5`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`
 query RI rowsort
 SELECT avg(`table_1`.`column_6`) AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_3` >= 1) GROUP BY `table_1`.`column_3`
 ----
--147505587.0000
+-147505587
 915305336
--291645419.6000
+-291645419.6
 1
--88012133.0000
+-88012133
 678334796
-2074787451.0000
+2074787451
 180177754
 
 query  rowsort
@@ -259,32 +259,32 @@ SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 query RII rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` >= `table_1`.`column_7`) OR (`table_1`.`column_3` >= `table_1`.`column_7`)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
--1794882993.0000
+-1794882993
 915305336
 915305336
--323926010.6000
+-323926010.6
 1
 1
--491437582.0000
+-491437582
 180177754
 180177754
-1076390772.0000
+1076390772
 678334796
 678334796
 
 query RII rowsort
 SELECT avg(`table_1`.`column_9`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` >= `table_1`.`column_7`) AND (`table_1`.`column_3` >= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
--818628118.8000
+-818628118.8
 1
 1
-1767835600.0000
+1767835600
 915305336
 915305336
-1909786305.0000
+1909786305
 180177754
 180177754
-518495587.0000
+518495587
 678334796
 678334796
 
@@ -362,16 +362,16 @@ SELECT avg(`table_1`.`column_14`) AS `alias_1`, `table_1`.`column_3` AS `alias_2
 query RII rowsort
 SELECT avg(`table_1`.`column_15`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_3` >= 1) OR (`table_1`.`column_3` >= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`
 ----
--1610862574.0000
+-1610862574
 678334796
 678334796
--218184432.8000
+-218184432.8
 1
 1
--479286421.0000
+-479286421
 180177754
 180177754
-2059462251.0000
+2059462251
 915305336
 915305336
 
@@ -486,19 +486,19 @@ SELECT `table_1`.`column_3` AS `alias_1`, `table_1`.`column_3` AS `alias_2` FROM
 query RIII rowsort
 SELECT avg(`table_1`.`column_18`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3`, `table_1`.`column_3` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_3` >= `table_1`.`column_7`) OR (`table_1`.`column_3` >= `table_1`.`column_7`)) AND (`table_1`.`column_3` >= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`, `table_1`.`column_3`
 ----
--135243751.4000
+-135243751.4
 1
 1
 1
--288184277.0000
+-288184277
 180177754
 180177754
 180177754
-1446253542.0000
+1446253542
 915305336
 915305336
 915305336
-2054933470.0000
+2054933470
 678334796
 678334796
 678334796
@@ -507,19 +507,19 @@ SELECT avg(`table_1`.`column_18`) AS `alias_1`, `table_1`.`column_3` AS `alias_2
 query RIII rowsort
 SELECT avg(`table_1`.`column_19`) AS `alias_1`, `table_1`.`column_3` AS `alias_2`, `table_1`.`column_3` AS `alias_3`, `table_1`.`column_3` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_3` >= `table_1`.`column_19`) OR (`table_1`.`column_3` >= `table_1`.`column_19`)) OR (`table_1`.`column_3` >= 1)) GROUP BY `table_1`.`column_3`, `table_1`.`column_3`, `table_1`.`column_3`
 ----
--2036584645.0000
+-2036584645
 678334796
 678334796
 678334796
--54152820.2000
+-54152820.2
 1
 1
 1
-1888397681.0000
+1888397681
 915305336
 915305336
 915305336
-473341096.0000
+473341096
 180177754
 180177754
 180177754
@@ -628,12 +628,12 @@ SELECT `table_1`.`column_21` AS `alias_1`, `table_1`.`column_21` AS `alias_2`, `
 query RIIII rowsort
 SELECT avg(`table_1`.`column_28`) AS `alias_1`, `table_1`.`column_21` AS `alias_2`, `table_1`.`column_21` AS `alias_3`, `table_1`.`column_21` AS `alias_4`, `table_1`.`column_21` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_21` >= `table_1`.`column_3`) OR (`table_1`.`column_21` >= `table_1`.`column_3`)) AND (`table_1`.`column_21` >= 1)) OR (`table_1`.`column_21` >= 1)) GROUP BY `table_1`.`column_21`, `table_1`.`column_21`, `table_1`.`column_21`, `table_1`.`column_21`
 ----
--456562644.4000
+-456562644.4
 1
 1
 1
 1
-1687247772.0000
+1687247772
 169099348
 169099348
 169099348

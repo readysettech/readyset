@@ -19,7 +19,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 0, a, 1, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT sum(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator ', ') AS alias_2 FROM table_1
@@ -35,21 +37,21 @@ SELECT sum(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator
 5
 a, a, a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT sum(table_1.column_5) AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-3
+5
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  rowsort
 SELECT sum(table_1.column_7) AS alias_1, group_concat(table_1.column_8 separator ', ') AS alias_2 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?)
@@ -79,7 +81,7 @@ SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1
 ----
 1, a, 2
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -87,6 +89,7 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?,
 ----
 1
 2
+a
 
 query  rowsort
 SELECT sum(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator ', ') AS alias_2 FROM table_1
@@ -94,21 +97,21 @@ SELECT sum(table_1.column_3) AS alias_1, group_concat(table_1.column_4 separator
 3
 a, a, a
 
-query  rowsort
+query  rowsort error: values returned
 SELECT sum(table_1.column_5) AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-2
+3
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_2 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  rowsort
 SELECT sum(table_1.column_7) AS alias_1, group_concat(table_1.column_8 separator ', ') AS alias_2 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?)

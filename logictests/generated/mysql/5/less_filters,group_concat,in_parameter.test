@@ -138,13 +138,13 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 < 1) AN
 ----
 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 < table_1.column_1) OR (table_1.column_2 < table_1.column_1)) AND (table_1.column_2 < 1))
@@ -598,13 +598,13 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE ((table_1.column_2 < 1) AN
 ----
 
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 < table_1.column_1) OR (table_1.column_2 < table_1.column_1)) AND (table_1.column_2 < 1))

@@ -27,7 +27,7 @@ DELETE FROM `table_1` WHERE (`column_34` = 4)
 query R rowsort
 SELECT avg(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--698907763.8000
+-698907763.8
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)
@@ -58,17 +58,17 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` > `table_1`.`column_1`) GROUP BY `table_1`.`column_2`
 ----
--353028591.0000
+-353028591
 -953060454
--887092514.0000
+-887092514
 -1058996989
-535017428.0000
+535017428
 -403694405
 
 query RI rowsort
 SELECT avg(`table_1`.`column_4`) AS `alias_1`, `table_1`.`column_2` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` > `table_1`.`column_3`) GROUP BY `table_1`.`column_2`
 ----
-1956387002.0000
+1956387002
 1
 
 query RI rowsort
@@ -138,7 +138,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 query RII rowsort
 SELECT avg(`table_1`.`column_8`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_2` > `table_1`.`column_6`) OR (`table_1`.`column_2` > `table_1`.`column_6`)) GROUP BY `table_1`.`column_2`, `table_1`.`column_2`
 ----
-698634030.0000
+698634030
 1
 1
 
@@ -149,10 +149,10 @@ SELECT avg(`table_1`.`column_9`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`
 query RII rowsort
 SELECT avg(`table_1`.`column_10`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_2` > `table_1`.`column_9`) OR (`table_1`.`column_2` > 1)) GROUP BY `table_1`.`column_2`, `table_1`.`column_2`
 ----
--765164024.5000
+-765164024.5
 1
 1
-242152396.0000
+242152396
 -1058996989
 -1058996989
 
@@ -168,10 +168,10 @@ SELECT avg(`table_1`.`column_12`) AS `alias_1`, `table_1`.`column_2` AS `alias_2
 query RII rowsort
 SELECT avg(`table_1`.`column_13`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_2` > `table_1`.`column_9`) OR (`table_1`.`column_2` > 1)) GROUP BY `table_1`.`column_2`, `table_1`.`column_2`
 ----
--1060437709.0000
+-1060437709
 -1058996989
 -1058996989
-449871660.5000
+449871660.5
 1
 1
 
@@ -250,7 +250,7 @@ SELECT avg(`table_1`.`column_18`) AS `alias_1`, `table_1`.`column_2` AS `alias_2
 query RIII rowsort
 SELECT avg(`table_1`.`column_19`) AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_2` > `table_1`.`column_14`) OR (`table_1`.`column_2` > `table_1`.`column_14`)) OR (`table_1`.`column_2` > 1)) GROUP BY `table_1`.`column_2`, `table_1`.`column_2`, `table_1`.`column_2`
 ----
--2040199712.0000
+-2040199712
 -403694405
 -403694405
 -403694405

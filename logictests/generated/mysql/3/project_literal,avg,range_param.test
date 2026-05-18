@@ -52,14 +52,14 @@ query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
--257379231.5000
+-257379231.5
 
 query IR rowsort
 SELECT 1 AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 1
--46889542.5000
+-46889542.5
 
 statement ok
 DELETE FROM `table_1` WHERE (`column_5` = 0)
@@ -105,7 +105,7 @@ query IR rowsort
 SELECT 1 AS `alias_1`, avg(`table_1`.`column_2`) AS `alias_2` FROM `table_1`
 ----
 1
--27216681.2000
+-27216681.2
 
 query  rowsort
 SELECT 1 AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)

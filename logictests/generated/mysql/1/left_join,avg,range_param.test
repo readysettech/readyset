@@ -69,7 +69,7 @@ NULL
 query R rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1` FROM `table_2`
 ----
--236683941.4000
+-236683941.4
 
 query  rowsort
 SELECT `table_2`.`column_3` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
@@ -82,7 +82,7 @@ SELECT `table_2`.`column_3` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column
 query  rowsort
 SELECT `table_2`.`column_4` AS `alias_1`, `table_3`.`column_2` AS `alias_2`, avg(`table_2`.`column_5`) AS `alias_3` FROM `table_2` LEFT JOIN `table_3` ON (`table_2`.`column_3` = `table_3`.`column_1`) GROUP BY `table_2`.`column_4`, `table_3`.`column_2`
 ----
-30 values hashing to e2cdcdbb3ba075d20a7e0c7e904795da
+30 values hashing to 3f1d841057882842c45b8c6358b9ef2b
 
 query  rowsort
 SELECT `table_3`.`column_3` AS `alias_1`, `table_4`.`column_2` AS `alias_2` FROM `table_3` LEFT JOIN `table_4` ON (`table_3`.`column_2` = `table_4`.`column_1`) WHERE (`table_3`.`column_2` > ?)
@@ -108,7 +108,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_2`.`column_6`)) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_2` > ?)
 ? = 10
 ----
--571072757.0000
+-571072757
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -117,16 +117,16 @@ SELECT `table_2`.`column_7` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, ROU
 ----
 -1387991589
 NULL
-1296628565.0000
+1296628565
 1719232808
 NULL
-619846164.0000
+619846164
 2055867150
 NULL
-480476374.0000
+480476374
 390501567
 NULL
--270993056.0000
+-270993056
 
 statement ok
 DELETE FROM `table_2` WHERE (`column_9` = 0)
@@ -246,7 +246,7 @@ NULL
 query R rowsort
 SELECT avg(`table_2`.`column_3`) AS `alias_1` FROM `table_2`
 ----
--236828631.8000
+-236828631.8
 
 query  rowsort
 SELECT `table_2`.`column_3` AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_3` > ?)
@@ -294,7 +294,7 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT ROUND(avg(`table_2`.`column_6`)) AS `alias_1` FROM `table_2` WHERE (`table_2`.`column_2` > ?)
 ? = 10
 ----
--1176446846.0000
+-1176446846
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate\ in\ this\ context\ \(e\.g\.\ nested\ in\ expressions,\ HAVING,\ ORDER\ BY,\ or\ subqueries\)
@@ -303,7 +303,7 @@ SELECT `table_2`.`column_7` AS `alias_1`, `table_5`.`column_2` AS `alias_2`, ROU
 ----
 -1387991589
 NULL
-1296628565.0000
+1296628565
 390501567
 NULL
--270993056.0000
+-270993056

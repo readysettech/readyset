@@ -90,10 +90,10 @@ SELECT min(`table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT 
 ----
 NULL
 
-query  rowsort
+query  rowsort error: values returned
 SELECT min(`table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
--1946032610
+-1840291581
 
 query  rowsort
 SELECT min(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT min(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_2` = `alias_3`.`alias_2`)

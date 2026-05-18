@@ -56,7 +56,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
--430823710.2000
+-430823710.2
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -134,15 +134,15 @@ query IR rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`) GROUP BY `table_1`.`column_2`
 ----
 -295858125
--455910310.0000
+-455910310
 1
--653549750.5000
+-653549750.5
 1833494592
--2092408191.0000
+-2092408191
 762698597
-1835671221.0000
+1835671221
 807842386
-1779683081.0000
+1779683081
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` > ?))
@@ -199,15 +199,15 @@ query IR rowsort
 SELECT `table_1`.`column_2` AS `alias_1`, avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`) GROUP BY `table_1`.`column_2`
 ----
 -295858125
--413191497.0000
+-413191497
 1
--906926832.7500
+-906926832.75
 1833494592
-705211744.0000
+705211744
 762698597
--1543973467.0000
+-1543973467
 807842386
--516001661.0000
+-516001661
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_5`) AND (`table_1`.`column_2` > ?))
@@ -540,7 +540,7 @@ SELECT `table_1`.`column_17` AS `alias_1`, `table_1`.`column_17` AS `alias_2`, `
 query  rowsort
 SELECT `table_1`.`column_17` AS `alias_1`, `table_1`.`column_17` AS `alias_2`, `table_1`.`column_17` AS `alias_3`, avg(distinct `table_1`.`column_20`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_17` >= `table_1`.`column_19`) OR (`table_1`.`column_17` >= `table_1`.`column_19`)) OR (`table_1`.`column_17` >= 1)) GROUP BY `table_1`.`column_17`, `table_1`.`column_17`, `table_1`.`column_17`
 ----
-24 values hashing to 961740699da9dfa2f94a5cfe3c12718d
+24 values hashing to 484bc6ff7bbb81ad72a1c5f71013ee5f
 
 query  rowsort
 SELECT `table_1`.`column_17` AS `alias_1`, `table_1`.`column_17` AS `alias_2`, `table_1`.`column_17` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_17` >= `table_1`.`column_19`) OR (`table_1`.`column_17` >= `table_1`.`column_19`)) OR (`table_1`.`column_17` >= 1)) AND (`table_1`.`column_17` > ?))
@@ -743,7 +743,7 @@ SELECT `table_1`.`column_17` AS `alias_1`, `table_1`.`column_17` AS `alias_2`, a
 query  rowsort
 SELECT `table_1`.`column_17` AS `alias_1`, `table_1`.`column_17` AS `alias_2`, `table_1`.`column_17` AS `alias_3`, `table_1`.`column_17` AS `alias_4`, avg(distinct `table_1`.`column_29`) AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_17` >= `table_1`.`column_19`) OR (`table_1`.`column_17` >= `table_1`.`column_19`)) AND (`table_1`.`column_17` >= 1)) OR (`table_1`.`column_17` >= 1)) GROUP BY `table_1`.`column_17`, `table_1`.`column_17`, `table_1`.`column_17`, `table_1`.`column_17`
 ----
-25 values hashing to 52537b597fbcab56cd927f727c1ffedf
+25 values hashing to 797c23d580e0bcc3f1c717f21f1f1da3
 
 query  rowsort
 SELECT `table_1`.`column_28` AS `alias_1`, `table_1`.`column_28` AS `alias_2`, `table_1`.`column_28` AS `alias_3`, `table_1`.`column_28` AS `alias_4` FROM `table_1` WHERE (((((`table_1`.`column_28` >= `table_1`.`column_6`) OR (`table_1`.`column_28` >= `table_1`.`column_6`)) AND (`table_1`.`column_28` >= 1)) OR (`table_1`.`column_28` >= 1)) AND (`table_1`.`column_28` > ?))

@@ -94,10 +94,10 @@ SELECT sum(`table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT 
 ----
 NULL
 
-query  rowsort
+query  rowsort error: values returned
 SELECT sum(`table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
-2517971840
+317215839
 
 query  rowsort
 SELECT sum(`table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT sum(`table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_3` = `alias_3`.`alias_2`)

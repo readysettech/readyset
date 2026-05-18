@@ -228,7 +228,7 @@ SELECT avg(table_1.column_13) AS alias_1, table_1.column_2 AS alias_2 FROM table
 ? = 1
 ? = 2
 ----
-0.0000
+0
 2
 1.0000
 1

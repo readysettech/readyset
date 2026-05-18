@@ -30,10 +30,40 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -57,6 +87,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -137,6 +182,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -160,6 +220,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -183,6 +258,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -206,6 +296,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -324,6 +429,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -559,6 +679,36 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -578,10 +728,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -601,6 +796,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -620,14 +830,89 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -647,10 +932,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -670,6 +1000,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -689,6 +1034,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -708,6 +1068,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -727,10 +1102,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -750,10 +1170,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -773,10 +1238,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -796,10 +1306,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -819,6 +1374,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -838,6 +1408,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -857,6 +1442,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -876,6 +1476,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -895,6 +1510,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -914,10 +1544,55 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
 ----
+-368091021
+-368091021
+-368091021
+1209778449
+1209778449
+1209778449
+1510363446
+1510363446
+1510363446
+1943412533
+1943412533
+1943412533
+2123672057
+2123672057
+2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -937,6 +1612,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -956,6 +1646,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -975,6 +1680,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))
@@ -994,6 +1714,21 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2123672057
 2123672057
 2123672057
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
+NULL
 
 query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) AND (`table_1`.`column_1` > ?))

@@ -18,7 +18,7 @@ SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--242864872.2000
+-242864872.2
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -36,7 +36,7 @@ query IR rowsort
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 3169667993
--385563530.7000
+-385563530.7
 
 query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_3` > ?)
@@ -86,7 +86,7 @@ SELECT sum(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--411558045.6000
+-411558045.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -102,7 +102,7 @@ query IR rowsort
 SELECT sum(distinct `table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 1772925834
--343495489.4000
+-343495489.4
 
 # REA-6472
 query  rowsort error: SUM\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

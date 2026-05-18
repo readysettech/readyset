@@ -80,13 +80,13 @@ a
 a, a, a
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5)
@@ -147,12 +147,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 1
 2
 
@@ -178,12 +180,14 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 NOT BETW
 ----
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
 1
 2
 
@@ -244,16 +248,16 @@ a, a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_14 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_9 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
-1
-a
 2
+a, a, a
+1
 
 query  rowsort
 SELECT group_concat(table_1.column_15 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2
@@ -277,16 +281,16 @@ SELECT group_concat(table_1.column_16 separator ', ') AS alias_1, table_1.column
 a
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_17 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
-1
-a
 2
+a, a, a
+1
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5)
@@ -347,7 +351,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -355,6 +359,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 1
 1
 2
@@ -379,7 +387,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -389,10 +397,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 0
 1
 1
+1
+1
+1
+1
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -400,10 +412,14 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 1
 1
+1
+1
+1
+1
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -411,6 +427,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
+1
+1
 1
 1
 2
@@ -470,7 +490,7 @@ a
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_23 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -480,11 +500,11 @@ a
 0
 0
 a
-1
-1
-a
 2
 2
+a, a, a
+1
+1
 
 query  rowsort
 SELECT group_concat(table_1.column_24 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
@@ -502,7 +522,7 @@ a, a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_25 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -512,26 +532,26 @@ a
 0
 0
 a
-1
-1
-a
 2
 2
+a, a, a
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_26 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
-1
-1
-a
 2
 2
+a, a, a
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_27 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -541,11 +561,11 @@ a
 0
 0
 a
-1
-1
-a
 2
 2
+a, a, a
+1
+1
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5)
@@ -581,7 +601,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -590,11 +610,17 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
+1
+1
+1
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -606,11 +632,17 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
+1
+1
+1
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -619,6 +651,12 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
+1
+1
+1
 1
 1
 1
@@ -656,22 +694,22 @@ a
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_30 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
 a
-1
-1
-1
-a
 2
 2
 2
+a, a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_31 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -682,15 +720,15 @@ a
 0
 0
 a
-1
-1
-1
-a
 2
 2
 2
+a, a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_32 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -701,15 +739,15 @@ a
 0
 0
 a
-1
-1
-1
-a
 2
 2
 2
+a, a, a
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -723,12 +761,20 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
+1
+1
+1
+1
+1
 2
 2
 2
 2
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_33 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE ((((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -740,15 +786,15 @@ a
 0
 0
 a
-1
-1
-1
-1
-a
 2
 2
 2
 2
+a, a, a
+1
+1
+1
+1
 
 statement ok
 DELETE FROM table_1 WHERE (column_34 = 0)
@@ -819,13 +865,13 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1, table_1.column_
 a, a
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5)
@@ -874,12 +920,13 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
 1
 
 query  rowsort
@@ -900,12 +947,13 @@ SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 NOT BETW
 ----
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_3 IN (?, ?, ?))
 ? = 0
 ? = 1
 ? = 2
 ----
+1
 1
 
 query  rowsort
@@ -956,13 +1004,13 @@ a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_14 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_9 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
-a
+a, a
 1
 
 query  rowsort
@@ -984,13 +1032,13 @@ SELECT group_concat(table_1.column_16 separator ', ') AS alias_1, table_1.column
 a
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_17 separator ', ') AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE (table_1.column_2 BETWEEN 1 AND 5 AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
-a
+a, a
 1
 
 query  rowsort
@@ -1040,7 +1088,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1048,6 +1096,8 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
 1
 1
 
@@ -1064,7 +1114,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1074,8 +1124,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 0
 1
 1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1083,8 +1135,10 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 1
 1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1092,6 +1146,8 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2 FROM table_1 WHE
 ----
 0
 0
+1
+1
 1
 1
 
@@ -1141,7 +1197,7 @@ a
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_23 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1150,7 +1206,7 @@ SELECT group_concat(table_1.column_23 separator ', ') AS alias_1, table_1.column
 a
 0
 0
-a
+a, a
 1
 1
 
@@ -1166,7 +1222,7 @@ a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_25 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1175,21 +1231,21 @@ SELECT group_concat(table_1.column_25 separator ', ') AS alias_1, table_1.column
 a
 0
 0
-a
+a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_26 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
-a
+a, a
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_27 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE ((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1198,7 +1254,7 @@ SELECT group_concat(table_1.column_27 separator ', ') AS alias_1, table_1.column
 a
 0
 0
-a
+a, a
 1
 1
 
@@ -1228,7 +1284,7 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1237,8 +1293,11 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1250,8 +1309,11 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1260,6 +1322,9 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 0
 0
 0
+1
+1
+1
 1
 1
 1
@@ -1289,18 +1354,18 @@ a
 0
 0
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_30 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
 ? = 2
 ----
-a
+a, a
 1
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_31 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 NOT BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1310,12 +1375,12 @@ a
 0
 0
 0
-a
+a, a
 1
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_32 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE (((table_1.column_2 BETWEEN 1 AND 5 OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1325,12 +1390,12 @@ a
 0
 0
 0
-a
+a, a
 1
 1
 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4 FROM table_1 WHERE ((((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?))
 ? = 0
 ? = 1
@@ -1344,8 +1409,12 @@ SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_
 1
 1
 1
+1
+1
+1
+1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT group_concat(table_1.column_33 separator ', ') AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3, table_1.column_2 AS alias_4, table_1.column_2 AS alias_5 FROM table_1 WHERE ((((table_1.column_2 NOT BETWEEN 1 AND 5 AND table_1.column_2 BETWEEN 1 AND 5) OR table_1.column_2 NOT BETWEEN 1 AND 5) OR table_1.column_2 BETWEEN 1 AND 5) AND table_1.column_4 IN (?, ?, ?)) GROUP BY table_1.column_2, table_1.column_2, table_1.column_2, table_1.column_2
 ? = 0
 ? = 1
@@ -1356,7 +1425,7 @@ a
 0
 0
 0
-a
+a, a
 1
 1
 1

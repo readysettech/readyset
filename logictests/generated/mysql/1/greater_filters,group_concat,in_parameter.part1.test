@@ -29,7 +29,7 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1
 ----
 2, a, 0, a, 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -38,6 +38,8 @@ SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT table_1.column_1 AS alias_1, table_1.column_1 AS alias_2 FROM table_1 WHERE ((table_1.column_1 > table_1.column_2) OR (table_1.column_1 > table_1.column_2))
@@ -114,7 +116,7 @@ SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-2, 1, 0
+2, a, 1, a, 0
 
 query  rowsort
 SELECT table_1.column_2 AS alias_1, table_1.column_2 AS alias_2, table_1.column_2 AS alias_3 FROM table_1 WHERE (((table_1.column_2 > table_1.column_1) OR (table_1.column_2 > table_1.column_1)) AND (table_1.column_2 > 1))

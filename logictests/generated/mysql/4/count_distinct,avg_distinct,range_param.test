@@ -94,7 +94,7 @@ query IR rowsort
 SELECT count(distinct `table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 5
--552937435.6000
+-552937435.6
 
 query  rowsort error: COUNT\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)

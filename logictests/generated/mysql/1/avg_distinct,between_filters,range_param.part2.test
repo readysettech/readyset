@@ -27,7 +27,7 @@ DELETE FROM `table_1` WHERE (`column_33` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--515954342.4000
+-515954342.4
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5
@@ -633,7 +633,7 @@ SELECT `table_1`.`column_19` AS `alias_1`, `table_1`.`column_19` AS `alias_2`, `
 query  rowsort
 SELECT avg(distinct `table_1`.`column_27`) AS `alias_1`, `table_1`.`column_19` AS `alias_2`, `table_1`.`column_19` AS `alias_3`, `table_1`.`column_19` AS `alias_4`, `table_1`.`column_19` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_19` NOT BETWEEN 1 AND 5 AND `table_1`.`column_19` BETWEEN 1 AND 5) OR `table_1`.`column_19` NOT BETWEEN 1 AND 5) OR `table_1`.`column_19` BETWEEN 1 AND 5) GROUP BY `table_1`.`column_19`, `table_1`.`column_19`, `table_1`.`column_19`, `table_1`.`column_19`
 ----
-25 values hashing to bb835a7ea54fcfcca6480cb9dc6b83f8
+25 values hashing to 7bf7a8b9f97fbb2ee5b8b42afa35ec71
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

@@ -51,7 +51,7 @@ SELECT table_1.column_3 AS alias_1, table_2.column_2 AS alias_2 FROM table_1 INN
 ----
 30 values hashing to 56a22a5394edccfc958048b005afa27b
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -60,6 +60,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1, table_1.column_5 AS alias_2, table_3.column_2 AS alias_3 FROM table_1 INNER JOIN table_3 ON (table_1.column_3 = table_3.column_1) GROUP BY table_1.column_5, table_3.column_2
@@ -75,15 +77,15 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-2, 0, 1
+2, a, 0, a, 1
 
-query  rowsort
+query  rowsort error: (values|results) returned
 SELECT table_1.column_7 AS alias_1, table_4.column_2 AS alias_2 FROM table_1 INNER JOIN table_4 ON (table_1.column_3 = table_4.column_1) WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-30 values hashing to 56a22a5394edccfc958048b005afa27b
+50 values hashing to 1f4709ccf33e9b44d9c58ab63929bdf1
 
 query  rowsort
 SELECT group_concat(table_2.column_3 separator ', ') AS alias_1, table_2.column_4 AS alias_2, table_5.column_2 AS alias_3 FROM table_2 INNER JOIN table_5 ON (table_2.column_1 = table_5.column_1) WHERE table_2.column_1 IN (?, ?, ?) GROUP BY table_2.column_4, table_5.column_2
@@ -151,7 +153,7 @@ SELECT table_1.column_3 AS alias_1, table_2.column_2 AS alias_2 FROM table_1 INN
 1
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -159,6 +161,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 0
 2
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1, table_1.column_5 AS alias_2, table_3.column_2 AS alias_3 FROM table_1 INNER JOIN table_3 ON (table_1.column_3 = table_3.column_1) GROUP BY table_1.column_5, table_3.column_2
@@ -167,20 +170,26 @@ a, a, a, a, a, a, a, a, a
 1
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-0, 1
+0, a, 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_7 AS alias_1, table_4.column_2 AS alias_2 FROM table_1 INNER JOIN table_4 ON (table_1.column_3 = table_4.column_1) WHERE table_1.column_6 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
+1
+1
+1
+1
+1
+1
 1
 1
 1

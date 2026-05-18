@@ -35,6 +35,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -72,6 +75,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -85,6 +91,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -98,6 +107,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -111,6 +123,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -164,6 +179,9 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` IS NOT NULL)
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -202,6 +220,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -217,6 +238,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -241,12 +265,18 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -262,6 +292,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -304,6 +337,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -319,6 +355,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -334,6 +373,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -349,6 +391,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -409,6 +454,9 @@ query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_reci
 SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
+1206652818
+1482386598
+710936833
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -605,68 +653,124 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))
 ----
+NULL
+NULL
+NULL
+NULL

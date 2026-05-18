@@ -84,7 +84,7 @@ SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query  rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_3`.`column_2` AS `alias_3` FROM `table_1` LEFT JOIN `table_3` ON (`table_1`.`column_2` = `table_3`.`column_1`) GROUP BY `table_1`.`column_4`, `table_3`.`column_2`
 ----
-30 values hashing to 592a2f7a533e7957a22e44316cf9f450
+30 values hashing to 88646ec2d7170c08ed10dd10fdfa970d
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate

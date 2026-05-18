@@ -58,7 +58,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query R rowsort
 SELECT avg(`table_1`.`column_3`) AS `alias_1` FROM `table_1`
 ----
--218163556.2000
+-218163556.2
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -212,15 +212,15 @@ query IR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` <= 1) GROUP BY `table_1`.`column_1`
 ----
 -1207538305
--2031845023.0000
+-2031845023
 -2032219871
--1816881214.0000
+-1816881214
 -328104851
--302606836.0000
+-302606836
 -587132494
-177162547.0000
+177162547
 1
--797746753.6000
+-797746753.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` <= 1) AND (`table_1`.`column_1` > ?))
@@ -231,15 +231,15 @@ query IR rowsort
 SELECT `table_1`.`column_1` AS `alias_1`, avg(`table_1`.`column_7`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` <= 1) GROUP BY `table_1`.`column_1`
 ----
 -1207538305
--151646415.0000
+-151646415
 -2032219871
--1505296765.0000
+-1505296765
 -328104851
--213944999.0000
+-213944999
 -587132494
--434925102.0000
+-434925102
 1
--141112071.6000
+-141112071.6
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` <= 1) AND (`table_1`.`column_1` > ?))
@@ -417,13 +417,13 @@ SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, a
 ----
 -147078110
 -147078110
--1459057727.0000
+-1459057727
 -211104253
 -211104253
-433363485.0000
+433363485
 1
 1
--313337959.4000
+-313337959.4
 
 query  rowsort
 SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_14` <= 1) OR (`table_1`.`column_14` <= 1)) AND (`table_1`.`column_14` > ?))
@@ -465,15 +465,15 @@ SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `
 -147078110
 -147078110
 -147078110
--103592502.0000
+-103592502
 -211104253
 -211104253
 -211104253
--1890425296.0000
+-1890425296
 1
 1
 1
--829238270.8000
+-829238270.8
 
 query  rowsort
 SELECT `table_1`.`column_14` AS `alias_1`, `table_1`.`column_14` AS `alias_2`, `table_1`.`column_14` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_14` <= `table_1`.`column_6`) OR (`table_1`.`column_14` <= `table_1`.`column_6`)) OR (`table_1`.`column_14` <= 1)) AND (`table_1`.`column_14` > ?))

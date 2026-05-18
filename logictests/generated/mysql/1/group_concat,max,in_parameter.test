@@ -19,7 +19,7 @@ SELECT max(table_1.column_2) AS alias_1 FROM table_1
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -28,6 +28,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, max(table_1.column_4) AS alias_2 FROM table_1
@@ -42,7 +44,7 @@ SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-0, 1, 2
+0, a, 1, a, 2
 
 query  rowsort
 SELECT max(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
@@ -52,13 +54,13 @@ SELECT max(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_1 IN (
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, max(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 1
 
 statement ok
@@ -80,7 +82,7 @@ SELECT max(table_1.column_2) AS alias_1 FROM table_1
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -88,6 +90,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 0
 1
+a
 
 query  rowsort
 SELECT group_concat(table_1.column_3 separator ', ') AS alias_1, max(table_1.column_4) AS alias_2 FROM table_1
@@ -102,7 +105,7 @@ SELECT group_concat(table_1.column_5 separator ', ') AS alias_1 FROM table_1 WHE
 ? = 1
 ? = 2
 ----
-1, 2
+1, a, 2
 
 query  rowsort
 SELECT max(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
@@ -112,11 +115,11 @@ SELECT max(table_1.column_6) AS alias_1 FROM table_1 WHERE table_1.column_1 IN (
 ----
 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1, max(table_1.column_8) AS alias_2 FROM table_1 WHERE table_1.column_5 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 1

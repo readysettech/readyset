@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_2`, `column_1`, `column_3`, `column_5`, `column_4
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--415022272.9000
+-415022272.9
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)
@@ -91,7 +91,7 @@ DELETE FROM `table_1` WHERE (`column_5` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--386720612.2000
+-386720612.2
 
 query  rowsort
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` > ?)

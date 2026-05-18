@@ -17,7 +17,7 @@ NULL
 query rowsort
 SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
--85294324.0000
+-85294324
 
 query  rowsort
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`)
@@ -30,7 +30,7 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_5` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -48,19 +48,19 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\) is not supported as a post-lookup aggregate
 SELECT avg(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
 -531861221.0000
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\) is not supported as a post-lookup aggregate
 SELECT avg(distinct `table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
@@ -91,10 +91,10 @@ SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JOIN
 ----
 NULL
 
-query  rowsort
+query  rowsort error: values returned
 SELECT round(avg(distinct `table_1`.`column_3`)) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
--85294324.0000
+-165938951
 
 query  rowsort
 SELECT avg(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`)
@@ -107,7 +107,7 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_5` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -122,19 +122,19 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\) is not supported as a post-lookup aggregate
 SELECT avg(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_9`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
 NULL
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----
 -408004989.0000
 
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: AVG\(DISTINCT \.\.\.\) is not supported as a post-lookup aggregate
 SELECT avg(distinct `table_1`.`column_11`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT avg(distinct `table_1`.`column_12`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_7` > ?)
 ? = 10
 ----

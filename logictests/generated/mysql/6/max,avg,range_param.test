@@ -36,7 +36,7 @@ query IR rowsort
 SELECT max(`table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 1938245237
--326044867.2000
+-326044867.2
 
 query  rowsort
 SELECT max(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -88,7 +88,7 @@ SELECT max(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--61807983.2000
+-61807983.2
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -103,7 +103,7 @@ query IR rowsort
 SELECT max(`table_1`.`column_3`) AS `alias_1`, avg(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 1938245237
--44332808.8000
+-44332808.8
 
 query  rowsort
 SELECT max(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)

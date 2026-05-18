@@ -156,6 +156,39 @@ fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) 
         .all(|(res, expected)| res.compare_type_insensitive(expected))
 }
 
+/// Decode `QueryResults` into a row-major `Vec<Vec<Value>>`.
+///
+/// The MySQL wire layer returns NEWDECIMAL as opaque bytes; the type-erased
+/// `TryFrom<QueryResults>` path would decode those as `Value::Text` and lose precision
+/// when comparing upstream and Readyset results. Dispatching on per-column type metadata
+/// preserves the declared numeric semantics.
+fn rows_from_results(results: database_utils::QueryResults) -> anyhow::Result<Vec<Vec<Value>>> {
+    use database_utils::QueryResults;
+    match results {
+        QueryResults::MySql(rows) => rows
+            .into_iter()
+            .map(|mut row| {
+                (0..row.columns_ref().len())
+                    .map(|i| {
+                        let v = row
+                            .take::<mysql_async::Value, _>(i)
+                            .expect("column index in range");
+                        Value::from_mysql_value_with_column(v, &row.columns_ref()[i])
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .collect(),
+        QueryResults::Postgres(rows) => rows
+            .into_iter()
+            .map(|row| {
+                (0..row.len())
+                    .map(|i| row.try_get(i).map_err(anyhow::Error::from))
+                    .collect::<anyhow::Result<Vec<_>>>()
+            })
+            .collect(),
+    }
+}
+
 /// Establish a connection to the upstream DB server and recreate the test database
 pub(crate) async fn recreate_test_database(url: &DatabaseURL) -> anyhow::Result<()> {
     let db_name = url
@@ -728,7 +761,7 @@ impl TestScript {
             results
         };
 
-        let mut rows = <Vec<Vec<Value>>>::try_from(results)?.into_iter().map(
+        let mut rows = rows_from_results(results)?.into_iter().map(
             |mut row: Vec<Value>| -> anyhow::Result<Vec<Value>> {
                 if let Some(column_types) = &query.column_types {
                     let row_len = row.len();

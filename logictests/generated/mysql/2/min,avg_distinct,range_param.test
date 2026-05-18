@@ -18,7 +18,7 @@ SELECT min(`table_1`.`column_1`) AS `alias_1` FROM `table_1`
 query R rowsort
 SELECT avg(distinct `table_1`.`column_2`) AS `alias_1` FROM `table_1`
 ----
--376033285.6000
+-376033285.6
 
 query  rowsort
 SELECT `table_1`.`column_2` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_2` > ?)
@@ -99,7 +99,7 @@ query IR rowsort
 SELECT min(`table_1`.`column_3`) AS `alias_1`, avg(distinct `table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
 -1604846678
--486618257.6000
+-486618257.6
 
 query  rowsort
 SELECT min(`table_1`.`column_5`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_5` > ?)

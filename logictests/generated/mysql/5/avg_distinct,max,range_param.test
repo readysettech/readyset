@@ -13,7 +13,7 @@ INSERT INTO `table_1` (`column_8`, `column_1`, `column_9`, `column_3`, `column_4
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--414699128.9000
+-414699128.9
 
 query  rowsort
 SELECT max(`table_1`.`column_2`) AS `alias_1` FROM `table_1`
@@ -31,7 +31,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 query RI rowsort
 SELECT avg(distinct `table_1`.`column_3`) AS `alias_1`, max(`table_1`.`column_4`) AS `alias_2` FROM `table_1`
 ----
--144174498.6000
+-144174498.6
 1723647744
 
 query  rowsort error: AVG\(DISTINCT \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
@@ -77,7 +77,7 @@ DELETE FROM `table_1` WHERE (`column_9` = 4)
 query R rowsort
 SELECT avg(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1`
 ----
--19199638.8000
+-19199638.8
 
 query  rowsort
 SELECT max(`table_1`.`column_2`) AS `alias_1` FROM `table_1`

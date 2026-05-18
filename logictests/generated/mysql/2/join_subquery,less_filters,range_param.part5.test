@@ -863,6 +863,9 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` < `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` < `table_1`.`column_2`) OR (`table_1`.`column_1` < `table_1`.`column_2`)) OR (`table_1`.`column_1` < 1))
 ----
+-1297615285
+-1297615285
+-1297615285
 -1392280664
 -1392280664
 -1392280664
@@ -872,6 +875,9 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -2027629015
 -2027629015
 -2027629015
+-323527174
+-323527174
+-323527174
 1
 1
 1
@@ -880,6 +886,9 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` < `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` < `table_1`.`column_2`) OR (`table_1`.`column_1` < `table_1`.`column_2`)) OR (`table_1`.`column_1` < 1))
 ----
+-1297615285
+-1297615285
+-1297615285
 -1392280664
 -1392280664
 -1392280664
@@ -889,6 +898,9 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -2027629015
 -2027629015
 -2027629015
+-323527174
+-323527174
+-323527174
 1
 1
 1
@@ -912,6 +924,9 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -323527174
 -323527174
 -323527174
+1
+1
+1
 
 # REA-6472
 query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
@@ -932,3 +947,6 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 -323527174
 -323527174
 -323527174
+1
+1
+1

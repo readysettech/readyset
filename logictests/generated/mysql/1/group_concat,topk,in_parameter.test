@@ -32,7 +32,7 @@ a
 1
 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -41,6 +41,8 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 0
 1
 2
+a
+a
 
 query  nosort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1 GROUP BY table_1.column_2 ORDER BY table_1.column_2 ASC LIMIT 10
@@ -52,13 +54,13 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 GRO
 ----
 0, a, 2, a, 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a, a
+a, a, a, a, a
 
 query  nosort
 SELECT table_1.column_3 AS alias_1 FROM table_1 ORDER BY table_1.column_3 DESC LIMIT 10
@@ -69,7 +71,7 @@ a
 1
 0
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 ASC LIMIT 10
 ? = 0
 ? = 1
@@ -78,13 +80,17 @@ SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?,
 0
 1
 2
+a
+a
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+a
 2
 1
 0
@@ -97,7 +103,7 @@ a
 a
 a
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) GROUP BY table_1.column_3 ORDER BY table_1.column_3 ASC LIMIT 10
 ? = 0
 ? = 1
@@ -106,33 +112,38 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHE
 a
 a
 a
+a, a
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?) GROUP BY table_1.column_7 ORDER BY table_1.column_7 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a, a
 2
 1
 0
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_7 AS alias_1 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?) ORDER BY table_1.column_7 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
+a
 2
 1
 0
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_8 IN (?, ?, ?) GROUP BY table_1.column_8 ORDER BY table_1.column_8 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a, a
 2
 1
 0
@@ -165,7 +176,7 @@ a
 1
 0
 
-query  rowsort
+query  rowsort error: values returned
 SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -173,6 +184,7 @@ SELECT table_1.column_1 AS alias_1 FROM table_1 WHERE table_1.column_1 IN (?, ?,
 ----
 0
 1
+a
 
 query  nosort
 SELECT group_concat(table_1.column_2 separator ', ') AS alias_1 FROM table_1 GROUP BY table_1.column_2 ORDER BY table_1.column_2 ASC LIMIT 10
@@ -185,13 +197,13 @@ SELECT group_concat(table_1.column_3 separator ', ') AS alias_1 FROM table_1 GRO
 ----
 2, a, 1
 
-query  rowsort
+query  rowsort error: values returned
 SELECT group_concat(table_1.column_4 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?)
 ? = 0
 ? = 1
 ? = 2
 ----
-a, a
+a, a, a
 
 query  nosort
 SELECT table_1.column_3 AS alias_1 FROM table_1 ORDER BY table_1.column_3 DESC LIMIT 10
@@ -200,7 +212,7 @@ a
 2
 1
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 ASC LIMIT 10
 ? = 0
 ? = 1
@@ -208,13 +220,15 @@ SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?,
 ----
 1
 2
+a
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
 2
 1
 
@@ -225,7 +239,7 @@ a
 a
 a
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) GROUP BY table_1.column_3 ORDER BY table_1.column_3 ASC LIMIT 10
 ? = 0
 ? = 1
@@ -233,30 +247,34 @@ SELECT group_concat(table_1.column_6 separator ', ') AS alias_1 FROM table_1 WHE
 ----
 a
 a
+a
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_7 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?) GROUP BY table_1.column_7 ORDER BY table_1.column_7 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
 2
 0
 
-query  nosort
+query  nosort error: values returned
 SELECT table_1.column_7 AS alias_1 FROM table_1 WHERE table_1.column_7 IN (?, ?, ?) ORDER BY table_1.column_7 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
 2
 0
 
-query  nosort
+query  nosort error: values returned
 SELECT group_concat(table_1.column_8 separator ', ') AS alias_1 FROM table_1 WHERE table_1.column_8 IN (?, ?, ?) GROUP BY table_1.column_8 ORDER BY table_1.column_8 DESC LIMIT 10
 ? = 0
 ? = 1
 ? = 2
 ----
+a
 2
 0

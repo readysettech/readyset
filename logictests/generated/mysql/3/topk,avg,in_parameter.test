@@ -58,7 +58,7 @@ SELECT avg(table_1.column_3) AS alias_1 FROM table_1 GROUP BY table_1.column_1 O
 ----
 2.0000
 1.0000
-0.0000
+0
 
 query  nosort
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 ASC LIMIT 10
@@ -196,7 +196,7 @@ query  nosort
 SELECT avg(table_1.column_3) AS alias_1 FROM table_1 GROUP BY table_1.column_1 ORDER BY table_1.column_1 ASC LIMIT 10
 ----
 1.0000
-0.0000
+0
 
 query  nosort
 SELECT table_1.column_3 AS alias_1 FROM table_1 WHERE table_1.column_3 IN (?, ?, ?) ORDER BY table_1.column_3 ASC LIMIT 10
