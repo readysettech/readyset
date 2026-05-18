@@ -2814,6 +2814,7 @@ where
                         e,
                         ReadySetError::ReaderMissingKey
                             | ReadySetError::NoCacheForQuery
+                            | ReadySetError::UpqueryTimeout
                             | ReadySetError::UnparseableQuery { .. }
                     )
                 }) {

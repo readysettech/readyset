@@ -333,6 +333,7 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
 /// until they succeed.
 pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
     let upquery_hist = metrics::histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
+    let upquery_timeout_ctr = metrics::counter!(recorded::SERVER_VIEW_UPQUERY_TIMEOUT);
     let mut reader_cache: ReaderMap = Default::default();
 
     while let Some((mut pending, ack)) = rx.recv().await {
@@ -355,6 +356,9 @@ pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, Ack)>) {
 
             if let Poll::Ready(res) = pending.check(&mut reader_cache) {
                 upquery_hist.record(pending.first.elapsed().as_micros() as f64);
+                if matches!(res, Err(ReadySetError::UpqueryTimeout)) {
+                    upquery_timeout_ctr.increment(1);
+                }
                 // Reader-level errors (UpqueryTimeout, ServerShuttingDown, ...) must travel
                 // back in-band as `ReadReply::Normal(Err(_))`. Returning them as the outer
                 // `Reply` error makes the multiplex server treat them as a service failure

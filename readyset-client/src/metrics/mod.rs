@@ -248,6 +248,11 @@ pub mod recorded {
     /// request.
     pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";
 
+    /// Counter: The number of reads that bailed out with `UpqueryTimeout` because the upquery
+    /// did not complete within the configured budget. Tracks the rate at which the adapter falls
+    /// through to upstream because the cache could not satisfy a request in time.
+    pub const SERVER_VIEW_UPQUERY_TIMEOUT: &str = "readyset_server.view_query_upquery_timeout";
+
     /// Counter: The number of times a dataflow node type is added to the
     /// dataflow graph. Recorded at the time the new graph is committed.
     ///
