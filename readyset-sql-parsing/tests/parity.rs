@@ -941,12 +941,26 @@ fn create_deep_cache_policy_fails() {
     check_parse_fails!(
         Dialect::MySQL,
         "CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
-        "only shallow caches support caching policies"
+        "DEEP caches do not support caching policies"
     );
     check_parse_fails!(
         Dialect::PostgreSQL,
         "CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
-        "only shallow caches support caching policies"
+        "DEEP caches do not support caching policies"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE DEEP CACHE COALESCE 250 MS FROM SELECT * FROM arst",
+        "COALESCE is not supported for DEEP caches"
+    );
+}
+
+#[test]
+fn create_cache_policy_without_cache_type() {
+    check_parse_both!("CREATE CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM foo");
+    check_parse_both!("CREATE CACHE COALESCE 250 MS FROM SELECT * FROM foo");
+    check_parse_both!(
+        "CREATE CACHE POLICY TTL 10 SECONDS REFRESH 2 SECONDS FROM SELECT * FROM foo"
     );
 }
 

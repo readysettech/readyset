@@ -1011,7 +1011,7 @@ fn cached_query_options(
                 if opts.policy.replace(policy).is_some() {
                     return Err(error(i));
                 }
-                if cache_type != Some(CacheType::Shallow) {
+                if cache_type == Some(CacheType::Deep) {
                     return Err(error(i));
                 }
             }
@@ -1019,7 +1019,7 @@ fn cached_query_options(
                 if opts.coalesce_ms.replace(duration).is_some() {
                     return Err(error(i));
                 }
-                if cache_type != Some(CacheType::Shallow) {
+                if cache_type == Some(CacheType::Deep) {
                     return Err(error(i));
                 }
             }
@@ -2038,11 +2038,6 @@ mod tests {
 
             let result = create_cached_query(Dialect::PostgreSQL)(LocatedSpan::new(
                 b"CREATE DEEP CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
-            ));
-            assert!(result.is_err());
-
-            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
-                b"CREATE CACHE POLICY TTL 10 SECONDS FROM SELECT * FROM arst",
             ));
             assert!(result.is_err());
         }

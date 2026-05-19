@@ -577,9 +577,9 @@ fn parse_cache_options(
     cache_type: Option<CacheType>,
 ) -> Result<CreateCacheOptions, ReadysetParsingError> {
     let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
-        if cache_type != Some(CacheType::Shallow) {
+        if cache_type == Some(CacheType::Deep) {
             return Err(ReadysetParsingError::ReadysetParsingError(
-                "only shallow caches support caching policies".into(),
+                "DEEP caches do not support caching policies".into(),
             ));
         }
         if !parse_readyset_keyword(parser, ReadysetKeyword::TTL) {
@@ -621,9 +621,9 @@ fn parse_cache_options(
     };
 
     let coalesce_ms = if parser.parse_keyword(Keyword::COALESCE) {
-        if cache_type != Some(CacheType::Shallow) {
+        if cache_type == Some(CacheType::Deep) {
             return Err(ReadysetParsingError::ReadysetParsingError(
-                "COALESCE is only supported for SHALLOW caches".into(),
+                "COALESCE is not supported for DEEP caches".into(),
             ));
         }
         Some(parse_duration_with_unit(parser, "COALESCE")?)
