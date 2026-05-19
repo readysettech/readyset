@@ -8,7 +8,7 @@ use datafusion::arrow::array::builder::{
     BinaryBuilder, BooleanBuilder, Float32Builder, Float64Builder, Int32Builder, Int64Builder,
     StringBuilder, UInt32Builder, UInt64Builder,
 };
-use datafusion::arrow::array::{ArrayBuilder, RecordBatch, make_builder};
+use datafusion::arrow::array::{ArrayBuilder, RecordBatch, RecordBatchOptions, make_builder};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::{Session, TableProvider};
 use datafusion::error::DataFusionError;
@@ -344,7 +344,8 @@ fn build_record_batch(
         .map(|f| make_builder(f.data_type(), 0))
         .collect();
 
-    for (row_count, row) in rows.enumerate() {
+    let mut row_count = 0;
+    for row in rows {
         if limit.is_some_and(|l| row_count >= l) {
             break;
         }
@@ -363,10 +364,19 @@ fn build_record_batch(
                 )?;
             }
         }
+        row_count += 1;
     }
 
     let columns = builders.iter_mut().map(|b| b.finish()).collect();
-    Ok(RecordBatch::try_new(projected_schema, columns)?)
+    // Since DataFusion may produce an empty projection of columns when no column values are
+    // needed, and Arrow cannot infer row count from 0 columns, explicitly pass the row count (this
+    // happens, for example, on SELECT COUNT(*) queries).
+    let options = RecordBatchOptions::new().with_row_count(Some(row_count));
+    Ok(RecordBatch::try_new_with_options(
+        projected_schema,
+        columns,
+        &options,
+    )?)
 }
 
 /// The implementation of a vrel to hand to DataFusion.
@@ -552,7 +562,7 @@ impl ExecutionPlan for VrelExecutionPlan {
 
 #[cfg(test)]
 mod tests {
-    use datafusion::arrow::array::{Array, Int32Array, StringArray};
+    use datafusion::arrow::array::{Array, Int32Array, Int64Array, StringArray};
 
     use readyset_client::query::QueryId;
     use readyset_shallow::{CacheEntryInfo, CacheInfo};
@@ -721,6 +731,21 @@ mod tests {
             .downcast_ref::<StringArray>()
             .expect("is StringArray");
         assert_eq!(name.value(row_idx), "bob");
+        assert!(iter.next_row().is_none());
+
+        // COUNT(*) with no explicit column references
+        let result = session
+            .query("SELECT COUNT(*) FROM test_users")
+            .await
+            .expect("count star");
+        let mut iter = result.borrowed_iter();
+        let (cols, row_idx) = iter.next_row().expect("one row");
+        let col: Vec<_> = cols.collect();
+        let count = col[0]
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .expect("is Int64Array");
+        assert_eq!(count.value(row_idx), 3);
         assert!(iter.next_row().is_none());
     }
 }
