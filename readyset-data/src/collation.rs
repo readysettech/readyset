@@ -275,7 +275,7 @@ impl Collation {
 
     /// Compute a collation key for a string.  This key may be compared bytewise with another
     /// key or hashed.
-    pub(crate) fn key<S>(&self, s: S) -> Vec<u8>
+    pub fn key<S>(&self, s: S) -> Box<[u8]>
     where
         S: AsRef<str>,
     {
@@ -313,7 +313,7 @@ impl Collation {
             }
         };
 
-        out
+        out.into_boxed_slice()
     }
 
     /// The default collation for a dialect.

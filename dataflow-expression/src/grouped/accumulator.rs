@@ -538,17 +538,25 @@ pub enum AccumulatorData {
     },
 }
 
-/// Sort a slice of `DfValue` according to an optional `(OrderType, NullOrder)`. Hoists the
-/// Option pattern-match out of the per-comparison closure.
-fn sort_values_by_order(values: &mut [DfValue], order_by: Option<(OrderType, NullOrder)>) {
-    match order_by {
-        Some((order_type, null_order)) => values.sort_unstable_by(|a, b| {
-            null_order
-                .apply(a.is_none(), b.is_none())
-                .then(order_type.apply(a.cmp(b)))
-        }),
-        None => values.sort_unstable(),
-    }
+/// Sort a `Vec<DfValue>` according to an optional `(OrderType, NullOrder)`.  For text,
+/// get each value's collation key up front and sort the precomputed keys.
+fn sort_values_by_order(values: &mut Vec<DfValue>, order_by: Option<(OrderType, NullOrder)>) {
+    let (order_type, null_order) =
+        order_by.unwrap_or((OrderType::OrderAscending, NullOrder::NullsLast));
+
+    let mut paired: Vec<(Option<Box<[u8]>>, DfValue)> =
+        values.drain(..).map(|v| (v.collation_key(), v)).collect();
+
+    paired.sort_unstable_by(|a, b| {
+        null_order
+            .apply(a.1.is_none(), b.1.is_none())
+            .then(order_type.apply(match (&a.0, &b.0) {
+                (Some(ka), Some(kb)) => ka.cmp(kb),
+                _ => a.1.cmp(&b.1),
+            }))
+    });
+
+    values.extend(paired.into_iter().map(|(_, v)| v));
 }
 
 /// A wrapper for DfValue + order_by information.

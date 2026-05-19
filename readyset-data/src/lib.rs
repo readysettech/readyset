@@ -282,6 +282,18 @@ impl DfValue {
         }
     }
 
+    /// Compute a collation sort key for textual variants, returning `None` for everything else.
+    /// Bytewise comparison of two keys yields the same ordering as `Ord` between the underlying
+    /// `Text`/`TinyText` values. Useful for amortizing collation work across repeated
+    /// comparisons (decorate-sort-undecorate).
+    pub fn collation_key(&self) -> Option<Box<[u8]>> {
+        match self {
+            DfValue::Text(t) => Some(t.collation_key()),
+            DfValue::TinyText(t) => Some(t.collation_key()),
+            _ => None,
+        }
+    }
+
     /// Checks if this value is `DfValue::None`.
     pub fn is_none(&self) -> bool {
         matches!(*self, DfValue::None)
@@ -819,8 +831,8 @@ impl DfValue {
     #[inline]
     pub fn transform_for_serialized_key(&self) -> Cow<'_, Self> {
         match self {
-            DfValue::Text(t) => Cow::Owned(t.collation().key(t.as_str()).into()),
-            DfValue::TinyText(t) => Cow::Owned(t.collation().key(t.as_str()).into()),
+            DfValue::Text(t) => Cow::Owned(t.collation().key(t.as_str()).into_vec().into()),
+            DfValue::TinyText(t) => Cow::Owned(t.collation().key(t.as_str()).into_vec().into()),
             DfValue::Float(f) => Cow::Owned((*f as f64).try_into().unwrap()),
             DfValue::TimestampTz(ts) => Cow::Owned(DfValue::TimestampTz(ts.normalize_for_key())),
             _ => Cow::Borrowed(self),

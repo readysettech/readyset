@@ -159,6 +159,12 @@ impl TinyText {
     pub fn collation(&self) -> Collation {
         self.len_and_collation.collation()
     }
+
+    /// Compute the collation sort key for this text.  Keys compare bytewise the same as with
+    /// `Ord` on the original strings.
+    pub fn collation_key(&self) -> Box<[u8]> {
+        self.collation().key(self.as_str())
+    }
 }
 
 impl AsRef<str> for TinyText {
@@ -256,6 +262,12 @@ impl Text {
     /// collation produce the same fingerprint.
     pub fn collation_hash(&self) -> u64 {
         self.inner.header.header.collation_hash
+    }
+
+    /// Compute the collation sort key for this text.  Keys compare bytewise the same as with
+    /// `Ord` on the original strings.
+    pub fn collation_key(&self) -> Box<[u8]> {
+        self.collation().key(self.as_str())
     }
 }
 
