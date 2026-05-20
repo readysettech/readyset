@@ -34,9 +34,11 @@ pub const REASON_NON_DETERMINISTIC: &str = "non-deterministic function";
 const MYSQL_SYSTEM_SCHEMAS: &[&str] = &["mysql", "information_schema", "performance_schema", "sys"];
 
 /// PostgreSQL schemas excluded from snapshot replication, mirrored from
-/// `replicators::postgres_connector::snapshot`.  `pg_toast*` and `pg_temp*`
-/// are matched as prefixes by [`is_system_schema`].
-const PG_SYSTEM_SCHEMAS: &[&str] = &["pg_catalog", "information_schema", "readyset"];
+/// `replicators::postgres_connector::snapshot`.  Any identifier beginning
+/// with `pg_` is also treated as a system reference by [`is_system_schema`]
+/// (covers `pg_catalog`, `pg_toast*`, `pg_temp*`, and unqualified catalog
+/// tables such as `pg_class`, `pg_type`, `pg_proc`, ...).
+const PG_SYSTEM_SCHEMAS: &[&str] = &["information_schema", "readyset"];
 
 /// Functions whose result depends on session/clock/random state and therefore
 /// must not be auto-cached.  Compared case-insensitively against the *last*
@@ -254,11 +256,13 @@ fn is_system_schema(name: &str, ctx: &Ctx) -> bool {
     {
         return true;
     }
-    if matches!(ctx.dialect, Dialect::PostgreSQL) {
-        let lower = name.to_ascii_lowercase();
-        if lower.starts_with("pg_toast") || lower.starts_with("pg_temp") {
-            return true;
-        }
+    if matches!(ctx.dialect, Dialect::PostgreSQL)
+        && name
+            .as_bytes()
+            .get(..3)
+            .is_some_and(|p| p.eq_ignore_ascii_case(b"pg_"))
+    {
+        return true;
     }
     false
 }
@@ -495,6 +499,32 @@ mod tests {
                 "query was {q}"
             );
         }
+    }
+
+    #[test]
+    fn postgres_unqualified_catalog_tables_are_blocked() {
+        for q in [
+            "SELECT oid, typname FROM pg_type",
+            "SELECT * FROM pg_class",
+            "SELECT * FROM pg_proc",
+            "SELECT * FROM pg_attribute",
+            "SELECT name FROM pg_timezone_names",
+            "SELECT * FROM PG_Class",
+        ] {
+            assert_eq!(
+                skip_reason(Dialect::PostgreSQL, q),
+                Some(REASON_SYSTEM_SCHEMA),
+                "query was {q}"
+            );
+        }
+    }
+
+    #[test]
+    fn mysql_pg_prefixed_table_is_eligible() {
+        assert_eq!(
+            skip_reason(Dialect::MySQL, "SELECT * FROM pg_my_user_table"),
+            None
+        );
     }
 
     #[test]
