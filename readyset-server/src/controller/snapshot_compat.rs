@@ -40,7 +40,7 @@ use crate::Config;
 /// Every snapshot this build can construct or verify. Adding a new entry
 /// here is the deliberate act that authorises generating a new
 /// `<name>.bin` fixture.
-pub const SNAPSHOT_NAMES: &[&str] = &["v1"];
+pub const SNAPSHOT_NAMES: &[&str] = &["v1", "v2"];
 
 /// Build the rmp_serde-encoded bytes for the named snapshot. The
 /// representation matches exactly what the Authority writes to RocksDB.
@@ -58,6 +58,7 @@ pub fn verify_snapshot(name: &str, bytes: &[u8]) -> Result<()> {
         rmp_serde::from_slice(bytes).with_context(|| format!("decoding snapshot `{name}`"))?;
     match name {
         "v1" => verify_v1(&state),
+        "v2" => verify_v2(&state),
         other => bail!("unknown snapshot name `{other}`"),
     }
 }
@@ -65,6 +66,7 @@ pub fn verify_snapshot(name: &str, bytes: &[u8]) -> Result<()> {
 fn build_state(name: &str) -> Result<ControllerState> {
     match name {
         "v1" => Ok(build_v1_state()),
+        "v2" => Ok(build_v2_state()),
         other => bail!("unknown snapshot name `{other}`"),
     }
 }
@@ -158,6 +160,90 @@ fn verify_v1(state: &ControllerState) -> Result<()> {
     ensure!(
         has_node,
         "Node.sharded_by sentinel: no node with Sharding::ByColumn(0, 2)"
+    );
+    Ok(())
+}
+
+#[allow(deprecated)]
+fn build_v2_state() -> ControllerState {
+    // `v2` captures `ControllerState` with the fields that domain-replication
+    // removal would otherwise have broken: `Config.min_workers`,
+    // `Config.replication_strategy`, `DfState.replication_strategy`, and
+    // `DfState.node_restrictions`, each populated to a non-default value. The
+    // compat shims keep these at their original positions so older payloads
+    // still decode.
+    let config = Config {
+        min_workers: 5,
+        replication_strategy: super::replication::ReplicationStrategy::ReaderDomains(2),
+        ..Config::default()
+    };
+
+    let mut g = petgraph::Graph::new();
+    let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
+        "source",
+        Vec::new(),
+        node::special::Source,
+    ));
+    let columns: Vec<Column> = vec![Column::new("id".into(), DfType::Int, None)];
+    g.add_node(node::Node::new(
+        "t",
+        columns,
+        node::special::Base::new().with_primary_key([0]),
+    ));
+
+    let recipe = Recipe::with_config(
+        Dialect::DEFAULT_POSTGRESQL,
+        super::sql::Config::default(),
+        super::sql::mir::Config::default(),
+        false,
+    );
+
+    let mut state = DfState::new(
+        g,
+        source,
+        0,
+        config.domain_config.clone(),
+        config.persistence.clone(),
+        Materializations::new(),
+        recipe,
+        None,
+        Arc::new(ChannelCoordinator::new()),
+    );
+    state.replication_strategy = super::replication::ReplicationStrategy::NonBaseDomains(4);
+    state.node_restrictions.insert(
+        super::NodeRestrictionKey::for_compat_test("t".into(), 0),
+        super::DomainPlacementRestriction::for_compat_test(Some("vol-1".to_string())),
+    );
+
+    ControllerState {
+        config,
+        dataflow_state: state,
+    }
+}
+
+#[allow(deprecated)]
+fn verify_v2(state: &ControllerState) -> Result<()> {
+    ensure!(
+        state.config.min_workers == 5,
+        "Config.min_workers sentinel: expected 5, got {}",
+        state.config.min_workers
+    );
+    let cfg_strategy = state.config.replication_strategy;
+    ensure!(
+        cfg_strategy == super::replication::ReplicationStrategy::ReaderDomains(2),
+        "Config.replication_strategy sentinel: expected ReaderDomains(2), got {cfg_strategy:?}"
+    );
+    let df_strategy = state.dataflow_state.replication_strategy;
+    ensure!(
+        df_strategy == super::replication::ReplicationStrategy::NonBaseDomains(4),
+        "DfState.replication_strategy sentinel: expected NonBaseDomains(4), got {df_strategy:?}"
+    );
+    let key = super::NodeRestrictionKey::for_compat_test("t".into(), 0);
+    let expected = super::DomainPlacementRestriction::for_compat_test(Some("vol-1".to_string()));
+    let got = state.dataflow_state.node_restrictions.get(&key);
+    ensure!(
+        got == Some(&expected),
+        "DfState.node_restrictions sentinel: expected {expected:?} at key {key:?}, got {got:?}"
     );
     Ok(())
 }

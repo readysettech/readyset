@@ -83,9 +83,17 @@ pub type VolumeId = String;
 #[doc(hidden)]
 #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
 #[allow(deprecated)]
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DomainPlacementRestriction {
     worker_volume: Option<VolumeId>,
+}
+
+#[allow(deprecated)]
+impl DomainPlacementRestriction {
+    #[doc(hidden)]
+    pub(super) fn for_compat_test(worker_volume: Option<VolumeId>) -> Self {
+        Self { worker_volume }
+    }
 }
 
 /// Historical key used to look up a [`DomainPlacementRestriction`].
@@ -95,6 +103,14 @@ pub struct DomainPlacementRestriction {
 pub struct NodeRestrictionKey {
     node_name: Relation,
     shard: usize,
+}
+
+#[allow(deprecated)]
+impl NodeRestrictionKey {
+    #[doc(hidden)]
+    pub(super) fn for_compat_test(node_name: Relation, shard: usize) -> Self {
+        Self { node_name, shard }
+    }
 }
 
 /// The full (metadata) state of a running ReadySet cluster.
