@@ -358,8 +358,8 @@ pub use crate::table::{
     TableOperation, TableRequest, TableStatus, TABLE_STATUS_REPORT_INTERVAL,
 };
 pub use crate::view::{
-    KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyBatch, ReadReplyStats, SchemaType,
-    ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
+    KeyComparison, KeyComparisonRef, LookupResult, ReadQuery, ReadReply, ReadReplyBatch,
+    ReadReplyStats, ReplayKeys, SchemaType, ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
 };
 
 pub mod builders {

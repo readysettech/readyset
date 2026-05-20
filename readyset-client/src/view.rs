@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt;
 use std::future::Future;
@@ -584,17 +584,15 @@ impl KeyComparison {
     where
         I: IntoIterator<Item = &'a DfValue> + Clone,
     {
+        self.as_ref().contains(key)
+    }
+
+    /// Borrow as a [`KeyComparisonRef`], sharing the inner `Vec1<DfValue>` rather than
+    /// cloning. The returned view borrows from `self` for `'_`.
+    pub fn as_ref(&self) -> KeyComparisonRef<'_> {
         match self {
-            Self::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
-            Self::Range((lower, upper)) => {
-                (match lower {
-                    Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
-                    Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
-                }) && (match upper {
-                    Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
-                    Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
-                })
-            }
+            KeyComparison::Equal(v) => KeyComparisonRef::Equal(v),
+            KeyComparison::Range(r) => KeyComparisonRef::Range(r),
         }
     }
 
@@ -649,6 +647,298 @@ impl Hash for KeyComparison {
             Self::Range(r) => r.hash(state),
         }
     }
+}
+
+/// A borrowed view of a [`KeyComparison`] yielded by [`ReplayKeys`] iteration.
+///
+/// Holds the same `Equal` / `Range` variants as [`KeyComparison`] but borrows the inner
+/// `Vec1<DfValue>` so hot-loop consumers can match on the variant without cloning. Obtain
+/// one from a borrowed [`KeyComparison`] via [`KeyComparison::as_ref`].
+///
+/// The Ref's API splits in two:
+/// - [`contains`](Self::contains) and [`to_owned`](Self::to_owned) mirror the corresponding
+///   `KeyComparison` semantics exactly.
+/// - [`equal`](Self::equal) is a Ref-only accessor with no `KeyComparison` analogue. It
+///   keys off the variant tag alone, so a degenerate `Range((Included(k), Included(k)))`
+///   yields `None`, even though [`KeyComparison`]'s `PartialEq`/`Hash` treat that range
+///   and `Equal(k)` as the same key. That divergence is deliberate: lookup-path selection
+///   (point vs. range) depends on the variant tag, not on set-theoretic equivalence.
+#[derive(Copy, Clone, Debug)]
+pub enum KeyComparisonRef<'a> {
+    Equal(&'a Vec1<DfValue>),
+    Range(&'a BoundedRange<Vec1<DfValue>>),
+}
+
+impl<'a> KeyComparisonRef<'a> {
+    /// Materialize an owned [`KeyComparison`] from a borrowed view.
+    pub fn to_owned(&self) -> KeyComparison {
+        match self {
+            KeyComparisonRef::Equal(v) => KeyComparison::Equal((*v).clone()),
+            KeyComparisonRef::Range(r) => KeyComparison::Range((*r).clone()),
+        }
+    }
+
+    /// Borrow the inner `Vec1<DfValue>` only when the variant tag is `Equal`. Returns
+    /// `None` on `Range`, including the degenerate `Range((Included(k), Included(k)))`
+    /// that [`KeyComparison`]'s `PartialEq` would treat as equal to `Equal(k)`.
+    pub fn equal(&self) -> Option<&'a Vec1<DfValue>> {
+        match self {
+            KeyComparisonRef::Equal(v) => Some(v),
+            KeyComparisonRef::Range(_) => None,
+        }
+    }
+
+    /// True if the given multi-column key falls inside this comparison. Mirrors
+    /// [`KeyComparison::contains`].
+    pub fn contains<I>(self, key: I) -> bool
+    where
+        I: IntoIterator<Item = &'a DfValue> + Clone,
+    {
+        match self {
+            KeyComparisonRef::Equal(equal) => key.into_iter().cmp(equal.iter()) == Ordering::Equal,
+            KeyComparisonRef::Range((lower, upper)) => {
+                (match lower {
+                    Bound::Included(start) => key.clone().into_iter().cmp(start.iter()).is_ge(),
+                    Bound::Excluded(start) => key.clone().into_iter().cmp(start.iter()).is_gt(),
+                }) && (match upper {
+                    Bound::Included(end) => key.into_iter().cmp(end.iter()).is_le(),
+                    Bound::Excluded(end) => key.into_iter().cmp(end.iter()).is_lt(),
+                })
+            }
+        }
+    }
+}
+
+/// A collection of [`KeyComparison`]s for a partial replay, physically partitioned into
+/// [`KeyComparison::Equal`] (held in one [`HashSet`]) and [`KeyComparison::Range`] (held in
+/// another).
+///
+/// The partition keeps each key's original variant intact: an `Equal(k)` is stored as Equal,
+/// a `Range((Included(k), Included(k)))` (a degenerate range) is stored as Range. Downstream
+/// consumers select the lookup path (point vs. range) based on the variant, so collapsing a
+/// degenerate range to Equal would redirect it onto the HashMap index when the source node
+/// may only have a BTree index. The two variants are *semantically* equivalent under
+/// [`KeyComparison`]'s `PartialEq`/`Hash`, but functionally distinct at the lookup layer.
+///
+/// # Why the partition exists
+///
+/// Consumers like `MissBuilder::build` need to ask "does any range here cover this record's
+/// key?" With a flat `HashSet<KeyComparison>`, that question requires scanning the entire set
+/// to find the Range entries -- catastrophic when replays carry millions of Equal keys with
+/// no ranges. Splitting at construction time turns that question into a scan over only the
+/// actual range keys (typically zero).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplayKeys {
+    equals: HashSet<Vec1<DfValue>>,
+    ranges: HashSet<BoundedRange<Vec1<DfValue>>>,
+}
+
+impl ReplayKeys {
+    /// Construct an empty [`ReplayKeys`]. Equivalent to [`Default::default`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a [`KeyComparison`]. Returns `true` if the partition for the key's variant did
+    /// not previously contain it. Variants are preserved as-is: a degenerate range stays in
+    /// the range partition, never silently routed to the Equal partition.
+    pub fn insert(&mut self, k: KeyComparison) -> bool {
+        match k {
+            KeyComparison::Equal(v) => self.equals.insert(v),
+            KeyComparison::Range(r) => self.ranges.insert(r),
+        }
+    }
+
+    /// Total number of keys (Equal + Range).
+    pub fn len(&self) -> usize {
+        self.equals.len() + self.ranges.len()
+    }
+
+    /// True if there are no keys at all.
+    pub fn is_empty(&self) -> bool {
+        self.equals.is_empty() && self.ranges.is_empty()
+    }
+
+    /// Iterate the [`KeyComparison::Range`] portion of the collection.
+    ///
+    /// Fast-path accessor used by `MissBuilder::build` to find a range covering a record's
+    /// key without touching [`KeyComparison::Equal`] entries.
+    pub fn ranges(&self) -> impl ExactSizeIterator<Item = &BoundedRange<Vec1<DfValue>>> + '_ {
+        self.ranges.iter()
+    }
+
+    /// True if the range partition is non-empty. O(1), so hot-path consumers can
+    /// short-circuit per-record range scans on the common case where a replay carries
+    /// only point keys.
+    pub fn has_any_range(&self) -> bool {
+        !self.ranges.is_empty()
+    }
+
+    /// Iterate the [`KeyComparison::Equal`] portion of the collection.
+    pub fn equals(&self) -> impl ExactSizeIterator<Item = &Vec1<DfValue>> + '_ {
+        self.equals.iter()
+    }
+
+    /// True if the partition for the key's variant contains it. Each variant is looked up in
+    /// its own partition; a degenerate range is *not* matched against an `Equal` of the same
+    /// inner value.
+    pub fn contains(&self, k: &KeyComparison) -> bool {
+        self.contains_ref(k.as_ref())
+    }
+
+    /// Borrowed-key counterpart to [`contains`](Self::contains). Lets retain-style loops on
+    /// borrowed [`KeyComparisonRef`] views probe membership without first materializing an
+    /// owned [`KeyComparison`].
+    pub fn contains_ref(&self, k: KeyComparisonRef<'_>) -> bool {
+        match k {
+            KeyComparisonRef::Equal(v) => self.equals.contains(v),
+            KeyComparisonRef::Range(r) => self.ranges.contains(r),
+        }
+    }
+
+    /// Iterate the keys as borrowed [`KeyComparisonRef`] views. No allocation per yield.
+    ///
+    /// This is the right iterator for hot-loop consumers that just need to match on the
+    /// variant. If you need owned [`KeyComparison`] values (e.g., for serialization or for
+    /// passing to a by-value API), use [`iter_owned`](Self::iter_owned).
+    pub fn iter(&self) -> ReplayKeysIter<'_> {
+        ReplayKeysIter {
+            equals: self.equals.iter(),
+            ranges: self.ranges.iter(),
+        }
+    }
+
+    /// Iterate the keys as owned [`KeyComparison`] values. Clones the underlying
+    /// `Vec1<DfValue>` per yield -- prefer [`iter`](Self::iter) when only matching on the
+    /// variant.
+    pub fn iter_owned(&self) -> impl Iterator<Item = KeyComparison> + '_ {
+        self.iter().map(|k| k.to_owned())
+    }
+
+    /// Retain only the keys for which the predicate returns true. The predicate receives a
+    /// borrowed [`KeyComparisonRef`], so no key allocation happens per element.
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(KeyComparisonRef<'_>) -> bool,
+    {
+        self.equals.retain(|v| f(KeyComparisonRef::Equal(v)));
+        self.ranges.retain(|r| f(KeyComparisonRef::Range(r)));
+    }
+
+    /// Remove all keys.
+    pub fn clear(&mut self) {
+        self.equals.clear();
+        self.ranges.clear();
+    }
+
+    /// Remove a single key. Returns true if the collection contained the key in the
+    /// partition for its variant. A degenerate range is *not* matched against the Equal
+    /// partition.
+    pub fn remove(&mut self, k: &KeyComparison) -> bool {
+        match k {
+            KeyComparison::Equal(v) => self.equals.remove(v),
+            KeyComparison::Range(r) => self.ranges.remove(r),
+        }
+    }
+}
+
+/// Borrowed iterator over a [`ReplayKeys`], yielding [`KeyComparisonRef`] views. Concrete
+/// (not boxed) so the optimizer can inline `.next()` at every call site.
+pub struct ReplayKeysIter<'a> {
+    equals: std::collections::hash_set::Iter<'a, Vec1<DfValue>>,
+    ranges: std::collections::hash_set::Iter<'a, BoundedRange<Vec1<DfValue>>>,
+}
+
+impl<'a> Iterator for ReplayKeysIter<'a> {
+    type Item = KeyComparisonRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(r) = self.ranges.next() {
+            return Some(KeyComparisonRef::Range(r));
+        }
+        self.equals.next().map(KeyComparisonRef::Equal)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lo_e, hi_e) = self.equals.size_hint();
+        let (lo_r, hi_r) = self.ranges.size_hint();
+        (lo_e + lo_r, hi_e.and_then(|e| hi_r.map(|r| e + r)))
+    }
+}
+
+/// Owned iterator over a [`ReplayKeys`], yielding [`KeyComparison`] values. Concrete to keep
+/// dispatch monomorphic at consumers.
+pub struct ReplayKeysIntoIter {
+    equals: std::collections::hash_set::IntoIter<Vec1<DfValue>>,
+    ranges: std::collections::hash_set::IntoIter<BoundedRange<Vec1<DfValue>>>,
+}
+
+impl Iterator for ReplayKeysIntoIter {
+    type Item = KeyComparison;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(r) = self.ranges.next() {
+            return Some(KeyComparison::Range(r));
+        }
+        self.equals.next().map(KeyComparison::Equal)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lo_e, hi_e) = self.equals.size_hint();
+        let (lo_r, hi_r) = self.ranges.size_hint();
+        (lo_e + lo_r, hi_e.and_then(|e| hi_r.map(|r| e + r)))
+    }
+}
+
+impl FromIterator<KeyComparison> for ReplayKeys {
+    fn from_iter<I: IntoIterator<Item = KeyComparison>>(iter: I) -> Self {
+        let mut rk = ReplayKeys::default();
+        rk.extend(iter);
+        rk
+    }
+}
+
+impl Extend<KeyComparison> for ReplayKeys {
+    fn extend<I: IntoIterator<Item = KeyComparison>>(&mut self, iter: I) {
+        for k in iter {
+            self.insert(k);
+        }
+    }
+}
+
+impl IntoIterator for ReplayKeys {
+    type Item = KeyComparison;
+    type IntoIter = ReplayKeysIntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ReplayKeysIntoIter {
+            equals: self.equals.into_iter(),
+            ranges: self.ranges.into_iter(),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a ReplayKeys {
+    type Item = KeyComparisonRef<'a>;
+    type IntoIter = ReplayKeysIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl Arbitrary for ReplayKeys {
+    type Parameters = ();
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        use proptest::arbitrary::any_with;
+        use proptest::strategy::Strategy;
+
+        any_with::<Vec<KeyComparison>>(((0..16).into(), ()))
+            .prop_map(|ks| ks.into_iter().collect())
+            .boxed()
+    }
+
+    type Strategy = proptest::strategy::BoxedStrategy<ReplayKeys>;
 }
 
 impl TryFrom<Vec<DfValue>> for KeyComparison {
@@ -1788,6 +2078,189 @@ mod tests {
         use super::*;
 
         eq_laws!(KeyComparison);
+    }
+
+    mod replay_keys {
+        use readyset_util::eq_laws;
+        use test_strategy::proptest;
+        use vec1::vec1;
+
+        use super::*;
+
+        eq_laws!(ReplayKeys);
+
+        fn equal(k: i32) -> KeyComparison {
+            KeyComparison::Equal(vec1![k.into()])
+        }
+
+        fn degenerate_range(k: i32) -> KeyComparison {
+            KeyComparison::Range((
+                Bound::Included(vec1![k.into()]),
+                Bound::Included(vec1![k.into()]),
+            ))
+        }
+
+        fn open_range(lo: i32, hi: i32) -> KeyComparison {
+            KeyComparison::Range((
+                Bound::Included(vec1![lo.into()]),
+                Bound::Excluded(vec1![hi.into()]),
+            ))
+        }
+
+        fn empty_excluded(k: i32) -> KeyComparison {
+            KeyComparison::Range((
+                Bound::Excluded(vec1![k.into()]),
+                Bound::Excluded(vec1![k.into()]),
+            ))
+        }
+
+        /// Variants are preserved: a degenerate range stays in the range partition rather
+        /// than collapsing into Equal. Downstream consumers select the lookup path (point
+        /// vs. range) based on the variant, and silently re-routing a range key onto the
+        /// point-lookup path can panic when the source node only has a BTree index.
+        #[test]
+        fn degenerate_range_stays_in_ranges() {
+            let mut rk = ReplayKeys::new();
+            assert!(rk.insert(degenerate_range(7)));
+            assert_eq!(rk.equals().count(), 0);
+            assert_eq!(rk.ranges().count(), 1);
+            assert!(!rk.contains(&equal(7)));
+            assert!(rk.contains(&degenerate_range(7)));
+        }
+
+        #[test]
+        fn empty_excluded_range_stays_in_ranges() {
+            let mut rk = ReplayKeys::new();
+            assert!(rk.insert(empty_excluded(5)));
+            assert_eq!(rk.equals().count(), 0);
+            assert_eq!(rk.ranges().count(), 1);
+        }
+
+        #[test]
+        fn from_iter_separates_equal_and_degenerate_range() {
+            let rk: ReplayKeys = [equal(3), degenerate_range(3), equal(3)]
+                .into_iter()
+                .collect();
+            assert_eq!(rk.equals().count(), 1);
+            assert_eq!(rk.ranges().count(), 1);
+            assert_eq!(rk.len(), 2);
+        }
+
+        #[test]
+        fn from_iter_dedupes_repeated_ranges() {
+            let rk: ReplayKeys = [open_range(1, 5), open_range(1, 5)].into_iter().collect();
+            assert_eq!(rk.len(), 1);
+            assert_eq!(rk.ranges().count(), 1);
+        }
+
+        #[test]
+        fn remove_is_variant_specific() {
+            let mut rk = ReplayKeys::new();
+            rk.insert(equal(9));
+            // Removing the matching Range variant must NOT touch the Equal partition.
+            assert!(!rk.remove(&degenerate_range(9)));
+            assert_eq!(rk.equals().count(), 1);
+            assert!(rk.remove(&equal(9)));
+            assert!(rk.is_empty());
+
+            rk.insert(degenerate_range(9));
+            assert!(!rk.remove(&equal(9)));
+            assert_eq!(rk.ranges().count(), 1);
+            assert!(rk.remove(&degenerate_range(9)));
+            assert!(rk.is_empty());
+        }
+
+        /// Headline property of this commit: every Equal key flows to the equals partition;
+        /// `ranges()` is empty so `MissBuilder::build` does no per-key work.
+        #[test]
+        fn equals_only_input_yields_empty_ranges() {
+            let rk: ReplayKeys = (0..1000).map(equal).collect();
+            assert_eq!(rk.len(), 1000);
+            assert_eq!(rk.ranges().count(), 0);
+        }
+
+        #[test]
+        fn retain_sees_equal_and_range_variants() {
+            let mut rk = ReplayKeys::new();
+            rk.insert(equal(1));
+            rk.insert(open_range(10, 20));
+            let mut saw_equal = false;
+            let mut saw_range = false;
+            rk.retain(|k| {
+                match k {
+                    KeyComparisonRef::Equal(_) => saw_equal = true,
+                    KeyComparisonRef::Range(_) => saw_range = true,
+                }
+                true
+            });
+            assert!(saw_equal && saw_range);
+            assert_eq!(rk.len(), 2);
+        }
+
+        /// Order-independent equality: two `ReplayKeys` built from the same set of inputs in
+        /// different orders must compare equal. Guards against a future refactor that puts
+        /// ranges back in a `Vec`.
+        #[test]
+        fn equality_is_order_independent_on_ranges() {
+            let a: ReplayKeys = [open_range(1, 2), open_range(3, 4)].into_iter().collect();
+            let b: ReplayKeys = [open_range(3, 4), open_range(1, 2)].into_iter().collect();
+            assert_eq!(a, b);
+        }
+
+        /// Structural partition: every input `KeyComparison::Equal(k)` ends up in the Equal
+        /// partition; every input `KeyComparison::Range(_)` ends up in the Range partition,
+        /// degenerate or not. Catches a hypothetical bug that would mis-route variants.
+        #[proptest]
+        fn partition_preserves_variant(input: Vec<KeyComparison>) {
+            let expected_equals: HashSet<Vec1<DfValue>> = input
+                .iter()
+                .filter_map(|k| match k {
+                    KeyComparison::Equal(v) => Some(v.clone()),
+                    KeyComparison::Range(_) => None,
+                })
+                .collect();
+            let expected_ranges: HashSet<BoundedRange<Vec1<DfValue>>> = input
+                .iter()
+                .filter_map(|k| match k {
+                    KeyComparison::Range(r) => Some(r.clone()),
+                    KeyComparison::Equal(_) => None,
+                })
+                .collect();
+
+            let rk: ReplayKeys = input.into_iter().collect();
+            let actual_equals: HashSet<Vec1<DfValue>> = rk.equals().cloned().collect();
+            let actual_ranges: HashSet<BoundedRange<Vec1<DfValue>>> =
+                rk.ranges().cloned().collect();
+            assert_eq!(expected_equals, actual_equals);
+            assert_eq!(expected_ranges, actual_ranges);
+        }
+
+        #[proptest]
+        fn iter_round_trip(rk: ReplayKeys) {
+            let collected: ReplayKeys = rk.iter_owned().collect();
+            assert_eq!(rk, collected);
+        }
+
+        #[proptest]
+        fn into_iter_round_trip(rk: ReplayKeys) {
+            let collected: ReplayKeys = rk.clone().into_iter().collect();
+            assert_eq!(rk, collected);
+        }
+
+        #[proptest]
+        fn bincode_round_trip(rk: ReplayKeys) {
+            let bytes = bincode::serialize(&rk).unwrap();
+            let decoded: ReplayKeys = bincode::deserialize(&bytes).unwrap();
+            assert_eq!(rk, decoded);
+        }
+
+        /// `KeyComparison::contains` now delegates through `as_ref()`, but keep this in
+        /// place: it locks the owned and borrowed paths together so a future refactor
+        /// can't silently let them desync.
+        #[proptest]
+        fn contains_matches_owned(k: KeyComparison, probe: Vec<DfValue>) {
+            assert_eq!(k.contains(&probe), k.as_ref().contains(&probe));
+        }
     }
 
     mod build_view_query {
