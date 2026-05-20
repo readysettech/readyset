@@ -102,6 +102,8 @@ const NON_DETERMINISTIC_FUNCTIONS: &[&str] = &[
     // Side-effecting / blocking (MySQL)
     "sleep",
     "load_file",
+    // Side-effecting (PostgreSQL): writes a session/transaction GUC
+    "set_config",
     // Advisory locks (MySQL)
     "get_lock",
     "release_lock",
@@ -637,6 +639,28 @@ mod tests {
             // depends on traversal order, but the query must be flagged.
             Some(REASON_NON_DETERMINISTIC)
         );
+    }
+
+    #[test]
+    fn set_config_calls_are_blocked() {
+        // set_config writes a session/transaction GUC; serving from cache would
+        // silently drop the side effect.  Block regardless of arg shape, batch
+        // shape, surrounding query, or schema qualification.
+        for q in [
+            "SELECT set_config('role', 'admin', true)",
+            "SELECT set_config($1, $2, $3)",
+            "SELECT set_config($1, $2, $3), set_config($4, $5, $6)",
+            "SELECT pg_catalog.set_config('role', 'admin', true)",
+            "SELECT SET_CONFIG($1, $2, $3)",
+            "SELECT set_config('role', 'admin', true), 1",
+            "SELECT set_config('role', 'admin', true) FROM users",
+        ] {
+            assert_eq!(
+                skip_reason(Dialect::PostgreSQL, q),
+                Some(REASON_NON_DETERMINISTIC),
+                "query was {q}"
+            );
+        }
     }
 
     #[test]
