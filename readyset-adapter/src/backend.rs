@@ -2345,6 +2345,20 @@ where
                     is_skip_cache,
                 ));
             }
+            // The shallow path rejected this query via the in-request-path
+            // eligibility filter (system catalogs, session-state mutations,
+            // ...).  Falling through to the deep-cache prepare path would
+            // re-attempt the same query as a base-table view and fail when
+            // the upstream table is not replicated, polluting the cache and
+            // returning an error to the client.  Upstream-only is the right
+            // outcome.
+            if self
+                .state
+                .query_status_cache
+                .is_shallow_auto_create_skipped(QueryId::from(&shallow))
+            {
+                return Ok((PrepareMeta::Proxy, is_skip_cache));
+            }
         }
 
         let meta = match parsed {
