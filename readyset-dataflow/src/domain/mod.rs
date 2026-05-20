@@ -39,7 +39,9 @@ use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
 use readyset_client::metrics::recorded;
-use readyset_client::{KeyComparison, PersistencePoint, ReaderAddress, TableStatus};
+use readyset_client::{
+    KeyComparison, KeyComparisonRef, PersistencePoint, ReaderAddress, ReplayKeys, TableStatus,
+};
 use readyset_data::DfType;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::Relation;
@@ -48,7 +50,7 @@ use readyset_util::SizeOf;
 use readyset_util::failpoints;
 use readyset_util::futures::abort_on_panic;
 use readyset_util::progress::report_progress_with;
-use readyset_util::ranges::RangeBounds;
+use readyset_util::ranges::{BoundedRange, RangeBounds};
 use readyset_util::redacted::Sensitive;
 use readyset_util::{Indices, time_scope};
 use replication_offset::ReplicationOffset;
@@ -220,13 +222,13 @@ enum ReplayMiss {
     },
 }
 
-/// The result of do_lookup, consists of the vector of the found records
-/// the hashset of the fulfilled keys, and a hashset of the missed replay keys
+/// The result of `do_lookup`: the records found, the [`ReplayKeys`] of fulfilled keys (Equal
+/// and Range partitioned), and the set of replay keys that missed.
 struct StateLookupResult<'a> {
     /// Records returned by the lookup
     records: Vec<RecordResult<'a>>,
     /// Keys for which records were found
-    found_keys: HashSet<KeyComparison>,
+    found_keys: ReplayKeys,
     /// Keys that missed in partial state, triggering upstream replays.
     replay_keys: HashSet<ReplayMiss>,
 }
@@ -505,7 +507,7 @@ impl RequestedKeys {
     /// ranges.
     ///
     /// [`HashMap`]: IndexType::HashMap`
-    fn filter_keys(&self, keys: &mut HashSet<KeyComparison>) {
+    fn filter_keys(&self, keys: &mut ReplayKeys) {
         match self {
             RequestedKeys::Points(requested) => keys.retain(|key| {
                 requested.contains(
@@ -514,31 +516,36 @@ impl RequestedKeys {
                 )
             }),
             RequestedKeys::Ranges(requested) => {
-                *keys = keys
-                    .iter()
-                    .flat_map(|key| {
-                        requested.get_interval_overlaps(key).map(|(lower, upper)| {
-                            // It is safe to unwrap here because we know we will never get a
-                            // `std::ops::Bound::Unbounded` back from the interval tree, since we're
-                            // never passing in unbounded bounds
-                            let expect_message =
-                                "we should never get unbounded bounds back from the interval tree";
-
-                            KeyComparison::Range((
-                                lower
-                                    .cloned()
-                                    .map(|l| Vec1::try_from(l).unwrap())
-                                    .try_into()
-                                    .expect(expect_message),
-                                upper
-                                    .cloned()
-                                    .map(|u| Vec1::try_from(u).unwrap())
-                                    .try_into()
-                                    .expect(expect_message),
-                            ))
-                        })
-                    })
-                    .collect()
+                // The interval tree borrows from the key passed to `get_interval_overlaps`, so
+                // build a fresh `ReplayKeys` in two passes (equals + ranges) rather than via a
+                // chained iterator.
+                let expect_bound = "interval tree returned an unbounded bound, but we never pass unbounded \
+                     bounds in";
+                let expect_empty = "interval tree returned an empty key vector";
+                let mut out = ReplayKeys::default();
+                let mut consume = |key: KeyComparison| {
+                    for (lower, upper) in requested.get_interval_overlaps(&key) {
+                        out.insert(KeyComparison::Range((
+                            lower
+                                .cloned()
+                                .map(|l| Vec1::try_from(l).expect(expect_empty))
+                                .try_into()
+                                .expect(expect_bound),
+                            upper
+                                .cloned()
+                                .map(|u| Vec1::try_from(u).expect(expect_empty))
+                                .try_into()
+                                .expect(expect_bound),
+                        )));
+                    }
+                };
+                for eq in keys.equals() {
+                    consume(KeyComparison::Equal(eq.clone()));
+                }
+                for r in keys.ranges() {
+                    consume(KeyComparison::Range(r.clone()));
+                }
+                *keys = out;
             }
         }
     }
@@ -678,7 +685,7 @@ impl DomainBuilder {
 struct TimedPurge {
     time: time::Instant,
     view: LocalNodeIndex,
-    keys: HashSet<KeyComparison>,
+    keys: ReplayKeys,
 }
 /// A [`Domain`] is a well-connected sub-graph of the overall dataflow graph, used as the unit
 /// of execution of the dataflow engine. The dataflow graph is split up into domains using
@@ -3073,25 +3080,22 @@ impl Domain {
         &self,
         state: &'a PersistentState,
         cols: &[usize],
-        keys: &HashSet<KeyComparison>,
+        keys: &ReplayKeys,
     ) -> Vec<RecordResult<'a>> {
         let mut range_records = Vec::new();
-        let equal_keys = keys
-            .iter()
-            .filter_map(|k| match k {
-                KeyComparison::Equal(equal) => Some(PointKey::from(equal.clone())),
-                KeyComparison::Range(range) => {
-                    // TODO: aggregate ranges to optimize range lookups too?
-                    match state.lookup_range(cols, &RangeKey::from(range)) {
-                        RangeLookupResult::Some(res) => range_records.push(res),
-                        RangeLookupResult::Missing(_) => {
-                            unreachable!("Can't miss in persistent state")
-                        }
-                    }
-                    None
+        for range in keys.ranges() {
+            // TODO: aggregate ranges to optimize range lookups too?
+            match state.lookup_range(cols, &RangeKey::from(range)) {
+                RangeLookupResult::Some(res) => range_records.push(res),
+                RangeLookupResult::Missing(_) => {
+                    unreachable!("Can't miss in persistent state")
                 }
-            })
-            .collect::<Vec<_>>();
+            }
+        }
+        let equal_keys: Vec<_> = keys
+            .equals()
+            .map(|equal| PointKey::from(equal.clone()))
+            .collect();
 
         let mut records = state.lookup_multi(cols, &equal_keys);
         records.append(&mut range_records);
@@ -3104,34 +3108,37 @@ impl Domain {
         &self,
         state: &'a MaterializedNodeState,
         cols: &[usize],
-        mut keys: HashSet<KeyComparison>,
+        mut keys: ReplayKeys,
     ) -> ReadySetResult<StateLookupResult<'a>> {
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
         keys.retain(|key| match key {
-            KeyComparison::Equal(equal) => {
-                match state.lookup(cols, &PointKey::from(equal.clone())) {
+            KeyComparisonRef::Equal(equal) => {
+                match state.lookup(cols, &PointKey::from((*equal).clone())) {
                     LookupResult::Some(record) => {
                         records.push(record);
                         true
                     }
                     LookupResult::Missing => {
-                        replay_keys.insert(ReplayMiss::Point(key.clone()));
+                        replay_keys
+                            .insert(ReplayMiss::Point(KeyComparison::Equal((*equal).clone())));
                         false
                     }
                 }
             }
-            KeyComparison::Range(range) => {
-                match state.lookup_range(cols, &RangeKey::from(range)) {
+            KeyComparisonRef::Range(range) => {
+                let range_ref: &BoundedRange<Vec1<DfValue>> = range;
+                match state.lookup_range(cols, &RangeKey::from(range_ref)) {
                     RangeLookupResult::Some(record) => {
                         records.push(record);
                         true
                     }
                     RangeLookupResult::Missing(ms) => {
                         // FIXME(eta): error handling impl here adds overhead
+                        let replay_key = KeyComparison::Range((*range).clone());
                         let ms = ms.into_iter().map(|m| ReplayMiss::Distinct {
-                            replay_key: key.clone(),
+                            replay_key: replay_key.clone(),
                             miss_key: KeyComparison::try_from(m).unwrap(),
                         });
                         replay_keys.extend(ms);
@@ -3153,8 +3160,8 @@ impl Domain {
         state: &MaterializedNodeState,
         source: LocalNodeIndex,
         cols: &[usize],
-        keys: HashSet<KeyComparison>,
-    ) -> ReadySetResult<(Vec<Record>, HashSet<KeyComparison>, HashSet<ReplayMiss>)> {
+        keys: ReplayKeys,
+    ) -> ReadySetResult<(Vec<Record>, ReplayKeys, HashSet<ReplayMiss>)> {
         let (records, found_keys, replay_keys) = if let Some(state) = state.as_persistent() {
             let records = self.do_lookup_multi(state, cols, &keys);
             (records, keys, HashSet::new()) // can't miss
@@ -3348,7 +3355,13 @@ impl Domain {
                         let target_node = target.expect("already checked target_in_self");
                         let outer_key = (target_node, Arc::from(partial_index.columns.as_slice()));
                         if let Some(inner) = w.redos.get(&outer_key) {
-                            for_keys.retain(|k| inner.contains_key(k));
+                            // `inner` keys on `KeyComparison`, whose `Hash` collapses a
+                            // degenerate `Range((Inc(k), Inc(k)))` to hash like `Equal(k)`.
+                            // Looking up by `KeyComparisonRef` would require mirroring that
+                            // collapse on the Ref's `Hash`/`Eq` impls; this retain runs once
+                            // per replay batch (not per record), so the per-key clone here
+                            // is acceptable.
+                            for_keys.retain(|k| inner.contains_key(&k.to_owned()));
                         } else {
                             for_keys.clear();
                         }
@@ -3408,7 +3421,7 @@ impl Domain {
             // n.process() prunes (e.g. due to misses) and undo mark_filled
             // for them. Cloned once here and maintained across the segment
             // loop; re-cloned only when misses or captures modify it.
-            let mut backfill_keys: Option<HashSet<KeyComparison>> = if let ReplayPiece {
+            let mut backfill_keys: Option<ReplayKeys> = if let ReplayPiece {
                 context: ReplayPieceContext::Partial { ref for_keys, .. },
                 ..
             } = m
@@ -3455,18 +3468,18 @@ impl Domain {
                         // the same "need replay" response that
                         // triggered this replay initially.
                         if let Some(state) = self.state.get_mut(segment.node) {
-                            for key in backfill_keys.iter() {
+                            for key in backfill_keys.iter_owned() {
                                 trace!(?key, ?tag, local = %segment.node, "Marking filled");
-                                state.mark_filled(key.clone(), tag);
+                                state.mark_filled(key, tag);
                             }
                         } else {
                             // we must be filling a hole in a Reader. we need to ensure
                             // that the hole for the key we're replaying ends up being
                             // filled, even if that hole is empty!
                             if let Some(wh) = self.reader_write_handles.get_mut(segment.node) {
-                                for key in backfill_keys.iter() {
+                                for key in backfill_keys.iter_owned() {
                                     trace!(?key, local = %segment.node, "Marking filled in reader");
-                                    wh.mark_filled(key.clone())?;
+                                    wh.mark_filled(key)?;
                                 }
                             }
                         }
@@ -3506,8 +3519,8 @@ impl Domain {
                                     .as_slice(),
                             );
                             if let Some(inner) = waiting.redos.get(&(target_node, cols)) {
-                                for key in backfill_keys.iter() {
-                                    if let Some(redos) = inner.get(key) {
+                                for key in backfill_keys.iter_owned() {
+                                    if let Some(redos) = inner.get(&key) {
                                         for redo in redos {
                                             // Are we about to satisfy the last hole
                                             // this redo was waiting for?
@@ -3581,8 +3594,8 @@ impl Domain {
                         if let Some(ref mut prev) = self.reader_triggered.get_mut(segment.node)
                             && let Some(backfill_keys) = &backfill_keys
                         {
-                            for key in backfill_keys {
-                                prev.remove(key);
+                            for key in backfill_keys.iter_owned() {
+                                prev.remove(&key);
                             }
                         }
                     }
@@ -3592,14 +3605,14 @@ impl Domain {
                     // materialized union ate some of our keys,
                     // so we didn't *actually* fill those keys after all!
                     if let Some(state) = self.state.get_mut(segment.node) {
-                        for key in &process_result.captured {
-                            state.mark_hole(key, tag);
+                        for key in process_result.captured.iter_owned() {
+                            state.mark_hole(&key, tag);
                         }
                     } else if n.is_reader()
                         && let Some(wh) = self.reader_write_handles.get_mut(segment.node)
                     {
-                        for key in &process_result.captured {
-                            wh.mark_hole(key)?;
+                        for key in process_result.captured.iter_owned() {
+                            wh.mark_hole(&key)?;
                         }
                     }
                 }
@@ -3650,7 +3663,7 @@ impl Domain {
                     } = m
                     && let Some(backfill_keys) = &mut backfill_keys
                 {
-                    backfill_keys.retain(|k| for_keys.contains(k));
+                    backfill_keys.retain(|k| for_keys.contains_ref(k));
                     backfill_keys_modified = true;
                 }
 
@@ -3670,8 +3683,11 @@ impl Domain {
 
                     need_replay.insert(misses);
 
-                    // we should only finish the replays for keys that *didn't* miss
-                    backfill_keys.retain(|k| !missed_on.contains(k));
+                    // we should only finish the replays for keys that *didn't* miss.
+                    // `missed_on: HashSet<&KeyComparison>` stores by `KeyComparison`, whose
+                    // collapse-semantic `Hash` rules out a borrow-keyed lookup -- materialize
+                    // an owned key per retain step. Cheaper than the partial-replay payload.
+                    backfill_keys.retain(|k| !missed_on.contains(&k.to_owned()));
                     backfill_keys_modified = true;
 
                     // prune all replayed records for keys where any replayed record for
@@ -3749,8 +3765,8 @@ impl Domain {
                                     keys = ?backfill_keys,
                                     "clearing keys from purgeable replay source after replay"
                                 );
-                                for key in backfill_keys {
-                                    state.mark_hole(key, tag);
+                                for key in backfill_keys.iter_owned() {
+                                    state.mark_hole(&key, tag);
                                 }
                             }
                         }

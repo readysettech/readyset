@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 
 use common::DfValue;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, KeyComparisonRef, ReplayKeys};
 use readyset_data::Bound;
 use readyset_errors::{ReadySetResult, internal};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ type ColumnIndexes = Vec<usize>;
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Default, Debug)]
 pub struct NodeKeys {
     /// The allowed keys, grouped by the column indexes they act upon.
-    keys: HashMap<ColumnIndexes, HashSet<KeyComparison>>,
+    keys: HashMap<ColumnIndexes, ReplayKeys>,
 }
 
 /// The goal of the [`PacketFilter`] is to avoid sending updates for keys when the destination
@@ -103,10 +103,10 @@ impl PacketFilter {
                         keys.iter().any(|key| match key {
                             // Here we filter the records based on the keys that the target node
                             // requested previously.
-                            KeyComparison::Equal(cond) => {
+                            KeyComparisonRef::Equal(cond) => {
                                 check_bound(ci, row, cond, |d1, d2| d1 == d2)
                             }
-                            KeyComparison::Range((lower_bound, upper_bound)) => {
+                            KeyComparisonRef::Range((lower_bound, upper_bound)) => {
                                 check_lower_bound(lower_bound, ci, row)
                                     && check_upper_bound(upper_bound, ci, row)
                             }
@@ -129,11 +129,9 @@ impl PacketFilter {
                         internal!("The keyed-by parameter must be present for replay messages")
                     }
                     // We add the keys to the node's allowlist information.
-                    Some(column_indexes) => self.add_keys(
-                        target,
-                        column_indexes.to_vec(),
-                        &for_keys.iter().cloned().collect::<Vec<_>>(),
-                    ),
+                    Some(column_indexes) => {
+                        self.add_keys(target, column_indexes.to_vec(), for_keys.iter_owned())
+                    }
                 }
                 Ok(true)
             }
@@ -163,16 +161,13 @@ impl PacketFilter {
     }
 
     /// Adds the given keys to the target node's allowlist information.
-    fn add_keys(&mut self, target: NodeIndex, column_indexes: Vec<usize>, keys: &[KeyComparison]) {
-        match self.requested_keys.entry(target) {
-            Entry::Occupied(mut entry) => {
-                let wd = entry.get_mut();
-                wd.keys
-                    .entry(column_indexes)
-                    .or_insert_with(HashSet::default)
-                    .extend(keys.iter().cloned());
-            }
-            Entry::Vacant(_) => (),
+    fn add_keys<I>(&mut self, target: NodeIndex, column_indexes: Vec<usize>, keys: I)
+    where
+        I: IntoIterator<Item = KeyComparison>,
+    {
+        if let Entry::Occupied(mut entry) = self.requested_keys.entry(target) {
+            let wd = entry.get_mut();
+            wd.keys.entry(column_indexes).or_default().extend(keys);
         }
     }
 }
@@ -263,7 +258,7 @@ mod test {
             let ni = NodeIndex::new(3);
 
             let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(key);
 
             let mut allowlist = HashMap::new();
@@ -289,7 +284,7 @@ mod test {
                     tag: Tag::new(1),
                     data,
                     context: ReplayPieceContext::Partial {
-                        for_keys: HashSet::from([key]),
+                        for_keys: ReplayKeys::from_iter([key]),
                     },
                     cache_name: "test".into(),
                 })
@@ -351,7 +346,7 @@ mod test {
             let ni = NodeIndex::new(3);
 
             let key = KeyComparison::Equal(vec1!["not_present_in_any_record".into(), 12.into()]);
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(key);
 
             let mut keys_by_col_index = HashMap::new();
@@ -402,7 +397,7 @@ mod test {
             let ni = NodeIndex::new(3);
 
             let key = KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]);
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(key);
 
             let mut keys_by_col_index = HashMap::new();
@@ -465,7 +460,7 @@ mod test {
                 Bound::Included(vec1![10.into()]),
                 Bound::Excluded(vec1![20.into()]),
             ));
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(key);
 
             let mut keys_by_col_index = HashMap::new();
@@ -514,7 +509,7 @@ mod test {
 
         #[test]
         fn process_replay_no_keyed_by() {
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
             let mut packet = create_packet(Some(keys));
             let ni = NodeIndex::new(3);
@@ -561,7 +556,7 @@ mod test {
 
         #[test]
         fn process_partial_equal_keys() {
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
 
             let col_indexes = vec![1usize, 3usize];
@@ -599,7 +594,112 @@ mod test {
             }
         }
 
-        fn create_packet(keys: Option<HashSet<KeyComparison>>) -> Packet {
+        /// Like `process_partial_equal_keys`, but the replay carries a [`KeyComparison::Range`]
+        /// instead of an `Equal`. Verifies that the [`ReplayKeys`] partition routes the key
+        /// into `ranges` and that downstream allowlisting still round-trips by equality.
+        #[test]
+        fn process_partial_range_keys() {
+            let mut keys = ReplayKeys::new();
+            keys.insert(KeyComparison::Range((
+                Bound::Included(vec1!["text1-1".into(), 10.into()]),
+                Bound::Excluded(vec1!["text1-1".into(), 20.into()]),
+            )));
+            assert_eq!(keys.ranges().count(), 1);
+
+            let col_indexes = vec![1usize, 3usize];
+
+            let original_packet = create_packet(Some(keys.clone()));
+            let mut processed_packet = original_packet.clone();
+            let ni = NodeIndex::new(3);
+
+            let mut allowlist = HashMap::new();
+            allowlist.insert(ni, NodeKeys::default());
+
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
+
+            let should_send = processor
+                .process(&mut processed_packet, Some(&col_indexes), ni)
+                .unwrap();
+
+            assert!(
+                should_send,
+                "The process should be signaling that the packet can be sent"
+            );
+            assert_eq!(
+                original_packet, processed_packet,
+                "The packet should still be the same"
+            );
+            let new_allowlist = &processor.requested_keys;
+            match new_allowlist.get(&ni) {
+                None => panic!("Filtering should be enabled for the target node"),
+                Some(wd) => match wd.keys.get(&col_indexes) {
+                    None => panic!("The column indexes should be present"),
+                    Some(k) => {
+                        assert_eq!(keys, k.to_owned(), "The allowlisted keys are wrong");
+                        assert_eq!(
+                            k.ranges().count(),
+                            1,
+                            "Range key should land in the ranges partition"
+                        );
+                    }
+                },
+            }
+        }
+
+        /// Equal + non-degenerate Range + degenerate Range in one replay. Each variant goes
+        /// into its own partition: Equal into the Equal partition, both Range forms
+        /// (including the degenerate one) into the Range partition.
+        #[test]
+        fn process_partial_mixed_keys() {
+            let equal_key = KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]);
+            let range_key = KeyComparison::Range((
+                Bound::Included(vec1!["text2-1".into(), 10.into()]),
+                Bound::Excluded(vec1!["text2-1".into(), 20.into()]),
+            ));
+            let degenerate = KeyComparison::Range((
+                Bound::Included(vec1!["text3-1".into(), 7.into()]),
+                Bound::Included(vec1!["text3-1".into(), 7.into()]),
+            ));
+            let keys: ReplayKeys = [equal_key, range_key, degenerate].into_iter().collect();
+            assert_eq!(keys.equals().count(), 1);
+            assert_eq!(
+                keys.ranges().count(),
+                2,
+                "degenerate range must stay in ranges"
+            );
+
+            let col_indexes = vec![1usize, 3usize];
+
+            let original_packet = create_packet(Some(keys.clone()));
+            let mut processed_packet = original_packet.clone();
+            let ni = NodeIndex::new(3);
+
+            let mut allowlist = HashMap::new();
+            allowlist.insert(ni, NodeKeys::default());
+
+            let mut processor = PacketFilter {
+                requested_keys: allowlist,
+            };
+
+            let should_send = processor
+                .process(&mut processed_packet, Some(&col_indexes), ni)
+                .unwrap();
+            assert!(should_send);
+            assert_eq!(original_packet, processed_packet);
+
+            let stored = processor
+                .requested_keys
+                .get(&ni)
+                .and_then(|wd| wd.keys.get(&col_indexes))
+                .expect("allowlist must hold the requested keys");
+            assert_eq!(*stored, keys);
+            assert_eq!(stored.equals().count(), 1);
+            assert_eq!(stored.ranges().count(), 2);
+        }
+
+        fn create_packet(keys: Option<ReplayKeys>) -> Packet {
             let context = if let Some(k) = keys {
                 ReplayPieceContext::Partial { for_keys: k }
             } else {
@@ -620,10 +720,10 @@ mod test {
 
         #[test]
         fn process_evict_all_keys() {
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
 
-            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let original_packet = create_packet(keys.iter_owned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
             let column_indexes = vec![1usize, 3usize];
 
@@ -665,10 +765,10 @@ mod test {
 
         #[test]
         fn process_evict_some_keys() {
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
 
-            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let original_packet = create_packet(keys.iter_owned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
             let key = KeyComparison::Equal(vec1!["text2-2".into(), 22.into()]);
             keys.insert(key.clone());
@@ -726,10 +826,10 @@ mod test {
 
         #[test]
         fn process_evict_no_keys() {
-            let mut keys = HashSet::new();
+            let mut keys = ReplayKeys::new();
             keys.insert(KeyComparison::Equal(vec1!["text1-1".into(), 12.into()]));
 
-            let original_packet = create_packet(keys.iter().cloned().collect::<Vec<_>>());
+            let original_packet = create_packet(keys.iter_owned().collect::<Vec<_>>());
             let mut processed_packet = original_packet.clone();
 
             let column_indexes = vec![1usize, 3usize];

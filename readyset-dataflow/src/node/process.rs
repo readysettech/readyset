@@ -1,9 +1,8 @@
-use std::collections::HashSet;
 use std::convert::TryInto;
 use std::mem;
 
 use dataflow_state::{MaterializedNodeState, SnapshotMode};
-use readyset_client::{KeyComparison, PacketData};
+use readyset_client::{KeyComparison, PacketData, ReplayKeys};
 use readyset_errors::ReadySetResult;
 use replication_offset::ReplicationOffset;
 use tracing::{debug_span, trace};
@@ -24,7 +23,7 @@ pub(crate) struct NodeProcessingResult {
     pub(crate) lookups: Vec<Lookup>,
 
     /// Keys for replays captured during processing
-    pub(crate) captured: HashSet<KeyComparison>,
+    pub(crate) captured: ReplayKeys,
 }
 
 /// Information about the domain required by [`Node::process`].
@@ -158,7 +157,7 @@ impl Node {
             }
             NodeType::Internal(ref mut i) => {
                 let mut captured_full = false;
-                let mut captured = HashSet::new();
+                let mut captured = ReplayKeys::new();
                 let mut misses = Vec::new();
                 let mut lookups = Vec::new();
 

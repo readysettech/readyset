@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, hash_map};
 use std::convert::{TryFrom, TryInto};
 
 use itertools::Itertools;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, ReplayKeys};
 use readyset_data::Bound;
 use readyset_errors::{ReadySetResult, invariant};
 use readyset_util::Indices;
@@ -795,10 +795,10 @@ impl Ingredient for Union {
 
                 let me = self.me;
                 let required = self.required; // can't borrow self in closures below
-                let mut released = HashSet::new();
-                let mut captured = HashSet::new();
+                let mut released = ReplayKeys::new();
+                let mut captured = ReplayKeys::new();
                 let rs = {
-                    keys.iter()
+                    keys.iter_owned()
                         .filter_map(|key| {
                             let rs = rs_by_key
                                 .range_mut::<Vec1<DfValue>, _>(key.as_std_range())
@@ -1067,7 +1067,7 @@ mod tests {
             let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
-            let keys = HashSet::from([key.clone()]);
+            let keys: ReplayKeys = [key.clone()].into_iter().collect();
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
@@ -1085,7 +1085,7 @@ mod tests {
                 RawProcessingResult::ReplayPiece { rows, captured, .. } => {
                     // We should capture the replay and emit no records
                     assert_eq!(rows, Records::default());
-                    assert_eq!(captured, HashSet::from([key.clone()]));
+                    assert_eq!(captured, ReplayKeys::from_iter([key.clone()]));
                 }
                 _ => panic!("expected replay piece, got: {res:?}"),
             }
@@ -1115,7 +1115,7 @@ mod tests {
                     assert!(rows.contains(&Record::Positive(vec![1.into(), "b".into()])));
 
                     assert!(captured.is_empty());
-                    assert_eq!(keys, HashSet::from([key]));
+                    assert_eq!(keys, ReplayKeys::from_iter([key]));
                 }
                 _ => panic!("Expected replay piece, got: {res:?}"),
             }
@@ -1126,7 +1126,7 @@ mod tests {
             let (mut g, left, right) = setup(DuplicateMode::UnionAll);
             let tag = Tag::new(0);
             let key: KeyComparison = vec1![1.into()].into();
-            let keys = HashSet::from([key.clone()]);
+            let keys: ReplayKeys = [key.clone()].into_iter().collect();
             let replay_ctx = || ReplayContext::Partial {
                 key_cols: &[0],
                 keys: &keys,
@@ -1147,7 +1147,7 @@ mod tests {
                 RawProcessingResult::ReplayPiece { rows, captured, .. } => {
                     // We should capture the replay and emit no records
                     assert_eq!(rows, Records::default());
-                    assert_eq!(captured, HashSet::from([key.clone()]));
+                    assert_eq!(captured, ReplayKeys::from_iter([key.clone()]));
                 }
                 _ => panic!("expected replay piece, got: {res:?}"),
             }
@@ -1192,7 +1192,7 @@ mod tests {
                     assert!(rows.contains(&Record::Positive(vec![1.into(), "d".into()])));
 
                     assert!(captured.is_empty());
-                    assert_eq!(keys, HashSet::from([key]));
+                    assert_eq!(keys, ReplayKeys::from_iter([key]));
                 }
                 _ => panic!("Expected replay piece, got: {res:?}"),
             }

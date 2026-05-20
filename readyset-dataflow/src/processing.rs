@@ -7,7 +7,7 @@ use std::{iter, mem};
 use crate::node::Column;
 use dataflow_state::PointKey;
 use derive_more::From;
-use readyset_client::KeyComparison;
+use readyset_client::{KeyComparison, ReplayKeys};
 use readyset_data::DfType;
 use readyset_errors::ReadySetResult;
 use readyset_util::Indices;
@@ -150,25 +150,22 @@ impl<'a> MissBuilder<'a> {
         let replay_key = match self.replay.take().unwrap() {
             ReplayContext::Partial { key_cols, keys, .. } => {
                 let replay_key_cols = self.replay_key_cols.take().unwrap_or(*key_cols);
-                // Does `keys` contain a range that covers `record`?
-                // Since we unfortunately have to do some cloning to answer that question due to the
-                // limiting type signature of `RangeBounds::contains`, avoid doing that cloning if
-                // we don't find any ranges by inserting into a memo (`record_key_memo`).
+                // Does any range in `keys` cover `record`? The record's key columns are
+                // cloned lazily into `record_key_memo` only when a range is actually found.
                 let mut record_key_memo = None;
                 let range = keys
-                    .iter()
-                    .filter_map(|k| k.range())
-                    // NOTE: Since overlapping range queries will be deduplicated by the domain, we
-                    // can be assured that we will find at most one range that covers our record
-                    // here.
+                    .ranges()
+                    // Since overlapping range queries will be deduplicated by the domain, we can
+                    // be assured that we will find at most one range that covers our record here.
                     .find(|(lower, upper)| {
                         (
                             lower.as_ref().map(|b| b.as_ref()),
                             upper.as_ref().map(|b| b.as_ref()),
                         )
                             .contains(record_key_memo.get_or_insert_with(
-                                // TODO(aspen): This clone shouldn't be necessary, but comparing
-                                // Vec<&DfValue> with &Vec<DfValue> is surprisingly difficult
+                                // TODO(aspen): This clone shouldn't be necessary, but
+                                // comparing Vec<&DfValue> with &Vec<DfValue> is
+                                // surprisingly difficult
                                 || {
                                     record
                                         .cloned_indices(replay_key_cols.iter().copied())
@@ -285,8 +282,8 @@ pub(crate) enum RawProcessingResult {
     CapturedFull,
     ReplayPiece {
         rows: Records,
-        keys: HashSet<KeyComparison>,
-        captured: HashSet<KeyComparison>,
+        keys: ReplayKeys,
+        captured: ReplayKeys,
     },
 }
 
@@ -295,7 +292,7 @@ pub(crate) enum ReplayContext<'a> {
     None,
     Partial {
         key_cols: &'a [usize],
-        keys: &'a HashSet<KeyComparison>,
+        keys: &'a ReplayKeys,
         tag: Tag,
     },
     Full {
@@ -321,7 +318,7 @@ impl<'a> ReplayContext<'a> {
     ///
     /// This is only valid for [`ReplayContext::Partial`], and will return `None` for
     /// other variants.
-    pub(crate) fn keys(&self) -> Option<&'a HashSet<KeyComparison>> {
+    pub(crate) fn keys(&self) -> Option<&'a ReplayKeys> {
         if let ReplayContext::Partial { keys, .. } = *self {
             Some(keys)
         } else {
@@ -894,5 +891,41 @@ where
     /// Returns true if this operator requires a full materialization
     fn requires_full_materialization(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use vec1::vec1;
+
+    use super::*;
+
+    /// Regression test for when a partial replay carries only `Equal` keys,
+    /// `MissBuilder::build` never enters the range-cover loop. The resulting miss's replay
+    /// key is derived from the record columns as an `Equal`, matching the partition routing.
+    #[test]
+    fn miss_builder_no_range_iteration_for_equals_only_replay() {
+        let keys: ReplayKeys = (0..1000)
+            .map(|k| KeyComparison::Equal(vec1![k.into()]))
+            .collect();
+        assert_eq!(keys.ranges().count(), 0);
+
+        let replay = ReplayContext::Partial {
+            key_cols: &[0],
+            keys: &keys,
+            tag: Tag::new(0),
+        };
+        let miss = Miss::builder()
+            .on(LocalNodeIndex::make(0))
+            .lookup_idx(vec![0])
+            .lookup_key(MissLookupKey::RecordColumns(vec![0]))
+            .replay(&replay)
+            .record(vec![42.into()])
+            .build();
+
+        // No range covers the record, so the resolved replay key is the record's
+        // projected columns as `KeyComparison::Equal`. A regression where ranges() was
+        // iterated would either pick up the wrong variant or panic on the empty iterator.
+        assert!(matches!(miss.replay_key(), Some(KeyComparison::Equal(_))));
     }
 }

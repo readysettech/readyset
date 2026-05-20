@@ -891,7 +891,7 @@ impl Join {
         for key in replay_keys {
             let other_predicate = self
                 .missing_upqueries
-                .remove(&(vec![key.clone()], side))
+                .remove(&(vec![key.to_owned()], side))
                 .ok_or_else(|| internal_err!("No missing keys found for key {:?}", key))?;
 
             let mut os_key_col_idx = SmallVec::<[usize; 8]>::from_slice(&on_cols_idx_os);
@@ -1779,7 +1779,7 @@ mod tests {
     /// (replay-key == join-key) and issued `continue`, discarding the row.
     #[test]
     fn left_join_replay_non_join_key_miss_proceeds() {
-        use std::collections::HashSet;
+        use readyset_client::ReplayKeys;
 
         use dataflow_state::MaterializedNodeState;
         use readyset_client::KeyComparison;
@@ -1810,7 +1810,7 @@ mod tests {
         // trace_replay_column_source will return [1] (right col 1),
         // which differs from on_cols_ts = [0] (right col 0).
         let replay_key: KeyComparison = vec1!["rval".into()].into();
-        let replay_keys = HashSet::from([replay_key]);
+        let replay_keys: ReplayKeys = [replay_key].into_iter().collect();
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[2], // emitted column 2 = Right.r1
             keys: &replay_keys,
@@ -1946,7 +1946,7 @@ mod tests {
     /// taking Case 2 (proceed without count).
     #[test]
     fn compound_join_key_reversed_order_is_case1() {
-        use std::collections::HashSet;
+        use readyset_client::ReplayKeys;
 
         use dataflow_state::MaterializedNodeState;
         use readyset_client::KeyComparison;
@@ -1978,7 +1978,7 @@ mod tests {
         // So rkc = [1, 0], while on_cols_ts = [0, 1].
         // These represent the same set of columns → Case 1 (skip).
         let replay_key: KeyComparison = vec1![6.into(), 5.into()].into();
-        let replay_keys = HashSet::from([replay_key]);
+        let replay_keys: ReplayKeys = [replay_key].into_iter().collect();
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[1, 0], // reversed order
             keys: &replay_keys,
@@ -2008,7 +2008,7 @@ mod tests {
     /// Should take Case 2 (proceed without right-side count).
     #[test]
     fn compound_join_non_join_key_replay_proceeds() {
-        use std::collections::HashSet;
+        use readyset_client::ReplayKeys;
 
         use dataflow_state::MaterializedNodeState;
         use readyset_client::KeyComparison;
@@ -2034,7 +2034,7 @@ mod tests {
         // trace_replay_column_source resolves emit[3] = (Right,2) → right col 2.
         // rkc = [2], on_cols_ts = [0, 1] → different set → Case 2 (proceed).
         let replay_key: KeyComparison = vec1!["rval".into()].into();
-        let replay_keys = HashSet::from([replay_key]);
+        let replay_keys: ReplayKeys = [replay_key].into_iter().collect();
         let replay_ctx = ReplayContext::Partial {
             key_cols: &[3], // emitted column 3 = Right.r2 (non-join-key)
             keys: &replay_keys,

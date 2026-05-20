@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 
 use dataflow_state::MaterializedNodeState;
 use itertools::Itertools;
-use readyset_client::{self, KeyComparison, PacketData, PacketTrace};
+use readyset_client::{self, KeyComparison, PacketData, PacketTrace, ReplayKeys};
 use readyset_data::DfType;
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
@@ -174,8 +174,8 @@ pub enum PrepareStateKind {
 pub enum ReplayPieceContext {
     /// Context for a partial replay
     Partial {
-        /// The set of keys that are being replayed
-        for_keys: HashSet<KeyComparison>,
+        /// The set of keys that are being replayed.
+        for_keys: ReplayKeys,
     },
     /// Context for a full replay
     Full {
