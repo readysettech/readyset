@@ -3174,11 +3174,14 @@ impl Domain {
             (records, found_keys, replay_keys)
         };
 
-        let records = records
-            .into_iter()
-            .flat_map(|rr| rr.into_iter().map(|r| self.seed_row(source, r)))
-            .collect::<ReadySetResult<Vec<Record>>>()?;
-        Ok((records, found_keys, replay_keys))
+        let total: usize = records.iter().map(|rr| rr.len()).sum();
+        let mut seeded = Vec::with_capacity(total);
+        for rr in records {
+            for r in rr {
+                seeded.push(self.seed_row(source, r)?);
+            }
+        }
+        Ok((seeded, found_keys, replay_keys))
     }
 
     // returns (src, index, dst)
