@@ -469,6 +469,72 @@ fn parse_unknown_directive() {
     assert!(result.is_none());
 }
 
+#[test]
+fn parse_create_cache_hint_with_clause_flags() {
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE CACHE WITH (ALWAYS, CONCURRENTLY)",
+    )
+    .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::Always);
+    assert!(opts.concurrently);
+}
+
+#[test]
+fn parse_create_cache_hint_with_clause_shallow_options() {
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE WITH (POLICY TTL 5 SECONDS REFRESH 1 SECONDS, COALESCE 250 MS, ALWAYS)",
+    )
+    .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::Always);
+    assert_eq!(opts.cache_type, Some(CacheType::Shallow));
+    assert_eq!(
+        opts.policy,
+        Some(EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(5),
+            refresh: Duration::from_secs(1),
+            schedule: false,
+        })
+    );
+    assert_eq!(opts.coalesce_ms, Some(Duration::from_millis(250)));
+}
+
+#[test]
+fn parse_create_cache_hint_with_clause_empty_allowed() {
+    // `WITH ()` parses as "no options", equivalent to the bare form (no clause), so SQL
+    // generators can emit `WITH (<options>)` without special-casing zero options.
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH ()").expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.trx_cache_policy, TrxCachePolicy::Never);
+    assert!(!opts.concurrently);
+    assert_eq!(opts.policy, None);
+    assert_eq!(opts.coalesce_ms, None);
+}
+
+#[test]
+fn parse_create_cache_hint_with_clause_rejects_duplicates() {
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (ALWAYS, ALWAYS)");
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_create_cache_hint_with_clause_rejects_policy_on_deep() {
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE DEEP CACHE WITH (POLICY TTL 5 SECONDS)",
+    );
+    assert!(result.is_err());
+}
+
 // --- SKIP CACHE hint directive tests ---
 
 #[test]

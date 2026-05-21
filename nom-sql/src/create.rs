@@ -911,43 +911,27 @@ fn uint_with_duration_unit(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Duratio
     Ok((i, to_duration(value)))
 }
 
-/// Extract the [`CreateCacheOption`] from a `CREATE CACHE statement.
-fn cached_query_options(
-    mut i: LocatedSpan<&[u8]>,
-    cache_type: Option<CacheType>,
-) -> NomSqlResult<&[u8], CreateCacheOptions> {
-    // Create an error given the position
-    fn error(i: LocatedSpan<&[u8]>) -> nom::Err<NomSqlError<&[u8]>> {
-        nom::Err::Failure(NomSqlError::from_error_kind(i, ErrorKind::Permutation))
-    }
+/// A single parsed `CREATE CACHE` option, used internally before being applied to
+/// [`CreateCacheOptions`]. Avoids string matching when reporting duplicates.
+enum CacheOptionKind {
+    Always,
+    UntilWrite,
+    Concurrently,
+    Policy(EvictionPolicy),
+    Coalesce(Duration),
+}
 
-    // A CREATE CACHE optional argument. Used to avoid string matching
-    enum Option {
-        Always,
-        UntilWrite,
-        Concurrently,
-        Policy(EvictionPolicy),
-        Coalesce(Duration),
-    }
-
-    let mut opts = CreateCacheOptions::default();
-
-    // Parse a subset of the options in any order. Ignore errors since all options are optional.
-    while let Ok((remaining, opt)) = alt((
-        map(tuple((tag_no_case("always"), whitespace1)), |_| {
-            Option::Always
-        }),
+/// Parse a single `CREATE CACHE` option without consuming any trailing whitespace.
+/// Used by both the bare-options form and the new `WITH (...)` form.
+fn cache_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheOptionKind> {
+    alt((
+        map(tag_no_case("always"), |_| CacheOptionKind::Always),
         map(
-            tuple((
-                tag_no_case("until"),
-                whitespace1,
-                tag_no_case("write"),
-                whitespace1,
-            )),
-            |_| Option::UntilWrite,
+            tuple((tag_no_case("until"), whitespace1, tag_no_case("write"))),
+            |_| CacheOptionKind::UntilWrite,
         ),
-        map(tuple((tag_no_case("concurrently"), whitespace1)), |_| {
-            Option::Concurrently
+        map(tag_no_case("concurrently"), |_| {
+            CacheOptionKind::Concurrently
         }),
         map(
             tuple((
@@ -956,24 +940,25 @@ fn cached_query_options(
                 tag_no_case("ttl"),
                 whitespace1,
                 uint_with_duration_unit,
-                whitespace1,
-                opt(tuple((
-                    tag_no_case("refresh"),
+                opt(preceded(
                     whitespace1,
-                    opt(tuple((tag_no_case("every"), whitespace1))),
-                    uint_with_duration_unit,
-                    whitespace1,
-                ))),
+                    tuple((
+                        tag_no_case("refresh"),
+                        whitespace1,
+                        opt(tuple((tag_no_case("every"), whitespace1))),
+                        uint_with_duration_unit,
+                    )),
+                )),
             )),
-            |(_, _, _, _, ttl, _, refresh_opt)| {
-                if let Some((_, _, every_opt, refresh, _)) = refresh_opt {
-                    Option::Policy(EvictionPolicy::TtlAndPeriod {
+            |(_, _, _, _, ttl, refresh_opt)| {
+                if let Some((_, _, every_opt, refresh)) = refresh_opt {
+                    CacheOptionKind::Policy(EvictionPolicy::TtlAndPeriod {
                         ttl,
                         refresh,
                         schedule: every_opt.is_some(),
                     })
                 } else {
-                    Option::Policy(EvictionPolicy::Ttl { ttl })
+                    CacheOptionKind::Policy(EvictionPolicy::Ttl { ttl })
                 }
             },
         ),
@@ -982,48 +967,115 @@ fn cached_query_options(
                 tag_no_case("coalesce"),
                 whitespace1,
                 uint_with_duration_unit,
-                whitespace1,
             )),
-            |(_, _, duration, _)| Option::Coalesce(duration),
+            |(_, _, duration)| CacheOptionKind::Coalesce(duration),
         ),
     ))(i)
-    {
-        // Error if the same option appears twice.
-        match opt {
-            Option::Always => {
-                if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
-                    return Err(error(i));
-                }
-                opts.trx_cache_policy = TrxCachePolicy::Always;
+}
+
+/// Apply a parsed option to the accumulator. Errors on duplicates and on shallow-only options
+/// used with a non-shallow cache.
+fn apply_cache_option<'a>(
+    opts: &mut CreateCacheOptions,
+    opt: CacheOptionKind,
+    cache_type: Option<CacheType>,
+    i: LocatedSpan<&'a [u8]>,
+) -> Result<(), nom::Err<NomSqlError<&'a [u8]>>> {
+    let error = || nom::Err::Failure(NomSqlError::from_error_kind(i, ErrorKind::Permutation));
+    match opt {
+        CacheOptionKind::Always => {
+            if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
+                return Err(error());
             }
-            Option::UntilWrite => {
-                if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
-                    return Err(error(i));
-                }
-                opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
+            opts.trx_cache_policy = TrxCachePolicy::Always;
+        }
+        CacheOptionKind::UntilWrite => {
+            if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
+                return Err(error());
             }
-            Option::Concurrently => {
-                if std::mem::replace(&mut opts.concurrently, true) {
-                    return Err(error(i));
-                }
-            }
-            Option::Policy(policy) => {
-                if opts.policy.replace(policy).is_some() {
-                    return Err(error(i));
-                }
-                if cache_type == Some(CacheType::Deep) {
-                    return Err(error(i));
-                }
-            }
-            Option::Coalesce(duration) => {
-                if opts.coalesce_ms.replace(duration).is_some() {
-                    return Err(error(i));
-                }
-                if cache_type == Some(CacheType::Deep) {
-                    return Err(error(i));
-                }
+            opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
+        }
+        CacheOptionKind::Concurrently => {
+            if std::mem::replace(&mut opts.concurrently, true) {
+                return Err(error());
             }
         }
+        CacheOptionKind::Policy(policy) => {
+            if opts.policy.replace(policy).is_some() {
+                return Err(error());
+            }
+            if cache_type == Some(CacheType::Deep) {
+                return Err(error());
+            }
+        }
+        CacheOptionKind::Coalesce(duration) => {
+            if opts.coalesce_ms.replace(duration).is_some() {
+                return Err(error());
+            }
+            if cache_type == Some(CacheType::Deep) {
+                return Err(error());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Parse a `WITH ( option [, option]... )` clause. Empty `WITH ()` is accepted as "no options",
+/// so callers generating SQL can always emit `WITH (<options>)` without special-casing zero
+/// options. Returns the remaining input *after* trailing whitespace.
+fn cache_options_with_clause(
+    i: LocatedSpan<&[u8]>,
+    cache_type: Option<CacheType>,
+) -> NomSqlResult<&[u8], CreateCacheOptions> {
+    use nom::combinator::peek;
+    let (i, _) = tag_no_case("with")(i)?;
+    // Word boundary after WITH: must be followed by whitespace or `(`, not part of a longer
+    // identifier like `WITHIN`.
+    let (i, _) = peek(nom::character::complete::one_of(" \t\r\n("))(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag("(")(i)?;
+    let (i, _) = whitespace0(i)?;
+    // `separated_list0` accepts zero options, so `WITH ()` parses as an empty option set.
+    let (i, parsed) =
+        separated_list0(tuple((whitespace0, tag(","), whitespace0)), cache_option)(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag(")")(i)?;
+    // Mirror the bare form's contract: each option (or the closing `)`) is followed by
+    // whitespace1, so the outer parser can immediately match the cache name or FROM.
+    let (i, _) = whitespace1(i)?;
+
+    let mut opts = CreateCacheOptions::default();
+    for opt in parsed {
+        apply_cache_option(&mut opts, opt, cache_type, i)?;
+    }
+    Ok((i, opts))
+}
+
+/// Extract the [`CreateCacheOptions`] from a `CREATE CACHE` statement. Accepts either:
+///   * the legacy bare form: `[ALWAYS] [CONCURRENTLY] [POLICY TTL ...] [COALESCE ...]`
+///   * the new umbrella form: `WITH ( option [, option]... )`
+///
+/// The two forms are mutually exclusive: a `WITH (...)` clause cannot be combined with bare
+/// options on the same statement.
+fn cached_query_options(
+    mut i: LocatedSpan<&[u8]>,
+    cache_type: Option<CacheType>,
+) -> NomSqlResult<&[u8], CreateCacheOptions> {
+    // Try the WITH form first; the leading WITH keyword unambiguously distinguishes it from a
+    // cache name. A `Failure` (committed-but-invalid) must bubble up; only an `Error`
+    // (didn't recognize a WITH clause at all) should fall through to the bare form.
+    match cache_options_with_clause(i, cache_type) {
+        Ok(ok) => return Ok(ok),
+        Err(nom::Err::Failure(e)) => return Err(nom::Err::Failure(e)),
+        Err(_) => {}
+    }
+
+    let mut opts = CreateCacheOptions::default();
+
+    // Bare form: parse a subset of the options in any order. Each option is followed by
+    // whitespace1, which acts as a separator before the next option, the cache name, or FROM.
+    while let Ok((remaining, (opt, _))) = tuple((cache_option, whitespace1))(i) {
+        apply_cache_option(&mut opts, opt, cache_type, i)?;
         i = remaining;
     }
     Ok((i, opts))
@@ -1964,7 +2016,7 @@ mod tests {
             let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
-                "CREATE CACHE UNTIL WRITE `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE WITH (UNTIL WRITE) `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
 
             // Round-trip: re-parsing the displayed form preserves the policy.
@@ -2001,7 +2053,7 @@ mod tests {
             let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
-                "CREATE CACHE CONCURRENTLY ALWAYS `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE WITH (CONCURRENTLY, ALWAYS) `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
         }
 
@@ -2078,6 +2130,84 @@ mod tests {
                 b"CREATE SHALLOW CACHE COALESCE 250 MS FROM SELECT id FROM t"
             );
             assert_eq!(stmt.coalesce_ms, Some(Duration::from_millis(250)));
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_flags() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH (ALWAYS, CONCURRENTLY) foo FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+            assert!(stmt.concurrently);
+            assert_eq!(stmt.name, Some("foo".into()));
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_shallow_options() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE WITH (POLICY TTL 5 SECONDS REFRESH 1 SECONDS, \
+                  COALESCE 250 MS, ALWAYS) FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+            assert!(!stmt.concurrently);
+            assert_eq!(stmt.cache_type, Some(CacheType::Shallow));
+            assert_eq!(
+                stmt.policy,
+                Some(EvictionPolicy::TtlAndPeriod {
+                    ttl: Duration::from_secs(5),
+                    refresh: Duration::from_secs(1),
+                    schedule: false,
+                })
+            );
+            assert_eq!(stmt.coalesce_ms, Some(Duration::from_millis(250)));
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_empty_allowed() {
+            // `WITH ()` parses as "no options" so SQL generators can emit `WITH (<options>)`
+            // unconditionally. It's equivalent to the bare form (no clause).
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH () foo FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Never);
+            assert!(!stmt.concurrently);
+            assert_eq!(stmt.policy, None);
+            assert_eq!(stmt.coalesce_ms, None);
+            assert_eq!(stmt.name, Some("foo".into()));
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_rejects_duplicates() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE WITH (ALWAYS, ALWAYS) FROM SELECT id FROM users",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_rejects_policy_on_deep() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE DEEP CACHE WITH (POLICY TTL 5 SECONDS) FROM SELECT id FROM t",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_equivalent_to_bare() {
+            let with_form = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE WITH (ALWAYS, COALESCE 100 MS) FROM SELECT id FROM t"
+            );
+            let bare_form = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE COALESCE 100 MS ALWAYS FROM SELECT id FROM t"
+            );
+            assert_eq!(with_form.trx_cache_policy, bare_form.trx_cache_policy);
+            assert_eq!(with_form.coalesce_ms, bare_form.coalesce_ms);
+            assert_eq!(with_form.cache_type, bare_form.cache_type);
         }
 
         #[test]

@@ -564,24 +564,22 @@ fn parse_alter_mcp_token_body(parser: &mut Parser) -> Result<SqlQuery, ReadysetP
     ))
 }
 
-/// Parse cache options (POLICY, TTL, REFRESH, COALESCE, ALWAYS, CONCURRENTLY) from the token
-/// stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must already be consumed.
-///
-/// This is shared between `CREATE CACHE` DDL parsing and hint directive parsing.
-/// Syntax is identical in both contexts:
-///     POLICY TTL <n> {SECONDS | MILLISECONDS | MS}
-///       [REFRESH [EVERY] <n> {SECONDS | MILLISECONDS | MS}]
-///       [COALESCE <n> {SECONDS | MILLISECONDS | MS}]
-fn parse_cache_options(
+/// A single parsed `CREATE CACHE` option, used internally before being applied to
+/// [`CreateCacheOptions`].
+enum CacheOptionKind {
+    Always,
+    UntilWrite,
+    Concurrently,
+    Policy(EvictionPolicy),
+    Coalesce(Duration),
+}
+
+/// Parse a single cache option (without leading `WITH (` or comma separators).
+/// Returns `None` if the next token doesn't begin a recognized option.
+fn parse_single_cache_option(
     parser: &mut Parser,
-    cache_type: Option<CacheType>,
-) -> Result<CreateCacheOptions, ReadysetParsingError> {
-    let policy = if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
-        if cache_type == Some(CacheType::Deep) {
-            return Err(ReadysetParsingError::ReadysetParsingError(
-                "DEEP caches do not support caching policies".into(),
-            ));
-        }
+) -> Result<Option<CacheOptionKind>, ReadysetParsingError> {
+    if parse_readyset_keyword(parser, ReadysetKeyword::POLICY) {
         if !parse_readyset_keyword(parser, ReadysetKeyword::TTL) {
             return Err(ReadysetParsingError::ReadysetParsingError(
                 "Expected TTL after POLICY".into(),
@@ -599,7 +597,6 @@ fn parse_cache_options(
                             "REFRESH period must be less than TTL".into(),
                         ));
                     }
-
                     EvictionPolicy::TtlAndPeriod {
                         ttl,
                         refresh,
@@ -614,58 +611,133 @@ fn parse_cache_options(
         } else {
             EvictionPolicy::Ttl { ttl }
         };
-
-        Some(policy)
-    } else {
-        None
-    };
-
-    let coalesce_ms = if parser.parse_keyword(Keyword::COALESCE) {
-        if cache_type == Some(CacheType::Deep) {
+        Ok(Some(CacheOptionKind::Policy(policy)))
+    } else if parser.parse_keyword(Keyword::COALESCE) {
+        Ok(Some(CacheOptionKind::Coalesce(parse_duration_with_unit(
+            parser, "COALESCE",
+        )?)))
+    } else if parser.parse_keyword(Keyword::ALWAYS) {
+        Ok(Some(CacheOptionKind::Always))
+    } else if parser.parse_keyword(Keyword::UNTIL) {
+        if !parser.parse_keyword(Keyword::WRITE) {
             return Err(ReadysetParsingError::ReadysetParsingError(
-                "COALESCE is not supported for DEEP caches".into(),
+                "expected WRITE after UNTIL".into(),
             ));
         }
-        Some(parse_duration_with_unit(parser, "COALESCE")?)
+        Ok(Some(CacheOptionKind::UntilWrite))
+    } else if parser.parse_keyword(Keyword::CONCURRENTLY) {
+        Ok(Some(CacheOptionKind::Concurrently))
     } else {
-        None
-    };
+        Ok(None)
+    }
+}
 
-    // ALWAYS and UNTIL WRITE are mutually exclusive in the same grammar slot;
-    // CONCURRENTLY composes with either.
-    fn try_parse_policy(parser: &mut Parser) -> Result<TrxCachePolicy, ReadysetParsingError> {
-        if parser.parse_keyword(Keyword::ALWAYS) {
-            Ok(TrxCachePolicy::Always)
-        } else if parser.parse_keyword(Keyword::UNTIL) {
-            if !parser.parse_keyword(Keyword::WRITE) {
+/// Apply a parsed option to the accumulator. Errors on duplicates and on shallow-only options
+/// used with a non-shallow cache.
+fn apply_cache_option(
+    opts: &mut CreateCacheOptions,
+    opt: CacheOptionKind,
+    cache_type: Option<CacheType>,
+) -> Result<(), ReadysetParsingError> {
+    match opt {
+        CacheOptionKind::Always => {
+            if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
                 return Err(ReadysetParsingError::ReadysetParsingError(
-                    "expected WRITE after UNTIL".into(),
+                    "transaction cache policy specified more than once".into(),
                 ));
             }
-            Ok(TrxCachePolicy::UntilWrite)
-        } else {
-            Ok(TrxCachePolicy::Never)
+            opts.trx_cache_policy = TrxCachePolicy::Always;
+        }
+        CacheOptionKind::UntilWrite => {
+            if !matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "transaction cache policy specified more than once".into(),
+                ));
+            }
+            opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
+        }
+        CacheOptionKind::Concurrently => {
+            if std::mem::replace(&mut opts.concurrently, true) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "CONCURRENTLY specified more than once".into(),
+                ));
+            }
+        }
+        CacheOptionKind::Policy(policy) => {
+            if cache_type == Some(CacheType::Deep) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "DEEP caches do not support caching policies".into(),
+                ));
+            }
+            if opts.policy.replace(policy).is_some() {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "POLICY specified more than once".into(),
+                ));
+            }
+        }
+        CacheOptionKind::Coalesce(duration) => {
+            if cache_type == Some(CacheType::Deep) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "COALESCE is not supported for DEEP caches".into(),
+                ));
+            }
+            if opts.coalesce_ms.replace(duration).is_some() {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "COALESCE specified more than once".into(),
+                ));
+            }
         }
     }
+    Ok(())
+}
 
-    let mut trx_cache_policy = try_parse_policy(parser)?;
-    let mut concurrently = false;
-    if matches!(trx_cache_policy, TrxCachePolicy::Never) {
-        if parser.parse_keyword(Keyword::CONCURRENTLY) {
-            concurrently = true;
-            trx_cache_policy = try_parse_policy(parser)?;
-        }
-    } else {
-        concurrently = parser.parse_keyword(Keyword::CONCURRENTLY);
-    }
-
-    Ok(CreateCacheOptions {
-        trx_cache_policy,
-        concurrently,
+/// Parse cache options from the token stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must
+/// already be consumed.
+///
+/// Accepts either:
+///   * the legacy bare form: `[POLICY TTL ...] [COALESCE ...] [ALWAYS] [CONCURRENTLY]`
+///   * the new umbrella form: `WITH ( option [, option]... )`
+///
+/// The two forms are mutually exclusive on a single statement. Both DDL parsing and
+/// `/*rs+ ... */` hint directive parsing share this entry point.
+fn parse_cache_options(
+    parser: &mut Parser,
+    cache_type: Option<CacheType>,
+) -> Result<CreateCacheOptions, ReadysetParsingError> {
+    let mut opts = CreateCacheOptions {
         cache_type,
-        policy,
-        coalesce_ms,
-    })
+        ..Default::default()
+    };
+
+    if parser.parse_keyword(Keyword::WITH) {
+        parser.expect_token(&Token::LParen)?;
+        // Empty `WITH ()` is accepted as "no options", so callers generating SQL can always emit
+        // `WITH (<options>)` without special-casing zero options.
+        loop {
+            if parser.peek_token().token == Token::RParen {
+                break;
+            }
+            let opt = parse_single_cache_option(parser)?.ok_or_else(|| {
+                ReadysetParsingError::ReadysetParsingError(format!(
+                    "Unexpected token in WITH clause: {}",
+                    parser.peek_token()
+                ))
+            })?;
+            apply_cache_option(&mut opts, opt, cache_type)?;
+            if !parser.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        parser.expect_token(&Token::RParen)?;
+        return Ok(opts);
+    }
+
+    // Bare form: parse options in any order, applying each as we go.
+    while let Some(opt) = parse_single_cache_option(parser)? {
+        apply_cache_option(&mut opts, opt, cache_type)?;
+    }
+
+    Ok(opts)
 }
 
 /// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache

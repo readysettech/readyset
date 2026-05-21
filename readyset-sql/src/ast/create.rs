@@ -1095,16 +1095,6 @@ pub enum TrxCachePolicy {
 }
 
 impl TrxCachePolicy {
-    /// Render the keyword used in `CREATE CACHE` DDL, with a trailing space, or empty
-    /// for the default `Never` policy.
-    fn ddl_keyword(&self) -> &'static str {
-        match self {
-            Self::Never => "",
-            Self::UntilWrite => "UNTIL WRITE ",
-            Self::Always => "ALWAYS ",
-        }
-    }
-
     /// Render the policy as it appears in `SHOW CACHES` output, or `None` for `Never`.
     pub fn show_caches_label(&self) -> Option<&'static str> {
         match self {
@@ -1198,18 +1188,47 @@ impl DialectDisplay for CreateCacheStatement {
                 Some(cache_type) => write!(f, "{} ", cache_type.display(dialect))?,
             }
             write!(f, "CACHE ")?;
-            if let Some(policy) = &self.policy {
-                write!(f, "{} ", policy.display(dialect))?;
+            // Render options through the `WITH (...)` umbrella so the canonical text matches the
+            // grammar. The clause is omitted entirely when there are no options to emit.
+            let has_options = self.policy.is_some()
+                || self.coalesce_ms.is_some()
+                || self.concurrently
+                || !matches!(self.trx_cache_policy, TrxCachePolicy::Never);
+            if has_options {
+                write!(f, "WITH (")?;
+                let mut first = true;
+                let mut sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
+                    if !std::mem::take(&mut first) {
+                        write!(f, ", ")?;
+                    }
+                    Ok(())
+                };
+                if let Some(policy) = &self.policy {
+                    sep(f)?;
+                    write!(f, "{}", policy.display(dialect))?;
+                }
+                if let Some(duration) = &self.coalesce_ms {
+                    sep(f)?;
+                    write!(f, "COALESCE ")?;
+                    format_duration(f, duration)?;
+                }
+                if self.concurrently {
+                    sep(f)?;
+                    write!(f, "CONCURRENTLY")?;
+                }
+                match self.trx_cache_policy {
+                    TrxCachePolicy::Always => {
+                        sep(f)?;
+                        write!(f, "ALWAYS")?;
+                    }
+                    TrxCachePolicy::UntilWrite => {
+                        sep(f)?;
+                        write!(f, "UNTIL WRITE")?;
+                    }
+                    TrxCachePolicy::Never => {}
+                }
+                write!(f, ") ")?;
             }
-            if let Some(duration) = &self.coalesce_ms {
-                write!(f, "COALESCE ")?;
-                format_duration(f, duration)?;
-                write!(f, " ")?;
-            }
-            if self.concurrently {
-                write!(f, "CONCURRENTLY ")?;
-            }
-            write!(f, "{}", self.trx_cache_policy.ddl_keyword())?;
             if let Some(name) = &self.name {
                 write!(f, "{} ", name.display(dialect))?;
             }
