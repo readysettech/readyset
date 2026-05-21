@@ -748,15 +748,14 @@ pub struct WorkerOptions {
     )]
     feature_straddled_joins: bool,
 
-    /// NOTE: This feature is experimental and should not be used in production -
-    /// Enable support for Top K in dataflow.
-    ///
-    /// NOTE: If enabled, this must be set for all ReadySet processes (both servers and adapters).
+    /// Enable support for Top K in dataflow. Enabled by default; pass
+    /// `--feature-topk=false` (or `FEATURE_TOPK=false`) to disable. The value must agree
+    /// across all Readyset processes (both servers and adapters).
     // XXX JCD keep features synchronized with readyset-features.json
     #[arg(
         long,
         env = "FEATURE_TOPK",
-        default_value = "false",
+        default_value = "true",
         default_missing_value = "true",
         num_args = 0..=1,
         action = ArgAction::Set
@@ -893,7 +892,8 @@ mod tests {
     fn enabled_features_default() {
         let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
         let enabled = worker_opts.enabled_features();
-        assert!(enabled.is_empty());
+        // Top K is enabled by default; every other feature defaults off.
+        assert_eq!(enabled, vec!["Top K"]);
     }
 
     #[test]

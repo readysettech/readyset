@@ -54,9 +54,9 @@
         "name": "Top K",
         "command-line": "--feature-topk",
         "environment-variable": "FEATURE_TOPK",
-        "description": "Enable support for Top K in dataflow.\n\nNOTE: If enabled, this must be set for all Readyset processes (both servers and adapters).",
+        "description": "Enable support for Top K in dataflow. The value must agree across all Readyset processes (both servers and adapters).",
         "dialect": ["mysql", "postgresql"],
-        "default": false,
+        "default": true,
         "display": true
     },
     {
