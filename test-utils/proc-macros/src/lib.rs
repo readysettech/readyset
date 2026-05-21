@@ -82,7 +82,7 @@ const MYSQL_VERSIONS: &[(u32, &str)] = &[
     (57, "mysql57"),
     (80, "mysql80"),
     (84, "mysql84"),
-    (96, "mysql96"),
+    (97, "mysql97"),
 ];
 
 /// Known PostgreSQL versions, as (numeric_id, variant_name) pairs.
@@ -448,7 +448,7 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
     //
     // Expansion adds the missing flags (mrbr, gtid) as __xp_ variants:
     //   mysql80           → + __xp_mrbr, __xp_gtid, __xp_nogtid, __xp_mrbr_gtid
-    //   mysql96           → + __xp_mrbr, __xp_gtid, __xp_mrbr_gtid  (no __xp_nogtid; GTID is default in 9.5+)
+    //   mysql97           → + __xp_mrbr, __xp_gtid, __xp_mrbr_gtid  (no __xp_nogtid; GTID is default in 9.5+)
     //   mysql80_mrbr      → + __xp_mrbr_gtid
     //   mysql80_gtid      → + __xp_mrbr_gtid
     //   mysql80_mrbr_gtid → (nothing, fully specified)
@@ -481,7 +481,7 @@ pub fn upstream(args: TokenStream, item: TokenStream) -> TokenStream {
 
             match (has_mrbr, has_gtid) {
                 // mysql80 → all four expanded variants
-                // mysql96 → three (no __xp_nogtid; GTID defaults to ON in 9.5+)
+                // mysql97 → three (no __xp_nogtid; GTID defaults to ON in 9.5+)
                 (false, false) => {
                     out.push(Ident::new(&format!("{base}__xp_mrbr"), span));
                     out.push(Ident::new(&format!("{base}__xp_gtid"), span));
