@@ -121,6 +121,14 @@ impl TopK {
         }
     }
 
+    /// Total capacity per group (`k + buffered`), saturated to avoid overflow when `buffered`
+    /// is at `usize::MAX`. Used as the `Vec::with_capacity` argument and as the comparison
+    /// threshold for the trim path.
+    #[inline]
+    fn total_capacity(&self) -> usize {
+        self.k.saturating_add(self.buffered)
+    }
+
     /// Project the columns we are grouping by out of the given record
     fn project_group<'rec, R>(&self, rec: &'rec R) -> ReadySetResult<Vec<&'rec DfValue>>
     where
@@ -208,8 +216,8 @@ impl TopK {
             // `Ord`. For typical small k the asymptotic win of the heap
             // is not worth the per-row wrapper allocation and the extra
             // boilerplate.
-            let cap = self.k + self.buffered;
-            let mut rs: Vec<Cow<'_, [DfValue]>> = Vec::with_capacity(cap + 1);
+            let cap = self.total_capacity();
+            let mut rs: Vec<Cow<'_, [DfValue]>> = Vec::with_capacity(cap.saturating_add(1));
             for row in parent_records {
                 let row = row?;
                 // Once full, reject rows that don't beat the current worst
@@ -266,7 +274,7 @@ impl TopK {
         }
 
         let top_end = min(current.len(), self.k);
-        let buffer_end = min(current.len(), self.k + self.buffered);
+        let buffer_end = min(current.len(), self.total_capacity());
 
         // Top-k slice: emit a Positive for any row downstream doesn't yet have.
         for r in current[..top_end].iter() {
@@ -285,10 +293,10 @@ impl TopK {
 
         // Update the buffered (auxiliary) state of this group.
         debug_assert!(
-            current.len() <= self.k + self.buffered,
+            current.len() <= self.total_capacity(),
             "current exceeded capacity: {} > {}",
             current.len(),
-            self.k + self.buffered
+            self.total_capacity()
         );
         buffered_state.insert(
             current_group_key.to_vec(),
@@ -404,7 +412,7 @@ impl Ingredient for TopK {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
         // +1 so insertions after reaching capacity don't cause a reallocation
-        let current_capacity = self.k + self.buffered + 1;
+        let current_capacity = self.total_capacity().saturating_add(1);
         let mut current: Vec<CurrentRecord> = Vec::with_capacity(current_capacity);
 
         // records are now chunked by group
@@ -502,7 +510,7 @@ impl Ingredient for TopK {
                         // top-k slice and the rest define the buffer; the
                         // `original_index < k` predicate (encoded by the
                         // CurrentRecord helpers) depends on this shape.
-                        if records.len() > self.k + self.buffered {
+                        if records.len() > self.total_capacity() {
                             internal!(
                                 "topk aux state for group has {} rows, exceeds k + buffered ({} + {})",
                                 records.len(),
@@ -585,7 +593,7 @@ impl Ingredient for TopK {
                             // are all deleted, which triggers backfill in post_group.
                             // If the popped row was in the original top-k, emit a
                             // Negative since downstream has it.
-                            if current.len() > self.k + self.buffered {
+                            if current.len() > self.total_capacity() {
                                 let dropped =
                                     current.pop().expect("current is non-empty after insert");
                                 if dropped.was_in_downstream_top_k(self.k) {
