@@ -63,9 +63,10 @@ mod tests {
 
     #[test]
     fn data_type_mem_size() {
+        const DFVALUE_SIZE: usize = size_of::<DfValue>();
+
         let s = "this needs to be longer than 14 chars to make it be a Text";
         let txt = DfValue::from(s);
-        let shrt = DfValue::Int(5);
         let time = DfValue::TimestampTz(
             DateTime::from_timestamp(0, 42_000_000)
                 .unwrap()
@@ -75,19 +76,14 @@ mod tests {
 
         let rec = vec![DfValue::Int(5), "asdfasdfasdfasdf".into(), "asdf".into()];
 
-        // DfValue should always use 16 bytes itself
-        assert_eq!(size_of::<DfValue>(), 16);
-        assert_eq!(size_of_val(&txt), 16);
         assert_eq!(
             txt.deep_size_of(),
             // DfValue + Arc's ptr + string
-            16 + 8 + s.len()
+            DFVALUE_SIZE + 8 + s.len()
         );
-        assert_eq!(size_of_val(&shrt), 16);
-        assert_eq!(size_of_val(&time), 16);
         assert_eq!(size_of_val(&time), time.deep_size_of());
 
         assert_eq!(size_of_val(&rec), 24);
-        assert_eq!(rec.deep_size_of(), 24 + 3 * 16 + (8 + 16));
+        assert_eq!(rec.deep_size_of(), 24 + 3 * DFVALUE_SIZE + (8 + 16));
     }
 }

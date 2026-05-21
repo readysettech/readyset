@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
+use std::mem::MaybeUninit;
 use std::num::{IntErrorKind, ParseIntError};
+use std::str;
 use std::str::FromStr;
 
 use cidr::IpInet;
@@ -44,11 +46,47 @@ impl LenAndCollation {
     }
 }
 
+/// A cached collation hash. Zero is reserved as a "not yet computed" sentinel for values built
+/// from a `const fn` context where the ICU-backed hash can't run. Real hashes equal to zero are
+/// stored as one to keep the sentinel unambiguous.
+#[repr(transparent)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+struct CachedCollationHash([u8; 8]);
+
+impl CachedCollationHash {
+    const UNINIT: Self = Self([0u8; 8]);
+
+    #[inline(always)]
+    const fn normalize(h: u64) -> u64 {
+        if h == 0 {
+            1
+        } else {
+            h
+        }
+    }
+
+    #[inline]
+    fn new(h: u64) -> Self {
+        Self(Self::normalize(h).to_ne_bytes())
+    }
+
+    #[inline]
+    fn get(self) -> Option<u64> {
+        let v = u64::from_ne_bytes(self.0);
+        if v == 0 {
+            None
+        } else {
+            Some(v)
+        }
+    }
+}
+
 /// An optimized storage for very short strings
 #[derive(Clone, Eq)]
 pub struct TinyText {
     len_and_collation: LenAndCollation,
     t: [u8; TINYTEXT_WIDTH],
+    collation_hash: CachedCollationHash,
 }
 
 #[derive(Debug)]
@@ -74,11 +112,12 @@ impl TinyText {
         // than assigning an array of zeroes (which uses memset instead). Don't remove
         // this without benchmarking (or at least looking at godbolt first).
         // SAFETY: it is safe because u8 is a zeroable type
-        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { MaybeUninit::zeroed().assume_init() };
         t[..s.len()].copy_from_slice(s.as_bytes());
         Ok(TinyText {
             len_and_collation: LenAndCollation::new(s.len() as _, collation),
             t,
+            collation_hash: CachedCollationHash::new(collation.key_hash(s)),
         })
     }
 
@@ -119,6 +158,7 @@ impl TinyText {
         TinyText {
             len_and_collation: LenAndCollation::new(i as u8, Collation::Utf8),
             t,
+            collation_hash: CachedCollationHash::UNINIT,
         }
     }
 
@@ -134,17 +174,43 @@ impl TinyText {
             return Err("slice too long");
         }
 
-        std::str::from_utf8(v).expect("Must always be UTF8");
+        let s = str::from_utf8(v).expect("Must always be UTF8");
 
         // For reasons I can't say using MaybeUninit::zeroed() is much faster
         // than assigning an array of zeroes (which uses memset instead). Don't remove
         // this without benchmarking (or at least looking at godbolt first).
         // SAFETY: it is safe because u8 is a zeroable type
-        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { std::mem::MaybeUninit::zeroed().assume_init() };
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { MaybeUninit::zeroed().assume_init() };
         t[..v.len()].copy_from_slice(v);
         Ok(TinyText {
             len_and_collation: LenAndCollation::new(v.len() as _, collation),
             t,
+            collation_hash: CachedCollationHash::new(collation.key_hash(s)),
+        })
+    }
+
+    /// Create a new `TinyText` from a precomputed collation hash and bytes. Used to reconstruct
+    /// a `TinyText` from a serialized form without recomputing the hash.
+    ///
+    /// # Safety
+    ///
+    /// `v` must contain valid UTF-8 and `collation_hash` must equal `collation.key_hash(v)`.
+    #[inline]
+    pub(crate) unsafe fn from_parts(
+        collation: Collation,
+        collation_hash: u64,
+        v: &[u8],
+    ) -> Result<Self, &'static str> {
+        if v.len() > TINYTEXT_WIDTH {
+            return Err("slice too long");
+        }
+        // SAFETY: it is safe because u8 is a zeroable type
+        let mut t: [u8; TINYTEXT_WIDTH] = unsafe { MaybeUninit::zeroed().assume_init() };
+        t[..v.len()].copy_from_slice(v);
+        Ok(TinyText {
+            len_and_collation: LenAndCollation::new(v.len() as _, collation),
+            t,
+            collation_hash: CachedCollationHash::new(collation_hash),
         })
     }
 
@@ -152,12 +218,21 @@ impl TinyText {
     #[inline]
     pub fn set_collation(&mut self, collation: Collation) {
         self.len_and_collation.set_collation(collation);
+        self.collation_hash = CachedCollationHash::new(collation.key_hash(self.as_str()));
     }
 
     /// Returns the configured collation for this [`TinyText`].
     #[inline]
     pub fn collation(&self) -> Collation {
         self.len_and_collation.collation()
+    }
+
+    /// Returns a hash of the collation sort key.
+    #[inline]
+    pub fn collation_hash(&self) -> u64 {
+        self.collation_hash.get().unwrap_or_else(|| {
+            CachedCollationHash::normalize(self.collation().key_hash(self.as_str()))
+        })
     }
 
     /// Compute the collation sort key for this text.  Keys compare bytewise the same as with

@@ -67,12 +67,10 @@ impl serde::ser::Serialize for DfValue {
                 Variant::Text,
                 &(v.collation(), Bytes::new(v.as_bytes()), v.collation_hash()),
             ),
-            // TinyText has no room to store a collation hash; write a placeholder zero so the
-            // wire format is the same shape as full Text.
             DfValue::TinyText(v) => serialize_variant(
                 serializer,
                 Variant::Text,
-                &(v.collation(), Bytes::new(v.as_bytes()), 0u64),
+                &(v.collation(), Bytes::new(v.as_bytes()), v.collation_hash()),
             ),
             DfValue::Time(v) => serialize_variant(serializer, Variant::Time, &v),
             DfValue::ByteArray(a) => {
@@ -274,13 +272,14 @@ impl<'de> Deserialize<'de> for TextOrTinyText {
                     .ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
 
                 // The serializer's TinyText-vs-Text choice is determined by whether the bytes
-                // fit in TinyText, so the same length test reproduces it on read. The
-                // placeholder hash written for TinyText is discarded.
-                if let Ok(tt) = TinyText::from_slice(&bytes, collation) {
+                // fit in TinyText, so the same length test reproduces it on read.
+                // SAFETY: bytes came from a previous Text/TinyText serialization (validated
+                // UTF-8) and `hash` is the matching collation hash written by the same
+                // serializer.
+                if let Ok(tt) = unsafe { TinyText::from_parts(collation, hash, &bytes) } {
                     Ok(TextOrTinyText::TinyText(tt))
                 } else {
-                    // SAFETY: bytes came from a previous `Text` serialization (validated UTF-8)
-                    // and `hash` is the matching collation hash written by the same serializer.
+                    // SAFETY: see above.
                     Ok(TextOrTinyText::Text(unsafe {
                         Text::from_parts(collation, hash, &bytes)
                     }))

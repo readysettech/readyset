@@ -1241,7 +1241,7 @@ impl Hash for DfValue {
             DfValue::Float(f) => (f as f64).to_bits().hash(state),
             DfValue::Double(f) => f.to_bits().hash(state),
             DfValue::Text(ref t) => t.collation_hash().hash(state),
-            DfValue::TinyText(ref t) => t.collation().key_hash(t.as_str()).hash(state),
+            DfValue::TinyText(ref t) => t.collation_hash().hash(state),
             DfValue::TimestampTz(ts) => ts.hash(state),
             DfValue::Time(ref t) => t.hash(state),
             DfValue::ByteArray(ref array) => array.hash(state),
@@ -2383,7 +2383,7 @@ mod tests {
 
     #[test]
     fn test_size_and_alignment() {
-        assert_eq!(std::mem::size_of::<DfValue>(), 16);
+        assert_eq!(std::mem::size_of::<DfValue>(), 24);
 
         let timestamp_tz = DfValue::from(
             FixedOffset::west_opt(18_000)
