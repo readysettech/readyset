@@ -535,6 +535,45 @@ fn parse_create_cache_hint_with_clause_rejects_policy_on_deep() {
     assert!(result.is_err());
 }
 
+#[test]
+fn parse_create_cache_hint_topk_buffer_multiplier() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4)")
+            .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.topk_buffer_multiplier, Some(4));
+}
+
+#[test]
+fn parse_create_cache_hint_topk_buffer_multiplier_zero_allowed() {
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 0)")
+            .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert_eq!(opts.topk_buffer_multiplier, Some(0));
+}
+
+#[test]
+fn parse_create_cache_hint_topk_buffer_multiplier_outside_with_rejected() {
+    // Bare form must NOT accept the WITH-only knob — TOPK_BUFFER_MULTIPLIER is not a
+    // recognized hint outside the WITH clause.
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE TOPK_BUFFER_MULTIPLIER = 4");
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_create_cache_hint_topk_buffer_multiplier_duplicate_rejected() {
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 1, TOPK_BUFFER_MULTIPLIER = 2)",
+    );
+    assert!(result.is_err());
+}
+
 // --- SKIP CACHE hint directive tests ---
 
 #[test]

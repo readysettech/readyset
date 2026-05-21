@@ -402,6 +402,7 @@ mod tests {
                 )],
                 group_by: vec![Column::new(Some("base"), "b")],
                 limit: 3,
+                topk_buffer_multiplier: None,
             })
         }
 

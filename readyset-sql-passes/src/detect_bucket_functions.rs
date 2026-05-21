@@ -151,6 +151,7 @@ mod tests {
             unparsed_create_cache_statement: None,
             trx_cache_policy: TrxCachePolicy::Never, // should cause error
             concurrently: false,
+            topk_buffer_multiplier: None,
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();
@@ -210,6 +211,7 @@ mod tests {
             unparsed_create_cache_statement: None,
             trx_cache_policy: TrxCachePolicy::Always, // should succeed
             concurrently: false,
+            topk_buffer_multiplier: None,
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();
@@ -257,6 +259,7 @@ mod tests {
             unparsed_create_cache_statement: None,
             trx_cache_policy: TrxCachePolicy::Never,
             concurrently: false,
+            topk_buffer_multiplier: None,
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();

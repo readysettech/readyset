@@ -353,6 +353,7 @@ impl TestHandle {
                         ),
                         trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                         schema_generation_used: None,
+                        topk_buffer_multiplier: None,
                     }),
                 ],
                 self.dialect,

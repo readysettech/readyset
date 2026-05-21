@@ -273,6 +273,7 @@ mod tests {
                 )],
                 group_by: vec!["a".into()],
                 limit: 3,
+                topk_buffer_multiplier: None,
             },
         ));
         mir_graph[topk].add_owner(query_name.clone());

@@ -1113,6 +1113,11 @@ pub struct CreateCacheOptions {
     pub cache_type: Option<CacheType>,
     pub policy: Option<EvictionPolicy>,
     pub coalesce_ms: Option<Duration>,
+    /// Multiplier applied to the `LIMIT k` value to size the TopK operator's buffer of rows
+    /// retained past the top-k window. `buffered = k * multiplier`. `0` disables buffering;
+    /// `None` (unset) preserves the legacy default of `buffered = k`. Only settable inside the
+    /// `WITH (...)` umbrella, and only meaningful for queries that lower to a TopK node.
+    pub topk_buffer_multiplier: Option<usize>,
 }
 
 /// `CREATE [DEEP|SHALLOW] CACHE [POLICY TTL N SECONDS] [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
@@ -1150,6 +1155,10 @@ pub struct CreateCacheStatement {
     pub trx_cache_policy: TrxCachePolicy,
     /// Whether the CREATE CACHE STATEMENT should block or run concurrently
     pub concurrently: bool,
+    /// Multiplier applied to the TopK operator's buffer size. See
+    /// [`CreateCacheOptions::topk_buffer_multiplier`]. Only settable via the `WITH (...)` clause.
+    #[serde(default)]
+    pub topk_buffer_multiplier: Option<usize>,
 }
 
 // `trx_cache_policy` is intentionally excluded from `Eq`/`Hash`: two `CREATE CACHE`
@@ -1163,6 +1172,7 @@ impl PartialEq for CreateCacheStatement {
             && self.coalesce_ms == other.coalesce_ms
             && self.inner == other.inner
             && self.concurrently == other.concurrently
+            && self.topk_buffer_multiplier == other.topk_buffer_multiplier
     }
 }
 
@@ -1176,6 +1186,7 @@ impl Hash for CreateCacheStatement {
         self.coalesce_ms.hash(state);
         self.inner.hash(state);
         self.concurrently.hash(state);
+        self.topk_buffer_multiplier.hash(state);
     }
 }
 
@@ -1193,7 +1204,8 @@ impl DialectDisplay for CreateCacheStatement {
             let has_options = self.policy.is_some()
                 || self.coalesce_ms.is_some()
                 || self.concurrently
-                || !matches!(self.trx_cache_policy, TrxCachePolicy::Never);
+                || !matches!(self.trx_cache_policy, TrxCachePolicy::Never)
+                || self.topk_buffer_multiplier.is_some();
             if has_options {
                 write!(f, "WITH (")?;
                 let mut first = true;
@@ -1226,6 +1238,10 @@ impl DialectDisplay for CreateCacheStatement {
                         write!(f, "UNTIL WRITE")?;
                     }
                     TrxCachePolicy::Never => {}
+                }
+                if let Some(m) = self.topk_buffer_multiplier {
+                    sep(f)?;
+                    write!(f, "TOPK_BUFFER_MULTIPLIER = {m}")?;
                 }
                 write!(f, ") ")?;
             }

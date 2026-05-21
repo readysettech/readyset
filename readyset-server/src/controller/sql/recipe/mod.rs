@@ -44,7 +44,9 @@ impl From<&RecipeExpr> for ExprId {
                 hasher.update(hash(name).to_le_bytes());
                 hasher.update(hash(definition).to_le_bytes());
             }
-            RecipeExpr::Cache { statement, .. } => hasher.update(hash(statement).to_le_bytes()),
+            RecipeExpr::Cache { statement, .. } => {
+                hasher.update(hash(statement).to_le_bytes());
+            }
         };
         // Sha1 digest is 20 byte long, so it is safe to consume only 16 bytes
         Self(u128::from_le_bytes(

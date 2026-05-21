@@ -1024,6 +1024,7 @@ impl NoriaConnector {
         deep: ViewCreateRequest,
         trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
+        topk_buffer_multiplier: Option<usize>,
         schema_generation: SchemaGeneration,
     ) -> ReadySetResult<Option<u64>> {
         let name = match name {
@@ -1035,6 +1036,7 @@ impl NoriaConnector {
                 name.clone(),
                 deep.statement.clone(),
                 trx_cache_policy,
+                topk_buffer_multiplier,
                 Some(schema_generation),
             ),
             self.dialect,
@@ -1070,6 +1072,7 @@ impl NoriaConnector {
                 id.to_string(),
                 req.statement.clone(),
                 TrxCachePolicy::Never,
+                None,
                 Some(schema_generation),
             ),
             self.dialect,
@@ -1123,6 +1126,7 @@ impl NoriaConnector {
                             qname.clone(),
                             q.clone(),
                             TrxCachePolicy::Never,
+                            None,
                             Some(schema_generation),
                         ),
                         self.dialect,

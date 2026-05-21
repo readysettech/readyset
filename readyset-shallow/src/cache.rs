@@ -240,6 +240,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             unparsed_create_cache_statement: None,
             trx_cache_policy: info.trx_cache_policy,
             concurrently: false,
+            topk_buffer_multiplier: None,
         }
     }
 }

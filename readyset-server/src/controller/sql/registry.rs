@@ -44,6 +44,12 @@ pub(crate) enum RecipeExpr {
         cache_type: Option<CacheType>,
         policy: Option<EvictionPolicy>,
         query_id: QueryId,
+        /// Multiplier applied to the TopK operator's buffer size for this cache. `None` means
+        /// the default buffer (`buffered = k`); `Some(n)` means `buffered = k * n`. Only
+        /// meaningful for queries that lower to a TopK dataflow node. Set via the
+        /// `WITH (TOPK_BUFFER_MULTIPLIER = n)` option on `CREATE CACHE`.
+        #[serde(default)]
+        topk_buffer_multiplier: Option<usize>,
     },
 }
 
@@ -748,6 +754,7 @@ mod tests {
             policy: None,
             query_id: QueryId::from_select(&statement, &[]),
             statement,
+            topk_buffer_multiplier: None,
         }
     }
 
@@ -1171,6 +1178,7 @@ mod tests {
                     trx_cache_policy: TrxCachePolicy::Never,
                     cache_type: Some(CacheType::Deep),
                     policy: None,
+                    topk_buffer_multiplier: None,
                 })
                 .unwrap());
 

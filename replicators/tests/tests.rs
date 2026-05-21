@@ -532,6 +532,7 @@ impl TestHandle {
                         ),
                         trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                         schema_generation_used: None,
+                        topk_buffer_multiplier: None,
                     }),
                 ],
                 self.dialect,
@@ -2348,6 +2349,7 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         ),
         trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
         schema_generation_used: None,
+        topk_buffer_multiplier: None,
     });
     eventually! {
         ctx.noria
@@ -2432,6 +2434,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
                 ),
                 trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Always,
                 schema_generation_used: None,
+                topk_buffer_multiplier: None,
             }),
             Dialect::DEFAULT_POSTGRESQL
         ))
@@ -5520,6 +5523,7 @@ async fn get_results_for_query_inner(
                     ),
                     trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
+                    topk_buffer_multiplier: None,
                 }),
             ],
             Dialect::DEFAULT_MYSQL,

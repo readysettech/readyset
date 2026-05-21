@@ -150,6 +150,7 @@ pub struct CacheProperties {
     coalesce_ms: Option<u64>,
     trx_cache_policy: TrxCachePolicy,
     schedule: bool,
+    topk_buffer_multiplier: Option<usize>,
 }
 
 impl Display for CacheProperties {
@@ -172,6 +173,9 @@ impl Display for CacheProperties {
         if let Some(coalesce_ms) = self.coalesce_ms {
             properties.push(Cow::Owned(format!("coalesce {coalesce_ms} ms")));
         }
+        if let Some(m) = self.topk_buffer_multiplier {
+            properties.push(Cow::Owned(format!("topk buffer ×{m}")));
+        }
         write!(f, "{}", properties.join(", "))
     }
 }
@@ -185,6 +189,7 @@ impl CacheProperties {
             coalesce_ms: None,
             trx_cache_policy: TrxCachePolicy::default(),
             schedule: false,
+            topk_buffer_multiplier: None,
         }
     }
 
@@ -206,5 +211,9 @@ impl CacheProperties {
 
     pub fn set_coalesce_ms(&mut self, coalesce_ms: u64) {
         self.coalesce_ms = Some(coalesce_ms);
+    }
+
+    pub fn set_topk_buffer_multiplier(&mut self, multiplier: usize) {
+        self.topk_buffer_multiplier = Some(multiplier);
     }
 }

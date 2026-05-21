@@ -390,6 +390,7 @@ impl SqlIncorporator {
                         cc.name,
                         *cc.statement,
                         cc.trx_cache_policy,
+                        cc.topk_buffer_multiplier,
                         &schema_search_path,
                         mig,
                     )?;
@@ -699,10 +700,23 @@ impl SqlIncorporator {
         name: Option<Relation>,
         mut stmt: SelectStatement,
         trx_cache_policy: TrxCachePolicy,
+        topk_buffer_multiplier: Option<usize>,
         schema_search_path: &[SqlIdentifier],
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<Relation> {
         let name = name.unwrap_or_else(|| format!("q_{}", self.num_queries).into());
+        // TOPK_BUFFER_MULTIPLIER only affects queries that lower to a TopK dataflow node. A
+        // TopK is produced when the SELECT has a `LIMIT` with no `OFFSET` (a non-zero offset
+        // makes it a Paginate node, which doesn't honor the multiplier). Reject early so the
+        // user gets a clear error instead of a silently-ignored knob.
+        if topk_buffer_multiplier.is_some() {
+            let limit = stmt.limit_clause.limit();
+            let offset = stmt.limit_clause.offset();
+            let has_topk = limit.is_some() && offset.is_none();
+            if !has_topk {
+                unsupported!("TOPK_BUFFER_MULTIPLIER requires a query with LIMIT and no OFFSET");
+            }
+        }
         let query_id = QueryId::from_select(&stmt, schema_search_path);
 
         // Make a copy of our current state, and first perform modifications on it.  If the cache
@@ -725,6 +739,7 @@ impl SqlIncorporator {
                     schema_search_path,
                     Some(invalidating_tables.borrow_mut().deref_mut()),
                     LeafBehavior::Leaf,
+                    topk_buffer_multiplier,
                     mig,
                 )
             }) {
@@ -775,6 +790,7 @@ impl SqlIncorporator {
             cache_type: Some(CacheType::Deep),
             policy: None,
             query_id,
+            topk_buffer_multiplier,
         };
 
         let exists = next.registry.contains_expression(&expression);
@@ -1185,6 +1201,7 @@ impl SqlIncorporator {
                 search_path,
                 tables.as_mut(),
                 LeafBehavior::Anonymous,
+                /* topk_buffer_multiplier */ None,
                 mig,
             )?);
             if let Some(ts) = tables {
@@ -1227,6 +1244,7 @@ impl SqlIncorporator {
 
     /// Add a new SelectStatement to the given migration, returning the index of the leaf MIR node
     /// that was added
+    #[allow(clippy::too_many_arguments)]
     fn select_query_to_mir(
         &mut self,
         query_name: Relation,
@@ -1234,6 +1252,7 @@ impl SqlIncorporator {
         search_path: &[SqlIdentifier],
         mut invalidating_tables: Option<&mut Vec<Relation>>,
         leaf_behavior: LeafBehavior,
+        topk_buffer_multiplier: Option<usize>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
         let on_err = |e| ReadySetError::SelectQueryCreationFailed {
@@ -1255,6 +1274,7 @@ impl SqlIncorporator {
                 search_path,
                 invalidating_tables.is_some().then_some(&tables),
                 leaf_behavior,
+                topk_buffer_multiplier,
                 mig,
             );
             match compile_res {
@@ -1297,6 +1317,7 @@ impl SqlIncorporator {
     /// handling errors caused by referencing uncompiled views.
     ///
     /// Do not call this method directly - call `select_query_to_mir` instead.
+    #[allow(clippy::too_many_arguments)]
     fn select_query_to_mir_inner(
         &mut self,
         query_name: &Relation,
@@ -1304,6 +1325,7 @@ impl SqlIncorporator {
         search_path: &[SqlIdentifier],
         invalidating_tables: Option<&RefCell<Vec<Relation>>>,
         leaf_behavior: LeafBehavior,
+        topk_buffer_multiplier: Option<usize>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirNodeIndex> {
         trace!(stmt = %stmt.display(mig.dialect.into()), "Adding select query");
@@ -1340,6 +1362,7 @@ impl SqlIncorporator {
                               * one (already qualified) table */
                         None,
                         LeafBehavior::Anonymous,
+                        /* topk_buffer_multiplier */ None,
                         mig,
                     )?;
                     anon_queries.insert(to_view, subquery_leaf);
@@ -1355,6 +1378,7 @@ impl SqlIncorporator {
                         search_path,
                         None,
                         LeafBehavior::Anonymous,
+                        /* topk_buffer_multiplier */ None,
                         mig,
                     )?;
                     anon_queries.insert(to_view, subquery_leaf);
@@ -1374,6 +1398,7 @@ impl SqlIncorporator {
             &query_graph,
             &anon_queries,
             leaf_behavior,
+            topk_buffer_multiplier,
         )
     }
 
@@ -1405,6 +1430,7 @@ impl SqlIncorporator {
                 &schema_search_path,
                 None,
                 LeafBehavior::NamedWithoutLeaf,
+                /* topk_buffer_multiplier */ None,
                 mig,
             )?,
         };

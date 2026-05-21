@@ -107,6 +107,11 @@ pub struct CacheExpr {
     pub cache_type: Option<CacheType>,
     pub policy: Option<EvictionPolicy>,
     pub query_id: QueryId,
+    /// Multiplier applied to the TopK operator's buffer size when this cache lowers to a TopK
+    /// dataflow node. `None` means use the default (`buffered = k`); `Some(0)` disables buffering.
+    /// Only meaningful for deep caches that include a TopK node.
+    #[serde(default)]
+    pub topk_buffer_multiplier: Option<usize>,
 }
 
 impl From<CacheExpr> for CreateCacheStatement {
@@ -125,6 +130,7 @@ impl From<CacheExpr> for CreateCacheStatement {
             // already-migrated query
             concurrently: false,
             unparsed_create_cache_statement: None,
+            topk_buffer_multiplier: value.topk_buffer_multiplier,
         }
     }
 }

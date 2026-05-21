@@ -78,7 +78,7 @@ pub struct TopK {
 }
 
 impl TopK {
-    /// Construct a new TopK operator.
+    /// Construct a new TopK operator with the default buffer size (`buffered = k`).
     ///
     /// # Arguments
     ///
@@ -92,13 +92,32 @@ impl TopK {
         group_by: Vec<usize>,
         k: usize,
     ) -> Self {
+        Self::with_buffer_multiplier(src, order, group_by, k, None)
+    }
+
+    /// Construct a new TopK operator, optionally overriding the buffer size with a multiplier.
+    ///
+    /// `topk_buffer_multiplier` is the factor applied to `k` when sizing the backup buffer used
+    /// to avoid backwards queries on negative records (`buffered = k * multiplier`). `None`
+    /// preserves the legacy default of `buffered = k`. `Some(0)` disables buffering entirely.
+    pub fn with_buffer_multiplier(
+        src: NodeIndex,
+        order: Vec<(usize, OrderType, NullOrder)>,
+        group_by: Vec<usize>,
+        k: usize,
+        topk_buffer_multiplier: Option<usize>,
+    ) -> Self {
+        let buffered = match topk_buffer_multiplier {
+            Some(m) => k.saturating_mul(m),
+            None => k,
+        };
         TopK {
             src: src.into(),
             our_index: None,
             group_by,
             order: order.into(),
             k,
-            buffered: k,
+            buffered,
         }
     }
 
@@ -843,6 +862,26 @@ mod tests {
         assert_eq!(a.len(), 2);
         assert!(a.iter().any(|r| r == &(r10.clone(), false).into()));
         assert!(a.iter().any(|r| r == &(r15.clone(), true).into()));
+    }
+
+    #[test]
+    fn with_buffer_multiplier_sets_buffered() {
+        // Default (None) keeps the legacy behavior: buffered == k.
+        let topk = TopK::new(NodeIndex::new(0), vec![], vec![], 10);
+        assert_eq!(topk.k, 10);
+        assert_eq!(topk.buffered, 10);
+
+        // Some(1) is explicitly equivalent to the default.
+        let topk = TopK::with_buffer_multiplier(NodeIndex::new(0), vec![], vec![], 10, Some(1));
+        assert_eq!(topk.buffered, 10);
+
+        // Some(3) scales the buffer: buffered = k * multiplier.
+        let topk = TopK::with_buffer_multiplier(NodeIndex::new(0), vec![], vec![], 10, Some(3));
+        assert_eq!(topk.buffered, 30);
+
+        // Some(0) disables buffering past k.
+        let topk = TopK::with_buffer_multiplier(NodeIndex::new(0), vec![], vec![], 10, Some(0));
+        assert_eq!(topk.buffered, 0);
     }
 
     #[test]

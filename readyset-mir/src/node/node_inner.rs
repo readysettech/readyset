@@ -331,6 +331,11 @@ pub enum MirNodeInner {
         /// Numeric literal that determines the number of results stored per group. Taken from the
         /// LIMIT clause
         limit: usize,
+        /// Optional multiplier for the dataflow TopK operator's buffer size (`buffered = k *
+        /// multiplier`). `None` preserves the legacy default of `buffered = k`. Set via
+        /// `CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = N)`.
+        #[serde(default)]
+        topk_buffer_multiplier: Option<usize>,
     },
     /// Node which emits only distinct rows per some group.
     ///
@@ -713,10 +718,12 @@ impl MirNodeInner {
             MirNodeInner::TopK {
                 ref order,
                 ref limit,
+                ref topk_buffer_multiplier,
                 ..
-            } => {
-                format!("TopK [k: {limit}, {order:?}]")
-            }
+            } => match topk_buffer_multiplier {
+                Some(m) => format!("TopK [k: {limit}, buf×{m}, {order:?}]"),
+                None => format!("TopK [k: {limit}, {order:?}]"),
+            },
             MirNodeInner::Union {
                 ref emit,
                 ref duplicate_mode,

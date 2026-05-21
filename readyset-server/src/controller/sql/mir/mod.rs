@@ -347,6 +347,7 @@ impl SqlToMirConverter {
                         .transpose()?,
                     limit,
                     make_topk,
+                    /* topk_buffer_multiplier */ None,
                     // TODO: we should have access to the output cols even if this is a compound query
                     None,
                 )?
@@ -1233,6 +1234,7 @@ impl SqlToMirConverter {
             &query_graph,
             &HashMap::new(),
             LeafBehavior::Anonymous,
+            None,
         )?;
 
         let cols = self.columns(subquery_leaf);
@@ -1344,6 +1346,7 @@ impl SqlToMirConverter {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn make_paginate_node(
         &mut self,
         query_name: &Relation,
@@ -1353,6 +1356,7 @@ impl SqlToMirConverter {
         order: &Option<Vec<(Expr, OrderType, NullOrder)>>,
         limit: usize,
         is_topk: bool,
+        topk_buffer_multiplier: Option<usize>,
         outputs: Option<&Vec<OutputColumn>>,
     ) -> ReadySetResult<Vec<NodeIndex>> {
         if !self.config.allow_topk && is_topk {
@@ -1471,6 +1475,7 @@ impl SqlToMirConverter {
                         order,
                         group_by,
                         limit,
+                        topk_buffer_multiplier,
                     },
                 )
             } else {
@@ -1512,6 +1517,7 @@ impl SqlToMirConverter {
             &query_graph,
             &HashMap::new(),
             LeafBehavior::Anonymous,
+            None,
         )?;
 
         // -> π[lit: 0, lit: 0]
@@ -1890,6 +1896,7 @@ impl SqlToMirConverter {
             &query_graph,
             &HashMap::new(),
             LeafBehavior::Anonymous,
+            None,
         )?;
 
         let cols = self.columns(subquery_leaf);
@@ -2350,6 +2357,7 @@ impl SqlToMirConverter {
         query_graph: &QueryGraph,
         anon_queries: &HashMap<Relation, NodeIndex>,
         leaf_behavior: LeafBehavior,
+        topk_buffer_multiplier: Option<usize>,
     ) -> Result<NodeIndex, ReadySetError> {
         // TODO(fran): We are not modifying the execution of this method with the implementation
         //  of petgraph, which causes us to create nodes that could now easily be reused:
@@ -2380,6 +2388,7 @@ impl SqlToMirConverter {
                             subquery,
                             &HashMap::new(),
                             LeafBehavior::Anonymous,
+                            None,
                         )?;
                         if correlated {
                             correlated_relations.insert(subquery_leaf);
@@ -2686,6 +2695,7 @@ impl SqlToMirConverter {
                     &pagination.order,
                     pagination.limit,
                     make_topk,
+                    topk_buffer_multiplier,
                     Some(&query_graph.columns),
                 )?;
                 func_nodes.extend(paginate_nodes.clone());
@@ -3132,6 +3142,7 @@ mod tests {
             &qg,
             &HashMap::new(),
             LeafBehavior::Leaf,
+            None,
         )?;
 
         Ok((converter, node))
@@ -3460,6 +3471,7 @@ mod tests {
                             &qg,
                             &HashMap::new(),
                             LeafBehavior::Leaf,
+                            None,
                         )
                     });
                 if $expect_success {
@@ -3603,7 +3615,13 @@ mod tests {
         let result = converter
             .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
-                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+                converter.named_query_to_mir(
+                    &"q1".into(),
+                    &qg,
+                    &HashMap::new(),
+                    LeafBehavior::Leaf,
+                    None,
+                )
             });
 
         assert!(
@@ -3645,7 +3663,13 @@ mod tests {
         let result = converter
             .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
-                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+                converter.named_query_to_mir(
+                    &"q1".into(),
+                    &qg,
+                    &HashMap::new(),
+                    LeafBehavior::Leaf,
+                    None,
+                )
             });
 
         assert!(
@@ -3687,7 +3711,13 @@ mod tests {
         let result = converter
             .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
-                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+                converter.named_query_to_mir(
+                    &"q1".into(),
+                    &qg,
+                    &HashMap::new(),
+                    LeafBehavior::Leaf,
+                    None,
+                )
             });
 
         assert!(
@@ -3729,7 +3759,13 @@ mod tests {
         let result = converter
             .make_base_node(&"test_table".into(), columns, None, None)
             .and_then(|_| {
-                converter.named_query_to_mir(&"q1".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+                converter.named_query_to_mir(
+                    &"q1".into(),
+                    &qg,
+                    &HashMap::new(),
+                    LeafBehavior::Leaf,
+                    None,
+                )
             });
 
         assert!(
@@ -3817,6 +3853,7 @@ mod tests {
             &qg,
             &HashMap::new(),
             LeafBehavior::Leaf,
+            None,
         )?;
 
         Ok((converter, node))
@@ -4195,7 +4232,13 @@ mod tests {
             .make_base_node(&"t".into(), &cols, None, None)
             .unwrap();
         let node = converter
-            .named_query_to_mir(&"q_test".into(), &qg, &HashMap::new(), LeafBehavior::Leaf)
+            .named_query_to_mir(
+                &"q_test".into(),
+                &qg,
+                &HashMap::new(),
+                LeafBehavior::Leaf,
+                None,
+            )
             .unwrap();
 
         let query = converter.make_mir_query("q_test".into(), node);

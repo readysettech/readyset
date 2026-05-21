@@ -356,6 +356,7 @@ impl DfState {
                             cache_type,
                             policy,
                             query_id,
+                            topk_buffer_multiplier,
                         } if (search_query_id.is_none() && search_name.is_none())
                             || (Some(query_id) == search_query_id)
                             || (Some(&name) == search_name) =>
@@ -367,6 +368,7 @@ impl DfState {
                                 cache_type,
                                 policy,
                                 query_id,
+                                topk_buffer_multiplier,
                             })
                         }
                         _ => None,

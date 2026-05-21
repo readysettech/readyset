@@ -3373,6 +3373,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
+        topk_buffer_multiplier: Option<usize>,
         schema_generation: SchemaGeneration,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         // If we have existing caches with the same query_id or name, drop them first.
@@ -3397,6 +3398,7 @@ where
                 deep.clone(),
                 trx_cache_policy,
                 concurrently,
+                topk_buffer_multiplier,
                 schema_generation,
             )
             .await
@@ -3453,6 +3455,7 @@ where
         shallow: ReadySetResult<ShallowViewRequest>,
         trx_cache_policy: TrxCachePolicy,
         concurrently: bool,
+        topk_buffer_multiplier: Option<usize>,
         schema_generation: SchemaGeneration,
         ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
@@ -3477,6 +3480,7 @@ where
             shallow,
             trx_cache_policy,
             concurrently,
+            topk_buffer_multiplier,
             schema_generation,
         )
         .await;
@@ -4227,6 +4231,9 @@ where
                 let properties = {
                     let mut properties = CacheProperties::new(CacheType::Deep);
                     properties.set_trx_cache_policy(view.trx_cache_policy);
+                    if let Some(m) = view.topk_buffer_multiplier {
+                        properties.set_topk_buffer_multiplier(m);
+                    }
                     properties.to_string().into()
                 };
                 let count = exec_counts
@@ -4475,6 +4482,7 @@ where
                     trx_cache_policy,
                     concurrently,
                     unparsed_create_cache_statement,
+                    topk_buffer_multiplier,
                 } = create_cache_stmt;
                 let (deep, shallow, schema_generation) =
                     Self::query_from_cache_inner(connectors, settings, state, inner).await?;
@@ -4515,6 +4523,7 @@ where
                         shallow,
                         *trx_cache_policy,
                         *concurrently,
+                        *topk_buffer_multiplier,
                         schema_generation,
                         ddl_req,
                         false,
@@ -4544,6 +4553,7 @@ where
                         shallow.clone(),
                         *trx_cache_policy,
                         *concurrently,
+                        *topk_buffer_multiplier,
                         schema_generation,
                         ddl_req.clone(),
                         true,

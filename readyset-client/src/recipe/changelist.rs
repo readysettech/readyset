@@ -201,6 +201,7 @@ impl ChangeList {
                     name,
                     inner,
                     trx_cache_policy,
+                    topk_buffer_multiplier,
                     ..
                 }) => {
                     // We don't call the rewrite on the CreateCache like we do in the adapte
@@ -227,6 +228,7 @@ impl ChangeList {
                         statement,
                         trx_cache_policy,
                         schema_generation_used: None,
+                        topk_buffer_multiplier,
                     }))
                 }
                 SqlQuery::AlterTable(ats) => changes.push(Change::AlterTable(ats)),
@@ -349,6 +351,11 @@ pub struct CreateCache {
     ///
     /// `None` indicates the generation was not set (e.g., in tests or legacy paths).
     pub schema_generation_used: Option<SchemaGeneration>,
+    /// Optional multiplier for the TopK operator's buffer size when this cache lowers to a
+    /// TopK node. `buffered = k * multiplier`. `None` keeps the legacy default of
+    /// `buffered = k`. Only set via `CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = N)`.
+    #[serde(default)]
+    pub topk_buffer_multiplier: Option<usize>,
 }
 
 /// Metadata about a PostgreSQL table
@@ -446,6 +453,7 @@ impl Change {
         name: N,
         statement: SelectStatement,
         trx_cache_policy: TrxCachePolicy,
+        topk_buffer_multiplier: Option<usize>,
         schema_generation_used: Option<SchemaGeneration>,
     ) -> Self
     where
@@ -456,6 +464,7 @@ impl Change {
             statement: Box::new(statement),
             trx_cache_policy,
             schema_generation_used,
+            topk_buffer_multiplier,
         })
     }
 
@@ -545,6 +554,7 @@ impl Change {
                 name,
                 inner,
                 trx_cache_policy,
+                topk_buffer_multiplier,
                 ..
             }) => {
                 let mut statement = match inner {
@@ -575,6 +585,7 @@ impl Change {
                     statement,
                     trx_cache_policy,
                     schema_generation_used: schema_generation,
+                    topk_buffer_multiplier,
                 }))
             },
             SqlQuery::DropCache(dcs) => Ok(Change::Drop {

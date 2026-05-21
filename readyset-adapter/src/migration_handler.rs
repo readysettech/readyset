@@ -204,6 +204,7 @@ impl MigrationHandler {
                         query.query().clone(),
                         TrxCachePolicy::Never,
                         /* concurrently */ false,
+                        None,
                         schema_generation,
                     )
                     .await;
@@ -331,7 +332,14 @@ impl MigrationHandler {
         );
 
         self.noria
-            .handle_create_cached_query(None, req, TrxCachePolicy::Never, false, schema_generation)
+            .handle_create_cached_query(
+                None,
+                req,
+                TrxCachePolicy::Never,
+                false,
+                None,
+                schema_generation,
+            )
             .await?;
         Ok(())
     }
@@ -381,6 +389,7 @@ impl MigrationHandler {
                 qname,
                 view_request.statement.clone(),
                 TrxCachePolicy::Never,
+                None,
                 Some(schema_generation),
             ),
             self.dialect,

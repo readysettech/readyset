@@ -919,6 +919,26 @@ enum CacheOptionKind {
     Concurrently,
     Policy(EvictionPolicy),
     Coalesce(Duration),
+    /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
+    TopkBufferMultiplier(usize),
+}
+
+/// Parse `TOPK_BUFFER_MULTIPLIER = <uint>`. WITH-only — never accepted in the bare-options form.
+///
+/// Requires a word boundary (whitespace or `=`) immediately after the identifier so that
+/// strings like `TOPK_BUFFER_MULTIPLIER_FOO` don't match the prefix.
+fn topk_buffer_multiplier_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheOptionKind> {
+    use nom::combinator::peek;
+    let (i, _) = tag_no_case("topk_buffer_multiplier")(i)?;
+    let (i, _) = peek(nom::character::complete::one_of(" \t\r\n="))(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, _) = tag("=")(i)?;
+    let (i, _) = whitespace0(i)?;
+    let (i, value) = map_res(
+        map_res(digit1, |s: LocatedSpan<&[u8]>| str::from_utf8(&s)),
+        usize::from_str,
+    )(i)?;
+    Ok((i, CacheOptionKind::TopkBufferMultiplier(value)))
 }
 
 /// Parse a single `CREATE CACHE` option without consuming any trailing whitespace.
@@ -1016,6 +1036,15 @@ fn apply_cache_option<'a>(
                 return Err(error());
             }
         }
+        CacheOptionKind::TopkBufferMultiplier(value) => {
+            if cache_type == Some(CacheType::Shallow) {
+                // Shallow caches never lower to a TopK node; the knob has no effect.
+                return Err(error());
+            }
+            if opts.topk_buffer_multiplier.replace(value).is_some() {
+                return Err(error());
+            }
+        }
     }
     Ok(())
 }
@@ -1035,9 +1064,11 @@ fn cache_options_with_clause(
     let (i, _) = whitespace0(i)?;
     let (i, _) = tag("(")(i)?;
     let (i, _) = whitespace0(i)?;
-    // `separated_list0` accepts zero options, so `WITH ()` parses as an empty option set.
-    let (i, parsed) =
-        separated_list0(tuple((whitespace0, tag(","), whitespace0)), cache_option)(i)?;
+    // WITH allows everything cache_option supports, plus WITH-only knobs like
+    // TOPK_BUFFER_MULTIPLIER. `separated_list0` accepts zero options, so `WITH ()` parses as an
+    // empty option set.
+    let with_option = |i| alt((topk_buffer_multiplier_option, cache_option))(i);
+    let (i, parsed) = separated_list0(tuple((whitespace0, tag(","), whitespace0)), with_option)(i)?;
     let (i, _) = whitespace0(i)?;
     let (i, _) = tag(")")(i)?;
     // Mirror the bare form's contract: each option (or the closing `)`) is followed by
@@ -1064,21 +1095,34 @@ fn cached_query_options(
     // Try the WITH form first; the leading WITH keyword unambiguously distinguishes it from a
     // cache name. A `Failure` (committed-but-invalid) must bubble up; only an `Error`
     // (didn't recognize a WITH clause at all) should fall through to the bare form.
-    match cache_options_with_clause(i, cache_type) {
-        Ok(ok) => return Ok(ok),
+    let (i, mut opts) = match cache_options_with_clause(i, cache_type) {
+        Ok(ok) => (ok.0, ok.1),
         Err(nom::Err::Failure(e)) => return Err(nom::Err::Failure(e)),
-        Err(_) => {}
-    }
-
-    let mut opts = CreateCacheOptions::default();
-
-    // Bare form: parse a subset of the options in any order. Each option is followed by
-    // whitespace1, which acts as a separator before the next option, the cache name, or FROM.
-    while let Ok((remaining, (opt, _))) = tuple((cache_option, whitespace1))(i) {
-        apply_cache_option(&mut opts, opt, cache_type, i)?;
-        i = remaining;
-    }
+        Err(_) => {
+            let mut opts = CreateCacheOptions::default();
+            // Bare form: parse a subset of the options in any order. Each option is followed by
+            // whitespace1, which acts as a separator before the next option, the cache name,
+            // or FROM.
+            while let Ok((remaining, (opt, _))) = tuple((cache_option, whitespace1))(i) {
+                apply_cache_option(&mut opts, opt, cache_type, i)?;
+                i = remaining;
+            }
+            (i, opts)
+        }
+    };
+    normalize_cache_options(&mut opts);
     Ok((i, opts))
+}
+
+/// Canonicalize options that have semantically-equivalent representations. Called once after
+/// all options are applied, so duplicate detection isn't confused.
+fn normalize_cache_options(opts: &mut CreateCacheOptions) {
+    // `TOPK_BUFFER_MULTIPLIER = 1` is semantically identical to the default (`buffered = k`).
+    // Normalize to `None` so two statements that differ only in `Some(1)` vs `None` hash and
+    // compare equal.
+    if opts.topk_buffer_multiplier == Some(1) {
+        opts.topk_buffer_multiplier = None;
+    }
 }
 
 /// Extract the [`SelectStatement`] or Query ID from a CREATE CACHE statement. Query ID is
@@ -1135,6 +1179,7 @@ pub fn create_cached_query(
                 unparsed_create_cache_statement,
                 trx_cache_policy: opts.trx_cache_policy,
                 concurrently: opts.concurrently,
+                topk_buffer_multiplier: opts.topk_buffer_multiplier,
             },
         ))
     }
@@ -2191,6 +2236,57 @@ mod tests {
         fn create_cached_query_with_clause_rejects_policy_on_deep() {
             let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
                 b"CREATE DEEP CACHE WITH (POLICY TTL 5 SECONDS) FROM SELECT id FROM t",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_with_topk_buffer_multiplier() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4) FROM SELECT id FROM users \
+                  ORDER BY id LIMIT 10"
+            );
+            assert_eq!(stmt.topk_buffer_multiplier, Some(4));
+        }
+
+        #[test]
+        fn create_cached_query_topk_buffer_multiplier_zero_allowed() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 0) FROM SELECT id FROM users \
+                  ORDER BY id LIMIT 5"
+            );
+            assert_eq!(stmt.topk_buffer_multiplier, Some(0));
+        }
+
+        #[test]
+        fn create_cached_query_topk_buffer_multiplier_combined_with_other_options() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH (ALWAYS, TOPK_BUFFER_MULTIPLIER = 2) foo FROM SELECT id \
+                  FROM users ORDER BY id LIMIT 5"
+            );
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+            assert_eq!(stmt.topk_buffer_multiplier, Some(2));
+        }
+
+        #[test]
+        fn create_cached_query_topk_buffer_multiplier_rejected_outside_with() {
+            // Bare form must NOT accept the WITH-only knob.
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE TOPK_BUFFER_MULTIPLIER = 4 FROM SELECT id FROM users",
+            ));
+            // The parser interprets TOPK_BUFFER_MULTIPLIER as a cache name and then fails on `=`
+            // (which isn't valid where FROM is expected).
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_topk_buffer_multiplier_duplicate_rejected() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 1, TOPK_BUFFER_MULTIPLIER = 2) \
+                  FROM SELECT id FROM t",
             ));
             assert!(result.is_err());
         }

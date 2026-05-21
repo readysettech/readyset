@@ -572,6 +572,47 @@ enum CacheOptionKind {
     Concurrently,
     Policy(EvictionPolicy),
     Coalesce(Duration),
+    /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
+    TopkBufferMultiplier(usize),
+}
+
+/// Try to consume `TOPK_BUFFER_MULTIPLIER = <uint>` from the parser. Returns `Ok(Some(value))`
+/// on success, `Ok(None)` if the identifier doesn't match (parser is left untouched), and
+/// `Err(_)` if the identifier matches but parsing fails after that point.
+///
+/// Only matches the bare (unquoted) identifier, so `"topk_buffer_multiplier"` and
+/// backtick-quoted forms are not accepted — same convention as the other cache options.
+fn try_parse_topk_buffer_multiplier(
+    parser: &mut Parser,
+) -> Result<Option<usize>, ReadysetParsingError> {
+    let TokenWithSpan {
+        token:
+            Token::Word(Word {
+                value,
+                quote_style: None,
+                ..
+            }),
+        ..
+    } = parser.peek_token()
+    else {
+        return Ok(None);
+    };
+    if !value.eq_ignore_ascii_case("topk_buffer_multiplier") {
+        return Ok(None);
+    }
+    parser.next_token();
+    parser.expect_token(&Token::Eq)?;
+    let value = parser.parse_literal_uint().map_err(|e| {
+        ReadysetParsingError::ReadysetParsingError(format!(
+            "TOPK_BUFFER_MULTIPLIER requires an unsigned integer literal: {e}"
+        ))
+    })?;
+    let value = usize::try_from(value).map_err(|_| {
+        ReadysetParsingError::ReadysetParsingError(format!(
+            "TOPK_BUFFER_MULTIPLIER value {value} does not fit in usize"
+        ))
+    })?;
+    Ok(Some(value))
 }
 
 /// Parse a single cache option (without leading `WITH (` or comma separators).
@@ -687,8 +728,30 @@ fn apply_cache_option(
                 ));
             }
         }
+        CacheOptionKind::TopkBufferMultiplier(value) => {
+            if cache_type == Some(CacheType::Shallow) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "TOPK_BUFFER_MULTIPLIER is not supported for SHALLOW caches".into(),
+                ));
+            }
+            if opts.topk_buffer_multiplier.replace(value).is_some() {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "TOPK_BUFFER_MULTIPLIER specified more than once".into(),
+                ));
+            }
+        }
     }
     Ok(())
+}
+
+/// Canonicalize options that have semantically-equivalent representations. Called after all
+/// options are applied so duplicate detection isn't confused by intermediate values.
+fn normalize_cache_options(opts: &mut CreateCacheOptions) {
+    // `TOPK_BUFFER_MULTIPLIER = 1` is identical to the default (`buffered = k`). Normalize to
+    // `None` so two statements that differ only in `Some(1)` vs `None` hash/compare equal.
+    if opts.topk_buffer_multiplier == Some(1) {
+        opts.topk_buffer_multiplier = None;
+    }
 }
 
 /// Parse cache options from the token stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must
@@ -717,18 +780,24 @@ fn parse_cache_options(
             if parser.peek_token().token == Token::RParen {
                 break;
             }
-            let opt = parse_single_cache_option(parser)?.ok_or_else(|| {
-                ReadysetParsingError::ReadysetParsingError(format!(
-                    "Unexpected token in WITH clause: {}",
-                    parser.peek_token()
-                ))
-            })?;
+            // WITH-only knobs first, then fall back to the shared legacy-option parser.
+            let opt = if let Some(value) = try_parse_topk_buffer_multiplier(parser)? {
+                CacheOptionKind::TopkBufferMultiplier(value)
+            } else {
+                parse_single_cache_option(parser)?.ok_or_else(|| {
+                    ReadysetParsingError::ReadysetParsingError(format!(
+                        "Unexpected token in WITH clause: {}",
+                        parser.peek_token()
+                    ))
+                })?
+            };
             apply_cache_option(&mut opts, opt, cache_type)?;
             if !parser.consume_token(&Token::Comma) {
                 break;
             }
         }
         parser.expect_token(&Token::RParen)?;
+        normalize_cache_options(&mut opts);
         return Ok(opts);
     }
 
@@ -737,6 +806,7 @@ fn parse_cache_options(
         apply_cache_option(&mut opts, opt, cache_type)?;
     }
 
+    normalize_cache_options(&mut opts);
     Ok(opts)
 }
 
@@ -805,6 +875,7 @@ fn parse_create_cache(
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
         trx_cache_policy: opts.trx_cache_policy,
         concurrently: opts.concurrently,
+        topk_buffer_multiplier: opts.topk_buffer_multiplier,
     }))
 }
 

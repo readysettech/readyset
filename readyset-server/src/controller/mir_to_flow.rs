@@ -367,11 +367,6 @@ pub(super) fn mir_node_to_flow_parts(
                     group_by,
                     limit,
                     ..
-                }
-                | MirNodeInner::TopK {
-                    order,
-                    group_by,
-                    limit,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
@@ -383,7 +378,29 @@ pub(super) fn mir_node_to_flow_parts(
                         order,
                         group_by,
                         *limit,
-                        matches!(graph[mir_node].inner, MirNodeInner::TopK { .. }),
+                        /* is_topk */ false,
+                        None,
+                        mig,
+                    )?)
+                }
+                MirNodeInner::TopK {
+                    order,
+                    group_by,
+                    limit,
+                    topk_buffer_multiplier,
+                } => {
+                    invariant_eq!(ancestors.len(), 1);
+                    let parent = ancestors[0];
+                    Some(make_paginate_or_topk_node(
+                        graph,
+                        name,
+                        parent,
+                        &graph.columns(mir_node),
+                        order,
+                        group_by,
+                        *limit,
+                        /* is_topk */ true,
+                        *topk_buffer_multiplier,
                         mig,
                     )?)
                 }
@@ -1518,6 +1535,7 @@ fn make_distinct_node(
     Ok(DfNodeIndex::new(na))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_paginate_or_topk_node(
     graph: &MirGraph,
     name: Relation,
@@ -1527,6 +1545,7 @@ fn make_paginate_or_topk_node(
     group_by: &[Column],
     limit: usize,
     is_topk: bool,
+    topk_buffer_multiplier: Option<usize>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
@@ -1587,7 +1606,13 @@ fn make_paginate_or_topk_node(
         mig.add_ingredient(
             name,
             parent_cols,
-            ops::topk::TopK::new(parent_na.address(), cmp_rows, group_by_indx, limit),
+            ops::topk::TopK::with_buffer_multiplier(
+                parent_na.address(),
+                cmp_rows,
+                group_by_indx,
+                limit,
+                topk_buffer_multiplier,
+            ),
         )
     } else {
         mig.add_ingredient(

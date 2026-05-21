@@ -3188,6 +3188,7 @@ async fn finkelstein1982_queries() {
                         None,
                         stmt,
                         readyset_sql::ast::TrxCachePolicy::Never,
+                        None,
                         &[],
                         mig,
                     )
@@ -8351,6 +8352,7 @@ async fn multiple_simultaneous_migrations() {
                     ),
                     trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
+                    topk_buffer_multiplier: None,
                 }),
                 Dialect::DEFAULT_MYSQL
             )),
@@ -8363,6 +8365,7 @@ async fn multiple_simultaneous_migrations() {
                     ),
                     trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                     schema_generation_used: None,
+                    topk_buffer_multiplier: None,
                 }),
                 Dialect::DEFAULT_MYSQL
             ))
@@ -8847,6 +8850,7 @@ async fn views_out_of_order() {
                 parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM v2").unwrap(),
                 readyset_sql::ast::TrxCachePolicy::Never,
                 None,
+                None,
             ),
             Dialect::DEFAULT_MYSQL,
         ))
@@ -8880,6 +8884,7 @@ async fn evict_single() {
                 "q",
                 parse_select(readyset_sql::Dialect::MySQL, "SELECT x FROM t1 where y = ?").unwrap(),
                 readyset_sql::ast::TrxCachePolicy::Never,
+                None,
                 None,
             ),
             Dialect::DEFAULT_MYSQL,
@@ -8952,6 +8957,7 @@ async fn evict_single_intermediate_state() {
                 )
                     .unwrap(),
                 readyset_sql::ast::TrxCachePolicy::Never,
+                None,
                 None,
             ),
             Dialect::DEFAULT_MYSQL,
