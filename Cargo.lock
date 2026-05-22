@@ -157,14 +157,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "array2"
-version = "0.0.1"
-dependencies = [
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

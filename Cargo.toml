@@ -8,7 +8,6 @@ tokio-postgres = { git = "https://github.com/readysettech/rust-postgres.git", ta
 
 [workspace]
 members = [
-    "array2",
     "benchmarks",
     "catalog-tables",
     "concrete-iter",
