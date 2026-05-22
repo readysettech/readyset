@@ -17,12 +17,13 @@
 //! rather than regenerating one in place.
 
 // This module intentionally references deprecated compat-shim types
-// (Sharding, Config.sharding, DfState.sharding, Node.sharded_by); that is
-// the entire point of the snapshot fixtures. The `#[allow(deprecated)]`
-// annotations stay narrow (use statement + per-fn) so unrelated
-// deprecations would still surface as warnings here.
+// (Sharding, Config.sharding, DfState.sharding, Node.sharded_by,
+// Config.worker_request_timeout); that is the entire point of the snapshot
+// fixtures. The `#[allow(deprecated)]` annotations stay narrow (use statement
+// + per-fn) so unrelated deprecations would still surface as warnings here.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{bail, ensure, Context, Result};
 use dataflow::node::{self, Column};
@@ -40,7 +41,7 @@ use crate::Config;
 /// Every snapshot this build can construct or verify. Adding a new entry
 /// here is the deliberate act that authorises generating a new
 /// `<name>.bin` fixture.
-pub const SNAPSHOT_NAMES: &[&str] = &["v1", "v2"];
+pub const SNAPSHOT_NAMES: &[&str] = &["v1", "v2", "v3"];
 
 /// Build the rmp_serde-encoded bytes for the named snapshot. The
 /// representation matches exactly what the Authority writes to RocksDB.
@@ -59,6 +60,7 @@ pub fn verify_snapshot(name: &str, bytes: &[u8]) -> Result<()> {
     match name {
         "v1" => verify_v1(&state),
         "v2" => verify_v2(&state),
+        "v3" => verify_v3(&state),
         other => bail!("unknown snapshot name `{other}`"),
     }
 }
@@ -67,6 +69,7 @@ fn build_state(name: &str) -> Result<ControllerState> {
     match name {
         "v1" => Ok(build_v1_state()),
         "v2" => Ok(build_v2_state()),
+        "v3" => Ok(build_v3_state()),
         other => bail!("unknown snapshot name `{other}`"),
     }
 }
@@ -178,37 +181,7 @@ fn build_v2_state() -> ControllerState {
         ..Config::default()
     };
 
-    let mut g = petgraph::Graph::new();
-    let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
-        "source",
-        Vec::new(),
-        node::special::Source,
-    ));
-    let columns: Vec<Column> = vec![Column::new("id".into(), DfType::Int, None)];
-    g.add_node(node::Node::new(
-        "t",
-        columns,
-        node::special::Base::new().with_primary_key([0]),
-    ));
-
-    let recipe = Recipe::with_config(
-        Dialect::DEFAULT_POSTGRESQL,
-        super::sql::Config::default(),
-        super::sql::mir::Config::default(),
-        false,
-    );
-
-    let mut state = DfState::new(
-        g,
-        source,
-        0,
-        config.domain_config.clone(),
-        config.persistence.clone(),
-        Materializations::new(),
-        recipe,
-        None,
-        Arc::new(ChannelCoordinator::new()),
-    );
+    let mut state = minimal_dfstate();
     state.replication_strategy = super::replication::ReplicationStrategy::NonBaseDomains(4);
     state.node_restrictions.insert(
         super::NodeRestrictionKey::for_compat_test("t".into(), 0),
@@ -246,4 +219,89 @@ fn verify_v2(state: &ControllerState) -> Result<()> {
         "DfState.node_restrictions sentinel: expected {expected:?} at key {key:?}, got {got:?}"
     );
     Ok(())
+}
+
+#[allow(deprecated)]
+fn build_v3_state() -> ControllerState {
+    // `v3` captures `ControllerState` with `Config.worker_request_timeout` populated
+    // to a sentinel value. The compat shim added in the prior commit keeps the
+    // field at its original positional slot in `Config` so older payloads still
+    // decode. `upquery_timeout` and `background_recovery_interval` are pinned to
+    // explicit values (not derived via `..Config::default()`) so that
+    // `verify_v3`'s neighbor assertions remain robust against legitimate tuning
+    // of `Config::default()`.
+    let config = Config {
+        worker_request_timeout: Duration::from_secs(123),
+        upquery_timeout: Duration::from_millis(5000),
+        background_recovery_interval: Duration::from_secs(20),
+        ..Config::default()
+    };
+    let dataflow_state = minimal_dfstate();
+    ControllerState {
+        config,
+        dataflow_state,
+    }
+}
+
+#[allow(deprecated)]
+fn verify_v3(state: &ControllerState) -> Result<()> {
+    let timeout = state.config.worker_request_timeout;
+    ensure!(
+        timeout == Duration::from_secs(123),
+        "Config.worker_request_timeout sentinel: expected Duration::from_secs(123), got {timeout:?}"
+    );
+    // Neighbor defaults defend against a future refactor that re-orders the
+    // adjacent `Duration` fields. If `upquery_timeout` and
+    // `worker_request_timeout` swap positions, decoding silently lands the
+    // sentinel in the wrong slot and the sibling assertion below trips first.
+    let upquery = state.config.upquery_timeout;
+    ensure!(
+        upquery == Duration::from_millis(5000),
+        "Config.upquery_timeout default: expected Duration::from_millis(5000), got {upquery:?}"
+    );
+    let recovery = state.config.background_recovery_interval;
+    ensure!(
+        recovery == Duration::from_secs(20),
+        "Config.background_recovery_interval default: expected Duration::from_secs(20), got {recovery:?}"
+    );
+    Ok(())
+}
+
+/// Minimal `DfState` skeleton (Source + single-column `t` base, default Recipe,
+/// empty `ChannelCoordinator`) shared by `build_v2_state` and `build_v3_state`.
+/// `build_v1_state` builds inline because its `t` is two-column and carries
+/// `Sharding::ByColumn(0, 2)` on the node.
+fn minimal_dfstate() -> DfState {
+    let defaults = Config::default();
+    let mut g = petgraph::Graph::new();
+    let source = g.add_node(node::Node::new::<_, _, Vec<Column>, _>(
+        "source",
+        Vec::new(),
+        node::special::Source,
+    ));
+    let columns: Vec<Column> = vec![Column::new("id".into(), DfType::Int, None)];
+    g.add_node(node::Node::new(
+        "t",
+        columns,
+        node::special::Base::new().with_primary_key([0]),
+    ));
+
+    let recipe = Recipe::with_config(
+        Dialect::DEFAULT_POSTGRESQL,
+        super::sql::Config::default(),
+        super::sql::mir::Config::default(),
+        false,
+    );
+
+    DfState::new(
+        g,
+        source,
+        0,
+        defaults.domain_config,
+        defaults.persistence,
+        Materializations::new(),
+        recipe,
+        None,
+        Arc::new(ChannelCoordinator::new()),
+    )
 }
