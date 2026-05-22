@@ -313,6 +313,18 @@ async fn create_cache_returns_deep_type() {
     assert!(!query.is_empty());
     assert_eq!(cache_type, "deep");
 
+    let row: Row = readyset
+        .query_first("SELECT query_id, name, always FROM readyset.deep_caches WHERE name = 'my_deep'")
+        .await
+        .unwrap()
+        .expect("expected one row in readyset.deep_caches");
+    let vrel_query_id: String = row.get("query_id").unwrap();
+    let vrel_name: String = row.get("name").unwrap();
+    let vrel_always: bool = row.get("always").unwrap();
+    assert_eq!(vrel_query_id, query_id);
+    assert_eq!(vrel_name, "my_deep");
+    assert!(!vrel_always);
+
     shutdown_tx.shutdown().await;
 }
 

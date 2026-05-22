@@ -1,6 +1,7 @@
 #![deny(unreachable_pub)]
 pub mod auto_cache_eligibility;
 pub mod backend;
+mod deep_vrels;
 pub mod http_router;
 pub mod mcp_http;
 pub mod migration_handler;
