@@ -5,6 +5,7 @@ use readyset_client::query::QueryId;
 use readyset_data::DfType;
 use readyset_metrics::metrics_handle;
 use readyset_shallow::{CacheEntryInfo, CacheInfo, CacheManager};
+use readyset_sql::ast::TrxCachePolicy;
 use readyset_sql::{DialectDisplay, ast::Relation};
 use readyset_util::SizeOf;
 
@@ -39,6 +40,7 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("refresh_ms", DfType::UnsignedBigInt),
     ("coalesce_ms", DfType::UnsignedBigInt),
     ("always", DfType::Bool),
+    ("until_write", DfType::Bool),
     ("schedule", DfType::Bool),
     ("hits", DfType::UnsignedBigInt),
     ("misses", DfType::UnsignedBigInt),
@@ -72,11 +74,8 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 cache.ttl_ms.into(),
                 cache.refresh_ms.into(),
                 cache.coalesce_ms.into(),
-                matches!(
-                    cache.trx_cache_policy,
-                    readyset_sql::ast::TrxCachePolicy::Always
-                )
-                .into(),
+                matches!(cache.trx_cache_policy, TrxCachePolicy::Always).into(),
+                matches!(cache.trx_cache_policy, TrxCachePolicy::UntilWrite).into(),
                 cache.schedule.into(),
                 hits.get(&query_id).into(),
                 misses.get(&query_id).into(),

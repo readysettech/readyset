@@ -186,6 +186,14 @@ async fn manual_until_write() {
         QueryDestination::ReadysetShallow,
     );
 
+    let (always, until_write): (bool, bool) = conn
+        .query_first("SELECT always, until_write FROM readyset.shallow_caches LIMIT 1")
+        .await
+        .unwrap()
+        .expect("shallow_caches must surface the manual UNTIL WRITE cache");
+    assert!(until_write, "until_write must be true for UNTIL WRITE caches");
+    assert!(!always, "always must be false for UNTIL WRITE caches");
+
     // Same dance: serve from cache before the write, upstream after.
     conn.query_drop("BEGIN").await.unwrap();
     conn.query_drop("SELECT a FROM foo WHERE a = 1")

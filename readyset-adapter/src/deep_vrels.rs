@@ -11,6 +11,7 @@ const DEEP_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("name", DfType::DEFAULT_TEXT),
     ("query", DfType::DEFAULT_TEXT),
     ("always", DfType::Bool),
+    ("until_write", DfType::Bool),
     ("total_count", DfType::UnsignedBigInt),
 ];
 
@@ -43,6 +44,7 @@ fn deep_caches_read(ctx: &VrelContext) -> VrelRead {
                 view.name.display_unquoted().to_string().into(),
                 view.statement.display(dialect).to_string().into(),
                 matches!(view.trx_cache_policy, TrxCachePolicy::Always).into(),
+                matches!(view.trx_cache_policy, TrxCachePolicy::UntilWrite).into(),
                 count.into(),
             ])
         }));
