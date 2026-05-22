@@ -2234,7 +2234,6 @@ where
         &mut self,
         stmt: SelectStatement,
         is_skip_cache: bool,
-        shallow_query_id: Option<QueryId>,
     ) -> ReadySetResult<PrepareMeta> {
         let rewrite_context =
             Self::rewrite_context(&self.connectors, &self.settings, &self.state, None).await?;
@@ -2267,11 +2266,7 @@ where
         } else {
             let should_do_readyset =
                 !matches!(status.migration_state, MigrationState::Unsupported(_));
-            let query_id = if self.settings.cache_mode.is_shallow() {
-                shallow_query_id
-            } else {
-                Some(QueryId::from(&view_request))
-            };
+            let query_id = Some(QueryId::from(&view_request));
             self.state
                 .query_status_cache
                 .update_schema_generation(&view_request, rewrite_context.schema_generation());
@@ -2345,28 +2340,25 @@ where
                     is_skip_cache,
                 ));
             }
-            // The shallow path rejected this query via the in-request-path
-            // eligibility filter (system catalogs, session-state mutations,
-            // ...).  Falling through to the deep-cache prepare path would
-            // re-attempt the same query as a base-table view and fail when
-            // the upstream table is not replicated, polluting the cache and
-            // returning an error to the client.  Upstream-only is the right
-            // outcome.
-            if self
-                .state
-                .query_status_cache
-                .is_shallow_auto_create_skipped(QueryId::from(&shallow))
-            {
-                return Ok((PrepareMeta::Proxy, is_skip_cache));
-            }
         }
 
         let meta = match parsed {
-            Ok(SqlQuery::Select(stmt)) => {
-                let shallow_query_id = query_shallow.as_ref().map(QueryId::from);
-                self.plan_prepare_select(stmt, is_skip_cache, shallow_query_id)
-                    .await?
+            Ok(SqlQuery::Select(stmt)) if self.settings.cache_mode.is_shallow() => {
+                let view_request = ViewCreateRequest::new(
+                    stmt.clone(),
+                    self.connectors.noria.schema_search_path().to_owned(),
+                );
+                PrepareMeta::Select(PrepareSelectMeta {
+                    stmt,
+                    view_request,
+                    query_id: query_shallow.as_ref().map(QueryId::from),
+                    migration_state: MigrationState::Unsupported("shallow-only mode".into()),
+                    must_migrate: false,
+                    should_do_noria: false,
+                    trx_cache_policy: TrxCachePolicy::Never,
+                })
             }
+            Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await?,
             Ok(
                 query @ SqlQuery::Insert(_)
                 | query @ SqlQuery::Update(_)
@@ -5872,6 +5864,8 @@ where
                 event.sql_type = SqlQueryType::Read;
                 if settings.cache_mode.is_shallow() {
                     event.query_id = query_shallow.as_ref().map(QueryId::from);
+                    return Self::query_fallback(connectors.upstream.as_mut(), query, event, None)
+                        .await;
                 }
 
                 let rewrite_context =
