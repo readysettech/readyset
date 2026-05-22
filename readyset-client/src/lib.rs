@@ -232,12 +232,10 @@ pub(crate) const PENDING_LIMIT: usize = 8192;
 pub const CONNECTION_MAGIC_NUMBER: [u8; 4] = [0x52, 0x53, 0x30, 0x31];
 
 /// A tag to be written over a newly-established connection to a domain to indicate that the
-/// connection is originating from a base table domain.
+/// connection is originating from a base table writer (the replicator or an external base
+/// writer). This is the only tag value the replica's listener accepts now that inter-domain
+/// traffic stays in-process.
 pub const CONNECTION_FROM_BASE: u8 = 1;
-
-/// A tag to be written over a newly-established connection to a domain to indicate that the
-/// connection is *not* originating from a base table domain.
-pub const CONNECTION_FROM_DOMAIN: u8 = 2;
 
 mod controller;
 pub mod events;

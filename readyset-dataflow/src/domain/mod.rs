@@ -1919,7 +1919,7 @@ impl Domain {
             .iter()
             .map(|addr| {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let sender = self.channel_coordinator.builder_for(addr)?.build_async()?;
+                let sender = self.channel_coordinator.connect_to(addr)?;
 
                 tokio::spawn(UnboundedReceiverStream::new(rx).forward(sender).map(|r| {
                     if let Err(e) = r {

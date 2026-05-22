@@ -598,14 +598,7 @@ async fn evict_check(
 
         let tx = match domain_senders.entry(target) {
             Occupied(entry) => entry.into_mut(),
-            Vacant(entry) => entry.insert(tokio::task::block_in_place(|| {
-                coord.builder_for(&target)?.build_async().map_err(|e| {
-                    internal_err!(
-                        "an error occurred while trying to create a domain connection: '{}'",
-                        e
-                    )
-                })
-            })?),
+            Vacant(entry) => entry.insert(coord.connect_to(&target)?),
         };
         let pkt = Packet::Evict(Evict {
             req: Eviction::Bytes {

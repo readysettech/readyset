@@ -8,7 +8,7 @@ use dataflow::payload::packets::*;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
 use dataflow::prelude::Upcall;
 use dataflow::{
-    Domain, DomainReceiver, DomainRequest, DualTcpStream, Outboxes, Packet, ReplayReceiver,
+    BaseWriteStream, Domain, DomainReceiver, DomainRequest, Outboxes, Packet, ReplayReceiver,
 };
 use futures_util::sink::{Sink, SinkExt};
 use futures_util::stream::StreamExt;
@@ -21,7 +21,7 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_util::logging::{rate_limit, TCP_CONNECTION_LOG_RECEIVED_FROM_UNKNOWN_SOURCE};
 use readyset_util::time_scope;
 use strawpoll::Strawpoll;
-use tokio::io::{AsyncReadExt, BufReader, BufStream, BufWriter};
+use tokio::io::{AsyncReadExt, BufStream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
@@ -72,7 +72,9 @@ pub struct Replica {
     /// NOTE: if `aggressively_update_state_sizes` updates will happen every packet
     refresh_sizes: IntervalStream,
 
-    /// Incoming TCP connections, usually from other Domains
+    /// Incoming TCP connections from base-table writers (the replicator and any
+    /// external base writers). Inter-domain traffic stays in-process via
+    /// `ChannelCoordinator`.
     incoming: Strawpoll<TcpListener>,
 
     /// A receiver for locally sent messages
@@ -151,11 +153,14 @@ impl Replica {
         )
     }
 
-    /// Read the first 4 bytes of a connection to determine if it has the correct magic number,
-    /// and then read the next byte to determine if it is from a base node. If it is, convert it to
-    /// a DualTcpStream, returning a unique token for the connection together with the upgraded
+    /// Read the first 4 bytes of a connection to determine if it has the correct magic
+    /// number, and then read the next byte to confirm it is a base-table connection
+    /// (the only kind that should arrive at this listener now that inter-domain TCP is
+    /// gone). Upgrade to a `BaseWriteStream` and return a unique token plus the upgraded
     /// connection.
-    async fn handle_new_connection(mut stream: TcpStream) -> ReadySetResult<(u64, DualTcpStream)> {
+    async fn handle_new_connection(
+        mut stream: TcpStream,
+    ) -> ReadySetResult<(u64, BaseWriteStream)> {
         let mut magic: [u8; 4] = [0; 4];
         stream.read_exact(&mut magic).await?;
         if magic != CONNECTION_MAGIC_NUMBER {
@@ -178,31 +183,28 @@ impl Replica {
 
         let mut tag: u8 = 0;
         stream.read_exact(std::slice::from_mut(&mut tag)).await?;
-        let is_base = tag == CONNECTION_FROM_BASE;
+        if tag != CONNECTION_FROM_BASE {
+            return Err(ReadySetError::TcpSendError(format!(
+                "Replica received non-base connection (tag={tag}); only base-table \
+                 writers should connect here in single-worker mode"
+            )));
+        }
 
-        debug!(base = is_base, "established new connection");
+        debug!("established new base-table connection");
 
         let token = next_token();
         let _ = stream.set_nodelay(true);
 
-        let tcp = if is_base {
-            DualTcpStream::upgrade(BufStream::new(stream), move |Tagged { v, tag }| {
-                let input: PacketData = v;
-                // Peek at its type.
-                match input.data {
-                    PacketPayload::Input(_) => Packet::Input(Input {
-                        inner: input,
-                        src: SourceChannelIdentifier { token, tag },
-                    }),
-                }
-            })
-        } else {
-            BufStream::from(BufReader::with_capacity(
-                2 * 1024 * 1024,
-                BufWriter::with_capacity(4 * 1024, stream),
-            ))
-            .into()
-        };
+        let tcp = BaseWriteStream::upgrade(BufStream::new(stream), move |Tagged { v, tag }| {
+            let input: PacketData = v;
+            // Peek at its type.
+            match input.data {
+                PacketPayload::Input(_) => Packet::Input(Input {
+                    inner: input,
+                    src: SourceChannelIdentifier { token, tag },
+                }),
+            }
+        });
 
         Ok((token, tcp))
     }
@@ -210,7 +212,7 @@ impl Replica {
     /// Receive packets from local and remote connections
     async fn receive_packets(
         locals: &mut DomainReceiver,
-        connections: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+        connections: &mut tokio_stream::StreamMap<u64, BaseWriteStream>,
     ) -> ReadySetResult<Option<VecDeque<Packet>>> {
         const MAX_PACKETS_PER_CALL: usize = 64;
 
@@ -299,7 +301,7 @@ impl Replica {
                     }
 
                     debug!(%domain, %addr, "Establishing connection to domain");
-                    entry.insert(coord.builder_for(&domain)?.build_async()?)
+                    entry.insert(coord.connect_to(&domain)?)
                 }
             };
 
@@ -407,7 +409,7 @@ impl Replica {
 
     async fn handle_one_packet(
         packets: &mut VecDeque<Packet>,
-        established: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+        established: &mut tokio_stream::StreamMap<u64, BaseWriteStream>,
         domain: &mut Domain,
         out: &mut Outboxes,
         mut packet: Packet,
@@ -459,7 +461,7 @@ impl Replica {
 
     async fn handle_packets(
         packets: Option<VecDeque<Packet>>,
-        established: &mut tokio_stream::StreamMap<u64, DualTcpStream>,
+        established: &mut tokio_stream::StreamMap<u64, BaseWriteStream>,
         domain: &mut Domain,
         out: &mut Outboxes,
     ) -> Option<ReadySetResult<()>> {
@@ -540,7 +542,7 @@ impl Replica {
                     accepted.push(Self::handle_new_connection(conn));
                 },
 
-                // Accepted but still converting to DualTcpStream
+                // Accepted but still converting to BaseWriteStream
                 Some(established_conn) = accepted.next() => {
                     let (token, tcp) = match established_conn {
                         Err(_) => continue, // errors on unestablished connections don't matter

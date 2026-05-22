@@ -43,7 +43,7 @@ pub use dataflow_state::{
 };
 
 pub use crate::domain::channel::{
-    ChannelCoordinator, DomainReceiver, DomainSender, DualTcpStream, ReplayReceiver, ReplaySender,
+    BaseWriteStream, ChannelCoordinator, DomainReceiver, DomainSender, ReplayReceiver, ReplaySender,
 };
 pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
 pub use crate::node_map::NodeMap;
