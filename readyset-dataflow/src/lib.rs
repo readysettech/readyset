@@ -21,7 +21,6 @@ use std::sync::{Arc, Mutex};
 
 use readyset_client::ReaderAddress;
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 pub use crate::backlog::{LookupError, ReaderUpdatedNotifier, SingleReadHandle};
 
@@ -50,7 +49,7 @@ pub use crate::node_map::NodeMap;
 pub use crate::payload::{
     DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, TriggerEndpoint,
 };
-use crate::prelude::{Executor, Upcall};
+use crate::prelude::Executor;
 pub use crate::processing::LookupIndex;
 
 /// Kept only so older persisted `ControllerState` payloads (which include `Node.sharded_by`) can
@@ -101,12 +100,19 @@ impl DerefMut for ReaderMap {
     }
 }
 
+/// A unit of barrier accounting returned to the worker's `BarrierManager`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BarrierCredit {
+    pub id: u128,
+    pub credits: u128,
+}
+
 #[derive(Default)]
 pub struct Outboxes {
     /// messages for other domains
     domains: HashMap<DomainIndex, VecDeque<Packet>>,
-    /// rpcs to send
-    rpcs: Vec<(Url, Upcall)>,
+    /// barrier credits to return to the worker's `BarrierManager`
+    barrier_credits: Vec<BarrierCredit>,
     /// messages held temporarily that we will revise soon
     corked: Option<Vec<(DomainIndex, Packet)>>,
 }
@@ -120,16 +126,16 @@ impl Outboxes {
         !self.domains.is_empty()
     }
 
-    pub fn have_rpcs(&self) -> bool {
-        !self.rpcs.is_empty()
+    pub fn have_barrier_credits(&self) -> bool {
+        !self.barrier_credits.is_empty()
     }
 
     pub fn take_messages(&mut self) -> Vec<(DomainIndex, VecDeque<Packet>)> {
         self.domains.drain().collect()
     }
 
-    pub fn take_rpcs(&mut self) -> Vec<(Url, Upcall)> {
-        self.rpcs.drain(..).collect()
+    pub fn take_barrier_credits(&mut self) -> Vec<BarrierCredit> {
+        self.barrier_credits.drain(..).collect()
     }
 }
 
@@ -142,8 +148,12 @@ impl Executor for Outboxes {
         }
     }
 
-    fn rpc(&mut self, url: Url, req: Upcall) {
-        self.rpcs.push((url, req));
+    fn barrier_credit(&mut self, credit: BarrierCredit) {
+        // Barrier credits are only emitted after `uncork`; the cork holds back
+        // downstream packets, not credit returns. Surface a future caller that
+        // violates that ordering.
+        debug_assert!(self.corked.is_none());
+        self.barrier_credits.push(credit);
     }
 
     fn cork(&mut self) {

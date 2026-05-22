@@ -272,20 +272,6 @@ async fn dispatch_worker_request(
             .await
             .map(|()| None)
         }
-        WorkerRequestKind::BarrierCredit { id, credits } => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(
-                worker_tx,
-                WorkerRequest::BarrierCredit {
-                    id,
-                    credits,
-                    done_tx,
-                },
-                done_rx,
-            )
-            .await
-            .map(|()| None)
-        }
     }
 }
 

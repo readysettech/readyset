@@ -8,7 +8,6 @@ use readyset_data::DfType;
 use readyset_sql::ast::Relation;
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
-use url::Url;
 use vec1::Vec1;
 
 use crate::node::Column;
@@ -465,10 +464,9 @@ pub mod packets {
     pub struct Evict {
         /// The eviction request
         pub req: Eviction,
-        /// If a URL is provided, flush downstream connections using provided barrier credits.
-        pub done: Option<Url>,
-        pub barrier: u128,
-        pub credits: u128,
+        /// If `Some`, the receiving domain must either propagate this credit further
+        /// downstream or return it to the worker's `BarrierManager`.
+        pub barrier: Option<BarrierCredit>,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -476,10 +474,9 @@ pub mod packets {
         pub node: LocalNodeIndex,
         pub cols: Vec<usize>,
         pub keys: Vec<KeyComparison>,
-        /// If a URL is provided, evict keys within the specified barrier.
-        pub done: Option<Url>,
-        pub barrier: u128,
-        pub credits: u128,
+        /// If `Some`, the receiving domain must either propagate this credit further
+        /// downstream or return it to the worker's `BarrierManager`.
+        pub barrier: Option<BarrierCredit>,
     }
 
     impl RequestEvictionFromReader {
@@ -492,9 +489,7 @@ pub mod packets {
                 node,
                 cols,
                 keys,
-                done: Default::default(),
-                barrier: Default::default(),
-                credits: Default::default(),
+                barrier: None,
             }
         }
     }
@@ -503,10 +498,9 @@ pub mod packets {
     pub struct RequestEviction {
         pub tag: Tag,
         pub keys: Vec<KeyComparison>,
-        /// If a URL is provided, evict keys within the specified barrier.
-        pub done: Option<Url>,
-        pub barrier: u128,
-        pub credits: u128,
+        /// If `Some`, the receiving domain must either propagate this credit further
+        /// downstream or return it to the worker's `BarrierManager`.
+        pub barrier: Option<BarrierCredit>,
     }
 
     impl RequestEviction {
@@ -514,9 +508,7 @@ pub mod packets {
             Self {
                 tag,
                 keys,
-                done: Default::default(),
-                barrier: Default::default(),
-                credits: Default::default(),
+                barrier: None,
             }
         }
     }

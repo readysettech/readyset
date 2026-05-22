@@ -59,7 +59,6 @@ use timekeeper::{RealTime, SimpleTracker, ThreadTime, Timer, TimerSet};
 use tokio::sync::mpsc::{Sender, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
-use url::Url;
 use vec1::Vec1;
 
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
@@ -1452,8 +1451,6 @@ impl Domain {
                     },
                     executor,
                     None,
-                    0,
-                    0,
                 )?;
             }
         }
@@ -2548,7 +2545,7 @@ impl Domain {
     ) -> ReadySetResult<Option<Vec<u8>>> {
         // Handle an external request for an eviction. Returns the evicted key unless no
         // eviction occurred.
-        let key = self.handle_eviction(req, executor, None, 0, 0)?;
+        let key = self.handle_eviction(req, executor, None)?;
         Ok(Some(bincode::serialize(&key)?))
     }
 
@@ -2748,9 +2745,7 @@ impl Domain {
         ex: &mut dyn Executor,
         pkt: RequestEvictionFromReader,
     ) -> ReadySetResult<()> {
-        let barrier = pkt
-            .done
-            .map(|done| Barrier::new(ex, done, pkt.barrier, pkt.credits));
+        let barrier = pkt.barrier.map(|c| Barrier::new(ex, c));
         let res = self.find_tags_and_evict(ex, pkt.keys, &pkt.cols, pkt.node);
         barrier.map(|b| b.flush(ex));
         res
@@ -2867,9 +2862,7 @@ impl Domain {
         ex: &mut dyn Executor,
         pkt: RequestEviction,
     ) -> ReadySetResult<()> {
-        let barrier = pkt
-            .done
-            .map(|done| Barrier::new(ex, done, pkt.barrier, pkt.credits));
+        let barrier = pkt.barrier.map(|c| Barrier::new(ex, c));
         let res = self.handle_request_eviction_in_barrier(ex, pkt.tag, pkt.keys);
         barrier.map(|b| b.flush(ex));
         res
@@ -2909,13 +2902,15 @@ impl Domain {
             }
             Packet::Evict(e) => {
                 assert_reachable!("domain receive Evict");
-                debug!(
-                    "{} evicting in barrier {:x}, credits: {:x}",
-                    self.address(),
-                    e.barrier,
-                    e.credits
-                );
-                self.handle_eviction(e.req, executor, e.done, e.barrier, e.credits)?;
+                if let Some(c) = e.barrier {
+                    debug!(
+                        "{} evicting in barrier {:x}, credits: {:x}",
+                        self.address(),
+                        c.id,
+                        c.credits
+                    );
+                }
+                self.handle_eviction(e.req, executor, e.barrier)?;
             }
             Packet::RequestReaderReplay(RequestReaderReplay {
                 mut keys,
@@ -4704,11 +4699,9 @@ impl Domain {
         &mut self,
         request: Eviction,
         ex: &mut dyn Executor,
-        done: Option<Url>,
-        barrier: u128,
-        credits: u128,
+        barrier: Option<BarrierCredit>,
     ) -> ReadySetResult<Option<Vec<DfValue>>> {
-        let barrier = done.map(|done| Barrier::new(ex, done, barrier, credits));
+        let barrier = barrier.map(|c| Barrier::new(ex, c));
 
         let res = match request {
             Eviction::Bytes { node, num_bytes } => self.handle_eviction_bytes(ex, node, num_bytes),
@@ -4986,34 +4979,32 @@ impl Domain {
 }
 
 struct Barrier {
-    done: Url,
-    id: u128,
-    credits: u128,
+    credit: BarrierCredit,
 }
 
 impl Barrier {
-    fn new(ex: &mut dyn Executor, done: Url, id: u128, credits: u128) -> Self {
+    fn new(ex: &mut dyn Executor, credit: BarrierCredit) -> Self {
         ex.cork();
-        Self { done, id, credits }
+        Self { credit }
     }
 
     fn flush(self, ex: &mut dyn Executor) -> ReadySetResult<()> {
         let mut msgs = ex.uncork().into_iter();
         let n = msgs.len() as u128;
 
-        let Some(each) = self.credits.checked_div(n) else {
+        let Some(each) = self.credit.credits.checked_div(n) else {
             debug!(
                 "flushing barrier {:x} to worker, credits {:x}",
-                self.id, self.credits
+                self.credit.id, self.credit.credits
             );
-            self.rpc(ex, self.credits);
+            ex.barrier_credit(self.credit);
             return Ok(());
         };
 
-        let extra = self.credits % n;
+        let extra = self.credit.credits % n;
         debug!(
             "flushing barrier {:x}, split {}, each {:x} + extra {:x}",
-            self.id, n, each, extra
+            self.credit.id, n, each, extra
         );
         invariant!(each > 0, "barrier split too many times");
 
@@ -5027,33 +5018,25 @@ impl Barrier {
         Ok(())
     }
 
-    fn rpc(&self, ex: &mut dyn Executor, credits: u128) {
-        ex.rpc(
-            self.done.clone(),
-            Upcall::BarrierCredit {
-                id: self.id,
-                credits,
-            },
-        );
-    }
-
     fn send(&self, ex: &mut dyn Executor, rep: DomainIndex, mut msg: Packet, credits: u128) {
-        let (done, barrier, cr) = match msg {
-            Packet::Evict(ref mut e) => (&mut e.done, &mut e.barrier, &mut e.credits),
-            Packet::RequestEvictionFromReader(ref mut e) => {
-                (&mut e.done, &mut e.barrier, &mut e.credits)
-            }
-            Packet::RequestEviction(ref mut e) => (&mut e.done, &mut e.barrier, &mut e.credits),
+        let slot = match msg {
+            Packet::Evict(ref mut e) => &mut e.barrier,
+            Packet::RequestEvictionFromReader(ref mut e) => &mut e.barrier,
+            Packet::RequestEviction(ref mut e) => &mut e.barrier,
             ref pkt => {
                 warn!("unexpected packet type during eviction: {:?}", pkt);
-                self.rpc(ex, credits);
+                ex.barrier_credit(BarrierCredit {
+                    id: self.credit.id,
+                    credits,
+                });
                 ex.send(rep, msg);
                 return;
             }
         };
-        *done = Some(self.done.clone());
-        *barrier = self.id;
-        *cr = credits;
+        *slot = Some(BarrierCredit {
+            id: self.credit.id,
+            credits,
+        });
         ex.send(rep, msg);
     }
 }
@@ -5075,38 +5058,34 @@ mod test {
                 node: None,
                 num_bytes: 0,
             },
-            done: None,
-            barrier: 0,
-            credits: 0,
+            barrier: None,
         })
     }
 
+    const fn fake_credit() -> BarrierCredit {
+        BarrierCredit {
+            id: BID,
+            credits: CREDITS,
+        }
+    }
+
     #[test]
-    fn barrier_upcall() {
+    fn barrier_credit_returned_when_no_downstream() {
         let mut out = Outboxes::new();
-        let url = Url::parse("http://example.org/foo").unwrap();
-        let b = Barrier::new(&mut out, url.clone(), BID, CREDITS);
+        let b = Barrier::new(&mut out, fake_credit());
 
         b.flush(&mut out).unwrap();
 
         let pkts = out.take_messages();
         assert_eq!(pkts.len(), 0);
 
-        let rpcs = out.take_rpcs();
-        assert_eq!(rpcs.len(), 1);
-        match &rpcs[0] {
-            (up, Upcall::BarrierCredit { id, credits }) => {
-                assert_eq!(*up, url);
-                assert_eq!(*id, BID);
-                assert_eq!(*credits, CREDITS);
-            }
-        }
+        let credits = out.take_barrier_credits();
+        assert_eq!(credits, vec![fake_credit()]);
     }
 
     fn barrier_test(send: fn(&mut dyn Executor)) {
         let mut out = Outboxes::new();
-        let url = Url::parse("http://example.org/foo").unwrap();
-        let b = Barrier::new(&mut out, url.clone(), BID, CREDITS);
+        let b = Barrier::new(&mut out, fake_credit());
 
         send(&mut out);
         b.flush(&mut out).unwrap();
@@ -5114,20 +5093,15 @@ mod test {
         let mut total = 0;
         for pkt in out.take_messages().pop().unwrap().1 {
             if let Packet::Evict(e) = pkt {
-                assert_eq!(e.done, Some(url.clone()));
-                assert_eq!(e.barrier, BID);
-                total += e.credits;
+                let c = e.barrier.expect("downstream packet must carry a credit");
+                assert_eq!(c.id, BID);
+                total += c.credits;
             }
         }
 
-        for rpc in out.take_rpcs() {
-            match rpc {
-                (up, Upcall::BarrierCredit { id, credits }) => {
-                    assert_eq!(up, url);
-                    assert_eq!(id, BID);
-                    total += credits;
-                }
-            }
+        for credit in out.take_barrier_credits() {
+            assert_eq!(credit.id, BID);
+            total += credit.credits;
         }
 
         assert_eq!(total, CREDITS);

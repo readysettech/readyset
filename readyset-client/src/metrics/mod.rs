@@ -177,6 +177,10 @@ pub mod recorded {
     /// making an eviction decision and sending packets.
     pub const EVICTION_WORKER_EVICTION_TIME: &str = "readyset_eviction_worker.eviction_time_us";
 
+    /// Counter: The number of barrier credits returned to the worker's `BarrierManager`
+    /// (incremented once per credit returned, regardless of credit amount).
+    pub const BARRIER_CREDITS_RETURNED: &str = "readyset_eviction_worker.barrier_credits_returned";
+
     /// Gauge: The sum of the amount of bytes used to store a node's reader state
     /// within a domain.
     ///

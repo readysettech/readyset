@@ -25,12 +25,13 @@ use tokio::sync::{oneshot, Mutex, MutexGuard};
 use tokio::task::{JoinError, JoinHandle};
 use tokio::time::Interval;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
-use url::Url;
 use vec1::Vec1;
 
 use crate::worker::replica::WrappedDomainRequest;
 use dataflow::payload::{packets::Evict, Eviction};
-use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers};
+use dataflow::{
+    BarrierCredit, ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers,
+};
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::DomainIndex;
 use readyset_client::metrics::recorded;
@@ -65,10 +66,6 @@ pub enum WorkerRequestKind {
         period: Option<Duration>,
         limit: Option<usize>,
     },
-    BarrierCredit {
-        id: u128,
-        credits: u128,
-    },
 }
 
 /// A typed request to a running ReadySet worker. Each variant carries the
@@ -96,11 +93,6 @@ pub enum WorkerRequest {
     SetMemoryLimit {
         period: Option<Duration>,
         limit: Option<usize>,
-        done_tx: oneshot::Sender<ReadySetResult<()>>,
-    },
-    BarrierCredit {
-        id: u128,
-        credits: u128,
         done_tx: oneshot::Sender<ReadySetResult<()>>,
     },
 }
@@ -183,8 +175,6 @@ pub struct Worker {
     domain_bind: IpAddr,
     /// The IP address to expose to other domains for domain<->domain traffic.
     domain_external: IpAddr,
-    /// URL at which this worker can be contacted.
-    url: Url,
     /// Reports domain-task exits to the controller (covers both controller-initiated
     /// teardown and unexpected death). The receiver lives in a dedicated controller-side
     /// task; `UnboundedSender::send` is synchronous and non-blocking, which is what
@@ -214,7 +204,6 @@ impl Worker {
         rx: Receiver<WorkerRequest>,
         listen_addr: IpAddr,
         external_addr: SocketAddr,
-        url: Url,
         coord: Arc<ChannelCoordinator>,
         domain_exited_tx: UnboundedSender<DomainIndex>,
         readers: Readers,
@@ -232,7 +221,6 @@ impl Worker {
             rx,
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
-            url,
             coord,
             domain_exited_tx,
             readers,
@@ -257,7 +245,6 @@ impl Worker {
             self.memory,
             self.state_sizes.clone(),
             self.is_evicting.clone(),
-            self.url.clone(),
             self.barriers.clone(),
         ));
     }
@@ -290,15 +277,6 @@ impl Worker {
                 done_tx,
             } => {
                 self.set_memory_limit_impl(period, limit);
-                let _ = done_tx.send(Ok(()));
-            }
-            WorkerRequest::BarrierCredit {
-                id,
-                credits,
-                done_tx,
-            } => {
-                debug!("received barrier credits: {:x} for id {:x}", credits, id);
-                self.barriers.add(id, credits).await;
                 let _ = done_tx.send(Ok(()));
             }
         }
@@ -367,6 +345,7 @@ impl Worker {
             init_state_rx,
             replay_rx,
             self.coord.clone(),
+            self.barriers.clone(),
         );
         // Each domain is single threaded in nature, so we spawn each one in a separate
         // thread, so we can avoid running blocking operations on the multi
@@ -534,7 +513,6 @@ async fn evict_check(
     coord: Arc<ChannelCoordinator>,
     tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<DomainIndex, Arc<AtomicUsize>>>>,
-    url: Url,
     bmgr: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
     let start = Instant::now();
@@ -627,9 +605,10 @@ async fn evict_check(
                 node: None,
                 num_bytes: evict,
             },
-            done: Some(url.clone()),
-            barrier: barrier.id(),
-            credits: barrier.split(),
+            barrier: Some(BarrierCredit {
+                id: barrier.id(),
+                credits: barrier.split(),
+            }),
         });
         if let Err(e) = tx.send(pkt).await {
             // probably exiting?
@@ -661,7 +640,6 @@ async fn evict_start(
     tracker: MemoryTracker,
     state_sizes: Arc<Mutex<HashMap<DomainIndex, Arc<AtomicUsize>>>>,
     is_evicting: Arc<AtomicBool>,
-    url: Url,
     barriers: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
     counter!(recorded::EVICTION_WORKER_EVICTION_TICKS).increment(1);
@@ -670,7 +648,7 @@ async fn evict_start(
     }
 
     counter!(recorded::EVICTION_WORKER_EVICTION_CHECKS).increment(1);
-    let res = evict_check(limit, coord, tracker, state_sizes, url, barriers)
+    let res = evict_check(limit, coord, tracker, state_sizes, barriers)
         .instrument(info_span!("evicting"))
         .await;
 
@@ -725,6 +703,14 @@ struct BarrierInternal {
     done: oneshot::Sender<ReadySetResult<()>>,
 }
 
+/// Tracks in-flight barriers and accumulates returned credits.
+///
+/// The internal mutex is a leaf in the lock order: it is acquired by every replica's
+/// select loop (returning credits via [`add`]) and by the eviction task (issuing
+/// barriers via [`create`]), and no other lock is held across `.await` on it.
+///
+/// [`add`]: BarrierManager::add
+/// [`create`]: BarrierManager::create
 #[derive(Default)]
 pub struct BarrierManager {
     barriers: Mutex<HashMap<u128, BarrierInternal>>,
@@ -758,16 +744,17 @@ impl BarrierManager {
         b
     }
 
-    async fn add(&self, id: u128, credits: u128) {
+    async fn add(&self, credit: BarrierCredit) {
+        counter!(recorded::BARRIER_CREDITS_RETURNED).increment(1);
         let mut barriers = self.barriers.lock().await;
-        let Some(b) = barriers.get_mut(&id) else {
-            error!("unknown barrier {:x}", id);
+        let Some(b) = barriers.get_mut(&credit.id) else {
+            error!("unknown barrier {:x}", credit.id);
             return;
         };
 
-        b.credits += credits;
+        b.credits += credit.credits;
         if b.credits == Self::FULL_CREDIT {
-            Self::notify(barriers, id);
+            Self::notify(barriers, credit.id);
         }
     }
 
@@ -902,7 +889,11 @@ mod test {
         let mut b = bm.create(SPLITS).await;
 
         for _ in 0..SPLITS {
-            bm.add(b.id, b.split()).await;
+            bm.add(BarrierCredit {
+                id: b.id,
+                credits: b.split(),
+            })
+            .await;
         }
 
         // b.await, but require that it resolve immediately

@@ -35,23 +35,18 @@ pub type Graph = petgraph::Graph<Node, Edge>;
 use dataflow_state::MaterializedNodeState;
 pub use dataflow_state::{DurabilityMode, PersistenceParameters};
 pub use readyset_errors::*;
-use url::Url;
 pub use vec1::vec1;
 
 pub use crate::processing::{ColumnRef, ColumnSource};
 pub use crate::{ChannelCoordinator, EvictionKind};
 
-/// A queued RPC for the worker that will be translated into a [`WorkerRequestKind`].
-pub enum Upcall {
-    /// Return barrier credits associated with the given barrier id.
-    BarrierCredit { id: u128, credits: u128 },
-}
-
 pub trait Executor {
     fn send(&mut self, dest: DomainIndex, m: Packet);
-    fn rpc(&mut self, url: Url, req: Upcall);
+    /// Surface a barrier credit collected by the domain to the replica, which hands it
+    /// to the worker's `BarrierManager` in-process.
+    fn barrier_credit(&mut self, credit: BarrierCredit);
     fn cork(&mut self);
     fn uncork(&mut self) -> Vec<(DomainIndex, Packet)>;
 }
 
-pub use crate::Outboxes;
+pub use crate::{BarrierCredit, Outboxes};

@@ -142,9 +142,7 @@ impl PacketFilter {
                         tag: _,
                         keys,
                     },
-                done: _,
                 barrier: _,
-                credits: _,
             }) => {
                 // We iterate through the keys that must be evicted, as
                 // instructed by the packet.
@@ -878,9 +876,7 @@ mod test {
                     tag: Tag::new(1),
                     keys,
                 },
-                done: None,
-                barrier: 0,
-                credits: 0,
+                barrier: None,
             })
         }
     }

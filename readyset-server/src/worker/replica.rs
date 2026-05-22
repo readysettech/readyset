@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use dataflow::payload::packets::*;
 use dataflow::payload::{MaterializedState, SourceChannelIdentifier};
-use dataflow::prelude::Upcall;
 use dataflow::{
     BaseWriteStream, Domain, DomainReceiver, DomainRequest, Outboxes, Packet, ReplayReceiver,
 };
@@ -27,7 +26,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio_stream::wrappers::IntervalStream;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument, Span};
 
-use super::{ChannelCoordinator, WorkerRequestKind};
+use super::{BarrierManager, ChannelCoordinator};
 
 type Outputs = HashMap<DomainIndex, Box<dyn Sink<Packet, Error = bincode::Error> + Send + Unpin>>;
 
@@ -92,8 +91,9 @@ pub struct Replica {
     /// Stores pending outgoing messages
     out: Outboxes,
 
-    /// Client for upcalls to worker
-    client: reqwest::Client,
+    /// Worker's barrier accounting. Barrier credits the domain accumulates in `out` are
+    /// drained into this directly each select-loop iteration.
+    barriers: Arc<BarrierManager>,
 }
 
 impl Replica {
@@ -105,6 +105,7 @@ impl Replica {
         init_state_reqs: mpsc::Receiver<MaterializedState>,
         replay_rx: ReplayReceiver,
         cc: Arc<ChannelCoordinator>,
+        barriers: Arc<BarrierManager>,
     ) -> Self {
         Replica {
             coord: cc,
@@ -116,7 +117,7 @@ impl Replica {
             requests,
             init_state_reqs,
             replay_rx,
-            client: reqwest::Client::new(),
+            barriers,
         }
     }
 }
@@ -512,11 +513,6 @@ impl Replica {
         // future when it is empty.
         let mut send_packets = futures::stream::FuturesUnordered::new();
 
-        // Similar to `send_packets`, we push our outbox of `Upcall`s in here and let the `select!`
-        // loop poll it; however, we don't maintain the invariant of only one future being in here
-        // at a time, and instead simply append to it as needed.
-        let mut pending_rpc_requests = futures::stream::FuturesUnordered::new();
-
         let Replica {
             domain,
             coord,
@@ -527,7 +523,7 @@ impl Replica {
             out,
             init_state_reqs,
             replay_rx,
-            client,
+            barriers,
         } = &mut self;
 
         loop {
@@ -595,9 +591,6 @@ impl Replica {
                 // Poll the send packets future and reissue if outstanding packets are present
                 Some(res) = send_packets.next() => res?,
 
-                // Poll the pending RPC upcalls
-                Some(res) = pending_rpc_requests.next() => res?,
-
                 // Update domain sizes when `refresh_sizes` expires
                 Some(_) = refresh_sizes.next() => domain.update_state_sizes(),
 
@@ -611,16 +604,10 @@ impl Replica {
                 send_packets.push(Self::send_packets(to_send, &outputs, coord, &failed));
             }
 
-            // Send rpcs
-            if out.have_rpcs() {
-                for (url, req) in out.take_rpcs() {
-                    const RPC_TIMEOUT: Duration = Duration::from_secs(5);
-                    let req = match req {
-                        Upcall::BarrierCredit { id, credits } => {
-                            WorkerRequestKind::BarrierCredit { id, credits }
-                        }
-                    };
-                    pending_rpc_requests.push(common::worker::rpc(client, url, RPC_TIMEOUT, req))
+            // Return any accumulated barrier credits to the worker's BarrierManager in-process.
+            if out.have_barrier_credits() {
+                for credit in out.take_barrier_credits() {
+                    barriers.add(credit).await;
                 }
             }
         }

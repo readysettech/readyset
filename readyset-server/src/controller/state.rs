@@ -1352,9 +1352,7 @@ impl DfState {
                                 node: Some(na),
                                 num_bytes: bytes as usize,
                             },
-                            done: None,
-                            barrier: 0,
-                            credits: 0,
+                            barrier: None,
                         })),
                         workers,
                     )
