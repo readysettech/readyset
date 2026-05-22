@@ -9,6 +9,7 @@ use anyhow::{format_err, Context};
 use bytes::Bytes;
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
+use dataflow::{DomainBuilder, DomainRequest};
 use futures::future::Either;
 use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
@@ -31,7 +32,6 @@ use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use replication_offset::ReplicationOffset;
 use replicators::{ControllerMessage, ReplicatorMessage};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use table_status::TableStatusState;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
@@ -39,6 +39,7 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 use url::Url;
+use vec1::Vec1;
 
 use crate::controller::events::EventsHandle;
 use crate::controller::inner::Leader;
@@ -46,7 +47,7 @@ use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
 use crate::materialization::Materializations;
-use crate::worker::WorkerRequestKind;
+use crate::worker::WorkerRequest;
 use crate::Config;
 
 mod domain_handle;
@@ -174,7 +175,11 @@ impl ControllerState {
         let mut materializations = Materializations::new();
         materializations.set_config(config.materialization_config.clone());
 
-        let cc = Arc::new(ChannelCoordinator::new());
+        // The `Arc<ChannelCoordinator>` here is a placeholder; the shared coord owned by
+        // `Controller` is injected into `state.dataflow_state.channel_coordinator` inside
+        // `handle_authority_update` before the state is handed to `Leader::new`. Constructing
+        // a fresh one is harmless because nothing reads through this field until then.
+        let channel_coordinator = Arc::new(ChannelCoordinator::new());
 
         let dialect = dialect
             .unwrap_or_else(|| {
@@ -206,7 +211,7 @@ impl ControllerState {
             materializations,
             recipe,
             None,
-            cc,
+            channel_coordinator,
         );
 
         Self {
@@ -220,35 +225,92 @@ impl ControllerState {
 pub struct Worker {
     healthy: bool,
     uri: Url,
-    http: reqwest::Client,
     /// Configuration for how domains should be scheduled onto this worker
     domain_scheduling_config: WorkerSchedulingConfig,
-    request_timeout: Duration,
+    /// Channel into the in-process `crate::worker::Worker` task. Each variant of
+    /// [`WorkerRequest`] carries its own typed `oneshot` for the response.
+    worker_tx: Sender<WorkerRequest>,
 }
 
 impl Worker {
     pub fn new(
         instance_uri: Url,
         domain_scheduling_config: WorkerSchedulingConfig,
-        request_timeout: Duration,
+        worker_tx: Sender<WorkerRequest>,
     ) -> Self {
         Worker {
             healthy: true,
             uri: instance_uri,
-            http: reqwest::Client::new(),
             domain_scheduling_config,
-            request_timeout,
+            worker_tx,
         }
     }
 
-    pub async fn rpc<T: DeserializeOwned>(&self, req: WorkerRequestKind) -> ReadySetResult<T> {
-        common::worker::rpc(
-            &self.http,
-            self.uri.join("worker_request")?,
-            self.request_timeout,
-            req,
-        )
-        .await
+    async fn send(&self, req: WorkerRequest) -> ReadySetResult<()> {
+        self.worker_tx
+            .send(req)
+            .await
+            .map_err(|_| internal_err!("worker request channel closed"))
+    }
+
+    pub async fn run_domain(&self, builder: DomainBuilder) -> ReadySetResult<()> {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.send(WorkerRequest::RunDomain { builder, done_tx })
+            .await?;
+        done_rx
+            .await
+            .map_err(|_| internal_err!("worker dropped RunDomain done_tx"))?
+    }
+
+    pub async fn clear_domains(&self) -> ReadySetResult<()> {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.send(WorkerRequest::ClearDomains { done_tx }).await?;
+        done_rx
+            .await
+            .map_err(|_| internal_err!("worker dropped ClearDomains done_tx"))?
+    }
+
+    pub async fn kill_domains(&self, domains: Vec1<DomainIndex>) -> ReadySetResult<()> {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.send(WorkerRequest::KillDomains { domains, done_tx })
+            .await?;
+        done_rx
+            .await
+            .map_err(|_| internal_err!("worker dropped KillDomains done_tx"))?
+    }
+
+    pub async fn domain_request(
+        &self,
+        domain_index: DomainIndex,
+        request: Box<DomainRequest>,
+    ) -> ReadySetResult<Vec<u8>> {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.send(WorkerRequest::DomainRequest {
+            domain_index,
+            request,
+            done_tx,
+        })
+        .await?;
+        done_rx
+            .await
+            .map_err(|_| internal_err!("worker dropped DomainRequest done_tx"))?
+    }
+
+    pub async fn set_memory_limit(
+        &self,
+        period: Option<Duration>,
+        limit: Option<usize>,
+    ) -> ReadySetResult<()> {
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.send(WorkerRequest::SetMemoryLimit {
+            period,
+            limit,
+            done_tx,
+        })
+        .await?;
+        done_rx
+            .await
+            .map_err(|_| internal_err!("worker dropped SetMemoryLimit done_tx"))?
     }
 }
 
@@ -447,6 +509,15 @@ pub struct Controller {
     inner: Arc<LeaderHandle>,
     /// The `Authority` structure used for leadership elections & such state.
     authority: Arc<Authority>,
+    /// Channel coordinator shared with the in-process Worker. Re-injected into every
+    /// `DfState` we hand to a freshly elected `Leader`, because `DfState.channel_coordinator`
+    /// is `#[serde(skip)]` and arrives from the Authority as a disconnected default.
+    channel_coordinator: Arc<ChannelCoordinator>,
+    /// Sender end of the worker's request channel. Cloned into every
+    /// `controller::Worker` we construct from a `WorkerDescriptor`, so the
+    /// `WorkerRequest`s flow straight to the in-process worker task without an
+    /// HTTP loopback.
+    worker_tx: Sender<WorkerRequest>,
     /// Receives external HTTP requests.
     http_rx: Receiver<ControllerRequest>,
     /// Receives requests from the controller's `Handle`.
@@ -507,6 +578,8 @@ impl Controller {
         controller_rx: Receiver<ControllerRequest>,
         handle_rx: Receiver<HandleRequest>,
         domain_exited_rx: UnboundedReceiver<DomainIndex>,
+        channel_coordinator: Arc<ChannelCoordinator>,
+        worker_tx: Sender<WorkerRequest>,
         our_descriptor: ControllerDescriptor,
         worker_descriptor: WorkerDescriptor,
         telemetry_sender: TelemetrySender,
@@ -552,6 +625,8 @@ impl Controller {
         Self {
             inner,
             authority,
+            channel_coordinator,
+            worker_tx,
             http_rx: controller_rx,
             handle_rx,
             background_task_failed_rx,
@@ -654,6 +729,12 @@ impl Controller {
                 info!("won leader election, creating Leader");
                 gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
 
+                // `DfState.channel_coordinator` is `#[serde(skip)]`, so the state we got from
+                // the Authority (or from a freshly-constructed `ControllerState::new`) carries
+                // a disconnected default `Arc`. Replace it with the coord shared with the
+                // in-process Worker so `coord.get_addr` / `builder_for` resolve correctly.
+                state.dataflow_state.channel_coordinator = self.channel_coordinator.clone();
+
                 // If replication is disabled (shallow-only mode), clean up any deep
                 // state left over from a previous replication-enabled run.  Disk
                 // cleanup is unconditional because stale RocksDB files may exist
@@ -683,7 +764,6 @@ impl Controller {
                     .dataflow_state
                     .recipe
                     .schema_catalog(state.dataflow_state.schema_generation());
-                #[allow(deprecated)]
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),
@@ -691,7 +771,7 @@ impl Controller {
                     background_task_failed_tx,
                     self.config.replicator_statement_logging,
                     self.config.replicator_config.clone(),
-                    self.config.worker_request_timeout,
+                    self.worker_tx.clone(),
                     self.config.background_recovery_interval,
                     self.parsing_preset,
                     self.replicator_channel.sender(),

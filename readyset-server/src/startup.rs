@@ -52,6 +52,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{process, time};
 
+use dataflow::prelude::ChannelCoordinator;
 use dataflow::Readers;
 use failpoint_macros::set_failpoint;
 use futures_util::future::{Either, TryFutureExt};
@@ -123,6 +124,7 @@ fn start_worker(
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     url: Url,
+    channel_coordinator: Arc<ChannelCoordinator>,
     domain_exited_tx: UnboundedSender<DomainIndex>,
     abort_on_task_failure: bool,
     readers: Readers,
@@ -138,6 +140,7 @@ fn start_worker(
         listen_addr,
         external_addr,
         url.join("worker_request")?,
+        channel_coordinator,
         domain_exited_tx,
         readers,
         memory_limit,
@@ -161,6 +164,8 @@ fn start_controller(
     controller_http: ControllerConnectionPool,
     controller_rx: Receiver<ControllerRequest>,
     domain_exited_rx: UnboundedReceiver<DomainIndex>,
+    channel_coordinator: Arc<ChannelCoordinator>,
+    worker_tx: Sender<WorkerRequest>,
     abort_on_task_failure: bool,
     domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
@@ -191,6 +196,8 @@ fn start_controller(
         controller_rx,
         handle_rx,
         domain_exited_rx,
+        channel_coordinator,
+        worker_tx,
         our_descriptor.clone(),
         worker_descriptor,
         telemetry_sender,
@@ -335,11 +342,17 @@ pub(crate) async fn start_instance_inner(
     let (domain_exited_tx, domain_exited_rx) =
         tokio::sync::mpsc::unbounded_channel::<DomainIndex>();
 
+    // Single coord shared by the in-process Worker and Controller. The worker registers
+    // local domain senders + bind addresses here; the controller's DfState reads them
+    // (TableBuilder, eviction routing) directly without an RPC round-trip.
+    let channel_coordinator = Arc::new(ChannelCoordinator::new());
+
     start_worker(
         worker_rx,
         listen_addr,
         external_addr,
         http_uri.clone(),
+        channel_coordinator.clone(),
         domain_exited_tx,
         abort_on_task_failure,
         readers,
@@ -359,6 +372,8 @@ pub(crate) async fn start_instance_inner(
         controller_http,
         controller_rx,
         domain_exited_rx,
+        channel_coordinator,
+        worker_tx,
         abort_on_task_failure,
         domain_scheduling_config,
         parsing_preset,

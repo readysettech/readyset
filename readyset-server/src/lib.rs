@@ -376,7 +376,6 @@
 mod builder;
 mod controller;
 pub use controller::snapshot_compat;
-mod coordination;
 mod handle;
 mod http_router;
 

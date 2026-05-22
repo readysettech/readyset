@@ -6,7 +6,6 @@ use serde::de::DeserializeOwned;
 use tracing::error;
 
 use crate::controller::{Worker, WorkerIdentifier};
-use crate::worker::WorkerRequestKind;
 
 /// A `DomainHandle` is a handle that allows communicating with a domain. With standalone-only
 /// Readyset there is exactly one worker, so a domain is either placed on that worker or
@@ -95,15 +94,11 @@ impl DomainHandle {
             return Err(ReadySetError::WorkerFailed { uri: addr.clone() });
         };
         let domain = self.domain_index();
-        Ok(Some(
-            worker
-                .rpc(WorkerRequestKind::DomainRequest {
-                    domain_index: domain,
-                    request: Box::new(req),
-                })
-                .await
-                .map_err(|e| rpc_err_no_downcast(format!("domain request to {domain}"), e))?,
-        ))
+        let bytes = worker
+            .domain_request(domain, Box::new(req))
+            .await
+            .map_err(|e| rpc_err_no_downcast(format!("domain request to {domain}"), e))?;
+        Ok(Some(bincode::deserialize::<R>(&bytes)?))
     }
 
     /// Like [`Self::try_send`], but returns an error if no worker has been assigned.

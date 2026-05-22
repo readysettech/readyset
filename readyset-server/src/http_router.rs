@@ -32,7 +32,7 @@ use tracing::{info, warn};
 
 use crate::controller::events::EventsHandle;
 use crate::controller::ControllerRequest;
-use crate::worker::WorkerRequest;
+use crate::worker::{WorkerRequest, WorkerRequestKind};
 
 /// Routes requests from an HTTP server to noria server workers and controllers.
 ///
@@ -173,7 +173,7 @@ async fn health(State(state): State<NoriaServerHttpRouter>) -> Response {
 async fn worker_request(State(state): State<NoriaServerHttpRouter>, body: Bytes) -> Response {
     metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);
 
-    let wrq = match bincode::deserialize(&body) {
+    let wrq: WorkerRequestKind = match bincode::deserialize(&body) {
         Ok(x) => x,
         Err(e) => {
             return (
@@ -185,29 +185,122 @@ async fn worker_request(State(state): State<NoriaServerHttpRouter>, body: Bytes)
         }
     };
 
-    let (tx, rx) = oneshot::channel();
-    if state
-        .worker_tx
-        .send(WorkerRequest {
-            kind: wrq,
-            done_tx: tx,
-        })
-        .await
-        .is_err()
-    {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
+    // Convert the wire-encoded `WorkerRequestKind` into a typed `WorkerRequest`, await the
+    // typed response, then bincode-wrap it as `ReadySetResult<Option<Vec<u8>>>` to preserve
+    // the HTTP route's response contract. Piece B/C of the Phase 3 cleanup deletes this
+    // bridge once nothing relies on `/worker_request` over the wire.
+    let result = dispatch_worker_request(&state.worker_tx, wrq).await;
 
-    match rx.await {
-        Ok(Ok(ret)) => octet_stream(
-            StatusCode::OK,
-            ret.unwrap_or_else(|| bincode::serialize(&()).unwrap()),
-        ),
-        Ok(Err(e)) => octet_stream(
+    match result {
+        Ok(Some(bytes)) => octet_stream(StatusCode::OK, bytes),
+        Ok(None) => octet_stream(StatusCode::OK, bincode::serialize(&()).unwrap()),
+        Err(DispatchError::ChannelClosed) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(DispatchError::WorkerError(e)) => octet_stream(
             StatusCode::INTERNAL_SERVER_ERROR,
             bincode::serialize(&e).unwrap(),
         ),
-        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+
+enum DispatchError {
+    ChannelClosed,
+    WorkerError(ReadySetError),
+}
+
+async fn dispatch_worker_request(
+    worker_tx: &Sender<WorkerRequest>,
+    kind: WorkerRequestKind,
+) -> Result<Option<Vec<u8>>, DispatchError> {
+    // Per-variant typed oneshots flatten into `Option<Vec<u8>>`: `None` for unit-returning
+    // variants (the HTTP path historically returned `bincode::serialize(&())` for those),
+    // `Some(bytes)` for `DomainRequest`.
+    match kind {
+        WorkerRequestKind::RunDomain(builder) => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(
+                worker_tx,
+                WorkerRequest::RunDomain { builder, done_tx },
+                done_rx,
+            )
+            .await
+            .map(|()| None)
+        }
+        WorkerRequestKind::ClearDomains => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(worker_tx, WorkerRequest::ClearDomains { done_tx }, done_rx)
+                .await
+                .map(|()| None)
+        }
+        WorkerRequestKind::KillDomains(domains) => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(
+                worker_tx,
+                WorkerRequest::KillDomains { domains, done_tx },
+                done_rx,
+            )
+            .await
+            .map(|()| None)
+        }
+        WorkerRequestKind::DomainRequest {
+            domain_index,
+            request,
+        } => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(
+                worker_tx,
+                WorkerRequest::DomainRequest {
+                    domain_index,
+                    request,
+                    done_tx,
+                },
+                done_rx,
+            )
+            .await
+            .map(Some)
+        }
+        WorkerRequestKind::SetMemoryLimit { period, limit } => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(
+                worker_tx,
+                WorkerRequest::SetMemoryLimit {
+                    period,
+                    limit,
+                    done_tx,
+                },
+                done_rx,
+            )
+            .await
+            .map(|()| None)
+        }
+        WorkerRequestKind::BarrierCredit { id, credits } => {
+            let (done_tx, done_rx) = oneshot::channel();
+            send_with_close_check(
+                worker_tx,
+                WorkerRequest::BarrierCredit {
+                    id,
+                    credits,
+                    done_tx,
+                },
+                done_rx,
+            )
+            .await
+            .map(|()| None)
+        }
+    }
+}
+
+async fn send_with_close_check<T>(
+    worker_tx: &Sender<WorkerRequest>,
+    req: WorkerRequest,
+    done_rx: oneshot::Receiver<readyset_errors::ReadySetResult<T>>,
+) -> Result<T, DispatchError> {
+    if worker_tx.send(req).await.is_err() {
+        return Err(DispatchError::ChannelClosed);
+    }
+    match done_rx.await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(e)) => Err(DispatchError::WorkerError(e)),
+        Err(_) => Err(DispatchError::ChannelClosed),
     }
 }
 

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use enum_kinds::EnumKind;
 use futures::stream::FuturesUnordered;
 use futures_util::future::TryFutureExt;
 use futures_util::sink::SinkExt;
@@ -29,7 +28,6 @@ use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use url::Url;
 use vec1::Vec1;
 
-use crate::coordination::RunDomainResponse;
 use crate::worker::replica::WrappedDomainRequest;
 use dataflow::payload::{packets::Evict, Eviction};
 use dataflow::{ChannelCoordinator, Domain, DomainBuilder, DomainRequest, Packet, Readers};
@@ -50,61 +48,61 @@ mod replica;
 /// Timeout for logging slow `worker_request` handling
 const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
 
-/// Some kind of request for a running ReadySet worker.
-///
-/// Most of these requests return `()`, apart from `DomainRequest`.
-#[derive(Clone, Debug, EnumKind, Serialize, Deserialize)]
-#[enum_kind(WorkerRequestType)]
+/// Wire shape of a worker request used by the `/worker_request` HTTP route handler
+/// in `http_router`. The handler deserialises a `WorkerRequestKind` from the body
+/// then bridges into the typed [`WorkerRequest`] channel below. The in-process
+/// control path skips this and constructs a [`WorkerRequest`] directly.
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorkerRequestKind {
-    /// A new domain should be started on this worker.
     RunDomain(DomainBuilder),
-
-    /// Clear domains.
     ClearDomains,
-
-    /// Kill one or more domains running on this worker
     KillDomains(Vec1<DomainIndex>),
-
-    /// The sender of the request would like one of the domains on this worker to do something.
-    ///
-    /// This actually might return something that isn't `()`; see the `DomainRequest` docs
-    /// for more.
     DomainRequest {
-        /// The [`DomainIndex`] of the target domain.
         domain_index: DomainIndex,
-        /// The actual request.
         request: Box<DomainRequest>, // box for perf (clippy::large-enum-variant)
     },
-
-    /// Sent to validate that a connection actually works. Provokes an empty response.
-    Ping,
-
-    /// Set the memory limit for this worker
     SetMemoryLimit {
-        /// The period with which eviction check will be performed
         period: Option<Duration>,
-        /// The limit in bytes
         limit: Option<usize>,
     },
-
-    /// Return barrier credit
     BarrierCredit {
-        /// The barrier id
         id: u128,
-        /// The number of credits
         credits: u128,
     },
 }
 
-/// A request to a running ReadySet worker, containing a request kind and a completion channel.
-pub struct WorkerRequest {
-    /// The kind of request.
-    pub kind: WorkerRequestKind,
-    /// A channel through which the result of executing the request should be sent.
-    ///
-    /// If the request returned a non-`()` response, the result will be sent as a serialized
-    /// bincode vector.
-    pub done_tx: oneshot::Sender<ReadySetResult<Option<Vec<u8>>>>,
+/// A typed request to a running ReadySet worker. Each variant carries the
+/// completion channel for that variant's response type, eliminating the bincode
+/// round-trip that the HTTP path required.
+pub enum WorkerRequest {
+    RunDomain {
+        builder: DomainBuilder,
+        done_tx: oneshot::Sender<ReadySetResult<()>>,
+    },
+    ClearDomains {
+        done_tx: oneshot::Sender<ReadySetResult<()>>,
+    },
+    KillDomains {
+        domains: Vec1<DomainIndex>,
+        done_tx: oneshot::Sender<ReadySetResult<()>>,
+    },
+    DomainRequest {
+        domain_index: DomainIndex,
+        request: Box<DomainRequest>,
+        /// The raw bincoded response payload from the domain (or `bincode::serialize(&())`
+        /// for unit-returning variants).
+        done_tx: oneshot::Sender<ReadySetResult<Vec<u8>>>,
+    },
+    SetMemoryLimit {
+        period: Option<Duration>,
+        limit: Option<usize>,
+        done_tx: oneshot::Sender<ReadySetResult<()>>,
+    },
+    BarrierCredit {
+        id: u128,
+        credits: u128,
+        done_tx: oneshot::Sender<ReadySetResult<()>>,
+    },
 }
 
 /// A handle for sending messages to a domain in-process.
@@ -153,6 +151,13 @@ impl Future for FinishedDomain {
         let res = ready!(this.0.poll(cx));
         Poll::Ready((res, *this.1))
     }
+}
+
+fn report_err<T>(ret: ReadySetResult<T>) -> ReadySetResult<T> {
+    if let Err(ref e) = ret {
+        warn!(error = %e, "worker request failed");
+    }
+    ret
 }
 
 fn log_domain_result(domain: DomainIndex, result: &Result<ReadySetResult<()>, JoinError>) {
@@ -210,6 +215,7 @@ impl Worker {
         listen_addr: IpAddr,
         external_addr: SocketAddr,
         url: Url,
+        coord: Arc<ChannelCoordinator>,
         domain_exited_tx: UnboundedSender<DomainIndex>,
         readers: Readers,
         memory_limit: Option<usize>,
@@ -227,6 +233,7 @@ impl Worker {
             domain_bind: listen_addr,
             domain_external: external_addr.ip(),
             url,
+            coord,
             domain_exited_tx,
             readers,
             memory_limit: memory_limit.unwrap_or(usize::MAX),
@@ -234,7 +241,6 @@ impl Worker {
             shutdown_rx,
             unquery,
             memory: MemoryTracker::new()?,
-            coord: Default::default(),
             state_sizes: Default::default(),
             domains: Default::default(),
             is_evicting: Default::default(),
@@ -257,186 +263,205 @@ impl Worker {
     }
 
     async fn process_worker_request(&mut self, req: WorkerRequest) {
-        let ret = self.handle_worker_request(req.kind).await;
-        if let Err(ref e) = ret {
-            warn!(error = %e, "worker request failed");
-        }
-        // discard result, since Err(..) means "the receiving end was dropped"
-        let _ = req.done_tx.send(ret);
-    }
-
-    async fn handle_worker_request(
-        &mut self,
-        req: WorkerRequestKind,
-    ) -> ReadySetResult<Option<Vec<u8>>> {
-        let span = info_span!("readyset_server::worker::handle_worker_request", ?req);
+        let span = info_span!("readyset_server::worker::process_worker_request");
         let _time = time_scope(span, SLOW_REQUEST_THRESHOLD);
         match req {
-            WorkerRequestKind::ClearDomains => {
-                info!("controller requested that this worker clear its existing domains");
-                self.coord.clear();
-                self.domains.clear();
-                while let Some((result, domain)) = self.domain_wait_queue.next().await {
-                    log_domain_result(domain, &result)
-                }
-
-                Ok(None)
+            WorkerRequest::ClearDomains { done_tx } => {
+                let _ = done_tx.send(report_err(self.clear_domains_impl().await));
             }
-            WorkerRequestKind::RunDomain(builder) => {
-                let domain = builder.address();
-                let span = info_span!("domain", address = %domain);
-                span.in_scope(|| debug!("received domain to run"));
-
-                let bind_on = self.domain_bind;
-                let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
-                    .map_err(|e| {
-                        internal_err!("failed to bind domain {} on {}: {}", domain, bind_on, e)
-                    })
-                    .await?;
-                let bind_actual = listener.local_addr().map_err(|e| {
-                    internal_err!("couldn't get TCP local address for domain: {}", e)
-                })?;
-                let mut bind_external = bind_actual;
-                bind_external.set_ip(self.domain_external);
-
-                // this channel is used for async persistent state initialization.
-                // since domains can have at most one base table, there's no need to have a
-                // buffer with a size bigger than one.
-                let (init_state_tx, init_state_rx) = tokio::sync::mpsc::channel(1);
-
-                let state_size = Arc::new(AtomicUsize::new(0));
-                let (dataflow_domain, replay_rx) = builder.build(
-                    self.readers.clone(),
-                    self.coord.clone(),
-                    state_size.clone(),
-                    init_state_tx,
-                    self.unquery,
-                    self.table_status_tx.clone(),
-                );
-
-                // this channel is used for in-process domain traffic, to avoid going through the
-                // network stack unnecessarily
-                let (local_tx, local_rx) = Domain::channel();
-                // this channel is used for domain requests; it has a buffer size of 1 to prevent
-                // flooding a domain with requests
-                let (req_tx, req_rx) = tokio::sync::mpsc::channel(1);
-
-                // need to register the domain with the local channel coordinator.
-                // local first to ensure that we don't unnecessarily give away remote for a
-                // local thing if there's a race
-                self.coord.insert_local(domain, local_tx);
-                self.coord.insert_remote(domain, bind_external);
-
-                self.state_sizes.lock().await.insert(domain, state_size);
-
-                let replica = Replica::new(
-                    dataflow_domain,
-                    listener,
-                    local_rx,
-                    req_rx,
-                    init_state_rx,
-                    replay_rx,
-                    self.coord.clone(),
-                );
-                // Each domain is single threaded in nature, so we spawn each one in a separate
-                // thread, so we can avoid running blocking operations on the multi
-                // threaded tokio runtime
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .max_blocking_threads(1)
-                    .build()
-                    .unwrap();
-
-                let jh = runtime.spawn(replica.run());
-
-                let (abort, abort_rx) = oneshot::channel::<()>();
-                // Spawn the actual thread to run the domain
-                std::thread::Builder::new()
-                    .name(format!("Domain {domain}"))
-                    .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
-                    .spawn_wrapper(move || {
-                        // The runtime will run until the abort signal is sent.
-                        // This will happen either if the DomainHandle is dropped (and error is
-                        // received) or an actual signal is sent on the
-                        // channel
-                        let _ = runtime.block_on(abort_rx);
-                        runtime.shutdown_background();
-                    })?;
-
-                self.domains.insert(domain, DomainHandle { req_tx, abort });
-
-                self.domain_wait_queue.push(FinishedDomain(jh, domain));
-
-                span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted"));
-                let resp = RunDomainResponse {
-                    external_addr: bind_external,
-                };
-                Ok(Some(bincode::serialize(&resp)?))
+            WorkerRequest::RunDomain { builder, done_tx } => {
+                let _ = done_tx.send(report_err(self.run_domain_impl(builder).await));
             }
-            WorkerRequestKind::KillDomains(domains) => {
-                for addr in domains {
-                    let nsde = || ReadySetError::DomainNotFound {
-                        domain_index: addr.index(),
-                    };
-                    match self.domains.remove(&addr) {
-                        Some(domain) => {
-                            info!(domain = %addr, "Shutting down domain");
-
-                            // tell the domain to cleanly shut down. note: this serially shuts down
-                            // the the domains; it could be done in
-                            // parallel.
-                            let (tx, rx) = oneshot::channel();
-                            domain
-                                .req_tx
-                                .send(WrappedDomainRequest {
-                                    req: DomainRequest::Shutdown,
-                                    done_tx: tx,
-                                })
-                                .await
-                                .map_err(|_| nsde())?;
-                            let _ = rx.await.map_err(|_| nsde())?;
-
-                            // now, shut down the actaul thread for the domain
-                            let _ = domain.abort.send(());
-                        }
-                        None => warn!(domain = %addr, "Asked to kill domain that is not running"),
-                    }
-                }
-                Ok(None)
+            WorkerRequest::KillDomains { domains, done_tx } => {
+                let _ = done_tx.send(report_err(self.kill_domains_impl(domains).await));
             }
-            WorkerRequestKind::DomainRequest {
-                domain_index: domain,
+            WorkerRequest::DomainRequest {
+                domain_index,
                 request,
+                done_tx,
             } => {
-                let nsde = || ReadySetError::DomainNotFound {
-                    domain_index: domain.index(),
-                };
-                let dh = self.domains.get_mut(&domain).ok_or_else(nsde)?;
-                let (tx, rx) = oneshot::channel();
-                dh.req_tx
-                    .send(WrappedDomainRequest {
-                        req: *request,
-                        done_tx: tx,
-                    })
-                    .await
-                    .map_err(|_| nsde())?;
-                rx.await.map_err(|_| nsde())?
+                let _ = done_tx.send(report_err(
+                    self.domain_request_impl(domain_index, request).await,
+                ));
             }
-            WorkerRequestKind::Ping => Ok(None),
-            WorkerRequestKind::SetMemoryLimit { period, limit } => {
-                if let Some(period) = period {
-                    self.evict_interval = tokio::time::interval(period);
-                }
-                if let Some(limit) = limit {
-                    self.memory_limit = limit;
-                }
-                Ok(None)
+            WorkerRequest::SetMemoryLimit {
+                period,
+                limit,
+                done_tx,
+            } => {
+                self.set_memory_limit_impl(period, limit);
+                let _ = done_tx.send(Ok(()));
             }
-            WorkerRequestKind::BarrierCredit { id, credits } => {
+            WorkerRequest::BarrierCredit {
+                id,
+                credits,
+                done_tx,
+            } => {
                 debug!("received barrier credits: {:x} for id {:x}", credits, id);
                 self.barriers.add(id, credits).await;
-                Ok(None)
+                let _ = done_tx.send(Ok(()));
             }
+        }
+    }
+
+    async fn clear_domains_impl(&mut self) -> ReadySetResult<()> {
+        info!("controller requested that this worker clear its existing domains");
+        self.coord.clear();
+        self.domains.clear();
+        while let Some((result, domain)) = self.domain_wait_queue.next().await {
+            log_domain_result(domain, &result)
+        }
+        Ok(())
+    }
+
+    async fn run_domain_impl(&mut self, builder: DomainBuilder) -> ReadySetResult<()> {
+        let domain = builder.address();
+        let span = info_span!("domain", address = %domain);
+        span.in_scope(|| debug!("received domain to run"));
+
+        let bind_on = self.domain_bind;
+        let listener = tokio::net::TcpListener::bind(&SocketAddr::new(bind_on, 0))
+            .map_err(|e| internal_err!("failed to bind domain {} on {}: {}", domain, bind_on, e))
+            .await?;
+        let bind_actual = listener
+            .local_addr()
+            .map_err(|e| internal_err!("couldn't get TCP local address for domain: {}", e))?;
+        let mut bind_external = bind_actual;
+        bind_external.set_ip(self.domain_external);
+
+        // this channel is used for async persistent state initialization.
+        // since domains can have at most one base table, there's no need to have a
+        // buffer with a size bigger than one.
+        let (init_state_tx, init_state_rx) = tokio::sync::mpsc::channel(1);
+
+        let state_size = Arc::new(AtomicUsize::new(0));
+        let (dataflow_domain, replay_rx) = builder.build(
+            self.readers.clone(),
+            self.coord.clone(),
+            state_size.clone(),
+            init_state_tx,
+            self.unquery,
+            self.table_status_tx.clone(),
+        );
+
+        // this channel is used for in-process domain traffic, to avoid going through the
+        // network stack unnecessarily
+        let (local_tx, local_rx) = Domain::channel();
+        // this channel is used for domain requests; it has a buffer size of 1 to prevent
+        // flooding a domain with requests
+        let (req_tx, req_rx) = tokio::sync::mpsc::channel(1);
+
+        // need to register the domain with the local channel coordinator.
+        // local first to ensure that we don't unnecessarily give away remote for a
+        // local thing if there's a race
+        self.coord.insert_local(domain, local_tx);
+        self.coord.insert_remote(domain, bind_external);
+
+        self.state_sizes.lock().await.insert(domain, state_size);
+
+        let replica = Replica::new(
+            dataflow_domain,
+            listener,
+            local_rx,
+            req_rx,
+            init_state_rx,
+            replay_rx,
+            self.coord.clone(),
+        );
+        // Each domain is single threaded in nature, so we spawn each one in a separate
+        // thread, so we can avoid running blocking operations on the multi
+        // threaded tokio runtime
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+
+        let jh = runtime.spawn(replica.run());
+
+        let (abort, abort_rx) = oneshot::channel::<()>();
+        // Spawn the actual thread to run the domain
+        std::thread::Builder::new()
+            .name(format!("Domain {domain}"))
+            .stack_size(2 * 1024 * 1024) // Use the same value tokio is using
+            .spawn_wrapper(move || {
+                // The runtime will run until the abort signal is sent.
+                // This will happen either if the DomainHandle is dropped (and error is
+                // received) or an actual signal is sent on the
+                // channel
+                let _ = runtime.block_on(abort_rx);
+                runtime.shutdown_background();
+            })?;
+
+        self.domains.insert(domain, DomainHandle { req_tx, abort });
+
+        self.domain_wait_queue.push(FinishedDomain(jh, domain));
+
+        span.in_scope(|| debug!(%bind_actual, %bind_external, "domain booted"));
+        Ok(())
+    }
+
+    async fn kill_domains_impl(&mut self, domains: Vec1<DomainIndex>) -> ReadySetResult<()> {
+        for addr in domains {
+            let nsde = || ReadySetError::DomainNotFound {
+                domain_index: addr.index(),
+            };
+            match self.domains.remove(&addr) {
+                Some(domain) => {
+                    info!(domain = %addr, "Shutting down domain");
+
+                    // tell the domain to cleanly shut down. note: this serially shuts down
+                    // the domains; it could be done in parallel.
+                    let (tx, rx) = oneshot::channel();
+                    domain
+                        .req_tx
+                        .send(WrappedDomainRequest {
+                            req: DomainRequest::Shutdown,
+                            done_tx: tx,
+                        })
+                        .await
+                        .map_err(|_| nsde())?;
+                    let _ = rx.await.map_err(|_| nsde())?;
+
+                    // now, shut down the actual thread for the domain
+                    let _ = domain.abort.send(());
+                }
+                None => warn!(domain = %addr, "Asked to kill domain that is not running"),
+            }
+        }
+        Ok(())
+    }
+
+    async fn domain_request_impl(
+        &mut self,
+        domain_index: DomainIndex,
+        request: Box<DomainRequest>,
+    ) -> ReadySetResult<Vec<u8>> {
+        let nsde = || ReadySetError::DomainNotFound {
+            domain_index: domain_index.index(),
+        };
+        let dh = self.domains.get_mut(&domain_index).ok_or_else(nsde)?;
+        let (tx, rx) = oneshot::channel();
+        dh.req_tx
+            .send(WrappedDomainRequest {
+                req: *request,
+                done_tx: tx,
+            })
+            .await
+            .map_err(|_| nsde())?;
+        let payload = rx.await.map_err(|_| nsde())??;
+        // Domain returns `None` for unit-returning variants; the HTTP wire contract
+        // serialises `()` for those, so we do the same here to keep the bytes
+        // shape callers expect.
+        Ok(payload.unwrap_or_else(|| bincode::serialize(&()).expect("serialize ()")))
+    }
+
+    fn set_memory_limit_impl(&mut self, period: Option<Duration>, limit: Option<usize>) {
+        if let Some(period) = period {
+            self.evict_interval = tokio::time::interval(period);
+        }
+        if let Some(limit) = limit {
+            self.memory_limit = limit;
         }
     }
 
@@ -479,10 +504,7 @@ impl Worker {
                     debug!("worker shutting down after shutdown signal received");
                     let keys: Vec<_> = self.domains.keys().cloned().collect();
                     if let Ok(keys) = Vec1::try_from_vec(keys) {
-                        let ret = self.handle_worker_request(
-                            WorkerRequestKind::KillDomains(keys)
-                        ).await;
-                        if let Err(ref e) = ret {
+                        if let Err(e) = self.kill_domains_impl(keys).await {
                             warn!(error = %e, "error on shutting down domains");
                         }
                     }

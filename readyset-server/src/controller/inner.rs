@@ -55,7 +55,7 @@ use tracing::{debug, error, info, info_span, warn};
 use crate::controller::events::EventsHandle;
 use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
-use crate::worker::WorkerRequestKind;
+use crate::worker::WorkerRequest;
 
 use super::table_status::TableStatusState;
 
@@ -82,8 +82,9 @@ type RunningMigration = Fuse<JoinHandle<ReadySetResult<()>>>;
 pub struct Leader {
     pub(super) dataflow_state_handle: Arc<DfStateHandle>,
     controller_uri: Url,
-    /// The amount of time to wait for a worker request to complete.
-    worker_request_timeout: Duration,
+    /// Sender end of the worker's request channel; cloned into the
+    /// `controller::Worker` we construct from a `WorkerDescriptor`.
+    worker_tx: tokio::sync::mpsc::Sender<WorkerRequest>,
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     background_recovery_interval: Duration,
     /// Are we currently trying to run recovery in the background?
@@ -440,9 +441,7 @@ impl Leader {
                 let res: Result<(), ReadySetError> = {
                     let ds = self.dataflow_state_handle.read().await;
                     for (_, worker) in ds.workers.iter() {
-                        worker
-                            .rpc::<()>(WorkerRequestKind::SetMemoryLimit { period, limit })
-                            .await?;
+                        worker.set_memory_limit(period, limit).await?;
                     }
                     Ok(())
                 };
@@ -877,14 +876,18 @@ impl Leader {
 
             info!(%worker_uri, %reader_addr, "received registration payload from worker");
 
+            if ds.workers.contains_key(&worker_uri) {
+                return Err(internal_err!("worker {worker_uri} already registered"));
+            }
+
             let ws = Worker::new(
                 worker_uri.clone(),
                 domain_scheduling_config,
-                self.worker_request_timeout,
+                self.worker_tx.clone(),
             );
 
             // Clean up any potential stale domains that may have been running on that worker
-            if let Err(e) = ws.rpc::<()>(WorkerRequestKind::ClearDomains).await {
+            if let Err(e) = ws.clear_domains().await {
                 error!(
                     %worker_uri,
                     %e,
@@ -1147,7 +1150,7 @@ impl Leader {
         background_task_failed: mpsc::Sender<ReadySetError>,
         replicator_statement_logging: bool,
         replicator_config: UpstreamConfig,
-        worker_request_timeout: Duration,
+        worker_tx: mpsc::Sender<crate::worker::WorkerRequest>,
         background_recovery_interval: Duration,
         parsing_preset: ParsingPreset,
         replicator_tx: UnboundedSender<ReplicatorMessage>,
@@ -1167,7 +1170,7 @@ impl Leader {
             replicator_statement_logging,
             replicator_config,
             authority,
-            worker_request_timeout,
+            worker_tx,
             background_recovery_interval,
             background_recovery_running: Arc::new(AtomicBool::new(false)),
             parsing_preset,

@@ -75,9 +75,7 @@ use crate::controller::migrate::scheduling::schedule_domain;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::{RecipeExpr, Schema};
 use crate::controller::{schema, ControllerState, Worker, WorkerIdentifier};
-use crate::coordination::RunDomainResponse;
 use crate::internal::LocalNodeIndex;
-use crate::worker::WorkerRequestKind;
 mod graphviz;
 
 pub(in crate::controller) use self::graphviz::Graphviz;
@@ -1241,8 +1239,7 @@ impl DfState {
 
             debug!("sending domain {} to worker {}", domain, w.uri);
 
-            let ret = w
-                .rpc::<RunDomainResponse>(WorkerRequestKind::RunDomain(builder))
+            w.run_domain(builder)
                 .await
                 .map_err(|e| ReadySetError::DomainCreationFailed {
                     domain_index: idx.index(),
@@ -1252,10 +1249,11 @@ impl DfState {
                     source: Box::new(e),
                 })?;
 
-            debug!(external_addr = %ret.external_addr, "worker booted domain");
-
-            self.channel_coordinator
-                .insert_remote(domain, ret.external_addr);
+            // The worker registers `(domain, bind_external)` on the shared
+            // `ChannelCoordinator` as part of `RunDomain`, so we no longer need a
+            // `RunDomainResponse` round-trip to mirror that registration on the
+            // controller side.
+            debug!(%domain, "worker booted domain");
             assigned_worker = Some(w.uri.clone());
         }
 
@@ -1655,6 +1653,10 @@ impl DfState {
         let mut materializations = Materializations::new();
         materializations.set_config(self.materializations.config.clone());
 
+        // Preserve the shared `Arc<ChannelCoordinator>` across the reset so the in-process
+        // Worker's registered domain senders stay reachable; the previous owner of `self`
+        // is dropped after this line, so cloning before the reassignment is required.
+        let channel_coordinator = self.channel_coordinator.clone();
         *self = DfState::new(
             g,
             source,
@@ -1664,7 +1666,7 @@ impl DfState {
             materializations,
             recipe,
             None,
-            Arc::new(ChannelCoordinator::new()),
+            channel_coordinator,
         );
 
         true
@@ -1800,11 +1802,7 @@ impl DfState {
             let worker = self.workers.get(&worker_url).ok_or_else(|| {
                 internal_err!("Worker not found for url {worker_url} to kill domains")
             })?;
-            futs.push(
-                worker
-                    .rpc(WorkerRequestKind::KillDomains(domains.clone()))
-                    .map_ok(|()| domains),
-            );
+            futs.push(worker.kill_domains(domains.clone()).map_ok(|()| domains));
         }
         while let Some(r) = futs.next().await {
             for killed_addr in r? {
