@@ -16,16 +16,16 @@ use datafusion::functions::utils::make_scalar_function;
 use datafusion::logical_expr::{ScalarUDF, Volatility};
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext, create_udf};
 
+use readyset_client::ReadySetHandle;
 use readyset_errors::ReadySetResult;
 use readyset_sql::Dialect;
 
-use replication_lag_vrel::ReplicationLagInfo;
 use shallow_vrels::ShallowInfo;
 use virtual_relation::{VrelContext, init_vrels};
 
 pub mod mysql;
 pub mod psql;
-pub mod replication_lag_vrel;
+mod replication_lag_vrel;
 mod shallow_vrels;
 pub mod virtual_relation;
 
@@ -38,16 +38,15 @@ pub struct ReadysetSchema {
 }
 
 impl ReadysetSchema {
-    pub fn init<S, R, Q>(
+    pub fn init<S, Q>(
         name: &str,
         dialect: Dialect,
         shallow: &Arc<S>,
-        repl_lag: &Arc<R>,
+        controller: ReadySetHandle,
         query_status_cache: &'static Q,
     ) -> ReadySetResult<Arc<Self>>
     where
         S: ShallowInfo + 'static,
-        R: ReplicationLagInfo + 'static,
         Q: std::any::Any + Send + Sync,
     {
         let runtime = Arc::new(RuntimeEnv::default());
@@ -82,7 +81,7 @@ impl ReadysetSchema {
         let vrel_ctx = Arc::new(VrelContext {
             dialect,
             shallow: Arc::clone(shallow) as Arc<dyn ShallowInfo>,
-            repl_lag: Arc::clone(repl_lag) as Arc<dyn ReplicationLagInfo>,
+            controller,
             query_status_cache,
         });
         for (name, provider) in init_vrels(&vrel_ctx) {

@@ -30,7 +30,6 @@ use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
 use readyset_metrics::init_global_recorder;
 use readyset_query_logger::QueryLogger;
-use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
 use readyset_server::{Builder, DurabilityMode, Handle, LocalAuthority, ReadySetHandle};
 use readyset_shallow::CacheManager;
@@ -582,11 +581,9 @@ impl TestBuilder {
         auth_cache.populate(self.backend_builder.get_users());
 
         tokio::spawn(async move {
-            let repl_lag_handle = ReadySetHandle::new(authority.clone()).await;
-            let repl_lag: Arc<ControllerReplicationLag> =
-                Arc::new(ControllerReplicationLag::new(repl_lag_handle));
+            let controller = ReadySetHandle::new(authority.clone()).await;
             let readyset_schema =
-                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, &repl_lag, &())
+                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, controller, &())
                     .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {

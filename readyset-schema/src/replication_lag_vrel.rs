@@ -1,51 +1,7 @@
-use std::future::Future;
-use std::pin::Pin;
-
-use readyset_client::ReadySetHandle;
-use readyset_client::status::ReplicationLagStatus;
 use readyset_data::{DfType, DfValue};
 
 use crate::bind_vrel;
 use crate::virtual_relation::{VrelContext, VrelRead, VrelRows};
-
-/// Trait for accessing replication lag status in virtual relations.
-pub trait ReplicationLagInfo: Send + Sync {
-    fn lag_status(&self)
-    -> Pin<Box<dyn Future<Output = Option<ReplicationLagStatus>> + Send + '_>>;
-}
-
-/// Provides replication lag status via controller RPC.
-pub struct ControllerReplicationLag {
-    handle: ReadySetHandle,
-}
-
-impl ControllerReplicationLag {
-    pub fn new(handle: ReadySetHandle) -> Self {
-        Self { handle }
-    }
-}
-
-impl ReplicationLagInfo for ControllerReplicationLag {
-    fn lag_status(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Option<ReplicationLagStatus>> + Send + '_>> {
-        Box::pin(async {
-            let mut handle = self.handle.clone();
-            handle.replication_lag_status().await.ok().flatten()
-        })
-    }
-}
-
-/// A no-op implementation for when replication lag reporting is not available.
-pub struct NoReplicationLag;
-
-impl ReplicationLagInfo for NoReplicationLag {
-    fn lag_status(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Option<ReplicationLagStatus>> + Send + '_>> {
-        Box::pin(async { None })
-    }
-}
 
 const REPLICATION_STATUS_SCHEMA: &[(&str, DfType)] = &[
     ("replication_mode", DfType::DEFAULT_TEXT),
@@ -58,9 +14,9 @@ const REPLICATION_STATUS_SCHEMA: &[(&str, DfType)] = &[
 ];
 
 fn replication_status_read(ctx: &VrelContext) -> VrelRead {
-    let repl_lag = ctx.repl_lag.clone();
+    let mut controller = ctx.controller.clone();
     Box::pin(async move {
-        let status = repl_lag.lag_status().await;
+        let status = controller.replication_lag_status().await.ok().flatten();
         let rows: VrelRows = match status {
             Some(s) => Box::new(std::iter::once(vec![
                 s.mode.to_string().into(),

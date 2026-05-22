@@ -51,7 +51,6 @@ use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_metrics::init_global_recorder;
 use readyset_query_logger::QueryLogger;
-use readyset_schema::replication_lag_vrel::ControllerReplicationLag;
 use readyset_schema::ReadysetSchema;
 use readyset_server::worker::readers::{retry_misses, BlockingRead, ReadRequestHandler, Reply};
 use readyset_server::WorkerOptions;
@@ -1556,13 +1555,12 @@ where
             options.shallow_refresh_workers,
         );
 
-        let repl_lag: Arc<ControllerReplicationLag> =
-            Arc::new(ControllerReplicationLag::new(rh.clone()));
+        let controller = rh.clone();
         let readyset_schema = ReadysetSchema::init(
             &options.readyset_schema,
             self.parse_dialect,
             &shallow,
-            &repl_lag,
+            controller,
             query_status_cache,
         )?;
 

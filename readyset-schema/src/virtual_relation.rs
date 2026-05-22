@@ -23,11 +23,11 @@ use datafusion::physical_plan::{
 use futures::future::Future;
 use linkme::distributed_slice;
 
+use readyset_client::ReadySetHandle;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::Dialect;
 
-use crate::replication_lag_vrel::ReplicationLagInfo;
 use crate::shallow_vrels::ShallowInfo;
 
 /// The rows yielded by a vrel read.
@@ -43,7 +43,7 @@ pub type VrelRead = Pin<Box<dyn Future<Output = ReadySetResult<VrelRows>> + Send
 pub struct VrelContext {
     pub dialect: Dialect,
     pub shallow: Arc<dyn ShallowInfo>,
-    pub repl_lag: Arc<dyn ReplicationLagInfo>,
+    pub controller: ReadySetHandle,
     pub query_status_cache: &'static (dyn std::any::Any + Send + Sync),
 }
 
@@ -564,12 +564,19 @@ impl ExecutionPlan for VrelExecutionPlan {
 mod tests {
     use datafusion::arrow::array::{Array, Int32Array, Int64Array, StringArray};
 
+    use readyset_client::ReadySetHandle;
+    use readyset_client::consensus::{Authority, LocalAuthority};
     use readyset_client::query::QueryId;
     use readyset_shallow::{CacheEntryInfo, CacheInfo};
     use readyset_sql::Dialect;
     use readyset_sql::ast::Relation;
 
     use super::*;
+
+    fn stub_controller() -> ReadySetHandle {
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        ReadySetHandle::make(authority, None, None)
+    }
 
     #[test]
     fn test_dftype_to_arrow() {
@@ -688,9 +695,14 @@ mod tests {
         }
 
         let shallow = Arc::new(NoopShallow);
-        let no_lag = Arc::new(crate::replication_lag_vrel::NoReplicationLag);
-        let schema = crate::ReadysetSchema::init("test_db", Dialect::MySQL, &shallow, &no_lag, &())
-            .expect("init succeeds");
+        let schema = crate::ReadysetSchema::init(
+            "test_db",
+            Dialect::MySQL,
+            &shallow,
+            stub_controller(),
+            &(),
+        )
+        .expect("init succeeds");
 
         let session = schema.session();
 
