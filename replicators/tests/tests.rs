@@ -764,31 +764,18 @@ async fn pgsql_replication_big_tables() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres)]
-async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_table_timeout() {
-    pgsql_snapshot_compaction_timeout_inner("table-timeout", 30, 5).await;
+async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated() {
+    pgsql_snapshot_compaction_timeout_inner("table-timeout", 5).await;
 }
 
 #[cfg(feature = "failure_injection")]
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial, slow)]
-#[upstream(postgres)]
-async fn pgsql_snapshot_compaction_timeout_marks_table_not_replicated_worker_timeout() {
-    pgsql_snapshot_compaction_timeout_inner("worker-timeout", 5, 30).await;
-}
-
-#[cfg(feature = "failure_injection")]
-async fn pgsql_snapshot_compaction_timeout_inner(
-    label: &str,
-    worker_timeout_secs: u64,
-    table_timeout_secs: u64,
-) {
+async fn pgsql_snapshot_compaction_timeout_inner(label: &str, table_timeout_secs: u64) {
     readyset_tracing::init_test_logging();
     let _fail_scenario = FailScenario::setup();
     let url = pgsql_url();
 
     info!(
         %label,
-        worker_timeout_secs,
         table_timeout_secs,
         "Starting compaction timeout scenario"
     );
@@ -812,7 +799,6 @@ async fn pgsql_snapshot_compaction_timeout_inner(
 
     let mut builder = Builder::for_tests();
     builder.set_dialect(sql_dialect_from_url(&url));
-    builder.set_worker_timeout(Duration::from_secs(worker_timeout_secs));
     builder.set_table_request_timeout(Duration::from_secs(table_timeout_secs));
 
     let (mut ctx, shutdown_tx) =

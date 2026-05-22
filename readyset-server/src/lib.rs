@@ -478,8 +478,10 @@ pub struct Config {
     pub(crate) replication_strategy: crate::controller::replication::ReplicationStrategy,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
-    /// The duration to wait before canceling a task waiting on a worker request. Worker requests
-    /// are typically issued as part of migrations.
+    /// Deserialized only for compatibility with older persisted `ControllerState`; never
+    /// consulted at runtime.
+    #[serde(default)]
+    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
     pub(crate) worker_request_timeout: Duration,
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     #[serde(default = "default_background_recovery_interval")]
@@ -518,6 +520,7 @@ impl Default for Config {
             #[allow(deprecated)]
             replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
+            #[allow(deprecated)]
             worker_request_timeout: Duration::from_millis(1800000),
             background_recovery_interval: default_background_recovery_interval(),
         }
@@ -611,15 +614,6 @@ pub struct WorkerOptions {
 
     #[command(flatten)]
     pub replicator_config: UpstreamConfig,
-
-    /// Timeout in seconds for all requests made from the controller to workers
-    #[arg(
-        long,
-        env = "WORKER_REQUEST_TIMEOUT_SECONDS",
-        default_value = "1800",
-        hide = true
-    )]
-    pub worker_request_timeout_seconds: u64,
 
     /// Timeout in seconds for table requests issued to domains
     #[arg(

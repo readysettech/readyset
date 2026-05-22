@@ -683,6 +683,7 @@ impl Controller {
                     .dataflow_state
                     .recipe
                     .schema_catalog(state.dataflow_state.schema_generation());
+                #[allow(deprecated)]
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),

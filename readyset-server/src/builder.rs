@@ -94,7 +94,6 @@ impl Builder {
         builder.set_straddled_joins(opts.feature_straddled_joins);
         builder.set_post_lookup(opts.feature_post_lookup);
         builder.set_parsing_preset(opts.parsing_preset);
-        builder.set_worker_timeout(Duration::from_secs(opts.worker_request_timeout_seconds));
         builder.set_table_request_timeout(Duration::from_secs(opts.table_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,
@@ -212,11 +211,6 @@ impl Builder {
 
     pub fn set_post_lookup(&mut self, allow_post_lookup: bool) {
         self.config.mir_config.allow_post_lookup = allow_post_lookup;
-    }
-
-    /// Set the value of [`controller::sql::Config::worker_request_timeout`]
-    pub fn set_worker_timeout(&mut self, worker_request_timeout: Duration) {
-        self.config.worker_request_timeout = worker_request_timeout;
     }
 
     /// Set the value of [`Config::background_recovery_interval`]
