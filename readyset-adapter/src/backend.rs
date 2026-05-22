@@ -1114,6 +1114,21 @@ where
 
         upstream.can_prepare(&query).await
     }
+
+    /// Initialize the search_path by reading it from the upstream.
+    pub async fn init_schema_search_path(&mut self) {
+        let Some(upstream) = self.upstream.as_mut() else {
+            return;
+        };
+        let search_path = match upstream.schema_search_path().await {
+            Ok(search_path) => search_path,
+            Err(error) => {
+                warn!(%error, "Failed to read schema_search_path from upstream");
+                return;
+            }
+        };
+        self.noria.set_schema_search_path(search_path);
+    }
 }
 
 /// Variables that keep track of the [`Backend`] state

@@ -632,7 +632,10 @@ impl TestBuilder {
 
                     let fallback_upstream = match self.fallback {
                         FallbackBehavior::NoFallback => None,
-                        FallbackBehavior::UseReplicationUpstream => cdc_upstream,
+                        FallbackBehavior::UseReplicationUpstream => match &upstream_url {
+                            Some(url) => Some(A::make_upstream(url.clone()).await),
+                            None => cdc_upstream,
+                        },
                     };
 
                     if init_system_props(&sys_props).is_err() {

@@ -141,6 +141,7 @@ impl ps::PsqlBackend for Backend {
     async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>) {
         if let Some(password) = password {
             let _ = self.inner.set_user(user, password).await;
+            self.inner.connectors.init_schema_search_path().await;
         }
     }
 
