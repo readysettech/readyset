@@ -3656,9 +3656,11 @@ where
                 let rewrite_context =
                     Self::rewrite_context(connectors, settings, state, None).await?;
                 let schema_generation = rewrite_context.schema_generation();
-                let deep = match deep {
-                    Ok(mut deep) => {
-                        match adapter_rewrites::rewrite_query(
+                let deep = if settings.cache_mode.is_shallow() {
+                    Err(ReadySetError::Unsupported("shallow-only mode".into()))
+                } else {
+                    match deep {
+                        Ok(mut deep) => match adapter_rewrites::rewrite_query(
                             &mut deep,
                             connectors.noria.rewrite_params(),
                             &rewrite_context,
@@ -3668,9 +3670,9 @@ where
                                 rewrite_context.search_path().to_owned(),
                             )),
                             Err(e) => Err(e),
-                        }
+                        },
+                        Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                     }
-                    Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                 };
 
                 // Rewrite for shallow.
