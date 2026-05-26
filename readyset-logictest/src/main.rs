@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,7 +25,7 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use serde_json::json;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use walkdir::WalkDir;
 
 pub mod ast;
@@ -85,10 +85,6 @@ impl Command {
 #[derive(Parser)]
 struct InputFileOptions {
     /// Files or directories containing test scripts to run. If `-`, will read from standard input
-    ///
-    /// Any files whose name ends in `.fail.test` will be run, but will be expected to *fail* for
-    /// some reason - if any of them pass, the overall run will fail (and noria-logictest will exit
-    /// with a non-zero status code)
     paths: Vec<PathBuf>,
 
     /// Load input files from subdirectories of the given paths recursively
@@ -99,11 +95,7 @@ struct InputFileOptions {
 /// The set of input files we are going to run over
 #[derive(Default)]
 struct InputFiles {
-    /// The files we expect to pass
-    expected_passes: Vec<(PathBuf, Box<dyn io::Read>)>,
-
-    /// The files we expect to fail
-    expected_failures: Vec<(PathBuf, Box<dyn io::Read>)>,
+    files: Vec<(PathBuf, Box<dyn io::Read>)>,
 }
 
 impl TryFrom<&'_ InputFileOptions> for InputFiles {
@@ -112,11 +104,10 @@ impl TryFrom<&'_ InputFileOptions> for InputFiles {
     fn try_from(opts: &InputFileOptions) -> Result<Self, Self::Error> {
         if opts.paths == vec![Path::new("-")] {
             Ok(InputFiles {
-                expected_passes: vec![("stdin".to_string().into(), Box::new(io::stdin()))],
-                ..Default::default()
+                files: vec![("stdin".to_string().into(), Box::new(io::stdin()))],
             })
         } else {
-            let (expected_failures, expected_passes) = opts
+            let files = opts
                 .paths
                 .iter()
                 .map(
@@ -149,27 +140,9 @@ impl TryFrom<&'_ InputFileOptions> for InputFiles {
                 .collect::<anyhow::Result<Vec<_>>>()?
                 .into_iter()
                 .flatten()
-                .partition(|(name, _)| name.to_string_lossy().as_ref().ends_with(".fail.test"));
+                .collect();
 
-            Ok(InputFiles {
-                expected_passes,
-                expected_failures,
-            })
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum ExpectedResult {
-    Pass,
-    Fail,
-}
-
-impl Display for ExpectedResult {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ExpectedResult::Pass => write!(f, "pass"),
-            ExpectedResult::Fail => write!(f, "fail"),
+            Ok(InputFiles { files })
         }
     }
 }
@@ -177,7 +150,6 @@ impl Display for ExpectedResult {
 struct InputFile {
     name: PathBuf,
     data: Box<dyn io::Read>,
-    expected_result: ExpectedResult,
 }
 
 impl IntoIterator for InputFiles {
@@ -187,22 +159,9 @@ impl IntoIterator for InputFiles {
 
     fn into_iter(self) -> Self::IntoIter {
         Box::new(
-            self.expected_passes
+            self.files
                 .into_iter()
-                .map(|(name, data)| InputFile {
-                    name,
-                    data,
-                    expected_result: ExpectedResult::Pass,
-                })
-                .chain(
-                    self.expected_failures
-                        .into_iter()
-                        .map(|(name, data)| InputFile {
-                            name,
-                            data,
-                            expected_result: ExpectedResult::Fail,
-                        }),
-                ),
+                .map(|(name, data)| InputFile { name, data }),
         )
     }
 }
@@ -303,15 +262,6 @@ struct Verify {
     #[arg(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
     tasks: usize,
 
-    /// When tests are encountered that are expected to fail but do not, rename the test file from
-    /// .fail.test to .test
-    #[arg(long)]
-    rename_passing: bool,
-
-    /// When tests that are expected to pass fail, rename the test file from .test to .fail.test
-    #[arg(long)]
-    rename_failing: bool,
-
     /// Collect timing of all named queries
     #[arg(long)]
     time: bool,
@@ -358,13 +308,12 @@ struct Verify {
 #[derive(Default)]
 struct VerifyResult {
     pub failures: Vec<String>,
-    pub unexpected_passes: Vec<String>,
     pub passes: usize,
 }
 
 impl VerifyResult {
     pub fn is_success(&self) -> bool {
-        self.failures.is_empty() && self.unexpected_passes.is_empty()
+        self.failures.is_empty()
     }
 }
 
@@ -383,34 +332,6 @@ impl Display for VerifyResult {
             writeln!(f, "{} failed:\n", n_scripts(self.failures.len()))?;
             for script in &self.failures {
                 writeln!(f, "    {script}")?;
-            }
-        }
-
-        if !self.unexpected_passes.is_empty() {
-            writeln!(
-                f,
-                "{} {} expected to fail, but did not:\n",
-                n_scripts(self.unexpected_passes.len()),
-                if self.unexpected_passes.len() == 1 {
-                    "was"
-                } else {
-                    "were"
-                }
-            )?;
-            for script in &self.unexpected_passes {
-                writeln!(f, "    {script}")?;
-            }
-            writeln!(
-                f,
-                "TIP: To rectify this, copy and paste the following commands in the relevant directory:"
-            )?;
-            for script in &self.unexpected_passes {
-                writeln!(
-                    f,
-                    "    mv {} {}",
-                    script,
-                    script.replace(".fail.test", ".test")
-                )?;
             }
         }
 
@@ -459,12 +380,7 @@ impl Verify {
         let free_slots: Arc<Mutex<VecDeque<usize>>> =
             Arc::new(Mutex::new((0..max_tasks).collect()));
 
-        for InputFile {
-            name,
-            data,
-            expected_result,
-        } in InputFiles::try_from(&self.input_opts)?
-        {
+        for InputFile { name, data } in InputFiles::try_from(&self.input_opts)? {
             if tasks.len() >= max_tasks {
                 // Wait for one of the in-flight tasks to finish (and return its slot) before
                 // claiming a new index for the next script.
@@ -482,8 +398,6 @@ impl Verify {
             let mut run_opts: RunOptions = self.into();
             run_opts.task_idx = task_idx;
             let result = Arc::clone(&result);
-            let rename_passing = self.rename_passing;
-            let rename_failing = self.rename_failing;
             let free_slots = Arc::clone(&free_slots);
 
             tasks.push(tokio::spawn(async move {
@@ -491,72 +405,35 @@ impl Verify {
 
                 let script_name = script.name().to_string();
 
-                let script_result = script.run(run_opts).await
+                let script_result = script
+                    .run(run_opts)
+                    .await
                     .with_context(|| format!("Running test script {}", script_name));
 
                 info!(
                     script_name = %script.name(),
                     operations = script.len(),
                     duration = test_started.elapsed().as_secs_f64(),
-                    expected_result = %expected_result,
                     succeeded = %script_result.is_ok(),
                     "script finished",
                 );
 
                 match script_result {
-                    Ok(_) if expected_result == ExpectedResult::Fail => {
-                        result
-                            .lock()
-                            .await
-                            .unexpected_passes
-                            .push(script.name().into_owned());
-
-                        let failing_fname = script.path().to_str().unwrap();
-                        let passing_fname = failing_fname.replace(".fail.test", ".test");
-                        if rename_passing {
-                            warn!(script_name = %script.name(), "Renaming {} to {}", failing_fname, passing_fname);
-                            fs::rename(Path::new(failing_fname), Path::new(&passing_fname))
-                                .unwrap();
-                        } else {
-                            error!(
-                                script_name = %script.name(),
-                                "Script {} didn't fail, but was expected to (maybe rename it to {}?)",
-                                failing_fname, passing_fname,
-                            );
-                        }
+                    Ok(_) => {
+                        result.lock().await.passes += 1;
                     }
-                    Err(err) if expected_result == ExpectedResult::Pass => {
+                    Err(err) => {
+                        error!(
+                            script_name = %script.name(),
+                            ?err,
+                            "Script {} failed",
+                            script.name(),
+                        );
                         result
                             .lock()
                             .await
                             .failures
                             .push(script.name().into_owned());
-                        let passing_fname = script.path().to_str().unwrap();
-                        let failing_fname = passing_fname.replace(".test", ".fail.test");
-                        if rename_failing {
-                            warn!(script_name = %script.name(), "Renaming {} to {}", passing_fname, failing_fname);
-                            fs::rename(Path::new(passing_fname), Path::new(&failing_fname))
-                                .unwrap();
-                        } else {
-                            error!(
-                                script_name = %script.name(),
-                                ?err,
-                                "Script {} failed, but was expected to pass (maybe rename it to {}?)",
-                                passing_fname, failing_fname,
-                            );
-                        }
-                    }
-                    Err(err) => {
-                        info!(
-                            script_name = %script.name(),
-                            %err,
-                            "Test script {} failed as expected",
-                            script.name(),
-                        );
-                        result.lock().await.passes += 1;
-                    }
-                    _ => {
-                        result.lock().await.passes += 1;
                     }
                 }
 
