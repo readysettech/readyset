@@ -1,0 +1,42 @@
+# Regression: view select list where one output column's alias collides by
+# name with another output column's source column.
+#
+# Minimal trigger (verified by reduction): BOTH must be present in the same
+# view select list —
+#   1. a column whose real name is `c2`, projected (here `a.c2 AS c1`)
+#   2. a *different* column aliased `AS c2` (here `a.y AS c2`)
+#
+# The output column `a.y AS c2` is represented in MIR as {table:a, name:c2,
+# aliases:[a.y]}; its (table,name) surface collides with the genuine base
+# column a.c2 (projected under alias c1). Demand-driven column pruning used
+# Column's alias-aware equality to dedup, conflating the two outputs and
+# pruning a.y from the join. With a.y gone, c2 resolved to a.c2 and `SELECT *`
+# returned the a.c2 value (20) for the c2 column instead of a.y (30).
+#
+# Originally surfaced by ddl_vertical_mysql proptest (nightly build 3937,
+# seed cc d54122ab...).
+
+statement ok
+create table a (id int primary key, x int, c2 int, y int)
+
+statement ok
+create table b (id int primary key, z int)
+
+statement ok
+insert into a (id, x, c2, y) values (0, 10, 20, 30)
+
+statement ok
+insert into b (id, z) values (0, 40)
+
+statement ok
+create view v as
+  select a.x as c0, a.c2 as c1, a.y as c2, b.z as c3
+  from a join b on a.id = b.id
+
+query IIII rowsort
+select * from v
+----
+10
+20
+30
+40

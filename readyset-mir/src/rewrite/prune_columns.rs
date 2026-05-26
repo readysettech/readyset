@@ -22,7 +22,15 @@ fn compute_demand(query: &MirQuery<'_>, ni: NodeIndex) -> ReadySetResult<Vec<Col
     let mut demanded: Vec<Column> = vec![];
     for &child in &query.descendants(ni)? {
         for col in query.graph.referenced_columns(child) {
-            if !demanded.contains(&col) {
+            // Dedup by exact (table, name) identity, not Column's alias-aware
+            // equality: distinct source columns whose names collide via an
+            // alias (e.g. `a.c2 AS c1` vs `a.y AS c2`) are separate demands.
+            // Over-pruning a still-needed column is a correctness bug;
+            // demanding a superset is at worst a missed optimization.
+            if !demanded
+                .iter()
+                .any(|d| d.name == col.name && d.table == col.table)
+            {
                 demanded.push(col);
             }
         }
@@ -290,6 +298,70 @@ mod tests {
         assert_eq!(emit.len(), 2);
         assert!(matches!(&emit[0], ProjectExpr::Column(c) if *c == Column::named("b")));
         assert!(matches!(&emit[1], ProjectExpr::Column(c) if *c == Column::named("a")));
+    }
+
+    #[test]
+    fn keep_alias_source_under_name_collision() {
+        // View: SELECT a.x AS c0, a.c2 AS c1, a.y AS c2, b.z AS c3
+        //       FROM a JOIN b ON a.id = b.id
+        //
+        // The output column `a.y AS c2` is represented as {table:a, name:c2,
+        // aliases:[a.y]}; its (table,name) surface collides with the genuine
+        // base column a.c2 (projected under alias c1). Demand computation must
+        // not conflate the two: a.y must survive pruning so that c2 resolves to
+        // a.y, not a.c2.
+        let mut g = MirGraph::new();
+        let a = base_node(
+            &mut g,
+            "a",
+            vec![
+                cspec("a", "id"),
+                cspec("a", "x"),
+                cspec("a", "c2"),
+                cspec("a", "y"),
+            ],
+        );
+        let b = base_node(&mut g, "b", vec![cspec("b", "id"), cspec("b", "z")]);
+        let join = g.add_node(MirNode::new(
+            "join".into(),
+            MirNodeInner::Join {
+                on: vec![(Column::new(Some("a"), "id"), Column::new(Some("b"), "id"))],
+                project: vec![
+                    Column::new(Some("a"), "id"),
+                    Column::new(Some("a"), "x"),
+                    Column::new(Some("a"), "c2"),
+                    Column::new(Some("a"), "y"),
+                    Column::new(Some("b"), "id"),
+                    Column::new(Some("b"), "z"),
+                ],
+            },
+        ));
+        g.add_edge(a, join, 0);
+        g.add_edge(b, join, 1);
+        let prj = g.add_node(MirNode::new(
+            "prj".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("a"), "x").aliased_as("c0".into())),
+                    ProjectExpr::Column(Column::new(Some("a"), "c2").aliased_as("c1".into())),
+                    ProjectExpr::Column(Column::new(Some("a"), "y").aliased_as("c2".into())),
+                    ProjectExpr::Column(Column::new(Some("b"), "z").aliased_as("c3".into())),
+                ],
+            },
+        ));
+        g.add_edge(join, prj, 0);
+        let leaf = leaf_node(&mut g, "c0");
+        g.add_edge(prj, leaf, 0);
+
+        run_prune(&mut g, &[a, b, join, prj, leaf], leaf);
+
+        let MirNodeInner::Join { project, .. } = &g[join].inner else {
+            panic!("expected Join");
+        };
+        assert!(
+            project.iter().any(|c| *c == Column::new(Some("a"), "y")),
+            "a.y must survive pruning (it is the source of output column c2); got {project:?}"
+        );
     }
 
     #[test]

@@ -188,11 +188,20 @@ impl MirGraph {
             }
             MirNodeInner::Distinct { group_by } => group_by.clone(),
             MirNodeInner::Project { emit } => {
-                let mut columns = vec![];
+                let mut columns: Vec<MirColumn> = vec![];
                 for expr in emit {
                     match expr {
                         ProjectExpr::Column(c) => {
-                            if !columns.contains(c) {
+                            // Dedup by exact (table, name) identity rather than
+                            // Column's alias-aware equality: two emit columns
+                            // that resolve to different parent columns (e.g.
+                            // `a.c2 AS c1` and `a.y AS c2`) must both be
+                            // demanded, even though `c1`'s alias collides by
+                            // name with `c2`'s surface.
+                            if !columns
+                                .iter()
+                                .any(|x| x.name == c.name && x.table == c.table)
+                            {
                                 columns.push(c.clone());
                             }
                         }
