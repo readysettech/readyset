@@ -201,9 +201,6 @@ pub mod recorded {
     /// controller or worker.
     pub const SERVER_EXTERNAL_REQUESTS: &str = "readyset_server.external_requests";
 
-    /// Counter: The number of worker HTTP requests received by the readyset-server.
-    pub const SERVER_WORKER_REQUESTS: &str = "readyset_server.worker_requests";
-
     /// Counter: The number of controller HTTP requests received by the readyset-server.
     pub const SERVER_CONTROLLER_REQUESTS: &str = "readyset_server.controller_requests";
 

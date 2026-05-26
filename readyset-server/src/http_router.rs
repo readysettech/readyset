@@ -19,7 +19,6 @@ use readyset_alloc::{
 };
 use readyset_client::events::ControllerEvent;
 use readyset_client::metrics::recorded;
-use readyset_errors::ReadySetError;
 use readyset_metrics::metrics_body;
 use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::SchemaCatalogUpdate;
@@ -32,21 +31,17 @@ use tracing::{info, warn};
 
 use crate::controller::events::EventsHandle;
 use crate::controller::ControllerRequest;
-use crate::worker::{WorkerRequest, WorkerRequestKind};
 
-/// Routes requests from an HTTP server to noria server workers and controllers.
+/// Routes requests from an HTTP server to the noria server controller.
 ///
-/// `worker_tx` and `controller_tx` are mpsc senders this router uses to forward HTTP requests
-/// to the worker and controller threads respectively. Requests on `/worker_request` go to the
-/// worker; anything that doesn't match a well-known route falls through to the controller.
+/// `controller_tx` is an mpsc sender this router uses to forward HTTP requests to the
+/// controller thread; anything that doesn't match a well-known route falls through to it.
 #[derive(Clone)]
 pub struct NoriaServerHttpRouter {
     /// The address to attempt to listen on.
     pub listen_addr: IpAddr,
     /// The port to attempt to listen on.
     pub port: u16,
-    /// Channel to the running `Worker`.
-    pub worker_tx: Sender<WorkerRequest>,
     /// Channel to the running `Controller`.
     pub controller_tx: Sender<ControllerRequest>,
     /// Handle for broadcasting events on the SSE stream. The handle is always present, but will
@@ -97,7 +92,6 @@ fn build_app(router: NoriaServerHttpRouter) -> Router {
         .route("/graph.html", get(graph_html))
         .route("/metrics", get(metrics))
         .route("/health", get(health))
-        .route("/worker_request", post(worker_request))
         .route("/memory_stats", get(memory_stats))
         .route("/memory_stats_verbose", get(memory_stats_verbose))
         .route(
@@ -168,126 +162,6 @@ async fn health(State(state): State<NoriaServerHttpRouter>) -> Response {
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     text(status, body)
-}
-
-async fn worker_request(State(state): State<NoriaServerHttpRouter>, body: Bytes) -> Response {
-    metrics::counter!(recorded::SERVER_WORKER_REQUESTS).increment(1);
-
-    let wrq: WorkerRequestKind = match bincode::deserialize(&body) {
-        Ok(x) => x,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(CONTENT_TYPE, "text/plain; charset=utf-8")],
-                Bytes::from(bincode::serialize(&ReadySetError::from(e)).unwrap()),
-            )
-                .into_response();
-        }
-    };
-
-    // Convert the wire-encoded `WorkerRequestKind` into a typed `WorkerRequest`, await the
-    // typed response, then bincode-wrap it as `ReadySetResult<Option<Vec<u8>>>` to preserve
-    // the HTTP route's response contract. Piece B/C of the Phase 3 cleanup deletes this
-    // bridge once nothing relies on `/worker_request` over the wire.
-    let result = dispatch_worker_request(&state.worker_tx, wrq).await;
-
-    match result {
-        Ok(Some(bytes)) => octet_stream(StatusCode::OK, bytes),
-        Ok(None) => octet_stream(StatusCode::OK, bincode::serialize(&()).unwrap()),
-        Err(DispatchError::ChannelClosed) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
-        Err(DispatchError::WorkerError(e)) => octet_stream(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            bincode::serialize(&e).unwrap(),
-        ),
-    }
-}
-
-enum DispatchError {
-    ChannelClosed,
-    WorkerError(ReadySetError),
-}
-
-async fn dispatch_worker_request(
-    worker_tx: &Sender<WorkerRequest>,
-    kind: WorkerRequestKind,
-) -> Result<Option<Vec<u8>>, DispatchError> {
-    // Per-variant typed oneshots flatten into `Option<Vec<u8>>`: `None` for unit-returning
-    // variants (the HTTP path historically returned `bincode::serialize(&())` for those),
-    // `Some(bytes)` for `DomainRequest`.
-    match kind {
-        WorkerRequestKind::RunDomain(builder) => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(
-                worker_tx,
-                WorkerRequest::RunDomain { builder, done_tx },
-                done_rx,
-            )
-            .await
-            .map(|()| None)
-        }
-        WorkerRequestKind::ClearDomains => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(worker_tx, WorkerRequest::ClearDomains { done_tx }, done_rx)
-                .await
-                .map(|()| None)
-        }
-        WorkerRequestKind::KillDomains(domains) => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(
-                worker_tx,
-                WorkerRequest::KillDomains { domains, done_tx },
-                done_rx,
-            )
-            .await
-            .map(|()| None)
-        }
-        WorkerRequestKind::DomainRequest {
-            domain_index,
-            request,
-        } => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(
-                worker_tx,
-                WorkerRequest::DomainRequest {
-                    domain_index,
-                    request,
-                    done_tx,
-                },
-                done_rx,
-            )
-            .await
-            .map(Some)
-        }
-        WorkerRequestKind::SetMemoryLimit { period, limit } => {
-            let (done_tx, done_rx) = oneshot::channel();
-            send_with_close_check(
-                worker_tx,
-                WorkerRequest::SetMemoryLimit {
-                    period,
-                    limit,
-                    done_tx,
-                },
-                done_rx,
-            )
-            .await
-            .map(|()| None)
-        }
-    }
-}
-
-async fn send_with_close_check<T>(
-    worker_tx: &Sender<WorkerRequest>,
-    req: WorkerRequest,
-    done_rx: oneshot::Receiver<readyset_errors::ReadySetResult<T>>,
-) -> Result<T, DispatchError> {
-    if worker_tx.send(req).await.is_err() {
-        return Err(DispatchError::ChannelClosed);
-    }
-    match done_rx.await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(e)) => Err(DispatchError::WorkerError(e)),
-        Err(_) => Err(DispatchError::ChannelClosed),
-    }
 }
 
 async fn memory_stats() -> Response {

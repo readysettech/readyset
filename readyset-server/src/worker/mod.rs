@@ -17,7 +17,6 @@ use metrics::{counter, gauge, histogram};
 use pin_project::pin_project;
 use rand::RngExt;
 use readyset_sql::ast::Relation;
-use serde::{Deserialize, Serialize};
 use tikv_jemalloc_ctl::stats::allocated_mib;
 use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
 use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
@@ -49,28 +48,8 @@ mod replica;
 /// Timeout for logging slow `worker_request` handling
 const SLOW_REQUEST_THRESHOLD: Duration = Duration::from_secs(1);
 
-/// Wire shape of a worker request used by the `/worker_request` HTTP route handler
-/// in `http_router`. The handler deserialises a `WorkerRequestKind` from the body
-/// then bridges into the typed [`WorkerRequest`] channel below. The in-process
-/// control path skips this and constructs a [`WorkerRequest`] directly.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum WorkerRequestKind {
-    RunDomain(DomainBuilder),
-    ClearDomains,
-    KillDomains(Vec1<DomainIndex>),
-    DomainRequest {
-        domain_index: DomainIndex,
-        request: Box<DomainRequest>, // box for perf (clippy::large-enum-variant)
-    },
-    SetMemoryLimit {
-        period: Option<Duration>,
-        limit: Option<usize>,
-    },
-}
-
 /// A typed request to a running ReadySet worker. Each variant carries the
-/// completion channel for that variant's response type, eliminating the bincode
-/// round-trip that the HTTP path required.
+/// completion channel for that variant's response type.
 pub enum WorkerRequest {
     RunDomain {
         builder: DomainBuilder,

@@ -30,9 +30,6 @@
 //! All control plane communications go via server instances' `NoriaServer`s, which are just HTTP
 //! servers. The endpoints exposed by this HTTP server are:
 //!
-//! - requests sent from the `Leader` to workers (including those workers' domains)
-//!   - the `WorkerRequestKind` enum, mapped to `POST /worker_request`
-//!   - ...which can contain a `DomainRequest`
 //! - requests sent from clients to the `Leader`
 //!   - see `Leader::external_request`
 //! - other misc. endpoints for things like metrics (see the `NoriaServer` implementation for more)
@@ -224,7 +221,6 @@ fn start_controller(
 async fn start_request_router(
     listen_addr: IpAddr,
     external_addr: SocketAddr,
-    worker_tx: Sender<WorkerRequest>,
     controller_tx: Sender<ControllerRequest>,
     events_handle: EventsHandle,
     abort_on_task_failure: bool,
@@ -235,7 +231,6 @@ async fn start_request_router(
     let http_server = NoriaServerHttpRouter {
         listen_addr,
         port: external_addr.port(),
-        worker_tx,
         controller_tx,
         events_handle,
         health_reporter: health_reporter.clone(),
@@ -321,7 +316,6 @@ pub(crate) async fn start_instance_inner(
     let http_uri = start_request_router(
         listen_addr,
         external_addr,
-        worker_tx.clone(),
         controller_tx,
         events_handle.clone(),
         abort_on_task_failure,
