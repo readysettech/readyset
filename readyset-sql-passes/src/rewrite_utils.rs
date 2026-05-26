@@ -3446,3 +3446,608 @@ pub(crate) fn is_always_true_filter(expr: &Expr, sql_dialect: Dialect) -> bool {
         _ => false,
     }
 }
+
+/// Recognized upper bound on a `ROW_NUMBER()` window-function output.
+///
+/// Built by [`is_row_number_cap_predicate`] (against an explicit projection list) or
+/// [`predicate_caps_row_number`] (which resolves the projection list from the
+/// statement's FROM). Recognition is purely structural and matches both the synthetic
+/// `__rn`-aliased filter produced by TOP-K rewrite and organically hand-written
+/// `WHERE rn <= K` patterns over a user-defined `ROW_NUMBER()` projection.
+///
+/// Consumed by the hoist-parametrizable-filters pass, the auto-parameterize visitor,
+/// and CBJR cardinality propagation to skip rewrites that would defeat the cap.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub(crate) struct RowNumberCap {
+    /// The alias of the `ROW_NUMBER()` projection that the predicate references.
+    pub rn_alias: SqlIdentifier,
+    /// Tight integer upper bound on the RN value, normalized from `<`/`<=`/`=` to an
+    /// inclusive cap. Always `>= 1`; predicates implying a bound `< 1` are unsatisfiable
+    /// and rejected by the recognizer.
+    pub bound: u64,
+    /// `PARTITION BY` expressions of the `ROW_NUMBER()` window. Empty means a global
+    /// (unpartitioned) RN, in which case the cap applies directly to the row count.
+    /// When non-empty, downstream consumers must scale the cap by `ndv(partition_keys)`
+    /// to derive the effective row-count cap.
+    pub partition_by: Vec<Expr>,
+    /// FROM-item alias whose subquery projects `rn_alias`. `Some(rel)` for the qualified
+    /// and unqualified-single-FROM-subquery branches; `None` only for the defensive
+    /// `stmt.fields` fallback (RN reference can't resolve to a FROM source). Per-source
+    /// consumers should treat `None` as "not attributable" and skip.
+    pub source: Option<Relation>,
+}
+
+/// Normalize a `(column_op_literal)` shape into an inclusive integer upper bound on the
+/// column. Returns `None` for ops that aren't upper bounds (e.g. `>`, `>=`, `!=`, `IS`),
+/// non-numeric literals, or bounds that resolve to `< 1` (unsatisfiable RN caps).
+fn upper_bound_from_op_and_literal(op: BinaryOperator, lit: &Literal) -> Option<u64> {
+    let n = literal_as_number(lit).ok()?;
+    let bound = match op {
+        BinaryOperator::LessOrEqual | BinaryOperator::Equal => n,
+        BinaryOperator::Less => n.saturating_sub(1),
+        _ => return None,
+    };
+    (bound >= 1).then_some(bound)
+}
+
+/// Match `pred` as a `column op literal` (or its flipped `literal op column`) shape,
+/// returning `(column, normalized_op_with_column_on_lhs, integer_literal)`.
+///
+/// `Equal` is symmetric, so a literal-on-left equality is normalized without a flip.
+/// Ordering ops (`<`, `<=`, `>`, `>=`) on a literal-LHS are flipped via
+/// [`BinaryOperator::flip_ordering_comparison`].
+fn match_column_vs_literal(pred: &Expr) -> Option<(&Column, BinaryOperator, &Literal)> {
+    let Expr::BinaryOp { lhs, op, rhs } = pred else {
+        return None;
+    };
+    match (lhs.as_ref(), rhs.as_ref()) {
+        (Expr::Column(c), Expr::Literal(lit)) => Some((c, *op, lit)),
+        (Expr::Literal(lit), Expr::Column(c)) => {
+            let normalized = if *op == BinaryOperator::Equal {
+                BinaryOperator::Equal
+            } else {
+                op.flip_ordering_comparison().ok()?
+            };
+            Some((c, normalized, lit))
+        }
+        _ => None,
+    }
+}
+
+/// Look up `col_name` among `projections` and, if it aliases a `ROW_NUMBER()` window
+/// function, return that window's PARTITION BY list along with the resolved alias.
+///
+/// Shallow: matches only when the field's expression is itself the `WindowFunction`.
+/// Forwarded references (`Expr::Column(deeper)`) are not followed; for that, see
+/// [`resolve_row_number_through_chain`].
+fn find_row_number_projection<'a>(
+    col_name: &SqlIdentifier,
+    projections: &'a [FieldDefinitionExpr],
+) -> Option<(SqlIdentifier, &'a [Expr])> {
+    for fe in projections {
+        let FieldDefinitionExpr::Expr {
+            expr,
+            alias: Some(a),
+        } = fe
+        else {
+            continue;
+        };
+        if a != col_name {
+            continue;
+        }
+        if let Expr::WindowFunction {
+            function: FunctionExpr::RowNumber,
+            partition_by,
+            ..
+        } = expr
+        {
+            return Some((a.clone(), partition_by.as_slice()));
+        }
+    }
+    None
+}
+
+/// Resolve `col_name` to a `ROW_NUMBER()` window through `stmt`'s projection chain.
+///
+/// At each level: look for an aliased field whose name matches `col_name`. If the field
+/// is itself a `ROW_NUMBER()` window function, return its alias and `PARTITION BY` list.
+/// If the field is a qualified `Expr::Column(forwarded)`, follow the qualifier into the
+/// matching FROM-subquery and recurse on `forwarded.name` there. Any other expression
+/// shape stops the walk and returns `None`.
+///
+/// Handles two cases the shallow [`find_row_number_projection`] misses:
+/// - Organic 2+-level wrappers where each level projects the RN by forwarding through
+///   a `SELECT inner_sub.rn FROM (…) inner_sub` shape.
+/// - Post-`derived_tables_rewrite` states where some wrappers got squashed but a
+///   forwarding level remained (e.g. an aggregated middle layer that DTR couldn't inline).
+///
+/// Termination: each recursion strictly descends into a FROM-subquery, so depth is
+/// bounded by AST nesting depth (small in practice; parser limits enforce an upper bound).
+fn resolve_row_number_through_chain(
+    col_name: &SqlIdentifier,
+    stmt: &SelectStatement,
+) -> Option<(SqlIdentifier, Vec<Expr>)> {
+    for fe in &stmt.fields {
+        let FieldDefinitionExpr::Expr { expr, alias } = fe else {
+            continue;
+        };
+        // The effective name of the field in the parent scope: an explicit `AS …` alias
+        // when present, else the column's own name when the field is a bare column
+        // reference (the canonical implicit-alias rule). Any other expression without an
+        // explicit alias has no name reachable from the parent and is skipped.
+        let effective_name = match (alias, expr) {
+            (Some(a), _) => a,
+            (None, Expr::Column(c)) => &c.name,
+            _ => continue,
+        };
+        if effective_name != col_name {
+            continue;
+        }
+        return match expr {
+            Expr::WindowFunction {
+                function: FunctionExpr::RowNumber,
+                partition_by,
+                ..
+            } => Some((effective_name.clone(), partition_by.clone())),
+            Expr::Column(forwarded) => {
+                let qualifier = forwarded.table.as_ref()?;
+                for te in get_local_from_items_iter!(stmt) {
+                    let Some((inner, alias)) = as_sub_query_with_alias(te) else {
+                        continue;
+                    };
+                    if alias == qualifier.name {
+                        return resolve_row_number_through_chain(&forwarded.name, inner);
+                    }
+                }
+                None
+            }
+            _ => None,
+        };
+    }
+    None
+}
+
+/// Iterator over the AND-conjuncts of a predicate expression. Only descends through
+/// `BinaryOperator::And` nodes; OR / BETWEEN / IN / non-And BinaryOps and every other
+/// shape is yielded as a single opaque conjunct. Borrowing iterator (no cloning).
+#[allow(dead_code)]
+pub(crate) fn iter_and_conjuncts(expr: &Expr) -> Box<dyn Iterator<Item = &Expr> + '_> {
+    match expr {
+        Expr::BinaryOp {
+            lhs,
+            op: BinaryOperator::And,
+            rhs,
+        } => Box::new(iter_and_conjuncts(lhs).chain(iter_and_conjuncts(rhs))),
+        other => Box::new(std::iter::once(other)),
+    }
+}
+
+/// Coerce a numeric `Literal` to a `u64`. Accepts `Integer` (non-negative),
+/// `UnsignedInteger`, and string-shaped variants (`Number`, `String`) that parse
+/// cleanly as `u64`. Negative `Integer` and any non-numeric or unparseable shape
+/// returns `invalid_query!`. Used by LIMIT/OFFSET handling and the ROW_NUMBER()
+/// cap recognizer alike.
+pub(crate) fn literal_as_number(lit: &Literal) -> ReadySetResult<u64> {
+    Ok(match lit {
+        Literal::Integer(i) => {
+            if *i < 0 {
+                invalid_query!("LIMIT/OFFSET must be non-negative")
+            }
+            *i as u64
+        }
+        Literal::UnsignedInteger(i) => *i,
+        Literal::Number(s) | Literal::String(s) => {
+            s.parse::<u64>().map_err(|e| invalid_query_err!("{e}"))?
+        }
+        _ => invalid_query!("Invalid LIMIT/OFFSET value"),
+    })
+}
+
+/// Recognize a predicate that upper-bounds a `ROW_NUMBER()` projection in `projections`.
+///
+/// Returns `Some(RowNumberCap)` when `pred` has the shape `rn_col op K` (or its symmetric
+/// flip) for an integer literal `K`, where `rn_col` aliases a `ROW_NUMBER()` window
+/// function in the supplied projection list. The op is normalized to an inclusive upper
+/// bound (`<=`/`<`/`=` accepted; lower-bound and inequality ops rejected). Unsatisfiable
+/// caps (`< 1`, `<= 0`, `= 0`, negative literals) return `None`.
+///
+/// Qualified column references are matched by `name` only: this helper has no view of
+/// FROM-clause aliases. [`predicate_caps_row_number`] is the qualifier-aware entry point.
+pub(crate) fn is_row_number_cap_predicate(
+    pred: &Expr,
+    projections: &[FieldDefinitionExpr],
+) -> Option<RowNumberCap> {
+    let (col, op, lit) = match_column_vs_literal(pred)?;
+    let bound = upper_bound_from_op_and_literal(op, lit)?;
+    let (rn_alias, partition_by) = find_row_number_projection(&col.name, projections)?;
+    Some(RowNumberCap {
+        rn_alias,
+        bound,
+        partition_by: partition_by.to_vec(),
+        source: None,
+    })
+}
+
+/// High-level entry point: recognize a predicate at `stmt`'s WHERE-level that caps a
+/// `ROW_NUMBER()` projected somewhere in `stmt`'s FROM chain (or, defensively, by
+/// `stmt` itself).
+///
+/// Resolution rules:
+/// - Qualified reference `t.rn`: locate FROM item with `alias == t` that is a subquery;
+///   then deep-resolve `rn` through that subquery's projection chain, following any
+///   forwarded `Expr::Column` projections until a `RowNumber` window is found. Plain-
+///   table aliases yield `None`.
+/// - Unqualified reference `rn`: if `stmt` has a single subquery FROM item, deep-resolve
+///   `rn` through that subquery; otherwise fall back to a shallow match against
+///   `stmt.fields` (defensive — direct WHERE references to an RN alias projected at
+///   the same level are ill-formed SQL but the recognizer stays sound).
+#[allow(dead_code)]
+pub(crate) fn predicate_caps_row_number(
+    pred: &Expr,
+    stmt: &SelectStatement,
+) -> Option<RowNumberCap> {
+    let (col, op, lit) = match_column_vs_literal(pred)?;
+    let bound = upper_bound_from_op_and_literal(op, lit)?;
+    match &col.table {
+        Some(rel) => {
+            let want = &rel.name;
+            for te in get_local_from_items_iter!(stmt) {
+                let Some((inner, alias)) = as_sub_query_with_alias(te) else {
+                    continue;
+                };
+                if alias == *want {
+                    let (rn_alias, partition_by) =
+                        resolve_row_number_through_chain(&col.name, inner)?;
+                    return Some(RowNumberCap {
+                        rn_alias,
+                        bound,
+                        partition_by,
+                        source: Some(alias.into()),
+                    });
+                }
+            }
+            None
+        }
+        None => {
+            if is_single_from_item!(stmt)
+                && let Some((inner, alias)) = as_sub_query_with_alias(&stmt.tables[0])
+                && let Some((rn_alias, partition_by)) =
+                    resolve_row_number_through_chain(&col.name, inner)
+            {
+                return Some(RowNumberCap {
+                    rn_alias,
+                    bound,
+                    partition_by,
+                    source: Some(alias.into()),
+                });
+            }
+            // Defensive fallback: shallow match against stmt.fields. No FROM-source
+            // attribution available; per-source consumers should not act on this case.
+            is_row_number_cap_predicate(pred, &stmt.fields)
+        }
+    }
+}
+
+#[cfg(test)]
+mod row_number_cap_tests {
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    use super::*;
+
+    // ROW_NUMBER() and other window functions aren't supported by the nom-sql parser,
+    // so these tests pin to sqlparser only (matching the convention used by
+    // `inline_leading_derived_table`'s tests).
+    const PARSING_CONFIG: ParsingPreset = ParsingPreset::OnlySqlparser;
+
+    fn parse_select(input: &str) -> SelectStatement {
+        parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, input).unwrap()
+    }
+
+    /// Extract the inner subquery's fields from a single-from-item outer SELECT. Useful
+    /// for driving `is_row_number_cap_predicate` directly with the projection list that
+    /// the predicate references.
+    fn inner_fields(stmt: &SelectStatement) -> &[FieldDefinitionExpr] {
+        let TableExprInner::Subquery(inner) = &stmt.tables[0].inner else {
+            panic!("expected single subquery FROM item");
+        };
+        &inner.fields
+    }
+
+    fn where_predicate(stmt: &SelectStatement) -> &Expr {
+        stmt.where_clause
+            .as_ref()
+            .expect("expected WHERE clause on outer SELECT")
+    }
+
+    /// Build a "RN under derived table" query of the form:
+    ///   SELECT id FROM (SELECT id, ROW_NUMBER() OVER (<window>) AS <alias> FROM t) s
+    ///   WHERE <pred>
+    /// The explicit `id` projection (versus a `SELECT *`) sidesteps a nom-sql limitation
+    /// in the `SELECT *, expr` shape; the recognizer is agnostic to surrounding
+    /// projections.
+    fn rn_under_dt(alias: &str, window: &str, pred: &str) -> SelectStatement {
+        let q = format!(
+            "SELECT id FROM (SELECT id, ROW_NUMBER() OVER ({window}) AS {alias} \
+             FROM t) s WHERE {pred}"
+        );
+        parse_select(&q)
+    }
+
+    #[test]
+    fn recognizes_le_ten() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn <= 10");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.rn_alias.as_str(), "rn");
+        assert_eq!(cap.bound, 10);
+        assert!(cap.partition_by.is_empty());
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.rn_alias.as_str(), "rn");
+        assert_eq!(cap2.bound, 10);
+        assert!(cap2.partition_by.is_empty());
+    }
+
+    #[test]
+    fn recognizes_lt_eleven_as_bound_ten() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn < 11");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.bound, 10);
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.bound, 10);
+    }
+
+    #[test]
+    fn recognizes_first_row_equality() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn = 1");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.bound, 1);
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.bound, 1);
+    }
+
+    #[test]
+    fn recognizes_literal_left_ge_flipped_to_cap() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "10 >= rn");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.bound, 10);
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.bound, 10);
+    }
+
+    #[test]
+    fn recognizes_literal_left_equality() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "1 = rn");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.bound, 1);
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.bound, 1);
+    }
+
+    #[test]
+    fn recognizes_qualified_reference_to_subquery_alias() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "s.rn <= 5");
+        let pred = where_predicate(&stmt);
+        let cap = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap.rn_alias.as_str(), "rn");
+        assert_eq!(cap.bound, 5);
+    }
+
+    #[test]
+    fn recognizes_synthetic_topk_shape_under_underscored_alias() {
+        let stmt = rn_under_dt("__rn", "ORDER BY a", "__rn <= 100");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.rn_alias.as_str(), "__rn");
+        assert_eq!(cap.bound, 100);
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.rn_alias.as_str(), "__rn");
+        assert_eq!(cap2.bound, 100);
+    }
+
+    #[test]
+    fn recognizes_partitioned_row_number() {
+        let stmt = rn_under_dt("rn", "PARTITION BY country ORDER BY ts", "rn <= 3");
+        let pred = where_predicate(&stmt);
+        let cap = is_row_number_cap_predicate(pred, inner_fields(&stmt)).unwrap();
+        assert_eq!(cap.bound, 3);
+        assert_eq!(cap.partition_by.len(), 1);
+        let Expr::Column(c) = &cap.partition_by[0] else {
+            panic!("expected column expression in PARTITION BY");
+        };
+        assert_eq!(c.name.as_str(), "country");
+
+        let cap2 = predicate_caps_row_number(pred, &stmt).unwrap();
+        assert_eq!(cap2.partition_by.len(), 1);
+    }
+
+    #[test]
+    fn rejects_lower_bound_gt() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn > 10");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_lower_bound_ge() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn >= 10");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_not_equal() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn != 5");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_is_null() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn IS NULL");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_lt_one_saturating_to_zero() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn < 1");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_le_zero() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn <= 0");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_equal_zero() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn = 0");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_negative_literal() {
+        // The parser surfaces `-5` as a UnaryOp { op: Neg, expr: Literal(5) } rather than
+        // a bare negative integer literal, so the structural column-vs-literal match
+        // fails. Either way the recognizer returns None.
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn <= -5");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_non_window_column() {
+        let stmt = parse_select("SELECT id FROM (SELECT id, val AS c FROM t) s WHERE c <= 10");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_non_window_aliased_expression() {
+        let stmt = parse_select("SELECT id FROM (SELECT id, val + 1 AS c FROM t) s WHERE c <= 10");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_aggregate_alias() {
+        let stmt =
+            parse_select("SELECT k FROM (SELECT k, SUM(v) AS c FROM t GROUP BY k) s WHERE c <= 10");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_unaliased_row_number_projection() {
+        let stmt = parse_select(
+            "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) FROM t) s \
+             WHERE rn <= 10",
+        );
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_string_literal_bound() {
+        let stmt = rn_under_dt("rn", "ORDER BY id", "rn <= 'foo'");
+        let pred = where_predicate(&stmt);
+        assert!(is_row_number_cap_predicate(pred, inner_fields(&stmt)).is_none());
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn rejects_qualified_reference_to_missing_from_alias() {
+        // `nope` is not a FROM-clause alias in this query, so resolution fails.
+        let stmt = rn_under_dt("rn", "ORDER BY id", "nope.rn <= 10");
+        let pred = where_predicate(&stmt);
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+
+    #[test]
+    fn recognizes_two_level_forwarded_qualified_rn() {
+        // Outer SELECT references `outer_sub.rn`. `outer_sub`'s projection forwards `rn`
+        // from `inner_sub`, which is the level that projects ROW_NUMBER() as `rn`. The
+        // deep walk has to follow the forwarded reference through one intermediate level.
+        let stmt = parse_select(
+            "SELECT outer_sub.rn FROM (\
+                SELECT inner_sub.rn FROM (\
+                    SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS rn FROM t\
+                ) inner_sub\
+             ) outer_sub WHERE outer_sub.rn <= 10",
+        );
+        let pred = where_predicate(&stmt);
+        let cap = predicate_caps_row_number(pred, &stmt).expect("deep walk must resolve");
+        assert_eq!(cap.rn_alias.as_str(), "rn");
+        assert_eq!(cap.bound, 10);
+        assert!(cap.partition_by.is_empty());
+        assert_eq!(
+            cap.source.as_ref().map(|r| r.name.as_str()),
+            Some("outer_sub")
+        );
+    }
+
+    #[test]
+    fn recognizes_three_level_forwarded_qualified_rn() {
+        // Three forwarding levels stress the recursion. The deep walk descends:
+        // outer_sub.rn -> mid_sub.rn -> inner_sub.rn -> WindowFunction.
+        let stmt = parse_select(
+            "SELECT outer_sub.rn FROM (\
+                SELECT mid_sub.rn FROM (\
+                    SELECT inner_sub.rn FROM (\
+                        SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS rn FROM t\
+                    ) inner_sub\
+                ) mid_sub\
+             ) outer_sub WHERE outer_sub.rn <= 5",
+        );
+        let pred = where_predicate(&stmt);
+        let cap = predicate_caps_row_number(pred, &stmt).expect("deep walk must resolve");
+        assert_eq!(cap.bound, 5);
+        assert_eq!(
+            cap.source.as_ref().map(|r| r.name.as_str()),
+            Some("outer_sub")
+        );
+    }
+
+    #[test]
+    fn rejects_two_level_chain_with_non_rn_terminal() {
+        // The forwarding chain terminates at an ordinary column (not a window function),
+        // so the deep walk must return None and not coerce the predicate into a cap.
+        let stmt = parse_select(
+            "SELECT outer_sub.rn FROM (\
+                SELECT inner_sub.rn FROM (\
+                    SELECT t.id AS rn FROM t\
+                ) inner_sub\
+             ) outer_sub WHERE outer_sub.rn <= 10",
+        );
+        let pred = where_predicate(&stmt);
+        assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+}

@@ -40,8 +40,9 @@ use crate::rewrite_utils::{
     extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
     get_from_item_reference_name, get_select_item_alias, is_aggregated_expr,
     is_aggregation_or_grouped, is_always_true_filter, is_column_eq_column,
-    is_simple_parametrizable_filter, outermost_expression, partition_correlated_predicates,
-    resolve_field_reference, split_expr, split_expr_mut, substitute_columns_in_expr,
+    is_simple_parametrizable_filter, literal_as_number, outermost_expression,
+    partition_correlated_predicates, resolve_field_reference, split_expr, split_expr_mut,
+    substitute_columns_in_expr,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -53,9 +54,7 @@ use crate::{
     is_window_function_expr,
 };
 use itertools::{Either, Itertools};
-use readyset_errors::{
-    ReadySetError, ReadySetResult, internal_err, invalid_query, invalid_query_err,
-};
+use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invalid_query};
 use readyset_sql::Dialect;
 use readyset_sql::analysis::contains_aggregate;
 use readyset_sql::ast::{
@@ -237,22 +236,6 @@ fn group_by_keys_all_projected(stmt: &SelectStatement) -> ReadySetResult<bool> {
         }
     }
     Ok(true)
-}
-
-pub(crate) fn literal_as_number(lit: &Literal) -> ReadySetResult<u64> {
-    Ok(match lit {
-        Literal::Integer(i) => {
-            if *i < 0 {
-                invalid_query!("LIMIT/OFFSET must be non-negative")
-            }
-            *i as u64
-        }
-        Literal::UnsignedInteger(i) => *i,
-        Literal::Number(s) | Literal::String(s) => {
-            s.parse::<u64>().map_err(|e| invalid_query_err!("{e}"))?
-        }
-        _ => invalid_query!("Invalid LIMIT/OFFSET value"),
-    })
 }
 
 pub(crate) fn limit_clause_as_numbers(limit_clause: &LimitClause) -> ReadySetResult<(u64, u64)> {
