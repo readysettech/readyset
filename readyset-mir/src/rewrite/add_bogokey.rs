@@ -307,6 +307,7 @@ mod tests {
                 group_by: vec![],
                 limit: 3,
                 topk_buffer_multiplier: None,
+                query_name: query_name.clone(),
             },
         ));
         mir_graph[topk].add_owner(query_name.clone());

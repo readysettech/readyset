@@ -14,7 +14,7 @@ use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, internal};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal, internal_err};
-use readyset_sql::ast::{NullOrder, OrderType};
+use readyset_sql::ast::{NullOrder, OrderType, Relation};
 use readyset_util::Indices;
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace};
@@ -75,6 +75,17 @@ pub struct TopK {
     /// This is used to reduce the number of lookups that need to be
     /// made in case of deletions from top k rows.
     buffered: usize,
+
+    /// Name of the cache this operator serves, used to label the backfill counter
+    /// ([`recorded::TOPK_BACKFILL_REQUESTS`]) so backfills can be attributed per cache.
+    ///
+    /// This is the `CREATE CACHE <name>` name (the `name` column in `SHOW CACHES`), set during
+    /// MIR lowering via [`TopK::with_cache_name`]. It is carried on the operator because an
+    /// operator can't borrow its own node out of `DomainNodes` while being processed. `None` only
+    /// when never set (e.g. test constructors), in which case the counter reports
+    /// `cache_name="unknown"`.
+    #[serde(default)]
+    cache_name: Option<Relation>,
 }
 
 impl TopK {
@@ -118,7 +129,15 @@ impl TopK {
             order: order.into(),
             k,
             buffered,
+            cache_name: None,
         }
+    }
+
+    /// Record the cache this operator serves (the `CREATE CACHE` name), so the backfill counter
+    /// can be labeled with it. Set during MIR lowering, where the cache name is known.
+    pub fn with_cache_name(mut self, cache_name: Relation) -> Self {
+        self.cache_name = Some(cache_name);
+        self
     }
 
     /// Total capacity per group (`k + buffered`), saturated to avoid overflow when `buffered`
@@ -189,7 +208,12 @@ impl TopK {
             //
             // The push/no-push decision is simplified here, please refer to the loops
             // below and their comments.
-            counter!(recorded::TOPK_BACKFILL_REQUESTS).increment(1);
+            let cache_name = self
+                .cache_name
+                .as_ref()
+                .map(|n| n.display_unquoted().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            counter!(recorded::TOPK_BACKFILL_REQUESTS, "cache_name" => cache_name).increment(1);
 
             let IngredientLookupResult::Records(parent_records) = self.lookup(
                 *self.src,

@@ -336,6 +336,10 @@ pub enum MirNodeInner {
         /// `CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = N)`.
         #[serde(default)]
         topk_buffer_multiplier: Option<usize>,
+        /// Name of the cache this TopK belongs to, propagated to the dataflow operator so its
+        /// backfill counter (`readyset_domain.topk_backfill_requests`) can be labeled with an
+        /// identifier the user also sees in `SHOW CACHES`.
+        query_name: Relation,
     },
     /// Node which emits only distinct rows per some group.
     ///

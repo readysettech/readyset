@@ -1476,6 +1476,7 @@ impl SqlToMirConverter {
                         group_by,
                         limit,
                         topk_buffer_multiplier,
+                        query_name: query_name.clone(),
                     },
                 )
             } else {

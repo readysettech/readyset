@@ -309,6 +309,11 @@ pub mod recorded {
     /// Counter: The number of times a TopK operator has triggered a backfill
     /// from its parent because a group dropped below k rows after deletions.
     /// High values indicate the buffer zone may be undersized.
+    ///
+    /// | Tag | Description |
+    /// | --- | ----------- |
+    /// | cache_name | The `CREATE CACHE` name of the cache this TopK serves (the `name` column
+    ///   in `SHOW CACHES`); `unknown` if the operator has no recorded cache name. |
     pub const TOPK_BACKFILL_REQUESTS: &str = "readyset_domain.topk_backfill_requests";
 
     /// Histogram: The amount of time in microseconds a snapshot takes to be performed.

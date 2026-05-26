@@ -380,6 +380,7 @@ pub(super) fn mir_node_to_flow_parts(
                         *limit,
                         /* is_topk */ false,
                         None,
+                        /* cache_name */ None,
                         mig,
                     )?)
                 }
@@ -388,6 +389,7 @@ pub(super) fn mir_node_to_flow_parts(
                     group_by,
                     limit,
                     topk_buffer_multiplier,
+                    query_name: topk_query_name,
                 } => {
                     invariant_eq!(ancestors.len(), 1);
                     let parent = ancestors[0];
@@ -401,6 +403,7 @@ pub(super) fn mir_node_to_flow_parts(
                         *limit,
                         /* is_topk */ true,
                         *topk_buffer_multiplier,
+                        Some(topk_query_name.clone()),
                         mig,
                     )?)
                 }
@@ -1546,6 +1549,7 @@ fn make_paginate_or_topk_node(
     limit: usize,
     is_topk: bool,
     topk_buffer_multiplier: Option<usize>,
+    cache_name: Option<Relation>,
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
     let parent_na = graph.resolve_dataflow_node(parent).ok_or_else(|| {
@@ -1603,17 +1607,17 @@ fn make_paginate_or_topk_node(
 
     // make the new operator and record its metadata
     let na = if is_topk {
-        mig.add_ingredient(
-            name,
-            parent_cols,
-            ops::topk::TopK::with_buffer_multiplier(
-                parent_na.address(),
-                cmp_rows,
-                group_by_indx,
-                limit,
-                topk_buffer_multiplier,
-            ),
-        )
+        let mut topk = ops::topk::TopK::with_buffer_multiplier(
+            parent_na.address(),
+            cmp_rows,
+            group_by_indx,
+            limit,
+            topk_buffer_multiplier,
+        );
+        if let Some(cache_name) = cache_name {
+            topk = topk.with_cache_name(cache_name);
+        }
+        mig.add_ingredient(name, parent_cols, topk)
     } else {
         mig.add_ingredient(
             name,
