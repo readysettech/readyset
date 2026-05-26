@@ -9,7 +9,7 @@ use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
-use readyset_client::consensus::SchemaCatalogEntry;
+use readyset_client::consensus::{PersistedCustomType, SchemaCatalogEntry};
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
@@ -1664,6 +1664,22 @@ impl SqlIncorporator {
             non_replicated_relations: self.non_replicated_relations().clone(),
             generation,
         }
+    }
+
+    /// Emits the persistent custom-type list.
+    pub(crate) fn to_persisted_custom_types(&self) -> Vec<PersistedCustomType> {
+        self.custom_types
+            .iter()
+            .map(|(name, ty)| PersistedCustomType {
+                name: name.clone(),
+                ty: ty.clone(),
+            })
+            .collect()
+    }
+
+    /// Emits the persisted non-replicated relation markers.
+    pub(crate) fn to_persisted_non_replicated_relations(&self) -> Vec<NonReplicatedRelation> {
+        self.non_replicated_relations().iter().cloned().collect()
     }
 
     /// Emits the persistent schema catalog of tables and views as canonical DDL text.

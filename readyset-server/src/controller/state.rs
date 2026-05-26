@@ -2233,6 +2233,17 @@ impl DfStateHandle {
             if let Err(error) = authority.overwrite_schema_catalog(entries).await {
                 error!(%error, "Failed to persist schema catalog");
             }
+            let custom_types = new_state.recipe.to_persisted_custom_types();
+            if let Err(error) = authority.overwrite_custom_types(custom_types).await {
+                error!(%error, "Failed to persist custom types");
+            }
+            let non_replicated = new_state.recipe.to_persisted_non_replicated_relations();
+            if let Err(error) = authority
+                .overwrite_non_replicated_relations(non_replicated)
+                .await
+            {
+                error!(%error, "Failed to persist non-replicated relations");
+            }
         }
 
         Ok(())

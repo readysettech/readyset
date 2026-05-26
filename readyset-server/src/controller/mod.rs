@@ -15,7 +15,7 @@ use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
-    GetLeaderResult, SchemaCatalogEntry, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
+    GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::Change;
@@ -1651,19 +1651,39 @@ impl AuthorityLeaderElectionState {
         authority: &Arc<Authority>,
         state: &mut ControllerState,
     ) -> ReadySetResult<()> {
-        let entries: Vec<SchemaCatalogEntry> = authority.schema_catalog_entries().await?;
-        if entries.is_empty() {
+        let custom_types = authority.custom_types().await?;
+        let non_replicated = authority.non_replicated_relations().await?;
+        let ddl_entries = authority.schema_catalog_entries().await?;
+        if custom_types.is_empty() && non_replicated.is_empty() && ddl_entries.is_empty() {
             return Ok(());
         }
-        let n_entries = entries.len();
+
         let dialect = state.dataflow_state.recipe.dialect();
-        let stmts: Vec<String> = entries.into_iter().map(|e| e.unparsed_stmt).collect();
-        let changelist = ChangeList::from_strings(stmts, dialect)?;
+        let mut changes: Vec<Change> = Vec::new();
+
+        // Custom types first; table DDL may reference them.
+        for entry in custom_types {
+            changes.push(Change::CreateType {
+                name: entry.name,
+                ty: entry.ty,
+            });
+        }
+        for relation in non_replicated {
+            changes.push(Change::AddNonReplicatedRelation(relation));
+        }
+        if !ddl_entries.is_empty() {
+            let stmts: Vec<String> = ddl_entries.into_iter().map(|e| e.unparsed_stmt).collect();
+            let ddl = ChangeList::from_strings(stmts, dialect)?;
+            changes.extend(ddl.changes);
+        }
+
+        let n_changes = changes.len();
+        let changelist = ChangeList::from_changes(changes, dialect);
         state
             .dataflow_state
             .extend_recipe(changelist.into(), false, None)
             .await?;
-        info!(n_entries, "Replayed persisted schema catalog");
+        info!(n_changes, "Replayed persisted schema catalog");
         Ok(())
     }
 

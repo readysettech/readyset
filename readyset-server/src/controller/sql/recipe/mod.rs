@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::{fmt, str};
 
 use petgraph::graph::NodeIndex;
-use readyset_client::consensus::SchemaCatalogEntry;
+use readyset_client::consensus::{PersistedCustomType, SchemaCatalogEntry};
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::recipe::ExprInfo;
 use readyset_client::{TableStatus, ViewCreateRequest};
 use readyset_data::Dialect;
 use readyset_errors::ReadySetResult;
+use readyset_sql::ast::NonReplicatedRelation;
 use readyset_sql::ast::{Relation, SelectStatement};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
@@ -276,5 +277,13 @@ impl Recipe {
     /// startup.
     pub(crate) fn to_schema_catalog_entries(&self) -> Vec<SchemaCatalogEntry> {
         self.inc.to_schema_catalog_entries()
+    }
+
+    pub(crate) fn to_persisted_custom_types(&self) -> Vec<PersistedCustomType> {
+        self.inc.to_persisted_custom_types()
+    }
+
+    pub(crate) fn to_persisted_non_replicated_relations(&self) -> Vec<NonReplicatedRelation> {
+        self.inc.to_persisted_non_replicated_relations()
     }
 }

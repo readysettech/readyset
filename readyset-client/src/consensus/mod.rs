@@ -11,9 +11,9 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
-use readyset_data::Dialect;
+use readyset_data::{DfType, Dialect};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 use replication_offset::ReplicationOffset;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,8 @@ const SHALLOW_CACHE_DDL_REQUESTS_PATH: &str = "shallow_cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
+const CUSTOM_TYPES_PATH: &str = "custom_types";
+const NON_REPLICATED_RELATIONS_PATH: &str = "non_replicated_relations";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
@@ -64,6 +66,14 @@ pub struct SchemaCatalogEntry {
     pub schema_search_path: Vec<SqlIdentifier>,
     /// Dialect under which `unparsed_stmt` should be re-parsed on replay.
     pub dialect: Dialect,
+}
+
+/// A user-defined custom type persisted for replay at controller startup.  (`CREATE TYPE` is
+/// not handled by the parser.)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PersistedCustomType {
+    pub name: Relation,
+    pub ty: DfType,
 }
 
 /// A response to a `worker_heartbeat`, to inform the worker of its
@@ -381,6 +391,75 @@ pub trait AuthorityControl: Send + Sync {
         self.read_modify_write::<_, Vec<String>, ReadySetError>(SCHEMA_CATALOG_PATH, move |_| {
             Ok(encoded.clone())
         })
+        .await??;
+        Ok(())
+    }
+
+    /// Returns the persisted custom types Readyset has accepted from upstream.
+    async fn custom_types(&self) -> ReadySetResult<Vec<PersistedCustomType>> {
+        Ok(self
+            .try_read::<Vec<String>>(CUSTOM_TYPES_PATH)
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
+                Ok(val) => Some(val),
+                Err(err) => {
+                    error!(%err, "Failed to deserialize PersistedCustomType; entry will not be replayed");
+                    None
+                }
+            })
+            .collect())
+    }
+
+    /// Replaces the persisted custom types list.
+    async fn overwrite_custom_types(
+        &self,
+        entries: Vec<PersistedCustomType>,
+    ) -> ReadySetResult<()> {
+        let encoded: Vec<String> = entries
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<_, _>>()?;
+        self.read_modify_write::<_, Vec<String>, ReadySetError>(CUSTOM_TYPES_PATH, move |_| {
+            Ok(encoded.clone())
+        })
+        .await??;
+        Ok(())
+    }
+
+    /// Returns the persisted non-replicated relation markers: upstream relations Readyset knows
+    /// about but does not replicate (excluded by configuration, partitioned, unsupported type,
+    /// etc.). Persisted separately because these markers have no SQL DDL form.
+    async fn non_replicated_relations(&self) -> ReadySetResult<Vec<NonReplicatedRelation>> {
+        Ok(self
+            .try_read::<Vec<String>>(NON_REPLICATED_RELATIONS_PATH)
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
+                Ok(val) => Some(val),
+                Err(err) => {
+                    error!(%err, "Failed to deserialize NonReplicatedRelation; entry will not be replayed");
+                    None
+                }
+            })
+            .collect())
+    }
+
+    /// Replaces the persisted non-replicated relations list.
+    async fn overwrite_non_replicated_relations(
+        &self,
+        entries: Vec<NonReplicatedRelation>,
+    ) -> ReadySetResult<()> {
+        let encoded: Vec<String> = entries
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<_, _>>()?;
+        self.read_modify_write::<_, Vec<String>, ReadySetError>(
+            NON_REPLICATED_RELATIONS_PATH,
+            move |_| Ok(encoded.clone()),
+        )
         .await??;
         Ok(())
     }
