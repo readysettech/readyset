@@ -42,11 +42,27 @@ const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const SHALLOW_CACHE_DDL_REQUESTS_PATH: &str = "shallow_cache_ddl_requests";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
+const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
     pub schema_search_path: Vec<SqlIdentifier>,
+    pub dialect: Dialect,
+}
+
+/// One entry in the persisted schema catalog: canonical DDL text for a table or view that
+/// Readyset has accepted from upstream.
+///
+/// At controller startup, each entry is re-parsed and replayed through `apply_changelist`
+/// to rebuild the table and view portions of the in-memory schema registry.
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct SchemaCatalogEntry {
+    /// Canonical SQL text (e.g. `CREATE TABLE "schema"."name" (...)`). Schema-qualified.
+    pub unparsed_stmt: String,
+    /// Schema search path under which `unparsed_stmt` should be re-parsed and resolved on replay.
+    pub schema_search_path: Vec<SqlIdentifier>,
+    /// Dialect under which `unparsed_stmt` should be re-parsed on replay.
     pub dialect: Dialect,
 }
 
@@ -325,6 +341,48 @@ pub trait AuthorityControl: Send + Sync {
     /// Returns the stored schema [`ReplicationOffset`], if present. Wrapper around Self::try_read
     async fn schema_replication_offset(&self) -> ReadySetResult<Option<ReplicationOffset>> {
         self.try_read(SCHEMA_REPLICATION_OFFSET_PATH).await
+    }
+
+    /// Returns the persisted schema catalog: one entry per relation or type Readyset has
+    /// accepted from upstream. At controller startup, these are re-parsed and replayed to
+    /// rebuild the in-memory schema registry.
+    ///
+    /// Stored separately from the controller state so that an unreadable controller blob does
+    /// not lose the schema; an individual unparseable entry is logged and skipped without
+    /// blocking the rest of the catalog.
+    async fn schema_catalog_entries(&self) -> ReadySetResult<Vec<SchemaCatalogEntry>> {
+        Ok(self
+            .try_read::<Vec<String>>(SCHEMA_CATALOG_PATH)
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| match serde_json::from_slice(v.as_bytes()) {
+                Ok(val) => Some(val),
+                Err(err) => {
+                    error!(%err, "Failed to deserialize SchemaCatalogEntry; entry will not be replayed");
+                    None
+                }
+            })
+            .collect())
+    }
+
+    /// Replaces the persisted schema catalog with the given list.
+    ///
+    /// The catalog is rebuilt from the in-memory registry on every schema-mutating commit, so
+    /// this is a wholesale overwrite rather than an append/remove pair.
+    async fn overwrite_schema_catalog(
+        &self,
+        entries: Vec<SchemaCatalogEntry>,
+    ) -> ReadySetResult<()> {
+        let encoded: Vec<String> = entries
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<Result<_, _>>()?;
+        self.read_modify_write::<_, Vec<String>, ReadySetError>(SCHEMA_CATALOG_PATH, move |_| {
+            Ok(encoded.clone())
+        })
+        .await??;
+        Ok(())
     }
 }
 

@@ -311,7 +311,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::consensus::CacheDDLRequest;
+    use crate::consensus::{CacheDDLRequest, SchemaCatalogEntry};
 
     #[tokio::test]
     async fn it_works() {
@@ -568,5 +568,50 @@ mod tests {
             .collect::<Vec<_>>();
         stmts.sort();
         assert_eq!(stmts, STMTS);
+    }
+
+    #[tokio::test]
+    async fn schema_catalog_overwrite_round_trip() {
+        let dir = tempdir().unwrap();
+        let authority = Arc::new(
+            StandaloneAuthority::new(dir.path().to_str().unwrap(), "schema_catalog_round_trip")
+                .unwrap(),
+        );
+
+        assert!(authority.schema_catalog_entries().await.unwrap().is_empty());
+
+        let entries = vec![
+            SchemaCatalogEntry {
+                unparsed_stmt: "CREATE TABLE s.t (a INT)".to_string(),
+                schema_search_path: vec!["s".into()],
+                dialect: Dialect::DEFAULT_POSTGRESQL,
+            },
+            SchemaCatalogEntry {
+                unparsed_stmt: "CREATE VIEW s.v AS SELECT a FROM s.t".to_string(),
+                schema_search_path: vec!["s".into()],
+                dialect: Dialect::DEFAULT_POSTGRESQL,
+            },
+        ];
+        authority
+            .overwrite_schema_catalog(entries.clone())
+            .await
+            .unwrap();
+        assert_eq!(authority.schema_catalog_entries().await.unwrap(), entries);
+
+        // Overwrite drops prior entries.
+        let next = vec![SchemaCatalogEntry {
+            unparsed_stmt: "CREATE TABLE s.u (b TEXT)".to_string(),
+            schema_search_path: vec!["s".into()],
+            dialect: Dialect::DEFAULT_POSTGRESQL,
+        }];
+        authority
+            .overwrite_schema_catalog(next.clone())
+            .await
+            .unwrap();
+        assert_eq!(authority.schema_catalog_entries().await.unwrap(), next);
+
+        // Empty overwrite clears.
+        authority.overwrite_schema_catalog(vec![]).await.unwrap();
+        assert!(authority.schema_catalog_entries().await.unwrap().is_empty());
     }
 }

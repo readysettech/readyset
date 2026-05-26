@@ -9,6 +9,7 @@ use ::mir::DfNodeIndex;
 use ::serde::{Deserialize, Serialize};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
+use readyset_client::consensus::SchemaCatalogEntry;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{AlterTypeChange, Change, PostgresTableMetadata};
 use readyset_client::recipe::ChangeList;
@@ -21,9 +22,9 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     self, AlterTableDefinition, CacheType, CompoundSelectStatement, CreateTableBody,
-    CreateTableOption, Expr, FieldDefinitionExpr, NonReplicatedRelation, Relation,
-    SelectSpecification, SelectStatement, SqlIdentifier, SqlType, TableExpr, TableKey,
-    TrxCachePolicy,
+    CreateTableOption, CreateTableStatement, CreateViewStatement, Expr, FieldDefinitionExpr,
+    NonReplicatedRelation, Relation, SelectSpecification, SelectStatement, SqlIdentifier, SqlType,
+    TableExpr, TableKey, TrxCachePolicy,
 };
 use readyset_sql::DialectDisplay;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteContext;
@@ -68,14 +69,15 @@ impl Default for Config {
     }
 }
 
-/// Information about a SQL `VIEW` that has been registered with ReadySet, but has yet to be
-/// compiled to Dataflow because no query has selected FROM them yet. Used as the value in
-/// [`SqlIncorporator::uncompiled_views`].
+/// Information about a SQL `VIEW` that has been registered with Readyset. Holds the view's
+/// definition as originally created, used both to compile the view to dataflow when a query
+/// first selects FROM it and to emit the view's DDL into the persisted schema catalog. Used as
+/// the value in [`SqlIncorporator::views`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct UncompiledView {
+struct RegisteredView {
     /// The name of the view.
     ///
-    /// This exists here in addition to as the key in `SqlIncorporator.uncompiled_views` because it
+    /// This exists here in addition to as the key in `SqlIncorporator.views` because it
     /// makes it easier to make sure view names are always schema-qualified
     name: Relation,
 
@@ -87,6 +89,11 @@ struct UncompiledView {
 
     /// The schema search path that the view was created with
     schema_search_path: Vec<SqlIdentifier>,
+
+    /// Whether the view has been compiled to dataflow. Set when a query first selects FROM the
+    /// view; cleared if the view's dataflow is removed (e.g. because a relation it depends on
+    /// was dropped), so the view can be compiled again on its next reference.
+    compiled: bool,
 }
 
 /// Schema for a SQL base node
@@ -117,10 +124,11 @@ pub(crate) struct SqlIncorporator {
     named_queries: HashMap<Relation, u64>,
     num_queries: usize,
 
-    /// Views which have been added to ReadySet, but which have not been compiled to dataflow yet
-    /// because no query has selected FROM them yet. Represented as a map from the
-    /// (schema-qualified!) name of the view to the *post-rewrite* SelectStatement for the view.
-    uncompiled_views: HashMap<Relation, UncompiledView>,
+    /// All SQL VIEWs which have been added to Readyset, represented as a map from the
+    /// (schema-qualified!) name of the view to the view's original definition. Views are
+    /// compiled to dataflow lazily, when a query first selects FROM them; each entry tracks
+    /// whether that has happened yet.
+    views: HashMap<Relation, RegisteredView>,
 
     base_schemas: HashMap<Relation, BaseSchema>,
     view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
@@ -158,7 +166,7 @@ impl SqlIncorporator {
             leaf_addresses: Default::default(),
             named_queries: Default::default(),
             num_queries: Default::default(),
-            uncompiled_views: Default::default(),
+            views: Default::default(),
             base_schemas: Default::default(),
             view_schemas: Default::default(),
             custom_types: Default::default(),
@@ -224,7 +232,12 @@ impl SqlIncorporator {
                 .iter()
                 .map(|(k, BaseSchema { statement, .. })| (k, statement))
                 .collect(),
-            uncompiled_views: self.uncompiled_views.keys().collect::<Vec<_>>(),
+            uncompiled_views: self
+                .views
+                .iter()
+                .filter(|(_, view)| !view.compiled)
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>(),
             custom_types: self
                 .custom_types
                 .keys()
@@ -518,6 +531,10 @@ impl SqlIncorporator {
                         self.drop_custom_type(&name).is_some()
                     } else {
                         let removed = self.remove_expression(&name, mig)?.is_some();
+                        // An explicit drop is the one removal that forgets a view's
+                        // definition; every other removal path keeps it so the view can be
+                        // compiled again when next referenced.
+                        self.views.remove(&name);
                         if let Some(table_statuses) = table_statuses.as_mut() {
                             table_statuses.insert(name.clone(), TableStatus::Dropped);
                         }
@@ -655,13 +672,14 @@ impl SqlIncorporator {
 
         let schema = Self::schema_from_select_spec(&rewritten_definition)?;
 
-        self.uncompiled_views.insert(
+        self.views.insert(
             name.clone(),
-            UncompiledView {
+            RegisteredView {
                 name,
                 definition,
                 schema,
                 schema_search_path,
+                compiled: false,
             },
         );
         Ok(())
@@ -970,7 +988,14 @@ impl SqlIncorporator {
         let expression = match self.registry.remove_expression(name_or_alias) {
             Some(expression) => expression,
             None => {
-                if self.uncompiled_views.remove(name_or_alias).is_some() {
+                // Compiled views always have a registry entry, so a view that only exists in
+                // the views map is uncompiled and has no dataflow state to clean up.
+                if self
+                    .views
+                    .get(name_or_alias)
+                    .is_some_and(|view| !view.compiled)
+                {
+                    self.views.remove(name_or_alias);
                     return Ok(Some(Default::default()));
                 }
 
@@ -1291,18 +1316,16 @@ impl SqlIncorporator {
                             schema: schema.map(Into::into),
                             name: name.into(),
                         })
-                        .and_then(|rel| self.uncompiled_views.remove(&rel))
+                        .and_then(|rel| self.views.get(&rel))
+                        .filter(|view| !view.compiled)
+                        .cloned()
                     {
                         trace!(
                             name = %view.name.display_unquoted(),
                             "Query referenced uncompiled view; compiling"
                         );
-                        if let Err(e) = self.compile_uncompiled_view(view.clone(), mig) {
-                            trace!(%e, "Compiling uncompiled view failed");
-                            // The view *might* have failed to migrate for a transient reason - put
-                            // it back in the map of uncompiled views so we can try again later if
-                            // the user asks us to
-                            self.uncompiled_views.insert(view.name.clone(), view);
+                        if let Err(e) = self.compile_view(view, mig) {
+                            trace!(%e, "Compiling view failed");
                             return Err(on_err(e));
                         }
                     } else {
@@ -1402,18 +1425,18 @@ impl SqlIncorporator {
         )
     }
 
-    /// Compile the given uncompiled view all the way to dataflow
-    fn compile_uncompiled_view(
+    /// Compile the given view all the way to dataflow, marking it as compiled on success
+    fn compile_view(
         &mut self,
-        uncompiled_view: UncompiledView,
+        view: RegisteredView,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
-        let UncompiledView {
+        let RegisteredView {
             name,
             mut definition,
             schema_search_path,
-            schema: _,
-        } = uncompiled_view;
+            ..
+        } = view;
 
         let mir_leaf = match &mut definition {
             SelectSpecification::Compound(stmt) => self.add_compound_query(
@@ -1435,16 +1458,17 @@ impl SqlIncorporator {
             )?,
         };
 
-        if !self.registry.add_query(RecipeExpr::View {
+        if self.registry.add_query(RecipeExpr::View {
             name: name.clone(),
             definition,
         })? {
-            // The expression is already present, and we successfully added
-            // a new alias for it.
-            return Ok(());
+            self.mir_to_dataflow(name.clone(), mir_leaf, mig)?;
         }
+        // else: the expression is already present, and we successfully added a new alias for it.
 
-        self.mir_to_dataflow(name, mir_leaf, mig)?;
+        if let Some(view) = self.views.get_mut(&name) {
+            view.compiled = true;
+        }
 
         Ok(())
     }
@@ -1483,7 +1507,12 @@ impl SqlIncorporator {
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<MirRemovalResult> {
         trace!(query_name = %query_name.display_unquoted(), "removing query");
-        if self.uncompiled_views.remove(query_name).is_some() {
+        if self
+            .views
+            .get(query_name)
+            .is_some_and(|view| !view.compiled)
+        {
+            self.views.remove(query_name);
             trace!(query_name = %query_name.display_unquoted(), "Removed uncompiled view");
             return Ok(Default::default());
         }
@@ -1524,6 +1553,12 @@ impl SqlIncorporator {
             self.leaf_addresses.remove(query);
             self.registry.remove_expression(query);
             self.view_schemas.remove(query);
+            // A view removed here (e.g. as a dependent of a dropped relation) still exists
+            // upstream: keep its definition so it stays in the persisted schema catalog and
+            // compiles again on its next reference.
+            if let Some(view) = self.views.get_mut(query) {
+                view.compiled = false;
+            }
         }
         // Sadly, we don't use `DfNodeIndex` for migrations/df state, so we need to map them
         // to `NodeIndex`.
@@ -1603,8 +1638,9 @@ impl SqlIncorporator {
             .collect();
 
         let uncompiled_views = self
-            .uncompiled_views
+            .views
             .iter()
+            .filter(|(_, view)| !view.compiled)
             .map(|(relation, view)| (relation.clone(), view.schema.clone()))
             .collect();
 
@@ -1628,6 +1664,43 @@ impl SqlIncorporator {
             non_replicated_relations: self.non_replicated_relations().clone(),
             generation,
         }
+    }
+
+    /// Emits the persistent schema catalog of tables and views as canonical DDL text.
+    pub(crate) fn to_schema_catalog_entries(&self) -> Vec<SchemaCatalogEntry> {
+        let sql_dialect: readyset_sql::Dialect = self.dialect.into();
+        let mut entries = Vec::with_capacity(self.base_schemas.len() + self.views.len());
+
+        for (relation, base) in &self.base_schemas {
+            let stmt = CreateTableStatement {
+                if_not_exists: false,
+                table: relation.clone(),
+                body: Ok(base.statement.clone()),
+                like: None,
+                options: Ok(Vec::new()),
+            };
+            entries.push(SchemaCatalogEntry {
+                unparsed_stmt: stmt.display(sql_dialect).to_string(),
+                schema_search_path: Vec::new(),
+                dialect: self.dialect,
+            });
+        }
+
+        for view in self.views.values() {
+            let stmt = CreateViewStatement {
+                name: view.name.clone(),
+                or_replace: false,
+                fields: Vec::new(),
+                definition: Ok(Box::new(view.definition.clone())),
+            };
+            entries.push(SchemaCatalogEntry {
+                unparsed_stmt: stmt.display(sql_dialect).to_string(),
+                schema_search_path: view.schema_search_path.clone(),
+                dialect: self.dialect,
+            });
+        }
+
+        entries
     }
 }
 
@@ -1748,7 +1821,7 @@ impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
             })
             .or_else(|| {
                 self.this
-                    .uncompiled_views
+                    .views
                     .get(relation)
                     .map(|view| view.schema.clone())
             })
@@ -1768,7 +1841,7 @@ impl ImpliedTablesContext for SqlIncorporatorRewriteContext<'_> {
         // schema universe.  `view_schemas` wins when a relation appears in
         // both buckets.
         let mut combined = self.this.view_schemas.clone();
-        for (rel, view) in &self.this.uncompiled_views {
+        for (rel, view) in &self.this.views {
             combined
                 .entry(rel.clone())
                 .or_insert_with(|| view.schema.clone());

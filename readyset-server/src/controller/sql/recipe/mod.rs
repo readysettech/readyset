@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::{fmt, str};
 
 use petgraph::graph::NodeIndex;
+use readyset_client::consensus::SchemaCatalogEntry;
 use readyset_client::recipe::changelist::ChangeList;
 use readyset_client::recipe::ExprInfo;
 use readyset_client::{TableStatus, ViewCreateRequest};
@@ -268,5 +269,12 @@ impl Recipe {
     /// between Readyset components.
     pub(crate) fn schema_catalog(&self, generation: SchemaGeneration) -> SchemaCatalog {
         self.inc.schema_catalog(generation)
+    }
+
+    /// Emits the persistent schema catalog: canonical DDL for every table and view Readyset
+    /// has accepted from upstream, suitable for writing to the Authority and replaying at
+    /// startup.
+    pub(crate) fn to_schema_catalog_entries(&self) -> Vec<SchemaCatalogEntry> {
+        self.inc.to_schema_catalog_entries()
     }
 }

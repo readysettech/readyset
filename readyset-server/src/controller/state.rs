@@ -2210,10 +2210,10 @@ impl DfStateHandle {
         state_guard.replace(new_state.clone());
         drop(state_guard);
 
-        if let Some(notifier) = &self.schema_change_notifier {
-            // The snapshot stored by `EventsHandle` is a complete `SchemaCatalog`, so partial
-            // deltas (if ever added) cannot be accidentally cached.
-            if new_state.schema_generation() != previous_generation {
+        if new_state.schema_generation() != previous_generation {
+            if let Some(notifier) = &self.schema_change_notifier {
+                // The snapshot stored by `EventsHandle` is a complete `SchemaCatalog`, so partial
+                // deltas (if ever added) cannot be accidentally cached.
                 let catalog = new_state
                     .recipe
                     .schema_catalog(new_state.schema_generation());
@@ -2226,6 +2226,12 @@ impl DfStateHandle {
                         error!(%error, "Failed to serialize schema catalog update");
                     }
                 }
+            }
+
+            // Dual-write the persistent schema catalog for future use in recovery.
+            let entries = new_state.recipe.to_schema_catalog_entries();
+            if let Err(error) = authority.overwrite_schema_catalog(entries).await {
+                error!(%error, "Failed to persist schema catalog");
             }
         }
 
