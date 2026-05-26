@@ -15,7 +15,7 @@ use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
-    GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
+    GetLeaderResult, SchemaCatalogEntry, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::Change;
@@ -1640,6 +1640,33 @@ impl AuthorityLeaderElectionState {
         self.is_leader
     }
 
+    /// Replays the persisted schema catalog into a freshly-created `ControllerState` so the
+    /// recipe has tables and views by the time cache regeneration runs at `SnapshotDone`.
+    /// Without this, a controller-state wipe leaves the recipe empty and cache compilation
+    /// fails unless an upstream resnapshot redelivers the schema.
+    ///
+    /// Returns an error if the catalog cannot be read, parsed, or applied. The caller should
+    /// react by forcing a fresh upstream resnapshot.
+    async fn replay_persisted_schema_catalog(
+        authority: &Arc<Authority>,
+        state: &mut ControllerState,
+    ) -> ReadySetResult<()> {
+        let entries: Vec<SchemaCatalogEntry> = authority.schema_catalog_entries().await?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let n_entries = entries.len();
+        let dialect = state.dataflow_state.recipe.dialect();
+        let stmts: Vec<String> = entries.into_iter().map(|e| e.unparsed_stmt).collect();
+        let changelist = ChangeList::from_strings(stmts, dialect)?;
+        state
+            .dataflow_state
+            .extend_recipe(changelist.into(), false, None)
+            .await?;
+        info!(n_entries, "Replayed persisted schema catalog");
+        Ok(())
+    }
+
     async fn update_leader_state(&mut self) -> ReadySetResult<()> {
         let mut should_attempt_leader_election = false;
         match self.authority.try_get_leader().await? {
@@ -1742,6 +1769,15 @@ impl AuthorityLeaderElectionState {
                     state
                         .dataflow_state
                         .set_schema_replication_offset(schema_replication_offset);
+                    if let Err(error) =
+                        Self::replay_persisted_schema_catalog(&self.authority, &mut state).await
+                    {
+                        warn!(
+                            %error,
+                            "Schema catalog replay failed; forcing upstream resnapshot"
+                        );
+                        state.dataflow_state.set_schema_replication_offset(None);
+                    }
                     let cache_ddl = match self.authority.cache_ddl_requests().await? {
                         res if res.is_empty() => None,
                         res => Some(res),
