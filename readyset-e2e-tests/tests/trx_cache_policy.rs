@@ -1,7 +1,7 @@
 //! E2E tests for [`TrxCachePolicy`] (REA-6596).
 //!
 //! Verifies the user-visible "serve from cache until first write" behavior the
-//! Supabase-style auto-cache configuration relies on. The matrix below pairs the
+//! the auto-cache configuration relies on. The matrix below pairs the
 //! `(MigrationMode, CacheMode, policy)` tuples that produce distinct routing decisions.
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::BackendBuilder;

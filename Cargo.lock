@@ -6715,6 +6715,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-rls"
+version = "0.0.1"
+dependencies = [
+ "metric",
+ "metrics",
+ "native-tls",
+ "papaya",
+ "parking_lot",
+ "postgres-native-tls",
+ "readyset-client",
+ "readyset-sql",
+ "readyset-sql-parsing",
+ "seize",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
 name = "readyset-schema"
 version = "0.0.1"
 dependencies = [

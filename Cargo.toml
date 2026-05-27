@@ -57,6 +57,7 @@ members = [
     "readyset-psql",
     "readyset-query-logger",
     "readyset-repl",
+    "readyset-rls",
     "readyset-schema",
     "readyset-server",
     "readyset-shallow",

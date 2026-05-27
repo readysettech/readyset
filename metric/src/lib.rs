@@ -24,6 +24,7 @@ export_metrics!(query_sampler);
 export_metrics!(query_status_cache);
 export_metrics!(reader_map);
 export_metrics!(replication);
+export_metrics!(rls);
 export_metrics!(rocksdb);
 export_metrics!(schema_catalog);
 export_metrics!(session);
