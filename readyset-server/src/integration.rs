@@ -1241,6 +1241,18 @@ async fn it_recovers_persisted_bases() {
     g.set_persistence(persistence_params);
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
+
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE CACHE CarPrice FROM SELECT price FROM Car WHERE id = ?;"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
     {
         let mut getter = g
             .view("CarPrice")
@@ -1249,7 +1261,7 @@ async fn it_recovers_persisted_bases() {
             .into_reader_handle()
             .unwrap();
 
-        // Make sure that the new graph contains the old writes
+        // Make sure that the recovered base still contains the old writes
         for i in 1..10 {
             let price = i * 10;
             let result = getter
@@ -1398,6 +1410,21 @@ async fn it_recovers_persisted_bases_w_multiple_nodes() {
     g.set_persistence(persistence_parameters);
     let (mut g, shutdown_tx) = g.start(authority.clone()).await.unwrap();
     g.backend_ready().await;
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec![
+                    "CREATE CACHE AID FROM SELECT id FROM A WHERE id = ?;",
+                    "CREATE CACHE BID FROM SELECT id FROM B WHERE id = ?;",
+                    "CREATE CACHE CID FROM SELECT id FROM C WHERE id = ?;",
+                ],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
     for (i, table) in tables.iter().enumerate() {
         let mut getter = g
             .view(&format!("{table}ID"))

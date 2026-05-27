@@ -53,6 +53,8 @@ use test_strategy::Arbitrary;
 use tracing::error;
 
 use crate::consensus::CacheDDLRequest;
+use crate::query::QueryId;
+use crate::view::ViewCreateRequest;
 
 /// The specification for a list of changes that must be made
 /// to the MIR and dataflow graphs.
@@ -586,8 +588,19 @@ impl Change {
                     adapter_rewrite_context,
                 )?;
 
+                // An unnamed CREATE CACHE recomputes the name the adapter resolved at create
+                // time, the query id of the rewritten statement under the request's schema
+                // search path, so implicit cache names survive replay.
+                let name = name.unwrap_or_else(|| {
+                    QueryId::from(&ViewCreateRequest::new(
+                        statement.as_ref().clone(),
+                        ddl_req.schema_search_path.clone(),
+                    ))
+                    .into()
+                });
+
                 Ok(Change::CreateCache(CreateCache {
-                    name,
+                    name: Some(name),
                     statement,
                     trx_cache_policy,
                     schema_generation_used: schema_generation,
@@ -707,6 +720,58 @@ mod tests {
                 )]),
             });
             assert!(change.requires_resnapshot())
+        }
+    }
+
+    mod from_cache_ddl_request {
+        use std::sync::Arc;
+
+        use schema_catalog::{RewriteContext, SchemaCatalog};
+
+        use super::*;
+
+        fn convert(unparsed_stmt: &str) -> CreateCache {
+            let ddl_req = CacheDDLRequest {
+                unparsed_stmt: unparsed_stmt.into(),
+                schema_search_path: vec!["public".into()],
+                dialect: Dialect::DEFAULT_POSTGRESQL,
+            };
+            let mut catalog = SchemaCatalog::default();
+            catalog.view_schemas.insert(
+                Relation {
+                    schema: Some("public".into()),
+                    name: "t".into(),
+                },
+                vec!["x".into(), "y".into()],
+            );
+            let rewrite_context = RewriteContext::new(
+                ddl_req.dialect,
+                Arc::new(catalog),
+                ddl_req.schema_search_path.clone(),
+            );
+            let change = Change::from_cache_ddl_request(
+                &ddl_req,
+                AdapterRewriteParams::new(ddl_req.dialect.into()),
+                &rewrite_context,
+                ParsingPreset::for_tests(),
+                None,
+            )
+            .unwrap();
+            match change {
+                Change::CreateCache(create_cache) => create_cache,
+                change => panic!("expected CreateCache, got {change:?}"),
+            }
+        }
+
+        #[test]
+        fn unnamed_derives_query_id() {
+            let create_cache = convert("CREATE CACHE FROM SELECT x FROM t WHERE x = 1");
+            let expected: Relation = QueryId::from(&ViewCreateRequest::new(
+                create_cache.statement.as_ref().clone(),
+                vec!["public".into()],
+            ))
+            .into();
+            assert_eq!(create_cache.name, Some(expected));
         }
     }
 }

@@ -274,6 +274,21 @@ async fn it_works_basic_standalone_impl() {
 
     let (mut g, shutdown_tx) = start_standalone().await.unwrap();
 
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec![
+                    "CREATE VIEW c AS SELECT a,b FROM a WHERE a = ? UNION ALL (SELECT a,b FROM b WHERE a = ? ORDER BY b);",
+                    "CREATE CACHE q FROM SELECT a,b FROM c WHERE a = ?;",
+                ],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+
     // Check that everything was restored properly
     let mut cq = g.view("q").await.unwrap().into_reader_handle().unwrap();
 

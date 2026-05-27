@@ -306,6 +306,8 @@ mod tests {
     use futures::stream::FuturesUnordered;
     use futures::StreamExt;
     use readyset_data::Dialect;
+    use replication_offset::mysql::MySqlPosition;
+    use replication_offset::ReplicationOffset;
     use reqwest::Url;
     use serde::Deserialize;
     use tempfile::tempdir;
@@ -613,5 +615,48 @@ mod tests {
         // Empty overwrite clears.
         authority.overwrite_schema_catalog(vec![]).await.unwrap();
         assert!(authority.schema_catalog_entries().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn schema_replication_offset_round_trip() {
+        let dir = tempdir().unwrap();
+        let authority = Arc::new(
+            StandaloneAuthority::new(
+                dir.path().to_str().unwrap(),
+                "schema_replication_offset_round_trip",
+            )
+            .unwrap(),
+        );
+
+        assert!(authority
+            .schema_replication_offset()
+            .await
+            .unwrap()
+            .is_none());
+
+        let offset = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.000001".to_owned(), 154).unwrap(),
+        );
+        authority
+            .overwrite_schema_replication_offset(offset.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            authority.schema_replication_offset().await.unwrap(),
+            Some(offset.clone())
+        );
+
+        // Overwrite replaces the prior value.
+        let next = ReplicationOffset::MySql(
+            MySqlPosition::from_file_name_and_position("binlog.000002".to_owned(), 42).unwrap(),
+        );
+        authority
+            .overwrite_schema_replication_offset(next.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            authority.schema_replication_offset().await.unwrap(),
+            Some(next)
+        );
     }
 }

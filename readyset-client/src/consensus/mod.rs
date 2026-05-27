@@ -353,6 +353,20 @@ pub trait AuthorityControl: Send + Sync {
         self.try_read(SCHEMA_REPLICATION_OFFSET_PATH).await
     }
 
+    /// Persists the schema [`ReplicationOffset`] to its own Authority key so it survives a
+    /// controller restart and graph regeneration independently of any other state.
+    async fn overwrite_schema_replication_offset(
+        &self,
+        offset: ReplicationOffset,
+    ) -> ReadySetResult<()> {
+        self.read_modify_write::<_, ReplicationOffset, ReadySetError>(
+            SCHEMA_REPLICATION_OFFSET_PATH,
+            move |_| Ok(offset.clone()),
+        )
+        .await??;
+        Ok(())
+    }
+
     /// Returns the persisted schema catalog: one entry per relation or type Readyset has
     /// accepted from upstream. At controller startup, these are re-parsed and replayed to
     /// rebuild the in-memory schema registry.

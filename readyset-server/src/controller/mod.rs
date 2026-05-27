@@ -745,10 +745,22 @@ impl Controller {
                         "Removing all dataflow state and persistent storage for shallow-only mode"
                     );
                     state.dataflow_state.remove_persistent_state().await;
-                    if state.dataflow_state.remove_all_tables() {
-                        self.authority
-                            .overwrite_controller_state(state.clone())
-                            .await?;
+                    state.dataflow_state.remove_all_tables();
+                    if let Err(error) = self.authority.overwrite_schema_catalog(vec![]).await {
+                        error!(%error, "Failed to clear persisted schema catalog");
+                    }
+                    if let Err(error) = self.authority.overwrite_custom_types(vec![]).await {
+                        error!(%error, "Failed to clear persisted custom types");
+                    }
+                    if let Err(error) = self
+                        .authority
+                        .overwrite_non_replicated_relations(vec![])
+                        .await
+                    {
+                        error!(%error, "Failed to clear persisted non-replicated relations");
+                    }
+                    if let Err(error) = self.authority.remove_all_cache_ddl_requests().await {
+                        error!(%error, "Failed to clear persisted cache DDL requests");
                     }
                 }
 
@@ -1717,97 +1729,33 @@ impl AuthorityLeaderElectionState {
                 return Ok(());
             }
 
-            // We are the new leader, attempt to update the leader state with our state.
-            let update_res = self
+            // Build a fresh ControllerState from authority-persisted inputs. The previously
+            // persisted ControllerState is intentionally not consulted: the inputs needed at
+            // startup are config (from CLI), schema replication offset, schema catalog
+            // (tables, views, custom types, non-replicated markers), and cache DDL. The
+            // dataflow graph is regenerated from these on every leader election.
+            let schema_replication_offset = self
                 .authority
-                .update_controller_state(
-                    |state: Option<ControllerState>| -> Result<ControllerState, Option<ReadySetError>> {
-                        match state {
-                            None => {
-                                Ok(ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect))
-                            },
-                            Some(mut state) => {
-                                // Validate that immutable config fields have not changed.
-                                // These fields cannot be changed on restart with existing state.
-                                if state.config.mir_config != self.config.mir_config {
-                                    return Err(Some(ReadySetError::Internal(format!(
-                                        "Cannot change MIR config on restart with existing state. \
-                                         Existing: {:?}, New: {:?}.",
-                                        state.config.mir_config, self.config.mir_config
-                                    ))));
-                                }
-
-                                // check that running config is compatible with the new
-                                // configuration.
-                                if state.config != self.config {
-                                    warn!(
-                                    authority_config = ?state.config,
-                                    our_config = ?self.config,
-                                    "Config in authority different than our config, changing to our config"
-                                );
-                                }
-                                state.dataflow_state.domain_config = self.config.domain_config.clone();
-                                state.dataflow_state.materializations.set_config(self.config.materialization_config.clone());
-                                state.dataflow_state.persistence = self.config.persistence.clone();
-                                state.config = self.config.clone();
-                                Ok(state)
-                            }
-                        }
-                    },
-                    |state: &ControllerState| {
-                        state.dataflow_state.schema_replication_offset().clone()
-                    },
-                    |state: &mut ControllerState| {
-                        state.dataflow_state.touch_up();
-                    }
-                )
-                .await;
-
-            let (state, cache_ddl) = match update_res {
-                Ok(Ok(state)) => (state, None),
-                Ok(Err(Some(e))) => return Err(e),
-                Ok(Err(None)) => return Ok(()),
-                Err(error) if error.caused_by_serialization_failed() => {
-                    warn!(
-                        %error,
-                        "Error deserializing controller state, wiping state and starting fresh \
-                         (NOTE: Caches will be re-created once snapshotting finishes)"
-                    );
-                    // If we are unsuccessful loading the schema replication offset from the
-                    // authority, we leave it as None which will mean performing a resnapshot. We
-                    // can still recover the caches.
-                    let schema_replication_offset = self
-                        .authority
-                        .schema_replication_offset()
-                        .await
-                        .unwrap_or_default();
-                    let mut state = ControllerState::new(
-                        self.config.clone(),
-                        self.permissive_writes,
-                        self.dialect,
-                    );
-                    state
-                        .dataflow_state
-                        .set_schema_replication_offset(schema_replication_offset);
-                    if let Err(error) =
-                        Self::replay_persisted_schema_catalog(&self.authority, &mut state).await
-                    {
-                        warn!(
-                            %error,
-                            "Schema catalog replay failed; forcing upstream resnapshot"
-                        );
-                        state.dataflow_state.set_schema_replication_offset(None);
-                    }
-                    let cache_ddl = match self.authority.cache_ddl_requests().await? {
-                        res if res.is_empty() => None,
-                        res => Some(res),
-                    };
-                    self.authority
-                        .overwrite_controller_state(state.clone())
-                        .await?;
-                    (state, cache_ddl)
-                }
-                Err(e) => return Err(e),
+                .schema_replication_offset()
+                .await
+                .unwrap_or_default();
+            let mut state =
+                ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect);
+            state
+                .dataflow_state
+                .set_schema_replication_offset(schema_replication_offset);
+            if let Err(error) =
+                Self::replay_persisted_schema_catalog(&self.authority, &mut state).await
+            {
+                warn!(
+                    %error,
+                    "Schema catalog replay failed; forcing upstream resnapshot"
+                );
+                state.dataflow_state.set_schema_replication_offset(None);
+            }
+            let cache_ddl = match self.authority.cache_ddl_requests().await? {
+                res if res.is_empty() => None,
+                res => Some(res),
             };
 
             // Notify our worker that we have won the leader election.

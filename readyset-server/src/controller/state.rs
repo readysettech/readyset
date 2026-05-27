@@ -73,7 +73,7 @@ use crate::controller::migrate::materialization::Materializations;
 use crate::controller::migrate::scheduling::schedule_domain;
 use crate::controller::migrate::{routing, DomainMigrationMode, DomainMigrationPlan, Migration};
 use crate::controller::sql::{RecipeExpr, Schema};
-use crate::controller::{schema, ControllerState, Worker, WorkerIdentifier};
+use crate::controller::{schema, Worker, WorkerIdentifier};
 use crate::internal::LocalNodeIndex;
 mod graphviz;
 
@@ -2015,33 +2015,6 @@ impl DfState {
 
         Ok(dmp)
     }
-
-    /// This method is a hack to make sure the [`ControllerState`] "persisted" in the
-    /// [`LocalAuthority`] is stored similarly to the way it would be, if it were serialized and
-    /// then deserailized, but without paying the extreme performance penalty actually serializing
-    /// it costs. Essentially we either clear or assign defaults to the fields that are marked as
-    /// #[serde::skip], thus making sure things are consistent wherever they are stored after
-    /// serialization or after this method is applied.
-    /// If called prior to serialization or after desiarialization this would effectively be a noop,
-    /// so don't bother calling it in authorities that serialize.
-    pub(crate) fn touch_up(&mut self) {
-        self.domains = Default::default();
-        self.channel_coordinator = Default::default();
-        self.read_addrs = Default::default();
-        self.workers = Default::default();
-
-        let mut new_materializations = Materializations::new();
-        new_materializations
-            .paths
-            .clone_from(&self.materializations.paths);
-        new_materializations
-            .redundant_partial
-            .clone_from(&self.materializations.redundant_partial);
-        new_materializations.tag_generator = self.materializations.tag_generator;
-        new_materializations.config = self.materializations.config.clone();
-
-        self.materializations = new_materializations;
-    }
 }
 
 /// This structure acts as a wrapper for a [`DfStateReader`] in order to guarantee
@@ -2169,46 +2142,14 @@ impl DfStateHandle {
             guard.state.schema_generation()
         };
         let new_state = &writer.state;
-        if let Some(local) = authority.as_local() {
-            local.update_controller_in_place(|state: Option<&mut ControllerState>| match state {
-                None => {
-                    eprintln!("There's no controller state to update");
-                    Err(())
-                }
-                Some(state) => {
-                    state.dataflow_state = new_state.clone();
-                    state.dataflow_state.touch_up();
-                    Ok(())
-                }
-            })
-        } else {
-            authority
-                .update_controller_state(
-                    |state: Option<ControllerState>| match state {
-                        None => {
-                            eprintln!("There's no controller state to update");
-                            Err(())
-                        }
-                        Some(mut state) => {
-                            state.dataflow_state = new_state.clone();
-                            Ok(state)
-                        }
-                    },
-                    |state: &ControllerState| {
-                        state.dataflow_state.schema_replication_offset().clone()
-                    },
-                    |state: &mut ControllerState| {
-                        state.dataflow_state.touch_up();
-                    },
-                )
-                .await?
-                .map(|_| ())
-        }
-        .map_err(|_| internal_err!("Unable to update state"))?;
 
         let mut state_guard = self.reader.write().await;
         state_guard.replace(new_state.clone());
         drop(state_guard);
+
+        // The schema replication offset says how far schema replication has progressed.  It
+        // must only advance after the schema catalog is durable.
+        let mut schema_persisted = true;
 
         if new_state.schema_generation() != previous_generation {
             if let Some(notifier) = &self.schema_change_notifier {
@@ -2232,10 +2173,12 @@ impl DfStateHandle {
             let entries = new_state.recipe.to_schema_catalog_entries();
             if let Err(error) = authority.overwrite_schema_catalog(entries).await {
                 error!(%error, "Failed to persist schema catalog");
+                schema_persisted = false;
             }
             let custom_types = new_state.recipe.to_persisted_custom_types();
             if let Err(error) = authority.overwrite_custom_types(custom_types).await {
                 error!(%error, "Failed to persist custom types");
+                schema_persisted = false;
             }
             let non_replicated = new_state.recipe.to_persisted_non_replicated_relations();
             if let Err(error) = authority
@@ -2243,7 +2186,21 @@ impl DfStateHandle {
                 .await
             {
                 error!(%error, "Failed to persist non-replicated relations");
+                schema_persisted = false;
             }
+        }
+
+        if schema_persisted {
+            if let Some(offset) = new_state.schema_replication_offset() {
+                if let Err(error) = authority
+                    .overwrite_schema_replication_offset(offset.clone())
+                    .await
+                {
+                    error!(%error, "Failed to persist schema replication offset");
+                }
+            }
+        } else {
+            warn!("Skipping schema replication offset persist after failed schema catalog write");
         }
 
         Ok(())
