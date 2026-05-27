@@ -193,7 +193,7 @@ impl Refresh for QueryResult {
 
     async fn refresh(
         self,
-        mut cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>,
+        mut cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
     ) -> std::io::Result<()> {
         async fn drain_resultset(resultset: Resultset) -> std::io::Result<()> {
             // Run the stream to trigger cache population.
@@ -404,6 +404,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     async fn reset(&mut self) -> Result<(), Self::Error> {
+        // `DISCARD ALL` drops session-state on this upstream so that a
+        // sticky `SET LOCAL` from a previous client cannot leak into
+        // the next fill. Required for the RLS shallow cache to remain
+        // correct under transaction-mode pooling (Supavisor, PgBouncer):
+        // a Postgres backend recycled to a different logical session
+        // must not carry forward `request.jwt.claims` from the prior
+        // tenant. See open-issues RLS-15.
         self.client.simple_query("DISCARD ALL").await?;
         Ok(())
     }

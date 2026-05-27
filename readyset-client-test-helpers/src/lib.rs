@@ -604,6 +604,10 @@ impl TestBuilder {
             self.backend_builder.get_default_ttl_ms(),
             self.backend_builder.get_default_coalesce_ms(),
             self.backend_builder.get_cache_mode(),
+            // A freshly-started test authority has no persisted shallow DDL, so this
+            // replay is a no-op; no RLS registry or coordinator is needed here.
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -727,6 +731,7 @@ impl TestBuilder {
                             status_reporter,
                             adapter_start_time,
                             shallow.clone(),
+                            None,
                             shallow_refresh_pool.clone(),
                         )
                         .await;

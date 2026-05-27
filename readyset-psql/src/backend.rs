@@ -143,6 +143,11 @@ impl ps::PsqlBackend for Backend {
             let _ = self.inner.set_user(user, password).await;
             self.inner.connectors.init_schema_search_path().await;
         }
+        // Stand up the RLS per-session security context with the
+        // authenticated `startup_user`. Subsequent SET / set_config /
+        // COMMIT traffic mirrors into this; MySQL leaves the slot
+        // empty.
+        self.inner.attach_session(user);
     }
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {

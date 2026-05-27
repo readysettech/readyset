@@ -37,7 +37,8 @@ use readyset_sql::Dialect;
 use readyset_sql::ast::ShallowCacheQuery;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    Expr, Function, ObjectName, TableFactor, TableSampleKind, Value, ValueWithSpan, Visit, Visitor,
+    Expr, Function, ObjectName, Query, SetExpr, TableFactor, TableSampleKind, Value, ValueWithSpan,
+    Visit, Visitor,
 };
 
 // Generated builtin-function allowlists, one sorted `BUILTINS: &[&str]` each.
@@ -47,6 +48,7 @@ mod pg_builtins;
 
 const REASON_NON_DETERMINISTIC: &str = "non-deterministic function";
 const REASON_SIDE_EFFECT: &str = "side-effecting function";
+const REASON_WRITE_IN_CTE: &str = "write statement inside a CTE body";
 const REASON_SYSTEM_SCHEMA: &str = "system schema reference";
 const REASON_SESSION_SPECIFIC: &str = "session-specific function";
 const REASON_USER_VARIABLE: &str = "user or session variable";
@@ -664,6 +666,21 @@ struct AutoCacheVisitor<'a> {
 impl Visitor for AutoCacheVisitor<'_> {
     type Break = ();
 
+    fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
+        // A CTE body can be a data-modifying statement (`WITH x AS (INSERT/UPDATE/DELETE
+        // ... RETURNING) SELECT ... FROM x`, the shape PostgREST emits for every mutation).
+        // Top-level write rejection does not catch these, and caching one would re-run the
+        // write on every hit. Unconditional: no opt-in flag relaxes it, because caching
+        // drops the mutation rather than merely returning stale rows.
+        if matches!(
+            &*query.body,
+            SetExpr::Insert(_) | SetExpr::Update(_) | SetExpr::Delete(_)
+        ) {
+            self.add_reason(REASON_WRITE_IN_CTE, None);
+        }
+        ControlFlow::Continue(())
+    }
+
     fn pre_visit_relation(&mut self, name: &ObjectName) -> ControlFlow<Self::Break> {
         if self.allow_system_schema {
             return ControlFlow::Continue(());
@@ -1068,6 +1085,36 @@ mod tests {
         assert!(
             msg.contains(expected_reason),
             "query {q:?} skipped as {msg:?}, expected mention of {expected_reason:?}"
+        );
+    }
+
+    #[test]
+    fn write_bearing_cte_is_blocked() {
+        // PostgREST emits every mutation as a data-modifying CTE wrapped in a SELECT.
+        for q in [
+            "WITH t AS (INSERT INTO users (name) VALUES ('a') RETURNING id) SELECT id FROM t",
+            "WITH t AS (UPDATE users SET name = 'a' WHERE id = 1 RETURNING id) SELECT id FROM t",
+            "WITH t AS (DELETE FROM users WHERE id = 1 RETURNING id) SELECT id FROM t",
+        ] {
+            assert_rejected(Dialect::PostgreSQL, q, REASON_WRITE_IN_CTE);
+        }
+    }
+
+    #[test]
+    fn write_bearing_cte_is_not_relaxed_by_allow_all_functions() {
+        // Caching a write drops the mutation, so no opt-in flag makes it eligible.
+        let q = "WITH t AS (INSERT INTO users (name) VALUES ('a') RETURNING id) SELECT id FROM t";
+        assert_eq!(
+            skip_reason_allow_all_functions(Dialect::PostgreSQL, q),
+            Some(REASON_WRITE_IN_CTE),
+        );
+    }
+
+    #[test]
+    fn read_only_cte_is_eligible() {
+        assert_eligible(
+            Dialect::PostgreSQL,
+            "WITH t AS (SELECT id FROM users WHERE id = 1) SELECT id FROM t",
         );
     }
 

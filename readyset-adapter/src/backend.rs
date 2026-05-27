@@ -78,6 +78,9 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::rls_coordinator::RlsCoordinator;
+use crate::session_context::{SessionContext, SetSessionEffect};
+use crate::shallow_key::{SessionInputValues, ShallowKey};
 use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
@@ -106,16 +109,18 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
 use readyset_metrics::metrics_handle;
+use readyset_rls::InvalidationSink;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult, ContentHash};
 use readyset_sql::ast::{
     self, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
-    CreateMcpTokenStatement, DeallocateStatement, DropAllCachesStatement, DropMcpTokenStatement,
-    ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
-    McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
-    SelectStatement, SetStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery, ShowStatement,
-    SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
+    CreateMcpTokenStatement, DeallocateStatement, DiscardObject, DiscardStatement,
+    DropAllCachesStatement, DropMcpTokenStatement, ExplainStatement, FlushCacheStatement,
+    McpTokenExpiresChange, McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions,
+    ReadysetHintDirective, Relation, SelectStatement, SessionAuthorizationValue,
+    SetSessionAuthorization, SetStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery,
+    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -143,6 +148,7 @@ use vec1::Vec1;
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::{ManualCacheEntry, QueryStatusCache};
+use crate::session_mutation::{self, SessionMutationTemplate};
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
@@ -216,6 +222,8 @@ enum PrepareMeta {
     Transaction { stmt: SqlQuery },
     /// A set command
     Set { stmt: SetStatement },
+    /// A `DISCARD` / `RESET ALL` full-session reset
+    Discard { stmt: DiscardStatement },
 }
 
 #[derive(Debug)]
@@ -636,6 +644,17 @@ pub struct BackendBuilder {
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
     shallow_cache_allowlist: ShallowCacheAllowlist,
+    /// Process-shared RLS policy registry. The adapter binary
+    /// constructs one at startup, hands it to the catalog poller, and
+    /// passes it through here so every per-connection Backend
+    /// consults the same view of pg_policy / pg_class / pg_roles.
+    /// `None` disables RLS: the analyzer gate is skipped and every
+    /// shallow cache is created Plain. MySQL deployments and
+    /// Postgres setups without a catalog poller (no upstream URL,
+    /// test harnesses) run in this mode; `readyset::NoriaAdapter::run`
+    /// refuses to start a Postgres adapter whose RLS bootstrap
+    /// failed, so production Postgres always carries `Some`.
+    policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
 }
 
 impl Default for BackendBuilder {
@@ -668,6 +687,7 @@ impl Default for BackendBuilder {
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
             shallow_cache_allowlist: ShallowCacheAllowlist::default(),
+            policy_registry: None,
         }
     }
 }
@@ -687,7 +707,8 @@ impl BackendBuilder {
         schema_handle: SchemaCatalogHandle,
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
-        shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+        shallow: Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
+        rls_coordinator: Option<Arc<RlsCoordinator<DB::CacheEntry>>>,
         shallow_refresh_pool: Option<Arc<ShallowRefreshPool<DB>>>,
     ) -> Backend<DB, Handler> {
         gauge!(metric::CONNECTED_CLIENTS).increment(1.0);
@@ -716,6 +737,7 @@ impl BackendBuilder {
                 noria,
                 upstream,
                 readyset_schema_session: None,
+                session: None,
             },
             state: BackendState {
                 client_addr: self.client_addr,
@@ -726,6 +748,7 @@ impl BackendBuilder {
                 last_query: None,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared_statements: Default::default(),
+                session_mutations: HashMap::new(),
                 unnamed_prepared_statements: Default::default(),
                 query_status_cache,
                 schema_handle,
@@ -739,6 +762,8 @@ impl BackendBuilder {
                 sampler_tx: self.sampler_tx,
                 is_internal_connection: false,
                 shallow,
+                policy_registry: self.policy_registry.clone(),
+                rls_coordinator,
                 shallow_refresh_pool,
                 db_version: self.db_version,
                 upstream_config: self.upstream_config,
@@ -947,6 +972,16 @@ impl BackendBuilder {
         self.readyset_schema = Some(readyset_schema);
         self
     }
+
+    /// Plumb a process-shared RLS policy registry into every Backend
+    /// the builder produces. Called by the adapter binary at startup
+    /// after it has spawned the catalog poller against the same
+    /// `Arc<PolicyRegistry>`; downstream connections then see policy
+    /// updates without per-connection state.
+    pub fn policy_registry(mut self, registry: Arc<readyset_rls::PolicyRegistry>) -> Self {
+        self.policy_registry = Some(registry);
+        self
+    }
 }
 
 /// A [`PreparedStatement`] stores the data needed for an immediate execution of a prepared
@@ -1099,6 +1134,12 @@ where
     upstream: Option<DB>,
     /// A current session with the Readyset schema.
     readyset_schema_session: Option<ReadysetSchemaSession>,
+    /// Per-Postgres-session security context, populated from
+    /// `StartupMessage.user` and then mutated by `SET` /
+    /// `set_config(...)` traffic. `None` on MySQL connections and on
+    /// Postgres connections that have not reached the per-session
+    /// initialisation hook yet.
+    pub session: Option<Arc<SessionContext>>,
 }
 
 impl<DB> BackendConnectors<DB>
@@ -1226,6 +1267,14 @@ where
     /// All queries previously prepared on noria or upstream. The position in the slab is the id to
     /// retrieve the prepared statement.
     prepared_statements: Slab<PreparedStatement<DB>>,
+    /// Recognised session-mutating templates indexed by prepared
+    /// statement id. The shallow-cache and proxy prepare paths null
+    /// out [`PreparedStatement::parsed_query`], so a hook that wanted
+    /// to peek at the AST at execute time would miss them. Recognise
+    /// the shape at prepare time (where the AST is still in hand)
+    /// and stash the typed template here for the execute-time
+    /// applier to consume.
+    session_mutations: HashMap<u32, SessionMutationTemplate>,
     /// For unnamed prepared statements, we need to prepare the statement on the upstream in
     /// order to get the types for the query. We store that metadata in `prepared_statements`,
     /// just like regular prepared statements. The difference is that the clients are not
@@ -1252,7 +1301,19 @@ where
     /// true if the backend connection is an internal connection (eg. from Query Sampler)
     is_internal_connection: bool,
     /// The adapter's shallow cache manager.
-    shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+    shallow: Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
+    /// Process-shared RLS policy registry. Populated by the catalog
+    /// poller; consulted by the analyzer at `CREATE CACHE` to decide
+    /// `Scoped` vs `Plain` backing and the set of GUCs to fold into
+    /// the lookup key. `None` disables RLS: the analyzer gate is
+    /// skipped and every shallow cache is created Plain.
+    policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
+    /// RLS coordinator bridging the generic shallow cache to the policy
+    /// registry: owns the per-cache scoped descriptors and the
+    /// relation/role reverse indices, builds lookup keys, and serves as
+    /// the catalog poller's invalidation sink. `None` disables RLS
+    /// scoping (MySQL, or Postgres without a catalog poller).
+    rls_coordinator: Option<Arc<RlsCoordinator<DB::CacheEntry>>>,
     /// Pool for shallow refresh workers
     shallow_refresh_pool: Option<Arc<ShallowRefreshPool<DB>>>,
     /// Memoized upstream database version.
@@ -1346,6 +1407,13 @@ where
             .map(|cache| cache.get_info());
 
         self.shallow.drop_cache(name, query_id.as_ref())?;
+
+        if let Some(coordinator) = &self.rls_coordinator {
+            let dropped_id = query_id.or_else(|| info.as_ref().map(|i| i.query_id));
+            if let Some(dropped_id) = dropped_id {
+                coordinator.unregister(&dropped_id);
+            }
+        }
 
         // The cache held the exact `CREATE CACHE` request that was persisted; remove that entry.
         // Matching the stored request (rather than the drop statement) also handles entries
@@ -1778,7 +1846,7 @@ where
     /// Results from upstream with optional pending shallow cache insert
     Upstream(
         DB::QueryResult<'a>,
-        Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
+        Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
         Option<&'a DB::ExecMeta>,
     ),
     /// Results from upstream that are explicitly buffered in a Vec (from postgres' Simple Query
@@ -2098,7 +2166,7 @@ where
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
-        cache: Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
+        cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let upstream = upstream.ok_or_else(|| {
             ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
@@ -2330,10 +2398,14 @@ where
             stmt,
             event,
         )?;
-        let res = if let (true, Some(upstream)) = (
-            self.state.proxy_state.should_proxy(),
-            self.connectors.upstream.as_mut(),
-        ) {
+        // A SET must always reach the upstream connection to take effect there,
+        // matching the simple-protocol path which proxies SET regardless of
+        // proxy state. `should_proxy()` governs ordinary reads, not session-
+        // mutating utility statements: gating on it dropped SET in autocommit,
+        // leaving the session mirror ahead of an upstream that never saw the
+        // statement. Fall back to a Noria no-op only with no upstream to carry
+        // the side effect.
+        let res = if let Some(upstream) = self.connectors.upstream.as_mut() {
             let prep = upstream.prepare(query, data, statement_type).await?;
             PrepareResultInner::Upstream(prep)
         } else {
@@ -2343,6 +2415,34 @@ where
         };
 
         Ok(res)
+    }
+
+    /// Prepare a `DISCARD` / `RESET ALL`: mirror the full-session reset into the
+    /// `SessionContext` (matching the simple-protocol pre-dispatch path) and
+    /// proxy the statement upstream so it takes effect on that connection. The
+    /// extended path otherwise routed `DISCARD` through `prepare_fallback`, which
+    /// proxies upstream but never resets the mirror, leaving stale role/GUC
+    /// state behind a reset session.
+    async fn prepare_discard(
+        &mut self,
+        stmt: &DiscardStatement,
+        query: &str,
+        data: DB::PrepareData<'_>,
+        statement_type: PreparedStatementType,
+    ) -> Result<PrepareResultInner<DB>, DB::Error> {
+        Self::check_routing(&self.connectors, &mut self.state).await?;
+
+        if stmt.object_type == DiscardObject::All
+            && let Some(session) = self.connectors.session.as_ref()
+        {
+            session.discard_all();
+        }
+
+        let Some(upstream) = self.connectors.upstream.as_mut() else {
+            return Err(unsupported_err!("DISCARD not supported without an upstream").into());
+        };
+        let prep = upstream.prepare(query, data, statement_type).await?;
+        Ok(PrepareResultInner::Upstream(prep))
     }
 
     /// Provides metadata required to prepare a select query
@@ -2502,6 +2602,7 @@ where
                 | query @ SqlQuery::Rollback(_),
             ) => PrepareMeta::Transaction { stmt: query },
             Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
+            Ok(SqlQuery::Discard(d)) => PrepareMeta::Discard { stmt: d },
             Ok(pq) => {
                 debug!(
                     statement = %pq.display(self.settings.dialect),
@@ -2555,6 +2656,10 @@ where
             }
             PrepareMeta::Set { stmt } => {
                 self.prepare_set(stmt, query, data, statement_type, event)
+                    .await
+            }
+            PrepareMeta::Discard { stmt } => {
+                self.prepare_discard(stmt, query, data, statement_type)
                     .await
             }
             PrepareMeta::Proxy
@@ -2617,6 +2722,18 @@ where
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
+                view_request: None,
+                shallow: None,
+                trx_cache_policy: TrxCachePolicy::Never,
+                params: None,
+                is_skip_cache,
+            },
+            PrepareMeta::Discard { stmt } => PreparedStatement {
+                query_id: None,
+                prep: PrepareResult::new(statement_id, prep),
+                migration_state: MigrationState::Successful(CacheType::Deep),
+                execution_info: None,
+                parsed_query: Some(Arc::new(SqlQuery::Discard(stmt))),
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -2702,6 +2819,16 @@ where
             .vacant_key()
             .try_into()
             .expect("Cannot prepare more than u32::MAX statements with a single connection");
+        // Recognise session-mutating shapes (PostgREST's set_config
+        // batch today; SET LOCAL / SET ROLE via Parse/Bind in future
+        // variants) at prepare time, while the parsed AST is still
+        // available -- it gets nulled out on the shallow-cache and
+        // proxy paths inside `create_prepared_statement`.
+        if let Some(parsed) = parse_query(&self.settings, query).ok().as_ref()
+            && let Some(template) = session_mutation::recognize(parsed)
+        {
+            self.state.session_mutations.insert(next_id, template);
+        }
         let prepared_statement = self.create_prepared_statement(meta, prep, next_id, is_skip_cache);
         let statement_id = self.state.prepared_statements.insert(prepared_statement) as StatementId;
         assert_eq!(next_id, statement_id);
@@ -2800,7 +2927,7 @@ where
         shallow_exec_meta: Option<&DB::ShallowExecMeta>,
         event: &mut QueryExecutionEvent,
         is_fallback: bool,
-        cache: Option<CacheInsertGuard<Vec<DfValue>, DB::CacheEntry>>,
+        cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         if is_fallback {
             event.destination = Some(QueryDestination::ReadysetThenUpstream);
@@ -2825,7 +2952,9 @@ where
     #[allow(clippy::too_many_arguments)]
     async fn execute_shallow<'a>(
         upstream: &'a mut DB,
-        shallow: &Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
+        shallow: &Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
+        coordinator: Option<&Arc<RlsCoordinator<DB::CacheEntry>>>,
+        session: Option<&Arc<SessionContext>>,
         prep: &UpstreamPrepare<DB>,
         params: &[DfValue],
         exec_meta: &'a DB::ExecMeta,
@@ -2836,10 +2965,46 @@ where
         view_request: &ShallowViewRequest,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
-        let key = query_params.make_keys_from_merged(&merged)?;
+        let params_key = query_params.make_keys_from_merged(&merged)?;
         let start = Instant::now();
+
+        // Assemble the key's session half. With no coordinator (RLS
+        // disabled) it stays empty and every cache is plain. A scoped
+        // cache whose session values cannot be resolved safely refuses;
+        // we then serve from upstream uncached rather than risk a
+        // cross-tenant entry.
+        let mut session_values = SessionInputValues::default();
+        if let Some(coordinator) = coordinator
+            && coordinator
+                .fill_rls_session_inputs(query_id, session.map(|s| s.as_ref()), &mut session_values)
+                .is_err()
+        {
+            let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
+            return Self::execute_upstream(
+                upstream,
+                prep,
+                params,
+                exec_meta,
+                Some(&shallow_exec_meta),
+                event,
+                false,
+                None,
+            )
+            .await;
+        }
+        let shallow_key = ShallowKey {
+            params: params_key,
+            session: session_values,
+        };
+
+        // An entry keyed on session state must not refresh through the
+        // session-less pool: a refresh worker has no session to resolve
+        // those values, so it would refill under a stale or bypass key.
+        // Serve such a hit without scheduling a refresh.
+        let session_keyed = !shallow_key.session.is_empty();
+
         let res = shallow
-            .get_or_start_insert(query_id, key, DB::is_meta_compatible)
+            .get_or_start_insert(query_id, shallow_key, DB::is_meta_compatible)
             .await;
 
         match res {
@@ -2854,7 +3019,7 @@ where
                 event.readyset_event = Some(ReadysetExecutionEvent::Other {
                     duration: start.elapsed(),
                 });
-                if let Some(refresh) = refresh {
+                if let (false, Some(refresh)) = (session_keyed, refresh) {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let query =
                         query_params.literalize_from_merged(&view_request.query, &merged)?;
@@ -2876,7 +3041,7 @@ where
                 let query = query_params.literalize_from_merged(&view_request.query, &merged)?;
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
 
-                if let Some(refresh) = refresh
+                if let (false, Some(refresh)) = (session_keyed, refresh)
                     && cache.is_scheduled()
                 {
                     let callback = {
@@ -3037,6 +3202,36 @@ where
         upstream
             .as_mut()
             .ok_or_else(|| internal_err!("Execution upstream requires an upstream"))
+    }
+
+    /// Attach a per-Postgres-connection [`SessionContext`] populated
+    /// from the authenticated `startup_user`.
+    ///
+    /// Called by the PG-specific backend after `set_auth_info` so that
+    /// every subsequent code path that mirrors session state into the
+    /// cache key (textual SET, set_config, COMMIT/ROLLBACK, etc.) has
+    /// somewhere to write. The MySQL path leaves the field as `None`.
+    pub fn attach_session(&mut self, startup_user: &str) {
+        // Snapshot the login role's default GUCs once, here at connection time:
+        // Postgres applies `ALTER ROLE ... SET` defaults at login and does not
+        // reprocess them on later SET ROLE / SET SESSION AUTHORIZATION, so the
+        // snapshot is frozen for the session's life.
+        let (role_default_gucs, role_defaults_available) = match self.state.policy_registry.as_ref()
+        {
+            Some(registry) => (
+                registry
+                    .role_default_gucs_for(startup_user)
+                    .map(|g| (*g).clone())
+                    .unwrap_or_default(),
+                registry.role_defaults_available(),
+            ),
+            None => (HashMap::new(), false),
+        };
+        self.connectors.session = Some(SessionContext::with_role_defaults(
+            readyset_sql::ast::SqlIdentifier::from(startup_user),
+            role_default_gucs,
+            role_defaults_available,
+        ));
     }
 
     /// Executes a prepared statement identified by `id` with parameters specified by the client
@@ -3325,6 +3520,8 @@ where
                 Self::execute_shallow(
                     Self::upstream_mut(upstream)?,
                     &self.state.shallow,
+                    self.state.rls_coordinator.as_ref(),
+                    self.connectors.session.as_ref(),
                     prep,
                     params,
                     exec_meta,
@@ -3337,6 +3534,37 @@ where
                 .await
             }
         };
+
+        // Mirror a session-mutating prepared statement (PostgREST's set_config
+        // batch today; future SET LOCAL / SET ROLE shapes tomorrow) into the
+        // per-connection SessionContext so the RLS shallow cache sees the bound
+        // role and JWT claims for the next user query. Only after the upstream
+        // has applied it: mirroring before dispatch would leave our tracking
+        // state ahead of the database if the statement failed, and a later read
+        // would key against a role / JWT / GUC the upstream never adopted. The
+        // template was recognised at prepare time and indexed by statement id;
+        // non-matching statements miss cheaply. With RLS disabled there are no
+        // scoped caches to key, so the mirror is skipped.
+        if result.is_ok()
+            && let Some(registry) = self.state.policy_registry.as_ref()
+            && let Some(session) = self.connectors.session.as_ref()
+            && let Some(template) = self.state.session_mutations.get(&id)
+        {
+            session_mutation::apply(template, params, session, registry);
+        }
+
+        // Mirror a prepared `SET [LOCAL] SESSION AUTHORIZATION` once upstream
+        // has applied it, matching `query_adhoc_non_select` on the simple
+        // path. Without this the extended protocol changes the upstream
+        // identity while the mirror keeps the old one, and later scoped
+        // lookups would key against a stale partition.
+        if result.is_ok()
+            && let Some(session) = self.connectors.session.as_ref()
+            && let Some(SqlQuery::Set(SetStatement::SessionAuthorization(auth))) =
+                cached_statement.parsed_query.as_deref()
+        {
+            Self::mirror_session_authorization(session, self.state.policy_registry.as_ref(), auth);
+        }
 
         if let Some(q) = &cached_statement.parsed_query {
             Self::update_transaction_boundaries(
@@ -3391,6 +3619,7 @@ where
         let mut dealloc_id = deallocate_id.clone();
         match deallocate_id {
             DeallocateId::Numeric(id) => {
+                self.state.session_mutations.remove(&id);
                 if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
                     match statement.prep.into_upstream() {
                         Some(ur) => {
@@ -3406,6 +3635,7 @@ where
             }
             DeallocateId::All => {
                 self.state.prepared_statements.clear();
+                self.state.session_mutations.clear();
             }
             DeallocateId::Named(_) => {}
         }
@@ -3797,6 +4027,59 @@ where
         quiet: bool,
     ) -> ReadySetResult<()> {
         ddl_req.cache_name = Some(name.clone());
+
+        // RLS analyzer gate, active only when a policy registry is
+        // wired (RLS enabled). Resolves the cacheability verdict
+        // against the registry; a `Refuse` returns the typed reason so
+        // EXPLAIN CACHE SUPPORT can surface it. An unresolved relation
+        // is fail-closed: the analyzer cannot decide RLS status against
+        // a table the registry has not yet observed, so we refuse the
+        // cache rather than fall through to a `Plain` backing. With
+        // RLS disabled every cache is created Plain.
+        // The relations and RLS analysis to register with the coordinator
+        // after the cache is created. `None` means RLS is disabled (no
+        // registry); the cache is plain and not coordinator-tracked.
+        let mut rls_registration: Option<(Vec<readyset_rls::Oid>, readyset_rls::CacheSessionDeps)> =
+            None;
+        if let Some(registry) = &state.policy_registry {
+            let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
+                &shallow.query,
+                registry,
+                &shallow.schema_search_path,
+            ) {
+                Ok(oids) => oids,
+                Err(unknown) => {
+                    let joined: Vec<String> = unknown.iter().map(|u| u.qualified()).collect();
+                    return Err(ReadySetError::Internal(format!(
+                        "rls_uncacheable[code=unknown_relation, relations={}]",
+                        joined.join(",")
+                    )));
+                }
+            };
+            let analysis = readyset_rls::analyze_cache(registry, &referenced_relations);
+            if let readyset_rls::Cacheability::Refuse(reason) = &analysis.cacheability {
+                // Structured form (RLS-20): downstream EXPLAIN CACHE
+                // SUPPORT / MCP tooling switches on `reason.code()`
+                // rather than parsing the human-readable text.
+                return Err(ReadySetError::Internal(reason.structured_display()));
+            }
+            // Track every query-referenced relation, not only the
+            // currently RLS-active ones, so RLS-6 lifecycle catches a
+            // Plain cache when relrowsecurity later flips true on a
+            // table the cache references. Also include the analyzer's
+            // expanded RLS tables: for a view query the referenced relation
+            // is the view, but invalidation must key on the underlying base
+            // tables the policies live on, or a base-table policy change
+            // would never invalidate the view's cache.
+            let mut relations: Vec<readyset_rls::Oid> = referenced_relations;
+            for &t in analysis.rls_active_for_tables.iter() {
+                if !relations.contains(&t) {
+                    relations.push(t);
+                }
+            }
+            rls_registration = Some((relations, analysis));
+        }
+
         state
             .authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
@@ -3819,6 +4102,53 @@ where
                 // Success or concurrent creation race — update status cache
                 // either way. ViewAlreadyExists is not a real failure: the
                 // cache exists, so we must NOT remove the DDL.
+
+                // Register the freshly-created cache with the coordinator.
+                // An RLS-active analysis registers a scoped descriptor; a
+                // plain cache that still references RLS-eligible relations
+                // registers relation-only so `on_rls_flag_enabled` can find
+                // it when its relation later turns RLS-active.
+                if matches!(res, Ok(()))
+                    && let Some(coordinator) = &state.rls_coordinator
+                    && let Some((relations, analysis)) = &rls_registration
+                {
+                    if analysis.rls_active_for_tables.is_empty() {
+                        coordinator.register_relations(query_id, relations.clone());
+                    } else {
+                        coordinator.register_scoped(
+                            query_id,
+                            analysis.session_rls_inputs.clone(),
+                            relations.clone(),
+                        );
+                    }
+
+                    // Close the analyze->register race: the analyzer captured
+                    // `analysis.snapshot_generation`, but a catalog poll reload
+                    // can bump the generation and run its invalidation pass
+                    // before this cache entered the reverse index, skipping it.
+                    // If the generation advanced, re-apply the missed pass over
+                    // every tracked relation now that the cache is registered,
+                    // mirroring the poller's dispatch: a policy change refreshes
+                    // a scoped descriptor, and a relation that turned RLS-active
+                    // drops a plain cache that would otherwise serve one tenant's
+                    // rows to all. Iterating only `rls_active_for_tables` would
+                    // miss the plain-cache case, whose set is empty.
+                    if let Some(registry) = &state.policy_registry
+                        && registry.generation() != analysis.snapshot_generation
+                    {
+                        for &relid in relations.iter() {
+                            coordinator.on_relation_changed(relid);
+                            let now_rls_active = registry
+                                .flags_for(relid)
+                                .map(|f| f.relrowsecurity)
+                                .unwrap_or(false);
+                            if now_rls_active {
+                                coordinator.on_rls_flag_enabled(relid);
+                            }
+                        }
+                    }
+                }
+
                 state.query_status_cache.update_query_migration_state(
                     shallow,
                     MigrationState::Successful(CacheType::Shallow),
@@ -4267,6 +4597,9 @@ where
                 .remove_all_shallow_cache_ddl_requests()
                 .await?;
             state.shallow.drop_all_caches();
+            if let Some(coordinator) = &state.rls_coordinator {
+                coordinator.clear();
+            }
         }
         state.query_status_cache.clear(cache_type);
         state.prepared_statements.iter_mut().for_each(
@@ -5411,11 +5744,33 @@ where
         event: &mut QueryExecutionEvent,
         params: ShallowQueryParameters,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let key = params.make_keys(&[])?;
+        let params_key = params.make_keys(&[])?;
         let start = Instant::now();
+
+        let mut session_values = SessionInputValues::default();
+        if let Some(coordinator) = state.rls_coordinator.as_ref()
+            && coordinator
+                .fill_rls_session_inputs(
+                    &query_id,
+                    connectors.session.as_ref().map(|s| s.as_ref()),
+                    &mut session_values,
+                )
+                .is_err()
+        {
+            return Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await;
+        }
+        let shallow_key = ShallowKey {
+            params: params_key,
+            session: session_values,
+        };
+
+        // An entry keyed on session state does not refresh via the
+        // session-less pool, which has no session to resolve those values.
+        let session_keyed = !shallow_key.session.is_empty();
+
         let res = state
             .shallow
-            .get_or_start_insert(&query_id, key, |_| true)
+            .get_or_start_insert(&query_id, shallow_key, |_| true)
             .await;
 
         match res {
@@ -5427,7 +5782,8 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::HitAndRefresh(values, cache) => {
-                if let Some(refresh) = state.shallow_refresh_pool.as_ref() {
+                if let (false, Some(refresh)) = (session_keyed, state.shallow_refresh_pool.as_ref())
+                {
                     let request = ShallowRefreshRequest {
                         query_id,
                         path: connectors.noria.schema_search_path().to_vec(),
@@ -5445,7 +5801,7 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(mut cache) => {
-                if let Some(refresh) = state.shallow_refresh_pool.as_ref()
+                if let (false, Some(refresh)) = (session_keyed, state.shallow_refresh_pool.as_ref())
                     && cache.is_scheduled()
                 {
                     let refresh = refresh.clone();
@@ -5996,7 +6352,56 @@ where
             connectors.noria.set_timezone(tz);
         }
 
+        // Mirror the SET into the per-connection SessionContext so the
+        // RLS shallow cache can hash by the relevant subset of session
+        // state. `SET ROLE` resolves `bypass_rls` against the policy
+        // registry: a role known to carry `rolsuper` or `rolbypassrls`
+        // collapses onto the shared bypass partition.
+        if let Some(session) = connectors.session.as_ref() {
+            match session.apply_set_statement(set) {
+                SetSessionEffect::None | SetSessionEffect::RoleReset => {}
+                SetSessionEffect::RoleSet { role, scope } => {
+                    let bypass = state
+                        .policy_registry
+                        .as_ref()
+                        .is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
+                    let local = matches!(
+                        scope,
+                        Some(readyset_sql::ast::PostgresParameterScope::Local)
+                    );
+                    session.set_effective_role_scoped(role, bypass, local);
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    /// Mirror a `SET [LOCAL] SESSION AUTHORIZATION` into the session context,
+    /// called only after upstream accepted the statement.
+    ///
+    /// A session-scope change (`local = false`) resolves to a concrete identity
+    /// -- `DEFAULT` (and `RESET SESSION AUTHORIZATION`) to the startup user, a
+    /// named user directly -- with `bypass_rls` resolved against the policy
+    /// registry, and updates the mirror so later reads partition by it. A
+    /// transaction-local change (`local = true`) reverts at the transaction
+    /// boundary, which the mirror cannot model for `session_user`, so it fails
+    /// closed (transaction-scoped) until `COMMIT` / `ROLLBACK`.
+    fn mirror_session_authorization(
+        session: &SessionContext,
+        policy_registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
+        auth: &SetSessionAuthorization,
+    ) {
+        if auth.local {
+            session.mark_transaction_untrusted();
+            return;
+        }
+        let role = match &auth.value {
+            SessionAuthorizationValue::Default => session.startup_user.clone(),
+            SessionAuthorizationValue::User(user) => user.clone(),
+        };
+        let bypass = policy_registry.is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
+        session.apply_session_authorization(role, bypass);
     }
 
     async fn query_adhoc_non_select<'a>(
@@ -6012,6 +6417,18 @@ where
             SqlQuery::Use(UseStatement { database }) => connectors
                 .noria
                 .set_schema_search_path(vec![database.clone()]),
+            SqlQuery::Commit(_) | SqlQuery::Rollback(_) => {
+                // `ROLLBACK TO SAVEPOINT` does not end the transaction, so it
+                // must not revert transaction-local RLS state or clear a
+                // transaction-scoped trust gap.
+                let ends_transaction = match &query {
+                    SqlQuery::Rollback(rollback_stmt) => rollback_stmt.ends_transaction(),
+                    _ => true,
+                };
+                if ends_transaction && let Some(session) = connectors.session.as_ref() {
+                    session.on_trx_end();
+                }
+            }
             _ => (),
         }
 
@@ -6046,8 +6463,25 @@ where
                             .await
                             .map(|r| QueryResult::Upstream(r, None, None))
                     }
-                    SqlQuery::Set(_)
-                    | SqlQuery::CompoundSelect(_)
+                    SqlQuery::Set(set) => {
+                        event.sql_type = SqlQueryType::Other;
+                        let result = upstream.query(raw_query).await?;
+                        // Mirror a session-authorization identity change only
+                        // now that upstream has accepted it: a rejected
+                        // statement must not leave the session mirror pointing
+                        // at an identity upstream never adopted.
+                        if let SetStatement::SessionAuthorization(auth) = &set
+                            && let Some(session) = connectors.session.as_ref()
+                        {
+                            Self::mirror_session_authorization(
+                                session,
+                                state.policy_registry.as_ref(),
+                                auth,
+                            );
+                        }
+                        Ok(QueryResult::Upstream(result, None, None))
+                    }
+                    SqlQuery::CompoundSelect(_)
                     | SqlQuery::Show(_)
                     | SqlQuery::Discard(_)
                     | SqlQuery::Comment(_) => {
@@ -6206,6 +6640,35 @@ where
             convert_or_parse_query(settings, deep_ast, query)
         };
 
+        // Mirror full-session resets into the SessionContext before the query
+        // runs. `DISCARD ALL` / `RESET ALL` fully reset run-time state. A `SET
+        // [LOCAL] SESSION AUTHORIZATION` identity change is mirrored separately,
+        // *after* upstream accepts it (see `query_adhoc_non_select`), so a
+        // rejected statement cannot leave the mirror pointing at an identity
+        // upstream never adopted.
+        if let Some(session) = connectors.session.as_ref() {
+            match &parsed {
+                Ok(SqlQuery::Discard(d)) if d.object_type == DiscardObject::All => {
+                    session.discard_all()
+                }
+                _ => {}
+            }
+        }
+
+        // Mirror a simple-protocol `set_config(...)` batch into the session.
+        // The extended protocol recognizes it at prepare and applies it at
+        // execute with the bound parameters; the simple path carries no bound
+        // params, so the literal-valued form is recognized and applied here
+        // (an empty parameter vector resolves the literal sources, and any
+        // stray `$N` source resolves to nothing and fails the batch closed).
+        if let Some(session) = connectors.session.as_ref()
+            && let Some(registry) = state.policy_registry.as_ref()
+            && let Ok(q) = &parsed
+            && let Some(template) = session_mutation::recognize(q)
+        {
+            session_mutation::apply(&template, &[], session, registry);
+        }
+
         if let Some(result) = Self::check_readyset_schema_routing(state, &parsed) {
             return Ok(result);
         }
@@ -6300,6 +6763,21 @@ where
             Ok(SqlQuery::Set(s))
                 if Handler::handle_set_statement(&s).set_autocommit == Some(true) =>
             {
+                Self::query_adhoc_non_select(
+                    connectors,
+                    settings,
+                    state,
+                    query,
+                    event,
+                    SqlQuery::Set(s),
+                )
+                .await
+            }
+            // SET [LOCAL] SESSION AUTHORIZATION must reach `query_adhoc_non_select`
+            // even inside a transaction (where the proxy path would otherwise
+            // forward it without mirroring), so the identity is mirrored into the
+            // session after upstream accepts it.
+            Ok(SqlQuery::Set(s @ SetStatement::SessionAuthorization(_))) => {
                 Self::query_adhoc_non_select(
                     connectors,
                     settings,
@@ -6729,10 +7207,30 @@ async fn remove_ddl_on_error<T, F, Fut>(
     }
 }
 
-/// Recreate shallow caches from stored DDL requests on adapter startup.
+/// Outcome of a single DDL's recovery attempt.
+#[derive(Debug)]
+pub enum RecoveryOutcome {
+    /// The cache was recreated.
+    Done,
+    /// Recovery couldn't complete: one or more referenced relations
+    /// aren't in the registry yet (the catalog poller hasn't seen
+    /// them). The caller's retry loop tries again after the next
+    /// poll tick.
+    Deferred { unknown: Vec<String> },
+    /// Recovery is permanently impossible — the analyzer Refused,
+    /// or the parsed statement is non-recoverable. DDL is dropped.
+    Skipped { reason: String },
+}
+
+/// Recreate shallow caches from stored DDL requests on adapter
+/// startup. DDLs that couldn't be recovered immediately (because
+/// the catalog poller hasn't observed the referenced relations yet)
+/// are retried by a background task that re-attempts every
+/// `retry_interval` until either success or exhaustion of the retry
+/// budget.
 #[allow(clippy::too_many_arguments)]
 pub async fn recreate_shallow_caches<V>(
-    shallow: Arc<CacheManager<Vec<DfValue>, V>>,
+    shallow: Arc<CacheManager<ShallowKey, V>>,
     query_status_cache: &'static QueryStatusCache,
     ddl_requests: Vec<CacheDDLRequest>,
     parsing_preset: ParsingPreset,
@@ -6740,32 +7238,154 @@ pub async fn recreate_shallow_caches<V>(
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
     cache_mode: CacheMode,
+    policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
+    coordinator: Option<Arc<RlsCoordinator<V>>>,
 ) -> ReadySetResult<()>
 where
     V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
+    let mut deferred: Vec<CacheDDLRequest> = Vec::new();
     for req in ddl_requests {
-        if let Err(e) = handle_shallow_cache_statement(
+        let schema = req
+            .schema_search_path
+            .first()
+            .map(|s| s.as_str().to_owned())
+            .unwrap_or_default();
+        match handle_shallow_cache_statement(
             &shallow,
+            coordinator.as_ref(),
             query_status_cache,
-            req,
+            req.clone(),
             parsing_preset,
             rewrite_params,
             default_ttl_ms,
             default_coalesce_ms,
             cache_mode,
+            policy_registry.as_ref(),
         )
         .await
         {
-            warn!(error = %e, "Failed to handle shallow cache statement");
+            Ok(RecoveryOutcome::Done) => {}
+            Ok(RecoveryOutcome::Deferred { unknown }) => {
+                info!(
+                    schema = %schema,
+                    unknown = ?unknown,
+                    "deferring shallow cache recovery until next poll tick"
+                );
+                deferred.push(req);
+            }
+            Ok(RecoveryOutcome::Skipped { reason }) => {
+                warn!(
+                    schema = %schema,
+                    reason = %reason,
+                    "skipping recovery of shallow cache; upstream schema state makes it uncacheable"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to handle shallow cache statement");
+            }
         }
+    }
+
+    if let Some(registry) = policy_registry.clone()
+        && !deferred.is_empty()
+    {
+        let shallow = Arc::clone(&shallow);
+        tokio::spawn(retry_deferred_recoveries(
+            shallow,
+            query_status_cache,
+            deferred,
+            parsing_preset,
+            rewrite_params,
+            default_ttl_ms,
+            default_coalesce_ms,
+            cache_mode,
+            registry,
+            coordinator.clone(),
+        ));
     }
     Ok(())
 }
 
+/// Interval between retry attempts for deferred recoveries.
+const RECOVERY_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Total budget for retry attempts before giving up. With a 30s
+/// interval, this covers ~5 minutes of upstream catalog lag at boot.
+const RECOVERY_RETRY_MAX_ATTEMPTS: u32 = 10;
+
+#[allow(clippy::too_many_arguments)]
+async fn retry_deferred_recoveries<V>(
+    shallow: Arc<CacheManager<ShallowKey, V>>,
+    query_status_cache: &'static QueryStatusCache,
+    mut pending: Vec<CacheDDLRequest>,
+    parsing_preset: ParsingPreset,
+    rewrite_params: AdapterRewriteParams,
+    default_ttl_ms: u64,
+    default_coalesce_ms: u64,
+    cache_mode: CacheMode,
+    policy_registry: Arc<readyset_rls::PolicyRegistry>,
+    coordinator: Option<Arc<RlsCoordinator<V>>>,
+) where
+    V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
+{
+    for attempt in 1..=RECOVERY_RETRY_MAX_ATTEMPTS {
+        tokio::time::sleep(RECOVERY_RETRY_INTERVAL).await;
+        if pending.is_empty() {
+            return;
+        }
+        let mut still_pending = Vec::new();
+        for req in pending.drain(..) {
+            match handle_shallow_cache_statement(
+                &shallow,
+                coordinator.as_ref(),
+                query_status_cache,
+                req.clone(),
+                parsing_preset,
+                rewrite_params,
+                default_ttl_ms,
+                default_coalesce_ms,
+                cache_mode,
+                Some(&policy_registry),
+            )
+            .await
+            {
+                Ok(RecoveryOutcome::Done) => {
+                    info!(
+                        attempt,
+                        "deferred shallow cache recovery succeeded on retry"
+                    );
+                }
+                Ok(RecoveryOutcome::Deferred { .. }) => {
+                    still_pending.push(req);
+                }
+                Ok(RecoveryOutcome::Skipped { reason }) => {
+                    warn!(
+                        attempt,
+                        reason = %reason,
+                        "deferred recovery permanently refused on retry"
+                    );
+                }
+                Err(e) => {
+                    warn!(attempt, error = %e, "deferred recovery retry errored");
+                }
+            }
+        }
+        pending = still_pending;
+    }
+    if !pending.is_empty() {
+        warn!(
+            pending = pending.len(),
+            attempts = RECOVERY_RETRY_MAX_ATTEMPTS,
+            "abandoning deferred shallow cache recoveries; referenced relations \
+             never reached the registry within the retry budget"
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_shallow_cache_statement<V>(
-    shallow: &CacheManager<Vec<DfValue>, V>,
+    shallow: &CacheManager<ShallowKey, V>,
+    coordinator: Option<&Arc<RlsCoordinator<V>>>,
     query_status_cache: &'static QueryStatusCache,
     req: CacheDDLRequest,
     parsing_preset: ParsingPreset,
@@ -6773,7 +7393,8 @@ async fn handle_shallow_cache_statement<V>(
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
     cache_mode: CacheMode,
-) -> ReadySetResult<()>
+    policy_registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
+) -> ReadySetResult<RecoveryOutcome>
 where
     V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
@@ -6787,6 +7408,7 @@ where
         SqlQuery::CreateCache(create_stmt) => {
             recover_shallow_cache_create(
                 shallow,
+                coordinator,
                 query_status_cache,
                 create_stmt,
                 req.schema_search_path.clone(),
@@ -6795,6 +7417,7 @@ where
                 default_ttl_ms,
                 default_coalesce_ms,
                 cache_mode,
+                policy_registry,
             )
             .await
         }
@@ -6804,7 +7427,8 @@ where
 
 #[allow(clippy::too_many_arguments)]
 async fn recover_shallow_cache_create<V>(
-    shallow: &CacheManager<Vec<DfValue>, V>,
+    shallow: &CacheManager<ShallowKey, V>,
+    coordinator: Option<&Arc<RlsCoordinator<V>>>,
     query_status_cache: &'static QueryStatusCache,
     stmt: CreateCacheStatement,
     schema_search_path: Vec<SqlIdentifier>,
@@ -6813,7 +7437,8 @@ async fn recover_shallow_cache_create<V>(
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
     cache_mode: CacheMode,
-) -> ReadySetResult<()>
+    policy_registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
+) -> ReadySetResult<RecoveryOutcome>
 where
     V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
@@ -6835,6 +7460,31 @@ where
 
     let query_id = QueryId::from_shallow_query(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());
+    let display_name = name.display_unquoted().to_string();
+
+    // Run the RLS analyzer at recovery time too. Without this a cache
+    // persisted under a previous run that targeted a now-RLS-protected
+    // table would come back as `Plain` and serve cross-tenant rows on
+    // startup.
+    let registration =
+        match analyze_recovered_cache(policy_registry, &select_stmt, &schema_search_path) {
+            RecoveryDeps::Plain => None,
+            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+            RecoveryDeps::Scoped {
+                relations,
+                session_rls_inputs,
+            } => Some((relations, Some(session_rls_inputs))),
+            RecoveryDeps::WaitForPoll { unknown } => {
+                return Ok(RecoveryOutcome::Deferred {
+                    unknown: unknown.iter().map(|u| u.qualified()).collect(),
+                });
+            }
+            RecoveryDeps::Skip { reason } => {
+                return Ok(RecoveryOutcome::Skipped {
+                    reason: format!("{display_name}: {reason}"),
+                });
+            }
+        };
 
     shallow.create_cache(
         Some(name),
@@ -6848,6 +7498,16 @@ where
         stmt.adaptive,
     )?;
 
+    if let (Some(coordinator), Some((relations, session_rls_inputs))) = (coordinator, registration)
+    {
+        match session_rls_inputs {
+            Some(inputs) => {
+                coordinator.register_scoped(query_id, inputs, relations);
+            }
+            None => coordinator.register_relations(query_id, relations),
+        }
+    }
+
     query_status_cache.update_query_migration_state(
         &ShallowViewRequest::new(select_stmt.clone(), schema_search_path.clone()),
         MigrationState::Successful(CacheType::Shallow),
@@ -6858,7 +7518,75 @@ where
         stmt.trx_cache_policy,
     );
 
-    Ok(())
+    Ok(RecoveryOutcome::Done)
+}
+
+enum RecoveryDeps {
+    /// RLS disabled: plain cache, not coordinator-tracked.
+    Plain,
+    /// Plain cache that references RLS-eligible relations. Register the
+    /// relations so an RLS flag flip on one of them later drops the cache.
+    PlainTracked { relations: Vec<readyset_rls::Oid> },
+    /// RLS-active: scoped cache keyed on `session_rls_inputs`.
+    Scoped {
+        relations: Vec<readyset_rls::Oid>,
+        session_rls_inputs: Arc<[readyset_rls::SessionInputType]>,
+    },
+    /// Registry doesn't have the referenced relations yet (catalog
+    /// poller hasn't observed them) but they may become resolvable
+    /// after the next successful poll. Caller defers this DDL and
+    /// retries later.
+    WaitForPoll {
+        unknown: Vec<crate::rls_relations::UnknownRelation>,
+    },
+    /// Permanent skip: analyzer Refused or the cache type is
+    /// otherwise unrecoverable. Caller drops the DDL.
+    Skip { reason: String },
+}
+
+fn analyze_recovered_cache(
+    registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
+    select_stmt: &readyset_sql::ast::ShallowCacheQuery,
+    schema_search_path: &[SqlIdentifier],
+) -> RecoveryDeps {
+    let Some(registry) = registry else {
+        return RecoveryDeps::Plain;
+    };
+    let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
+        select_stmt,
+        registry,
+        schema_search_path,
+    ) {
+        Ok(oids) => oids,
+        Err(unknown) => {
+            // Registry may not have caught up yet. Defer rather
+            // than permanently dropping; the retry loop tries
+            // again after the next poll tick.
+            return RecoveryDeps::WaitForPoll { unknown };
+        }
+    };
+    let deps = readyset_rls::analyze_cache(registry, &referenced_relations);
+    // Include the analyzer's expanded RLS tables so invalidation keys on
+    // a view's underlying base tables, not just the query-referenced
+    // relation (the view itself).
+    let mut relations: Vec<readyset_rls::Oid> = referenced_relations;
+    for &t in deps.rls_active_for_tables.iter() {
+        if !relations.contains(&t) {
+            relations.push(t);
+        }
+    }
+    match deps.cacheability {
+        readyset_rls::Cacheability::Cacheable if !deps.rls_active_for_tables.is_empty() => {
+            RecoveryDeps::Scoped {
+                relations,
+                session_rls_inputs: deps.session_rls_inputs,
+            }
+        }
+        readyset_rls::Cacheability::Cacheable => RecoveryDeps::PlainTracked { relations },
+        readyset_rls::Cacheability::Refuse(reason) => RecoveryDeps::Skip {
+            reason: reason.structured_display(),
+        },
+    }
 }
 
 #[cfg(test)]
@@ -7194,7 +7922,7 @@ mod tests {
     #[test]
     fn skip_reason_for_distinguishes_until_write_after_write() {
         // UntilWrite + had_write: dashboards see "trx_after_write" so the rollout impact on
-        // the Supabase auto-cache configuration is observable.
+        // the auto-cache configuration is observable.
         for state in [ProxyState::InTransaction, ProxyState::AutocommitOff] {
             assert_eq!(
                 state.skip_reason_for(TrxCachePolicy::UntilWrite, true, false),

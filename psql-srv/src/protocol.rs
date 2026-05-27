@@ -396,6 +396,12 @@ impl Protocol {
             database.ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
         let response = match backend.on_init(database.borrow()).await? {
             crate::CredentialsNeeded::None => {
+                // Establish the session even with authentication disabled, so
+                // the per-connection context (RLS startup user, etc.) is set up
+                // with the startup user, matching the authenticated path.
+                if let Some(user) = user.as_ref() {
+                    backend.set_auth_info(user, None).await;
+                }
                 self.state = State::Ready;
                 Self::get_ready_message(backend.version())
             }

@@ -141,7 +141,7 @@ impl<'a> QueryResult<'a> {
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
-        mut cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        mut cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
         status_flags_override: Option<StatusFlags>,
     ) -> io::Result<()>
     where
@@ -256,7 +256,10 @@ impl<'a> QueryResult<'a> {
 impl Refresh for QueryResult<'_> {
     type Entry = CacheEntry;
 
-    async fn refresh(self, cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>) -> io::Result<()> {
+    async fn refresh(
+        self,
+        cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
+    ) -> io::Result<()> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),

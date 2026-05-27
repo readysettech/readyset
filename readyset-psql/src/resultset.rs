@@ -80,7 +80,7 @@ pub struct Resultset {
     project_field_names: Vec<String>,
 
     /// Optional cache guard for shallow cache insertion during streaming
-    cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+    cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
 
     /// Client's requested result formats
     client_formats: Option<Vec<TransferFormat>>,
@@ -160,7 +160,7 @@ impl Resultset {
         stream: Pin<Box<ResultStream>>,
         first_row: tokio_postgres::Row,
         schema: Vec<Type>,
-        cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
     ) -> Self {
         let names = first_row
             .columns()
@@ -183,7 +183,7 @@ impl Resultset {
         stream: Pin<Box<RowStream>>,
         first_row: tokio_postgres::Row,
         schema: Vec<Type>,
-        cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
         client_formats: Option<Vec<TransferFormat>>,
     ) -> Self {
         let names = first_row
@@ -206,7 +206,7 @@ impl Resultset {
     pub fn from_simple_query_stream(
         stream: Pin<Box<SimpleQueryStream>>,
         first_msg: tokio_postgres::SimpleQueryMessage,
-        cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+        cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
     ) -> Self {
         Self {
             results: ResultsetInner::SimpleQueryStream {

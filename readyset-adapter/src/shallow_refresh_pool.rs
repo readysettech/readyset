@@ -9,7 +9,6 @@ use metric::{
 };
 use metrics::{Gauge, counter, gauge, histogram};
 use readyset_client::query::QueryId;
-use readyset_data::DfValue;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::logging::*;
@@ -35,7 +34,7 @@ where
     pub(crate) query_id: QueryId,
     pub(crate) path: Vec<SqlIdentifier>,
     pub(crate) query: String,
-    pub(crate) cache: CacheInsertGuard<Vec<DfValue>, V>,
+    pub(crate) cache: CacheInsertGuard<crate::shallow_key::ShallowKey, V>,
     pub(crate) shallow_exec_meta: Option<M>,
 }
 

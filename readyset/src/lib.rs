@@ -411,6 +411,22 @@ pub struct Options {
     )]
     shallow_adaptive_max_extra_load_percent: u64,
 
+    /// Postgres Row Level Security awareness for shallow caching. On by
+    /// default; refuses to start if the RLS catalog cannot be loaded.
+    ///
+    /// Setting this to `false` is DANGEROUS: the RLS catalog is not consulted
+    /// and every shallow cache is created Plain. Only safe if no table has, or
+    /// ever gains, RLS -- enabling RLS on a cached table afterwards would serve
+    /// one tenant's rows to another. Intended for non-RLS Postgres deployments
+    /// whose connection role cannot read the catalog.
+    #[arg(
+        long = "enable-rls",
+        env = "RLS_ENABLED",
+        default_value_t = true,
+        action = clap::ArgAction::Set
+    )]
+    enabled_rls: bool,
+
     #[command(flatten)]
     pub server_worker_options: WorkerOptions,
 
@@ -1666,6 +1682,83 @@ where
         let shallow = Arc::new(shallow);
         rt.handle()
             .spawn(Arc::clone(&shallow).report_metrics(shutdown_rx.clone()));
+
+        // Bootstrap the RLS catalog poller for a Postgres upstream and
+        // build the coordinator that bridges it to the shallow cache.
+        // `bootstrap_from_url` creates the registry and starts the poller
+        // in one call, but the coordinator (the poller's sink) needs that
+        // registry to exist first. A `DeferredSink` breaks the cycle: it
+        // is handed to bootstrap, then has the coordinator installed once
+        // the registry returns. Non-Postgres upstreams yield `None` and
+        // run RLS-disabled (every shallow cache stays plain).
+        let (rls_registry, rls_coordinator, rls_bootstrap_handle) = {
+            let upstream_url = upstream_config
+                .upstream_db_url
+                .as_ref()
+                .map(|u| u.to_string());
+            let deferred_sink = Arc::new(readyset_rls::DeferredSink::new());
+            let handle = if !options.enabled_rls {
+                // Explicit operator opt-out: skip the catalog bootstrap
+                // entirely and run RLS-disabled. Loud because it is unsafe
+                // if any table has or gains RLS.
+                warn!(
+                    "RLS support disabled via --enable-rls=false; every shallow cache will \
+                     be Plain. This is unsafe if any table has or gains RLS -- cached reads \
+                     would then serve one tenant's rows to another."
+                );
+                None
+            } else {
+                upstream_url.as_deref().and_then(|url| {
+                    match rt.block_on(readyset_rls::bootstrap_from_url(
+                        url,
+                        readyset_rls::RlsConfig::default(),
+                        Some(deferred_sink.clone() as Arc<dyn readyset_rls::InvalidationSink>),
+                    )) {
+                        Ok(handle) => handle,
+                        Err(e) => {
+                            // A bootstrap error means a Postgres upstream whose RLS
+                            // catalog could not be loaded -- unreachable upstream, TLS
+                            // failure, or the connection role lacking SELECT on the
+                            // pg_catalog relations the snapshot reads. Continuing
+                            // RLS-disabled would cache RLS-protected tables as Plain
+                            // and serve one tenant's rows to another, with no later
+                            // correction (the poller never started). Fail closed:
+                            // refuse to start rather than serve a silent cross-tenant
+                            // leak. Non-Postgres upstreams return Ok(None) and never
+                            // reach this arm.
+                            error!(
+                                error = %e,
+                                "RLS bootstrap failed for a Postgres upstream; refusing to \
+                                 start to avoid caching RLS-protected tables without \
+                                 per-tenant partitioning. Ensure the upstream is reachable \
+                                 and the connection role can SELECT the pg_catalog relations \
+                                 named in the error (and call pg_get_expr)."
+                            );
+                            process::exit(1);
+                        }
+                    }
+                })
+            };
+            match handle {
+                Some(handle) => {
+                    let registry = handle.registry.clone();
+                    let coordinator =
+                        Arc::new(readyset_adapter::rls_coordinator::RlsCoordinator::new(
+                            registry.clone(),
+                            shallow.clone(),
+                            query_status_cache,
+                        ));
+                    deferred_sink
+                        .set(coordinator.clone() as Arc<dyn readyset_rls::InvalidationSink>);
+                    // Retain the bootstrap handle: it owns the poller's only
+                    // shutdown sender, so dropping it here would close the watch
+                    // channel and stop the catalog poller right after startup.
+                    (Some(registry), Some(coordinator), Some(handle))
+                }
+                None => (None, None, None),
+            }
+        };
+
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {
@@ -1679,6 +1772,8 @@ where
                 options.default_ttl_ms,
                 options.default_coalesce_ms,
                 options.cache_mode,
+                rls_registry.clone(),
+                rls_coordinator.clone(),
             )) {
                 error!("Failed to recreate shallow caches: {}", e);
             }
@@ -1829,6 +1924,7 @@ where
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
             let shallow_cache_allowlist = shallow_cache_allowlist.clone();
+            let rls_coordinator = rls_coordinator.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
@@ -1864,6 +1960,10 @@ where
                 .readyset_schema(Arc::clone(&readyset_schema))
                 .shallow_cache_eligibility(shallow_cache_eligibility)
                 .shallow_cache_allowlist(shallow_cache_allowlist);
+            let backend_builder = match &rls_registry {
+                Some(registry) => backend_builder.policy_registry(registry.clone()),
+                None => backend_builder,
+            };
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
@@ -1930,6 +2030,7 @@ where
                                         status_reporter_clone,
                                         adapter_start_time,
                                         shallow,
+                                        rls_coordinator,
                                         Some(shallow_refresh_pool),
                                     )
                                     .await;
@@ -1967,6 +2068,13 @@ where
 
         let rs_shutdown = span!(Level::INFO, "RS server Shutting down");
         health_reporter.set_state(AdapterState::ShuttingDown);
+
+        // Signal the RLS catalog poller to stop before we tear down the runtime.
+        // Sending `true` lets its current tick drain any in-flight upstream query
+        // and return cleanly, rather than being aborted mid-request.
+        if let Some(rls_handle) = &rls_bootstrap_handle {
+            let _ = rls_handle.shutdown_tx.send(true);
+        }
 
         // We need to drop the last remaining `ShutdownReceiver` before sending the shutdown
         // signal. If we didn't, `ShutdownSender::shutdown` would hang forever, since it

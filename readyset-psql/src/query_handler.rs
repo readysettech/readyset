@@ -433,6 +433,12 @@ impl QueryHandler for PostgreSqlQueryHandler {
                             None => behavior.unsupported(true),
                         }
                     }
+                    // `SET ROLE` / `SET role = ...` changes the effective
+                    // role, which `apply_set_statement` mirrors into the
+                    // SessionContext and RLS keys scoped caches on. Treat as
+                    // supported so it doesn't force `ProxyAlways` and disable
+                    // caching for the rest of the connection.
+                    "role" => behavior,
                     "search_path" => {
                         let value_to_string = |value: &PostgresParameterValueInner| match value {
                             PostgresParameterValueInner::Identifier(id) => id.clone(),
@@ -458,6 +464,15 @@ impl QueryHandler for PostgreSqlQueryHandler {
                     other => {
                         if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(other) {
                             behavior.unsupported(!allowed_value.set_value_is_allowed(value))
+                        } else if other.contains('.') {
+                            // Namespaced custom GUC (`request.jwt.claims`,
+                            // `app.tenant_id`, ...). These are per-session app
+                            // variables Readyset mirrors into the SessionContext
+                            // -- RLS keys scoped caches on the policy-referenced
+                            // ones. Treat as supported so they don't force
+                            // `ProxyAlways`, matching the `set_config('<name>',
+                            // ...)` path, which never disables caching.
+                            behavior.unsupported(false)
                         } else {
                             behavior.unsupported(true)
                         }
@@ -468,6 +483,12 @@ impl QueryHandler for PostgreSqlQueryHandler {
                 let charset = charset.to_ascii_lowercase();
                 behavior.unsupported(!["utf8", "utf-8"].contains(&charset.as_str()))
             }
+            // `SET [LOCAL] SESSION AUTHORIZATION { user | DEFAULT }` is handled:
+            // the adapter mirrors the resulting identity into the session
+            // context after upstream accepts it (see `Backend`'s SET dispatch).
+            // Treating it as supported keeps it from tripping proxy-always, which
+            // would route the whole connection upstream and defeat the mirror.
+            SetStatement::SessionAuthorization(_) => behavior.unsupported(false),
             _ => behavior.unsupported(true),
         }
     }
@@ -502,6 +523,60 @@ mod tests {
     #[test]
     fn client_encoding_utf8_allowed() {
         is_proxy("SET client_encoding = 'UTF8'");
+    }
+
+    #[test]
+    fn set_role_is_supported() {
+        // `SET ROLE` mirrors the effective role into the session and RLS keys
+        // scoped caches on it, so it must not flip the connection into
+        // ProxyAlways. Constructed directly (the keyword form only parses
+        // under the sqlparser-preferred prod preset, not the default).
+        let role_set = SetStatement::PostgresParameter(SetPostgresParameter {
+            scope: None,
+            name: "role".into(),
+            value: SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                PostgresParameterValueInner::Identifier("authenticated".into()),
+            )),
+        });
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&role_set),
+            SetBehavior::default(),
+        );
+        let role_reset = SetStatement::PostgresParameter(SetPostgresParameter {
+            scope: None,
+            name: "role".into(),
+            value: SetPostgresParameterValue::Default,
+        });
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&role_reset),
+            SetBehavior::default(),
+        );
+    }
+
+    #[test]
+    fn namespaced_custom_gucs_are_supported() {
+        // Custom GUCs (set per-request and mirrored into the SessionContext)
+        // must not flip the connection into ProxyAlways, matching the
+        // `set_config('<name>', ...)` path which never disables caching.
+        // Constructed directly: a namespaced `SET` only parses under the
+        // sqlparser-preferred prod preset, not the default test preset.
+        let stmt = |name: &str| {
+            SetStatement::PostgresParameter(SetPostgresParameter {
+                scope: None,
+                name: name.into(),
+                value: SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                    PostgresParameterValueInner::Literal(Literal::String("v".into())),
+                )),
+            })
+        };
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&stmt("request.jwt.claims")),
+            SetBehavior::default(),
+        );
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&stmt("app.tenant_id")),
+            SetBehavior::default(),
+        );
     }
 
     #[test]

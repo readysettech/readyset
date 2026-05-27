@@ -540,7 +540,7 @@ where
 async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
-    cache: Option<CacheInsertGuard<Vec<DfValue>, CacheEntry>>,
+    cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
     status_flags_override: Option<StatusFlags>,
 ) -> io::Result<()>
 where

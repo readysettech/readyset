@@ -203,6 +203,8 @@ async fn setup_adapter(
                         status_reporter,
                         adapter_start_time,
                         shallow,
+                        // RLS coordinator: the in-process logictest harness runs RLS-disabled.
+                        None,
                         shallow_refresh_pool,
                     )
                     .await

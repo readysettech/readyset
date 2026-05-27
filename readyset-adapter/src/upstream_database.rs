@@ -25,7 +25,7 @@ pub trait Refresh {
     /// Populate the cache with data from this query result
     async fn refresh(
         self,
-        cache: CacheInsertGuard<Vec<DfValue>, Self::Entry>,
+        cache: CacheInsertGuard<crate::shallow_key::ShallowKey, Self::Entry>,
     ) -> std::io::Result<()>;
 }
 
