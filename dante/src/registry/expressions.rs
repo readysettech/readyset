@@ -255,7 +255,7 @@ pub fn where_lookup_decimal_eq_int_div_int() -> Pattern {
     //   - Both-match: lookup=1.0000, c1=c2=4 -> 4/4=1 on both engines.
     b.example(
         "lookup=2.0000, c1=8, c2=3 -- RS-only match (int/int divide coerces to 2.0000)",
-        DialectSupport::Both,
+        DialectSupport::MySqlOnly,
         vec![
             ExampleCell {
                 var: lookup,
@@ -273,7 +273,7 @@ pub fn where_lookup_decimal_eq_int_div_int() -> Pattern {
     );
     b.example(
         "lookup=2.6667, c1=8, c2=3 -- MySQL-only match (DECIMAL division result)",
-        DialectSupport::Both,
+        DialectSupport::MySqlOnly,
         vec![
             ExampleCell {
                 var: lookup,
@@ -291,7 +291,7 @@ pub fn where_lookup_decimal_eq_int_div_int() -> Pattern {
     );
     b.example(
         "lookup=1.0000, c1=4, c2=4 -- both engines match (4/4=1)",
-        DialectSupport::Both,
+        DialectSupport::MySqlOnly,
         vec![
             ExampleCell {
                 var: lookup,
@@ -519,5 +519,23 @@ mod tests {
             DialectSupport::MySqlOnly,
             "pattern is mysql-only: PG int/int is integer division, bug does not manifest"
         );
+    }
+
+    #[test]
+    fn where_lookup_decimal_eq_int_div_int_example_cells_are_mysql_only() {
+        // Example cells must carry the same dialect restriction as the pattern.
+        // A MySqlOnly pattern with Both-tagged cells would be a landmine: if the
+        // pattern is ever widened to Both, PG would pick up the examples without
+        // any indication that they were written for MySQL semantics only.
+        let p = where_lookup_decimal_eq_int_div_int();
+        for c in &p.constraints {
+            if let crate::constraint::Constraint::Example { dialect, .. } = c {
+                assert_eq!(
+                    *dialect,
+                    DialectSupport::MySqlOnly,
+                    "example cell dialect must match pattern's MySqlOnly restriction"
+                );
+            }
+        }
     }
 }

@@ -423,6 +423,19 @@ fn resolve_column_exists(
     let reuse = state.config().reuse_preference;
     let table_schema = state.table(&table_name);
 
+    // A var that any `Constraint::Example` cell pins by literal must not
+    // collapse onto the auto-allocated PK column. Two examples on the same
+    // pattern can legitimately pin different literals for the same logical
+    // variable (different `param_overrides` exercising the same row); if
+    // that variable resolves to the PK column the seed-data INSERT then
+    // rejects with `Duplicate entry` and the run aborts. Pattern authors
+    // never intend to pin a PK literal -- they're naming a semantic var
+    // ("the integer operand"), and the resolver chose to map it onto the
+    // PK only because it happened to match the Int type class.
+    let example_pinned = all_constraints.iter().any(
+        |c| matches!(c, Constraint::Example { cells, .. } if cells.iter().any(|x| x.var == col)),
+    );
+
     let existing_col = table_schema.and_then(|ts| {
         if ts.columns.is_empty() || !entropy.probability(reuse) {
             return None;
@@ -434,6 +447,15 @@ fn resolve_column_exists(
             .filter(|(_, meta)| match &type_class {
                 Some(tc) => type_matches(&meta.sql_type, tc),
                 None => true,
+            })
+            .filter(|(name, _)| {
+                if example_pinned {
+                    // Drop the PK from candidates so an example-pinned
+                    // literal never lands on the PRIMARY KEY column.
+                    ts.primary_key.as_ref().is_none_or(|pk| pk != *name)
+                } else {
+                    true
+                }
             })
             .collect();
         if matching.is_empty() {
@@ -1793,6 +1815,92 @@ mod tests {
         assert!(
             sql.contains("= ?") || sql.contains("= $"),
             "should contain WHERE = ? from fallback branch, but got: {sql}"
+        );
+    }
+
+    /// Pattern authors don't pin PK columns intentionally — the bug is that
+    /// the resolver collapses an Integer-class pattern var onto the
+    /// auto-allocated PK column `c0` (also Int) under high reuse_preference.
+    /// Two examples then both pin literals for the same physical PK,
+    /// producing duplicate-key INSERT failures at run time. The resolver
+    /// must treat columns referenced by `Constraint::Example` as
+    /// "not-PK" and exclude the PK column from reuse candidates.
+    #[test]
+    fn example_pinned_column_does_not_collapse_onto_pk() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue};
+
+        let t_var = VarId(0);
+        let c_var = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t_var),
+            Constraint::ColumnExists {
+                col: c_var,
+                table: t_var,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_var,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::From(t_var),
+            Constraint::ProjectColumn {
+                col: c_var,
+                table: t_var,
+            },
+            Constraint::Example {
+                note: "pinned literal must not be the PK",
+                dialect: DialectSupport::Both,
+                cells: vec![ExampleCell {
+                    var: c_var,
+                    value: ExampleValue::Literal("8"),
+                }],
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t_var }];
+
+        // Pre-register `t0` with `c0` (PK, Int) as the ONLY column. The PK
+        // is the only matching Int candidate at reuse time, so without the
+        // fix the resolver collapses `c_var` onto `c0` (= the PK). With the
+        // fix it must synthesize a fresh non-PK column instead.
+        let config = GeneratorConfig {
+            reuse_preference: 1.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut schema = TableSchema::new(SqlIdentifier::from("t0"));
+        // Use `fresh_column_name` so `column_counter` is advanced; otherwise
+        // a later resolver synthesis on the same table also picks `c0` and
+        // hits the `add_column` collision panic that masks the real
+        // assertion.
+        let pk_name = schema.fresh_column_name();
+        schema.add_column(
+            pk_name.clone(),
+            ColumnMeta {
+                sql_type: SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.primary_key = Some(pk_name);
+        state.add_table(schema);
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let output = crate::resolver::resolve(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("resolve should succeed");
+
+        assert_eq!(
+            output.examples.len(),
+            1,
+            "expected exactly one resolved example"
+        );
+        let row_override = &output.examples[0].row_overrides[0];
+        assert_ne!(
+            row_override.column.as_str(),
+            "c0",
+            "example-pinned column must not bind to the PK column `c0`; \
+             got column `{}` for table `{}`",
+            row_override.column,
+            row_override.table,
         );
     }
 }

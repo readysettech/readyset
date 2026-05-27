@@ -39,6 +39,29 @@ pub enum PatternRegistrationError {
         var: crate::var::VarId,
         kind: &'static str,
     },
+    #[error(
+        "Constraint::Example cell in pattern `{pattern}`: \
+         column var {var:?} (cell index {cell_index}) has no ColumnTypeClass \
+         constraint; an example-pinned column must be type-pinned so its \
+         literal can't land on a randomly-chosen incompatible type"
+    )]
+    ExampleColumnNotTyped {
+        pattern: &'static str,
+        cell_index: usize,
+        var: crate::var::VarId,
+    },
+    #[error(
+        "Constraint::Example cell in pattern `{pattern}`: \
+         literal {literal:?} (cell index {cell_index}) is not valid for \
+         column var {var:?} pinned to {type_class:?}"
+    )]
+    ExampleLiteralTypeMismatch {
+        pattern: &'static str,
+        cell_index: usize,
+        var: crate::var::VarId,
+        literal: &'static str,
+        type_class: crate::constraint::TypeClass,
+    },
 }
 
 /// Error type for query generation.
@@ -82,7 +105,7 @@ pub struct DdlOutput {
 }
 
 impl QueryOutput {
-    fn from_resolver(
+    pub fn from_resolver(
         ro: ResolverOutput,
         pattern_name: String,
         dialect: readyset_sql::Dialect,
@@ -135,7 +158,7 @@ impl ConstraintRegistry {
     }
 
     fn validate_examples(pattern: &Pattern) -> Result<(), PatternRegistrationError> {
-        use crate::constraint::Constraint;
+        use crate::constraint::{Constraint, ExampleValue};
         use crate::var::VarKind;
 
         for constraint in &pattern.constraints {
@@ -160,6 +183,35 @@ impl ConstraintRegistry {
                         kind: kind.discriminant_name(),
                     });
                 }
+                // A column cell's literal is materialized into seed data against
+                // the column's resolved type. Require the column to be type-pinned
+                // and the literal to be valid for that class, so an authoring bug
+                // fails here rather than panicking the oracle mid-run.
+                if matches!(kind, VarKind::Column { .. }) {
+                    let type_class = pattern.constraints.iter().find_map(|c| match c {
+                        Constraint::ColumnTypeClass { col, type_class } if *col == cell.var => {
+                            Some(type_class)
+                        }
+                        _ => None,
+                    });
+                    let Some(type_class) = type_class else {
+                        return Err(PatternRegistrationError::ExampleColumnNotTyped {
+                            pattern: pattern.name,
+                            cell_index,
+                            var: cell.var,
+                        });
+                    };
+                    let ExampleValue::Literal(literal) = &cell.value;
+                    if !type_class.accepts_literal(literal) {
+                        return Err(PatternRegistrationError::ExampleLiteralTypeMismatch {
+                            pattern: pattern.name,
+                            cell_index,
+                            var: cell.var,
+                            literal,
+                            type_class: type_class.clone(),
+                        });
+                    }
+                }
             }
         }
         Ok(())
@@ -183,6 +235,15 @@ impl ConstraintRegistry {
     /// Returns all registered pattern names.
     pub fn pattern_names(&self) -> Vec<String> {
         self.patterns.iter().map(|p| p.name.to_string()).collect()
+    }
+
+    /// Returns every distinct tag carried by a registered pattern, sorted.
+    /// Callers validate user-supplied tag filters against this set.
+    pub fn all_tags(&self) -> std::collections::BTreeSet<&'static str> {
+        self.patterns
+            .iter()
+            .flat_map(|p| p.tags.iter().copied())
+            .collect()
     }
 
     /// Returns the compatibility rules.
@@ -916,6 +977,18 @@ mod tests {
             reg.len()
         );
         assert!(!reg.rules().is_empty());
+    }
+
+    #[test]
+    fn all_tags_collects_distinct_pattern_tags() {
+        let reg = ConstraintRegistry::default_registry();
+        let tags = reg.all_tags();
+        assert!(tags.contains("expr_eval"), "expected expr_eval in {tags:?}");
+        assert!(
+            tags.contains("postgres_only"),
+            "expected postgres_only in {tags:?}"
+        );
+        assert!(!tags.contains("definitely_not_a_real_tag"));
     }
 
     #[test]
@@ -2215,6 +2288,68 @@ mod tests {
                 PatternRegistrationError::ExampleCellVarOutOfRange { .. }
             ),
             "expected ExampleCellVarOutOfRange, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn register_errors_on_example_column_not_typed() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue};
+        use crate::pattern::PatternBuilder;
+
+        // A column example cell on a column with no ColumnTypeClass: the
+        // literal would land on a randomly-chosen type at resolution time.
+        let mut b = PatternBuilder::new("untyped");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_column(c, t);
+        b.example(
+            "untyped column",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("1"),
+            }],
+        );
+        let p = b.build();
+        let mut reg = ConstraintRegistry::new();
+        let err = reg.register(p).unwrap_err();
+        assert!(
+            matches!(err, PatternRegistrationError::ExampleColumnNotTyped { .. }),
+            "expected ExampleColumnNotTyped, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn register_errors_on_example_literal_type_mismatch() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
+        use crate::pattern::PatternBuilder;
+
+        // A non-numeric literal pinned to an integer column would panic the
+        // oracle's parse_literal mid-run; reject it at registration instead.
+        let mut b = PatternBuilder::new("badlit");
+        let t = b.table();
+        let c = b.column(t);
+        b.column_type_class(c, TypeClass::Integer);
+        b.from(t);
+        b.project_column(c, t);
+        b.example(
+            "non-numeric literal on integer column",
+            DialectSupport::Both,
+            vec![ExampleCell {
+                var: c,
+                value: ExampleValue::Literal("abc"),
+            }],
+        );
+        let p = b.build();
+        let mut reg = ConstraintRegistry::new();
+        let err = reg.register(p).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                PatternRegistrationError::ExampleLiteralTypeMismatch { .. }
+            ),
+            "expected ExampleLiteralTypeMismatch, got: {err:?}"
         );
     }
 }

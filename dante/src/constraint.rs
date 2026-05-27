@@ -89,6 +89,27 @@ impl TypeClass {
             TypeClass::Exact(exact) => sql_type == exact,
         }
     }
+
+    /// Whether a `Constraint::Example` literal is plausibly valid for a column
+    /// pinned to this type class. Numeric classes require the literal to parse
+    /// as the corresponding number so a mis-authored cell (e.g. `"abc"` on an
+    /// integer column) is rejected at registration rather than panicking the
+    /// oracle's `parse_literal` mid-run. Non-numeric classes accept any text,
+    /// matching how the oracle materializes them.
+    pub fn accepts_literal(&self, literal: &str) -> bool {
+        let s = literal.trim();
+        match self {
+            TypeClass::Integer => s.parse::<i64>().is_ok(),
+            TypeClass::Numeric | TypeClass::Decimal | TypeClass::FixedPoint => {
+                s.parse::<f64>().is_ok()
+            }
+            TypeClass::Exact(ty) if TypeClass::Integer.matches(ty) => s.parse::<i64>().is_ok(),
+            TypeClass::Exact(ty) if TypeClass::Numeric.matches(ty) => s.parse::<f64>().is_ok(),
+            // String, DateTime, Any, Orderable, and non-numeric Exact types
+            // are not statically checkable here; the oracle parses them as text.
+            _ => true,
+        }
+    }
 }
 
 /// Aggregate function specifier for `ProjectAggregate` and `Having` constraints.
@@ -211,7 +232,7 @@ impl DialectSupport {
 }
 
 /// One cell of a [`Constraint::Example`]: pins a `VarId` to a literal SQL
-/// value or overrides its `ColumnGenerationSpec` for one example run.
+/// value for one example run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExampleCell {
     /// A `VarId` whose `VarKind` is `Column { .. }` (-> row override) or
@@ -228,13 +249,6 @@ pub enum ExampleValue {
     /// Dialect-shaped by the author (e.g., `'2025-01-01'` for MySQL vs
     /// `DATE '2025-01-01'` for PG).
     Literal(&'static str),
-    /// Override the var's normal `ColumnGenerationSpec` for this example's run.
-    ///
-    /// For `Column` vars: overrides the column's gen_spec for this
-    /// example's INSERTed row.
-    /// For `Param` vars: overrides the param's gen_spec for this example's
-    /// SELECT execution.
-    GenSpec(data_generator::ColumnGenerationSpec),
 }
 
 /// A single declarative assertion about the query being generated.
@@ -1246,6 +1260,22 @@ mod tests {
             TypeClass::Exact(SqlType::Int(None)),
             TypeClass::Exact(SqlType::Int(None))
         );
+    }
+
+    #[test]
+    fn accepts_literal_enforces_numeric_classes_only() {
+        use readyset_sql::ast::SqlType;
+        assert!(TypeClass::Integer.accepts_literal("8"));
+        assert!(!TypeClass::Integer.accepts_literal("8.5"));
+        assert!(!TypeClass::Integer.accepts_literal("abc"));
+        assert!(TypeClass::Numeric.accepts_literal("2.6667"));
+        assert!(!TypeClass::Numeric.accepts_literal("abc"));
+        assert!(TypeClass::Exact(SqlType::Decimal(10, 4)).accepts_literal("2.0000"));
+        assert!(!TypeClass::Exact(SqlType::Int(None)).accepts_literal("2.0000"));
+        // Non-numeric and unconstrained classes accept any text.
+        assert!(TypeClass::String.accepts_literal("anything"));
+        assert!(TypeClass::DateTime.accepts_literal("2025-01-01"));
+        assert!(TypeClass::Any.accepts_literal("whatever"));
     }
 
     #[test]

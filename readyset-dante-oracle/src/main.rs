@@ -331,23 +331,28 @@ fn table_schema_to_create_table(schema: &TableSchema) -> CreateTableStatement {
 
 /// Format an [`ExampleValue`] for human-readable repro-script comments.
 fn fmt_example_value(v: &ExampleValue) -> String {
-    match v {
-        ExampleValue::Literal(s) => s.to_string(),
-        ExampleValue::GenSpec(_) => "(generated)".to_string(),
-    }
+    let ExampleValue::Literal(s) = v;
+    s.to_string()
 }
 
 /// Parse a SQL literal string into a [`DfValue`] for the given column type.
 ///
-/// Used when materialising `ExampleValue::Literal` overrides into actual row data.
-/// Only handles the common scalar types; unsupported types fall back to
-/// `DfValue::None` (NULL) so the harness continues rather than panicking.
+/// Used when materialising `ExampleValue::Literal` overrides into actual row
+/// data. Example literals are authored `&'static` constants, so a value that
+/// fails to parse for its column type is a test-authoring bug: panic with
+/// context rather than silently binding NULL, which would let a bug-bait
+/// example pass green while exercising nothing. Non-numeric types accept any
+/// text as-is.
 fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
     use std::str::FromStr;
     use std::sync::Arc;
 
     use readyset_decimal::Decimal;
     use readyset_sql::ast::SqlType;
+
+    let bad = |e: &dyn std::fmt::Debug| -> ! {
+        panic!("dante example literal {s:?} is not a valid {sql_type:?}: {e:?}")
+    };
     match sql_type {
         SqlType::Int(_)
         | SqlType::Int4
@@ -358,7 +363,7 @@ fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
             .trim()
             .parse::<i64>()
             .map(DfValue::Int)
-            .unwrap_or(DfValue::None),
+            .unwrap_or_else(|e| bad(&e)),
         SqlType::IntUnsigned(_)
         | SqlType::BigIntUnsigned(_)
         | SqlType::SmallIntUnsigned(_)
@@ -368,7 +373,7 @@ fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
             .trim()
             .parse::<u64>()
             .map(DfValue::UnsignedInt)
-            .unwrap_or(DfValue::None),
+            .unwrap_or_else(|e| bad(&e)),
         // Decimal/Numeric must land as `DfValue::Numeric` so the INSERT path
         // emits a true DECIMAL literal. Parsing as f64 silently demotes
         // values like `2.6667` to `DfValue::Double`, which round-trips
@@ -376,12 +381,12 @@ fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
         // bug-bait examples that depend on exact decimal arithmetic.
         SqlType::Decimal(_, _) | SqlType::Numeric(_) => Decimal::from_str(s.trim())
             .map(|d| DfValue::Numeric(Arc::new(d)))
-            .unwrap_or(DfValue::None),
+            .unwrap_or_else(|e| bad(&e)),
         SqlType::Double | SqlType::Float | SqlType::Real => s
             .trim()
             .parse::<f64>()
             .map(DfValue::Double)
-            .unwrap_or(DfValue::None),
+            .unwrap_or_else(|e| bad(&e)),
         _ => DfValue::from(s),
     }
 }
@@ -392,12 +397,12 @@ fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
 /// best-effort avoidance for uniqueness columns, not a hard guarantee.
 fn sample_avoiding<R: Rng>(
     generator: &mut ColumnGenerator,
-    exclude: &HashSet<String>,
+    exclude: &HashSet<DfValue>,
     rng: &mut R,
 ) -> DfValue {
     let mut last = generator.r#gen(rng);
     for _ in 0..32 {
-        if !exclude.contains(&last.to_string()) {
+        if !exclude.contains(&last) {
             return last;
         }
         last = generator.r#gen(rng);
@@ -405,14 +410,19 @@ fn sample_avoiding<R: Rng>(
     last
 }
 
-/// Generate rows of data for a table, returning each row as a `Vec<DfValue>`
-/// with columns in schema order.
+/// Generate rows of data for a table.
+///
+/// Returns `(rows, dropped_example_indices)`. `rows` contains one emitted row
+/// per un-dropped example followed by random-fill rows. `dropped_example_indices`
+/// lists which positions in `examples` were skipped due to PK collision with an
+/// earlier example; callers should remove the corresponding `ResolvedExample`
+/// entries before building SELECT probes so probes don't fire for absent rows.
 ///
 /// If `examples` is non-empty, one row is emitted per example using its
 /// `row_overrides` to pin specific column values. The remaining `random_fill`
-/// rows are produced by each column's `gen_spec`. Per-column exclude sets
-/// carry example `Literal` values into the random-fill draws so that
-/// `Unique`/`UniqueFrom` gen-specs don't collide with the bait.
+/// rows are produced by each column's `gen_spec`. Per-column exclude sets are
+/// seeded from example `Literal` values only so that `Unique`/`UniqueFrom`
+/// gen-specs don't collide with the bait; they are not updated during random fill.
 ///
 /// Each column gets its own sub-RNG seeded from `(parent_seed, column_name)` so
 /// the per-column data depends only on the seed and the column name, not on
@@ -423,14 +433,29 @@ fn generate_rows<R: Rng>(
     random_fill: usize,
     examples: &[&ResolvedExample],
     rng: &mut R,
-) -> Vec<Vec<DfValue>> {
+) -> (Vec<Vec<DfValue>>, Vec<usize>) {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    // Per-column exclude sets accumulate Literal values from examples so
-    // random-fill draws don't collide with bait rows.
     let col_count = schema.columns.len();
-    let mut excludes: Vec<HashSet<String>> = vec![HashSet::new(); col_count];
+
+    // Build per-column exclude sets from example Literal values only.
+    // Random-fill generators (Unique/Sequential) produce distinct values on
+    // their own; feeding back random-fill draws into excludes would
+    // unnecessarily inflate the set and block bait-value avoidance.
+    let mut excludes: Vec<HashSet<DfValue>> = vec![HashSet::new(); col_count];
+    for ex in examples {
+        for (col_idx, (col_name, col_meta)) in schema.columns.iter().enumerate() {
+            if let Some(o) = ex
+                .row_overrides
+                .iter()
+                .find(|o| o.table == schema.name && o.column == *col_name)
+            {
+                let ExampleValue::Literal(s) = &o.value;
+                excludes[col_idx].insert(parse_literal(s, &col_meta.sql_type));
+            }
+        }
+    }
 
     // Build per-column sub-RNGs (keyed by column name for determinism).
     let parent_seed = rng.next_u64();
@@ -451,9 +476,21 @@ fn generate_rows<R: Rng>(
         .collect();
 
     let mut out: Vec<Vec<DfValue>> = Vec::with_capacity(examples.len() + random_fill);
+    let mut dropped_example_indices: Vec<usize> = Vec::new();
+
+    // Index of the primary-key column (if any) and the set of PK values
+    // already committed to `out`. Pattern authors can legitimately pin the
+    // same PK literal in two examples (different `param_overrides` exercising
+    // the same row); without dedup, the second example would trigger a
+    // duplicate-key INSERT failure that aborts the run.
+    let pk_idx: Option<usize> = schema
+        .primary_key
+        .as_ref()
+        .and_then(|pk| schema.columns.iter().position(|(name, _)| name == pk));
+    let mut seen_pks: HashSet<DfValue> = HashSet::new();
 
     // Emit one row per example.
-    for ex in examples {
+    for (ex_idx, ex) in examples.iter().enumerate() {
         let mut row = Vec::with_capacity(col_count);
         for (idx, (col_name, col_meta)) in schema.columns.iter().enumerate() {
             let override_for_col = ex
@@ -461,32 +498,28 @@ fn generate_rows<R: Rng>(
                 .iter()
                 .find(|o| o.table == schema.name && o.column == *col_name);
             match override_for_col {
-                Some(o) => match &o.value {
-                    ExampleValue::Literal(s) => {
-                        let v = parse_literal(s, &col_meta.sql_type);
-                        excludes[idx].insert(v.to_string());
-                        row.push(v);
-                    }
-                    ExampleValue::GenSpec(spec) => {
-                        let (ref mut col_gen, ref mut sub_rng) = generators[idx];
-                        // Temporarily override: create a one-shot generator
-                        // from the override spec and draw from it.
-                        let mut override_gen =
-                            spec.generator_for_col(col_meta.sql_type.clone(), sub_rng);
-                        let v = override_gen.r#gen(sub_rng);
-                        excludes[idx].insert(v.to_string());
-                        // Advance the main generator by one draw so column
-                        // sub-RNG state stays in sync with the example count.
-                        let _ = col_gen.r#gen(sub_rng);
-                        row.push(v);
-                    }
-                },
+                Some(o) => {
+                    let ExampleValue::Literal(s) = &o.value;
+                    row.push(parse_literal(s, &col_meta.sql_type));
+                }
                 None => {
                     let (ref mut col_gen, ref mut sub_rng) = generators[idx];
                     let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
-                    excludes[idx].insert(v.to_string());
                     row.push(v);
                 }
+            }
+        }
+        if let Some(pk_i) = pk_idx {
+            let pk_val = row[pk_i].clone();
+            if !seen_pks.insert(pk_val.clone()) {
+                warn!(
+                    table = %schema.name,
+                    pk = %pk_val,
+                    note = ex.note,
+                    "skipping example seed row whose PK collides with an earlier example"
+                );
+                dropped_example_indices.push(ex_idx);
+                continue;
             }
         }
         out.push(row);
@@ -498,13 +531,20 @@ fn generate_rows<R: Rng>(
         for (idx, _) in schema.columns.iter().enumerate() {
             let (ref mut col_gen, ref mut sub_rng) = generators[idx];
             let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
-            excludes[idx].insert(v.to_string());
             row.push(v);
+        }
+        if let Some(pk_i) = pk_idx {
+            let pk_val = row[pk_i].clone();
+            if !seen_pks.insert(pk_val) {
+                // `sample_avoiding` is best-effort (32 retries). On collision
+                // we drop the random-fill row rather than insert a duplicate.
+                continue;
+            }
         }
         out.push(row);
     }
 
-    out
+    (out, dropped_example_indices)
 }
 
 /// Build an [`InsertStatement`] for a batch of rows.
@@ -518,12 +558,30 @@ fn build_insert(schema: &TableSchema, data: &[Vec<DfValue>]) -> anyhow::Result<I
         })
         .collect();
 
+    // Column SQL types in projection order, used to project BOOL values to boolean literals.
+    let col_types: Vec<readyset_sql::ast::SqlType> = schema
+        .columns
+        .values()
+        .map(|m| m.sql_type.clone())
+        .collect();
+
     let insert_data: Vec<Vec<Expr>> = data
         .iter()
         .map(|row| {
             row.iter()
-                .map(|v| {
+                .enumerate()
+                .map(|(i, v)| {
                     let lit: Literal = v.clone().try_into().unwrap_or(Literal::Null);
+                    // BOOL columns get Literal::Integer(0|1) from the data-generator
+                    // (DfValue::Int -> Literal::Integer); Postgres rejects an integer literal
+                    // for a boolean column. Project to Literal::Boolean so the dialect printer
+                    // emits TRUE/FALSE on PG and 1/0 on MySQL.
+                    let lit = match (col_types.get(i), lit) {
+                        (Some(readyset_sql::ast::SqlType::Bool), Literal::Integer(n)) => {
+                            Literal::Boolean(n != 0)
+                        }
+                        (_, l) => l,
+                    };
                     Expr::Literal(lit)
                 })
                 .collect()
@@ -568,13 +626,10 @@ fn materialize_params_with_overrides<R: Rng>(
                 .iter()
                 .find(|o| o.placeholder_index == placeholder_idx);
             let v = match override_for_idx {
-                Some(o) => match &o.value {
-                    ExampleValue::Literal(s) => parse_literal(s, &meta.sql_type),
-                    ExampleValue::GenSpec(spec) => {
-                        let mut override_gen = spec.generator_for_col(meta.sql_type.clone(), rng);
-                        override_gen.r#gen(rng)
-                    }
-                },
+                Some(o) => {
+                    let ExampleValue::Literal(s) = &o.value;
+                    parse_literal(s, &meta.sql_type)
+                }
                 None => generator.r#gen(rng),
             };
             out.push(v);
@@ -689,6 +744,9 @@ enum CacheMode {
     Deep,
     Shallow,
     Proxy,
+    /// The routing probe was deliberately not run (without --readyset-mode,
+    /// where the oracle is indifferent to how the result was served).
+    NotChecked,
 }
 
 impl std::fmt::Display for CacheMode {
@@ -698,8 +756,24 @@ impl std::fmt::Display for CacheMode {
             CacheMode::Deep => "deep",
             CacheMode::Shallow => "shallow",
             CacheMode::Proxy => "proxy",
+            CacheMode::NotChecked => "not_checked",
         })
     }
+}
+
+/// Reject `--required-tags`/`--excluded-tags` values that no registered
+/// pattern carries. A typo'd tag would otherwise silently select nothing,
+/// so fail fast and name the offending tag.
+fn validate_known_tags<'a>(
+    supplied: impl IntoIterator<Item = &'a str>,
+    known: &std::collections::BTreeSet<&'static str>,
+) -> anyhow::Result<()> {
+    for tag in supplied {
+        if !known.contains(tag) {
+            bail!("unknown pattern tag {tag:?}: no registered pattern carries it");
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone)]
@@ -708,6 +782,10 @@ struct PatternCounts {
     matched: usize,
     mismatched: usize,
     skipped: usize,
+    /// Non-fatal terminal errors from upstream or Readyset that would
+    /// otherwise abort the loop. Only incremented when `--keep-going` is
+    /// set; otherwise the run exits before this counter would advance.
+    errored: usize,
     deep: usize,
     shallow: usize,
     proxy: usize,
@@ -736,7 +814,7 @@ impl PatternStats {
             CacheMode::Deep => entry.deep += 1,
             CacheMode::Shallow => entry.shallow += 1,
             CacheMode::Proxy => entry.proxy += 1,
-            CacheMode::Unknown => {}
+            CacheMode::Unknown | CacheMode::NotChecked => {}
         }
     }
 
@@ -752,6 +830,7 @@ impl PatternStats {
                 matched = c.matched,
                 mismatched = c.mismatched,
                 skipped = c.skipped,
+                errored = c.errored,
                 deep = c.deep,
                 shallow = c.shallow,
                 proxy = c.proxy,
@@ -764,6 +843,7 @@ impl PatternStats {
         let total_generated: usize = entries.iter().map(|(_, c)| c.generated).sum();
         let total_matched: usize = entries.iter().map(|(_, c)| c.matched).sum();
         let total_mismatched: usize = entries.iter().map(|(_, c)| c.mismatched).sum();
+        let total_errored: usize = entries.iter().map(|(_, c)| c.errored).sum();
         let total_deep: usize = entries.iter().map(|(_, c)| c.deep).sum();
         let total_shallow: usize = entries.iter().map(|(_, c)| c.shallow).sum();
         let total_proxy: usize = entries.iter().map(|(_, c)| c.proxy).sum();
@@ -778,6 +858,7 @@ impl PatternStats {
             total_generated,
             total_matched,
             total_mismatched,
+            total_errored,
             total_deep,
             total_shallow,
             total_proxy,
@@ -817,7 +898,11 @@ async fn run_queries(
     readyset: &mut DatabaseConnection,
     stats: &mut PatternStats,
     repro: &mut ReproLog,
-) -> anyhow::Result<(usize, usize)> {
+    selection_filter: dante::compat::SelectionFilter,
+    single_pattern: bool,
+    keep_going: bool,
+    readyset_mode: bool,
+) -> anyhow::Result<(usize, usize, usize)> {
     let mut created_views: Vec<String> = Vec::new();
     let result = run_queries_body(
         dialect,
@@ -831,6 +916,10 @@ async fn run_queries(
         stats,
         repro,
         &mut created_views,
+        selection_filter,
+        single_pattern,
+        keep_going,
+        readyset_mode,
     )
     .await;
     drop_all_views(upstream, &created_views).await;
@@ -850,12 +939,23 @@ async fn run_queries_body(
     stats: &mut PatternStats,
     repro: &mut ReproLog,
     created_views: &mut Vec<String>,
-) -> anyhow::Result<(usize, usize)> {
+    selection_filter: dante::compat::SelectionFilter,
+    single_pattern: bool,
+    keep_going: bool,
+    readyset_mode: bool,
+) -> anyhow::Result<(usize, usize, usize)> {
     let config = GeneratorConfig {
-        readyset_compatible: true,
-        // High column reuse so composed queries exercise shared columns
-        // across patterns.
-        reuse_preference: 0.99,
+        // In Readyset mode, apply the deep-cache compatibility rules so the
+        // generator avoids shapes Readyset cannot deep-cache. Against a
+        // transparent proxy those rules only narrow coverage for no benefit.
+        readyset_compatible: readyset_mode,
+        // Under `--single-pattern` patterns run standalone; high reuse collapses
+        // distinct column variables onto the auto-allocated PK (Integer
+        // columns all bind to `c0`), erasing patterns that need three
+        // distinct columns of overlapping classes (e.g.
+        // `where_lookup_decimal_eq_int_div_int` needs lookup + c1 + c2).
+        // Fresh tables per iteration also keep bug-bait inserts isolated.
+        reuse_preference: if single_pattern { 0.0 } else { 0.99 },
         ..GeneratorConfig::default()
     };
     let mut generator = Generator::new(dialect, config);
@@ -868,11 +968,30 @@ async fn run_queries_body(
     let mut created_tables: HashSet<SqlIdentifier> = HashSet::new();
     let mut matched_count = 0usize;
     let mut mismatched_count = 0usize;
+    let mut errored_count = 0usize;
 
     'query: for query_idx in 0..num_queries {
-        let output = generator
-            .generate_with_ddl(&mut entropy)
-            .with_context(|| format!("generating query {query_idx}"))?;
+        let mut output = if single_pattern {
+            // Direct resolve path: pick one pattern matching the filter,
+            // resolve via `try_resolve` without composition. Avoids
+            // composition partners (self_join, problematic placeholders,
+            // etc.) that block `CREATE DEEP CACHE`.
+            let pattern = generator
+                .registry()
+                .pick_random(&mut entropy, &selection_filter, dialect)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("no pattern matches --required-tags / --excluded-tags filter")
+                })?;
+            let pattern_name = pattern.name.to_string();
+            let recipe = pattern.to_recipe(0);
+            let ro = dante::resolver::try_resolve(&recipe, generator.state_mut(), &mut entropy)
+                .with_context(|| format!("resolving query {query_idx}"))?;
+            dante::QueryOutput::from_resolver(ro, pattern_name, dialect)
+        } else {
+            generator
+                .generate_with_ddl_filtered(&mut entropy, &selection_filter)
+                .with_context(|| format!("generating query {query_idx}"))?
+        };
 
         // Borrow rather than clone: `output` lives through the entire query
         // iteration, and every `pattern_name` use below is a `&str`. Cloning
@@ -931,14 +1050,23 @@ async fn run_queries_body(
 
                     // Insert seed data, including rows pinned by example
                     // row_overrides for this table so that example-targeted
-                    // SELECTs have matching rows to hit.
-                    let examples_for_table: Vec<&ResolvedExample> = output
-                        .examples
-                        .iter()
-                        .filter(|ex| ex.row_overrides.iter().any(|o| o.table == *name))
-                        .collect();
-                    let rows =
+                    // SELECTs have matching rows to hit. `global_indices`
+                    // maps the per-table slice back into `output.examples`
+                    // so dropped rows can be removed and their probes
+                    // skipped.
+                    let (global_indices, examples_for_table): (Vec<usize>, Vec<&ResolvedExample>) =
+                        output
+                            .examples
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, ex)| ex.row_overrides.iter().any(|o| o.table == *name))
+                            .unzip();
+                    let (rows, dropped) =
                         generate_rows(schema, rows_per_table, &examples_for_table, &mut entropy);
+                    // Remove examples for dropped rows (in reverse order to keep indices valid).
+                    for &local_idx in dropped.iter().rev() {
+                        output.examples.remove(global_indices[local_idx]);
+                    }
                     if !rows.is_empty() {
                         let insert = build_insert(schema, &rows)?;
                         let insert_sql = insert.display(dialect).to_string();
@@ -1052,11 +1180,15 @@ async fn run_queries_body(
                 })
                 .collect();
             if !table_names.is_empty() {
-                wait_for_replication(upstream, readyset, &table_names, Duration::from_secs(60))
-                    .await
-                    .with_context(|| {
-                        format!("waiting for DDL replication before query {query_idx}")
-                    })?;
+                wait_for_replication(
+                    upstream,
+                    readyset,
+                    &table_names,
+                    Duration::from_secs(60),
+                    readyset_mode,
+                )
+                .await
+                .with_context(|| format!("waiting for DDL replication before query {query_idx}"))?;
             }
         }
 
@@ -1104,34 +1236,70 @@ async fn run_queries_body(
             created_views.push(vname_sql.clone());
 
             let view_select = format!("SELECT * FROM {vname_sql}");
-            let create_cache = format!("CREATE DEEP CACHE FROM {view_select}");
-            // Bounded retry budget so a stuck Readyset skips this view's
-            // comparison instead of stalling the run on multi-minute
-            // exponential backoff.
+            if !readyset_mode {
+                // Non-Readyset endpoint: run the view directly without the
+                // cache-forcing DDL. The proxy decides routing.
+                view_select
+            } else {
+                let create_cache = format!("CREATE DEEP CACHE FROM {view_select}");
+                // Bounded retry budget so a stuck Readyset skips this view's
+                // comparison instead of stalling the run on multi-minute
+                // exponential backoff.
+                let cache_result: Result<_, _> = retry_with_exponential_backoff!(
+                    { readyset.query_drop(&create_cache).await },
+                    retries: CACHE_CREATE_RETRIES,
+                    delay: CACHE_CREATE_BASE_DELAY_MS,
+                    backoff: CACHE_CREATE_BACKOFF,
+                );
+                // Don't proceed-anyway: the previous behavior ran the SELECT
+                // against Readyset without a deep cache, creating a shallow
+                // cache and mixing performance with correctness signal. Skip
+                // the comparison instead so the run continues without a false
+                // mismatch from cache-mode divergence.
+                if let Err(err) = cache_result {
+                    warn!(
+                        %vname_sql,
+                        %err,
+                        query_idx,
+                        "timed out creating deep cache for compound view; skipping comparison"
+                    );
+                    stats.entry(pattern_name).skipped += 1;
+                    continue 'query;
+                }
+
+                view_select
+            }
+        } else if !readyset_mode {
+            // Non-Readyset endpoint: skip the deep-cache DDL entirely.
+            select_sql.clone()
+        } else {
+            // Non-compound: ask Readyset to deep-cache the SELECT so the
+            // query runs through dataflow instead of being proxied upstream
+            // or shallow-cached (which would still forward to upstream and
+            // mask coercion divergences). Explicit DEEP CACHE so we don't
+            // fall back to SHALLOW when deep compilation can't handle the
+            // shape.
+            let create_cache = format!("CREATE DEEP CACHE FROM {select_sql}");
             let cache_result: Result<_, _> = retry_with_exponential_backoff!(
                 { readyset.query_drop(&create_cache).await },
                 retries: CACHE_CREATE_RETRIES,
                 delay: CACHE_CREATE_BASE_DELAY_MS,
                 backoff: CACHE_CREATE_BACKOFF,
             );
-            // Don't proceed-anyway: the previous behavior ran the SELECT
-            // against Readyset without a deep cache, creating a shallow
-            // cache and mixing performance with correctness signal. Skip
-            // the comparison instead so the run continues without a false
-            // mismatch from cache-mode divergence.
+            // Skip the comparison rather than proxying on failure: a proxied
+            // SELECT forwards to upstream and matches it trivially, reporting a
+            // false match that masks the coercion divergences this oracle
+            // exists to find. Mirrors the compound-view path above.
             if let Err(err) = cache_result {
                 warn!(
-                    %vname_sql,
-                    %err,
                     query_idx,
-                    "timed out creating deep cache for compound view; skipping comparison"
+                    %select_sql,
+                    %err,
+                    "CREATE DEEP CACHE failed; skipping comparison"
                 );
                 stats.entry(pattern_name).skipped += 1;
                 continue 'query;
             }
-
-            view_select
-        } else {
             select_sql.clone()
         };
 
@@ -1164,6 +1332,7 @@ async fn run_queries_body(
         // ResolvedExample. Each probe is compared independently.
         let mut query_matched_probes = 0usize;
         let mut query_mismatched_probes = 0usize;
+        let mut query_errored_probes = 0usize;
         for probe in &select_probes {
             let params = &probe.params;
             let example_note = probe.example_note;
@@ -1230,7 +1399,36 @@ async fn run_queries_body(
                         stats.entry(pattern_name).skipped += 1;
                         continue 'query;
                     }
-                    ErrorClass::Other | ErrorClass::ReadysetTransient => {
+                    class @ (ErrorClass::Other
+                    | ErrorClass::ReadysetTransient
+                    | ErrorClass::UpstreamTransient) => {
+                        // Upstream is the deterministic source of truth: only a
+                        // transient error may be skipped under --keep-going.
+                        // `Other` propagates so a real upstream failure is
+                        // never masked as a benign "errored".
+                        if keep_going && upstream_error_tolerable_under_keep_going(&class) {
+                            warn!(
+                                query_idx,
+                                %select_sql,
+                                err = %format!("{err:#}"),
+                                "upstream SELECT hit a transient error; skipping under keep-going"
+                            );
+                            match classify_query(
+                                query_matched_probes,
+                                query_mismatched_probes,
+                                true,
+                            ) {
+                                QueryTally::Mismatched => {
+                                    mismatched_count += 1;
+                                    stats.entry(pattern_name).mismatched += 1;
+                                }
+                                _ => {
+                                    errored_count += 1;
+                                    stats.entry(pattern_name).errored += 1;
+                                }
+                            }
+                            continue 'query;
+                        }
                         return Err(err).context(format!("SELECT on upstream: {select_sql}"));
                     }
                 },
@@ -1271,7 +1469,36 @@ async fn run_queries_body(
                             }
                             continue;
                         }
-                        _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
+                        _ => {
+                            if keep_going {
+                                error!(
+                                    query_idx,
+                                    %select_sql,
+                                    err = %format!("{err:#}"),
+                                    "readyset SELECT failed (keep-going)"
+                                );
+                                assert_unreachable!(
+                                    "Readyset SELECT errored (keep-going swallowed)",
+                                    &json!({ "pattern": &pattern_name })
+                                );
+                                match classify_query(
+                                    query_matched_probes,
+                                    query_mismatched_probes,
+                                    true,
+                                ) {
+                                    QueryTally::Mismatched => {
+                                        mismatched_count += 1;
+                                        stats.entry(pattern_name).mismatched += 1;
+                                    }
+                                    _ => {
+                                        errored_count += 1;
+                                        stats.entry(pattern_name).errored += 1;
+                                    }
+                                }
+                                continue 'query;
+                            }
+                            return Err(err).context(format!("SELECT on readyset: {select_sql}"));
+                        }
                     },
                 };
                 let readyset_rows: Vec<Vec<Value>> = readyset_results;
@@ -1302,13 +1529,13 @@ async fn run_queries_body(
             if matched {
                 query_matched_probes += 1;
             } else {
-                query_mismatched_probes += 1;
                 // `last_mismatch` is None when the entire retry budget was
                 // consumed by transient errors / connection drops without ever
                 // producing a comparable result. Surface them as separate
                 // Antithesis findings with low-cardinality payloads.
                 match last_mismatch {
                     Some(mismatch_msg) => {
+                        query_mismatched_probes += 1;
                         assert_unreachable!(
                             "Result mismatch between upstream and Readyset after retries",
                             &json!({
@@ -1329,6 +1556,11 @@ async fn run_queries_body(
                         error!(query_idx, "{mismatch_msg}");
                     }
                     None => {
+                        // Readyset never produced a comparable result, so this
+                        // is an error, not a divergence. Counting it as a
+                        // mismatch would let infra flakiness trip the divergence
+                        // assertion and inflate the mismatch tally.
+                        query_errored_probes += 1;
                         assert_unreachable!(
                             "Readyset never converged within retry budget (all transient)",
                             &json!({
@@ -1349,10 +1581,18 @@ async fn run_queries_body(
             // Sentinel-based autoparameterization probe for hoisting patterns.
             // Only run on the random probe (example_note is None) to avoid
             // duplicate autoparam signals with different pinned literals.
+            //
+            // Runs only in --readyset-mode: the probe relies on EXPLAIN
+            // CREATE CACHE, which only applies to a cache-creating Readyset
+            // target. Against a transparent proxy (e.g. SQP) there is no
+            // autoparameterization to observe, so the probe and its
+            // assertions can never be satisfied and would otherwise show as
+            // a permanent failure floor.
             if example_note.is_none()
                 && matched
                 && Pattern::name_needs_literal_mode(pattern_name)
                 && !params.is_empty()
+                && readyset_mode
             {
                 let (sentinel_sql, sentinels) = inline_sentinels(&select_sql, params, dialect);
                 debug!(
@@ -1501,19 +1741,41 @@ async fn run_queries_body(
 
         // Update per-query counters once after all probes complete.
         // Cache mode is per (pattern, query shape), not per probe.
-        let cache_mode = query_cache_mode(readyset).await;
+        //
+        // The `EXPLAIN LAST STATEMENT` probe runs only in --readyset-mode.
+        // Against a transparent proxy such as SQP (the default) the oracle is
+        // indifferent to routing -- deep, shallow, proxied upstream, or DuckDB
+        // are all fine -- so it is skipped entirely.
+        let cache_mode = if readyset_mode {
+            query_cache_mode(readyset).await
+        } else {
+            CacheMode::NotChecked
+        };
         stats.record_cache_mode(pattern_name, cache_mode);
 
-        let query_match_status = if query_mismatched_probes == 0 && query_matched_probes > 0 {
-            matched_count += 1;
-            stats.entry(pattern_name).matched += 1;
-            "matched"
-        } else if query_mismatched_probes > 0 {
-            mismatched_count += 1;
-            stats.entry(pattern_name).mismatched += 1;
-            "mismatched"
-        } else {
-            "neither"
+        let query_match_status = match classify_query(
+            query_matched_probes,
+            query_mismatched_probes,
+            query_errored_probes > 0,
+        ) {
+            QueryTally::Matched => {
+                matched_count += 1;
+                stats.entry(pattern_name).matched += 1;
+                "matched"
+            }
+            QueryTally::Mismatched => {
+                mismatched_count += 1;
+                stats.entry(pattern_name).mismatched += 1;
+                "mismatched"
+            }
+            QueryTally::Errored => {
+                // A probe ran but only produced transient errors; tally it as
+                // errored, distinct from a query that was never compared.
+                errored_count += 1;
+                stats.entry(pattern_name).errored += 1;
+                "errored"
+            }
+            QueryTally::Inconclusive => "neither",
         };
         assert_reachable!(
             "Query comparison completed",
@@ -1535,19 +1797,24 @@ async fn run_queries_body(
         }
     }
 
-    // Verify that queries actually created caches.
-    let cache_count = count_caches_for_tables(readyset, &created_tables).await;
-    if cache_count == 0 && num_queries > 0 {
-        warn!(
-            num_queries,
-            "no caches were created — all queries may have been proxied to upstream"
-        );
-    } else {
-        info!(cache_count, "deep caches created during run");
-        assert_reachable!(
-            "Deep caches created",
-            &json!({ "cache_count": cache_count })
-        );
+    // Verify that queries actually created caches. Runs only in
+    // --readyset-mode; against a transparent proxy (like SQP) no caches are
+    // created, so the "Deep caches created" reachability marker is not
+    // applicable and would never fire.
+    if readyset_mode {
+        let cache_count = count_caches_for_tables(readyset, &created_tables).await;
+        if cache_count == 0 && num_queries > 0 {
+            warn!(
+                num_queries,
+                "no caches were created — all queries may have been proxied to upstream"
+            );
+        } else {
+            info!(cache_count, "deep caches created during run");
+            assert_reachable!(
+                "Deep caches created",
+                &json!({ "cache_count": cache_count })
+            );
+        }
     }
 
     let (deep_count, shallow_count) = count_caches_detailed(readyset, &created_tables).await;
@@ -1616,14 +1883,22 @@ async fn run_queries_body(
             "hoisting_generated": hoisting_generated,
         })
     );
-    assert_sometimes!(
-        hoisting_autoparam > 0,
-        "Hoisting pattern autoparameterization confirmed via cache reuse",
-        &json!({
-            "hoisting_autoparam": hoisting_autoparam,
-            "hoisting_matched": hoisting_matched,
-        })
-    );
+    // Autoparameterization is confirmed via EXPLAIN CREATE CACHE, which only
+    // applies to a cache-creating Readyset target. Without --readyset-mode
+    // the sentinel probe above is skipped so hoisting_autoparam is always 0;
+    // emitting this Sometimes would be a permanent unsatisfiable failure
+    // against a transparent proxy. "Hoisting pattern was generated/matched"
+    // stay unconditional -- they are passthrough-observable (row-set equality).
+    if readyset_mode {
+        assert_sometimes!(
+            hoisting_autoparam > 0,
+            "Hoisting pattern autoparameterization confirmed via cache reuse",
+            &json!({
+                "hoisting_autoparam": hoisting_autoparam,
+                "hoisting_matched": hoisting_matched,
+            })
+        );
+    }
 
     info!(
         matched_count,
@@ -1637,7 +1912,7 @@ async fn run_queries_body(
         shallow_caches = shallow_count,
         "run completed"
     );
-    Ok((matched_count, mismatched_count))
+    Ok((matched_count, mismatched_count, errored_count))
 }
 
 /// Drop every view we created during the run. Always called from
@@ -1957,8 +2232,17 @@ fn compare_results(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ErrorClass {
     Fatal,
-    UpstreamKnownLimit { code: Option<u16> },
-    UpstreamGeneratorBug { code: Option<u16> },
+    UpstreamKnownLimit {
+        code: Option<u16>,
+    },
+    UpstreamGeneratorBug {
+        code: Option<u16>,
+    },
+    /// Upstream-side transient infrastructure error (e.g. query timeout
+    /// during an Antithesis-injected network partition). Tolerable under
+    /// `--keep-going`: the probe is skipped with an event but the driver
+    /// keeps running so a single fault doesn't halt the whole oracle.
+    UpstreamTransient,
     ReadysetTransient,
     Other,
 }
@@ -1981,6 +2265,17 @@ const READYSET_TRANSIENT_NEEDLES: &[&str] = &[
     "schema generation mismatch",
 ];
 
+/// Classify a query-execution error into an `ErrorClass`.
+///
+/// The same classification is used at both call sites, but they act on the
+/// classes differently and that asymmetry is load-bearing: the upstream-SELECT
+/// site skips and continues on `UpstreamKnownLimit` (the oracle cannot read the
+/// upstream result, so the query is unevaluable), while the Readyset-SELECT site
+/// has no skip arm for it and lets it fall through to the "Readyset SELECT
+/// errored" assertion. Do not add an `UpstreamKnownLimit` skip arm at the
+/// Readyset site: that would silently mask a Readyset-only divergence (e.g.
+/// Readyset returning a type the oracle cannot decode that upstream returned
+/// cleanly).
 fn classify_error(err: &anyhow::Error) -> ErrorClass {
     use database_utils::DatabaseError;
     use mysql_async::Error as MyErr;
@@ -1994,20 +2289,26 @@ fn classify_error(err: &anyhow::Error) -> ErrorClass {
                 DatabaseError::PostgreSQL(pg) => {
                     if pg.is_closed() {
                         ErrorClass::Fatal
-                    } else if pg.as_db_error().is_some() {
-                        // Any Postgres server-side rejection we haven't
-                        // explicitly allowlisted is treated as a generator
-                        // bug, mirroring the MySQL path. Postgres uses
-                        // SQLSTATE strings rather than numeric codes, so
-                        // the `code` field stays None.
-                        ErrorClass::UpstreamGeneratorBug { code: None }
+                    } else if let Some(db) = pg.as_db_error() {
+                        classify_pg_sqlstate(db.code())
+                    } else if pg_error_is_client_decode(&pg.to_string()) {
+                        // Client-side decode failure: the oracle's Value type
+                        // does not handle the PG column type (e.g.
+                        // _timestamp). This is a generator-side limitation,
+                        // not a server or infrastructure failure. Treat as a
+                        // known limit so --keep-going skips the query instead
+                        // of aborting the run.
+                        ErrorClass::UpstreamKnownLimit { code: None }
                     } else {
-                        // No db error attached -- IO/decoder/protocol failure.
+                        // Other non-db, non-closed error (IO/protocol).
                         ErrorClass::Fatal
                     }
                 }
                 DatabaseError::UpstreamQueryTimeout | DatabaseError::UpstreamConnectionNone => {
-                    ErrorClass::Fatal
+                    // Antithesis-injected network partitions and slow disks
+                    // surface as query timeouts and connection-none; treat as
+                    // transient so --keep-going lets the driver continue.
+                    ErrorClass::UpstreamTransient
                 }
                 _ => ErrorClass::Other,
             };
@@ -2021,12 +2322,90 @@ fn classify_error(err: &anyhow::Error) -> ErrorClass {
     ErrorClass::Other
 }
 
+/// Whether an upstream SELECT error of this class may be skipped under
+/// `--keep-going`. Upstream is the deterministic source of truth, so only
+/// transient infrastructure errors are tolerable; an `Other` error (or a
+/// misclassified Readyset-known-bug) on the upstream path must propagate so a
+/// real upstream failure is never masked as a benign "errored".
+fn upstream_error_tolerable_under_keep_going(class: &ErrorClass) -> bool {
+    matches!(
+        class,
+        ErrorClass::ReadysetTransient | ErrorClass::UpstreamTransient,
+    )
+}
+
+/// Final per-query classification used by all exit paths.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum QueryTally {
+    Matched,
+    Mismatched,
+    Errored,
+    Inconclusive,
+}
+
+/// Classify a query from its per-probe tallies and whether a probe errored out
+/// early (e.g. a transient swallowed under --keep-going). A divergence recorded
+/// by ANY probe makes the query a mismatch: it is never downgraded to a benign
+/// error even when a *later* probe errors out. Only with zero recorded
+/// divergences does an early error determine the outcome.
+fn classify_query(
+    matched_probes: usize,
+    mismatched_probes: usize,
+    errored_early: bool,
+) -> QueryTally {
+    if mismatched_probes > 0 {
+        QueryTally::Mismatched
+    } else if errored_early {
+        QueryTally::Errored
+    } else if matched_probes > 0 {
+        QueryTally::Matched
+    } else {
+        QueryTally::Inconclusive
+    }
+}
+
 fn classify_mysql_code(code: u16) -> ErrorClass {
     if MYSQL_KNOWN_LIMIT_CODES.contains(&code) {
         ErrorClass::UpstreamKnownLimit { code: Some(code) }
     } else {
         ErrorClass::UpstreamGeneratorBug { code: Some(code) }
     }
+}
+
+/// Classify a Postgres server-side SQLSTATE code.
+///
+/// Data-dependent errors that the generator cannot avoid (numeric overflow,
+/// division by zero) are `UpstreamKnownLimit`, mirroring MySQL code 1038.
+/// All other server rejections are `UpstreamGeneratorBug` so the bad-SQL
+/// pattern surfaces as an Antithesis assertion.
+fn classify_pg_sqlstate(state: &tokio_postgres::error::SqlState) -> ErrorClass {
+    use tokio_postgres::error::SqlState;
+    if *state == SqlState::NUMERIC_VALUE_OUT_OF_RANGE || *state == SqlState::DIVISION_BY_ZERO {
+        ErrorClass::UpstreamKnownLimit { code: None }
+    } else {
+        ErrorClass::UpstreamGeneratorBug { code: None }
+    }
+}
+
+/// True when a tokio_postgres error message indicates a client-side
+/// deserialization failure (the oracle's `Value` type does not handle the
+/// PG column type). The tokio_postgres display for `Kind::FromSql(idx)` is
+/// "error deserializing column <idx>: <cause>".
+///
+/// This is the testable surface for the decode-error detection in
+/// `classify_error`: we cannot construct a `tokio_postgres::Error` with a
+/// specific `Kind` in unit tests because those constructors are `pub(crate)`,
+/// so we factor the check onto the string representation.
+///
+/// This prefix match is brittle: it depends on tokio_postgres's `Display` for
+/// `Kind::FromSql`. If a dependency bump changes that wording, decode errors
+/// stop matching and fall through to the `Fatal` arm in `classify_error`,
+/// reintroducing the run-aborting crash this guards against. The unit tests
+/// assert against a hardcoded copy of the message, so they will NOT catch such
+/// drift on their own — an integration run that triggers a real FromSql error
+/// (e.g. `ARRAY_AGG` over a timestamp column) is the durable guard.
+fn pg_error_is_client_decode(msg: &str) -> bool {
+    msg.starts_with("error deserializing column")
 }
 
 struct SentinelInfo {
@@ -2115,16 +2494,47 @@ fn inline_sentinels(sql: &str, params: &[Value], dialect: Dialect) -> (String, V
 }
 
 fn inline_params(sql: &str, params: &[Value], dialect: Dialect) -> String {
+    // Quote a string-shaped literal, escaping embedded single quotes.
+    let quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
     replace_placeholders(sql, dialect, |idx| {
-        if idx >= params.len() {
+        let Some(param) = params.get(idx) else {
             return "NULL".to_string();
-        }
-        match &params[idx] {
+        };
+        // Exhaustive on purpose: a new `Value` variant must be given a literal
+        // form here rather than silently binding NULL, which would make a
+        // divergence's repro script reproduce the wrong (null) value.
+        match param {
             Value::Integer(n) => n.to_string(),
-            Value::Real(bits) => format!("{:?}", f64::from_bits(*bits)),
-            Value::Text(s) => format!("'{}'", s.replace('\'', "''")),
+            Value::UnsignedInteger(n) => n.to_string(),
+            Value::Real(bits) => {
+                let v = f64::from_bits(*bits);
+                if v.is_finite() {
+                    // `{v:?}` renders a round-trippable decimal (`2.5`, `2.0`).
+                    format!("{v:?}")
+                } else {
+                    // NaN / +/-inf have no portable SQL literal; mark it so the
+                    // repro is visibly non-replayable rather than silently wrong.
+                    "/* non-finite real, unrepresentable */ NULL".to_string()
+                }
+            }
+            Value::Numeric(d) => d.to_string(),
+            Value::Text(s) => quote(s),
+            Value::DateTime(dt) => quote(&dt.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
+            Value::Time(t) => quote(&t.to_string()),
+            Value::TimestampTz(ts) => match dialect {
+                // MySQL has no TIMESTAMPTZ; project to UTC-naive, mirroring the
+                // bind path in `value.rs`.
+                Dialect::MySQL => {
+                    quote(&ts.naive_utc().format("%Y-%m-%d %H:%M:%S%.6f").to_string())
+                }
+                Dialect::PostgreSQL => quote(&ts.to_rfc3339()),
+            },
             Value::Null => "NULL".to_string(),
-            _ => "NULL".to_string(),
+            // Rare in dante-generated queries and without a simple cross-dialect
+            // literal here; mark visibly instead of silently binding NULL.
+            Value::ByteArray(_) => "/* unrepresentable ByteArray param */ NULL".to_string(),
+            Value::BitVector(_) => "/* unrepresentable BitVector param */ NULL".to_string(),
+            Value::Json(_) => "/* unrepresentable Json param */ NULL".to_string(),
         }
     })
 }
@@ -2252,6 +2662,13 @@ fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
+/// True if a `SHOW CACHES` props column marks a deep cache. Matches `deep` on
+/// a word boundary so values like `deeper` don't false-positive -- the same
+/// boundary guard `count_caches_detailed` applies to the query column.
+fn cache_props_is_deep(props: &str) -> bool {
+    query_mentions_identifier(props, "deep")
+}
+
 async fn count_caches_for_tables(
     readyset: &mut DatabaseConnection,
     tables: &HashSet<SqlIdentifier>,
@@ -2288,7 +2705,7 @@ async fn count_caches_detailed(
         if !mentions_table {
             continue;
         }
-        if matches!(row.get(3), Some(Value::Text(props)) if props.contains("deep")) {
+        if matches!(row.get(3), Some(Value::Text(props)) if cache_props_is_deep(props)) {
             deep += 1;
         } else {
             shallow += 1;
@@ -2360,6 +2777,7 @@ async fn wait_for_replication(
     readyset: &mut DatabaseConnection,
     tables: &[&SqlIdentifier],
     timeout: Duration,
+    readyset_mode: bool,
 ) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     let poll_interval = Duration::from_millis(200);
@@ -2404,6 +2822,12 @@ async fn wait_for_replication(
     }
 
     // Phase 2: Wait for SHOW READYSET TABLES to report Online status.
+    // Runs only in --readyset-mode: a transparent proxy like SQP has no
+    // Readyset-specific status surface, and the row-count phase above
+    // already proves the proxy sees the same rows as upstream.
+    if !readyset_mode {
+        return Ok(());
+    }
     let table_names: Vec<String> = tables.iter().map(|t| t.to_string()).collect();
     loop {
         match online_tables(readyset).await {
@@ -2525,6 +2949,59 @@ struct ConstraintFuzz {
     /// at the point of failure.
     #[arg(long)]
     dump_repro: Option<PathBuf>,
+
+    /// Restrict pattern selection to patterns carrying ALL of these tags.
+    /// Comma-separated. Maps directly to
+    /// `dante::compat::SelectionFilter::required_tags`.
+    ///
+    /// Example: `--required-tags expr_eval` runs only the
+    /// expression-evaluation patterns so `bug_bait` coercion rows are
+    /// exercised reliably instead of being washed out by the default
+    /// 143-pattern primary-pick distribution.
+    #[arg(long, value_delimiter = ',')]
+    required_tags: Vec<String>,
+
+    /// Exclude patterns carrying ANY of these tags. Comma-separated.
+    /// Maps directly to `dante::compat::SelectionFilter::excluded_tags`.
+    #[arg(long, value_delimiter = ',')]
+    excluded_tags: Vec<String>,
+
+    /// Skip composition: each iteration picks ONE pattern and resolves it
+    /// alone via `resolver::try_resolve`. Composition would otherwise pair
+    /// patterns with partners like `self_join` or aggregate compose helpers
+    /// that block `CREATE DEEP CACHE` (Readyset rejects self-joins-on-same-
+    /// column / unsupported placeholder positions), which forces the query
+    /// to proxy upstream and hides expression-eval divergences. Use with
+    /// `--required-tags expr_eval` for the focused expression-eval bug
+    /// coverage flow.
+    #[arg(long)]
+    single_pattern: bool,
+
+    /// Continue past non-fatal terminal SELECT errors instead of aborting
+    /// the run. Errors classified as `ErrorClass::Other` from either the
+    /// upstream or Readyset side are logged, surfaced as Antithesis
+    /// assertion failures, counted as `errored`, and the loop moves on.
+    /// `ErrorClass::Fatal` (closed connection) still bails because the
+    /// session cannot be reused safely. Useful for collecting full
+    /// coverage data during soak runs that would otherwise stop at the
+    /// first novel Readyset bug.
+    #[arg(long)]
+    keep_going: bool,
+
+    /// Treat the `--readyset-url` endpoint as a real Readyset instance and
+    /// exercise its Readyset-specific surfaces. Enables: the deep-cache
+    /// compatibility rules in the generator (skip shapes Readyset cannot
+    /// deep-cache), `CREATE DEEP CACHE FROM ...` per query, the
+    /// `EXPLAIN CREATE CACHE` autoparameterization probes, the
+    /// `EXPLAIN LAST STATEMENT` cache-routing probe, and the
+    /// `SHOW READYSET TABLES` online-status wait.
+    ///
+    /// Off by default: the endpoint is treated as a transparent proxy
+    /// (e.g. SQP), so none of the Readyset-specific DDL or probes run.
+    /// Compound SELECTs still get their helper VIEW so the same SQL runs
+    /// on both sides.
+    #[arg(long)]
+    readyset_mode: bool,
 }
 
 impl ConstraintFuzz {
@@ -2578,12 +3055,20 @@ impl ConstraintFuzz {
         let mut stats = PatternStats::default();
 
         // Seed stats with all registered pattern names so we can detect
-        // patterns that were never generated.
+        // patterns that were never generated, and reject typo'd tag filters
+        // before any DB work.
         {
             let registry = dante::ConstraintRegistry::default_registry();
             for name in registry.pattern_names() {
                 stats.counts.entry(name).or_default();
             }
+            validate_known_tags(
+                self.required_tags
+                    .iter()
+                    .chain(&self.excluded_tags)
+                    .map(String::as_str),
+                &registry.all_tags(),
+            )?;
         }
 
         // 5 retries × exponential backoff (1s, 2s, 4s, 8s, 16s ≈ 31s budget)
@@ -2610,6 +3095,28 @@ impl ConstraintFuzz {
             None => ReproLog::new(dialect, seed_display.clone()),
         };
 
+        // Build the SelectionFilter from CLI arg slices. Empty vecs give
+        // the default (no restriction) — same behavior as before.
+        let selection_filter = dante::compat::SelectionFilter {
+            max_depth: None,
+            required_tags: self
+                .required_tags
+                .iter()
+                .map(String::as_str)
+                // `SelectionFilter` holds `&'static str`. CLI strings live for
+                // the lifetime of the run, so `Box::leak` is the only way to
+                // get a `'static` borrow without re-architecting the filter
+                // type.
+                .map(|s| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) })
+                .collect(),
+            excluded_tags: self
+                .excluded_tags
+                .iter()
+                .map(String::as_str)
+                .map(|s| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) })
+                .collect(),
+        };
+
         let result = run_queries(
             dialect,
             self.num_queries,
@@ -2621,6 +3128,10 @@ impl ConstraintFuzz {
             &mut readyset,
             &mut stats,
             &mut repro,
+            selection_filter,
+            self.single_pattern,
+            self.keep_going,
+            self.readyset_mode,
         )
         .await;
 
@@ -2657,16 +3168,19 @@ impl ConstraintFuzz {
             (false, false) => {}
         }
 
-        let (matched, mismatched) = result?;
+        let (matched, mismatched, errored) = result?;
 
         assert_sometimes!(
             matched > 0,
             "Constraint-fuzz matched at least one query",
-            &json!({ "matched": matched, "mismatched": mismatched })
+            &json!({ "matched": matched, "mismatched": mismatched, "errored": errored })
         );
 
         stats.log_summary();
-        info!(matched, mismatched, "readyset-dante-oracle complete");
+        info!(
+            matched,
+            mismatched, errored, "readyset-dante-oracle complete"
+        );
 
         Ok(())
     }
@@ -2716,6 +3230,128 @@ mod tests {
         );
         schema.primary_key = Some(SqlIdentifier::from("id"));
         schema
+    }
+
+    #[test]
+    fn recorded_divergence_is_never_downgraded_to_error() {
+        // A divergence recorded by an earlier probe must classify the
+        // query as a mismatch even when a later probe errors out (or is
+        // skipped) under --keep-going -- it must not be reported as a benign
+        // error.
+        // Errored-early but an earlier probe diverged -> still a mismatch.
+        assert_eq!(classify_query(0, 1, true), QueryTally::Mismatched);
+        // Matched + diverged + errored-early -> the divergence still wins.
+        assert_eq!(classify_query(2, 1, true), QueryTally::Mismatched);
+        // No divergence: the early error decides.
+        assert_eq!(classify_query(1, 0, true), QueryTally::Errored);
+        assert_eq!(classify_query(2, 0, false), QueryTally::Matched);
+        assert_eq!(classify_query(0, 3, false), QueryTally::Mismatched);
+        assert_eq!(classify_query(0, 0, false), QueryTally::Inconclusive);
+        // All probes exhausted their retry budget on transient errors with no
+        // comparison: errored, never a divergence.
+        assert_eq!(classify_query(0, 0, true), QueryTally::Errored);
+    }
+
+    #[test]
+    fn validate_known_tags_rejects_unknown_tags() {
+        let known: std::collections::BTreeSet<&'static str> =
+            ["expr_eval", "postgres_only"].into_iter().collect();
+        validate_known_tags(["expr_eval", "postgres_only"], &known)
+            .expect("known tags must validate");
+        let err = validate_known_tags(["expr_eval", "typo_tag"], &known)
+            .expect_err("an unknown tag must be rejected");
+        assert!(
+            err.to_string().contains("typo_tag"),
+            "error should name the offending tag: {err}"
+        );
+    }
+
+    #[test]
+    fn upstream_only_tolerates_transient_under_keep_going() {
+        // Upstream is the source of truth; under --keep-going only a
+        // transient error may be skipped. `Other` must propagate so a real
+        // upstream failure isn't masked.
+        assert!(upstream_error_tolerable_under_keep_going(
+            &ErrorClass::ReadysetTransient
+        ));
+        assert!(!upstream_error_tolerable_under_keep_going(
+            &ErrorClass::Other
+        ));
+    }
+
+    #[test]
+    fn inline_params_emits_replayable_literals() {
+        // Numeric/datetime params must emit as replayable literals, and a
+        // non-finite Real must not render as a bare `NaN`, so a divergence
+        // repro on those param types can be replayed.
+        let num = inline_params(
+            "x = $1",
+            &[Value::Numeric(readyset_decimal::Decimal::from(424242))],
+            Dialect::PostgreSQL,
+        );
+        assert!(
+            num.contains("424242") && !num.contains("NULL"),
+            "numeric param not emitted as a literal: {num}"
+        );
+
+        let nan = inline_params(
+            "x = $1",
+            &[Value::Real(f64::NAN.to_bits())],
+            Dialect::PostgreSQL,
+        );
+        assert!(
+            !nan.contains("NaN"),
+            "non-finite real must not render as a bare NaN literal: {nan}"
+        );
+    }
+
+    #[test]
+    fn cache_props_is_deep_requires_word_boundary() {
+        // "deep" must match on a word boundary; a raw substring test
+        // mis-counts deep caches.
+        assert!(cache_props_is_deep("deep"));
+        assert!(!cache_props_is_deep("deeper"));
+        assert!(!cache_props_is_deep("deepcache"));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a valid")]
+    fn parse_literal_rejects_malformed_numeric_example() {
+        // A malformed authored example literal must hard-error rather
+        // than silently binding NULL, which would let a bug-bait example pass
+        // green while testing nothing.
+        let _ = parse_literal("8x", &SqlType::Int(None));
+    }
+
+    #[test]
+    fn build_insert_renders_bool_column_as_boolean_literal() {
+        // dante generates DfValue::Int(0|1) for BOOL columns; Postgres rejects an integer
+        // literal for a boolean column (SQLSTATE 42804: "column is of type boolean but
+        // expression is of type integer"). The seed INSERT must emit a boolean literal.
+        let mut schema = TableSchema::new(SqlIdentifier::from("t0"));
+        schema.add_column(
+            SqlIdentifier::from("id"),
+            ColumnMeta {
+                sql_type: SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.add_column(
+            SqlIdentifier::from("flag"),
+            ColumnMeta {
+                sql_type: SqlType::Bool,
+                gen_spec: ColumnGenerationSpec::Random,
+            },
+        );
+
+        let data = vec![vec![DfValue::Int(7), DfValue::Int(1)]];
+        let insert = build_insert(&schema, &data).expect("build_insert should succeed");
+        let sql = insert.display(Dialect::PostgreSQL).to_string();
+
+        assert!(
+            sql.contains("TRUE"),
+            "BOOL column must render as a boolean literal (TRUE/FALSE), got: {sql}"
+        );
     }
 
     #[test]
@@ -2781,7 +3417,7 @@ mod tests {
     fn generate_rows_produces_correct_count() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 50, &[], &mut rng);
+        let (rows, _) = generate_rows(&schema, 50, &[], &mut rng);
         assert_eq!(rows.len(), 50);
         for row in &rows {
             assert_eq!(row.len(), 3, "row: {row:?}");
@@ -2792,7 +3428,7 @@ mod tests {
     fn generate_rows_unique_column_produces_unique_values() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 100, &[], &mut rng);
+        let (rows, _) = generate_rows(&schema, 100, &[], &mut rng);
         let ids: Vec<&DfValue> = rows.iter().map(|r| &r[0]).collect();
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(
@@ -2823,8 +3459,8 @@ mod tests {
 
         let mut rng_ab = SmallRng::seed_from_u64(42);
         let mut rng_ba = SmallRng::seed_from_u64(42);
-        let rows_ab = generate_rows(&schema_ab, 5, &[], &mut rng_ab);
-        let rows_ba = generate_rows(&schema_ba, 5, &[], &mut rng_ba);
+        let (rows_ab, _) = generate_rows(&schema_ab, 5, &[], &mut rng_ab);
+        let (rows_ba, _) = generate_rows(&schema_ba, 5, &[], &mut rng_ba);
 
         for (row_ab, row_ba) in rows_ab.iter().zip(rows_ba.iter()) {
             // schema_ab positions: [a, b]; schema_ba positions: [b, a]
@@ -2843,7 +3479,7 @@ mod tests {
     fn build_insert_produces_valid_sql() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 5, &[], &mut rng);
+        let (rows, _) = generate_rows(&schema, 5, &[], &mut rng);
         let insert = build_insert(&schema, &rows).expect("should build insert");
         let sql = insert.display(Dialect::MySQL).to_string();
 
@@ -2882,7 +3518,7 @@ mod tests {
     fn dfvalue_to_value_conversion() {
         let schema = sample_table();
         let mut rng = SmallRng::seed_from_u64(42);
-        let rows = generate_rows(&schema, 10, &[], &mut rng);
+        let (rows, _) = generate_rows(&schema, 10, &[], &mut rng);
         for row in &rows {
             for val in row {
                 let result = Value::try_from(val.clone());
@@ -2916,7 +3552,7 @@ mod tests {
                         "expected CREATE TABLE, got: {sql}"
                     );
 
-                    let rows = generate_rows(schema, 10, &[], &mut entropy);
+                    let (rows, _) = generate_rows(schema, 10, &[], &mut entropy);
                     assert_eq!(rows.len(), 10);
                     let insert = build_insert(schema, &rows).expect("should build insert");
                     let insert_sql = insert.display(Dialect::MySQL).to_string();
@@ -3137,6 +3773,11 @@ mod tests {
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
             dump_repro: None,
+            required_tags: vec![],
+            excluded_tags: vec![],
+            single_pattern: false,
+            keep_going: false,
+            readyset_mode: false,
         };
         assert_eq!(fuzz.dialect().expect("valid mysql url"), Dialect::MySQL);
     }
@@ -3152,6 +3793,11 @@ mod tests {
             readyset_url: "postgresql://postgres:noria@localhost:5433/test".to_string(),
             db_op_timeout_secs: 30,
             dump_repro: None,
+            required_tags: vec![],
+            excluded_tags: vec![],
+            single_pattern: false,
+            keep_going: false,
+            readyset_mode: false,
         };
         assert_eq!(
             fuzz.dialect().expect("valid postgres url"),
@@ -3170,6 +3816,11 @@ mod tests {
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
             dump_repro: None,
+            required_tags: vec![],
+            excluded_tags: vec![],
+            single_pattern: false,
+            keep_going: false,
+            readyset_mode: false,
         };
         let mut rng1 = fuzz.make_rng();
         let mut rng2 = fuzz.make_rng();
@@ -3187,6 +3838,11 @@ mod tests {
             readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
             db_op_timeout_secs: 30,
             dump_repro: None,
+            required_tags: vec![],
+            excluded_tags: vec![],
+            single_pattern: false,
+            keep_going: false,
+            readyset_mode: false,
         };
         let mut rng = fuzz.make_rng();
         let _ = rng.next_u64();
@@ -3256,6 +3912,29 @@ mod tests {
     }
 
     #[test]
+    fn classify_error_upstream_query_timeout_is_upstream_transient() {
+        // qp:fdywzvulipvu: Antithesis network partitions surface as
+        // UpstreamQueryTimeout. The old classification (Fatal) halted the
+        // driver on the first partition-driven timeout; UpstreamTransient
+        // lets --keep-going continue probing.
+        let err = anyhow::Error::from(database_utils::DatabaseError::UpstreamQueryTimeout);
+        assert_eq!(classify_error(&err), ErrorClass::UpstreamTransient);
+    }
+
+    #[test]
+    fn classify_error_upstream_connection_none_is_upstream_transient() {
+        let err = anyhow::Error::from(database_utils::DatabaseError::UpstreamConnectionNone);
+        assert_eq!(classify_error(&err), ErrorClass::UpstreamTransient);
+    }
+
+    #[test]
+    fn upstream_transient_tolerable_under_keep_going() {
+        assert!(upstream_error_tolerable_under_keep_going(
+            &ErrorClass::UpstreamTransient
+        ));
+    }
+
+    #[test]
     fn readyset_error_substrings_are_never_masked() {
         // The oracle must never silence a Readyset divergence. A Readyset
         // error message classifies as `Other` and is surfaced rather than
@@ -3265,6 +3944,69 @@ mod tests {
              Double to MYSQL_TYPE_LONGLONG"
         );
         assert_eq!(classify_error(&err), ErrorClass::Other);
+    }
+
+    // qp:lxhufzoavfhd — client-side PG decode errors must not be Fatal.
+    //
+    // tokio_postgres::Error constructors are pub(crate) so we cannot build a
+    // DatabaseError::PostgreSQL wrapping a FromSql-kind error directly in
+    // tests. The classification logic delegates to the
+    // `pg_error_is_client_decode` predicate, which we test via its string
+    // interface here.
+    #[test]
+    fn pg_client_decode_msg_matches_deserializing_column_prefix() {
+        // The exact message tokio_postgres emits for a WrongType rejection:
+        // "error deserializing column N: <cause>"
+        assert!(pg_error_is_client_decode(
+            "error deserializing column 2: cannot convert between the Rust type \
+             readyset_dante_oracle::value::Value and the Postgres type _timestamp"
+        ));
+        // A bare decode error without the column prefix is also a decode error.
+        assert!(pg_error_is_client_decode(
+            "error deserializing column 0: Invalid type"
+        ));
+    }
+
+    #[test]
+    fn pg_client_decode_msg_does_not_match_io_or_db_errors() {
+        assert!(!pg_error_is_client_decode(
+            "error communicating with the server"
+        ));
+        assert!(!pg_error_is_client_decode("db error"));
+        assert!(!pg_error_is_client_decode("connection closed"));
+    }
+
+    // qp:zxanhxlohpix -- PG data errors (22003, 22012) must be UpstreamKnownLimit.
+    //
+    // tokio_postgres::Error constructors are pub(crate); we test via
+    // classify_pg_sqlstate() which classify_error delegates to for PG
+    // server-side codes.
+    #[test]
+    fn pg_22003_numeric_out_of_range_is_known_limit() {
+        use tokio_postgres::error::SqlState;
+        assert_eq!(
+            classify_pg_sqlstate(&SqlState::NUMERIC_VALUE_OUT_OF_RANGE),
+            ErrorClass::UpstreamKnownLimit { code: None }
+        );
+    }
+
+    #[test]
+    fn pg_22012_division_by_zero_is_known_limit() {
+        use tokio_postgres::error::SqlState;
+        assert_eq!(
+            classify_pg_sqlstate(&SqlState::DIVISION_BY_ZERO),
+            ErrorClass::UpstreamKnownLimit { code: None }
+        );
+    }
+
+    #[test]
+    fn pg_unrelated_server_error_remains_generator_bug() {
+        // SQLSTATE 42883 = undefined_function; not a data error.
+        use tokio_postgres::error::SqlState;
+        assert_eq!(
+            classify_pg_sqlstate(&SqlState::from_code("42883")),
+            ErrorClass::UpstreamGeneratorBug { code: None }
+        );
     }
 
     #[test]
@@ -3723,7 +4465,7 @@ mod tests {
             ],
             param_overrides: vec![],
         };
-        let rows = generate_rows(&schema, 3, &[&example], &mut rng);
+        let (rows, _) = generate_rows(&schema, 3, &[&example], &mut rng);
         assert_eq!(rows.len(), 4, "1 example + 3 random fill");
         // Row 0 must carry the example literals.
         assert_eq!(rows[0][0].to_string(), "8");
@@ -3753,7 +4495,7 @@ mod tests {
             }],
             param_overrides: vec![],
         };
-        let rows = generate_rows(&schema, 5, &[&example], &mut rng);
+        let (rows, _) = generate_rows(&schema, 5, &[&example], &mut rng);
         assert_eq!(rows[0][0].to_string(), "0");
         // Random fill must not collide with the example literal.
         for row in &rows[1..] {
@@ -3921,5 +4663,190 @@ mod tests {
             body.contains("--   param override: $1"),
             "expected param override comment: {body}"
         );
+    }
+
+    #[test]
+    fn generate_rows_skips_example_with_pk_already_emitted() {
+        use dante::constraint::ExampleValue;
+        use dante::resolver::{ResolvedExample, RowOverride};
+
+        // Schema: PK on c0, plus c1. Two examples both pin c0=8 with
+        // different c1 values. The oracle previously emitted both rows
+        // verbatim, producing a `Duplicate entry '8' for key 'PRIMARY'`
+        // INSERT failure at run time. The dedup makes the second
+        // example's row be dropped while still preserving the first
+        // example's seed row.
+        let mut schema = TableSchema::new(SqlIdentifier::from("t"));
+        schema.add_column(
+            SqlIdentifier::from("c0"),
+            dante::state::ColumnMeta {
+                sql_type: readyset_sql::ast::SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Unique,
+            },
+        );
+        schema.add_column(
+            SqlIdentifier::from("c1"),
+            dante::state::ColumnMeta {
+                sql_type: readyset_sql::ast::SqlType::Int(None),
+                gen_spec: ColumnGenerationSpec::Random,
+            },
+        );
+        schema.primary_key = Some(SqlIdentifier::from("c0"));
+
+        let ex_a = ResolvedExample {
+            note: "first",
+            dialect: dante::constraint::DialectSupport::Both,
+            row_overrides: vec![
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c0"),
+                    value: ExampleValue::Literal("8"),
+                },
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c1"),
+                    value: ExampleValue::Literal("2"),
+                },
+            ],
+            param_overrides: vec![],
+        };
+        let ex_b = ResolvedExample {
+            note: "second",
+            dialect: dante::constraint::DialectSupport::Both,
+            row_overrides: vec![
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c0"),
+                    value: ExampleValue::Literal("8"),
+                },
+                RowOverride {
+                    table: SqlIdentifier::from("t"),
+                    column: SqlIdentifier::from("c1"),
+                    value: ExampleValue::Literal("999"),
+                },
+            ],
+            param_overrides: vec![],
+        };
+
+        let mut rng = test_rng();
+        let (rows, dropped) = generate_rows(&schema, 3, &[&ex_a, &ex_b], &mut rng);
+        assert_eq!(
+            dropped,
+            vec![1],
+            "second example (index 1) should be dropped"
+        );
+
+        let pk_values: Vec<String> = rows.iter().map(|r| r[0].to_string()).collect();
+        let unique: std::collections::HashSet<_> = pk_values.iter().collect();
+        assert_eq!(
+            unique.len(),
+            pk_values.len(),
+            "PK values must be unique across all emitted rows; got {pk_values:?}"
+        );
+        let pk_eights: usize = pk_values.iter().filter(|v| v.as_str() == "8").count();
+        assert_eq!(
+            pk_eights, 1,
+            "second example with same PK must be skipped, not duplicated"
+        );
+        // First example wins: c1 must be 2, not 999.
+        let row_with_pk_8 = rows
+            .iter()
+            .find(|r| r[0].to_string() == "8")
+            .expect("row with PK=8 must exist");
+        assert_eq!(
+            row_with_pk_8[1].to_string(),
+            "2",
+            "first example's c1 must be preserved"
+        );
+    }
+
+    #[test]
+    fn pattern_counts_errored_field_defaults_to_zero_and_increments() {
+        let mut stats = PatternStats::default();
+        assert_eq!(stats.entry("p").errored, 0);
+        stats.entry("p").errored += 1;
+        stats.entry("p").errored += 1;
+        assert_eq!(stats.entry("p").errored, 2);
+    }
+
+    #[test]
+    fn constraint_fuzz_single_pattern_defaults_off_and_parses() {
+        // Defaults off when the flag is absent: patterns are composed.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+        ])
+        .expect("parse without --single-pattern");
+        assert!(!parsed.single_pattern);
+
+        // Flips on when present: one pattern per iteration, no composition.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--single-pattern",
+        ])
+        .expect("parse with --single-pattern");
+        assert!(parsed.single_pattern);
+    }
+
+    #[test]
+    fn constraint_fuzz_keep_going_defaults_off_and_parses() {
+        // Defaults off when the flag is absent.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+        ])
+        .expect("parse without --keep-going");
+        assert!(!parsed.keep_going);
+
+        // Flips on when present.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--keep-going",
+        ])
+        .expect("parse with --keep-going");
+        assert!(parsed.keep_going);
+    }
+
+    #[test]
+    fn constraint_fuzz_readyset_mode_defaults_off_and_parses() {
+        // Defaults off when the flag is absent: the endpoint is treated as a
+        // transparent proxy (e.g. SQP), so the oracle emits no
+        // Readyset-specific DDL the proxy cannot route.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+        ])
+        .expect("parse without --readyset-mode");
+        assert!(!parsed.readyset_mode);
+
+        // Flips on when present: forces `CREATE DEEP CACHE`, runs the EXPLAIN
+        // probes, and applies the Readyset deep-cache compatibility rules.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--readyset-mode",
+        ])
+        .expect("parse with --readyset-mode");
+        assert!(parsed.readyset_mode);
     }
 }

@@ -163,6 +163,9 @@ impl pgsql::types::ToSql for Value {
                 Type::INT2 => (*x as i16).to_sql(ty, out),
                 Type::INT4 => (*x as i32).to_sql(ty, out),
                 Type::INT8 => x.to_sql(ty, out),
+                // Postgres infers NUMERIC for `$1` against numeric columns or aggregate results
+                // (e.g. `avg(c) > $1`); an integer is exactly representable as numeric.
+                Type::NUMERIC => Decimal::new(*x as i128, 0).to_sql(ty, out),
                 _ => Err(unsupported("Integer")),
             },
             Value::UnsignedInteger(x) => match *ty {
@@ -171,6 +174,7 @@ impl pgsql::types::ToSql for Value {
                 Type::INT2 => (*x as i16).to_sql(ty, out),
                 Type::INT4 => (*x as i32).to_sql(ty, out),
                 Type::INT8 => (*x as i64).to_sql(ty, out),
+                Type::NUMERIC => Decimal::new(*x as i128, 0).to_sql(ty, out),
                 _ => Err(unsupported("UnsignedInteger")),
             },
             Value::Real(bits) => {
@@ -178,6 +182,11 @@ impl pgsql::types::ToSql for Value {
                 match *ty {
                     Type::FLOAT4 => (val as f32).to_sql(ty, out),
                     Type::FLOAT8 => val.to_sql(ty, out),
+                    // `avg(int)`/`sum(numeric)` results are NUMERIC in Postgres, so a value the
+                    // oracle generated as a float must serialize into a NUMERIC parameter.
+                    Type::NUMERIC => Decimal::try_from(val)
+                        .map_err(|e| -> Box<dyn Error + Sync + Send> { e.to_string().into() })?
+                        .to_sql(ty, out),
                     _ => Err(unsupported("Real")),
                 }
             }
@@ -247,6 +256,43 @@ impl pgsql::types::ToSql for Value {
     }
 
     pgsql::types::to_sql_checked!();
+}
+
+#[cfg(test)]
+mod to_sql_tests {
+    use bytes::BytesMut;
+    use tokio_postgres::types::{ToSql, Type};
+
+    use super::Value;
+
+    // Postgres infers a `NUMERIC` type for `$1` in shapes like `avg(c) > $1` (avg returns
+    // numeric) and accepts integer literals against numeric columns. The oracle generates the
+    // bound value from the aggregate's declared result type (e.g. Double for avg, BigInt for
+    // count), so an integer/float Value must serialize into a NUMERIC parameter rather than
+    // failing with "error serializing parameter 0".
+    #[test]
+    fn integer_serializes_to_numeric() {
+        let mut out = BytesMut::new();
+        Value::Integer(5)
+            .to_sql(&Type::NUMERIC, &mut out)
+            .expect("Integer should serialize to NUMERIC");
+    }
+
+    #[test]
+    fn unsigned_integer_serializes_to_numeric() {
+        let mut out = BytesMut::new();
+        Value::UnsignedInteger(5)
+            .to_sql(&Type::NUMERIC, &mut out)
+            .expect("UnsignedInteger should serialize to NUMERIC");
+    }
+
+    #[test]
+    fn real_serializes_to_numeric() {
+        let mut out = BytesMut::new();
+        Value::Real(1.5f64.to_bits())
+            .to_sql(&Type::NUMERIC, &mut out)
+            .expect("Real should serialize to NUMERIC");
+    }
 }
 
 impl<'a> pgsql::types::FromSql<'a> for Value {
@@ -333,14 +379,15 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             Type::INT2_ARRAY => handle_int_array!(i16),
             Type::INT4_ARRAY => handle_int_array!(i32),
             Type::INT8_ARRAY => handle_int_array!(i64),
-            // ARRAY_AGG over float / bool / timestamp columns surfaces
-            // these element types via the standard `_<elem>` array OID.
-            // Comparison happens on the rendered Text form, so as long as
-            // both sides decode to the same bracketed string the row
+            // ARRAY_AGG over float / bool / timestamp / numeric columns
+            // surfaces these element types via the standard `_<elem>` array
+            // OID. Comparison happens on the rendered Text form, so as long
+            // as both sides decode to the same bracketed string the row
             // matches.
             Type::FLOAT4_ARRAY => handle_displayable_array!(f32),
             Type::FLOAT8_ARRAY => handle_displayable_array!(f64),
             Type::BOOL_ARRAY => handle_displayable_array!(bool),
+            Type::NUMERIC_ARRAY => handle_displayable_array!(Decimal),
             Type::DATE => {
                 let val = match NaiveDateTime::from_sql(ty, raw) {
                     Ok(datetime) => datetime,
@@ -382,6 +429,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::INT2
             | Type::INT4
             | Type::INT8
+            | Type::INT2_ARRAY
             | Type::INT4_ARRAY
             | Type::INT8_ARRAY
             | Type::FLOAT4_ARRAY
@@ -390,6 +438,7 @@ impl<'a> pgsql::types::FromSql<'a> for Value {
             | Type::FLOAT4
             | Type::FLOAT8
             | Type::NUMERIC
+            | Type::NUMERIC_ARRAY
             | Type::TEXT
             | Type::TEXT_ARRAY
             | Type::VARCHAR
@@ -786,6 +835,22 @@ mod tests {
     #[test]
     fn integer_ord_is_numeric_not_lexicographic() {
         assert_eq!(Value::Integer(2).cmp(&Value::Integer(10)), Ordering::Less);
+    }
+
+    #[test]
+    fn from_sql_accepts_numeric_array_for_array_agg() {
+        // qp:jltjbjjcdyfb: ARRAY_AGG over NUMERIC/DECIMAL columns returns
+        // Postgres type `_numeric` (NUMERIC_ARRAY). The oracle's FromSql
+        // impl must accept it so dante-generated ARRAY_AGG(decimal_col)
+        // queries don't fail with 'cannot convert between the Rust type
+        // readyset_dante_oracle::value::Value and the Postgres type _numeric'.
+        use pgsql::types::FromSql;
+        assert!(<Value as FromSql>::accepts(
+            &pgsql::types::Type::NUMERIC_ARRAY
+        ));
+        // INT2_ARRAY had a from_sql arm but was missing from accepts ---
+        // assert it now matches too.
+        assert!(<Value as FromSql>::accepts(&pgsql::types::Type::INT2_ARRAY));
     }
 
     #[test]

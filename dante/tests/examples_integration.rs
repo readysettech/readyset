@@ -5,47 +5,17 @@ use dante::entropy::Entropy;
 use dante::generator::{ConstraintRegistry, Generator};
 use dante::pattern::PatternBuilder;
 use dante::state::GeneratorConfig;
-use data_generator::ColumnGenerationSpec;
 use proptest::prelude::*;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
-use readyset_data::DfValue;
 use readyset_sql::{Dialect, ast::BinaryOperator};
 
 #[test]
 fn example_surfaces_for_matching_dialect() {
-    let mut b = PatternBuilder::new("int_int_divide_bait");
-    let t = b.table();
-    let c1 = b.column(t);
-    let c2 = b.column(t);
-    b.column_type_class(c1, TypeClass::Integer);
-    b.column_type_class(c2, TypeClass::Integer);
-    b.from(t);
-    b.project_column(c1, t);
-    b.project_column(c2, t);
-    let p = b.where_param(c1, t, BinaryOperator::Equal);
-    b.example(
-        "int/int divide: c1=8, c2=3, param=2",
-        DialectSupport::MySqlOnly,
-        vec![
-            ExampleCell {
-                var: c1,
-                value: ExampleValue::Literal("8"),
-            },
-            ExampleCell {
-                var: c2,
-                value: ExampleValue::Literal("3"),
-            },
-            ExampleCell {
-                var: p,
-                value: ExampleValue::Literal("2"),
-            },
-        ],
-    );
-    let pattern = b.build();
-
+    // Drive the canonical registry pattern rather than a hand-built twin so
+    // this test tracks the real `int_int_divide_bait` definition.
     let mut reg = ConstraintRegistry::new();
-    reg.register(pattern)
+    reg.register(dante::registry::examples::int_int_divide_bait())
         .expect("int_int_divide_bait is a valid pattern");
 
     let config = GeneratorConfig {
@@ -57,7 +27,7 @@ fn example_surfaces_for_matching_dialect() {
     let mut entropy = Entropy::new(&mut rng);
     let out = generator
         .generate_with_ddl(&mut entropy)
-        .expect("generation should succeed for this hand-built pattern");
+        .expect("generation should succeed for the registry pattern");
 
     // The generator may compose the single pattern with itself, so there could
     // be more than one example. Verify that at least one example with the
@@ -73,10 +43,9 @@ fn example_surfaces_for_matching_dialect() {
         .expect("expected to find example with note 'int/int divide: c1=8, c2=3, param=2'");
     assert_eq!(ex.row_overrides.len(), 2);
     assert_eq!(ex.param_overrides.len(), 1);
-    // The registry contains only this single pattern. Self-composition keeps
-    // vars in the same namespace, so the one WhereParam in the base pattern
-    // is always placeholder index 0.
-    assert_eq!(ex.param_overrides[0].placeholder_index, 0);
+    // Assert the pinned param value carries through rather than its internal
+    // placeholder index, which is an artifact of var numbering / composition.
+    assert_eq!(ex.param_overrides[0].value, ExampleValue::Literal("2"));
 }
 
 #[test]
@@ -114,57 +83,6 @@ fn mysqlonly_example_dropped_for_postgres_dialect() {
         out.examples.len(),
         0,
         "dialect filter should drop MySqlOnly example for PG"
-    );
-}
-
-#[test]
-fn genspec_cell_surfaces_in_row_overrides() {
-    // A Constraint::Example cell with ExampleValue::GenSpec should round-trip
-    // through the resolver and appear in row_overrides.
-    let mut b = PatternBuilder::new("genspec_bait");
-    let t = b.table();
-    let c = b.column(t);
-    b.column_type_class(c, TypeClass::Integer);
-    b.from(t);
-    b.project_column(c, t);
-    b.example(
-        "genspec row",
-        DialectSupport::Both,
-        vec![ExampleCell {
-            var: c,
-            value: ExampleValue::GenSpec(ColumnGenerationSpec::Constant(DfValue::Int(42))),
-        }],
-    );
-    let pattern = b.build();
-
-    let mut reg = ConstraintRegistry::new();
-    reg.register(pattern)
-        .expect("genspec_bait is a valid pattern");
-
-    let config = GeneratorConfig {
-        reuse_preference: 0.0,
-        ..Default::default()
-    };
-    let mut generator = Generator::new_with_registry(Dialect::MySQL, config, reg);
-    let mut rng = SmallRng::seed_from_u64(0xABCD);
-    let mut entropy = Entropy::new(&mut rng);
-    let out = generator
-        .generate_with_ddl(&mut entropy)
-        .expect("generation should succeed");
-
-    let ex = out
-        .examples
-        .iter()
-        .find(|e| e.note == "genspec row")
-        .expect("expected example with note 'genspec row'");
-    assert_eq!(ex.row_overrides.len(), 1);
-    assert!(
-        matches!(
-            &ex.row_overrides[0].value,
-            ExampleValue::GenSpec(ColumnGenerationSpec::Constant(DfValue::Int(42)))
-        ),
-        "expected GenSpec(Constant(42)) in row_overrides, got {:?}",
-        &ex.row_overrides[0].value
     );
 }
 

@@ -241,6 +241,12 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                     Constraint::ProjectFunction { args, .. } => {
                         args.iter().any(|(col, _)| !grouped.contains(col))
                     }
+                    Constraint::ProjectBinaryOp {
+                        left_col,
+                        right_col,
+                        ..
+                    } => !grouped.contains(left_col) || !grouped.contains(right_col),
+                    Constraint::ProjectCast { col, .. } => !grouped.contains(col),
                     _ => false,
                 })
             }),
@@ -916,6 +922,95 @@ mod tests {
         assert!(
             check_rules(&rules, &constraints, &[]).is_none(),
             "CompoundSelect + outer ORDER BY / LIMIT must be allowed"
+        );
+    }
+
+    #[test]
+    fn aggregate_with_ungrouped_binary_op_projection_rejected() {
+        // Reproduces qp:ecymxbrywuyy: the failing Buildkite 563/564 pattern
+        // `max+min_in_list+count_distinct+binary_op_int_int_modulo+min_max`
+        // emitted `SELECT max(c1), min(c2), count(distinct c0), (c3 % c3), min(c0)`
+        // without GROUP BY -- the `(c3 % c3)` ProjectBinaryOp expression
+        // references a non-grouped column alongside aggregates. Postgres
+        // rejects with `column "t0.c3" must appear in the GROUP BY clause
+        // or be used in an aggregate function`.
+        use crate::constraint::AggregateFn;
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Max,
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::ProjectBinaryOp {
+                left_col: VarId(2),
+                left_table: VarId(0),
+                op: readyset_sql::ast::BinaryOperator::Modulo,
+                right_col: VarId(2),
+                right_table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "ProjectAggregate + ProjectBinaryOp on a non-grouped column must be rejected"
+        );
+    }
+
+    #[test]
+    fn aggregate_with_grouped_binary_op_projection_allowed() {
+        // Same composition is fine if both sides of the binary op are in
+        // GROUP BY.
+        use crate::constraint::AggregateFn;
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Max,
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::ProjectBinaryOp {
+                left_col: VarId(2),
+                left_table: VarId(0),
+                op: readyset_sql::ast::BinaryOperator::Modulo,
+                right_col: VarId(3),
+                right_table: VarId(0),
+            },
+            Constraint::GroupBy {
+                col: VarId(2),
+                table: VarId(0),
+            },
+            Constraint::GroupBy {
+                col: VarId(3),
+                table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_none(),
+            "ProjectBinaryOp on grouped columns must be allowed alongside aggregates"
+        );
+    }
+
+    #[test]
+    fn aggregate_with_ungrouped_cast_projection_rejected() {
+        // ProjectCast wraps a single column; the same rule must catch it.
+        use crate::constraint::AggregateFn;
+        use readyset_sql::ast::SqlType;
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::ProjectCast {
+                col: VarId(2),
+                table: VarId(0),
+                target_ty: SqlType::Text,
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "ProjectAggregate + ProjectCast on a non-grouped column must be rejected"
         );
     }
 

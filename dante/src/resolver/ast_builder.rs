@@ -1221,13 +1221,20 @@ fn make_placeholder(dialect: Dialect, idx: &mut u32) -> ItemPlaceholder {
 ///
 /// The zero-based index equals `*idx - 1` before the increment (i.e., the
 /// first placeholder gets index 0, the second gets 1, etc.).
+///
+/// Callers must seed `idx >= 1`; seeding 0 would make `*idx - 1` underflow.
 fn make_and_record_placeholder(
     dialect: Dialect,
     idx: &mut u32,
     param: VarId,
     param_map: &mut [Option<usize>],
 ) -> ItemPlaceholder {
-    let zero_based = (*idx - 1) as usize;
+    // checked_sub (not `*idx - 1`) so a 0 seed fails identically in release
+    // and debug rather than wrapping to usize::MAX and corrupting param_map.
+    let zero_based = idx.checked_sub(1).expect(
+        "placeholder_idx must be >= 1 before calling \
+            make_and_record_placeholder; seeding 0 causes u32 underflow",
+    ) as usize;
     let p = make_placeholder(dialect, idx);
     param_map[param.0] = Some(zero_based);
     p
@@ -2745,6 +2752,17 @@ mod tests {
         ];
         let (sql, _) = resolve_to_sql(constraints, var_kinds, Dialect::MySQL);
         assert!(sql.contains("OR"), "expected OR in: {sql}");
+    }
+
+    #[test]
+    #[should_panic(expected = "placeholder_idx must be >= 1")]
+    fn make_and_record_placeholder_panics_on_zero_idx() {
+        // BUG 12: *idx - 1 underflows (u32 wrap) when idx == 0, producing a
+        // bogus zero_based index. checked_sub turns this into a hard error in
+        // both debug and release rather than a silent wrap to usize::MAX.
+        let mut idx: u32 = 0;
+        let mut param_map: Vec<Option<usize>> = vec![None; 1];
+        super::make_and_record_placeholder(Dialect::MySQL, &mut idx, VarId(0), &mut param_map);
     }
 
     #[test]
