@@ -55,7 +55,6 @@ mod inner;
 mod keys;
 pub(crate) mod migrate;
 mod mir_to_flow;
-pub(crate) mod replication;
 pub(crate) mod schema;
 pub(crate) mod sql;
 mod state;
@@ -72,29 +71,6 @@ const REPLICATOR_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Timeout for failover command responses from the controller event loop.
 const FAILOVER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Historical persistent-volume identifier.
-#[doc(hidden)]
-#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-pub type VolumeId = String;
-
-/// Historical placement restriction associated with a base-table domain.
-#[doc(hidden)]
-#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-#[allow(deprecated)]
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DomainPlacementRestriction {
-    worker_volume: Option<VolumeId>,
-}
-
-/// Historical key used to look up a [`DomainPlacementRestriction`].
-#[doc(hidden)]
-#[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct NodeRestrictionKey {
-    node_name: Relation,
-    shard: usize,
-}
 
 /// The full (metadata) state of a running ReadySet cluster.
 ///

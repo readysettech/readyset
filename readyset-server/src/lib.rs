@@ -428,23 +428,12 @@ use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for a running Readyset cluster.
-#[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never consulted
-    /// at runtime.
-    #[serde(default)]
-    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-    pub(crate) sharding: Option<usize>,
     #[serde(default)]
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never
-    /// consulted at runtime.
-    #[serde(default, alias = "quorum")]
-    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-    pub(crate) min_workers: usize,
     pub(crate) reuse: Option<ReuseConfigType>,
     /// If set to true (the default), failing tokio tasks will cause a full-process abort.
     pub(crate) abort_on_task_failure: bool,
@@ -454,17 +443,8 @@ pub struct Config {
     pub(crate) replicator_config: UpstreamConfig,
     #[serde(default)]
     pub(crate) replicator_statement_logging: bool,
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never
-    /// consulted at runtime. See [`controller::replication::ReplicationStrategy`].
-    #[serde(default)]
-    pub(crate) replication_strategy: crate::controller::replication::ReplicationStrategy,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never
-    /// consulted at runtime.
-    #[serde(default)]
-    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-    pub(crate) worker_request_timeout: Duration,
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
     #[serde(default = "default_background_recovery_interval")]
     pub(crate) background_recovery_interval: Duration,
@@ -477,8 +457,6 @@ fn default_background_recovery_interval() -> Duration {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            #[allow(deprecated)]
-            sharding: None,
             materialization_config: Default::default(),
             domain_config: DomainConfig {
                 aggressively_update_state_sizes: false,
@@ -492,18 +470,12 @@ impl Default for Config {
                 materialization_persistence: false,
             },
             persistence: Default::default(),
-            #[allow(deprecated)]
-            min_workers: 0,
             reuse: None,
             abort_on_task_failure: true,
             mir_config: Default::default(),
             replicator_statement_logging: false,
             replicator_config: Default::default(),
-            #[allow(deprecated)]
-            replication_strategy: Default::default(),
             upquery_timeout: Duration::from_millis(5000),
-            #[allow(deprecated)]
-            worker_request_timeout: Duration::from_millis(1800000),
             background_recovery_interval: default_background_recovery_interval(),
         }
     }

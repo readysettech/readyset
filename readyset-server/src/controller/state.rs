@@ -111,7 +111,6 @@ fn reachable_from(graph: &Graph, start: NodeIndex, direction: Direction) -> Hash
 /// `readyset-server/src/lib.rs` for the full policy and the compat-shim
 /// recipe.
 #[serde_as]
-#[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DfState {
     pub(super) ingredients: Graph,
@@ -123,18 +122,7 @@ pub struct DfState {
     /// hands out a new index.
     pub(super) ndomains: usize,
 
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never consulted
-    /// at runtime.
-    #[serde(default)]
-    #[deprecated(note = "kept only for persisted state compat; do not consult at runtime")]
-    pub(super) sharding: Option<usize>,
-
     pub(super) domain_config: DomainConfig,
-
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never
-    /// consulted at runtime. See [`super::replication::ReplicationStrategy`].
-    #[serde(default)]
-    pub(super) replication_strategy: super::replication::ReplicationStrategy,
 
     /// Controls the persistence mode, and parameters related to persistence.
     ///
@@ -164,14 +152,6 @@ pub struct DfState {
     /// - `None` in `CreateCache::schema_generation_used` indicates "missing/unset"
     /// - Wraps from u64::MAX back to 1 (never 0)
     schema_generation: SchemaGeneration,
-
-    /// Deserialized only for compatibility with older persisted `ControllerState`; never
-    /// consulted at runtime. See [`super::NodeRestrictionKey`] and
-    /// [`super::DomainPlacementRestriction`].
-    #[serde_as(as = "Vec<(_, _)>")]
-    #[serde(default)]
-    pub(super) node_restrictions:
-        HashMap<super::NodeRestrictionKey, super::DomainPlacementRestriction>,
 
     #[serde_as(as = "Vec<(_, _)>")]
     /// Map from local to global node index for each domain
@@ -210,17 +190,12 @@ impl DfState {
             ingredients,
             source,
             ndomains,
-            #[allow(deprecated)]
-            sharding: None,
             domain_config,
-            #[allow(deprecated)]
-            replication_strategy: Default::default(),
             persistence,
             materializations,
             recipe,
             schema_replication_offset,
             schema_generation: SchemaGeneration::INITIAL,
-            node_restrictions: Default::default(),
             domains: Default::default(),
             domain_nodes: Default::default(),
             channel_coordinator,
