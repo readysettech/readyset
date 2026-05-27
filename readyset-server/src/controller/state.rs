@@ -60,8 +60,6 @@ use readyset_util::failpoints;
 use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use schema_catalog::SchemaGeneration;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use tokio::fs;
 use tokio::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use tracing::{debug, error, info, trace, warn};
@@ -110,8 +108,7 @@ fn reachable_from(graph: &Graph, start: NodeIndex, direction: Direction) -> Hash
 /// payload. See the matching warning above `Config` in
 /// `readyset-server/src/lib.rs` for the full policy and the compat-shim
 /// recipe.
-#[serde_as]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct DfState {
     pub(super) ingredients: Graph,
 
@@ -153,23 +150,17 @@ pub struct DfState {
     /// - Wraps from u64::MAX back to 1 (never 0)
     schema_generation: SchemaGeneration,
 
-    #[serde_as(as = "Vec<(_, _)>")]
     /// Map from local to global node index for each domain
     pub(super) domain_nodes: HashMap<DomainIndex, NodeMap<NodeIndex>>,
     /// Map from global node index to index pair for each domain
-    #[serde_as(as = "Vec<(_, _)>")]
     pub(super) domain_node_index_pairs: HashMap<DomainIndex, HashMap<NodeIndex, IndexPair>>,
 
-    #[serde(skip)]
     pub(super) domains: HashMap<DomainIndex, DomainHandle>,
 
-    #[serde(skip)]
     pub(super) channel_coordinator: Arc<ChannelCoordinator>,
 
     /// Map from worker URI to the address the worker is listening on for reads.
-    #[serde(skip)]
     pub(super) read_addrs: HashMap<WorkerIdentifier, SocketAddr>,
-    #[serde(skip)]
     pub(super) workers: HashMap<WorkerIdentifier, Worker>,
 }
 

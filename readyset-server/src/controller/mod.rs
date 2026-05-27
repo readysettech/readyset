@@ -31,7 +31,6 @@ use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use replication_offset::ReplicationOffset;
 use replicators::{ControllerMessage, ReplicatorMessage};
-use serde::{Deserialize, Serialize};
 use table_status::TableStatusState;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -72,26 +71,10 @@ const REPLICATOR_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Timeout for failover command responses from the controller event loop.
 const FAILOVER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The full (metadata) state of a running ReadySet cluster.
-///
-/// This struct is the root data structure that is serialized atomically and written to the
-/// [`Authority`] upon changes to the state of the cluster. It includes:
-/// - All configuration for the cluster
-/// - The full schema of the database (both `CREATE TABLE` statements taken from the upstream
-///   database and ReadySet-specific configuration including `CREATE CACHE` statements)
-/// - The full state of the graph, including both [`MIR`][] and the dataflow graph itself
-///
-/// [`MIR`]: readyset_mir
-///
-/// # Wire format
-///
-/// Persisted to the Authority's RocksDB via `rmp_serde::to_vec` — adding or
-/// removing fields here, or in any type reachable through `config` /
-/// `dataflow_state`, breaks decoding of every older payload and causes the
-/// controller to hard-crash at boot. See the warning above `Config` in
-/// `readyset-server/src/lib.rs` for the full policy and the compat-shim
-/// recipe.
-#[derive(Clone, Serialize, Deserialize)]
+/// The full (metadata) state of a running ReadySet cluster: the user-provided configuration
+/// plus the dataflow engine state. Held only in memory; rebuilt from individual Authority
+/// keys at leader election.
+#[derive(Clone)]
 pub(crate) struct ControllerState {
     /// The user-provided configuration for the cluster
     pub(crate) config: Config,

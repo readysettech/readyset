@@ -14,8 +14,6 @@ use readyset_sql::ast::{
 };
 use readyset_sql_passes::SelectStatementSkeleton;
 use readyset_util::redacted::Sensitive;
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use tracing::debug;
 use vec1::Vec1;
 
@@ -23,7 +21,7 @@ use super::ExprId;
 
 /// A single SQL expression stored in a Recipe.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RecipeExpr {
     /// Expression that represents a `CREATE TABLE` statement.
     Table {
@@ -48,7 +46,6 @@ pub(crate) enum RecipeExpr {
         /// the default buffer (`buffered = k`); `Some(n)` means `buffered = k * n`. Only
         /// meaningful for queries that lower to a TopK dataflow node. Set via the
         /// `WITH (TOPK_BUFFER_MULTIPLIER = n)` option on `CREATE CACHE`.
-        #[serde(default)]
         topk_buffer_multiplier: Option<usize>,
     },
 }
@@ -155,7 +152,7 @@ type LiteralPair<'a, 'b> = (&'a Literal, &'b Literal);
 /// This struct maps values in a query AST to values in a corresponding dataflow migration. We
 /// cannot directly relate an AST and dataflow migration - however, we can use this mapping to adapt
 /// the mapping given by [`Reader::placeholder_map`].
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct MatchedCache {
     /// The name of the matching cached query.
     name: Relation,
@@ -226,7 +223,7 @@ impl MatchedCache {
 }
 
 /// A struct to maintain queries by their AST structure, without regard for literal values.
-#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub(super) struct ExprSkeletons {
     /// Map from the query with all literals removed (the "skeleton") to the name of the view and
     /// the set of literals that belong to that view.
@@ -328,11 +325,9 @@ impl ExprSkeletons {
 }
 
 /// The set of all [`RecipeExpr`]s installed in a ReadySet server cluster.
-#[serde_as]
-#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub(super) struct ExprRegistry {
     /// A map from [`ExprId`] to the [`RecipeExpr`] associated with it.
-    #[serde_as(as = "Vec<(_, _)>")]
     expressions: HashMap<ExprId, RecipeExpr>,
 
     /// A map from a hash of a stripped SelectStatement to all sets of stripped literals for each

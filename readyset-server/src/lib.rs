@@ -428,9 +428,8 @@ use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for a running Readyset cluster.
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Config {
-    #[serde(default)]
     pub(crate) materialization_config: materialization::Config,
     pub(crate) domain_config: DomainConfig,
     pub(crate) persistence: PersistenceParameters,
@@ -439,14 +438,11 @@ pub struct Config {
     pub(crate) abort_on_task_failure: bool,
     /// Configuration for converting SQL to MIR
     pub(crate) mir_config: sql::mir::Config,
-    #[serde(flatten)]
     pub(crate) replicator_config: UpstreamConfig,
-    #[serde(default)]
     pub(crate) replicator_statement_logging: bool,
     /// The duration to wait before canceling the task waiting on an upquery.
     pub(crate) upquery_timeout: Duration,
     /// Interval on which to automatically run recovery as long as there are unscheduled domains
-    #[serde(default = "default_background_recovery_interval")]
     pub(crate) background_recovery_interval: Duration,
 }
 
@@ -811,15 +807,6 @@ mod tests {
     struct Wrapper {
         #[command(flatten)]
         worker_opts: WorkerOptions,
-    }
-
-    #[test]
-    fn config_serde_round_trip() {
-        let input = Config::default();
-        let serialized = serde_json::to_string(&input).unwrap();
-        let roundtripped = serde_json::from_str::<Config>(&serialized).unwrap();
-
-        assert_eq!(roundtripped, input);
     }
 
     /// Test setting the storage directory

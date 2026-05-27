@@ -6,7 +6,6 @@ use std::vec::Vec;
 
 use ::mir::visualize::GraphViz;
 use ::mir::DfNodeIndex;
-use ::serde::{Deserialize, Serialize};
 use itertools::Itertools;
 use petgraph::graph::NodeIndex;
 use readyset_client::consensus::{PersistedCustomType, SchemaCatalogEntry};
@@ -55,7 +54,7 @@ mod recipe;
 mod registry;
 
 /// Configuration for converting SQL to dataflow
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub(crate) struct Config {
     pub(crate) reuse_type: Option<ReuseConfigType>,
@@ -73,7 +72,7 @@ impl Default for Config {
 /// definition as originally created, used both to compile the view to dataflow when a query
 /// first selects FROM it and to emit the view's DDL into the persisted schema catalog. Used as
 /// the value in [`SqlIncorporator::views`].
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 struct RegisteredView {
     /// The name of the view.
     ///
@@ -97,7 +96,7 @@ struct RegisteredView {
 }
 
 /// Schema for a SQL base node
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct BaseSchema {
     /// The body of the original `CREATE TABLE` statement for the table
     pub statement: CreateTableBody,
@@ -115,13 +114,11 @@ pub(crate) struct BaseSchema {
 /// * [`add_table`][Self::add_table], to add a new `TABLE`
 /// * [`add_view`][Self::add_view], to add a new `VIEW`
 /// * [`add_query`][Self::add_query], to add a new cached query
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct SqlIncorporator {
     mir_converter: SqlToMirConverter,
     leaf_addresses: HashMap<Relation, NodeIndex>,
 
-    /// Stores VIEWs and CACHE queries.
-    named_queries: HashMap<Relation, u64>,
     num_queries: usize,
 
     /// All SQL VIEWs which have been added to Readyset, represented as a map from the
@@ -164,7 +161,6 @@ impl SqlIncorporator {
         Self {
             mir_converter: SqlToMirConverter::new(dialect),
             leaf_addresses: Default::default(),
-            named_queries: Default::default(),
             num_queries: Default::default(),
             views: Default::default(),
             base_schemas: Default::default(),

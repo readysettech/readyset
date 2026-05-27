@@ -13,8 +13,6 @@ use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
 use petgraph::graph::NodeIndex;
 use readyset_errors::{internal, internal_err, invariant, ReadySetError, ReadySetResult};
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use tracing::{debug, error, info_span, trace};
 
 use crate::controller::keys::{self, RawReplayPath};
@@ -35,7 +33,7 @@ pub(crate) struct InvalidEdge {
 ///
 /// Note that no matter what this is set to, all nodes whose name starts with `SHALLOW_` will be
 /// placed beyond the frontier.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum, Default)]
 pub enum FrontierStrategy {
     /// Place no nodes beyond the frontier (this is the default).
     #[default]
@@ -72,7 +70,7 @@ enum IndexObligation {
     Replay(Index),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
     /// Whether the creation of [`PacketFilter`]s for egresses before readers is enabled.
     ///
@@ -88,7 +86,6 @@ pub struct Config {
     /// return [`ReadySetError::Unsupported`].
     ///
     /// Defaults to `false`
-    #[serde(default)]
     pub allow_straddled_joins: bool,
 
     /// Strategy for determining which (partial) materializations should be placed beyond the
@@ -103,12 +100,7 @@ pub struct Config {
     pub partial_enabled: bool,
 
     /// Whether to use non-blocking index builds for base tables.
-    #[serde(default = "default_non_blocking_index_build")]
     pub non_blocking_index_build: bool,
-}
-
-fn default_non_blocking_index_build() -> bool {
-    true
 }
 
 impl Default for Config {
@@ -126,13 +118,9 @@ impl Default for Config {
 /// Struct containing (authoritative!) information about which nodes in a graph are materialized
 /// (store their output state either in-memory or on-disk), and in what way those materializations
 /// are indexed.
-#[serde_as]
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Default)]
 pub(in crate::controller) struct Materializations {
     /// Nodes that are (fully or partially) materialized.
-    // Skipping this field as we will rebuild the [`Materializations`] state
-    // upon recovery.
-    #[serde(skip)]
     have: HashMap<NodeIndex, Indices>,
     /// Nodes that *were* (fully or partially) as of the last time we called [`commit`].
     ///
@@ -141,32 +129,23 @@ pub(in crate::controller) struct Materializations {
     ///
     /// [`extend`]: Materializations::extend
     /// [`commit`]: Materializations::commit
-    #[serde(skip)]
     had: HashSet<NodeIndex>,
     /// Nodes materialized since the last time `commit()` was invoked.
-    #[serde(skip)]
     added: HashMap<NodeIndex, Indices>,
 
     /// Weak indices added since the last time `commit()` was invoked
-    #[serde(skip)]
     added_weak: HashMap<NodeIndex, Indices>,
 
     /// Readers added since the last time `commit()` was invoked.
-    #[serde(skip)]
     new_readers: HashSet<NodeIndex>,
 
     /// A list of replay paths for each node, indexed by tag.
-    #[serde_as(as = "Vec<(_, _)>")]
     pub(in crate::controller) paths: HashMap<NodeIndex, BiHashMap<Tag, (Index, Vec<NodeIndex>)>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning.
-    #[serde_as(as = "Vec<(_, _)>")]
     pub(in crate::controller) redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
-    // Skipping this field as we will rebuild the [`Materializations`] state
-    // upon recovery.
-    #[serde(skip)]
     partial: HashSet<NodeIndex>,
 
     pub(in crate::controller) tag_generator: usize,

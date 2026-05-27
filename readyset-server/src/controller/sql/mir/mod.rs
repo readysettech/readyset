@@ -4,7 +4,6 @@ use std::fmt::Debug;
 use std::iter;
 use std::vec::Vec;
 
-use ::serde::{Deserialize, Serialize};
 use catalog_tables::is_catalog_table;
 use common::IndexType;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -148,7 +147,7 @@ impl LeafBehavior {
 }
 
 /// Configuration for how SQL is converted to MIR
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub(crate) struct Config {
     /// If set to `true`, a SQL `ORDER BY` with `LIMIT` will emit a [`TopK`][] node. If set to
     /// `false`, the SQL conversion process returns a [`ReadySetError::Unsupported`], causing the
@@ -171,15 +170,12 @@ pub(crate) struct Config {
 
     /// Enable support for post-lookup (queries which do extra work after the lookup into the
     /// reader)
-    #[serde(default)]
     pub(crate) allow_post_lookup: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(super) struct SqlToMirConverter {
     pub(in crate::controller::sql) config: Config,
-    pub(in crate::controller::sql) base_schemas:
-        HashMap<Relation, Vec<(usize, Vec<ColumnSpecification>)>>,
     /// The graph containing all of the MIR base tables, views and cached queries.
     /// Each of them are a subgraph in the MIR Graph.
     pub(in crate::controller::sql) mir_graph: MirGraph,
@@ -207,7 +203,6 @@ impl SqlToMirConverter {
     pub(crate) fn new(dialect: Dialect) -> Self {
         Self {
             config: Default::default(),
-            base_schemas: Default::default(),
             mir_graph: Default::default(),
             relations: Default::default(),
             non_replicated_relations: Default::default(),

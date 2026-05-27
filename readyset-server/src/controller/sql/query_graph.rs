@@ -26,26 +26,24 @@ use readyset_sql_passes::{
     const_eval_to_dfvalue, eval_constant_expr, is_correlated, is_predicate, map_aggregates,
     LogicalOp,
 };
-use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 
 use super::mir::{self, PAGE_NUMBER_COL};
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct LiteralColumn {
     pub name: SqlIdentifier,
     pub table: Option<Relation>,
     pub value: Literal,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ExprColumn {
     pub name: SqlIdentifier,
     pub table: Option<Relation>,
     pub expression: Expr,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum OutputColumn {
     Data {
         alias: SqlIdentifier,
@@ -132,7 +130,7 @@ impl PartialOrd for OutputColumn {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct WindowFunction {
     pub function: FunctionExpr,
     pub partition_by: Vec<Expr>,
@@ -140,21 +138,21 @@ pub struct WindowFunction {
     pub alias: SqlIdentifier,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct JoinRef {
     pub src: Relation,
     pub dst: Relation,
 }
 
 /// An equality predicate on two columns, used as the key for a join
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct JoinPredicate {
     pub left: Column,
     pub right: Column,
 }
 
 /// An individual column on which a query is parameterized
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Parameter {
     pub col: Column,
     pub op: BinaryOperator,
@@ -162,7 +160,7 @@ pub struct Parameter {
 }
 
 /// The source of data for a query graph relation.
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub enum RelationSource {
     /// A base table — data comes from an existing table in the schema.
     Table,
@@ -172,7 +170,7 @@ pub enum RelationSource {
     Values(ValuesClause),
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct QueryGraphNode {
     pub relation: Relation,
     pub predicates: Vec<Expr>,
@@ -183,7 +181,7 @@ pub struct QueryGraphNode {
 }
 
 /// Represents a VALUES clause with its rows and column aliases
-#[derive(Clone, Debug, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq)]
 pub struct ValuesClause {
     /// The constant rows (each row is a vector of expressions that evaluate to constants)
     pub rows: Vec<Vec<Literal>>,
@@ -191,7 +189,7 @@ pub struct ValuesClause {
     pub column_names: Vec<SqlIdentifier>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum QueryGraphEdge {
     Join {
         on: Vec<JoinPredicate>,
@@ -209,7 +207,7 @@ pub enum QueryGraphEdge {
     },
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct Pagination {
     pub order: Option<Vec<(Expr, OrderType, NullOrder)>>,
     pub limit: usize,
@@ -227,8 +225,7 @@ pub struct ViewKey {
     pub index_type: IndexType,
 }
 
-#[serde_as]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 // NOTE: Keep in mind this struct has a custom Hash impl - when changing it, remember to update that
 // as well!
 // TODO(aspen): impl Arbitrary for this struct so we can make a proptest for that
@@ -236,7 +233,6 @@ pub struct QueryGraph {
     /// Relations mentioned in the query.
     pub relations: HashMap<Relation, QueryGraphNode>,
     /// Joins in the query.
-    #[serde_as(as = "Vec<(_, _)>")]
     pub edges: HashMap<(Relation, Relation), QueryGraphEdge>,
     /// Whether the query has a `DISTINCT` in the `SELECT` clause
     pub distinct: bool,

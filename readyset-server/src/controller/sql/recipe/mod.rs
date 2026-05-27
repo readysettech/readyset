@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::{fmt, str};
+use std::fmt;
 
 use petgraph::graph::NodeIndex;
 use readyset_client::consensus::{PersistedCustomType, SchemaCatalogEntry};
@@ -13,7 +13,6 @@ use readyset_sql::ast::{Relation, SelectStatement};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_util::hash::hash;
 use schema_catalog::{SchemaCatalog, SchemaGeneration};
-use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use tracing::warn;
 use vec1::Vec1;
@@ -24,7 +23,7 @@ use crate::controller::sql::SqlIncorporator;
 use crate::controller::Migration;
 
 /// Uniquely identifies an expression in the expression registry.
-#[derive(Clone, Copy, Default, Debug, Deserialize, Hash, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Debug, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub(crate) struct ExprId(u128);
 
@@ -74,7 +73,7 @@ impl fmt::Display for ExprId {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub(crate) struct Recipe {
     /// Maintains lower-level state, but not the graph itself. Lazily initialized.
     inc: SqlIncorporator,
