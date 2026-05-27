@@ -1,8 +1,60 @@
+use std::collections::HashSet;
 use std::mem;
 
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, InValue, ItemPlaceholder, Literal, SelectStatement};
+
+use crate::rewrite_utils::{
+    iter_and_conjuncts, predicate_caps_row_number, preserve_row_number_caps,
+};
+
+/// Collect top-level WHERE conjuncts that cap a `ROW_NUMBER()` projection, returning a set
+/// keyed by value-equality on `Expr`. Both orientations of each cap predicate are inserted
+/// so the gate at the top of `visit_expr` also short-circuits the literal-on-left shape
+/// that the swap arms produce by recursively revisiting the (now-swapped) expression.
+/// Returns an empty set when `preserve_row_number_caps()` is false — the gate is then a
+/// no-op and auto-parameterize handles cap predicates with its default literal-swap arms.
+fn collect_top_level_caps(query: &SelectStatement) -> HashSet<Expr> {
+    let mut set = HashSet::new();
+    if !preserve_row_number_caps() {
+        return set;
+    }
+    if let Some(where_clause) = query.where_clause.as_ref() {
+        for conjunct in iter_and_conjuncts(where_clause) {
+            if predicate_caps_row_number(conjunct, query).is_some() {
+                set.insert(conjunct.clone());
+                if let Some(flipped) = flip_binary_operands(conjunct) {
+                    set.insert(flipped);
+                }
+            }
+        }
+    }
+    set
+}
+
+/// For a `BinaryOp` whose operands the auto-parameterize swap arms would mutate
+/// in-place, return the post-swap form. Used to pre-populate the cap-predicate set
+/// with both orientations.
+///
+/// Equal: swap lhs/rhs (operator unchanged, equality is symmetric). Ordering
+/// comparisons: swap lhs/rhs and flip the operator (e.g. `10 >= rn` -> `rn <= 10`).
+/// Any other shape returns `None`.
+fn flip_binary_operands(expr: &Expr) -> Option<Expr> {
+    let Expr::BinaryOp { lhs, op, rhs } = expr else {
+        return None;
+    };
+    let new_op = match op {
+        BinaryOperator::Equal => *op,
+        op if op.is_ordering_comparison() => op.flip_ordering_comparison().ok()?,
+        _ => return None,
+    };
+    Some(Expr::BinaryOp {
+        lhs: rhs.clone(),
+        op: new_op,
+        rhs: lhs.clone(),
+    })
+}
 
 #[derive(Default)]
 struct AutoParameterizeVisitor {
@@ -13,6 +65,12 @@ struct AutoParameterizeVisitor {
     param_index: usize,
     query_depth: u8,
     visit_limit_clause: bool,
+    /// Top-level WHERE conjuncts (in both orientations) that cap a `ROW_NUMBER()`
+    /// projection. The integer literal in such a predicate is the cardinality signal
+    /// CBJR consumes downstream; replacing it with a placeholder would destroy the
+    /// signal, so the gate at the top of `visit_expr` short-circuits the walk when
+    /// the current expression appears in this set.
+    cap_predicates: HashSet<Expr>,
 }
 
 impl AutoParameterizeVisitor {
@@ -54,6 +112,12 @@ impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
 
     fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         let was_supported = self.in_supported_position;
+        // Preserve row-number cap literals: the integer bound is a cardinality signal
+        // that CBJR reads from the AST. Skipping the walk here keeps the literal
+        // intact rather than rewriting it to a placeholder.
+        if was_supported && self.cap_predicates.contains(expression) {
+            return Ok(());
+        }
         if was_supported {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
@@ -272,6 +336,10 @@ struct AnalyzeLiteralsVisitor {
     query_depth: u8,
     in_supported_position: bool,
     has_aggregates: bool,
+    /// Same gate as `AutoParameterizeVisitor::cap_predicates`: skipping cap predicates
+    /// here prevents the mode-decision in `auto_parameterize_query` from biasing toward
+    /// range-mode when the only range comparison in the query is an RN cap.
+    cap_predicates: HashSet<Expr>,
 }
 
 impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
@@ -298,6 +366,11 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
 
     fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         let was_supported = self.in_supported_position;
+        // Skip cap predicates so they don't count toward the range/equal classification
+        // used to pick the autoparameterize mode below.
+        if was_supported && self.cap_predicates.contains(expression) {
+            return Ok(());
+        }
         if was_supported {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
@@ -410,9 +483,14 @@ pub fn auto_parameterize_query(
     server_supports_mixed_comparisons: bool,
     visit_limit_clause: bool,
 ) -> ReadySetResult<Vec<(usize, Literal)>> {
+    let cap_predicates = collect_top_level_caps(query);
+
     // Don't try to auto-parameterize equal-queries that already contain range params for now, since
     // we don't yet allow mixing range and equal parameters in the same query
-    let mut visitor = AnalyzeLiteralsVisitor::default();
+    let mut visitor = AnalyzeLiteralsVisitor {
+        cap_predicates: cap_predicates.clone(),
+        ..Default::default()
+    };
     visitor.visit_select_statement(query).unwrap();
 
     let (autoparameterize_equals, autoparameterize_ranges) = if server_supports_mixed_comparisons {
@@ -456,6 +534,7 @@ pub fn auto_parameterize_query(
         param_index: prev.len(),
         out: prev,
         visit_limit_clause,
+        cap_predicates,
         ..Default::default()
     };
     visitor.visit_select_statement(query)?;
@@ -1033,6 +1112,125 @@ mod tests {
                 "SELECT id FROM users WHERE (name, age) = (?, ?)",
                 vec![(0, "Bob".into()), (1, 27.into())],
             )
+        }
+    }
+
+    /// Row-number cap predicates (`rn op K` where `rn` aliases a `ROW_NUMBER()` projection)
+    /// must keep their integer literal intact: CBJR reads that literal as a cardinality
+    /// signal. These tests pin to sqlparser-only on the MySQL dialect: nom-sql doesn't
+    /// support `ROW_NUMBER`, and MySQL's `?` placeholder shape is what the
+    /// auto-parameterizer emits.
+    mod row_number_caps {
+        use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+        use super::*;
+
+        fn parse_mysql(q: &str) -> SelectStatement {
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, q).unwrap()
+        }
+
+        fn test_auto_parameterize_rn(
+            query: &str,
+            expected_query: &str,
+            expected_added_parameters: Vec<(usize, Literal)>,
+        ) {
+            let mut query = parse_mysql(query);
+            let expected = parse_mysql(expected_query);
+            let res = auto_parameterize_query(&mut query, Vec::new(), false, true).unwrap();
+            assert_eq!(
+                query,
+                expected,
+                "\n  left: {}\n right: {}",
+                query.display(Dialect::MySQL),
+                expected.display(Dialect::MySQL),
+            );
+            assert_eq!(res, expected_added_parameters);
+        }
+
+        #[test]
+        fn cap_predicate_literal_preserved() {
+            // The outer WHERE references `rn` which resolves to the inner ROW_NUMBER()
+            // projection. The literal 10 is the cardinality cap and must survive.
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE rn <= 10",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE rn <= 10",
+                vec![],
+            );
+        }
+
+        #[test]
+        fn cap_and_regular_filter_mixed() {
+            // The cap stays put; the unrelated `id = 5` equality parameterizes normally.
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE rn <= 10 AND id = 5",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE rn <= 10 AND id = ?",
+                vec![(0, 5.into())],
+            );
+        }
+
+        #[test]
+        fn flipped_cap_literal_left_preserved() {
+            // `10 >= rn` is the swap-arm shape; the dual-orientation cap set must catch
+            // the post-swap expression on the recursive visit.
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE 10 >= rn",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE 10 >= rn",
+                vec![],
+            );
+        }
+
+        #[test]
+        fn flipped_cap_equality_literal_left_preserved() {
+            // `1 = rn` exercises the equality swap arm (Equal/NotEqual branch).
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE 1 = rn",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE 1 = rn",
+                vec![],
+            );
+        }
+
+        #[test]
+        fn synthetic_underscore_rn_preserved() {
+            // The synthetic `__rn` alias produced by TOP-K rewrite must also be recognized.
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS __rn FROM t) s \
+                 WHERE __rn <= 100",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS __rn FROM t) s \
+                 WHERE __rn <= 100",
+                vec![],
+            );
+        }
+
+        #[test]
+        fn qualified_cap_reference_preserved() {
+            // `s.rn <= 5` resolves via the FROM-alias `s` to the inner subquery's RN
+            // projection. The cap literal stays intact.
+            test_auto_parameterize_rn(
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE s.rn <= 5",
+                "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM t) s \
+                 WHERE s.rn <= 5",
+                vec![],
+            );
+        }
+
+        #[test]
+        fn non_rn_range_filter_still_parameterized() {
+            // Negative control: a plain integer column with the same operator/literal
+            // shape still autoparameterizes — the gate is targeted to RN caps only.
+            test_auto_parameterize_rn(
+                "SELECT id FROM posts WHERE id <= 10",
+                "SELECT id FROM posts WHERE id <= ?",
+                vec![(0, 10.into())],
+            );
         }
     }
 }
