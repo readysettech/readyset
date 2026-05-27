@@ -4,9 +4,9 @@ use crate::rewrite_utils::{
     expect_field_as_expr, find_rhs_join_clause, fix_groupby_without_aggregates,
     for_each_window_function, hoist_parametrizable_join_filters_to_where, is_aggregated_expr,
     is_aggregation_or_grouped, is_parametrizable_filter_candidate, is_simple_parametrizable_filter,
-    normalize_having_and_group_by, project_columns,
-    project_columns_if_not_exist_fix_duplicate_aliases, project_statement_columns_if,
-    resolve_group_by_exprs, split_expr, split_expr_mut,
+    normalize_having_and_group_by, predicate_caps_row_number, preserve_row_number_caps,
+    project_columns, project_columns_if_not_exist_fix_duplicate_aliases,
+    project_statement_columns_if, resolve_group_by_exprs, split_expr, split_expr_mut,
 };
 use crate::{
     contains_wf, get_local_from_items_iter, get_local_from_items_iter_mut, is_window_function_expr,
@@ -167,13 +167,19 @@ fn hoist_parametrizable_filters_globally(
             if let Some(where_expr) = sub_stmt.where_clause.take() {
                 let sub_locals = collect_local_from_items(sub_stmt)?;
 
+                // Reborrow immutably for the closure: split_expr needs only a read view of
+                // sub_stmt to consult its projections via predicate_caps_row_number, and the
+                // mutable borrow on sub_stmt is dormant until after split_expr returns.
+                let sub_view: &SelectStatement = sub_stmt;
+
                 let mut matched_conjuncts = vec![];
                 let remaining_expr = split_expr(
                     &where_expr,
                     &|expr| {
                         is_simple_parametrizable_filter(expr, |col_tab, _| {
                             sub_locals.contains(col_tab)
-                        })
+                        }) && (!preserve_row_number_caps()
+                            || predicate_caps_row_number(expr, sub_view).is_none())
                     },
                     &mut matched_conjuncts,
                 );
@@ -252,6 +258,15 @@ fn extract_filters_from_aggregated_subquery_stmt(
 
     let mut outer_filters = Vec::new();
 
+    // Row-number cap predicates must stay attached to their projecting subquery at every
+    // extraction site below: hoisting (or relocating to HAVING) detaches the cap from the
+    // `ROW_NUMBER()` projection it bounds, and downstream consumers rely on the literal
+    // bound as a cardinality signal that auto-parameterize must not erase.
+    //
+    // The recognizer needs a read view of `stmt` to resolve `rn` against its FROM items.
+    // Each extraction block below rebinds a fresh immutable view AFTER taking the relevant
+    // clause out of `stmt`, scoping the borrow to that block.
+
     // Pre-step: move parametrizable WHERE filters on GROUP BY keys to HAVING.
     // A GROUP BY key has one value per group, so filtering before or after
     // aggregation on it is equivalent — the filter eliminates entire groups.
@@ -262,12 +277,14 @@ fn extract_filters_from_aggregated_subquery_stmt(
         && let Some(where_expr) = stmt.where_clause.take()
     {
         let mut to_having = Vec::new();
+        let stmt_view: &SelectStatement = stmt;
         stmt.where_clause = split_expr(
             &where_expr,
             &|expr: &Expr| {
                 is_parametrizable_filter_candidate(expr, |operand| {
                     gb_exprs.iter().any(|g| g.eq(operand))
-                })
+                }) && (!preserve_row_number_caps()
+                    || predicate_caps_row_number(expr, stmt_view).is_none())
             },
             &mut to_having,
         );
@@ -284,6 +301,7 @@ fn extract_filters_from_aggregated_subquery_stmt(
         let mut expressions_from_where = Vec::new();
         let mut extracted_filters = Vec::new();
 
+        let stmt_view: &SelectStatement = stmt;
         stmt.where_clause = split_expr_mut(
             &where_expr,
             &mut |expr: &Expr| {
@@ -296,7 +314,8 @@ fn extract_filters_from_aggregated_subquery_stmt(
                 ) && is_parametrizable_filter_candidate(expr, |operand| {
                     expressions_from_where.push(operand.clone());
                     true
-                })
+                }) && (!preserve_row_number_caps()
+                    || predicate_caps_row_number(expr, stmt_view).is_none())
             },
             &mut extracted_filters,
         );
@@ -316,13 +335,15 @@ fn extract_filters_from_aggregated_subquery_stmt(
         let mut expressions_from_having = Vec::new();
         let mut extracted_filters = Vec::new();
 
+        let stmt_view: &SelectStatement = stmt;
         stmt.having = split_expr_mut(
             &having_expr,
             &mut |expr: &Expr| {
                 is_parametrizable_filter_candidate(expr, &mut |operand: &Expr| {
                     expressions_from_having.push(operand.clone());
                     true
-                })
+                }) && (!preserve_row_number_caps()
+                    || predicate_caps_row_number(expr, stmt_view).is_none())
             },
             &mut extracted_filters,
         );

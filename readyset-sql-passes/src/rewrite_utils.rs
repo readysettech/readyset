@@ -49,6 +49,24 @@ pub(crate) fn preserve_uncorrelated_top_k() -> bool {
     true
 }
 
+/// Gate for ROW_NUMBER cap preservation through the rewrite pipeline.  When
+/// `true` (the default), the hoist pass keeps `__rn <= K`-shaped predicates
+/// attached to their projecting subquery, and the auto-parameterize pass
+/// preserves the literal `K` rather than swapping it for a placeholder.
+/// Together these route the cap to MIR/dataflow as a Filter immediately
+/// downstream of the ROW_NUMBER() projection, bounding interim materialised
+/// state to K rows per partition.  Companion to `preserve_uncorrelated_top_k`
+/// — the same "keep LIMIT semantics local to the subquery" theme, applied to
+/// the materialised-RN paths that `preserve_uncorrelated_top_k` doesn't
+/// cover (correlated, predicate-subquery, engine-incompatible pagination
+/// shape, organic ROW_NUMBER).  When `false`, the pipeline reverts to the
+/// pre-Change-13420 hoist / autoparam behaviour (caps may drift to outer
+/// WHERE and become parameterised).  Kept as a flip-back hatch.
+#[inline]
+pub(crate) fn preserve_row_number_caps() -> bool {
+    true
+}
+
 const INNER_STMT_ALIAS: &str = "INNER";
 
 /// Iterate over all FROM items, including JOIN right-hand tables (mutable).

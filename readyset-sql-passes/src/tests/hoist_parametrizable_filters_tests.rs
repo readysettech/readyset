@@ -68,6 +68,23 @@ fn hoist_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
     stmt
 }
 
+/// Parse `sql` with PostgreSQL dialect and run the hoist pass alone — no DTR.
+/// Lets tests inspect the hoist pass's behavior on a hand-shaped AST without DTR
+/// flattening intermediate wrappers. Used by the row-number-cap exclusion tests
+/// below: DTR would inline the cap-bearing wrapper, hiding the hoist gate from
+/// observation, so those tests need the hoist pass to see the nested shape as
+/// written.
+fn hoist_only_pg(sql: &str) -> readyset_sql::ast::SelectStatement {
+    let mut stmt = parse_pg(sql);
+    hoist_parametrizable_filters(&mut stmt)
+        .unwrap_or_else(|e| panic!("hoist_parametrizable_filters failed: {e}\n  sql: {sql}"));
+    println!(
+        ">>> Hoisted only (PG): {}",
+        stmt.display(Dialect::PostgreSQL)
+    );
+    stmt
+}
+
 // ─── Group 1: Basic hoisting from aggregated (formerly non-inlinable) subqueries ────
 //
 // Prior to C.2 dedup, `derived_tables_rewrite_main` left LIMIT-bearing aggregated
@@ -705,5 +722,164 @@ fn filter_in_limit_bearing_subquery_stays() {
     assert!(
         !result_str.contains(r#""sq"."y" > 0"#),
         "filter under LIMIT must not be rebound at the outer level; got:\n{result_str}"
+    );
+}
+
+// Row-number cap predicates — must stay attached to their projecting subquery
+//
+// `predicate_caps_row_number` recognizes any `rn op K` predicate whose `rn` column
+// aliases a `ROW_NUMBER()` projection. Hoisting such a predicate to a parent WHERE
+// detaches it from the projection that defines `rn`, breaking the cap semantics:
+// the literal `K` is load-bearing as a cardinality signal for downstream consumers
+// (auto-parameterize, CBJR), and a hoist would expose it to placeholder substitution.
+// The exclusion applies whether `rn` is hand-aliased or the synthetic `__rn` produced
+// by `rewrite_top_k_in_place_impl`.
+//
+// These tests exercise the hoist pass in isolation (`hoist_only_pg`) so that DTR
+// flattening does not move the cap predicate before hoist gets to see it: each
+// shape is a hand-built post-DTR-resistant nest with the cap inside a wrapper's
+// WHERE, and the assertion is that hoist leaves the cap in that wrapper.
+
+/// Cap on an unqualified `rn` reference inside a wrapping subquery's WHERE.
+/// Hoist would otherwise promote `rn <= 10` to the outer WHERE; the exclusion
+/// keeps it pinned to the wrapper.
+#[test]
+fn row_number_cap_stays_in_subquery_unqualified() {
+    let result = hoist_only_pg(
+        r#"SELECT b.id, b.rn
+           FROM (SELECT inner_sub.id, inner_sub.rn
+                 FROM (SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS rn FROM t) AS inner_sub
+                 WHERE rn <= 10) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    // The outer SELECT must not gain a WHERE — cap stays inside `b`.
+    assert!(
+        result.where_clause.is_none(),
+        "outer WHERE must remain empty (cap should not hoist), got:\n{result_str}"
+    );
+    assert!(
+        result_str.contains("<= 10"),
+        "cap predicate must still be present in the wrapper, got:\n{result_str}"
+    );
+}
+
+/// Cap on a qualified `inner_sub.rn` reference: same expectation. Qualifiers
+/// must not let the cap escape the wrapper.
+#[test]
+fn row_number_cap_stays_in_subquery_qualified() {
+    let result = hoist_only_pg(
+        r#"SELECT b.id, b.rn
+           FROM (SELECT inner_sub.id, inner_sub.rn
+                 FROM (SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS rn FROM t) AS inner_sub
+                 WHERE inner_sub.rn <= 10) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    assert!(
+        result.where_clause.is_none(),
+        "outer WHERE must remain empty (qualified cap should not hoist), got:\n{result_str}"
+    );
+    assert!(
+        result_str.contains("<= 10"),
+        "qualified cap predicate must still be present, got:\n{result_str}"
+    );
+}
+
+/// The synthetic `__rn` alias used by `rewrite_top_k_in_place_impl` is recognized
+/// just like a user-defined alias.
+#[test]
+fn synthetic_underscore_rn_cap_stays_in_subquery() {
+    let result = hoist_only_pg(
+        r#"SELECT b.id, b.__rn
+           FROM (SELECT inner_sub.id, inner_sub.__rn
+                 FROM (SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS __rn FROM t) AS inner_sub
+                 WHERE inner_sub.__rn <= 100) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    assert!(
+        result.where_clause.is_none(),
+        "outer WHERE must remain empty for __rn cap, got:\n{result_str}"
+    );
+    assert!(
+        result_str.contains("<= 100"),
+        "__rn cap predicate must still be present, got:\n{result_str}"
+    );
+}
+
+/// A partitioned `ROW_NUMBER()` cap is recognized the same way: the partition list
+/// is captured by the recognizer; the cap predicate is still excluded from hoisting.
+#[test]
+fn partitioned_row_number_cap_stays_in_subquery() {
+    let result = hoist_only_pg(
+        r#"SELECT b.customer_id, b.rn
+           FROM (SELECT inner_sub.customer_id, inner_sub.rn
+                 FROM (SELECT orders.customer_id,
+                              ROW_NUMBER() OVER (PARTITION BY orders.customer_id ORDER BY orders.ts) AS rn
+                       FROM orders) AS inner_sub
+                 WHERE inner_sub.rn <= 3) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    assert!(
+        result.where_clause.is_none(),
+        "outer WHERE must remain empty for partitioned cap, got:\n{result_str}"
+    );
+    assert!(
+        result_str.contains("<= 3"),
+        "partitioned cap predicate must still be present, got:\n{result_str}"
+    );
+}
+
+/// Aggregated-subquery path: a cap inside a GROUP-BY-bearing wrapper routes through
+/// `extract_filters_from_aggregated_subquery_stmt` rather than the general FROM-subquery
+/// WHERE-extraction path. The wrapper aggregates with `COUNT(*)` over `GROUP BY rn`,
+/// which makes `is_aggregation_or_grouped` true and steers the pass into the aggregated
+/// branch. The cap predicate `inner_sub.rn <= 10` is on the GROUP BY key, so the
+/// pre-step would move it from WHERE to HAVING and the HAVING-extraction would then
+/// pull it out to the outer WHERE — unless the exclusion holds it in place.
+///
+/// Without all three gates inside `extract_filters_from_aggregated_subquery_stmt`,
+/// the cap surfaces at the outer WHERE as `b.rn <= 10`; with the gates, the wrapper
+/// retains the predicate intact in its WHERE clause.
+#[test]
+fn row_number_cap_stays_in_aggregated_subquery() {
+    let result = hoist_only_pg(
+        r#"SELECT b.rn, b.cnt
+           FROM (SELECT inner_sub.rn, COUNT(*) AS cnt
+                 FROM (SELECT t.x, ROW_NUMBER() OVER (ORDER BY t.x) AS rn FROM t) AS inner_sub
+                 WHERE inner_sub.rn <= 10
+                 GROUP BY inner_sub.rn) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    // Outer SELECT must not gain a WHERE — cap must not escape the aggregated wrapper.
+    assert!(
+        result.where_clause.is_none(),
+        "outer WHERE must remain empty (aggregated-path cap must not hoist), got:\n{result_str}"
+    );
+    // Cap must remain inside the wrapper, not relocate to HAVING either.
+    assert!(
+        result_str.contains("WHERE (\"inner_sub\".\"rn\" <= 10)"),
+        "cap predicate must stay in the wrapper's WHERE, got:\n{result_str}"
+    );
+}
+
+/// Negative control: a non-RN integer comparison in the same shape still hoists.
+/// Proves the exclusion is targeted to `ROW_NUMBER()`-aliased columns and does
+/// not block general hoisting of comparable integer filters.
+#[test]
+fn non_row_number_int_filter_still_hoists() {
+    let result = hoist_only_pg(
+        r#"SELECT b.id, b.rn
+           FROM (SELECT inner_sub.id, inner_sub.rn
+                 FROM (SELECT t.id, ROW_NUMBER() OVER (ORDER BY t.id) AS rn FROM t) AS inner_sub
+                 WHERE inner_sub.id <= 10) AS b"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    // The non-RN filter on `id` should reach the outer WHERE.
+    assert!(
+        result.where_clause.is_some(),
+        "non-RN int filter must reach outer WHERE, got:\n{result_str}"
+    );
+    assert!(
+        result_str.contains("<= 10"),
+        "non-RN cap predicate must still be present, got:\n{result_str}"
     );
 }
