@@ -20,7 +20,7 @@ use test_utils::{tags, upstream};
 async fn cache_mode_shallow() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -81,7 +81,7 @@ async fn cache_mode_shallow() {
 async fn cache_mode_deep() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -136,7 +136,7 @@ async fn cache_mode_deep() {
 async fn cache_mode_deep_then_shallow() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -202,7 +202,7 @@ async fn cache_mode_deep_then_shallow() {
 async fn cache_mode_shallow_auto_create_in_request_path() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -264,7 +264,7 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
 async fn create_cache_returns_deep_type() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -334,7 +334,7 @@ async fn create_cache_returns_deep_type() {
 async fn create_cache_returns_shallow_type() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -384,7 +384,7 @@ async fn create_cache_returns_shallow_type() {
 async fn create_cache_returns_shallow_type_on_fallback() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));

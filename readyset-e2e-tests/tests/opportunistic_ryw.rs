@@ -69,7 +69,7 @@ async fn setup_with_opportunistic_ryw(
 #[upstream(mysql)]
 async fn opportunistic_ryw_window_skips_cache_after_write() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(500)).await;
 
     // Warm the auto-cache.
@@ -119,7 +119,7 @@ async fn opportunistic_ryw_window_skips_cache_after_write() {
 #[upstream(mysql)]
 async fn opportunistic_ryw_disabled_does_not_skip_cache() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, None).await;
 
     // Warm the auto-cache.
@@ -157,7 +157,7 @@ async fn opportunistic_ryw_disabled_does_not_skip_cache() {
 #[upstream(mysql)]
 async fn opportunistic_ryw_fires_after_commit() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(500)).await;
 
     // Warm the auto-cache.
@@ -195,7 +195,7 @@ async fn opportunistic_ryw_fires_after_commit() {
 #[upstream(mysql)]
 async fn opportunistic_ryw_cleared_on_rollback() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(60_000)).await;
 
     // Warm the auto-cache.

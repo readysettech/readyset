@@ -48,6 +48,8 @@ pub mod psql_helpers;
 
 pub use readyset_server::sleep;
 
+const MAX_DATABASE_NAME_LEN: usize = 63;
+
 static UNIQUE_SERVER_ID_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn is_leader_not_ready(err: &ReadySetError) -> bool {
@@ -83,17 +85,17 @@ pub async fn wait_for_schema_generation_change(
     });
 }
 
-#[macro_export]
-macro_rules! derive_test_name {
-    () => {
-        std::thread::current()
-            .name()
-            .unwrap()
-            .split_once("::")
-            .unwrap()
-            .0
-            .to_owned()
-    };
+pub fn derive_test_name() -> String {
+    std::thread::current()
+        .name()
+        .unwrap()
+        .split("::")
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .take(MAX_DATABASE_NAME_LEN)
+        .collect()
 }
 
 /// Wait for a table to be rebuilt (as indicated by a change in its dataflow node id), and for the

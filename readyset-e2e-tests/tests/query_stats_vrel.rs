@@ -14,7 +14,7 @@ use test_utils::{tags, upstream};
 async fn cached_query_stats_vrel() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -49,7 +49,7 @@ async fn cached_query_stats_vrel() {
         .unwrap();
 
     let exec_count = 5;
-    let expected_query_id = "q_a36dada0b788953c";
+    let expected_query_id = "q_fb6dc788155a5136";
 
     for _ in 0..exec_count {
         rs.query_drop("SELECT x FROM t WHERE x = 1").await.unwrap();

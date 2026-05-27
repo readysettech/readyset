@@ -23,7 +23,7 @@ use tokio_postgres::SimpleQueryMessage;
 async fn scheduled_refresh_expiration() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -97,7 +97,7 @@ async fn scheduled_refresh_expiration() {
 async fn execution_longer_than_ttl_is_cacheable() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -170,7 +170,7 @@ async fn execution_longer_than_ttl_is_cacheable() {
 async fn scheduled_refresh_starts_immediately() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -267,7 +267,7 @@ async fn scheduled_refresh_starts_immediately() {
 async fn show_shallow_caches() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -331,7 +331,7 @@ async fn show_shallow_caches() {
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
 
     let (query_id, name, query, properties, count) = &rows[0];
-    assert_eq!(query_id, "q_89a59a917bc9c0ba");
+    assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
     let count: u64 = count.parse().unwrap();
@@ -369,7 +369,7 @@ async fn show_shallow_caches() {
         hits,
         misses,
     ) = &rows[0];
-    assert_eq!(query_id, "q_89a59a917bc9c0ba");
+    assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
     assert_eq!(*ttl_ms, 32000);
@@ -391,7 +391,7 @@ async fn show_shallow_caches() {
 async fn shallow_cache_millisecond_units() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -450,7 +450,7 @@ async fn shallow_cache_millisecond_units() {
 async fn show_shallow_cache_entries() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -581,7 +581,7 @@ async fn show_shallow_cache_entries() {
 async fn shallow_cache_entry_bytes() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
@@ -642,7 +642,7 @@ async fn shallow_cache_entry_bytes() {
 async fn mysql_change_upstream() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let db_a = format!("{test_name}_a");
     let db_b = format!("{test_name}_b");
 
@@ -763,7 +763,7 @@ async fn mysql_change_upstream() {
 async fn hint_creates_shallow_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -821,7 +821,7 @@ async fn hint_creates_shallow_cache() {
 async fn hint_creates_shallow_cache_union() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -877,7 +877,7 @@ async fn hint_creates_shallow_cache_union() {
 async fn hint_creates_shallow_cache_cte() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -933,7 +933,7 @@ async fn hint_creates_shallow_cache_cte() {
 async fn hint_creates_shallow_cache_window_function() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -991,7 +991,7 @@ async fn hint_creates_shallow_cache_window_function() {
 async fn hint_creates_shallow_cache_subquery() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1053,7 +1053,7 @@ fn first_row_col(rows: &[SimpleQueryMessage], col: usize) -> &str {
 async fn pg_change_upstream() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let db_a = format!("{test_name}_a");
     let db_b = format!("{test_name}_b");
 
@@ -1187,7 +1187,7 @@ async fn pg_change_upstream() {
 async fn hint_query_id_matches_without_hint() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1239,7 +1239,7 @@ async fn hint_query_id_matches_without_hint() {
 async fn hint_idempotent_when_cache_exists() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1297,7 +1297,7 @@ async fn hint_idempotent_when_cache_exists() {
 async fn hint_ttl_option_applies() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1370,7 +1370,7 @@ async fn hint_ttl_option_applies() {
 async fn hint_prepared_statement_creates_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1456,7 +1456,7 @@ async fn hint_skipped_when_cache_ddl_disabled() {
 
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1527,7 +1527,7 @@ async fn hint_skipped_when_cache_ddl_disabled() {
 async fn malformed_hint_falls_through() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1582,7 +1582,7 @@ async fn malformed_hint_falls_through() {
 async fn multiple_hints_produce_same_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1659,7 +1659,7 @@ async fn multiple_hints_produce_same_cache() {
 async fn malformed_hint_does_not_bypass_existing_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1741,7 +1741,7 @@ async fn malformed_hint_does_not_bypass_existing_cache() {
 async fn skip_cache_hint_bypasses_shallow_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1838,7 +1838,7 @@ async fn skip_cache_hint_bypasses_shallow_cache() {
 async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     mysql_helpers::recreate_database(&test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
@@ -1957,7 +1957,7 @@ fn pg_first_col_i32(rows: &[SimpleQueryMessage], col: usize) -> i32 {
 async fn pg_hint_creates_shallow_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     PostgreSQLAdapter::recreate_database(&test_name).await;
 
     let mut cfg = psql_helpers::upstream_config();
@@ -2026,7 +2026,7 @@ async fn pg_hint_creates_shallow_cache() {
 async fn pg_hint_prepared_statement_creates_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     PostgreSQLAdapter::recreate_database(&test_name).await;
 
     let mut cfg = psql_helpers::upstream_config();
@@ -2108,7 +2108,7 @@ async fn pg_hint_prepared_statement_creates_cache() {
 async fn pg_skip_cache_hint_bypasses_shallow_cache() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     PostgreSQLAdapter::recreate_database(&test_name).await;
 
     let mut cfg = psql_helpers::upstream_config();
@@ -2191,7 +2191,7 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache() {
 async fn pg_skip_cache_hint_bypasses_shallow_cache_prepared() {
     init_test_logging();
 
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     PostgreSQLAdapter::recreate_database(&test_name).await;
 
     let mut cfg = psql_helpers::upstream_config();

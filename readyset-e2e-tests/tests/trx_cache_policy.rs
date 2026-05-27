@@ -60,7 +60,7 @@ async fn setup_shallow_adapter(
 #[upstream(mysql)]
 async fn until_write_in_request_path_shallow() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
 
     // Warm the auto-created cache (first read goes upstream, second hits the cache).
@@ -123,7 +123,7 @@ async fn until_write_in_request_path_shallow() {
 #[upstream(mysql)]
 async fn manual_no_keyword_stays_never() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
 
     // Replace the auto-cache with a manually-created one (still no keyword -> Never).
@@ -166,7 +166,7 @@ async fn manual_no_keyword_stays_never() {
 #[upstream(mysql)]
 async fn manual_until_write() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
 
     conn.query_drop("DROP ALL CACHES").await.unwrap();
@@ -224,7 +224,7 @@ async fn manual_until_write() {
 #[upstream(mysql)]
 async fn manual_always_unaffected_by_writes() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
 
     conn.query_drop("DROP ALL CACHES").await.unwrap();
@@ -267,7 +267,7 @@ async fn manual_always_unaffected_by_writes() {
 #[upstream(mysql)]
 async fn autocommit_off_carries_had_write() {
     init_test_logging();
-    let test_name = derive_test_name!();
+    let test_name = derive_test_name();
     let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
 
     // Warm the auto-cache.
