@@ -930,6 +930,52 @@ fn create_cache() {
 }
 
 #[test]
+fn create_cache_with_clause_after_name() {
+    // The WITH (...) umbrella follows the optional cache name.
+    check_parse_both!("CREATE CACHE foo WITH (ALWAYS) FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!(
+        "CREATE CACHE foo WITH (ALWAYS, CONCURRENTLY) FROM SELECT * FROM users WHERE id = $1"
+    );
+    // No name: the umbrella sits where the name would be.
+    check_parse_both!("CREATE CACHE WITH (ALWAYS) FROM SELECT * FROM users WHERE id = $1");
+    check_parse_both!(
+        "CREATE SHALLOW CACHE bar WITH (POLICY TTL 5 SECONDS, COALESCE 250 MS) \
+         FROM SELECT * FROM users WHERE id = $1"
+    );
+}
+
+#[test]
+fn create_cache_rejects_mixing_bare_options_and_with_clause() {
+    // Bare options (before the name) and a WITH (...) clause (after it) are mutually exclusive.
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE CACHE ALWAYS foo WITH (CONCURRENTLY) FROM SELECT * FROM users WHERE id = ?",
+        "combine bare options with a WITH"
+    );
+    // Same with no name between the bare option and the clause.
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE CACHE ALWAYS WITH (CONCURRENTLY) FROM SELECT * FROM users WHERE id = ?",
+        "combine bare options with a WITH"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "CREATE CACHE CONCURRENTLY foo WITH (ALWAYS) FROM SELECT * FROM users WHERE id = $1",
+        "combine bare options with a WITH"
+    );
+}
+
+#[test]
+fn create_cache_rejects_with_clause_before_name() {
+    // The old `WITH (...) <name>` ordering no longer parses; the name comes first.
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE CACHE WITH (ALWAYS) foo FROM SELECT * FROM users WHERE id = ?",
+        "sqlparser error"
+    );
+}
+
+#[test]
 fn create_deep_shallow_cache() {
     check_parse_both!("CREATE DEEP CACHE FROM SELECT * FROM users WHERE id = $1");
     check_parse_both!("CREATE SHALLOW CACHE FROM SELECT * FROM users WHERE id = $1");

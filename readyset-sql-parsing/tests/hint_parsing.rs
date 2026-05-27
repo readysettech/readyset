@@ -536,6 +536,19 @@ fn parse_create_cache_hint_with_clause_rejects_policy_on_deep() {
 }
 
 #[test]
+fn parse_create_cache_hint_rejects_mixing_bare_and_with_clause() {
+    // A hint has no name, so a bare option and the WITH clause sit back to back; combining them
+    // is still rejected.
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE ALWAYS WITH (CONCURRENTLY)");
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("combine bare options with a WITH"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn parse_create_cache_hint_topk_buffer_multiplier() {
     let result =
         parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4)")

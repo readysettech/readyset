@@ -1199,8 +1199,12 @@ impl DialectDisplay for CreateCacheStatement {
                 Some(cache_type) => write!(f, "{} ", cache_type.display(dialect))?,
             }
             write!(f, "CACHE ")?;
+            if let Some(name) = &self.name {
+                write!(f, "{} ", name.display(dialect))?;
+            }
             // Render options through the `WITH (...)` umbrella so the canonical text matches the
-            // grammar. The clause is omitted entirely when there are no options to emit.
+            // grammar. The clause follows the name and is omitted entirely when there are no
+            // options to emit.
             let has_options = self.policy.is_some()
                 || self.coalesce_ms.is_some()
                 || self.concurrently
@@ -1244,9 +1248,6 @@ impl DialectDisplay for CreateCacheStatement {
                     write!(f, "TOPK_BUFFER_MULTIPLIER = {m}")?;
                 }
                 write!(f, ") ")?;
-            }
-            if let Some(name) = &self.name {
-                write!(f, "{} ", name.display(dialect))?;
             }
             write!(f, "FROM ")?;
             write!(f, "{}", self.inner.display(dialect))

@@ -754,16 +754,10 @@ fn normalize_cache_options(opts: &mut CreateCacheOptions) {
     }
 }
 
-/// Parse cache options from the token stream. The `CREATE [DEEP|SHALLOW] CACHE` keywords must
-/// already be consumed.
-///
-/// Accepts either:
-///   * the legacy bare form: `[POLICY TTL ...] [COALESCE ...] [ALWAYS] [CONCURRENTLY]`
-///   * the new umbrella form: `WITH ( option [, option]... )`
-///
-/// The two forms are mutually exclusive on a single statement. Both DDL parsing and
-/// `/*rs+ ... */` hint directive parsing share this entry point.
-fn parse_cache_options(
+/// Parse the legacy bare options (`[POLICY TTL ...] [COALESCE ...] [ALWAYS] [CONCURRENTLY]`) that
+/// precede the cache name. The `CREATE [DEEP|SHALLOW] CACHE` keywords must already be consumed.
+/// Returns the default (no options) when none are present.
+fn parse_bare_cache_options(
     parser: &mut Parser,
     cache_type: Option<CacheType>,
 ) -> Result<CreateCacheOptions, ReadysetParsingError> {
@@ -771,43 +765,57 @@ fn parse_cache_options(
         cache_type,
         ..Default::default()
     };
-
-    if parser.parse_keyword(Keyword::WITH) {
-        parser.expect_token(&Token::LParen)?;
-        // Empty `WITH ()` is accepted as "no options", so callers generating SQL can always emit
-        // `WITH (<options>)` without special-casing zero options.
-        loop {
-            if parser.peek_token().token == Token::RParen {
-                break;
-            }
-            // WITH-only knobs first, then fall back to the shared legacy-option parser.
-            let opt = if let Some(value) = try_parse_topk_buffer_multiplier(parser)? {
-                CacheOptionKind::TopkBufferMultiplier(value)
-            } else {
-                parse_single_cache_option(parser)?.ok_or_else(|| {
-                    ReadysetParsingError::ReadysetParsingError(format!(
-                        "Unexpected token in WITH clause: {}",
-                        parser.peek_token()
-                    ))
-                })?
-            };
-            apply_cache_option(&mut opts, opt, cache_type)?;
-            if !parser.consume_token(&Token::Comma) {
-                break;
-            }
-        }
-        parser.expect_token(&Token::RParen)?;
-        normalize_cache_options(&mut opts);
-        return Ok(opts);
-    }
-
-    // Bare form: parse options in any order, applying each as we go.
     while let Some(opt) = parse_single_cache_option(parser)? {
         apply_cache_option(&mut opts, opt, cache_type)?;
     }
-
-    normalize_cache_options(&mut opts);
     Ok(opts)
+}
+
+/// If the next token is `WITH`, parse a `WITH ( option [, option]... )` clause into `opts` and
+/// return `true`. Returns `false` (consuming nothing) when there is no WITH clause. Empty
+/// `WITH ()` is accepted as "no options", so callers generating SQL can always emit
+/// `WITH (<options>)` without special-casing zero options.
+fn parse_with_cache_clause(
+    parser: &mut Parser,
+    cache_type: Option<CacheType>,
+    opts: &mut CreateCacheOptions,
+) -> Result<bool, ReadysetParsingError> {
+    if !parser.parse_keyword(Keyword::WITH) {
+        return Ok(false);
+    }
+    parser.expect_token(&Token::LParen)?;
+    loop {
+        if parser.peek_token().token == Token::RParen {
+            break;
+        }
+        // WITH-only knobs first, then fall back to the shared legacy-option parser.
+        let opt = if let Some(value) = try_parse_topk_buffer_multiplier(parser)? {
+            CacheOptionKind::TopkBufferMultiplier(value)
+        } else {
+            parse_single_cache_option(parser)?.ok_or_else(|| {
+                ReadysetParsingError::ReadysetParsingError(format!(
+                    "Unexpected token in WITH clause: {}",
+                    parser.peek_token()
+                ))
+            })?
+        };
+        apply_cache_option(opts, opt, cache_type)?;
+        if !parser.consume_token(&Token::Comma) {
+            break;
+        }
+    }
+    parser.expect_token(&Token::RParen)?;
+    Ok(true)
+}
+
+/// Whether any cache option is set, used to reject combining the bare form with a `WITH (...)`
+/// clause on the same statement.
+fn cache_options_present(opts: &CreateCacheOptions) -> bool {
+    opts.policy.is_some()
+        || opts.coalesce_ms.is_some()
+        || opts.concurrently
+        || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
+        || opts.topk_buffer_multiplier.is_some()
 }
 
 /// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
@@ -835,19 +843,29 @@ fn parse_create_cache(
     input: impl AsRef<str>,
 ) -> Result<SqlQuery, ReadysetParsingError> {
     let cache_type = parse_create_cache_keywords(parser)?;
-    let opts = parse_cache_options(parser, cache_type)?;
+    // Legacy bare options come before the name; the `WITH (...)` umbrella comes after it.
+    let mut opts = parse_bare_cache_options(parser, cache_type)?;
+    let bare_present = cache_options_present(&opts);
 
-    let from = parser.parse_keyword(Keyword::FROM);
-    let name = if !from {
-        let name = parser
+    // Optional cache name: absent when the next token is FROM (no name) or WITH (the umbrella,
+    // which follows the name slot).
+    let name = if parser.peek_keyword(Keyword::FROM) || parser.peek_keyword(Keyword::WITH) {
+        None
+    } else {
+        parser
             .parse_object_name(false)
             .ok()
-            .try_into_dialect(dialect)?;
-        parser.expect_keyword(Keyword::FROM)?;
-        name
-    } else {
-        None
+            .try_into_dialect(dialect)?
     };
+
+    // Optional WITH (...) umbrella, after the name. Mutually exclusive with the bare form.
+    if parse_with_cache_clause(parser, cache_type, &mut opts)? && bare_present {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "CREATE CACHE cannot combine bare options with a WITH (...) clause".into(),
+        ));
+    }
+    normalize_cache_options(&mut opts);
+    parser.expect_keyword(Keyword::FROM)?;
 
     // FIXME(sqlparser): Remove this once we deprecate nom-sql and switch to sqlparser
     // This is here to match the behavior of nom-sql, where it returns the part of
@@ -904,8 +922,17 @@ pub fn parse_hint_directive(
     let directive = if parser.parse_keywords(&[Keyword::SKIP, Keyword::CACHE]) {
         Some(ReadysetHintDirective::SkipCache)
     } else if parser.peek_keyword(Keyword::CREATE) {
+        // A hint has no cache name or FROM, so the bare options and the optional WITH umbrella
+        // sit back to back; they remain mutually exclusive.
         let cache_type = parse_create_cache_keywords(&mut parser)?;
-        let opts = parse_cache_options(&mut parser, cache_type)?;
+        let mut opts = parse_bare_cache_options(&mut parser, cache_type)?;
+        let bare_present = cache_options_present(&opts);
+        if parse_with_cache_clause(&mut parser, cache_type, &mut opts)? && bare_present {
+            return Err(ReadysetParsingError::ReadysetParsingError(
+                "CREATE CACHE cannot combine bare options with a WITH (...) clause".into(),
+            ));
+        }
+        normalize_cache_options(&mut opts);
         Some(ReadysetHintDirective::CreateCache(opts))
     } else {
         None

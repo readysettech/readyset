@@ -1082,36 +1082,29 @@ fn cache_options_with_clause(
     Ok((i, opts))
 }
 
-/// Extract the [`CreateCacheOptions`] from a `CREATE CACHE` statement. Accepts either:
-///   * the legacy bare form: `[ALWAYS] [CONCURRENTLY] [POLICY TTL ...] [COALESCE ...]`
-///   * the new umbrella form: `WITH ( option [, option]... )`
-///
-/// The two forms are mutually exclusive: a `WITH (...)` clause cannot be combined with bare
-/// options on the same statement.
-fn cached_query_options(
+/// Parse the legacy bare options (`[ALWAYS] [CONCURRENTLY] [POLICY TTL ...] [COALESCE ...]`) that
+/// precede the cache name. Returns the default (no options) when none are present. Each option is
+/// followed by whitespace1, which separates it from the next option, the cache name, or FROM.
+fn cached_query_bare_options(
     mut i: LocatedSpan<&[u8]>,
     cache_type: Option<CacheType>,
 ) -> NomSqlResult<&[u8], CreateCacheOptions> {
-    // Try the WITH form first; the leading WITH keyword unambiguously distinguishes it from a
-    // cache name. A `Failure` (committed-but-invalid) must bubble up; only an `Error`
-    // (didn't recognize a WITH clause at all) should fall through to the bare form.
-    let (i, mut opts) = match cache_options_with_clause(i, cache_type) {
-        Ok(ok) => (ok.0, ok.1),
-        Err(nom::Err::Failure(e)) => return Err(nom::Err::Failure(e)),
-        Err(_) => {
-            let mut opts = CreateCacheOptions::default();
-            // Bare form: parse a subset of the options in any order. Each option is followed by
-            // whitespace1, which acts as a separator before the next option, the cache name,
-            // or FROM.
-            while let Ok((remaining, (opt, _))) = tuple((cache_option, whitespace1))(i) {
-                apply_cache_option(&mut opts, opt, cache_type, i)?;
-                i = remaining;
-            }
-            (i, opts)
-        }
-    };
-    normalize_cache_options(&mut opts);
+    let mut opts = CreateCacheOptions::default();
+    while let Ok((remaining, (opt, _))) = tuple((cache_option, whitespace1))(i) {
+        apply_cache_option(&mut opts, opt, cache_type, i)?;
+        i = remaining;
+    }
     Ok((i, opts))
+}
+
+/// Whether any cache option is set, used to reject combining the bare form with a `WITH (...)`
+/// clause on the same statement.
+fn cache_options_present(opts: &CreateCacheOptions) -> bool {
+    opts.policy.is_some()
+        || opts.coalesce_ms.is_some()
+        || opts.concurrently
+        || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
+        || opts.topk_buffer_multiplier.is_some()
 }
 
 /// Canonicalize options that have semantically-equivalent representations. Called once after
@@ -1158,8 +1151,28 @@ pub fn create_cached_query(
 
         let (i, _) = tag_no_case("cache")(i)?;
         let (i, _) = whitespace1(i)?;
-        let (i, opts) = cached_query_options(i, cache_type)?;
+        // Legacy bare options come before the name; the `WITH (...)` umbrella comes after it.
+        let (i, bare_opts) = cached_query_bare_options(i, cache_type)?;
         let (i, name) = opt(terminated(relation(dialect), whitespace1))(i)?;
+        // The name parser won't consume a leading `WITH` (it's a reserved keyword), so a no-name
+        // `CREATE CACHE WITH (...)` lands here with `name == None`.
+        let (i, mut opts) = match cache_options_with_clause(i, cache_type) {
+            Ok((remaining, with_opts)) => {
+                if cache_options_present(&bare_opts) {
+                    // Bare options and a WITH clause are mutually exclusive on one statement.
+                    return Err(nom::Err::Failure(NomSqlError::from_error_kind(
+                        i,
+                        ErrorKind::Permutation,
+                    )));
+                }
+                (remaining, with_opts)
+            }
+            // A committed-but-invalid WITH clause must bubble up; a plain `Error` means there was
+            // no WITH clause, so fall back to whatever the bare form parsed.
+            Err(nom::Err::Failure(e)) => return Err(nom::Err::Failure(e)),
+            Err(_) => (i, bare_opts),
+        };
+        normalize_cache_options(&mut opts);
         let (i, _) = tag_no_case("from")(i)?;
         let (i, _) = whitespace1(i)?;
         let (i, inner_result) =
@@ -2061,7 +2074,7 @@ mod tests {
             let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
-                "CREATE CACHE WITH (UNTIL WRITE) `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE `foo` WITH (UNTIL WRITE) FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
 
             // Round-trip: re-parsing the displayed form preserves the policy.
@@ -2098,7 +2111,7 @@ mod tests {
             let res = stmt.display(Dialect::MySQL).to_string();
             assert_eq!(
                 res,
-                "CREATE CACHE WITH (CONCURRENTLY, ALWAYS) `foo` FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+                "CREATE CACHE `foo` WITH (CONCURRENTLY, ALWAYS) FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
             );
         }
 
@@ -2181,7 +2194,7 @@ mod tests {
         fn create_cached_query_with_clause_flags() {
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHE WITH (ALWAYS, CONCURRENTLY) foo FROM SELECT id FROM users"
+                b"CREATE CACHE foo WITH (ALWAYS, CONCURRENTLY) FROM SELECT id FROM users"
             );
             assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
             assert!(stmt.concurrently);
@@ -2215,7 +2228,7 @@ mod tests {
             // unconditionally. It's equivalent to the bare form (no clause).
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHE WITH () foo FROM SELECT id FROM users"
+                b"CREATE CACHE foo WITH () FROM SELECT id FROM users"
             );
             assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Never);
             assert!(!stmt.concurrently);
@@ -2264,7 +2277,7 @@ mod tests {
         fn create_cached_query_topk_buffer_multiplier_combined_with_other_options() {
             let stmt = test_parse!(
                 create_cached_query(Dialect::MySQL),
-                b"CREATE CACHE WITH (ALWAYS, TOPK_BUFFER_MULTIPLIER = 2) foo FROM SELECT id \
+                b"CREATE CACHE foo WITH (ALWAYS, TOPK_BUFFER_MULTIPLIER = 2) FROM SELECT id \
                   FROM users ORDER BY id LIMIT 5"
             );
             assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
@@ -2304,6 +2317,102 @@ mod tests {
             assert_eq!(with_form.trx_cache_policy, bare_form.trx_cache_policy);
             assert_eq!(with_form.coalesce_ms, bare_form.coalesce_ms);
             assert_eq!(with_form.cache_type, bare_form.cache_type);
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_after_name() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE foo WITH (ALWAYS, CONCURRENTLY) FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.name, Some("foo".into()));
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+            assert!(stmt.concurrently);
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_after_name_shallow_options() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE lb WITH (POLICY TTL 5 SECONDS, COALESCE 250 MS) \
+                  FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.name, Some("lb".into()));
+            assert_eq!(stmt.cache_type, Some(CacheType::Shallow));
+            assert_eq!(stmt.coalesce_ms, Some(Duration::from_millis(250)));
+            assert_eq!(
+                stmt.policy,
+                Some(EvictionPolicy::Ttl {
+                    ttl: Duration::from_secs(5)
+                })
+            );
+        }
+
+        #[test]
+        fn create_cached_query_with_clause_no_name() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE WITH (ALWAYS) FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.name, None);
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+        }
+
+        #[test]
+        fn create_cached_query_rejects_with_clause_before_name() {
+            // The WITH clause must follow the optional name; the old `WITH (...) <name>` ordering
+            // is no longer accepted.
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE WITH (ALWAYS) foo FROM SELECT id FROM users",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_rejects_bare_and_with_clause_named() {
+            // Bare options (before the name) cannot be combined with a WITH clause (after it).
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE ALWAYS foo WITH (CONCURRENTLY) FROM SELECT id FROM users",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_rejects_bare_and_with_clause_unnamed() {
+            // Same mutual exclusion with no name between the bare option and the WITH clause.
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE CACHE ALWAYS WITH (CONCURRENTLY) FROM SELECT id FROM users",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_cached_query_bare_options_before_name_still_parse() {
+            // The legacy bare form keeps its options before the name.
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE ALWAYS CONCURRENTLY foo FROM SELECT id FROM users"
+            );
+            assert_eq!(stmt.name, Some("foo".into()));
+            assert_eq!(stmt.trx_cache_policy, TrxCachePolicy::Always);
+            assert!(stmt.concurrently);
+        }
+
+        #[test]
+        fn display_create_cache_name_then_with_clause_roundtrip() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE CACHE foo WITH (ALWAYS) FROM SELECT id FROM users WHERE name = ?"
+            );
+            let displayed = stmt.display(Dialect::MySQL).to_string();
+            assert_eq!(
+                displayed,
+                "CREATE CACHE `foo` WITH (ALWAYS) FROM SELECT `id` FROM `users` WHERE (`name` = ?)"
+            );
+            // The displayed form parses back to an equivalent statement (name before WITH).
+            let reparsed = test_parse!(create_cached_query(Dialect::MySQL), displayed.as_bytes());
+            assert_eq!(reparsed.name, Some("foo".into()));
+            assert_eq!(reparsed.trx_cache_policy, TrxCachePolicy::Always);
         }
 
         #[test]
