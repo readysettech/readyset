@@ -375,7 +375,6 @@
 
 mod builder;
 mod controller;
-pub use controller::snapshot_compat;
 mod handle;
 mod http_router;
 
@@ -429,22 +428,6 @@ use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
 
 /// Configuration for a running Readyset cluster.
-///
-/// # Wire format
-///
-/// This struct (and every type reachable through it) is persisted to the
-/// Authority's RocksDB as part of `ControllerState` via `rmp_serde::to_vec`.
-/// That encoding is positional MessagePack with no version field, so any
-/// serde-included field that gets removed, reordered, or retyped will break
-/// decoding of every older payload — and the controller hard-crashes at boot
-/// on a decode error.
-///
-/// Backwards compatibility is enforced by
-/// `tests/state_backwards_compatibility.rs`, which runs every fixture under
-/// `tests/state_snapshots/` through the production `rmp_serde::from_slice`
-/// codepath. If you break the wire shape, the test fails. To recover, add a
-/// `#[serde(default)] #[deprecated]` compat shim that restores the original
-/// positional layout (see `Config.sharding` for the recipe).
 #[allow(deprecated)]
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub struct Config {

@@ -23,10 +23,6 @@ name = "controller_request"
 path = "src/controller_request.rs"
 
 [[bin]]
-name = "make_state_snapshot"
-path = "src/make_state_snapshot.rs"
-
-[[bin]]
 name = "failpoint"
 path = "src/failpoint.rs"
 
