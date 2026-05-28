@@ -6391,6 +6391,7 @@ dependencies = [
  "rsa",
  "schema-catalog",
  "serde_json",
+ "tempfile",
  "test-discovery",
  "test-strategy",
  "test-utils",
