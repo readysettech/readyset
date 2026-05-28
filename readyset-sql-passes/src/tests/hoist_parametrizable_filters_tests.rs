@@ -673,3 +673,37 @@ fn filter_behind_left_join_stays() {
         "filter behind LEFT JOIN should not be hoisted to outer WHERE, got:\n{result_str}"
     );
 }
+
+#[test]
+fn filter_in_limit_bearing_subquery_stays() {
+    // Lifting a filter out of a LIMIT-bearing subquery's WHERE would change which
+    // rows survive the LIMIT — a different output set. The hoist pass must treat
+    // LIMIT as a hard barrier (parallel to its window-function barrier).
+    //
+    // In production today, the TOP-K rewrite synthesises a `ROW_NUMBER()`
+    // projection for every LIMIT-bearing subquery upstream, so hoist's
+    // `contains_wf!` guard catches them transitively. This regression test
+    // pins the explicit LIMIT guard so that any pipeline change letting a
+    // LIMIT-bearing subquery reach hoist without a WF still preserves the
+    // soundness invariant.
+    let result = hoist_pg(
+        r#"SELECT "sq"."x"
+           FROM (SELECT "t"."x", "t"."y" FROM "t"
+                 WHERE "t"."y" > 0
+                 ORDER BY "t"."x"
+                 LIMIT 10) AS "sq"
+           WHERE "sq"."x" > 100"#,
+    );
+    let result_str = result.display(Dialect::PostgreSQL).to_string();
+    // The inner filter "t"."y" > 0 must stay inside the subquery — verified by
+    // its substring presence and by the outer WHERE not absorbing it.
+    assert!(
+        result_str.contains(r#""t"."y" > 0"#),
+        "filter under LIMIT must stay inside the subquery; got:\n{result_str}"
+    );
+    // The outer WHERE keeps only its own filter (sq.x > 100), not the lifted one.
+    assert!(
+        !result_str.contains(r#""sq"."y" > 0"#),
+        "filter under LIMIT must not be rebound at the outer level; got:\n{result_str}"
+    );
+}

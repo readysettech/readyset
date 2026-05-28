@@ -59,6 +59,11 @@ pub(crate) fn hoist_parametrizable_filters(stmt: &mut SelectStatement) -> ReadyS
 /// - Aggregation/grouping boundaries: moving predicates can change grouping semantics.
 /// - Window functions (WF): treated as a conservative boundary for this pass to avoid
 ///   evaluation/order surprises and mid-stack reshaping under WF contexts.
+/// - `LIMIT` / `OFFSET` on a child: lifting a filter out of a LIMIT-bearing child changes
+///   which rows survive the LIMIT (a different output set). Today this is reached
+///   transitively through the WF barrier because the TOP-K rewrite synthesises a
+///   `ROW_NUMBER()` projection upstream; the explicit `limit_clause` check at the
+///   child-hop site is the load-bearing guarantee should that invariant ever change.
 ///
 /// Preconditions:
 /// - Subqueries are already decorrelated (post-unnesting).
@@ -122,7 +127,15 @@ fn hoist_parametrizable_filters_globally(
             // Child → parent hop must be safe, and the child must be eligible for Goal 1 hoisting.
             // If this is false, we *also* skip recursion into the child to avoid partial hoisting
             // inside a subtree that cannot reach the outermost WHERE.
+            //
+            // LIMIT/OFFSET on the child is a hard barrier: lifting a filter out of a child's
+            // WHERE changes which rows survive the child's LIMIT, producing a different output
+            // set. Today this is reached transitively via `contains_wf!` because the TOP-K
+            // rewrite synthesises a `ROW_NUMBER()` projection for every LIMIT-bearing subquery
+            // before hoist runs; the explicit check here is the load-bearing guarantee should
+            // any pipeline change ever let a LIMIT-bearing subquery reach hoist with no WF.
             let can_hoist_child_where_to_parent_where = !contains_wf!(sub_stmt) // WF is a conservative boundary
+                && sub_stmt.limit_clause.is_empty() // LIMIT/OFFSET is a hard barrier (see above)
                 && join_op.map(|op| op.is_inner_join()).unwrap_or(true) // do not cross OUTER-join edges
                 && !sub_is_agg; // do not hoist across aggregation/grouping
 
@@ -452,6 +465,16 @@ fn hoist_parametrizable_filters_from_aggregated_subqueries(
                 if let Some((from_item_stmt, _)) = as_sub_query_with_alias(from_item) {
                     if contains_wf!(from_item_stmt) {
                         return None; // Skip: subquery contains WF — hoisting is unsafe
+                    }
+                    if !from_item_stmt.limit_clause.is_empty() {
+                        // Skip: lifting filters out of a LIMIT-bearing child would change
+                        // which rows survive the child's LIMIT (a different output set).
+                        // Today this is reached transitively via `contains_wf!` above
+                        // because the TOP-K rewrite injects ROW_NUMBER() for every
+                        // LIMIT-bearing subquery upstream; the explicit check here is
+                        // the load-bearing guarantee should any pipeline change ever
+                        // let a LIMIT-bearing subquery reach hoist with no WF.
+                        return None;
                     }
                     if is_aggregation_or_grouped(from_item_stmt).is_ok_and(|v| v)
                         && from_items_filters_pushability[from_item_idx]
