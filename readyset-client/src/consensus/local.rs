@@ -250,32 +250,32 @@ impl AuthorityControl for LocalAuthority {
     }
 
     async fn try_get_leader(&self) -> ReadySetResult<GetLeaderResult> {
-        let is_same_epoch = |leader_epoch: u64| -> ReadySetResult<bool> {
-            let inner = self.inner_read()?;
-            if let Some(epoch) = inner.known_leader_epoch {
-                Ok(leader_epoch == epoch)
-            } else {
-                Ok(false)
-            }
-        };
-
         let store_inner = self.store.inner_lock()?;
-        if is_same_epoch(store_inner.leader_epoch)? {
+
+        // Fast path only when there is an actual leader and its epoch matches what we last
+        // observed. If there is no leader, fall through so a leader-eligible caller sees
+        // `NoLeader` and can attempt election. `surrender_leadership` bumps the epoch and the
+        // local snapshot together, so on a shared `Authority` instance an epoch match alone is
+        // not enough to know that a leader is still present.
+        let known_leader_epoch = self.inner_read()?.known_leader_epoch;
+        if known_leader_epoch == Some(store_inner.leader_epoch)
+            && store_inner.keys.contains_key(CONTROLLER_KEY)
+        {
             return Ok(GetLeaderResult::Unchanged);
         }
 
         let mut inner = self.inner_write()?;
         inner.known_leader_epoch = Some(store_inner.leader_epoch);
-        if let Some(r) = store_inner
-            .keys
-            .get(CONTROLLER_KEY)
-            .and_then(|data| serde_json::from_slice(data).ok())
-        {
-            inner.known_leader_epoch = Some(store_inner.leader_epoch);
-            Ok(GetLeaderResult::NewLeader(r))
-        } else {
-            Ok(GetLeaderResult::NoLeader)
-        }
+        Ok(
+            match store_inner
+                .keys
+                .get(CONTROLLER_KEY)
+                .and_then(|data| serde_json::from_slice(data).ok())
+            {
+                Some(payload) => GetLeaderResult::NewLeader(payload),
+                None => GetLeaderResult::NoLeader,
+            },
+        )
     }
 
     async fn try_read<P>(&self, path: &str) -> ReadySetResult<Option<P>>
