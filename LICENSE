@@ -6,10 +6,19 @@ Licensor:            ReadySet, Inc.
 Licensed Work:       ReadySet Core version stable-250227 or later
                      The Licensed Work is (c) 2025 ReadySet, Inc.
 
-Additional Use Grant: You may make use of the Licensed Work, provided that
-you may not use the Licensed Work for a Database Service. A ‘Database
-Service’ is a commercial offering that allows third parties (other than
-your employees and contractors) to access the functionality of the Licensed Work.
+Additional Use Grant: You may make use of the Licensed Work for production use,
+provided that (i) your and your affiliates’ aggregate production deployment of
+the Licensed Work does not exceed 32 GB of RAM across all instances ("Permitted
+Production Use"), and (ii) you may not use the Licensed Work to provide a
+Managed Service.
+
+Production use that exceeds the Permitted Production Use threshold requires a
+commercial license from the Licensor.
+
+A "Managed Service" is a commercial offering that allows third parties (other
+than your employees and contractors) to access the functionality of the
+Licensed Work, including but not limited to database-as-a-service,
+caching-as-a-service, or any hosted offering of the Licensed Work itself.
 
 Change Date:          Four years from the date the Licensed Work is published.
 
