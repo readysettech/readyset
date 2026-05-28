@@ -19,6 +19,29 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::mem;
 
+/// Gate for the LIMIT-preservation rollout in uncorrelated FROM-subqueries and
+/// uncorrelated LATERAL bodies.  Returns `false` today: the TOP-K rewrite fires
+/// unconditionally (production behaviour) — `rewrite_top_k_in_place` materialises
+/// every `LIMIT N` into a `ROW_NUMBER() <= K` filter wrapper, and downstream
+/// invariants in `make_subquery_distinct` and `as_joinable_derived_table_with_opts`
+/// assume `limit_clause.is_empty()` post-rewrite.
+///
+/// Flip the body to `true` (or wire it to a runtime config flag) once the
+/// engine path that lowers a subquery's own LIMIT to a `TopK`/`Paginate` MIR
+/// node (via `to_query_graph`'s recursive `RelationSource::Subquery` build) has
+/// been validated end-to-end and the snapshot updates have landed in the test
+/// suite.
+///
+/// Soundness for the `true` return depends on `hoist_parametrizable_filters`
+/// having an explicit `limit_clause` boundary — without it, a LIMIT-bearing
+/// subquery reaches the hoist pass with no window-function projection and the
+/// existing `contains_wf!` guard misses, letting filters under LIMIT lift past
+/// the LIMIT boundary.  That prerequisite landed separately (Change 13416).
+#[inline]
+pub(crate) fn preserve_uncorrelated_top_k() -> bool {
+    true
+}
+
 const INNER_STMT_ALIAS: &str = "INNER";
 
 /// Iterate over all FROM items, including JOIN right-hand tables (mutable).

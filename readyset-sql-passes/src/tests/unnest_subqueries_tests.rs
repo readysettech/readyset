@@ -3079,19 +3079,14 @@ FROM s AS s;"#;
         WHEN (("s"."sn" IS NULL) AND ("EP_3VL"."present_" IS NOT NULL)) THEN NULL
         WHEN ("NP_3VL"."present_" IS NOT NULL) THEN NULL ELSE FALSE END AS "top5_supplier"
         FROM "s" AS "s" LEFT OUTER JOIN (SELECT DISTINCT "x"."sn" AS "sn" FROM
-        (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm" FROM
-        (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm", ROW_NUMBER() OVER(ORDER BY "INNER"."sm" DESC NULLS FIRST) AS "__rn"
-        FROM (SELECT "t"."sn" AS "sn", sum("t"."qty") AS "sm" FROM "spj" AS "t" GROUP BY "t"."sn") AS "INNER") AS "INNER"
-        WHERE ("INNER"."__rn" <= 5)) AS "x") AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
-        (SELECT DISTINCT 1 AS "present_" FROM (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm" FROM
-        (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm", ROW_NUMBER() OVER(ORDER BY "INNER"."sm" DESC NULLS FIRST) AS "__rn"
-        FROM (SELECT "t"."sn" AS "sn", sum("t"."qty") AS "sm" FROM "spj" AS "t" GROUP BY "t"."sn") AS "INNER") AS "INNER"
-        WHERE ("INNER"."__rn" <= 5)) AS "x") AS "EP_3VL"  LEFT OUTER JOIN
+        (SELECT "t"."sn", sum("t"."qty") AS "sm" FROM "spj" AS "t" GROUP BY "t"."sn"
+        ORDER BY "sm" DESC NULLS FIRST LIMIT 5) AS "x") AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
+        (SELECT DISTINCT 1 AS "present_" FROM
+        (SELECT "t"."sn", sum("t"."qty") AS "sm" FROM "spj" AS "t" GROUP BY "t"."sn"
+        ORDER BY "sm" DESC NULLS FIRST LIMIT 5) AS "x") AS "EP_3VL"  LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", "x"."sn" AS "sn" FROM
-        (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm" FROM (SELECT "INNER"."sn" AS "sn", "INNER"."sm" AS "sm",
-        ROW_NUMBER() OVER(ORDER BY "INNER"."sm" DESC NULLS FIRST) AS "__rn" FROM (SELECT "t"."sn" AS "sn", sum("t"."qty") AS "sm"
-        FROM "spj" AS "t" GROUP BY "t"."sn") AS "INNER") AS "INNER"
-        WHERE ("INNER"."__rn" <= 5)) AS "x") AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL""#;
+        (SELECT "t"."sn", sum("t"."qty") AS "sm" FROM "spj" AS "t" GROUP BY "t"."sn"
+        ORDER BY "sm" DESC NULLS FIRST LIMIT 5) AS "x") AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL""#;
     test_it("test103", original_text, expected_text);
 }
 
@@ -4548,9 +4543,8 @@ WHERE (
 
     let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN (SELECT "w"."weight" AS "weight" FROM
         (SELECT "i"."weight", ROW_NUMBER() OVER(ORDER BY "i"."weight" DESC NULLS FIRST) AS "r" FROM
-        (SELECT "INNER"."weight" AS "weight" FROM (SELECT "p"."weight" AS "weight",
-        ROW_NUMBER() OVER(ORDER BY "p"."weight" DESC NULLS FIRST) AS "__rn" FROM "p" AS "p") AS "INNER"
-        WHERE ("INNER"."__rn" <= 1)) AS "i") AS "w") AS "GNL"  WHERE ("GNL"."weight" >= 75)"#;
+        (SELECT "p"."weight" FROM "p" AS "p" ORDER BY "p"."weight" DESC NULLS FIRST LIMIT 1) AS "i") AS "w") AS "GNL"
+        WHERE ("GNL"."weight" >= 75)"#;
 
     test_it("test156", original_text, expected_text);
 }
@@ -4574,9 +4568,8 @@ WHERE s.pn IN (
 );"#;
 
     let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN (SELECT "x"."pn" AS "pn" FROM
-        (SELECT "INNER"."pn" AS "pn" FROM (SELECT "p"."pn" AS "pn",
-        ROW_NUMBER() OVER(ORDER BY "p"."weight" DESC NULLS FIRST) AS "__rn" FROM "p" AS "p") AS "INNER" WHERE
-        ("INNER"."__rn" <= 1)) AS "x") AS "GNL" ON ("s"."pn" = "GNL"."pn")"#;
+        (SELECT "p"."pn" FROM "p" AS "p" ORDER BY "p"."weight" DESC NULLS FIRST LIMIT 1) AS "x") AS "GNL"
+        ON ("s"."pn" = "GNL"."pn")"#;
 
     test_it("test157", original_text, expected_text);
 }
@@ -7084,4 +7077,35 @@ FROM s;
         FROM "s" LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_", "spj"."sn" AS "sn"
         FROM "spj") AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
     test_it("test269", original_text, expected_text);
+}
+
+// Uncorrelated FROM-position subquery with `LIMIT N OFFSET M` (literal,
+// non-zero OFFSET).  The preservation gate consults
+// `limit_clause_eligible_for_native_pagination`, which rejects literal
+// non-zero OFFSETs (the engine's `extract_limit_offset` only accepts
+// `OFFSET 0` or `OFFSET $N`).  Expect materialisation into a
+// `ROW_NUMBER()` wrapper with `__rn > offset AND __rn <= offset+limit`,
+// matching the pre-Change-13424 shape so the query continues to cache.
+#[test]
+fn test270_uncorrelated_limit_offset_literal_materialises() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+INNER JOIN (
+  SELECT t.sn
+  FROM spj AS t
+  ORDER BY t.qty DESC
+  LIMIT 5 OFFSET 2
+) AS sub
+ON sub.sn = s.sn;"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+        (SELECT "INNER"."sn" AS "sn" FROM (SELECT "t"."sn" AS "sn",
+        ROW_NUMBER() OVER(ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn" FROM "spj" AS "t") AS "INNER"
+        WHERE (("INNER"."__rn" > 2) AND ("INNER"."__rn" <= 7))) AS "sub"
+        ON ("sub"."sn" = "s"."sn")"#;
+    test_it(
+        "test270_uncorrelated_limit_offset_literal_materialises",
+        original_text,
+        expected_text,
+    );
 }

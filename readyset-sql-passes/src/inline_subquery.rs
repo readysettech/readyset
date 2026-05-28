@@ -255,7 +255,7 @@ pub(crate) fn literal_as_number(lit: &Literal) -> ReadySetResult<u64> {
     })
 }
 
-fn limit_clause_as_numbers(limit_clause: &LimitClause) -> ReadySetResult<(u64, u64)> {
+pub(crate) fn limit_clause_as_numbers(limit_clause: &LimitClause) -> ReadySetResult<(u64, u64)> {
     let lim = limit_clause
         .limit()
         .cloned()

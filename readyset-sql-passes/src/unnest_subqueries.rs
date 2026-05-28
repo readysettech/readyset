@@ -1,5 +1,6 @@
 use crate::detect_problematic_self_joins::contains_problematic_self_joins;
 use crate::drop_redundant_join::UniqueColumnsSchema;
+use crate::inline_subquery::limit_clause_as_numbers;
 use crate::lateral_join::unnest_lateral_subqueries;
 use crate::rewrite_utils::{
     NO_REWRITES_STATUS, OnAtom, RewriteStatus, SINGLE_REWRITE_STATUS,
@@ -16,8 +17,9 @@ use crate::rewrite_utils::{
     get_unique_alias, has_alias, is_aggregate_only_without_group_by, is_aggregated_expr,
     is_aggregated_select, is_literal_one, is_literal_positive, is_literal_zero,
     make_first_field_ref_name, move_correlated_constraints_from_join_to_where,
-    partition_correlated_predicates, project_statement_columns_if, resolve_field_expr_by_alias,
-    rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition, split_expr_mut,
+    partition_correlated_predicates, preserve_uncorrelated_top_k, project_statement_columns_if,
+    resolve_field_expr_by_alias, rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition,
+    split_expr_mut,
 };
 use crate::unnest_subqueries_3vl::{
     ProbeRegistry, RhsContext, SelectList3vlFlags, SelectList3vlInput,
@@ -47,27 +49,27 @@ use std::iter;
 use std::mem;
 use tracing::trace;
 
-/// Gate for the LIMIT-preservation rollout in uncorrelated FROM-subqueries and
-/// uncorrelated LATERAL bodies.  Returns `false` today: the TOP-K rewrite fires
-/// unconditionally (production behaviour) — `rewrite_top_k_in_place` materialises
-/// every `LIMIT N` into a `ROW_NUMBER() <= K` filter wrapper, and downstream
-/// invariants in `make_subquery_distinct` and `as_joinable_derived_table_with_opts`
-/// assume `limit_clause.is_empty()` post-rewrite.
+/// True when the engine's `extract_limit_offset`
+/// (`readyset-server/src/controller/sql/query_graph.rs`) accepts this
+/// `LimitClause` in subquery pagination position.  Mirrors the engine's
+/// acceptance set so the SQL rewrite pipeline preserves LIMIT only when
+/// the engine can lower it; engine-incompatible shapes route through
+/// `rewrite_top_k_in_place` and reach the engine as materialised
+/// `__rn`-filter predicates.
 ///
-/// Flip the body to `true` (or wire it to a runtime config flag) once the
-/// engine path that lowers a subquery's own LIMIT to a `TopK`/`Paginate` MIR
-/// node (via `to_query_graph`'s recursive `RelationSource::Subquery` build) has
-/// been validated end-to-end and the snapshot updates have landed in the test
-/// suite.
+/// Eligible shapes:
+///   - LIMIT: literal non-negative integer (`Integer` / `UnsignedInteger`).
+///   - OFFSET: absent or literal `0`.
 ///
-/// Soundness for the `true` return depends on `hoist_parametrizable_filters`
-/// having an explicit `limit_clause` boundary — without it, a LIMIT-bearing
-/// subquery reaches the hoist pass with no window-function projection and the
-/// existing `contains_wf!` guard misses, letting filters under LIMIT lift past
-/// the LIMIT boundary.  That prerequisite landed separately (Change 13416).
-#[inline]
-fn preserve_uncorrelated_top_k() -> bool {
-    false
+/// `Literal::Placeholder` cannot appear in LIMIT/OFFSET at this point in
+/// the pipeline: question-mark placeholders short-circuit the entire
+/// rewrite pipeline at the adapter gate (`adapter_rewrites/mod.rs`), and
+/// dollar-number / colon-number placeholders are synthesised by
+/// autoparameterisation which runs after this pass.
+/// `limit_clause_as_numbers` returns `Err` on any non-numeric literal
+/// regardless, routing them to materialisation.
+fn limit_clause_eligible_for_native_pagination(limit_clause: &LimitClause) -> bool {
+    matches!(limit_clause_as_numbers(limit_clause), Ok((_, 0)))
 }
 
 #[derive(Default, Copy, Clone, Debug)]
@@ -383,14 +385,6 @@ fn make_subquery_distinct(stmt: &mut SelectStatement) -> ReadySetResult<()> {
         stmt.distinct = true;
     }
 
-    // Today, every LIMIT-bearing subquery has been materialised into a
-    // `ROW_NUMBER() <= K` filter by upstream TOP-K rewriting before reaching
-    // here, so `limit_clause` is always empty.  When `preserve_uncorrelated_top_k()`
-    // returns `true` an uncorrelated subquery may keep its LIMIT — but this
-    // function's caller (`as_joinable_derived_table_with_opts`) skips the call
-    // entirely for the preserved case, since setting `stmt.distinct = true`
-    // over a LIMIT-bearing subquery would change semantics from "first N rows"
-    // to "first N distinct".  The invariant therefore stays strict here.
     invariant!(stmt.limit_clause.is_empty());
     stmt.order = None;
 
@@ -414,6 +408,14 @@ fn hoist_correlated_from_where_clause_and_rewrite_top_k(
     stmt: &mut SelectStatement,
     stmt_alias: SqlIdentifier,
     locals: &HashSet<Relation>,
+    // True when `stmt` is a FROM-position derived-table subquery whose LIMIT
+    // (if uncorrelated) is eligible for native MIR lowering — see
+    // `preserve_uncorrelated_top_k`.  False when called from the predicate-
+    // subquery path (`as_joinable_derived_table_with_opts` for IN / EXISTS /
+    // Scalar): the predicate-rewrite logic that follows depends on
+    // `make_subquery_distinct` to enforce set semantics over the subquery's
+    // output, which is incompatible with retaining the LIMIT inside.
+    top_k_in_subquery_position: bool,
     mut check_for_local_cols_eq_group_keys: impl FnMut(bool) -> ReadySetResult<()>,
     mut check_for_uncorrelated_where: impl FnMut(&mut SelectStatement) -> ReadySetResult<()>,
 ) -> ReadySetResult<Option<Expr>> {
@@ -484,11 +486,23 @@ fn hoist_correlated_from_where_clause_and_rewrite_top_k(
     check_for_uncorrelated_where(stmt)?;
 
     // Apply TOP-K if present (redundant agg-only LIMIT already stripped at entry).
-    // Gated by `preserve_uncorrelated_top_k()`: when it returns `true`, leave
-    // LIMIT/ORDER on the uncorrelated subquery so MIR can lower it to a native
+    // Gated by `preserve_uncorrelated_top_k()` AND the caller's position flag
+    // AND the per-query pagination-eligibility check:
+    // when all three indicate we should preserve, leave LIMIT/ORDER on the
+    // (FROM-position) uncorrelated subquery so MIR can lower it to a native
     // `TopK`/`Paginate` node instead of materialising a `ROW_NUMBER() <= K`
-    // filter wrapper.
-    if !stmt.limit_clause.is_empty() && !preserve_uncorrelated_top_k() {
+    // filter wrapper.  Predicate-subquery callers pass
+    // `top_k_in_subquery_position = false` so their LIMIT continues to be
+    // materialised — they rely on the post-rewrite shape (DISTINCT + flat row
+    // set) for the IN/EXISTS unnest.  Engine-incompatible pagination shapes
+    // (literal non-zero OFFSET, parameterised LIMIT, etc.) likewise fall back
+    // to materialisation so they reach the engine as `__rn`-filter predicates
+    // rather than tripping `extract_limit_offset`'s `unsupported!` exits at
+    // recipe-extend time.
+    let preserve_limit = top_k_in_subquery_position
+        && preserve_uncorrelated_top_k()
+        && limit_clause_eligible_for_native_pagination(&stmt.limit_clause);
+    if !stmt.limit_clause.is_empty() && !preserve_limit {
         rewrite_top_k_in_place(stmt)?;
     }
 
@@ -646,11 +660,17 @@ pub(crate) fn rewrite_top_k_for_lateral(
         }
     }
 
-    if !stmt.limit_clause.is_empty() && !preserve_uncorrelated_top_k() {
-        // No WHERE, or no correlation in WHERE, but TOP‑K present → global RN.
-        // Gated by `preserve_uncorrelated_top_k()`: when it returns `true`,
-        // leave LIMIT/ORDER on the (uncorrelated) LATERAL body so MIR can
-        // lower it natively.
+    // No WHERE, or no correlation in WHERE, but TOP‑K present → global RN.
+    // Gated by `preserve_uncorrelated_top_k()` and the per-query pagination-
+    // eligibility check: when both indicate we should preserve, leave
+    // LIMIT/ORDER on the (uncorrelated) LATERAL body so MIR can lower it
+    // natively.  Engine-incompatible pagination shapes (literal non-zero
+    // OFFSET, parameterised LIMIT, etc.) fall back to materialisation so
+    // they reach the engine as `__rn`-filter predicates rather than tripping
+    // `extract_limit_offset`'s `unsupported!` exits at recipe-extend time.
+    let preserve_limit = preserve_uncorrelated_top_k()
+        && limit_clause_eligible_for_native_pagination(&stmt.limit_clause);
+    if !stmt.limit_clause.is_empty() && !preserve_limit {
         rewrite_top_k_in_place(stmt)?;
         return Ok(true);
     }
@@ -731,6 +751,9 @@ fn hoist_correlated_from_nested_and_rewrite_top_k(
                     inner_stmt,
                     inner_alias.clone(),
                     &inner_locals,
+                    // FROM-position derived table: eligible for LIMIT-preservation
+                    // when `preserve_uncorrelated_top_k()` returns `true`.
+                    true,
                     |_| Ok(()),
                     |_| Ok(()),
                 )?
@@ -1216,6 +1239,10 @@ pub(crate) fn as_joinable_derived_table_with_opts(
             stmt,
             stmt_alias.clone(),
             &local_from_items,
+            // Predicate-subquery (IN / EXISTS / Scalar) context: keep
+            // materialising LIMIT — the downstream unnest relies on the
+            // RN-rewritten shape (DISTINCT + flat row set) for set semantics.
+            false,
             check_for_local_cols_eq_group_keys,
             check_for_uncorrelated_where,
         )?
@@ -1225,14 +1252,7 @@ pub(crate) fn as_joinable_derived_table_with_opts(
     // Additionally, for Scalar with explicit LIMIT 1, DISTINCT is redundant:
     // after rewrite_top_k_in_place(_with_partition), LIMIT/ORDER are consumed and
     // RN <= 1 ensures at most one row (globally or per partition), so de-dup is unnecessary.
-    // When `preserve_uncorrelated_top_k()` returns `true`, a subquery may retain its
-    // LIMIT instead of being materialised — DISTINCT must not be applied in that case,
-    // since it would change "first N rows" into "first N distinct values" (semantically
-    // distinct from the user's query).
-    let preserved_limit = preserve_uncorrelated_top_k() && !stmt.limit_clause.is_empty();
-    let exists_with_top_k =
-        matches!(ctx, SubqueryContext::Exists) && opts.preserve_top_k_for_exists;
-    if !(exists_with_top_k || preserved_limit) {
+    if !(matches!(ctx, SubqueryContext::Exists) && opts.preserve_top_k_for_exists) {
         #[cfg(debug_assertions)]
         {
             // Invariant for DISTINCT phase: TOP-K must have been materialized already.
