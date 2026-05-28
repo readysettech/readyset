@@ -17,7 +17,7 @@ use datafusion::logical_expr::{ScalarUDF, Volatility};
 use datafusion::prelude::{SQLOptions, SessionConfig, SessionContext, create_udf};
 
 use readyset_client::ReadySetHandle;
-use readyset_errors::ReadySetResult;
+use readyset_errors::{ReadySetResult, readyset_schema_err};
 use readyset_sql::Dialect;
 
 use shallow_vrels::ShallowInfo;
@@ -52,7 +52,9 @@ impl ReadysetSchema {
         let runtime = Arc::new(RuntimeEnv::default());
         let catalog = Arc::new(MemoryCatalogProvider::new());
         let schema: Arc<dyn SchemaProvider> = Arc::new(MemorySchemaProvider::new());
-        catalog.register_schema(name, Arc::clone(&schema))?;
+        catalog
+            .register_schema(name, Arc::clone(&schema))
+            .map_err(readyset_schema_err)?;
         let catalog_list = MemoryCatalogProviderList::new();
         catalog_list.register_catalog(CATALOG.into(), catalog);
 
@@ -85,7 +87,9 @@ impl ReadysetSchema {
             query_status_cache,
         });
         for (name, provider) in init_vrels(&vrel_ctx) {
-            schema.register_table(name.into(), provider)?;
+            schema
+                .register_table(name.into(), provider)
+                .map_err(readyset_schema_err)?;
         }
 
         Ok(Arc::new(Self {
@@ -134,9 +138,13 @@ pub struct ReadysetSchemaSession {
 
 impl ReadysetSchemaSession {
     pub async fn query(&self, query: &str) -> ReadySetResult<ReadysetSchemaResult> {
-        let df = self.session.sql_with_options(query, self.sql_opts).await?;
+        let df = self
+            .session
+            .sql_with_options(query, self.sql_opts)
+            .await
+            .map_err(readyset_schema_err)?;
         let schema = df.schema().clone();
-        let results = df.collect().await?;
+        let results = df.collect().await.map_err(readyset_schema_err)?;
         Ok(ReadysetSchemaResult::Select { schema, results })
     }
 }

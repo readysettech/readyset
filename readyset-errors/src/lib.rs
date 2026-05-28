@@ -1053,6 +1053,11 @@ pub fn bad_request_err<T: Into<String>>(err: T) -> ReadySetError {
     ReadySetError::BadRequest(err.into())
 }
 
+/// Make a new [`ReadySetError::ReadysetSchemaError`] by stringifying the provided error.
+pub fn readyset_schema_err<E: ToString>(err: E) -> ReadySetError {
+    ReadySetError::ReadysetSchemaError(err.to_string())
+}
+
 /// Make a new [`ReadySetError::Internal`] for a column with no associated table. An internal error
 /// is used, because the implied table expansion should guarantee that this should not happen.
 pub fn no_table_for_col() -> ReadySetError {
@@ -1265,8 +1270,6 @@ impl_from_to_string!(reqwest::Error, HttpError);
 impl_from_to_string!(readyset_decimal::ReadysetDecimalError, DecimalError);
 impl_from_to_string!(readyset_sql::AstConversionError, AstConversionError);
 impl_from_to_string!(pem::PemError, PemError);
-impl_from_to_string!(datafusion::error::DataFusionError, ReadysetSchemaError);
-impl_from_to_string!(datafusion::arrow::error::ArrowError, ReadysetSchemaError);
 
 impl From<Size0Error> for ReadySetError {
     fn from(_: Size0Error) -> Self {
