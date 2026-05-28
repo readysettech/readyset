@@ -840,7 +840,7 @@ impl BuiltinFunction {
                 if time_param1.is_none()
                     || time_param1
                         .sql_type()
-                        .and_then(|st| time_param2.sql_type().map(|st2| (st, st2)))
+                        .zip(time_param2.sql_type())
                         .filter(|(st1, st2)| st1.eq(st2))
                         .is_none()
                 {
