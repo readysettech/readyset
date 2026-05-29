@@ -1,0 +1,86 @@
+# ARRAY(SELECT ...) whose inner projection is a column drawn from a derived
+# table (subquery in the FROM clause), qualified by the derived-table alias.
+#
+# The array-constructor rewrite turns ARRAY(SELECT ...) into a LATERAL join
+# with array_agg() wrapped in COALESCE(<agg>, ARRAY[]::<elem>[]). Typing the
+# empty-array fallback requires resolving the inner projection's element type;
+# when the projection is a column owned by a derived table, the resolver must
+# follow the alias into the derived table's own projection to find the base
+# column type. If it cannot, it emits a bare, untyped ARRAY[], which is
+# rejected at lowering, the query is proxied to upstream instead of cached,
+# and a plain `query` directive fails with "was proxied".
+
+statement ok
+create table entries (id int, ext_id text);
+
+statement ok
+create table entry_tags (entry_id int, tag text);
+
+statement ok
+insert into entries values (1, 'a1'), (2, 'a2'), (3, 'a3');
+
+statement ok
+insert into entry_tags values
+  (1, 'zzz'), (1, 'aaa'), (1, 'mmm'),
+  (2, 'qqq');
+
+# Correlation lives inside the derived table (mirrors the reported query),
+# and the array projects a single derived-table column.
+query T
+select array(
+  select te.tag
+  from (select tag from entry_tags et where et.entry_id = e.id) as te
+  order by te.tag asc
+) as tags
+from entries e where e.id = 1;
+----
+{aaa,mmm,zzz}
+
+# Derived table projects multiple columns; the array picks one of them.
+query T
+select array(
+  select te.tag
+  from (select entry_id, tag from entry_tags et where et.entry_id = e.id) as te
+  order by te.tag asc
+) as tags
+from entries e where e.id = 2;
+----
+{qqq}
+
+# Entry with no matching tags: the COALESCE empty-array fallback path. The
+# typed fallback must evaluate to {}.
+query T
+select array(
+  select te.tag
+  from (select tag from entry_tags et where et.entry_id = e.id) as te
+  order by te.tag asc
+) as tags
+from entries e where e.id = 3;
+----
+{}
+
+# Ambiguous derived-table projection: the derived table exposes two columns
+# both named `jn`, so `dt.jn` is ambiguous and PostgreSQL rejects it. The
+# type-derivation resolves the projection via `resolve_field_expr_by_alias`,
+# whose first-match is safe here because an ambiguity check refuses the query
+# before it could be cached -- ReadySet must error rather than silently pick
+# one column. Guards against that check (or this reuse) regressing into a
+# silent pick.
+statement ok
+create table amb_a (id int, jn text);
+
+statement ok
+create table amb_b (id int, jn text);
+
+statement ok
+insert into amb_a values (1, 'AAA');
+
+statement ok
+insert into amb_b values (1, 'BBB');
+
+statement error: ambiguous
+select array(
+  select dt.jn
+  from (select a.jn, b.jn from amb_a a join amb_b b on a.id = b.id) dt
+) as arr
+from amb_a;

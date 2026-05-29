@@ -105,8 +105,9 @@ use crate::get_local_from_items_iter;
 use crate::get_local_from_items_iter_mut;
 use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
-    as_sub_query_with_alias_mut, collect_local_from_items,
+    as_sub_query_with_alias, as_sub_query_with_alias_mut, collect_local_from_items,
     default_alias_for_select_item_expression, get_from_item_reference_name, get_unique_alias,
+    resolve_field_expr_by_alias,
 };
 use std::iter;
 use std::mem;
@@ -391,17 +392,56 @@ fn derive_sql_type_of_column<C: BaseSchemasContext>(
 ) -> Option<SqlType> {
     // Columns are qualified before this pass runs (`expand_implied_tables`),
     // so `col.table` is always set in production; an unqualified column here
-    // is unresolvable, so give up.  The qualifier may be a table alias or a
-    // real relation name -- `resolve_alias_to_relation` handles both, and
-    // returns `None` for anything it cannot map to a base relation (e.g. a
-    // derived-table/CTE alias) rather than fabricating one.
+    // is unresolvable, so give up.
     let table = col.table.as_ref()?;
+
+    // A qualifier naming a derived table (a subquery in the FROM clause)
+    // resolves into that subquery's own projection rather than a base schema:
+    // follow the alias to the field producing this output column and derive
+    // its type there. This types the empty-array fallback for
+    // `ARRAY(SELECT dt.col FROM (subquery) dt)`, where the projected column is
+    // owned by a derived table whose base column type lives one level down.
+    let derived_subquery =
+        get_local_from_items_iter!(stmt).find_map(|t| match as_sub_query_with_alias(t) {
+            Some((sq, alias)) if alias.as_str() == table.name.as_str() => {
+                Some((sq, &t.column_aliases))
+            }
+            _ => None,
+        });
+    if let Some((subquery, column_aliases)) = derived_subquery {
+        let field_expr = derived_table_projection(subquery, column_aliases, &col.name)?;
+        return derive_sql_type_of_expr(field_expr, subquery, context);
+    }
+
+    // Otherwise the qualifier is a table alias or a real relation name --
+    // `resolve_alias_to_relation` handles both and returns `None` for anything
+    // it cannot map to a base relation rather than fabricating one.
     let rel = resolve_alias_to_relation(table, stmt)?;
     let body = context.base_schema(&rel)?;
     body.fields
         .iter()
         .find(|c| c.column.name == col.name)
         .map(|c| c.sql_type.clone())
+}
+
+/// Find the projection in a derived table's subquery that produces the output
+/// column named `name`. Explicit column aliases (`(..) AS dt(a, b)`) rename the
+/// outputs positionally; without them, `resolve_field_expr_by_alias` matches
+/// each projection's own output name. `*`/`tbl.*` projections return `None`.
+fn derived_table_projection<'a>(
+    subquery: &'a SelectStatement,
+    column_aliases: &[SqlIdentifier],
+    name: &SqlIdentifier,
+) -> Option<&'a Expr> {
+    if column_aliases.is_empty() {
+        return resolve_field_expr_by_alias(subquery, name);
+    }
+    // Explicit column aliases rename the derived table's outputs positionally.
+    let idx = column_aliases.iter().position(|a| a == name)?;
+    match subquery.fields.get(idx)? {
+        FieldDefinitionExpr::Expr { expr, .. } => Some(expr),
+        _ => None,
+    }
 }
 
 /// Resolve a column qualifier (a table alias or a relation name) to the
@@ -1461,6 +1501,79 @@ mod tests {
         let stmt = test_rewrite_with(
             "SELECT ARRAY(SELECT n + 1 FROM inner_t WHERE link_id = o.id) FROM outer_t o",
             &int_schema,
+        );
+        assert_eq!(fallback_array_type(&stmt), None);
+    }
+
+    /// When the array subquery projects a column out of a derived table, the
+    /// type follows the derived-table alias into the subquery's own projection
+    /// and resolves the base column behind it. Without this the fallback stays
+    /// bare and lowering rejects an otherwise-cacheable query.
+    #[test]
+    fn fallback_type_derivation_through_derived_table() {
+        let text_schema = schema_with("inner_t", "name", SqlType::Text);
+
+        // Derived-table alias `dt` -> its projection `i.name` -> inner_t.name.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT dt.name FROM \
+             (SELECT i.name FROM inner_t i WHERE i.link_id = o.id) dt) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+
+        // Explicit derived-table column alias maps positionally to the
+        // underlying projection.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT dt.x FROM \
+             (SELECT i.name FROM inner_t i WHERE i.link_id = o.id) dt(x)) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+
+        // Nested derived tables: the type follows two alias levels down to the
+        // base column, exercising the recursive descent.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT d2.name FROM \
+             (SELECT d1.name FROM \
+              (SELECT i.name FROM inner_t i WHERE i.link_id = o.id) d1) d2) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+
+        // Column aliases map by POSITION, not by the underlying name. `dt(a, b)`
+        // over `(i.name, i.missing)`: `dt.a` is the first projection (a known
+        // column), `dt.b` the second (an unknown column -> None). Resolving both
+        // proves the index, not a name, selects the projection.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT dt.a FROM \
+             (SELECT i.name, i.missing FROM inner_t i) dt(a, b)) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(
+            fallback_array_type(&stmt),
+            Some(SqlType::Array(Box::new(SqlType::Text)))
+        );
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT dt.b FROM \
+             (SELECT i.name, i.missing FROM inner_t i) dt(a, b)) FROM outer_t o",
+            &text_schema,
+        );
+        assert_eq!(fallback_array_type(&stmt), None);
+
+        // A `*` projection inside the derived table is unresolvable by name, so
+        // the fallback stays bare and lowering rejects the query.
+        let stmt = test_rewrite_with(
+            "SELECT ARRAY(SELECT dt.name FROM (SELECT * FROM inner_t) dt) FROM outer_t o",
+            &text_schema,
         );
         assert_eq!(fallback_array_type(&stmt), None);
     }
