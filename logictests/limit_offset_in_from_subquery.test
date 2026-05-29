@@ -1,0 +1,58 @@
+# Literal non-zero OFFSET in an uncorrelated FROM-position subquery.  The
+# engine's `extract_limit_offset` (`readyset-server/src/controller/sql/
+# query_graph.rs:884`) only accepts OFFSET = absent / Integer(0) /
+# Placeholder(DollarNumber(_)); any other shape is rejected with
+# `unsupported!("Numeric OFFSETs must be parameterized")` at recipe-extend
+# time.  Pre-Change-13424 the rewrite pipeline materialised every
+# LIMIT/OFFSET into RN-filter predicates and never reached this check.
+# After Change 13424 the LIMIT-preservation gate would have bypassed
+# materialisation; the per-query eligibility check
+# (`limit_clause_eligible_for_native_pagination`) routes literal non-zero
+# OFFSETs back through `rewrite_top_k_in_place` so the query continues to
+# cache successfully.
+#
+# Top rows by jn DESC, rk DESC: E(7), D(6), C(5), C(4), B(3).  OFFSET 2
+# LIMIT 3 yields {C(5), C(4), B(3)} = the bag {C, C, B}.  Outer JOIN with
+# s.jn = {B, C, E} matches each tuple individually => {B, C, C}.
+
+statement ok
+create table s (jn text);
+
+statement ok
+insert into s (jn) values ('B'), ('C'), ('E');
+
+statement ok
+create table spj (jn text, rk int);
+
+statement ok
+insert into spj (jn, rk) values
+  ('A', 1), ('A', 2), ('B', 3), ('C', 4), ('C', 5), ('D', 6), ('E', 7);
+
+# Regression check: pre-eligibility-gate this CREATE CACHE failed with
+# `unsupported!("Numeric OFFSETs must be parameterized")` at recipe-extend.
+statement ok
+create cache from
+SELECT s.jn
+FROM s
+INNER JOIN (
+  SELECT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC, t.rk DESC
+  LIMIT 3 OFFSET 2
+) AS sub
+ON sub.jn = s.jn;
+
+query T rowsort
+SELECT s.jn
+FROM s
+INNER JOIN (
+  SELECT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC, t.rk DESC
+  LIMIT 3 OFFSET 2
+) AS sub
+ON sub.jn = s.jn;
+----
+B
+C
+C

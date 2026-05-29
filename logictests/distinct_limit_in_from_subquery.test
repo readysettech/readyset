@@ -1,0 +1,38 @@
+# DISTINCT + LIMIT in an uncorrelated FROM-position subquery, joined back to
+# an outer table.  Exercises the preserve-LIMIT rewrite path: the SQL pipeline
+# leaves `LIMIT 3` on the subquery (rather than materialising it into a
+# ROW_NUMBER() + __rn filter), and MIR lowers it to a native TopK node.
+#
+# The setup forces DISTINCT and LIMIT to do real work:
+#   spj.jn has duplicates and 5 distinct values {A, B, C, D, E};
+#   `LIMIT 3` over the distinct set by jn DESC selects {E, D, C};
+#   JOIN with s.jn = {A, C, E, F} matches {C, E}.
+# Wrong-ordering bugs (LIMIT before DISTINCT) or set-vs-bag semantics drift
+# would produce different output.
+
+statement ok
+create table s (jn text);
+
+statement ok
+insert into s (jn) values ('A'), ('C'), ('E'), ('F');
+
+statement ok
+create table spj (jn text);
+
+statement ok
+insert into spj (jn) values
+  ('A'), ('A'), ('B'), ('C'), ('C'), ('D'), ('E');
+
+query T rowsort
+SELECT s.jn
+FROM s
+INNER JOIN (
+  SELECT DISTINCT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC
+  LIMIT 3
+) AS sub
+ON sub.jn = s.jn;
+----
+C
+E
