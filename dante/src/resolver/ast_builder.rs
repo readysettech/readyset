@@ -83,6 +83,9 @@ fn build_select_inner(
     let mut group_by_fields = Vec::new();
     let mut having_expr: Option<Expr> = None;
     let mut order_bys = Vec::new();
+    // Table of the first ORDER BY column, used to append a primary-key tiebreaker for a total
+    // order (see the post-loop append below).
+    let mut order_tiebreak_table: Option<VarId> = None;
     let mut limit_clause = LimitClause::LimitOffset {
         limit: None,
         offset: None,
@@ -501,6 +504,9 @@ fn build_select_inner(
                 null_order,
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                if order_tiebreak_table.is_none() {
+                    order_tiebreak_table = Some(*table);
+                }
                 order_bys.push(OrderBy {
                     field: FieldReference::Expr(make_column_expr(&col_name, &table_name)),
                     order_type: Some(*direction),
@@ -779,7 +785,7 @@ fn build_select_inner(
                     vec![]
                 };
 
-                let order_by = if let Some((col, table)) = order_col {
+                let mut order_by = if let Some((col, table)) = order_col {
                     let (col_name, table_name) = get_col_table(env, *col, *table)?;
                     let ot = order_type.unwrap_or(OrderType::OrderAscending);
                     vec![(
@@ -790,6 +796,25 @@ fn build_select_inner(
                 } else {
                     vec![]
                 };
+
+                // ROW_NUMBER/RANK/DENSE_RANK are non-deterministic unless the OVER ORDER BY is a
+                // total order over each partition. Append the table's primary key as a tiebreaker
+                // so the generated query produces identical results on upstream and Readyset.
+                if let Some((_, table)) = (*order_col).or(*partition_col) {
+                    let physical = get_physical_table_name(env, table)?;
+                    let pk = state.table(&physical).and_then(|s| s.primary_key.clone());
+                    if let Some(pk) = pk {
+                        let emitted_table = get_table_name(env, table)?;
+                        let pk_expr = make_column_expr(&pk, &emitted_table);
+                        if !order_by.iter().any(|(e, _, _)| *e == pk_expr) {
+                            order_by.push((
+                                pk_expr,
+                                OrderType::OrderAscending,
+                                NullOrder::NullsLast,
+                            ));
+                        }
+                    }
+                }
 
                 fields.push(FieldDefinitionExpr::Expr {
                     expr: Expr::WindowFunction {
@@ -845,6 +870,29 @@ fn build_select_inner(
             fields: group_by_fields,
         })
     };
+
+    // Append the ordered table's primary key as a final ascending tiebreaker so ORDER BY
+    // establishes a total order. Without it, ties in the ordered column make the row order
+    // non-deterministic — and under LIMIT/OFFSET the returned row SET non-deterministic —
+    // producing spurious upstream-vs-Readyset mismatches. Skipped when the order already targets
+    // the primary key or the table has no resolvable base-table PK (e.g. a derived relation).
+    if let Some(tb_table) = order_tiebreak_table
+        && let Ok(physical) = get_physical_table_name(env, tb_table)
+        && let Some(pk) = state.table(&physical).and_then(|s| s.primary_key.clone())
+    {
+        let emitted_table = get_table_name(env, tb_table)?;
+        let pk_expr = make_column_expr(&pk, &emitted_table);
+        let already = order_bys
+            .iter()
+            .any(|ob| matches!(&ob.field, FieldReference::Expr(e) if *e == pk_expr));
+        if !already {
+            order_bys.push(OrderBy {
+                field: FieldReference::Expr(pk_expr),
+                order_type: Some(OrderType::OrderAscending),
+                null_order: NullOrder::NullsLast,
+            });
+        }
+    }
 
     let order = if order_bys.is_empty() {
         None

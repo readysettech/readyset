@@ -129,8 +129,24 @@ mod tests {
         let p = union_all_same_table();
         assert_eq!(p.name, "union_all_same_table");
         assert_eq!(p.tags, vec!["compound", "union"]);
-        assert_eq!(p.min_depth, 0); // no subquery nesting
+        assert_eq!(p.min_depth, 1); // the compound wrapping layer counts as one level
         assert_eq!(p.num_vars(), 2); // 1 table + 1 column
+    }
+
+    #[test]
+    #[should_panic(expected = "at least 2 branches")]
+    fn compound_select_requires_two_branches() {
+        let mut b = PatternBuilder::new("bad_compound");
+        let t = b.table();
+        let c = b.column(t);
+        // A compound select with a single branch is malformed.
+        b.compound_select(
+            CompoundSelectOperator::UnionAll,
+            vec![vec![
+                Constraint::From(t),
+                Constraint::ProjectColumn { col: c, table: t },
+            ]],
+        );
     }
 
     #[test]

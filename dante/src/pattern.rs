@@ -701,6 +701,11 @@ impl PatternBuilder {
         operator: CompoundSelectOperator,
         branches: Vec<Vec<Constraint>>,
     ) {
+        debug_assert!(
+            branches.len() >= 2,
+            "compound select must have at least 2 branches, got {}",
+            branches.len()
+        );
         self.constraints
             .push(Constraint::CompoundSelect { operator, branches });
     }
@@ -1044,11 +1049,15 @@ fn compute_min_depth(constraints: &[Constraint]) -> usize {
         let inner_depth = match c {
             Constraint::SubqueryExpr { constraints, .. } => 1 + compute_min_depth(constraints),
             Constraint::SubqueryRelation { constraints, .. } => 1 + compute_min_depth(constraints),
-            Constraint::CompoundSelect { branches, .. } => branches
-                .iter()
-                .map(|b| compute_min_depth(b))
-                .max()
-                .unwrap_or(0),
+            Constraint::CompoundSelect { branches, .. } => {
+                // The compound statement wraps its branches in a layer, the same way
+                // SubqueryExpr/SubqueryRelation do, so it contributes +1 to the depth.
+                1 + branches
+                    .iter()
+                    .map(|b| compute_min_depth(b))
+                    .max()
+                    .unwrap_or(0)
+            }
             _ => 0,
         };
         max_inner_depth = max_inner_depth.max(inner_depth);

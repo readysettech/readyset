@@ -101,6 +101,22 @@ mod tests {
     }
 
     #[test]
+    fn order_by_has_pk_tiebreaker() {
+        // ORDER BY on a non-unique column is non-deterministic — and under LIMIT the returned
+        // row SET becomes non-deterministic — unless the ordering is total. The builder appends
+        // the table's primary key as a tiebreaker. The seeded PK is c0 and the order column is a
+        // later fresh column, so without the tiebreaker the ORDER BY would not reference c0.
+        for p in [topk(), order_by(), paginate()] {
+            let sql = resolve_pattern(&p, Dialect::MySQL);
+            let order = sql.split_once("ORDER BY").expect("has ORDER BY").1;
+            assert!(
+                order.contains("c0"),
+                "ORDER BY should append the PK (c0) as a tiebreaker: {sql}"
+            );
+        }
+    }
+
+    #[test]
     fn paginate_builds() {
         let p = paginate();
         assert_eq!(p.name, "paginate");
