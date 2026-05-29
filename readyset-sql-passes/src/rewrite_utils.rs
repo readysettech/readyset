@@ -19,24 +19,31 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::mem;
 
-/// Gate for the LIMIT-preservation rollout in uncorrelated FROM-subqueries and
-/// uncorrelated LATERAL bodies.  Returns `false` today: the TOP-K rewrite fires
-/// unconditionally (production behaviour) — `rewrite_top_k_in_place` materialises
-/// every `LIMIT N` into a `ROW_NUMBER() <= K` filter wrapper, and downstream
-/// invariants in `make_subquery_distinct` and `as_joinable_derived_table_with_opts`
-/// assume `limit_clause.is_empty()` post-rewrite.
+/// Gate for LIMIT-preservation in uncorrelated FROM-subqueries and
+/// uncorrelated LATERAL bodies.  When `true` (the default), the TOP-K
+/// rewrite is skipped for those positions: LIMIT/ORDER stay on the
+/// subquery so MIR lowers them to a native `TopK`/`Paginate` node via
+/// `to_query_graph`'s recursive `RelationSource::Subquery` build.
+/// When `false`, `rewrite_top_k_in_place` materialises every `LIMIT N`
+/// into a `ROW_NUMBER() <= K` filter wrapper (the pre-Change-13420
+/// behaviour); kept as a flip-back hatch in case a regression surfaces.
 ///
-/// Flip the body to `true` (or wire it to a runtime config flag) once the
-/// engine path that lowers a subquery's own LIMIT to a `TopK`/`Paginate` MIR
-/// node (via `to_query_graph`'s recursive `RelationSource::Subquery` build) has
-/// been validated end-to-end and the snapshot updates have landed in the test
-/// suite.
+/// Soundness depends on `hoist_parametrizable_filters` having an
+/// explicit `limit_clause` boundary so filters under LIMIT can't hoist
+/// past it; that boundary was added in Change 13416 alongside the
+/// existing `contains_wf!` guard.
 ///
-/// Soundness for the `true` return depends on `hoist_parametrizable_filters`
-/// having an explicit `limit_clause` boundary — without it, a LIMIT-bearing
-/// subquery reaches the hoist pass with no window-function projection and the
-/// existing `contains_wf!` guard misses, letting filters under LIMIT lift past
-/// the LIMIT boundary.  That prerequisite landed separately (Change 13416).
+/// Predicate-subquery callers (IN / EXISTS / Scalar via
+/// `as_joinable_derived_table_with_opts`) pass
+/// `top_k_in_subquery_position = false` and continue to materialise
+/// regardless of this return value — the IN/EXISTS unnest emits an
+/// INNER JOIN against the subquery body and relies on the materialised
+/// shape (DISTINCT + flat row set) for set semantics.
+///
+/// Per-query eligibility — `limit_clause_eligible_for_native_pagination`
+/// — gates preservation on the engine's `extract_limit_offset` acceptance
+/// set; subqueries with engine-incompatible pagination shape (literal
+/// non-zero OFFSET, NULL literals, etc.) fall back to materialisation.
 #[inline]
 pub(crate) fn preserve_uncorrelated_top_k() -> bool {
     true
