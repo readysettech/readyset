@@ -46,6 +46,7 @@ pub fn min_max() -> Pattern {
     let mut b = PatternBuilder::new("min_max");
     let t = b.table();
     let c = b.column(t);
+    b.column_type_class(c, TypeClass::Orderable);
     b.from(t);
     b.project_aggregate(AggregateFn::Min, c, t);
     b.tags(&["aggregate"]);
@@ -194,6 +195,7 @@ pub fn max() -> Pattern {
     let mut b = PatternBuilder::new("max");
     let t = b.table();
     let c = b.column(t);
+    b.column_type_class(c, TypeClass::Orderable);
     b.from(t);
     b.project_aggregate(AggregateFn::Max, c, t);
     b.tags(&["aggregate"]);
@@ -210,6 +212,7 @@ pub fn max_in_list() -> Pattern {
     let c_agg = b.column(t);
     let c_filter = b.column(t);
     b.from(t);
+    b.column_type_class(c_agg, TypeClass::Orderable);
     b.project_aggregate(AggregateFn::Max, c_agg, t);
     b.where_in_param(c_filter, t, 3);
     b.tags(&["aggregate", "filter", "post_lookup"]);
@@ -227,6 +230,7 @@ pub fn min_in_list() -> Pattern {
     let c_agg = b.column(t);
     let c_filter = b.column(t);
     b.from(t);
+    b.column_type_class(c_agg, TypeClass::Orderable);
     b.project_aggregate(AggregateFn::Min, c_agg, t);
     b.where_in_param(c_filter, t, 3);
     b.tags(&["aggregate", "filter", "post_lookup"]);
@@ -275,6 +279,25 @@ mod tests {
     use super::*;
     use crate::constraint::{Constraint, DialectSupport};
     use crate::test_util::resolve_pattern;
+
+    #[test]
+    fn min_max_patterns_constrain_operand_orderable() {
+        use crate::constraint::{Constraint, TypeClass};
+        for p in [min_max(), max(), min_in_list(), max_in_list()] {
+            assert!(
+                p.constraints.iter().any(|c| matches!(
+                    c,
+                    Constraint::ColumnTypeClass {
+                        type_class: TypeClass::Orderable,
+                        ..
+                    }
+                )),
+                "pattern `{}` must constrain its MIN/MAX operand to Orderable so PG \
+                 never sees min/max(boolean)",
+                p.name
+            );
+        }
+    }
 
     #[test]
     fn count_builds() {

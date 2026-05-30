@@ -37,6 +37,9 @@ pub enum TypeClass {
     String,
     /// Date/time types (DATE, DATETIME, TIMESTAMP, TIME)
     DateTime,
+    /// Types PostgreSQL accepts for MIN/MAX and ordering: numeric, string,
+    /// and date/time. Excludes boolean, which has no min/max aggregate in PG.
+    Orderable,
     /// Exact SQL type
     Exact(SqlType),
 }
@@ -86,6 +89,11 @@ impl TypeClass {
                 sql_type,
                 SqlType::DateTime(_) | SqlType::Timestamp | SqlType::Date | SqlType::Time
             ),
+            TypeClass::Orderable => {
+                TypeClass::Numeric.matches(sql_type)
+                    || TypeClass::String.matches(sql_type)
+                    || TypeClass::DateTime.matches(sql_type)
+            }
             TypeClass::Exact(exact) => sql_type == exact,
         }
     }
@@ -1276,6 +1284,20 @@ mod tests {
         assert!(TypeClass::String.accepts_literal("anything"));
         assert!(TypeClass::DateTime.accepts_literal("2025-01-01"));
         assert!(TypeClass::Any.accepts_literal("whatever"));
+    }
+
+    #[test]
+    fn orderable_matches_ordered_types_excludes_bool() {
+        use readyset_sql::ast::SqlType;
+        let tc = TypeClass::Orderable;
+        assert!(tc.matches(&SqlType::Int(None)));
+        assert!(tc.matches(&SqlType::Double));
+        assert!(tc.matches(&SqlType::Text));
+        assert!(tc.matches(&SqlType::VarChar(Some(255))));
+        assert!(tc.matches(&SqlType::Date));
+        assert!(tc.matches(&SqlType::Timestamp));
+        // PostgreSQL has no min/max aggregate over boolean.
+        assert!(!tc.matches(&SqlType::Bool));
     }
 
     #[test]

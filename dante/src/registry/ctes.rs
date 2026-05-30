@@ -2,7 +2,7 @@
 
 use readyset_sql::ast::BinaryOperator;
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// WITH cte0 AS (SELECT t.c FROM t) SELECT cte0.c FROM cte0
@@ -33,6 +33,8 @@ pub fn cte_with_join() -> Pattern {
     let mut sq = b.subquery();
     let t_inner = sq.table();
     let c_cte = sq.column(t_inner);
+    // Pin the CTE-projected key inside the subquery scope, where `c_cte` binds.
+    sq.column_type_class(c_cte, TypeClass::Integer);
     sq.from(t_inner);
     sq.project_column(c_cte, t_inner);
     let cte_alias = sq.commit_as_cte();
@@ -44,6 +46,16 @@ pub fn cte_with_join() -> Pattern {
     let t_join = b.table();
     let c_join = b.column(t_join);
     let c_join_key = b.column(t_join);
+
+    // The join is `ON (cte0.c_cte = t_join.c_join_key)`. Without a type
+    // constraint the two keys resolve to arbitrary, often-incompatible types
+    // and PG rejects the equality with 42883 "operator does not exist:
+    // <typeA> = <typeB>". Mirror inner_join: pin each key's type class in its
+    // own scope so they resolve compatibly. `c_cte` is bound inside the
+    // subquery, so a cross-scope `type_compatible` against it is a no-op at
+    // schema-resolution time; the per-scope ColumnTypeClass constraints are
+    // what actually keep the keys compatible. (qp:bdmpewvhgaor)
+    b.column_type_class(c_join_key, TypeClass::Integer);
 
     b.from(cte_alias);
     b.project_column(c_cte, cte_alias);
@@ -156,6 +168,43 @@ mod tests {
         assert!(
             sql.contains("FROM `cte0`"),
             "outer FROM should use CTE alias: {sql}"
+        );
+    }
+
+    // Both CTE-join keys must be type-pinned in their own scopes, or the
+    // generator emits `ON (cte0.c = t.c)` with mismatched column types and PG
+    // rejects it with 42883 "operator does not exist: <typeA> = <typeB>". A
+    // cross-scope `TypeCompatible` against the CTE-projected key is a no-op at
+    // schema-resolution time, so the per-scope ColumnTypeClass constraints
+    // (one outer, one inside the subquery) are what enforce compatibility.
+    // (qp:bdmpewvhgaor)
+    #[test]
+    fn cte_with_join_constrains_join_key_types() {
+        let p = cte_with_join();
+
+        let outer_typed = p
+            .constraints
+            .iter()
+            .filter(|c| matches!(c, Constraint::ColumnTypeClass { .. }))
+            .count();
+        assert!(
+            outer_typed >= 1,
+            "cte_with_join must pin its outer join key's type class"
+        );
+
+        let inner_typed = p
+            .constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::SubqueryRelation { constraints, .. } => Some(constraints),
+                _ => None,
+            })
+            .flatten()
+            .filter(|c| matches!(c, Constraint::ColumnTypeClass { .. }))
+            .count();
+        assert!(
+            inner_typed >= 1,
+            "cte_with_join must pin its CTE-projected join key's type class inside the subquery"
         );
     }
 

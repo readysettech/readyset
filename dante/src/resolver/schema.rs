@@ -650,12 +650,21 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Diale
             .choose(&[SqlType::Int(None), SqlType::BigInt(None)])
             .cloned()
             .expect("integer type slice is non-empty"),
+        // Spans the integer and approximate/exact decimal types so a
+        // `Numeric`-constrained column exercises the float/decimal coercion
+        // paths the expr_eval families target, not just int/double. The slice
+        // stays a subset of `TypeClass::Numeric::matches`: that predicate is
+        // intentionally broader so a *reused* column of a type the synthesizer
+        // doesn't mint (e.g. MySQL TinyInt) still satisfies the class.
         TypeClass::Numeric => entropy
             .choose(&[
                 SqlType::Int(None),
                 SqlType::BigInt(None),
+                SqlType::SmallInt(None),
                 SqlType::Double,
                 SqlType::Float,
+                SqlType::Real,
+                SqlType::Decimal(10, 2),
             ])
             .cloned()
             .expect("numeric type slice is non-empty"),
@@ -674,6 +683,13 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Diale
             .choose(&[datetime_for(dialect), SqlType::Date])
             .cloned()
             .expect("datetime type slice is non-empty"),
+        TypeClass::Orderable => {
+            let class = entropy
+                .choose(&[TypeClass::Numeric, TypeClass::String, TypeClass::DateTime])
+                .cloned()
+                .expect("orderable class slice is non-empty");
+            pick_type_for_class(&class, entropy, dialect)
+        }
         TypeClass::Exact(t) => t.clone(),
     }
 }
@@ -1257,6 +1273,31 @@ mod tests {
         assert_eq!(column_role(lookup, &constraints), ColumnRole::FilterKey);
         assert_eq!(column_role(c1, &constraints), ColumnRole::General);
         assert_eq!(column_role(c2, &constraints), ColumnRole::General);
+    }
+
+    #[test]
+    fn pick_type_for_class_numeric_stays_within_matches_and_reaches_decimal() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // Every synthesized Numeric type must satisfy the class predicate, and
+        // over many draws the decimal/fixed-point types must be reachable so
+        // the float/decimal coercion paths actually get exercised.
+        let mut saw_decimal = false;
+        for _ in 0..400 {
+            let t = pick_type_for_class(&TypeClass::Numeric, &mut entropy, Dialect::MySQL);
+            assert!(
+                type_matches(&t, &TypeClass::Numeric),
+                "pick_type_for_class(Numeric) returned a non-numeric type: {t:?}"
+            );
+            if matches!(t, SqlType::Decimal(_, _) | SqlType::Real) {
+                saw_decimal = true;
+            }
+        }
+        assert!(
+            saw_decimal,
+            "pick_type_for_class(Numeric) should sometimes return a decimal/real type"
+        );
     }
 
     #[test]
@@ -1902,5 +1943,55 @@ mod tests {
             row_override.column,
             row_override.table,
         );
+    }
+
+    #[test]
+    fn orderable_column_binding_never_resolves_to_bool() {
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::ColumnTypeClass {
+                col: c,
+                type_class: TypeClass::Orderable,
+            },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+
+        // GenerationState is not Clone, so rebuild the bool-only table per seed.
+        for seed in 0..64u64 {
+            let config = GeneratorConfig {
+                reuse_preference: 1.0,
+                ..Default::default()
+            };
+            let mut state = GenerationState::new(Dialect::PostgreSQL, config);
+            // Use a name that won't collide with the resolver's fresh_column_name
+            // counter (which starts at c0). The resolver will synthesize a new
+            // column because the bool column doesn't match Orderable.
+            let mut ts = TableSchema::new(SqlIdentifier::from("t0"));
+            ts.add_column(
+                SqlIdentifier::from("bool_col"),
+                ColumnMeta {
+                    sql_type: SqlType::Bool,
+                    gen_spec: ColumnGenerationSpec::Random,
+                },
+            );
+            state.add_table(ts);
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut entropy = Entropy::new(&mut rng);
+            let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+                .expect("should resolve");
+            if let Some(Binding::Column { sql_type, .. }) = env.get(c) {
+                assert_ne!(
+                    *sql_type,
+                    SqlType::Bool,
+                    "Orderable bound to bool at seed {seed}"
+                );
+            } else {
+                panic!("column not bound at seed {seed}");
+            }
+        }
     }
 }

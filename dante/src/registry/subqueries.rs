@@ -17,6 +17,11 @@ pub fn exists_subquery() -> Pattern {
     let c_inner = sq.column(t_inner);
     sq.from(t_inner);
     sq.project_column(c_inner, t_inner);
+    // Ensure the correlated columns are type-compatible so PG does not
+    // reject the comparison (e.g. "operator does not exist: integer =
+    // character varying"). Mirrors the TypeCompatible constraint in
+    // in_subquery. (qp:yjlcpcardjmj)
+    sq.constraint(Constraint::TypeCompatible(c_inner, c_outer_ref));
     // Correlated: reference outer column in inner WHERE
     sq.constraint(Constraint::WhereColumnCompare {
         left_col: c_inner,
@@ -230,6 +235,35 @@ mod tests {
         let sql = resolve_pattern(&p, Dialect::MySQL);
         assert!(sql.contains("JOIN"), "sql: {sql}");
         assert!(sql.contains("SELECT"), "sql: {sql}");
+    }
+
+    // exists_subquery must include TypeCompatible for the correlated column
+    // pair so the resolver enforces type-compatibility between the inner and
+    // outer columns. Without it, PG rejects queries like
+    // `WHERE t1.c1 = t0.c2` when c1 and c2 have incompatible types
+    // (e.g. integer = varchar). in_subquery already carries this constraint;
+    // exists_subquery must mirror it. (qp:yjlcpcardjmj)
+    #[test]
+    fn exists_subquery_inner_constraints_include_type_compatible() {
+        let p = exists_subquery();
+        let inner_constraints = p
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::SubqueryExpr {
+                    constraints: inner, ..
+                } => Some(inner.as_slice()),
+                _ => None,
+            })
+            .expect("expected a SubqueryExpr constraint");
+
+        assert!(
+            inner_constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::TypeCompatible(..))),
+            "exists_subquery inner constraints must include TypeCompatible \
+             for the correlated column pair"
+        );
     }
 
     /// Subquery scope must not leak inner-only BaseTable / ColumnExists into

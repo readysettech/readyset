@@ -84,9 +84,9 @@ pub fn union_all_two_tables(class: crate::constraint::TypeClass) -> Pattern {
         crate::constraint::TypeClass::DateTime => "union_all_two_tables_datetime",
         crate::constraint::TypeClass::Decimal => "union_all_two_tables_decimal",
         crate::constraint::TypeClass::FixedPoint => "union_all_two_tables_fixedpoint",
-        crate::constraint::TypeClass::Any | crate::constraint::TypeClass::Exact(_) => {
-            "union_all_two_tables_any"
-        }
+        crate::constraint::TypeClass::Orderable
+        | crate::constraint::TypeClass::Any
+        | crate::constraint::TypeClass::Exact(_) => "union_all_two_tables_any",
     };
     let mut b = PatternBuilder::new(name);
     let t1 = b.table();
