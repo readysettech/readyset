@@ -98,6 +98,12 @@ fn build_select_inner(
     // it up to emit `JOIN (SELECT ...) AS sqN`.
     let mut join_subqueries: HashMap<VarId, (SelectStatement, SqlIdentifier)> = HashMap::new();
 
+    let parent_type_compat: Vec<Constraint> = constraints
+        .iter()
+        .filter(|c| matches!(c, Constraint::TypeCompatible(_, _)))
+        .cloned()
+        .collect();
+
     for c in constraints {
         match c {
             Constraint::From(t) => {
@@ -593,6 +599,7 @@ fn build_select_inner(
                     entropy,
                     placeholder_idx,
                     param_map,
+                    &parent_type_compat,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -655,6 +662,7 @@ fn build_select_inner(
                     entropy,
                     placeholder_idx,
                     param_map,
+                    &parent_type_compat,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -693,6 +701,7 @@ fn build_select_inner(
                     entropy,
                     placeholder_idx,
                     param_map,
+                    &parent_type_compat,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -725,6 +734,7 @@ fn build_select_inner(
                     entropy,
                     placeholder_idx,
                     param_map,
+                    &parent_type_compat,
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
@@ -1260,9 +1270,34 @@ fn resolve_inner_subquery(
     entropy: &mut Entropy<'_>,
     placeholder_idx: &mut u32,
     param_map: &mut [Option<usize>],
+    parent_type_compat: &[Constraint],
 ) -> Result<(SelectStatement, Vec<ParamMeta>, Vec<DdlStep>), ResolveError> {
-    // Collect all VarIds referenced in inner constraints to size num_vars.
-    let max_var = inner_constraints
+    // Parent-scope TypeCompatible constraints that reference a var used in this
+    // inner scope must travel with the inner constraints so inner column
+    // binding can anchor against the (parent-bound) partner. Without this, a
+    // CTE-join's `TypeCompatible(c_cte, c_join_key)` -- which lives in the
+    // parent list -- never reaches the scope that binds `c_cte`.
+    let inner_var_ids: std::collections::HashSet<usize> = inner_constraints
+        .iter()
+        .flat_map(|c| c.var_ids())
+        .map(|v| v.0)
+        .collect();
+    let injected: Vec<Constraint> = parent_type_compat
+        .iter()
+        .filter(|c| match c {
+            Constraint::TypeCompatible(a, b) => {
+                inner_var_ids.contains(&a.0) || inner_var_ids.contains(&b.0)
+            }
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    let augmented: Vec<Constraint> = inner_constraints.iter().cloned().chain(injected).collect();
+
+    // Collect all VarIds referenced in augmented constraints to size num_vars.
+    // Any parent var referenced by an injected constraint gets an inner-env
+    // slot, left unbound and resolved via outer_env.
+    let max_var = augmented
         .iter()
         .flat_map(|c| c.var_ids())
         .map(|v| v.0)
@@ -1283,9 +1318,15 @@ fn resolve_inner_subquery(
     // var_kinds[v.0] is correct.
     let var_kinds: &[VarKind] = &outer_var_kinds[..num_vars];
 
-    // Resolve schema constraints for the inner scope
-    let (mut inner_env, expanded) =
-        super::schema::resolve_schema(inner_constraints, var_kinds, state, entropy)?;
+    // Resolve schema constraints for the inner scope, anchoring TypeCompatible
+    // partners against the parent env so cross-scope operands bind compatibly.
+    let (mut inner_env, expanded) = super::schema::resolve_schema_with_outer(
+        &augmented,
+        var_kinds,
+        state,
+        entropy,
+        Some(outer_env),
+    )?;
 
     // The inner env needs to know about tables created in the outer scope
     // so it doesn't emit redundant AddColumn DDL for them (those columns
@@ -1354,8 +1395,31 @@ fn resolve_cte_inner_subquery(
     entropy: &mut Entropy<'_>,
     placeholder_idx: &mut u32,
     param_map: &mut [Option<usize>],
+    parent_type_compat: &[Constraint],
 ) -> Result<(SelectStatement, Vec<ParamMeta>, Vec<DdlStep>), ResolveError> {
-    let max_var = inner_constraints
+    // Parent-scope TypeCompatible constraints that reference a var used in this
+    // inner scope must travel with the inner constraints so inner column
+    // binding can anchor against the (parent-bound) partner. Without this, a
+    // CTE-join's `TypeCompatible(c_cte, c_join_key)` -- which lives in the
+    // parent list -- never reaches the scope that binds `c_cte`.
+    let inner_var_ids: std::collections::HashSet<usize> = inner_constraints
+        .iter()
+        .flat_map(|c| c.var_ids())
+        .map(|v| v.0)
+        .collect();
+    let injected: Vec<Constraint> = parent_type_compat
+        .iter()
+        .filter(|c| match c {
+            Constraint::TypeCompatible(a, b) => {
+                inner_var_ids.contains(&a.0) || inner_var_ids.contains(&b.0)
+            }
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    let augmented: Vec<Constraint> = inner_constraints.iter().cloned().chain(injected).collect();
+
+    let max_var = augmented
         .iter()
         .flat_map(|c| c.var_ids())
         .map(|v| v.0)
@@ -1372,8 +1436,13 @@ fn resolve_cte_inner_subquery(
 
     let var_kinds: &[VarKind] = &outer_var_kinds[..num_vars];
 
-    let (mut inner_env, expanded) =
-        super::schema::resolve_schema(inner_constraints, var_kinds, state, entropy)?;
+    let (mut inner_env, expanded) = super::schema::resolve_schema_with_outer(
+        &augmented,
+        var_kinds,
+        state,
+        entropy,
+        Some(outer_env),
+    )?;
 
     for t in &outer_env.new_tables {
         if !inner_env.new_tables.contains(t) {

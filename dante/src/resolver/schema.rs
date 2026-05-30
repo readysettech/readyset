@@ -22,9 +22,24 @@ pub(crate) fn resolve_schema(
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
 ) -> Result<(Env, Vec<Constraint>), ResolveError> {
+    resolve_schema_with_outer(constraints, var_kinds, state, entropy, None)
+}
+
+/// Like [`resolve_schema`], but with an optional parent `outer_env` whose
+/// bindings are visible to TypeCompatible anchoring and verification. Used by
+/// subquery resolution so a `TypeCompatible` linking an inner column to an
+/// outer one is enforced even though the two columns bind in separate passes.
+pub(crate) fn resolve_schema_with_outer(
+    constraints: &[Constraint],
+    var_kinds: &[VarKind],
+    state: &mut GenerationState,
+    entropy: &mut Entropy<'_>,
+    outer_env: Option<&Env>,
+) -> Result<(Env, Vec<Constraint>), ResolveError> {
     let num_vars = var_kinds.len();
     let mut env = Env::new(num_vars);
-    let expanded = resolve_constraint_set(&mut env, constraints, var_kinds, state, entropy)?;
+    let expanded =
+        resolve_constraint_set(&mut env, constraints, var_kinds, state, entropy, outer_env)?;
     Ok((env, expanded))
 }
 
@@ -40,6 +55,7 @@ fn resolve_constraint_set(
     var_kinds: &[VarKind],
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
+    outer_env: Option<&Env>,
 ) -> Result<Vec<Constraint>, ResolveError> {
     // Phase 1: Classify and order constraints
     let mut table_exists = Vec::new();
@@ -102,6 +118,7 @@ fn resolve_constraint_set(
                 constraints,
                 state,
                 entropy,
+                outer_env,
             )?;
         }
     }
@@ -113,7 +130,7 @@ fn resolve_constraint_set(
                 resolve_type_class(env, *col, type_class)?;
             }
             Constraint::TypeCompatible(a, b) => {
-                resolve_type_compatible(env, *a, *b)?;
+                resolve_type_compatible(env, *a, *b, outer_env)?;
             }
             _ => {}
         }
@@ -138,15 +155,16 @@ fn resolve_constraint_set(
             let env_cp = env.checkpoint();
             let state_cp = state.checkpoint();
             let entropy_cp = entropy.checkpoint();
-            let branch = match resolve_constraint_set(env, branch_a, var_kinds, state, entropy) {
-                Ok(b) => b,
-                Err(_) => {
-                    env.restore(env_cp);
-                    state.restore(state_cp);
-                    entropy.restore(entropy_cp);
-                    resolve_constraint_set(env, branch_b, var_kinds, state, entropy)?
-                }
-            };
+            let branch =
+                match resolve_constraint_set(env, branch_a, var_kinds, state, entropy, outer_env) {
+                    Ok(b) => b,
+                    Err(_) => {
+                        env.restore(env_cp);
+                        state.restore(state_cp);
+                        entropy.restore(entropy_cp);
+                        resolve_constraint_set(env, branch_b, var_kinds, state, entropy, outer_env)?
+                    }
+                };
             entropy.release();
             expanded.extend(branch);
         }
@@ -384,6 +402,7 @@ fn gen_spec_for_role(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_column_exists(
     env: &mut Env,
     col: VarId,
@@ -392,6 +411,7 @@ fn resolve_column_exists(
     all_constraints: &[Constraint],
     state: &mut GenerationState,
     entropy: &mut Entropy<'_>,
+    outer_env: Option<&Env>,
 ) -> Result<(), ResolveError> {
     if env.is_bound(col) {
         return Ok(());
@@ -419,6 +439,27 @@ fn resolve_column_exists(
             None
         }
     });
+
+    // Compatibility anchors: bound types of TypeCompatible partners of `col`.
+    // Choosing a compatible type here (rather than only verifying later)
+    // enforces TypeCompatible even across scope/binding-order boundaries,
+    // where the phase-2d verify would no-op on an unbound operand.
+    let anchors: Vec<SqlType> = type_constraints
+        .iter()
+        .filter_map(|c| match c {
+            Constraint::TypeCompatible(a, b) => {
+                let other = if *a == col {
+                    Some(*b)
+                } else if *b == col {
+                    Some(*a)
+                } else {
+                    None
+                }?;
+                anchor_type(env, outer_env, other)
+            }
+            _ => None,
+        })
+        .collect();
 
     let reuse = state.config().reuse_preference;
     let table_schema = state.table(&table_name);
@@ -448,6 +489,7 @@ fn resolve_column_exists(
                 Some(tc) => type_matches(&meta.sql_type, tc),
                 None => true,
             })
+            .filter(|(_, meta)| anchors.iter().all(|a| types_compatible(&meta.sql_type, a)))
             .filter(|(name, _)| {
                 if example_pinned {
                     // Drop the PK from candidates so an example-pinned
@@ -478,9 +520,21 @@ fn resolve_column_exists(
         );
     } else {
         // Synthesize a new column
-        let sql_type = match &type_class {
-            Some(tc) => pick_type_for_class(tc, entropy, state.dialect()),
-            None => pick_random_type(entropy, state.dialect()),
+        let sql_type = if let Some(anchor) = anchors.first() {
+            // Adopt a concrete type compatible with the anchor. If a type class
+            // is also present and the anchor does not satisfy it, fall back to
+            // the class and let the phase-2d verify reject any residual clash.
+            match &type_class {
+                Some(tc) if !tc.matches(anchor) => {
+                    pick_type_for_class(tc, entropy, state.dialect())
+                }
+                _ => anchor.clone(),
+            }
+        } else {
+            match &type_class {
+                Some(tc) => pick_type_for_class(tc, entropy, state.dialect()),
+                None => pick_random_type(entropy, state.dialect()),
+            }
         };
         let role = column_role(col, all_constraints);
         let gen_spec = gen_spec_for_role(role, &sql_type, &state.config().default_gen_spec);
@@ -540,15 +594,33 @@ fn resolve_type_class(
     }
 }
 
-fn resolve_type_compatible(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError> {
-    let type_a = match env.get(a) {
-        Some(Binding::Column { sql_type, .. }) => Some(sql_type.clone()),
-        _ => None,
-    };
-    let type_b = match env.get(b) {
-        Some(Binding::Column { sql_type, .. }) => Some(sql_type.clone()),
-        _ => None,
-    };
+/// The bound SQL type of `v`, looked up in `env` and then, if present, in a
+/// parent `outer_env`. Used to find TypeCompatible "anchors" so column binding
+/// can choose a compatible type up front instead of relying on a post-hoc
+/// verify that silently skips when an operand is unbound in the current env.
+fn anchor_type(env: &Env, outer_env: Option<&Env>, v: VarId) -> Option<SqlType> {
+    if v.0 < env.bindings.len()
+        && let Some(Binding::Column { sql_type, .. }) = env.get(v)
+    {
+        return Some(sql_type.clone());
+    }
+    if let Some(oe) = outer_env
+        && v.0 < oe.bindings.len()
+        && let Some(Binding::Column { sql_type, .. }) = oe.get(v)
+    {
+        return Some(sql_type.clone());
+    }
+    None
+}
+
+fn resolve_type_compatible(
+    env: &mut Env,
+    a: VarId,
+    b: VarId,
+    outer_env: Option<&Env>,
+) -> Result<(), ResolveError> {
+    let type_a = anchor_type(env, outer_env, a);
+    let type_b = anchor_type(env, outer_env, b);
 
     if let (Some(ta), Some(tb)) = (type_a, type_b)
         && !types_compatible(&ta, &tb)
@@ -606,6 +678,12 @@ fn resolve_not_eq(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError>
 /// Check if a SQL type matches a type class.
 fn type_matches(sql_type: &SqlType, type_class: &TypeClass) -> bool {
     type_class.matches(sql_type)
+}
+
+/// Test/crate-visible wrapper around the private `types_compatible`.
+#[cfg(test)]
+pub(crate) fn types_compatible_pub(a: &SqlType, b: &SqlType) -> bool {
+    types_compatible(a, b)
 }
 
 /// Check if two SQL types are compatible (can be compared/joined).
@@ -1943,6 +2021,153 @@ mod tests {
             row_override.column,
             row_override.table,
         );
+    }
+
+    #[test]
+    fn type_compatible_narrows_second_column_to_first() {
+        // Table has one Integer column and one Text column. Pin c1 to Integer,
+        // mark c1/c2 TypeCompatible, force reuse. c2 must land on a numeric
+        // (compatible) column every time, not the text one.
+        use crate::constraint::TypeClass;
+        let t = VarId(0);
+        let c1 = VarId(1);
+        let c2 = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c1, table: t },
+            Constraint::ColumnTypeClass {
+                col: c1,
+                type_class: TypeClass::Integer,
+            },
+            Constraint::ColumnExists { col: c2, table: t },
+            Constraint::TypeCompatible(c1, c2),
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+
+        // GenerationState is not Clone; rebuild the mixed-type table per seed.
+        for seed in 0..64u64 {
+            let config = GeneratorConfig {
+                reuse_preference: 1.0,
+                ..Default::default()
+            };
+            let mut state = GenerationState::new(Dialect::PostgreSQL, config);
+            let mut ts = TableSchema::new(SqlIdentifier::from("t0"));
+            ts.add_column(
+                SqlIdentifier::from("c0"),
+                ColumnMeta {
+                    sql_type: SqlType::Int(None),
+                    gen_spec: ColumnGenerationSpec::Unique,
+                },
+            );
+            ts.add_column(
+                SqlIdentifier::from("c1"),
+                ColumnMeta {
+                    sql_type: SqlType::Text,
+                    gen_spec: ColumnGenerationSpec::Random,
+                },
+            );
+            state.add_table(ts);
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut entropy = Entropy::new(&mut rng);
+            let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+                .expect("should resolve");
+            let ty1 = match env.get(c1) {
+                Some(Binding::Column { sql_type, .. }) => sql_type.clone(),
+                _ => panic!("c1 unbound"),
+            };
+            let ty2 = match env.get(c2) {
+                Some(Binding::Column { sql_type, .. }) => sql_type.clone(),
+                _ => panic!("c2 unbound"),
+            };
+            assert!(
+                types_compatible(&ty1, &ty2),
+                "seed {seed}: c1={ty1:?} c2={ty2:?} not compatible"
+            );
+        }
+    }
+
+    #[test]
+    fn type_compatible_narrows_against_outer_env() {
+        use crate::constraint::TypeClass;
+        let t = VarId(0);
+        let c1 = VarId(1); // outer column, pinned Integer
+        let c2 = VarId(2); // inner column, TypeCompatible(c1, c2)
+
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+        ];
+
+        // GenerationState is not Clone; rebuild the mixed-type table per seed.
+        for seed in 0..64u64 {
+            let config = GeneratorConfig {
+                reuse_preference: 1.0,
+                ..Default::default()
+            };
+            let mut state = GenerationState::new(Dialect::PostgreSQL, config);
+            let mut ts = TableSchema::new(SqlIdentifier::from("t0"));
+            ts.add_column(
+                SqlIdentifier::from("c0"),
+                ColumnMeta {
+                    sql_type: SqlType::Int(None),
+                    gen_spec: ColumnGenerationSpec::Unique,
+                },
+            );
+            ts.add_column(
+                SqlIdentifier::from("c1"),
+                ColumnMeta {
+                    sql_type: SqlType::Text,
+                    gen_spec: ColumnGenerationSpec::Random,
+                },
+            );
+            state.add_table(ts);
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut entropy = Entropy::new(&mut rng);
+
+            // Resolve the outer scope first.
+            let outer_constraints = vec![
+                Constraint::BaseTable(t),
+                Constraint::ColumnExists { col: c1, table: t },
+                Constraint::ColumnTypeClass {
+                    col: c1,
+                    type_class: TypeClass::Integer,
+                },
+            ];
+            let (outer_env, _) =
+                resolve_schema(&outer_constraints, &var_kinds, &mut state, &mut entropy)
+                    .expect("outer resolves");
+
+            // Inner scope references c2 and carries TypeCompatible to the outer c1.
+            let inner_constraints = vec![
+                Constraint::BaseTable(t),
+                Constraint::ColumnExists { col: c2, table: t },
+                Constraint::TypeCompatible(c1, c2),
+            ];
+            let (inner_env, _) = resolve_schema_with_outer(
+                &inner_constraints,
+                &var_kinds,
+                &mut state,
+                &mut entropy,
+                Some(&outer_env),
+            )
+            .expect("inner resolves");
+
+            let ty2 = match inner_env.get(c2) {
+                Some(Binding::Column { sql_type, .. }) => sql_type.clone(),
+                _ => panic!("c2 unbound at seed {seed}"),
+            };
+            assert!(
+                types_compatible(&SqlType::Int(None), &ty2),
+                "seed {seed}: inner c2={ty2:?} not compatible with outer Integer c1"
+            );
+        }
     }
 
     #[test]

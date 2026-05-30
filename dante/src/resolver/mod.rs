@@ -423,8 +423,11 @@ pub fn try_resolve(
 mod tests {
     use rand::SeedableRng;
     use rand::rngs::SmallRng;
-    use readyset_sql::Dialect;
-    use readyset_sql::ast::{BinaryOperator, SqlIdentifier, SqlType};
+    use readyset_sql::ast::{
+        BinaryOperator, Expr, FieldDefinitionExpr, InValue, JoinConstraint, SelectSpecification,
+        SelectStatement, SqlIdentifier, SqlType,
+    };
+    use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
     use crate::pattern::Pattern;
@@ -857,5 +860,175 @@ mod tests {
         // Roll back first try
         state.restore(state_cp1);
         assert_eq!(state.tables().len(), 0);
+    }
+
+    /// Collect column-name pairs that PostgreSQL will compare with `=`:
+    /// JOIN ON equalities, correlated WHERE `col = col`, and IN-subquery
+    /// (lhs col, subquery's first projected col). Recurses into CTEs and
+    /// nested subqueries. Column names only -- callers map names to types
+    /// in controlled single-base-table scenarios.
+    fn eq_operand_column_pairs(stmt: &SelectStatement) -> Vec<(SqlIdentifier, SqlIdentifier)> {
+        let mut pairs = Vec::new();
+        collect_from_select(stmt, &mut pairs);
+        pairs
+    }
+
+    fn first_projected_column(stmt: &SelectStatement) -> Option<SqlIdentifier> {
+        stmt.fields.iter().find_map(|f| match f {
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(c),
+                ..
+            } => Some(c.name.clone()),
+            _ => None,
+        })
+    }
+
+    fn collect_from_select(stmt: &SelectStatement, out: &mut Vec<(SqlIdentifier, SqlIdentifier)>) {
+        for cte in &stmt.ctes {
+            collect_from_select(&cte.statement, out);
+        }
+        for j in &stmt.join {
+            if let JoinConstraint::On(e) = &j.constraint {
+                collect_from_expr(e, out);
+            }
+        }
+        if let Some(w) = &stmt.where_clause {
+            collect_from_expr(w, out);
+        }
+    }
+
+    fn collect_from_expr(e: &Expr, out: &mut Vec<(SqlIdentifier, SqlIdentifier)>) {
+        match e {
+            Expr::BinaryOp { lhs, op, rhs } => {
+                if *op == BinaryOperator::Equal
+                    && let (Expr::Column(l), Expr::Column(r)) = (lhs.as_ref(), rhs.as_ref())
+                {
+                    out.push((l.name.clone(), r.name.clone()));
+                }
+                collect_from_expr(lhs, out);
+                collect_from_expr(rhs, out);
+            }
+            Expr::In {
+                lhs,
+                rhs: InValue::Subquery(sub),
+                ..
+            } => {
+                if let Expr::Column(l) = lhs.as_ref()
+                    && let Some(rc) = first_projected_column(sub)
+                {
+                    out.push((l.name.clone(), rc));
+                }
+                collect_from_select(sub, out);
+            }
+            Expr::Exists(sub) | Expr::NestedSelect(sub) => collect_from_select(sub, out),
+            _ => {}
+        }
+    }
+
+    /// Resolve a pattern against a pre-seeded single-table state with forced
+    /// reuse and assert every `=` operand pair references columns of
+    /// PG-compatible type. All columns resolve to `table`'s schema by name.
+    fn assert_pattern_operand_types_compatible(
+        pattern: &crate::pattern::Pattern,
+        table: &str,
+        columns: &[(&str, SqlType)],
+        seeds: std::ops::Range<u64>,
+    ) {
+        for seed in seeds {
+            let config = crate::state::GeneratorConfig {
+                reuse_preference: 1.0,
+                ..Default::default()
+            };
+            let mut state = GenerationState::new(Dialect::PostgreSQL, config);
+            let mut ts = TableSchema::new(SqlIdentifier::from(table));
+            for (name, ty) in columns {
+                ts.add_column(
+                    SqlIdentifier::from(*name),
+                    ColumnMeta {
+                        sql_type: ty.clone(),
+                        gen_spec: ColumnGenerationSpec::Random,
+                    },
+                );
+            }
+            ts.primary_key = Some(SqlIdentifier::from(columns[0].0));
+            state.add_table(ts);
+
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut entropy = Entropy::new(&mut rng);
+            let output = resolve(
+                &pattern.constraints,
+                &pattern.vars,
+                &mut state,
+                &mut entropy,
+            )
+            .expect("should resolve");
+
+            let stmt = match &output.query {
+                SelectSpecification::Simple(s) => s.clone(),
+                SelectSpecification::Compound(_) => continue,
+            };
+            let type_of = |n: &SqlIdentifier| -> SqlType {
+                state
+                    .table(&SqlIdentifier::from(table))
+                    .and_then(|t| t.columns.iter().find(|(cn, _)| *cn == n))
+                    .map(|(_, m)| m.sql_type.clone())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "seed {seed}: unknown column {n} in {}",
+                            output.query.display(Dialect::PostgreSQL)
+                        )
+                    })
+            };
+            for (a, b) in eq_operand_column_pairs(&stmt) {
+                let (ta, tb) = (type_of(&a), type_of(&b));
+                assert!(
+                    crate::resolver::schema::types_compatible_pub(&ta, &tb),
+                    "seed {seed}: {a}({ta:?}) = {b}({tb:?}) incompatible in: {}",
+                    output.query.display(Dialect::PostgreSQL)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cte_with_join_operands_type_compatible_under_reuse() {
+        assert_pattern_operand_types_compatible(
+            &crate::registry::ctes::cte_with_join(),
+            "t0",
+            &[
+                ("c0", SqlType::Int(None)),
+                ("c1", SqlType::Text),
+                ("c2", SqlType::Double),
+            ],
+            0..96,
+        );
+    }
+
+    #[test]
+    fn in_subquery_operands_type_compatible_under_reuse() {
+        assert_pattern_operand_types_compatible(
+            &crate::registry::subqueries::in_subquery(),
+            "t0",
+            &[
+                ("c0", SqlType::Int(None)),
+                ("c1", SqlType::Text),
+                ("c2", SqlType::Double),
+            ],
+            0..96,
+        );
+    }
+
+    #[test]
+    fn exists_subquery_operands_type_compatible_under_reuse() {
+        assert_pattern_operand_types_compatible(
+            &crate::registry::subqueries::exists_subquery(),
+            "t0",
+            &[
+                ("c0", SqlType::Int(None)),
+                ("c1", SqlType::Text),
+                ("c2", SqlType::Double),
+            ],
+            0..96,
+        );
     }
 }
