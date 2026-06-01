@@ -833,7 +833,7 @@ async fn run_queries_body(
         .await
         {
             Ok(results) => results,
-            Err(err) => match classify_error(&err, pattern_name) {
+            Err(err) => match classify_error(&err) {
                 ErrorClass::Fatal => {
                     return Err(err).context(format!("SELECT on upstream: {select_sql}"));
                 }
@@ -866,9 +866,7 @@ async fn run_queries_body(
                     stats.entry(pattern_name).skipped += 1;
                     continue;
                 }
-                ErrorClass::Other
-                | ErrorClass::ReadysetTransient
-                | ErrorClass::ReadysetKnownBug { .. } => {
+                ErrorClass::Other | ErrorClass::ReadysetTransient => {
                     return Err(err).context(format!("SELECT on upstream: {select_sql}"));
                 }
             },
@@ -920,7 +918,7 @@ async fn run_queries_body(
                         }
                         continue;
                     }
-                    Err(err) => match classify_error(&err, pattern_name) {
+                    Err(err) => match classify_error(&err) {
                         ErrorClass::ReadysetTransient => {
                             debug!(
                                 attempt,
@@ -932,17 +930,6 @@ async fn run_queries_body(
                                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                             }
                             continue;
-                        }
-                        ErrorClass::ReadysetKnownBug { ticket } => {
-                            warn!(
-                                query_idx,
-                                %select_sql,
-                                %ticket,
-                                err = %format!("{err:#}"),
-                                "skipping query due to known readyset bug"
-                            );
-                            stats.entry(pattern_name).skipped += 1;
-                            continue 'query;
                         }
                         _ => return Err(err).context(format!("SELECT on readyset: {select_sql}")),
                     },
@@ -1583,10 +1570,6 @@ fn compare_results(
 ///   the bad-SQL pattern surfaces in triage, then skips and continues.
 /// - `ReadysetTransient` retries with backoff (cache may not be populated
 ///   yet).
-/// - `ReadysetKnownBug` warns + skips, but ONLY when the failing pattern
-///   is on the corresponding allowlist in [`READYSET_KNOWN_BUGS`] —
-///   otherwise the substring is treated as `Other` so newly-affected
-///   patterns surface as plain mismatches.
 /// - `Other` falls through to the caller's default handling.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ErrorClass {
@@ -1594,7 +1577,6 @@ enum ErrorClass {
     UpstreamKnownLimit { code: Option<u16> },
     UpstreamGeneratorBug { code: Option<u16> },
     ReadysetTransient,
-    ReadysetKnownBug { ticket: &'static str },
     Other,
 }
 
@@ -1616,23 +1598,7 @@ const READYSET_TRANSIENT_NEEDLES: &[&str] = &[
     "schema generation mismatch",
 ];
 
-/// Known Readyset bugs we've intentionally chosen to skip. Each row pairs a
-/// substring with a ticket reference and a pattern-name allowlist. The
-/// allowlist gates the skip: if the failing pattern is not on the list, the
-/// error is *not* classified as a known bug, so newly-broken patterns
-/// surface instead of being silently swallowed. New entries here must
-/// include both a ticket and an explicit allowlist (an empty allowlist
-/// means "currently skipping nothing — placeholder until we observe it").
-const READYSET_KNOWN_BUGS: &[(&str, &str, &[&str])] = &[
-    // DfValue type conversion bug: IFNULL/COALESCE with Double columns
-    // produces a MYSQL_TYPE_LONGLONG mismatch in write_column. No patterns
-    // are bypassed by default; add explicit entries when triage confirms
-    // the same root cause.
-    ("DfValue conversion error", "REA-DFVAL", &[]),
-    ("Unhandled type conversion", "REA-DFVAL", &[]),
-];
-
-fn classify_error(err: &anyhow::Error, pattern_name: &str) -> ErrorClass {
+fn classify_error(err: &anyhow::Error) -> ErrorClass {
     use database_utils::DatabaseError;
     use mysql_async::Error as MyErr;
 
@@ -1668,11 +1634,6 @@ fn classify_error(err: &anyhow::Error, pattern_name: &str) -> ErrorClass {
     let msg = format!("{err:#}");
     if READYSET_TRANSIENT_NEEDLES.iter().any(|n| msg.contains(n)) {
         return ErrorClass::ReadysetTransient;
-    }
-    for (needle, ticket, allowlist) in READYSET_KNOWN_BUGS {
-        if msg.contains(needle) && allowlist.contains(&pattern_name) {
-            return ErrorClass::ReadysetKnownBug { ticket };
-        }
     }
     ErrorClass::Other
 }
@@ -2839,7 +2800,7 @@ mod tests {
     fn classify_error_mysql_known_limit_codes_only() {
         // 1038 (sort memory) is the one allowlisted planner limitation.
         assert_eq!(
-            classify_error(&mysql_server_anyhow(1038), "any_pattern"),
+            classify_error(&mysql_server_anyhow(1038)),
             ErrorClass::UpstreamKnownLimit { code: Some(1038) }
         );
     }
@@ -2850,7 +2811,7 @@ mod tests {
         // as generator bugs so we record an Antithesis assertion.
         for code in [1054, 1055, 1060, 1064, 1066, 1140, 1146, 1525] {
             assert_eq!(
-                classify_error(&mysql_server_anyhow(code), "any_pattern"),
+                classify_error(&mysql_server_anyhow(code)),
                 ErrorClass::UpstreamGeneratorBug { code: Some(code) },
                 "MySQL code {code} must classify as a generator bug, not a known limit"
             );
@@ -2862,7 +2823,7 @@ mod tests {
         // Connection drop → Fatal; not skippable, not a generator bug.
         let io_err = mysql_async::Error::Io(mysql_async::IoError::Io(std::io::Error::other("eof")));
         let err = anyhow::Error::from(database_utils::DatabaseError::MySQL(io_err));
-        assert_eq!(classify_error(&err, "any_pattern"), ErrorClass::Fatal);
+        assert_eq!(classify_error(&err), ErrorClass::Fatal);
     }
 
     #[test]
@@ -2879,48 +2840,25 @@ mod tests {
         // Sanity: an arbitrary anyhow error that is *not* a DatabaseError
         // doesn't get routed to Fatal anymore — it falls through to Other.
         let err = anyhow::anyhow!("non-database upstream rejection");
-        assert_eq!(classify_error(&err, "any_pattern"), ErrorClass::Other);
+        assert_eq!(classify_error(&err), ErrorClass::Other);
     }
 
     #[test]
     fn classify_error_readyset_transient() {
         let err = anyhow::anyhow!("Could not find table foo");
-        assert_eq!(
-            classify_error(&err, "any_pattern"),
-            ErrorClass::ReadysetTransient
-        );
+        assert_eq!(classify_error(&err), ErrorClass::ReadysetTransient);
     }
 
     #[test]
-    fn classify_error_readyset_known_bug_only_when_pattern_in_allowlist() {
-        // No pattern is currently allowlisted for the DfValue substring, so
-        // the substring alone must NOT classify as a known bug — surface it
-        // as Other so newly-broken patterns are visible instead of being
-        // silently swallowed.
+    fn readyset_error_substrings_are_never_masked() {
+        // The oracle must never silence a Readyset divergence. A Readyset
+        // error message classifies as `Other` and is surfaced rather than
+        // skipped; there is no allowlist that downgrades it to a known bug.
         let err = anyhow::anyhow!(
             "Server error: DfValue conversion error: Failed to convert value of type \
              Double to MYSQL_TYPE_LONGLONG"
         );
-        assert_eq!(
-            classify_error(&err, "some_pattern_not_on_allowlist"),
-            ErrorClass::Other
-        );
-    }
-
-    #[test]
-    fn classify_error_unrelated_dfvalue_substring_is_not_known_bug() {
-        // A custom error message that happens to contain "DfValue conversion
-        // error" without our concrete pattern allowlist must NOT skip — the
-        // old substring-only check would have hidden this as a known bug.
-        let err = anyhow::anyhow!(
-            "Some unrelated component reported: DfValue conversion error during arithmetic"
-        );
-        assert_ne!(
-            classify_error(&err, "any_pattern"),
-            ErrorClass::ReadysetKnownBug {
-                ticket: "REA-DFVAL"
-            }
-        );
+        assert_eq!(classify_error(&err), ErrorClass::Other);
     }
 
     #[test]
