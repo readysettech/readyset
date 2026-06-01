@@ -1,0 +1,160 @@
+# Uncorrelated predicate subqueries with LIMIT pinned to the wrap-preservation
+# shape introduced by Cnew.  PG evaluates:
+#   - IN-in-WHERE: outer.k IN (SELECT s.k FROM t LIMIT N) = set membership over
+#     the top-N rows by ORDER BY (a bag of up to N values; outer rows kept iff
+#     they appear in the distinct projection of that bag).
+#   - Scalar (LIMIT 1): single value or NULL if source empty.
+#
+# The wrap rewrite produces the equivalent shape:
+#   INNER JOIN (SELECT DISTINCT INNER.k FROM (orig with LIMIT N) AS INNER) AS GNL
+#   ON outer.k = GNL.k
+# with the LIMIT preserved at the inner level for native MIR TopK lowering.
+
+statement ok
+create table s (jn text);
+
+statement ok
+insert into s (jn) values ('A'), ('C'), ('E'), ('F');
+
+statement ok
+create table spj (jn text, rk int);
+
+statement ok
+insert into spj (jn, rk) values
+  ('A', 1), ('A', 2), ('B', 3), ('C', 4), ('C', 5), ('D', 6), ('E', 7);
+
+# IN-in-WHERE + LIMIT.  Top rows of spj by jn DESC: E, D, C, C, B, A, A.
+# LIMIT 3 picks {E, D, C}.  s.jn intersected with the distinct set = {C, E}.
+statement ok
+create cache from
+SELECT s.jn
+FROM s
+INNER JOIN (
+  SELECT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC, t.rk DESC
+  LIMIT 3
+) AS sub
+ON sub.jn = s.jn;
+
+query T rowsort
+SELECT s.jn
+FROM s
+WHERE s.jn IN (
+  SELECT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC, t.rk DESC
+  LIMIT 3
+);
+----
+C
+E
+
+# IN-in-WHERE + DISTINCT + LIMIT.  DISTINCT applies before LIMIT in PG.
+# Distinct jn values in spj: {A, B, C, D, E}.  ORDER BY jn DESC LIMIT 3 -> {E, D, C}.
+# s.jn intersected -> {C, E}.
+query T rowsort
+SELECT s.jn
+FROM s
+WHERE s.jn IN (
+  SELECT DISTINCT t.jn
+  FROM spj AS t
+  ORDER BY t.jn DESC
+  LIMIT 3
+);
+----
+C
+E
+
+# IN-in-WHERE + LIMIT with ORDER BY on a non-projected column.  The wrap
+# preserves PG's evaluation order (LIMIT inside the wrap; DISTINCT only at the
+# outer wrap level over the projected column).
+#
+# Bag = top-2 of spj.jn by rk DESC = {E(rk=7), D(rk=6)}.
+# s.jn = {A, C, E, F}.  Only 'E' is in both.
+query T rowsort
+SELECT s.jn
+FROM s
+WHERE s.jn IN (
+  SELECT t.jn
+  FROM spj AS t
+  ORDER BY t.rk DESC
+  LIMIT 2
+);
+----
+E
+
+# NOT IN + LIMIT, null-free bag.  When the bag has no NULL values, NOT IN is
+# straightforward set complement (no 3VL UNKNOWN).  The pipeline still
+# constructs EP_3VL/NP_3VL probes, but NP_3VL doesn't fire (bag has no NULLs).
+# The wrap-preservation GNL probe carries the LIMIT to native MIR TopK; the
+# AntiJoin (LEFT JOIN + IS NULL) eliminates outer rows that match the bag.
+#
+# Bag = top-2 of spj.jn (filtered non-NULL) by rk DESC = {D(rk=6), E(rk=7)}.
+# s.jn = {A, C, E, F}.  'E' is in bag -> rejected.  Others kept.
+statement ok
+create cache from
+SELECT s.jn
+FROM s
+WHERE s.jn NOT IN (
+  SELECT t.jn
+  FROM spj AS t
+  WHERE t.jn IS NOT NULL
+  ORDER BY t.rk DESC
+  LIMIT 2
+);
+
+query T rowsort
+SELECT s.jn
+FROM s
+WHERE s.jn NOT IN (
+  SELECT t.jn
+  FROM spj AS t
+  WHERE t.jn IS NOT NULL
+  ORDER BY t.rk DESC
+  LIMIT 2
+);
+----
+A
+C
+F
+
+# NOT IN + LIMIT with NULL in the bag.  PG semantics: `x NOT IN (... NULL ...)`
+# evaluates to UNKNOWN whenever there's no matching non-NULL element (and to
+# FALSE if there is a match).  WHERE rejects UNKNOWN rows.  Net effect: when
+# the bag contains NULL, the outer row survives ONLY if it matches no
+# non-NULL bag element AND it's NULL itself — and since `s.jn IS NULL` would
+# also be UNKNOWN against a non-empty bag, NULL outer rows are also rejected.
+# Practically: with NULL in the bag, NO outer rows survive unless they don't
+# match anything AND the bag's NULL doesn't matter — which is never.
+#
+# The pipeline's NP_3VL probe detects the NULL in the bag and contributes to
+# the composite WHERE that rejects outer rows in the UNKNOWN cases.  This
+# logictest pins that the 3VL plumbing operates correctly over the
+# wrap-preservation shape.
+#
+# Setup a separate table to introduce a NULL into the LIMITed bag.
+statement ok
+create table spj_n (jn text, rk int);
+
+statement ok
+insert into spj_n (jn, rk) values
+  ('C', 1), ('D', 2), (NULL, 3);
+
+# Bag = top-2 of spj_n by rk DESC = {NULL(rk=3), D(rk=2)}.
+# For each outer s.jn:
+#   'A' NOT IN {NULL, D}: 'A' != D true, but NULL in bag -> UNKNOWN -> rejected.
+#   'C' NOT IN {NULL, D}: same -> rejected.
+#   'E' NOT IN {NULL, D}: same -> rejected.
+#   'F' NOT IN {NULL, D}: same -> rejected.
+# All s rows rejected.
+query T rowsort
+SELECT s.jn
+FROM s
+WHERE s.jn NOT IN (
+  SELECT t.jn
+  FROM spj_n AS t
+  ORDER BY t.rk DESC
+  LIMIT 2
+);
+----

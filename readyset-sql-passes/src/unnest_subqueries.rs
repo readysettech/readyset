@@ -26,6 +26,7 @@ use crate::unnest_subqueries_3vl::{
     add_3vl_for_not_in_where_subquery, add_3vl_for_select_list_in_subquery,
     is_first_field_null_free, is_select_expr_null_free,
 };
+use crate::util::is_correlated;
 use crate::{
     BaseSchemasContext, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of,
 };
@@ -487,18 +488,32 @@ fn hoist_correlated_from_where_clause_and_rewrite_top_k(
 
     // Apply TOP-K if present (redundant agg-only LIMIT already stripped at entry).
     // Gated by `preserve_uncorrelated_top_k()` AND the caller's position flag
-    // AND the per-query pagination-eligibility check:
-    // when all three indicate we should preserve, leave LIMIT/ORDER on the
-    // (FROM-position) uncorrelated subquery so MIR can lower it to a native
-    // `TopK`/`Paginate` node instead of materialising a `ROW_NUMBER() <= K`
-    // filter wrapper.  Predicate-subquery callers pass
-    // `top_k_in_subquery_position = false` so their LIMIT continues to be
-    // materialised — they rely on the post-rewrite shape (DISTINCT + flat row
-    // set) for the IN/EXISTS unnest.  Engine-incompatible pagination shapes
-    // (literal non-zero OFFSET, parameterised LIMIT, etc.) likewise fall back
-    // to materialisation so they reach the engine as `__rn`-filter predicates
-    // rather than tripping `extract_limit_offset`'s `unsupported!` exits at
-    // recipe-extend time.
+    // AND the per-query pagination-eligibility check: when all three indicate
+    // preservation, leave LIMIT/ORDER on the (FROM-position) uncorrelated
+    // subquery so MIR can lower it to a native `TopK`/`Paginate` node instead
+    // of materialising a `ROW_NUMBER() <= K` filter wrapper.
+    //
+    // The two callers set `top_k_in_subquery_position` to encode their context:
+    //
+    // - The FROM-loop in `hoist_correlated_from_nested_and_rewrite_top_k`
+    //   passes `true`.  This is the load-bearing setting for FROM-position
+    //   preservation.
+    //
+    // - `as_joinable_derived_table_with_opts` (predicate-subquery context: IN,
+    //   NOT IN, Scalar) passes `false`.  Today this is a defensive backstop:
+    //   the predicate-subquery entry point pre-wraps LIMIT-bearing eligible
+    //   subqueries into a FROM-position derived table BEFORE reaching this
+    //   function, so the stmt at this point either has no LIMIT (pre-wrap
+    //   fired) or is in a case that must materialise anyway (correlated, or
+    //   engine-incompatible pagination).  The `false` setting ensures
+    //   materialisation if a future path bypasses the pre-wrap and reaches
+    //   here with a preservation-eligible LIMIT still in place.
+    //
+    // Engine-incompatible pagination shapes (literal non-zero OFFSET,
+    // parameterised LIMIT, NULL literals, etc.) fall back to materialisation
+    // via the eligibility check so they reach the engine as `__rn`-filter
+    // predicates rather than tripping `extract_limit_offset`'s `unsupported!`
+    // exits at recipe-extend time.
     let preserve_limit = top_k_in_subquery_position
         && preserve_uncorrelated_top_k()
         && limit_clause_eligible_for_native_pagination(&stmt.limit_clause);
@@ -1093,6 +1108,44 @@ pub(crate) fn as_joinable_derived_table_with_opts(
     // LIMIT and ORDER BY are no-ops.
     strip_redundant_limit_for_agg_no_gby(stmt)?;
 
+    // Pre-wrap eligibility: lift a LIMIT-bearing uncorrelated predicate subquery
+    // into a FROM-position derived table so the LIMIT is preserved at the inner
+    // level (the nested-hoist FROM-loop's `top_k_in_subquery_position = true`
+    // gate preserves it for native MIR TopK lowering) while the outer level
+    // has empty `limit_clause` — satisfying `make_subquery_distinct`'s invariant
+    // and giving the IN-unnest / Scalar machinery a clean outer SELECT to add
+    // DISTINCT and marker columns to.  `has_limit_one_deep` walks projecting
+    // wrappers, so the LIMIT-1 detection above remains correct across the wrap.
+    //
+    // Runs AFTER `strip_redundant_limit_for_agg_no_gby` so ExactlyOne/AtMostOne
+    // aggregate-only-no-GBY shapes (where LIMIT is semantically redundant) take
+    // the cheaper stripped path instead of incurring the wrap.
+    //
+    // For `SubqueryContext::Exists`, the wrap fires only when the caller has
+    // requested TOP-K preservation in the probe (`preserve_top_k_for_exists`)
+    // — i.e., the NP_3VL probe path, which needs to detect NULL in the
+    // LIMITed bag specifically and so requires the LIMIT to survive.  The EP
+    // probe path (`!preserve_top_k_for_exists`) takes the LIMIT-stripping
+    // simplification later in this function (LIMIT and ORDER BY don't affect
+    // emptiness; stripping yields cheaper dataflow than preservation).
+    let wrap_eligible_for_exists =
+        matches!(ctx, SubqueryContext::Exists) && opts.preserve_top_k_for_exists;
+    if (!matches!(ctx, SubqueryContext::Exists) || wrap_eligible_for_exists)
+        && !stmt.limit_clause.is_empty()
+        && preserve_uncorrelated_top_k()
+        && limit_clause_eligible_for_native_pagination(&stmt.limit_clause)
+        && !is_correlated(stmt)
+    {
+        let inner_alias = get_unique_alias(&collect_local_from_items(stmt)?, "INNER");
+        let mut wrapped = construct_projecting_wrapper(TableExpr {
+            inner: TableExprInner::Subquery(Box::new(mem::take(stmt))),
+            alias: Some(inner_alias),
+            column_aliases: vec![],
+        })?;
+        let (outer, _) = expect_sub_query_with_alias_mut(&mut wrapped);
+        *stmt = mem::take(outer);
+    }
+
     // Bubble up correlation from nested derived tables (one level, recursively)
     // (Runs *after* we captured LIMIT 1 information and stripped redundant LIMIT/ORDER.)
     hoist_correlated_from_nested_and_rewrite_top_k(stmt)?;
@@ -1252,14 +1305,23 @@ pub(crate) fn as_joinable_derived_table_with_opts(
     // Additionally, for Scalar with explicit LIMIT 1, DISTINCT is redundant:
     // after rewrite_top_k_in_place(_with_partition), LIMIT/ORDER are consumed and
     // RN <= 1 ensures at most one row (globally or per partition), so de-dup is unnecessary.
-    if !(matches!(ctx, SubqueryContext::Exists) && opts.preserve_top_k_for_exists) {
+    //
+    // The `stmt.limit_clause.is_empty()` guard makes this block self-defending against
+    // future call paths that bypass both materialisation (`rewrite_top_k_in_place`,
+    // `rewrite_correlated_top_k_in_place`) and the pre-wrap above: setting
+    // `stmt.distinct = true` on a LIMIT-bearing subquery would silently turn "first N
+    // rows" into "first N distinct rows" — a different query.  `make_subquery_distinct`
+    // would `invariant!` on that input; the gate here keeps the failure mode local.
+    if !(matches!(ctx, SubqueryContext::Exists) && opts.preserve_top_k_for_exists)
+        && stmt.limit_clause.is_empty()
+    {
         #[cfg(debug_assertions)]
         {
-            // Invariant for DISTINCT phase: TOP-K must have been materialized already.
-            // ORDER BY and LIMIT/OFFSET are expected to be cleared at this point.
+            // ORDER BY is expected to be cleared alongside LIMIT at this point: both
+            // `rewrite_top_k_in_place(_with_partition)` and the pre-wrap clear it.
             debug_assert!(
-                stmt.limit_clause.is_empty() && stmt.order.is_none(),
-                "TOP-K should have been materialized before DISTINCT handling"
+                stmt.order.is_none(),
+                "ORDER BY should have been cleared with LIMIT before DISTINCT handling"
             );
         }
         if matches!(ctx, SubqueryContext::Scalar) && has_limit_one {

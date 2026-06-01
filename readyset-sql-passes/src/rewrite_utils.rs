@@ -33,12 +33,25 @@ use std::mem;
 /// past it; that boundary was added in Change 13416 alongside the
 /// existing `contains_wf!` guard.
 ///
-/// Predicate-subquery callers (IN / EXISTS / Scalar via
-/// `as_joinable_derived_table_with_opts`) pass
-/// `top_k_in_subquery_position = false` and continue to materialise
-/// regardless of this return value — the IN/EXISTS unnest emits an
-/// INNER JOIN against the subquery body and relies on the materialised
-/// shape (DISTINCT + flat row set) for set semantics.
+/// Predicate-subquery callers (IN-in-WHERE, IN-in-SELECT-list, NOT IN,
+/// Scalar via `as_joinable_derived_table_with_opts`) extend the same
+/// preservation path via an identity-derived-table wrap applied at the
+/// entry of that function: the wrap lifts the original LIMIT into a
+/// FROM-position derived table (which the FROM-loop then preserves)
+/// while leaving the outer SELECT with empty `limit_clause` for the
+/// IN/Scalar machinery to add DISTINCT and marker columns to.  For
+/// `SubqueryContext::Exists`, the wrap fires only on the NP_3VL probe
+/// path (`preserve_top_k_for_exists = true`), which needs to detect
+/// NULL specifically in the LIMITed bag.  The EP_3VL probe and plain
+/// EXISTS / NOT EXISTS take the existing LIMIT-stripping simplification
+/// (LIMIT doesn't affect emptiness).
+///
+/// The `top_k_in_subquery_position = false` argument that
+/// `as_joinable_derived_table_with_opts` passes to
+/// `hoist_correlated_from_where_clause_and_rewrite_top_k` is now a
+/// defensive backstop: the pre-wrap clears the outer LIMIT before that
+/// function runs, so `false` only matters if a future caller bypasses
+/// the pre-wrap and arrives there with a preservation-eligible LIMIT.
 ///
 /// Per-query eligibility — `limit_clause_eligible_for_native_pagination`
 /// — gates preservation on the engine's `extract_limit_offset` acceptance

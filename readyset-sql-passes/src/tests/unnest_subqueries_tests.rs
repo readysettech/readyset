@@ -3053,8 +3053,9 @@ WHERE j.jn IN (
   LIMIT 5
 );"#;
     let expected_text = r#"SELECT "j"."jn" FROM "j" AS "j" INNER JOIN
-        (SELECT DISTINCT "INNER"."jn" AS "jn" FROM (SELECT "t"."jn" AS "jn", ROW_NUMBER() OVER(ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn"
-        FROM "spj" AS "t") AS "INNER" WHERE ("INNER"."__rn" <= 5)) AS "GNL" ON ("j"."jn" = "GNL"."jn")"#;
+        (SELECT DISTINCT "INNER"."jn" AS "jn" FROM
+        (SELECT "t"."jn" AS "jn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 5) AS "INNER")
+        AS "GNL" ON ("j"."jn" = "GNL"."jn")"#;
     test_it("test102", original_text, expected_text);
 }
 
@@ -3977,12 +3978,14 @@ FROM j AS j;"#;
     let expected_text = r#"SELECT "j"."jn", CASE WHEN ("GNL"."jn" IS NOT NULL) THEN TRUE
         WHEN (("j"."jn" IS NULL) AND ("EP_3VL"."present_" IS NOT NULL)) THEN NULL
         WHEN ("NP_3VL"."present_" IS NOT NULL) THEN NULL ELSE FALSE END AS "in_top3" FROM "j" AS "j" LEFT OUTER JOIN
-        (SELECT DISTINCT "INNER"."jn" AS "jn" FROM (SELECT "t"."jn" AS "jn", ROW_NUMBER() OVER(ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn"
-        FROM "spj" AS "t") AS "INNER" WHERE ("INNER"."__rn" <= 3)) AS "GNL" ON ("j"."jn" = "GNL"."jn") LEFT OUTER JOIN
+        (SELECT DISTINCT "INNER"."jn" AS "jn" FROM
+        (SELECT "t"."jn" AS "jn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 3) AS "INNER")
+        AS "GNL" ON ("j"."jn" = "GNL"."jn") LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_" FROM "spj" AS "t") AS "EP_3VL"  LEFT OUTER JOIN
-        (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT "INNER"."present_" AS "present_", "INNER"."jn" AS "jn" FROM
-        (SELECT 1 AS "present_", "t"."jn" AS "jn", ROW_NUMBER() OVER(ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn" FROM "spj" AS "t") AS "INNER"
-        WHERE ("INNER"."__rn" <= 3)) AS "NP_3VL" WHERE ("NP_3VL"."jn" IS NULL)) AS "NP_3VL""#;
+        (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM
+        (SELECT 1 AS "present_", "INNER"."jn" AS "jn" FROM
+        (SELECT "t"."jn" AS "jn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 3) AS "INNER") AS "NP_3VL"
+        WHERE ("NP_3VL"."jn" IS NULL)) AS "NP_3VL""#;
     test_it("test133", original_text, expected_text);
 }
 
@@ -5320,11 +5323,12 @@ SELECT (
     ) T2
 FROM s;"#;
     let expected_text = r#"SELECT "GNL"."test_integer2" AS "t2" FROM "s" LEFT OUTER JOIN
-        (SELECT "INNER"."test_integer2" AS "test_integer2" FROM (SELECT "t1"."test_integer2" AS "test_integer2",
-        ROW_NUMBER() OVER() AS "__rn" FROM "datatypes" INNER JOIN (SELECT "INNER"."test_integer2" AS "test_integer2" FROM
+        (SELECT "INNER"."test_integer2" AS "test_integer2" FROM
+        (SELECT "t1"."test_integer2" AS "test_integer2" FROM "datatypes"
+        INNER JOIN (SELECT "INNER"."test_integer2" AS "test_integer2" FROM
         (SELECT "dt"."test_integer2" AS "test_integer2", ROW_NUMBER() OVER(PARTITION BY "dt"."test_integer2") AS "__rn"
-        FROM "datatypes3" AS "dt") AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "t1" ON
-        ("datatypes"."test_integer" = "t1"."test_integer2")) AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "GNL""#;
+        FROM "datatypes3" AS "dt") AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "t1"
+        ON ("datatypes"."test_integer" = "t1"."test_integer2") LIMIT 1) AS "INNER") AS "GNL""#;
     test_it("test189", original_text, expected_text);
 }
 
@@ -7105,6 +7109,148 @@ ON sub.sn = s.sn;"#;
         ON ("sub"."sn" = "s"."sn")"#;
     test_it(
         "test270_uncorrelated_limit_offset_literal_materialises",
+        original_text,
+        expected_text,
+    );
+}
+
+// Uncorrelated IN-in-WHERE with LIMIT and ORDER BY on a non-projected column.
+// The wrap puts ORDER BY inside the inner derived table where t.qty is in
+// scope; the outer DISTINCT operates on the projected k.  If `make_subquery_distinct`
+// were applied at the same level as LIMIT, PG would reject the ORDER-BY-on-
+// non-projected-column form with DISTINCT.  The wrap sidesteps that.
+#[test]
+fn test271_in_where_limit_orderby_non_projected_preserved() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE s.sn IN (
+  SELECT t.sn
+  FROM spj AS t
+  ORDER BY t.qty DESC
+  LIMIT 4
+);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+        (SELECT DISTINCT "INNER"."sn" AS "sn" FROM
+        (SELECT "t"."sn" AS "sn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 4) AS "INNER")
+        AS "GNL" ON ("s"."sn" = "GNL"."sn")"#;
+    test_it(
+        "test271_in_where_limit_orderby_non_projected_preserved",
+        original_text,
+        expected_text,
+    );
+}
+
+// Uncorrelated IN with DISTINCT and LIMIT in the original.  The wrap adds an
+// outer DISTINCT that's redundant given the inner DISTINCT; the redundancy is
+// harmless (DISTINCT is idempotent on already-distinct input).  ORDER BY
+// references a DISTINCT-projected column (PG-valid).
+#[test]
+fn test272_in_distinct_limit_preserved() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE s.sn IN (
+  SELECT DISTINCT t.sn
+  FROM spj AS t
+  ORDER BY t.sn DESC
+  LIMIT 3
+);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+        (SELECT DISTINCT "INNER"."sn" AS "sn" FROM
+        (SELECT DISTINCT "t"."sn" AS "sn" FROM "spj" AS "t" ORDER BY "t"."sn" DESC NULLS FIRST LIMIT 3) AS "INNER")
+        AS "GNL" ON ("s"."sn" = "GNL"."sn")"#;
+    test_it(
+        "test272_in_distinct_limit_preserved",
+        original_text,
+        expected_text,
+    );
+}
+
+// Correlated predicate subquery with LIMIT: pre-wrap does NOT fire (correlation
+// detected); existing partitioned-RN materialisation path runs.
+#[test]
+fn test273_in_correlated_limit_materialises() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE s.sn IN (
+  SELECT t.sn
+  FROM spj AS t
+  WHERE t.sn = s.sn
+  ORDER BY t.qty DESC
+  LIMIT 5
+);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+        (SELECT DISTINCT "INNER"."sn" AS "sn" FROM (SELECT "t"."sn" AS "sn",
+        ROW_NUMBER() OVER(PARTITION BY "t"."sn" ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn"
+        FROM "spj" AS "t") AS "INNER" WHERE ("INNER"."__rn" <= 5)) AS "GNL" ON ("GNL"."sn" = "s"."sn")"#;
+    test_it(
+        "test273_in_correlated_limit_materialises",
+        original_text,
+        expected_text,
+    );
+}
+
+// Uncorrelated IN with literal non-zero OFFSET: pre-wrap does NOT fire
+// (`limit_clause_eligible_for_native_pagination` rejects literal non-zero
+// OFFSET); existing materialisation path runs.  The wrap eligibility gate
+// keeps engine-incompatible shapes on today's path.
+#[test]
+fn test274_in_limit_offset_materialises() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE s.sn IN (
+  SELECT t.sn
+  FROM spj AS t
+  ORDER BY t.qty DESC
+  LIMIT 3 OFFSET 2
+);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" INNER JOIN
+        (SELECT DISTINCT "INNER"."sn" AS "sn" FROM (SELECT "t"."sn" AS "sn",
+        ROW_NUMBER() OVER(ORDER BY "t"."qty" DESC NULLS FIRST) AS "__rn" FROM "spj" AS "t") AS "INNER"
+        WHERE (("INNER"."__rn" > 2) AND ("INNER"."__rn" <= 5))) AS "GNL" ON ("s"."sn" = "GNL"."sn")"#;
+    test_it(
+        "test274_in_limit_offset_materialises",
+        original_text,
+        expected_text,
+    );
+}
+
+// Uncorrelated NOT IN with LIMIT.  Exercises the wrap-preservation + 3VL
+// plumbing interaction: the GNL probe wraps the LIMIT-bearing source (so
+// the LIMIT survives at the inner level for native MIR TopK lowering);
+// EP_3VL takes the existing LIMIT-stripping path (LIMIT doesn't affect
+// emptiness for OFFSET=0); NP_3VL stays on the materialised RN+filter path
+// (its own `preserve_top_k_for_exists = true` opts out of the strip).
+// Line 1935's DISTINCT drop on the AntiJoin path then removes DISTINCT
+// from the GNL outer wrap.
+#[test]
+fn test275_not_in_uncorrelated_limit_preserved() {
+    let original_text = r#"
+SELECT s.sn
+FROM s AS s
+WHERE s.sn NOT IN (
+  SELECT t.sn
+  FROM spj AS t
+  ORDER BY t.qty DESC
+  LIMIT 4
+);"#;
+    let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" LEFT OUTER JOIN
+        (SELECT "INNER"."sn" AS "sn" FROM
+        (SELECT "t"."sn" AS "sn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 4) AS "INNER")
+        AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
+        (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM
+        (SELECT 1 AS "present_", "INNER"."sn" AS "sn" FROM
+        (SELECT "t"."sn" AS "sn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 4) AS "INNER") AS "NP_3VL"
+        WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"
+        LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_" FROM "spj" AS "t") AS "EP_3VL"
+        WHERE (("GNL"."sn" IS NULL) AND
+        ((("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR
+        ("EP_3VL"."present_" IS NULL)))"#;
+    test_it(
+        "test275_not_in_uncorrelated_limit_preserved",
         original_text,
         expected_text,
     );
