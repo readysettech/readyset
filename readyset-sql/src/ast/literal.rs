@@ -97,6 +97,14 @@ pub enum Literal {
     ByteArray(Vec<u8>),
     Placeholder(ItemPlaceholder),
     BitVector(#[strategy(arbitrary_bitvec(0..=64))] BitVec),
+    /// A literal tagged by the autoparameterization-exclusion machinery
+    /// (`CREATE CACHE ... WITH (AUTOPARAM (EXCLUDE_*))`) to be kept inline rather than
+    /// auto-parameterized. This variant is strictly transient: it is introduced by the
+    /// exclusion pre-pass and fully consumed (unwrapped) inside `auto_parameterize_query`, so it
+    /// must never reach hashing, Display, dataflow lowering, or any persisted form. Code that
+    /// encounters it outside the rewrite pipeline should treat it as a bug.
+    #[weight(0)]
+    Preserved(Box<Literal>),
 }
 
 impl From<bool> for Literal {
@@ -261,6 +269,9 @@ impl DialectDisplay for Literal {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
+            // Transient marker that should be consumed inside `auto_parameterize_query`. If one
+            // ever reaches Display, render the wrapped literal transparently rather than panic.
+            Literal::Preserved(inner) => write!(f, "{}", inner.display(dialect)),
         })
     }
 }

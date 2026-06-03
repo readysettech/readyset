@@ -73,11 +73,41 @@ struct AutoParameterizeVisitor {
     cap_predicates: HashSet<Expr>,
 }
 
+/// Replace a `Literal::Preserved(inner)` marker with its inner literal, in place. No-op for any
+/// other literal. The autoparam-exclusion pre-pass wraps literals it wants kept inline; this is
+/// how the marker is consumed so the literal stays a plain constant.
+fn unwrap_preserved(literal: &mut Literal) {
+    if matches!(literal, Literal::Preserved(_))
+        && let Literal::Preserved(inner) = mem::replace(literal, Literal::Null)
+    {
+        *literal = *inner;
+    }
+}
+
 impl AutoParameterizeVisitor {
     fn replace_literal(&mut self, literal: &mut Literal) {
+        // A literal frozen by the exclusion pre-pass must not be parameterized: unwrap it and
+        // leave the plain constant in place.
+        if matches!(literal, Literal::Preserved(_)) {
+            unwrap_preserved(literal);
+            return;
+        }
         let literal = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
         self.out.push((self.param_index, literal));
         self.param_index += 1;
+    }
+}
+
+/// Final sweep that unwraps every remaining `Literal::Preserved` marker to its inner literal, so
+/// no marker survives `auto_parameterize_query` regardless of which visitor arms fired.
+struct UnwrapPreservedVisitor;
+
+impl<'ast> VisitorMut<'ast> for UnwrapPreservedVisitor {
+    type Error = std::convert::Infallible;
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        unwrap_preserved(literal);
+        Ok(())
     }
 }
 
@@ -374,7 +404,11 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
         if was_supported {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
-                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit)) => {
+                    // Literals frozen by the exclusion pre-pass won't be parameterized, so they
+                    // must not influence the equals/range mixing gate: fall through as unsupported.
+                    (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(lit))
+                        if !matches!(lit, Literal::Preserved(_)) =>
+                    {
                         self.contains_equal = true;
                         if let Literal::Placeholder(_) = lit {
                             self.contains_equal_placeholder = true;
@@ -390,7 +424,10 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Column(_), op, Expr::Literal(lit)) if op.is_ordering_comparison() => {
+                    (Expr::Column(_), op, Expr::Literal(lit))
+                        if op.is_ordering_comparison()
+                            && !matches!(lit, Literal::Preserved(_)) =>
+                    {
                         self.contains_range = true;
                         if let Literal::Placeholder(_) = lit {
                             self.contains_range_placeholder = true;
@@ -523,8 +560,13 @@ pub fn auto_parameterize_query(
             // comparisons only, since we don't support mixed comparisons yet
             (false, false) => (true, false),
             // If the query contains equal and range placeholders, we bail, since we don't support
-            // mixed comparisons yet
-            (true, true) => return Ok(vec![]),
+            // mixed comparisons yet. Still consume any exclusion markers before returning.
+            (true, true) => {
+                UnwrapPreservedVisitor
+                    .visit_select_statement(query)
+                    .unwrap();
+                return Ok(vec![]);
+            }
         }
     };
 
@@ -538,6 +580,11 @@ pub fn auto_parameterize_query(
         ..Default::default()
     };
     visitor.visit_select_statement(query)?;
+    // Consume any exclusion markers that no parameterizing arm reached, so no `Literal::Preserved`
+    // survives this function.
+    UnwrapPreservedVisitor
+        .visit_select_statement(query)
+        .unwrap();
     Ok(visitor.out)
 }
 
@@ -669,6 +716,86 @@ mod tests {
             "SELECT id FROM users WHERE id = ? AND name = ?",
             vec![(0, 1.into()), (1, "bob".into())],
         );
+    }
+
+    /// A literal frozen by the autoparam-exclusion machinery (wrapped in `Literal::Preserved`, as
+    /// the pre-pass produces) is kept inline by `auto_parameterize_query` while sibling literals
+    /// are still parameterized, and no marker survives the call.
+    #[test]
+    fn autoparam_keeps_preserved_literal_inline() {
+        struct FreezeStrings;
+        impl<'ast> VisitorMut<'ast> for FreezeStrings {
+            type Error = std::convert::Infallible;
+            fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+                if matches!(literal, Literal::String(_)) {
+                    let inner = mem::replace(literal, Literal::Null);
+                    *literal = Literal::Preserved(Box::new(inner));
+                }
+                Ok(())
+            }
+        }
+
+        let dialect = Dialect::MySQL;
+        let mut query = parse_select_statement(
+            "SELECT id FROM users WHERE name = \"frozen\" AND id = 5",
+            dialect,
+        );
+        FreezeStrings.visit_select_statement(&mut query).unwrap();
+
+        let params = auto_parameterize_query(&mut query, Vec::new(), false, true).unwrap();
+
+        // `name` stays an inline constant; `id` is autoparameterized. Equality also proves no
+        // `Literal::Preserved` survived (it would not equal the plain `String`).
+        let expected = parse_select_statement(
+            "SELECT id FROM users WHERE name = \"frozen\" AND id = ?",
+            dialect,
+        );
+        assert_eq!(
+            query,
+            expected,
+            "\n  left: {}\n right: {}",
+            query.display(dialect),
+            expected.display(dialect),
+        );
+        assert_eq!(params, vec![(0, 5.into())]);
+    }
+
+    /// A frozen literal in a range position is likewise preserved, and (via the analyze-gate
+    /// guard) does not flip the query into the unsupported mixed-comparison bail.
+    #[test]
+    fn autoparam_keeps_preserved_range_literal_inline() {
+        struct FreezeIntoPreserved;
+        impl<'ast> VisitorMut<'ast> for FreezeIntoPreserved {
+            type Error = std::convert::Infallible;
+            fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+                // Freeze the range bound `10`, leaving the equality literal `5` to parameterize.
+                if matches!(literal, Literal::Integer(10) | Literal::UnsignedInteger(10)) {
+                    let inner = mem::replace(literal, Literal::Null);
+                    *literal = Literal::Preserved(Box::new(inner));
+                }
+                Ok(())
+            }
+        }
+
+        let dialect = Dialect::MySQL;
+        let mut query =
+            parse_select_statement("SELECT id FROM users WHERE id = 5 AND age > 10", dialect);
+        FreezeIntoPreserved
+            .visit_select_statement(&mut query)
+            .unwrap();
+
+        let params = auto_parameterize_query(&mut query, Vec::new(), false, true).unwrap();
+
+        let expected =
+            parse_select_statement("SELECT id FROM users WHERE id = ? AND age > 10", dialect);
+        assert_eq!(
+            query,
+            expected,
+            "\n  left: {}\n right: {}",
+            query.display(dialect),
+            expected.display(dialect),
+        );
+        assert_eq!(params, vec![(0, 5.into())]);
     }
 
     #[test]

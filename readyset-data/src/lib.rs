@@ -1439,6 +1439,11 @@ impl TryFromDialect<&Literal> for DfValue {
             Literal::Placeholder(_) => {
                 readyset_sql::failed!("Tried to convert a Placeholder literal to a DfValue")
             }
+            // `Preserved` is a transient autoparam-exclusion marker that must be unwrapped inside
+            // `auto_parameterize_query`. Reaching dataflow lowering means it leaked; fail loudly.
+            Literal::Preserved(_) => {
+                readyset_sql::failed!("Preserved literal escaped the rewrite pipeline")
+            }
         }
     }
 }

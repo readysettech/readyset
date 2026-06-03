@@ -304,6 +304,11 @@ impl TryFrom<Literal> for Value {
                     "Placeholders are not valid values".to_string(),
                 ))
             }
+            Literal::Preserved(_) => {
+                return Err(ValueConversionError(
+                    "Preserved literal markers are not valid values".to_string(),
+                ))
+            }
         })
     }
 }
