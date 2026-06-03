@@ -555,6 +555,7 @@ impl Change {
                 inner,
                 trx_cache_policy,
                 topk_buffer_multiplier,
+                autoparam,
                 ..
             }) => {
                 let mut statement = match inner {
@@ -574,6 +575,8 @@ impl Change {
                     }
                 };
 
+                let mut adapter_rewrite_params = adapter_rewrite_params;
+                adapter_rewrite_params.autoparameterize = !autoparam.off;
                 adapter_rewrites::rewrite_query(
                     &mut statement,
                     adapter_rewrite_params,

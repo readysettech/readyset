@@ -167,6 +167,10 @@ pub struct AdapterRewriteParams {
     /// flag is true, both equals and range parameters in supported positions will be
     /// autoparameterized during the adapter rewrite passes.
     pub server_supports_mixed_comparisons: bool,
+    /// Whether to run the autoparameterization pass (`ParameterizeMode::Auto`). Defaults to `true`.
+    /// `CREATE CACHE WITH (AUTOPARAM OFF)` sets this to `false` so the cache is built with
+    /// exactly the placeholders the user wrote; explicit `?`/`$N` placeholders are still numbered.
+    pub autoparameterize: bool,
 }
 
 impl AdapterRewriteParams {
@@ -176,6 +180,7 @@ impl AdapterRewriteParams {
             server_supports_topk: false,
             server_supports_pagination: false,
             server_supports_mixed_comparisons: false,
+            autoparameterize: true,
         }
     }
 }
@@ -227,6 +232,12 @@ pub fn rewrite_equivalent_parameters(
         placeholders=?reordered_placeholders
     );
     let auto_parameters = match mode {
+        ParameterizeMode::Auto if !flags.autoparameterize => {
+            // Autoparameterization explicitly disabled (CREATE CACHE WITH (AUTOPARAM OFF)).
+            // Leave any user-written placeholders in place; they're numbered below.
+            trace!(parent: &span, pass = "auto_parameterize_query", skipped = true);
+            Vec::new()
+        }
         ParameterizeMode::Auto => {
             let auto_parameters = autoparameterize::auto_parameterize_query(
                 query,
@@ -435,13 +446,19 @@ pub fn rewrite_for_readyset(
         limit_clause = %limit_clause.display(flags.dialect)
     );
 
-    let auto_parameters = autoparameterize::auto_parameterize_query(
-        query,
-        auto_parameters,
-        flags.server_supports_mixed_comparisons,
-        true,
-    )?;
-    trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
+    let auto_parameters = if flags.autoparameterize {
+        let auto_parameters = autoparameterize::auto_parameterize_query(
+            query,
+            auto_parameters,
+            flags.server_supports_mixed_comparisons,
+            true,
+        )?;
+        trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
+        auto_parameters
+    } else {
+        trace!(parent: &span, pass = "auto_parameterize_query", skipped = true);
+        auto_parameters
+    };
     let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
     trace!(parent: &span, pass="collapse_where_in", query = %query.display(flags.dialect), rewritten_in_conditions=?rewritten_in_conditions);
 
@@ -1845,6 +1862,7 @@ mod tests {
                 server_supports_topk: false,
                 server_supports_pagination: false,
                 server_supports_mixed_comparisons: false,
+                autoparameterize: true,
             }
         }
 
@@ -2048,6 +2066,80 @@ mod tests {
             assert_eq!(
                 query.display(Dialect::PostgreSQL).to_string(),
                 expected.display(Dialect::PostgreSQL).to_string()
+            );
+        }
+
+        /// Rewrite `query` with autoparameterization either on or off (the `AUTOPARAM OFF`
+        /// knob), returning the rewritten statement for output assertions.
+        fn rewrite_with_autoparam(
+            query: &str,
+            dialect: Dialect,
+            autoparameterize: bool,
+        ) -> SelectStatement {
+            let mut params = rewrite_params(dialect);
+            params.autoparameterize = autoparameterize;
+            let mut query = parse_select_statement(query, dialect);
+            rewrite_query(&mut query, params, rewrite_context(dialect))
+                .expect("Should be able to rewrite query");
+            query
+        }
+
+        fn assert_rewrites_to(actual: &SelectStatement, expected: &str, dialect: Dialect) {
+            assert_eq!(
+                actual.display(dialect).to_string(),
+                parse_select_statement(expected, dialect)
+                    .display(dialect)
+                    .to_string(),
+            );
+        }
+
+        /// With `AUTOPARAM OFF`, the pass leaves every literal inline; the default still
+        /// autoparameterizes them. Same input, opposite output.
+        #[test]
+        fn autoparam_off_preserves_literals() {
+            let input =
+                "SELECT id FROM users WHERE credit_card_number = 'look at this PII' AND id = 3";
+
+            let on = rewrite_with_autoparam(input, Dialect::PostgreSQL, true);
+            assert_rewrites_to(
+                &on,
+                "SELECT users.id FROM users \
+                 WHERE users.credit_card_number = $1 AND users.id = $2",
+                Dialect::PostgreSQL,
+            );
+
+            let off = rewrite_with_autoparam(input, Dialect::PostgreSQL, false);
+            assert_rewrites_to(
+                &off,
+                "SELECT users.id FROM users \
+                 WHERE users.credit_card_number = 'look at this PII' AND users.id = 3",
+                Dialect::PostgreSQL,
+            );
+        }
+
+        /// With `AUTOPARAM OFF`, literals the user left inline are preserved while the
+        /// placeholders they wrote by hand are still numbered normally.
+        #[test]
+        fn autoparam_off_keeps_user_placeholders() {
+            let input = "SELECT id FROM users WHERE credit_card_number = 'pii' AND id = $1";
+            let off = rewrite_with_autoparam(input, Dialect::PostgreSQL, false);
+            assert_rewrites_to(
+                &off,
+                "SELECT users.id FROM users WHERE users.credit_card_number = 'pii' AND users.id = $1",
+                Dialect::PostgreSQL,
+            );
+        }
+
+        /// `AUTOPARAM OFF` only suppresses autoparameterization; the rest of the pass (here,
+        /// reordering hand-written `$N` placeholders into positional order) still runs.
+        #[test]
+        fn autoparam_off_still_reorders_placeholders() {
+            let input = "SELECT x FROM t WHERE x = $2 AND y = $1";
+            let off = rewrite_with_autoparam(input, Dialect::PostgreSQL, false);
+            assert_rewrites_to(
+                &off,
+                "SELECT t.x FROM t WHERE t.x = $1 AND t.y = $2",
+                Dialect::PostgreSQL,
             );
         }
 
@@ -3243,6 +3335,7 @@ mod tests {
                 server_supports_topk: false,
                 server_supports_pagination: false,
                 server_supports_mixed_comparisons: false,
+                autoparameterize: true,
             }
         }
 

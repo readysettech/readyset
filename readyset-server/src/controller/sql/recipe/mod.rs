@@ -253,6 +253,7 @@ impl Recipe {
             server_supports_mixed_comparisons: self.mir_config().allow_mixed_comparisons,
             server_supports_pagination: self.mir_config().allow_paginate
                 && self.mir_config().allow_topk,
+            autoparameterize: true,
         }
     }
 

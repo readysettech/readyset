@@ -1041,6 +1041,7 @@ where
             server_supports_mixed_comparisons: options
                 .server_worker_options
                 .feature_mixed_comparisons,
+            autoparameterize: true,
         };
         let no_upstream_connections = options.no_upstream_connections;
 

@@ -3657,6 +3657,7 @@ where
         settings: &BackendSettings,
         state: &BackendState<DB>,
         inner: &CacheInner,
+        autoparameterize: bool,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
@@ -3674,10 +3675,14 @@ where
                 let deep = if settings.cache_mode.is_shallow() {
                     Err(ReadySetError::Unsupported("shallow-only mode".into()))
                 } else {
+                    // AUTOPARAM OFF turns off the autoparameterization pass for this cache so
+                    // it's built with exactly the placeholders the user wrote.
+                    let mut rewrite_params = connectors.noria.rewrite_params();
+                    rewrite_params.autoparameterize = autoparameterize;
                     match deep {
                         Ok(mut deep) => match adapter_rewrites::rewrite_query(
                             &mut deep,
-                            connectors.noria.rewrite_params(),
+                            rewrite_params,
                             &rewrite_context,
                         ) {
                             Ok(_params) => Ok(ViewCreateRequest::new(
@@ -3758,7 +3763,7 @@ where
             internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        Self::query_from_cache_inner(connectors, settings, state, inner).await
+        Self::query_from_cache_inner(connectors, settings, state, inner, true).await
     }
 
     // Determine the migration state of the deep representation, performing a dry run if necessary.
@@ -4500,10 +4505,16 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                     topk_buffer_multiplier,
-                    autoparam: _,
+                    autoparam,
                 } = create_cache_stmt;
-                let (deep, shallow, schema_generation) =
-                    Self::query_from_cache_inner(connectors, settings, state, inner).await?;
+                let (deep, shallow, schema_generation) = Self::query_from_cache_inner(
+                    connectors,
+                    settings,
+                    state,
+                    inner,
+                    !autoparam.off,
+                )
+                .await?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = state.telemetry_sender {
