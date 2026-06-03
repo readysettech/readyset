@@ -11,7 +11,7 @@ pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools, repeat_n};
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{
-    ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported,
+    ReadySetError, ReadySetResult, internal, internal_err, invalid_query_err, unsupported,
 };
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
@@ -73,6 +73,12 @@ pub struct DfQueryParameters {
     auto_parameters: Vec<(usize, Literal)>,
     pagination_parameters: AdapterPaginationParams,
     post_lookup_plan: PostLookupPlan,
+    /// When this query is served by a manually parameterized cache (`CREATE CACHE WITH
+    /// (AUTOPARAM ...)`), the cache's inline literals by position in this query's merged
+    /// parameter order; verified and stripped from each lookup key by [`Self::apply_frozen`].
+    /// Empty for ordinary queries (no manual cache) -- creation never registers a mapping with
+    /// an empty frozen set, so a non-empty value uniquely marks a manual-cache query.
+    frozen: Vec<(usize, Literal)>,
 }
 
 /// Information about parameters from a query, which allows converting a parameter list into a
@@ -504,6 +510,7 @@ pub fn rewrite_for_readyset(
             force_paginate_in_adapter,
         },
         post_lookup_plan,
+        frozen: Vec::new(),
     })
 }
 
@@ -831,6 +838,80 @@ impl DfQueryParameters {
     /// Returns the precomputed post-lookup plan for this query.
     pub fn post_lookup_plan(&self) -> &PostLookupPlan {
         &self.post_lookup_plan
+    }
+
+    /// The literals extracted by autoparameterization, by position in the merged parameter order.
+    pub fn auto_parameters(&self) -> &[(usize, Literal)] {
+        &self.auto_parameters
+    }
+
+    /// Whether any IN conditions were collapsed into parameterized equality conditions.
+    pub fn has_rewritten_in_conditions(&self) -> bool {
+        !self.rewritten_in_conditions.is_empty()
+    }
+
+    /// Mark this query as served by a manually parameterized cache (`CREATE CACHE WITH
+    /// (AUTOPARAM ...)`). `frozen` holds the cache's inline literals by position in this query's
+    /// merged parameter order; [`Self::apply_frozen`] enforces them at execute time.
+    pub fn set_frozen(&mut self, frozen: Vec<(usize, Literal)>) {
+        self.frozen = frozen;
+    }
+
+    /// When this query is served by a manually parameterized cache, verify that each key's values
+    /// at the frozen positions equal the cache's inline literals, and strip those positions so
+    /// each key is in the manual cache's parameter order. Returns `Ok(None)` when a value
+    /// differs: the cache is specialized on different constants and cannot serve this execution,
+    /// so callers must treat it as a cache miss. No-op when no frozen literals are set.
+    pub fn apply_frozen<'param, T>(
+        &self,
+        keys: Vec<Cow<'param, [T]>>,
+    ) -> ReadySetResult<Option<Vec<Cow<'param, [T]>>>>
+    where
+        T: Clone + TryFromDialect<Literal> + Debug + PartialEq,
+    {
+        if self.frozen.is_empty() {
+            return Ok(Some(keys));
+        }
+        let expected = self
+            .frozen
+            .iter()
+            .map(|(i, lit)| -> ReadySetResult<(usize, T)> {
+                Ok((*i, lit.clone().try_into_dialect(self.dialect)?))
+            })
+            .collect::<ReadySetResult<Vec<_>>>()?;
+        let mut out = Vec::with_capacity(keys.len());
+        for key in keys {
+            for (i, value) in &expected {
+                match key.get(*i) {
+                    Some(v) if v == value => {}
+                    Some(_) => return Ok(None),
+                    None => internal!(
+                        "frozen parameter index {i} out of bounds for key of length {}",
+                        key.len()
+                    ),
+                }
+            }
+            let reduced = key
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !expected.iter().any(|(fi, _)| fi == i))
+                .map(|(_, v)| v.clone())
+                .collect::<Vec<_>>();
+            out.push(Cow::Owned(reduced));
+        }
+        Ok(Some(out))
+    }
+
+    /// Whether a manually parameterized cache can serve this execution: `true` when no frozen
+    /// literals are set, or when every frozen position's value (in the merged lookup key built
+    /// from `params`) equals the cache's inline literal. Lets callers route a non-matching query
+    /// cleanly upstream instead of attempting the cache and treating the decline as a failure.
+    pub fn frozen_satisfied(&self, params: &[DfValue]) -> ReadySetResult<bool> {
+        if self.frozen.is_empty() {
+            return Ok(true);
+        }
+        let keys = self.make_keys(params)?;
+        Ok(self.apply_frozen(keys)?.is_some())
     }
 }
 
@@ -2128,6 +2209,64 @@ mod tests {
                 "SELECT users.id FROM users WHERE users.credit_card_number = 'pii' AND users.id = $1",
                 Dialect::PostgreSQL,
             );
+        }
+
+        /// `apply_frozen` verifies the incoming values at frozen positions against the manual
+        /// cache's inline literals and strips them from the key; a differing value is a miss.
+        #[test]
+        fn apply_frozen_verifies_and_reduces_keys() {
+            // Ad-hoc query: both literals are autoparameterized; the manual cache froze
+            // `credit_card_number = 'frozen'`, so position 0 is frozen and `id` is the real key.
+            let mut query = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = 'frozen' AND id = 7",
+                Dialect::PostgreSQL,
+            );
+            let mut processed = rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+            // The standard rewrite extracted both literals at positions 0 and 1.
+            assert_eq!(processed.auto_parameters().len(), 2);
+
+            processed.set_frozen(vec![(0, Literal::String("frozen".into()))]);
+
+            // Matching frozen value: key reduces to just `id`.
+            let keys = processed.make_keys::<DfValue>(&[]).unwrap();
+            let reduced = processed.apply_frozen(keys).unwrap().expect("should match");
+            assert_eq!(reduced, vec![Cow::<[DfValue]>::Owned(vec![7.into()])]);
+
+            // Mismatching frozen value: cache miss.
+            let mut other = parse_select_statement(
+                "SELECT id FROM users WHERE credit_card_number = 'other' AND id = 7",
+                Dialect::PostgreSQL,
+            );
+            let mut processed_other = rewrite_query(
+                &mut other,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+            processed_other.set_frozen(vec![(0, Literal::String("frozen".into()))]);
+            let keys = processed_other.make_keys::<DfValue>(&[]).unwrap();
+            assert!(processed_other.apply_frozen(keys).unwrap().is_none());
+        }
+
+        /// Without frozen literals set, `apply_frozen` passes keys through untouched.
+        #[test]
+        fn apply_frozen_is_noop_without_frozen() {
+            let mut query =
+                parse_select_statement("SELECT id FROM users WHERE id = 7", Dialect::PostgreSQL);
+            let processed = rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+            let keys = processed.make_keys::<DfValue>(&[]).unwrap();
+            let out = processed.apply_frozen(keys.clone()).unwrap().unwrap();
+            assert_eq!(out, keys);
         }
 
         /// `AUTOPARAM OFF` only suppresses autoparameterization; the rest of the pass (here,

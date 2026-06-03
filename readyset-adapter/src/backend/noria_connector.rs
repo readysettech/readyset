@@ -41,6 +41,7 @@ use tracing::{error, info, trace, warn};
 
 use crate::backend::SelectSchema;
 use crate::query_handler::SessionTimezone;
+use crate::query_status_cache::ManualCacheEntry;
 use crate::utils;
 
 #[derive(Clone, Debug)]
@@ -159,6 +160,21 @@ pub enum PrepareResult {
     Set {
         statement: SetStatement,
     },
+}
+
+impl PrepareResult {
+    /// Whether a manually parameterized cache (`AUTOPARAM`) backing this prepared SELECT can serve
+    /// an execution with the given `params`: `true` unless the cache's frozen literals don't match
+    /// (see [`DfQueryParameters::frozen_satisfied`]). Always `true` for non-SELECT prepares and
+    /// for SELECTs without a manual cache.
+    pub(crate) fn frozen_satisfied(&self, params: &[DfValue]) -> ReadySetResult<bool> {
+        match self {
+            PrepareResult::Select { statement, .. } => {
+                statement.processed_query_params.frozen_satisfied(params)
+            }
+            _ => Ok(true),
+        }
+    }
 }
 
 /// A single row in the variable table associated with [`QueryResult::MetaVariables`].
@@ -338,6 +354,10 @@ pub(crate) enum ExecuteSelectContext<'ctx> {
         create_if_missing: bool,
         processed_query_params: DfQueryParameters,
         schema_generation: SchemaGeneration,
+        /// Set to the cache name when the query's standard shape maps to a manually
+        /// parameterized cache (`CREATE CACHE WITH (AUTOPARAM ...)`); the read is served by that
+        /// cache. The frozen literals travel in `processed_query_params`.
+        manual_cache_name: Option<Relation>,
     },
 }
 
@@ -1463,6 +1483,7 @@ impl NoriaConnector {
         mut statement: SelectStatement,
         create_if_not_exist: bool,
         rewrite_context: &RewriteContext,
+        manual_cache: Option<&ManualCacheEntry>,
     ) -> ReadySetResult<PrepareResult> {
         // extract parameter columns *for the client*
         // note that we have to do this *before* processing the query, otherwise the
@@ -1483,7 +1504,7 @@ impl NoriaConnector {
             .collect();
 
         trace!("select::collapse where-in clauses");
-        let processed_query_params = adapter_rewrites::rewrite_query(
+        let mut processed_query_params = adapter_rewrites::rewrite_query(
             &mut statement,
             self.rewrite_params(),
             rewrite_context,
@@ -1491,15 +1512,21 @@ impl NoriaConnector {
 
         // check if we already have this query prepared
         trace!("select::access view");
-        let qname = self
-            .get_view_name_cached(
+        let qname = if let Some(manual) = manual_cache {
+            // A manually parameterized cache (`AUTOPARAM`) claims this query's standard shape:
+            // serve from it, enforcing its inline literals at execute time.
+            processed_query_params.set_frozen(manual.frozen.clone());
+            manual.name.clone()
+        } else {
+            self.get_view_name_cached(
                 &statement,
                 true,
                 create_if_not_exist,
                 Some(rewrite_context.search_path().to_vec()),
                 rewrite_context.schema_generation(),
             )
-            .await?;
+            .await?
+        };
 
         let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self.inner.get_noria_view(&qname, view_failed).await?;
@@ -1578,16 +1605,23 @@ impl NoriaConnector {
                 create_if_missing,
                 processed_query_params,
                 schema_generation,
+                manual_cache_name,
             } => {
-                let name = self
-                    .get_view_name_cached(
+                let name = if let Some(name) = manual_cache_name {
+                    // A manually parameterized cache (`AUTOPARAM`) claims this query's standard
+                    // shape: serve from it. The frozen literals are already carried by
+                    // `processed_query_params` and enforced when the lookup key is built.
+                    name
+                } else {
+                    self.get_view_name_cached(
                         statement,
                         false,
                         create_if_missing,
                         None,
                         schema_generation,
                     )
-                    .await?;
+                    .await?
+                };
                 (
                     Cow::Owned(name),
                     Cow::Owned(processed_query_params),
@@ -1886,6 +1920,13 @@ fn build_view_query<'a>(
 ) -> ReadySetResult<Option<(&'a mut ReaderHandle, ViewQuery)>> {
     let (limit, offset) = processed_query_params.limit_offset_params(params)?;
     let raw_keys = processed_query_params.make_keys(params)?;
+    // When a manually parameterized cache serves this query, the incoming values at the frozen
+    // positions must equal the cache's inline literals -- otherwise the cache is specialized on
+    // different constants and this read is a miss for it -- and are stripped so the key matches
+    // the cache's parameter order.
+    let Some(raw_keys) = processed_query_params.apply_frozen(raw_keys)? else {
+        return Ok(None);
+    };
 
     getter.build_view_query(raw_keys, limit, offset, dialect)
 }

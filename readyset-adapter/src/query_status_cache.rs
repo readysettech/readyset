@@ -75,6 +75,30 @@ pub struct QueryStatusCache {
     /// [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`]; on overflow the set is bulk-
     /// cleared and a warning is logged.
     shallow_auto_create_skip: DashSet<QueryId, ahash::RandomState>,
+
+    /// Deep caches created with manual parameterization (`CREATE CACHE WITH (AUTOPARAM ...)`),
+    /// keyed by the [`QueryId`] of the *standard* (fully autoparameterized) form of their query.
+    /// Incoming SELECTs hash to that standard form, so this map is what routes them to the
+    /// manually parameterized cache. Strictly 1:1: a second manual cache with the same standard
+    /// shape but a different manual form is rejected at creation.
+    manual_caches: DashMap<QueryId, ManualCacheEntry, ahash::RandomState>,
+}
+
+/// A deep cache created with manual parameterization (`CREATE CACHE WITH (AUTOPARAM ...)`),
+/// registered under the standard (fully autoparameterized) shape of its query. See
+/// [`QueryStatusCache::manual_caches`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualCacheEntry {
+    /// The name of the manually parameterized cache; incoming SELECTs that map here are executed
+    /// against this view.
+    pub name: Relation,
+    /// The manual (registered) form of the query, used to detect idempotent re-creates vs
+    /// genuine collisions on the standard shape.
+    pub manual: ViewCreateRequest,
+    /// The literals the cache keeps inline, by position in the standard form's merged parameter
+    /// order. At execute time the incoming values at these positions must equal these literals
+    /// (else the query is a cache miss), and are stripped from the lookup key.
+    pub frozen: Vec<(usize, readyset_sql::ast::Literal)>,
 }
 
 #[derive(Debug)]
@@ -331,6 +355,7 @@ impl QueryStatusCache {
             style: MigrationStyle::InRequestPath,
             placeholder_inlining: false,
             shallow_auto_create_skip: Default::default(),
+            manual_caches: Default::default(),
         }
     }
 
@@ -343,7 +368,48 @@ impl QueryStatusCache {
             style: MigrationStyle::InRequestPath,
             placeholder_inlining: false,
             shallow_auto_create_skip: Default::default(),
+            manual_caches: Default::default(),
         }
+    }
+
+    /// Look up the manually parameterized cache registered for the given standard-form query id.
+    pub fn manual_cache(&self, id: &QueryId) -> Option<ManualCacheEntry> {
+        self.manual_caches.get(id).map(|e| e.value().clone())
+    }
+
+    /// Register a manually parameterized cache under the standard-form query id it should serve.
+    /// Re-registering the same manual form is idempotent; a different manual form colliding on
+    /// the same standard shape is rejected, returning the existing entry so the caller can name
+    /// it in the error.
+    pub fn insert_manual_cache(
+        &self,
+        id: QueryId,
+        entry: ManualCacheEntry,
+    ) -> Result<(), Box<ManualCacheEntry>> {
+        match self.manual_caches.entry(id) {
+            Entry::Occupied(occupied) => {
+                if occupied.get().manual == entry.manual {
+                    Ok(())
+                } else {
+                    Err(Box::new(occupied.get().clone()))
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(entry);
+                Ok(())
+            }
+        }
+    }
+
+    /// Remove any manual-cache registrations pointing at the given cache name. Used by
+    /// DROP CACHE so a dropped manual cache stops capturing its standard shape.
+    pub fn remove_manual_cache_by_name(&self, name: &Relation) {
+        self.manual_caches.retain(|_, entry| entry.name != *name);
+    }
+
+    /// Remove all manual-cache registrations. Used by DROP ALL CACHES.
+    pub fn clear_manual_caches(&self) {
+        self.manual_caches.clear();
     }
 
     /// Returns true if the in-request-path shallow auto-create filter has
@@ -1069,6 +1135,48 @@ mod tests {
             Ok(SqlQuery::Select(s)) => Ok(s),
             Ok(q) => Err(anyhow::anyhow!("Not a SELECT statement: {q:?}")),
             Err(e) => Err(anyhow::anyhow!("Parsing error: {e}")),
+        }
+    }
+
+    mod manual_caches {
+        use readyset_sql::ast::Literal;
+
+        use super::*;
+
+        fn entry(name: &str, stmt: &str) -> ManualCacheEntry {
+            ManualCacheEntry {
+                name: name.into(),
+                manual: ViewCreateRequest::new(select_statement(stmt).unwrap(), vec![]),
+                frozen: vec![(1, Literal::String("frozen".into()))],
+            }
+        }
+
+        #[test]
+        fn insert_lookup_collision_and_removal() {
+            let cache = QueryStatusCache::new();
+            let lookup = ViewCreateRequest::new(
+                select_statement("SELECT * FROM t WHERE a = ? AND b = ?").unwrap(),
+                vec![],
+            );
+            let id = QueryId::from(&lookup);
+            assert!(cache.manual_cache(&id).is_none());
+
+            let e = entry("m1", "SELECT * FROM t WHERE a = ? AND b = 'frozen'");
+            cache.insert_manual_cache(id, e.clone()).unwrap();
+            assert_eq!(cache.manual_cache(&id), Some(e.clone()));
+
+            // Re-registering the same manual form is idempotent.
+            cache.insert_manual_cache(id, e.clone()).unwrap();
+
+            // A different manual form colliding on the shape is rejected and names the
+            // existing cache.
+            let other = entry("m2", "SELECT * FROM t WHERE a = ? AND b = 'other'");
+            let existing = cache.insert_manual_cache(id, other).unwrap_err();
+            assert_eq!(existing.name, e.name);
+
+            // Removal by name clears the registration.
+            cache.remove_manual_cache_by_name(&"m1".into());
+            assert!(cache.manual_cache(&id).is_none());
         }
     }
 

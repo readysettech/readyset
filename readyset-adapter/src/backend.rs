@@ -138,7 +138,7 @@ use vec1::Vec1;
 use crate::auto_cache_eligibility::auto_cache_skip_reason;
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
-use crate::query_status_cache::QueryStatusCache;
+use crate::query_status_cache::{ManualCacheEntry, QueryStatusCache};
 use crate::status_reporter::ReadySetStatusReporter;
 pub use crate::upstream_database::UpstreamPrepare;
 use crate::utils::{create_dummy_column, time_or_null};
@@ -219,6 +219,19 @@ struct PrepareSelectMeta {
     must_migrate: bool,
     should_do_noria: bool,
     trx_cache_policy: TrxCachePolicy,
+    /// Set when the query's standard shape maps to a manually parameterized cache
+    /// (`CREATE CACHE WITH (AUTOPARAM ...)`): the SELECT is served by that cache instead.
+    manual_cache: Option<ManualCacheEntry>,
+}
+
+/// Mapping data computed while creating a deep cache with autoparameterization suppressed
+/// (`CREATE CACHE WITH (AUTOPARAM ...)`): the standard (fully autoparameterized) form of the
+/// query, which is the shape incoming SELECTs hash to, and the literals the manual form keeps
+/// inline (by position in the standard form's merged parameter order).
+#[derive(Debug, Clone)]
+struct ManualMappingInfo {
+    lookup: ViewCreateRequest,
+    frozen: Vec<(usize, ast::Literal)>,
 }
 
 #[derive(Debug)]
@@ -2079,6 +2092,7 @@ where
                 select_meta.stmt.clone(),
                 select_meta.must_migrate,
                 &rewrite_context,
+                select_meta.manual_cache.as_ref(),
             ))
             .into();
 
@@ -2098,13 +2112,21 @@ where
 
         // Update noria migration state for query
         match &noria_res {
-            Some(Ok(noria_connector::PrepareResult::Select { .. })) => {
+            // Don't promote the standard (fully autoparameterized) shape when this prepare was
+            // served by a manual cache (`AUTOPARAM`): that shape has no deep cache of its own, so
+            // a stale `Successful` would make later queries attempt a non-existent view once the
+            // manual cache is dropped.
+            Some(Ok(noria_connector::PrepareResult::Select { .. }))
+                if select_meta.manual_cache.is_none() =>
+            {
                 self.state.query_status_cache.update_query_migration_state(
                     &select_meta.view_request,
                     MigrationState::Successful(CacheType::Deep),
                     None,
                 );
             }
+            // Manual-cache prepare: routed by the standard shape's mapping, leave its status alone.
+            Some(Ok(noria_connector::PrepareResult::Select { .. })) => {}
             Some(Err(e)) => {
                 if e.caused_by_view_not_found() {
                     debug!(error = %e, "View not found during mirror_prepare()");
@@ -2279,23 +2301,31 @@ where
         {
             Ok(PrepareMeta::Proxy)
         } else {
-            let should_do_readyset =
-                !matches!(status.migration_state, MigrationState::Unsupported(_));
-            let query_id = Some(QueryId::from(&view_request));
+            let query_id = QueryId::from(&view_request);
+            // A manually parameterized cache (`AUTOPARAM`) claiming this query's standard shape
+            // serves the SELECT, regardless of the standard shape's own migration state.
+            let manual_cache = self.state.query_status_cache.manual_cache(&query_id);
+            let migration_state = if manual_cache.is_some() {
+                MigrationState::Successful(CacheType::Deep)
+            } else {
+                status.migration_state
+            };
+            let should_do_readyset = !matches!(migration_state, MigrationState::Unsupported(_));
             self.state
                 .query_status_cache
                 .update_schema_generation(&view_request, rewrite_context.schema_generation());
             Ok(PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 view_request,
-                query_id,
-                migration_state: status.migration_state,
+                query_id: Some(query_id),
+                migration_state,
                 // For select statements only InRequestPath should trigger migrations
                 // synchronously, or if no upstream is present.
                 must_migrate: self.settings.migration_mode == MigrationMode::InRequestPath
                     || !self.connectors.has_fallback(),
                 should_do_noria: should_do_readyset,
                 trx_cache_policy: status.trx_cache_policy,
+                manual_cache,
             }))
         }
     }
@@ -2371,6 +2401,7 @@ where
                     must_migrate: false,
                     should_do_noria: false,
                     trx_cache_policy: TrxCachePolicy::Never,
+                    manual_cache: None,
                 })
             }
             Ok(SqlQuery::Select(stmt)) => self.plan_prepare_select(stmt, is_skip_cache).await?,
@@ -2876,6 +2907,7 @@ where
         noria: &mut NoriaConnector,
         cached_entry: &mut PreparedStatement<DB>,
         rewrite_context: &RewriteContext,
+        manual_cache: Option<&ManualCacheEntry>,
     ) -> ReadySetResult<()> {
         debug_assert!(
             cached_entry.migration_state.is_pending() || cached_entry.migration_state.is_inlined()
@@ -2894,7 +2926,7 @@ where
         let noria_prep = match &**parsed_statement {
             SqlQuery::Select(stmt) => {
                 noria
-                    .prepare_select(stmt.clone(), false, rewrite_context)
+                    .prepare_select(stmt.clone(), false, rewrite_context, manual_cache)
                     .await?
             }
             _ => internal!("Only SELECT statements can be pending migration"),
@@ -2971,11 +3003,15 @@ where
             // Use try_query_migration_state (read-only) rather than query_migration_state
             // to avoid overwriting the stored schema generation. The generation was set
             // at prepare time and must not be updated to the current generation here.
-            let new_migration_state = self
+            let (query_id, new_migration_state) = self
                 .state
                 .query_status_cache
-                .try_query_migration_state(cached_statement.as_view_request()?)
-                .1;
+                .try_query_migration_state(cached_statement.as_view_request()?);
+
+            // A manually parameterized cache (`AUTOPARAM`) created after this statement was
+            // prepared claims its standard shape; route to it even though the shape's own
+            // migration state never transitions to Successful.
+            let manual_cache = self.state.query_status_cache.manual_cache(&query_id);
 
             let search_path = cached_statement
                 .view_request
@@ -2989,9 +3025,17 @@ where
                 search_path,
             );
 
-            if matches!(new_migration_state, Some(MigrationState::Successful(_))) {
+            if manual_cache.is_some()
+                || matches!(new_migration_state, Some(MigrationState::Successful(_)))
+            {
                 // Attempt to prepare on ReadySet
-                let _ = Self::update_noria_prepare(noria, cached_statement, &rewrite_context).await;
+                let _ = Self::update_noria_prepare(
+                    noria,
+                    cached_statement,
+                    &rewrite_context,
+                    manual_cache.as_ref(),
+                )
+                .await;
             } else if let Some(MigrationState::Inlined(new_state)) = new_migration_state
                 && let MigrationState::Inlined(ref old_state) = cached_statement.migration_state
             {
@@ -3018,9 +3062,14 @@ where
                     if updated_view_cache
                         && matches!(cached_statement.prep.inner, PrepareResultInner::Upstream(_))
                     {
-                        if Self::update_noria_prepare(noria, cached_statement, &rewrite_context)
-                            .await
-                            .is_ok()
+                        if Self::update_noria_prepare(
+                            noria,
+                            cached_statement,
+                            &rewrite_context,
+                            None,
+                        )
+                        .await
+                        .is_ok()
                         {
                             cached_statement.migration_state = MigrationState::Inlined(new_state);
                         }
@@ -3126,6 +3175,25 @@ where
             | PrepareResultInner::Shallow(uprep)
                 if should_fallback =>
             {
+                Self::execute_upstream(
+                    Self::upstream_mut(upstream)?,
+                    uprep,
+                    params,
+                    exec_meta,
+                    None,
+                    &mut event,
+                    false,
+                    None,
+                )
+                .await
+            }
+            PrepareResultInner::NoriaAndUpstream(nprep, uprep)
+                if !nprep.frozen_satisfied(params)? =>
+            {
+                // A manually parameterized cache (`AUTOPARAM`) backs this statement, but its
+                // frozen literals don't match these params: the query isn't served by the cache,
+                // so go straight upstream as a clean miss rather than attempting (and declining)
+                // the readyset read.
                 Self::execute_upstream(
                     Self::upstream_mut(upstream)?,
                     uprep,
@@ -3472,11 +3540,38 @@ where
         concurrently: bool,
         topk_buffer_multiplier: Option<usize>,
         schema_generation: SchemaGeneration,
+        manual_mapping: Option<ManualMappingInfo>,
         ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
         let (query_id, name) = Self::resolve_id_and_name(name, QueryId::from(&deep));
+
+        // A manually parameterized cache owns its standard (fully autoparameterized) shape
+        // exclusively: reject the creation up front when a different manual cache already
+        // claims it, so incoming SELECTs are never routed ambiguously.
+        let manual_registration = manual_mapping
+            .map(|info| {
+                let lookup_id = QueryId::from(&info.lookup);
+                let entry = ManualCacheEntry {
+                    name: name.clone(),
+                    manual: deep.clone(),
+                    frozen: info.frozen,
+                };
+                match state.query_status_cache.manual_cache(&lookup_id) {
+                    Some(existing) if existing.manual != entry.manual => {
+                        Err(ReadySetError::CreateCacheError(format!(
+                            "manually parameterized cache {} already serves this query's \
+                             auto-parameterized shape. DROP CACHE {}, or add more parameters \
+                             so the shapes differ",
+                            existing.name.display_unquoted(),
+                            existing.name.display_unquoted(),
+                        )))
+                    }
+                    _ => Ok((lookup_id, entry)),
+                }
+            })
+            .transpose()?;
 
         if let Some(ref ddl_req) = ddl_req {
             state
@@ -3499,6 +3594,19 @@ where
             schema_generation,
         )
         .await;
+
+        if res.is_ok()
+            && let Some((lookup_id, entry)) = manual_registration
+            && let Err(existing) = state
+                .query_status_cache
+                .insert_manual_cache(lookup_id, entry)
+        {
+            // Pre-checked above; only a concurrent CREATE CACHE can race us here.
+            warn!(
+                existing = %existing.name.display_unquoted(),
+                "manual cache mapping already claimed concurrently"
+            );
+        }
 
         remove_ddl_on_error(
             &res,
@@ -3651,7 +3759,10 @@ where
         Ok(*cache_type)
     }
 
-    /// Extract the deep and shallow representations of the query.
+    /// Extract the deep and shallow representations of the query. When autoparameterization is
+    /// suppressed (`AUTOPARAM OFF`), also computes the [`ManualMappingInfo`] that routes incoming
+    /// SELECTs (which still autoparameterize fully) to the manually parameterized cache.
+    #[allow(clippy::type_complexity)]
     async fn query_from_cache_inner(
         connectors: &BackendConnectors<DB>,
         settings: &BackendSettings,
@@ -3662,6 +3773,7 @@ where
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
         SchemaGeneration,
+        Option<ManualMappingInfo>,
     )> {
         match inner {
             CacheInner::Statement { deep, shallow } => {
@@ -3672,6 +3784,7 @@ where
                 let rewrite_context =
                     Self::rewrite_context(connectors, settings, state, None).await?;
                 let schema_generation = rewrite_context.schema_generation();
+                let mut manual_mapping = None;
                 let deep = if settings.cache_mode.is_shallow() {
                     Err(ReadySetError::Unsupported("shallow-only mode".into()))
                 } else {
@@ -3680,17 +3793,56 @@ where
                     let mut rewrite_params = connectors.noria.rewrite_params();
                     rewrite_params.autoparameterize = autoparameterize;
                     match deep {
-                        Ok(mut deep) => match adapter_rewrites::rewrite_query(
-                            &mut deep,
-                            rewrite_params,
-                            &rewrite_context,
-                        ) {
-                            Ok(_params) => Ok(ViewCreateRequest::new(
-                                *deep,
-                                rewrite_context.search_path().to_owned(),
-                            )),
-                            Err(e) => Err(e),
-                        },
+                        Ok(mut deep) => {
+                            // Incoming SELECTs hash to the standard (fully autoparameterized)
+                            // form, so keep a pre-rewrite copy to compute that form alongside
+                            // the manual one.
+                            let standard_src = (!autoparameterize).then(|| (*deep).clone());
+                            match adapter_rewrites::rewrite_query(
+                                &mut deep,
+                                rewrite_params,
+                                &rewrite_context,
+                            ) {
+                                Ok(_params) => {
+                                    if let Some(mut standard) = standard_src {
+                                        let params = adapter_rewrites::rewrite_query(
+                                            &mut standard,
+                                            connectors.noria.rewrite_params(),
+                                            &rewrite_context,
+                                        )?;
+                                        let frozen = params.auto_parameters().to_vec();
+                                        // With nothing frozen the two forms agree and the
+                                        // regular lookup path already finds the cache.
+                                        if !frozen.is_empty() {
+                                            if params.has_rewritten_in_conditions() {
+                                                unsupported!(
+                                                    "AUTOPARAM is not supported for queries \
+                                                     whose IN clauses would be autoparameterized"
+                                                );
+                                            }
+                                            if standard.limit_clause != deep.limit_clause {
+                                                unsupported!(
+                                                    "AUTOPARAM is not supported when LIMIT or \
+                                                     OFFSET would be autoparameterized"
+                                                );
+                                            }
+                                            manual_mapping = Some(ManualMappingInfo {
+                                                lookup: ViewCreateRequest::new(
+                                                    standard,
+                                                    rewrite_context.search_path().to_owned(),
+                                                ),
+                                                frozen,
+                                            });
+                                        }
+                                    }
+                                    Ok(ViewCreateRequest::new(
+                                        *deep,
+                                        rewrite_context.search_path().to_owned(),
+                                    ))
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
                         Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                     }
                 };
@@ -3710,7 +3862,7 @@ where
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                 };
 
-                Ok((deep, shallow, schema_generation))
+                Ok((deep, shallow, schema_generation, manual_mapping))
             }
             CacheInner::Id(id) => match state
                 .query_status_cache
@@ -3728,6 +3880,7 @@ where
                             Ok((*deep).clone()),
                             Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                             generation,
+                            None,
                         ))
                     }
                     Query::ShallowParsed(shallow) => {
@@ -3739,6 +3892,7 @@ where
                             Err(ReadySetError::NoQueryForId { id: id.to_string() }),
                             Ok((*shallow).clone()),
                             generation,
+                            None,
                         ))
                     }
                     Query::ParseFailed(_, e) => Err(ReadySetError::UnparseableQuery(e)),
@@ -3763,7 +3917,9 @@ where
             internal!("Unexpected EXPLAIN: {explain:?}");
         };
 
-        Self::query_from_cache_inner(connectors, settings, state, inner, true).await
+        let (deep, shallow, schema_generation, _) =
+            Self::query_from_cache_inner(connectors, settings, state, inner, true).await?;
+        Ok((deep, shallow, schema_generation))
     }
 
     // Determine the migration state of the deep representation, performing a dry run if necessary.
@@ -3966,6 +4122,8 @@ where
         if let Some(view_request) = maybe_view_request {
             state.drop_view_request(&view_request);
         }
+        // A dropped manually parameterized cache must stop capturing its standard shape.
+        state.query_status_cache.remove_manual_cache_by_name(name);
         Ok(noria_connector::QueryResult::Delete {
             num_rows_deleted: result,
         })
@@ -4004,6 +4162,7 @@ where
         if matches!(cache_type, Some(CacheType::Deep) | None) {
             state.authority.remove_all_cache_ddl_requests().await?;
             connectors.noria.drop_all_caches().await?;
+            state.query_status_cache.clear_manual_caches();
         }
         if matches!(cache_type, Some(CacheType::Shallow) | None) {
             state
@@ -4507,14 +4666,15 @@ where
                     topk_buffer_multiplier,
                     autoparam,
                 } = create_cache_stmt;
-                let (deep, shallow, schema_generation) = Self::query_from_cache_inner(
-                    connectors,
-                    settings,
-                    state,
-                    inner,
-                    !autoparam.off,
-                )
-                .await?;
+                let (deep, shallow, schema_generation, manual_mapping) =
+                    Self::query_from_cache_inner(
+                        connectors,
+                        settings,
+                        state,
+                        inner,
+                        !autoparam.off,
+                    )
+                    .await?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = state.telemetry_sender {
@@ -4554,6 +4714,7 @@ where
                         *concurrently,
                         *topk_buffer_multiplier,
                         schema_generation,
+                        manual_mapping,
                         ddl_req,
                         false,
                     )
@@ -4584,6 +4745,7 @@ where
                         *concurrently,
                         *topk_buffer_multiplier,
                         schema_generation,
+                        manual_mapping,
                         ddl_req.clone(),
                         true,
                     )
@@ -5161,7 +5323,7 @@ where
         view_request: ViewCreateRequest,
         mut status: QueryStatus,
         event: &mut QueryExecutionEvent,
-        params: DfQueryParameters,
+        mut params: DfQueryParameters,
         schema_generation: SchemaGeneration,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         // Track the schema generation that was used to rewrite this query so that
@@ -5179,11 +5341,35 @@ where
             false
         };
 
+        // A manually parameterized cache (`AUTOPARAM`) claiming this query's standard shape
+        // serves the read regardless of the shape's own migration state.
+        let manual_cache = state
+            .query_status_cache
+            .manual_cache(&QueryId::from(&view_request));
+        let served_via_manual_cache = manual_cache.is_some();
+        if let Some(mc) = &manual_cache {
+            // The frozen literals travel with the params so the readsider can strip them from the
+            // lookup key; if they don't match these params the cache doesn't serve this query, so
+            // go straight upstream as a clean miss.
+            params.set_frozen(mc.frozen.clone());
+            if connectors.upstream.is_some() && !params.frozen_satisfied(&[])? {
+                return Self::query_fallback(
+                    connectors.upstream.as_mut(),
+                    original_query,
+                    event,
+                    None,
+                )
+                .await;
+            }
+        }
+
         // Test several conditions to see if we should proxy
         let upstream_exists = connectors.upstream.is_some();
         let proxy_out_of_band = settings.migration_mode != MigrationMode::InRequestPath
-            && !matches!(status.migration_state, MigrationState::Successful(_));
-        let unsupported = matches!(&status.migration_state, MigrationState::Unsupported(_));
+            && !matches!(status.migration_state, MigrationState::Successful(_))
+            && manual_cache.is_none();
+        let unsupported = matches!(&status.migration_state, MigrationState::Unsupported(_))
+            && manual_cache.is_none();
         let exceeded_network_failure = status
             .execution_info
             .as_mut()
@@ -5211,6 +5397,7 @@ where
             create_if_missing,
             processed_query_params: params,
             schema_generation,
+            manual_cache_name: manual_cache.map(|mc| mc.name),
         };
         let res = connectors.noria.execute_select(ctx, event).await;
         if status.execution_info.is_none() {
@@ -5222,8 +5409,13 @@ where
 
         match res {
             Ok(noria_ok) => {
-                // We managed to select on ReadySet, good for us
-                status.migration_state = MigrationState::Successful(CacheType::Deep);
+                // We managed to select on ReadySet, good for us. Don't promote the standard
+                // (fully autoparameterized) shape's status when the read was served by a manual
+                // cache: that shape has no deep cache of its own, so a stale `Successful` would
+                // make later queries attempt a non-existent view once the manual cache is dropped.
+                if !served_via_manual_cache {
+                    status.migration_state = MigrationState::Successful(CacheType::Deep);
+                }
                 if let Some(i) = status.execution_info.as_mut() {
                     i.execute_succeeded()
                 }
