@@ -921,6 +921,9 @@ enum CacheOptionKind {
     Coalesce(Duration),
     /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
     TopkBufferMultiplier(usize),
+    /// `AUTOPARAM OFF` or `AUTOPARAM (EXCLUDE_JOINS, ...)`. Only accepted inside the `WITH (...)`
+    /// umbrella; not part of the public SQL reference.
+    Autoparam(AutoparamControl),
 }
 
 /// Parse `TOPK_BUFFER_MULTIPLIER = <uint>`. WITH-only — never accepted in the bare-options form.
@@ -939,6 +942,63 @@ fn topk_buffer_multiplier_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], C
         usize::from_str,
     )(i)?;
     Ok((i, CacheOptionKind::TopkBufferMultiplier(value)))
+}
+
+#[derive(Clone, Copy)]
+enum AutoparamScope {
+    Joins,
+    Exists,
+    Subqueries,
+}
+
+fn autoparam_scope(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AutoparamScope> {
+    alt((
+        map(tag_no_case("exclude_joins"), |_| AutoparamScope::Joins),
+        map(tag_no_case("exclude_exists"), |_| AutoparamScope::Exists),
+        map(tag_no_case("exclude_subqueries"), |_| {
+            AutoparamScope::Subqueries
+        }),
+    ))(i)
+}
+
+/// Parse `AUTOPARAM ON`, `AUTOPARAM OFF`, or
+/// `AUTOPARAM (EXCLUDE_JOINS[, EXCLUDE_EXISTS, EXCLUDE_SUBQUERIES])`. `ON` is the explicit
+/// default. WITH-only — never accepted in the bare-options form. Not part of the public SQL
+/// reference.
+fn autoparam_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheOptionKind> {
+    map(
+        preceded(
+            tuple((tag_no_case("autoparam"), whitespace1)),
+            alt((
+                map(tag_no_case("off"), |_| AutoparamControl {
+                    off: true,
+                    ..Default::default()
+                }),
+                // `ON` is the explicit default (autoparameterize everything); lets generated DDL
+                // always emit an AUTOPARAM clause rather than conditionally omitting it.
+                map(tag_no_case("on"), |_| AutoparamControl::default()),
+                map(
+                    delimited(
+                        tuple((tag("("), whitespace0)),
+                        separated_list1(ws_sep_comma, autoparam_scope),
+                        tuple((whitespace0, tag(")"))),
+                    ),
+                    |scopes| {
+                        let mut ctrl = AutoparamControl::default();
+                        for scope in scopes {
+                            match scope {
+                                AutoparamScope::Joins => ctrl.exclude_joins = true,
+                                AutoparamScope::Exists => ctrl.exclude_exists = true,
+                                AutoparamScope::Subqueries => ctrl.exclude_subqueries = true,
+                            }
+                        }
+                        ctrl
+                    },
+                ),
+            )),
+        ),
+        CacheOptionKind::Autoparam,
+    )(i)
 }
 
 /// Parse a single `CREATE CACHE` option without consuming any trailing whitespace.
@@ -1045,6 +1105,12 @@ fn apply_cache_option<'a>(
                 return Err(error());
             }
         }
+        CacheOptionKind::Autoparam(ctrl) => {
+            if !opts.autoparam.is_default() {
+                return Err(error());
+            }
+            opts.autoparam = ctrl;
+        }
     }
     Ok(())
 }
@@ -1067,7 +1133,13 @@ fn cache_options_with_clause(
     // WITH allows everything cache_option supports, plus WITH-only knobs like
     // TOPK_BUFFER_MULTIPLIER. `separated_list0` accepts zero options, so `WITH ()` parses as an
     // empty option set.
-    let with_option = |i| alt((topk_buffer_multiplier_option, cache_option))(i);
+    let with_option = |i| {
+        alt((
+            topk_buffer_multiplier_option,
+            autoparam_option,
+            cache_option,
+        ))(i)
+    };
     let (i, parsed) = separated_list0(tuple((whitespace0, tag(","), whitespace0)), with_option)(i)?;
     let (i, _) = whitespace0(i)?;
     let (i, _) = tag(")")(i)?;
@@ -1105,6 +1177,7 @@ fn cache_options_present(opts: &CreateCacheOptions) -> bool {
         || opts.concurrently
         || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
         || opts.topk_buffer_multiplier.is_some()
+        || !opts.autoparam.is_default()
 }
 
 /// Canonicalize options that have semantically-equivalent representations. Called once after
@@ -1193,6 +1266,7 @@ pub fn create_cached_query(
                 trx_cache_policy: opts.trx_cache_policy,
                 concurrently: opts.concurrently,
                 topk_buffer_multiplier: opts.topk_buffer_multiplier,
+                autoparam: opts.autoparam,
             },
         ))
     }

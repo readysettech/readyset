@@ -5,12 +5,13 @@ use std::time::Duration;
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
-    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, CacheInner, CacheType,
-    ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
-    CreateTableStatement, CreateViewStatement, DropCacheStatement, EvictionPolicy, Expr,
-    FlushAllShallowCachesStatement, FlushCacheStatement, ReadysetHintDirective,
-    ResnapshotTableStatement, SelectStatement, SetEviction, SetReplicationPositionStatement,
-    ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, AutoparamControl, CacheInner,
+    CacheType, ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions,
+    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
+    EvictionPolicy, Expr, FlushAllShallowCachesStatement, FlushCacheStatement,
+    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SetEviction,
+    SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
+    TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -574,6 +575,81 @@ enum CacheOptionKind {
     Coalesce(Duration),
     /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
     TopkBufferMultiplier(usize),
+    /// `AUTOPARAM OFF` or `AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS)`. Suppresses
+    /// autoparameterization for the named scope; not part of the public SQL reference.
+    Autoparam(AutoparamControl),
+}
+
+/// Consume an unquoted identifier matching `name` (case-insensitive). Returns `true` and advances
+/// the parser on a match; otherwise leaves the parser untouched and returns `false`.
+fn consume_bare_ident(parser: &mut Parser, name: &str) -> bool {
+    if let TokenWithSpan {
+        token:
+            Token::Word(Word {
+                value,
+                quote_style: None,
+                ..
+            }),
+        ..
+    } = parser.peek_token()
+        && value.eq_ignore_ascii_case(name)
+    {
+        parser.next_token();
+        return true;
+    }
+    false
+}
+
+/// Parse the `AUTOPARAM` option: `AUTOPARAM ON` (explicit default), `AUTOPARAM OFF` (suppress
+/// autoparameterization entirely), or `AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS)` (suppress it for
+/// literals originating in the named clause kinds). WITH-only, like `TOPK_BUFFER_MULTIPLIER` —
+/// never accepted in the bare options form. The inner parens keep the scope-list commas from
+/// colliding with the `WITH (...)` option separator. Returns `Ok(None)` (consuming nothing) when
+/// the next token isn't `AUTOPARAM`.
+fn parse_autoparam_option(
+    parser: &mut Parser,
+) -> Result<Option<AutoparamControl>, ReadysetParsingError> {
+    if !consume_bare_ident(parser, "autoparam") {
+        return Ok(None);
+    }
+    let mut ctrl = AutoparamControl::default();
+    if consume_bare_ident(parser, "off") {
+        ctrl.off = true;
+        return Ok(Some(ctrl));
+    }
+    if consume_bare_ident(parser, "on") {
+        // Explicit default (autoparameterize everything); lets generated DDL always emit an
+        // AUTOPARAM clause rather than conditionally omitting it.
+        return Ok(Some(ctrl));
+    }
+    parser.expect_token(&Token::LParen)?;
+    loop {
+        if parser.peek_token().token == Token::RParen {
+            break;
+        }
+        if consume_bare_ident(parser, "exclude_joins") {
+            ctrl.exclude_joins = true;
+        } else if consume_bare_ident(parser, "exclude_exists") {
+            ctrl.exclude_exists = true;
+        } else if consume_bare_ident(parser, "exclude_subqueries") {
+            ctrl.exclude_subqueries = true;
+        } else {
+            return Err(ReadysetParsingError::ReadysetParsingError(format!(
+                "Unexpected token in AUTOPARAM (...): {}",
+                parser.peek_token()
+            )));
+        }
+        if !parser.consume_token(&Token::Comma) {
+            break;
+        }
+    }
+    parser.expect_token(&Token::RParen)?;
+    if ctrl.is_default() {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "AUTOPARAM requires OFF or a non-empty exclude list".into(),
+        ));
+    }
+    Ok(Some(ctrl))
 }
 
 /// Try to consume `TOPK_BUFFER_MULTIPLIER = <uint>` from the parser. Returns `Ok(Some(value))`
@@ -740,6 +816,14 @@ fn apply_cache_option(
                 ));
             }
         }
+        CacheOptionKind::Autoparam(ctrl) => {
+            if !opts.autoparam.is_default() {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "AUTOPARAM specified more than once".into(),
+                ));
+            }
+            opts.autoparam = ctrl;
+        }
     }
     Ok(())
 }
@@ -791,6 +875,8 @@ fn parse_with_cache_clause(
         // WITH-only knobs first, then fall back to the shared legacy-option parser.
         let opt = if let Some(value) = try_parse_topk_buffer_multiplier(parser)? {
             CacheOptionKind::TopkBufferMultiplier(value)
+        } else if let Some(ctrl) = parse_autoparam_option(parser)? {
+            CacheOptionKind::Autoparam(ctrl)
         } else {
             parse_single_cache_option(parser)?.ok_or_else(|| {
                 ReadysetParsingError::ReadysetParsingError(format!(
@@ -816,6 +902,7 @@ fn cache_options_present(opts: &CreateCacheOptions) -> bool {
         || opts.concurrently
         || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
         || opts.topk_buffer_multiplier.is_some()
+        || !opts.autoparam.is_default()
 }
 
 /// Expects `CREATE CACHE` was already parsed. Attempts to parse a Readyset-specific create cache
@@ -894,6 +981,7 @@ fn parse_create_cache(
         trx_cache_policy: opts.trx_cache_policy,
         concurrently: opts.concurrently,
         topk_buffer_multiplier: opts.topk_buffer_multiplier,
+        autoparam: opts.autoparam,
     }))
 }
 

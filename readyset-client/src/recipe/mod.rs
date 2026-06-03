@@ -131,6 +131,7 @@ impl From<CacheExpr> for CreateCacheStatement {
             concurrently: false,
             unparsed_create_cache_statement: None,
             topk_buffer_multiplier: value.topk_buffer_multiplier,
+            autoparam: Default::default(),
         }
     }
 }

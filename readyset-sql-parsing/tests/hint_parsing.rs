@@ -587,6 +587,94 @@ fn parse_create_cache_hint_topk_buffer_multiplier_duplicate_rejected() {
     assert!(result.is_err());
 }
 
+// --- AUTOPARAM option tests (option is not part of the public SQL reference) ---
+
+fn parse_create_cache_statement(sql: &str) -> readyset_sql::ast::CreateCacheStatement {
+    let query = parse_query(Dialect::MySQL, sql).expect("should parse");
+    let SqlQuery::CreateCache(stmt) = query else {
+        panic!("expected CreateCache");
+    };
+    stmt
+}
+
+#[test]
+fn parse_create_cache_autoparam_off() {
+    let stmt = parse_create_cache_statement(
+        "CREATE CACHE c WITH (AUTOPARAM OFF) FROM SELECT id FROM t WHERE x = 1",
+    );
+    assert!(stmt.autoparam.off);
+    assert!(!stmt.autoparam.exclude_joins);
+    assert!(!stmt.autoparam.exclude_exists);
+    assert!(!stmt.autoparam.exclude_subqueries);
+}
+
+#[test]
+fn parse_create_cache_autoparam_on() {
+    // `AUTOPARAM ON` is the explicit default: accepted, with no exclusions set.
+    let stmt = parse_create_cache_statement(
+        "CREATE CACHE c WITH (AUTOPARAM ON) FROM SELECT id FROM t WHERE x = 1",
+    );
+    assert!(stmt.autoparam.is_default());
+}
+
+#[test]
+fn parse_create_cache_autoparam_excludes() {
+    let stmt = parse_create_cache_statement(
+        "CREATE CACHE c WITH (AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS, EXCLUDE_SUBQUERIES)) \
+         FROM SELECT id FROM t WHERE x = 1",
+    );
+    assert!(!stmt.autoparam.off);
+    assert!(stmt.autoparam.exclude_joins);
+    assert!(stmt.autoparam.exclude_exists);
+    assert!(stmt.autoparam.exclude_subqueries);
+}
+
+#[test]
+fn create_cache_autoparam_display_roundtrip() {
+    use readyset_sql::DialectDisplay;
+
+    for sql in [
+        "CREATE CACHE c WITH (AUTOPARAM OFF) FROM SELECT id FROM t WHERE x = 1",
+        "CREATE CACHE c WITH (AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS)) \
+         FROM SELECT id FROM t WHERE x = 1",
+    ] {
+        let stmt = parse_create_cache_statement(sql);
+        let displayed = stmt.display(Dialect::MySQL).to_string();
+        let reparsed = parse_create_cache_statement(&displayed);
+        assert_eq!(
+            stmt.autoparam, reparsed.autoparam,
+            "roundtrip failed for: {displayed}"
+        );
+    }
+}
+
+#[test]
+fn parse_create_cache_autoparam_duplicate_rejected() {
+    let result = parse_query(
+        Dialect::MySQL,
+        "CREATE CACHE c WITH (AUTOPARAM OFF, AUTOPARAM OFF) FROM SELECT id FROM t",
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_create_cache_autoparam_empty_list_rejected() {
+    let result = parse_query(
+        Dialect::MySQL,
+        "CREATE CACHE c WITH (AUTOPARAM ()) FROM SELECT id FROM t",
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn parse_create_cache_autoparam_unknown_scope_rejected() {
+    let result = parse_query(
+        Dialect::MySQL,
+        "CREATE CACHE c WITH (AUTOPARAM (EXCLUDE_EVERYTHING)) FROM SELECT id FROM t",
+    );
+    assert!(result.is_err());
+}
+
 // --- SKIP CACHE hint directive tests ---
 
 #[test]

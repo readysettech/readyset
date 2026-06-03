@@ -152,6 +152,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::Never, // should cause error
             concurrently: false,
             topk_buffer_multiplier: None,
+            autoparam: Default::default(),
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();
@@ -212,6 +213,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::Always, // should succeed
             concurrently: false,
             topk_buffer_multiplier: None,
+            autoparam: Default::default(),
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();
@@ -260,6 +262,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::Never,
             concurrently: false,
             topk_buffer_multiplier: None,
+            autoparam: Default::default(),
         };
 
         let result = cache_stmt.detect_and_validate_bucket_always();

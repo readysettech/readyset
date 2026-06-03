@@ -231,6 +231,7 @@ impl ArbitraryQueryParameters {
             concurrently: false,
             unparsed_create_cache_statement: None,
             topk_buffer_multiplier: None,
+            autoparam: Default::default(),
         };
 
         conn.query_drop(create_cache_query.display(conn.dialect()).to_string())

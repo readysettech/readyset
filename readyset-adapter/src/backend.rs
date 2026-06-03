@@ -4500,6 +4500,7 @@ where
                     concurrently,
                     unparsed_create_cache_statement,
                     topk_buffer_multiplier,
+                    autoparam: _,
                 } = create_cache_stmt;
                 let (deep, shallow, schema_generation) =
                     Self::query_from_cache_inner(connectors, settings, state, inner).await?;

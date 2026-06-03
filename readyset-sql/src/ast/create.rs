@@ -1105,6 +1105,35 @@ impl TrxCachePolicy {
     }
 }
 
+/// Controls the adapter's autoparameterization pass for a `CREATE CACHE`. Intentionally left out
+/// of the public SQL reference; for internal and power-user use.
+///
+/// Autoparameterization can make some queries uncacheable or produce pathological indices, so
+/// power users sometimes want to keep specific literals inline and parameterize by hand. Set via
+/// `WITH (AUTOPARAM OFF)` (skip entirely) or `WITH (AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS,
+/// EXCLUDE_SUBQUERIES))` (preserve literals originating in the named clause kinds). `AUTOPARAM ON`
+/// is the explicit default (every default field `false`), accepted so generated DDL can always
+/// emit an `AUTOPARAM` clause. Only affects the deep (`Auto`) parameterization path.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, Arbitrary)]
+pub struct AutoparamControl {
+    /// `AUTOPARAM OFF`: skip autoparameterization entirely; preserve every literal.
+    pub off: bool,
+    /// `EXCLUDE_JOINS`: preserve literals in JOIN ON conditions.
+    pub exclude_joins: bool,
+    /// `EXCLUDE_EXISTS`: preserve literals originating in `EXISTS` / `NOT EXISTS` clauses.
+    pub exclude_exists: bool,
+    /// `EXCLUDE_SUBQUERIES`: preserve literals originating in `IN (SELECT ...)`, derived tables,
+    /// and scalar subqueries (predicates the unnest/inline passes hoist into the outer query).
+    pub exclude_subqueries: bool,
+}
+
+impl AutoparamControl {
+    /// True when no exclusions are requested (autoparameterize normally).
+    pub fn is_default(&self) -> bool {
+        !self.off && !self.exclude_joins && !self.exclude_exists && !self.exclude_subqueries
+    }
+}
+
 /// Optional `CREATE CACHE` arguments. This struct is only used for parsing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateCacheOptions {
@@ -1118,6 +1147,8 @@ pub struct CreateCacheOptions {
     /// `None` (unset) preserves the legacy default of `buffered = k`. Only settable inside the
     /// `WITH (...)` umbrella, and only meaningful for queries that lower to a TopK node.
     pub topk_buffer_multiplier: Option<usize>,
+    /// Autoparameterization control; see [`AutoparamControl`].
+    pub autoparam: AutoparamControl,
 }
 
 /// `CREATE [DEEP|SHALLOW] CACHE [POLICY TTL N SECONDS] [CONCURRENTLY] [ALWAYS] [<name>] FROM ...`
@@ -1159,6 +1190,10 @@ pub struct CreateCacheStatement {
     /// [`CreateCacheOptions::topk_buffer_multiplier`]. Only settable via the `WITH (...)` clause.
     #[serde(default)]
     pub topk_buffer_multiplier: Option<usize>,
+    /// Autoparameterization control; see [`AutoparamControl`]. Not part of the public SQL
+    /// reference.
+    #[serde(default)]
+    pub autoparam: AutoparamControl,
 }
 
 // `trx_cache_policy` is intentionally excluded from `Eq`/`Hash`: two `CREATE CACHE`
@@ -1173,6 +1208,7 @@ impl PartialEq for CreateCacheStatement {
             && self.inner == other.inner
             && self.concurrently == other.concurrently
             && self.topk_buffer_multiplier == other.topk_buffer_multiplier
+            && self.autoparam == other.autoparam
     }
 }
 
@@ -1187,6 +1223,7 @@ impl Hash for CreateCacheStatement {
         self.inner.hash(state);
         self.concurrently.hash(state);
         self.topk_buffer_multiplier.hash(state);
+        self.autoparam.hash(state);
     }
 }
 
@@ -1209,7 +1246,8 @@ impl DialectDisplay for CreateCacheStatement {
                 || self.coalesce_ms.is_some()
                 || self.concurrently
                 || !matches!(self.trx_cache_policy, TrxCachePolicy::Never)
-                || self.topk_buffer_multiplier.is_some();
+                || self.topk_buffer_multiplier.is_some()
+                || !self.autoparam.is_default();
             if has_options {
                 write!(f, "WITH (")?;
                 let mut first = true;
@@ -1246,6 +1284,36 @@ impl DialectDisplay for CreateCacheStatement {
                 if let Some(m) = self.topk_buffer_multiplier {
                     sep(f)?;
                     write!(f, "TOPK_BUFFER_MULTIPLIER = {m}")?;
+                }
+                if self.autoparam.off {
+                    sep(f)?;
+                    write!(f, "AUTOPARAM OFF")?;
+                } else if self.autoparam.exclude_joins
+                    || self.autoparam.exclude_exists
+                    || self.autoparam.exclude_subqueries
+                {
+                    sep(f)?;
+                    write!(f, "AUTOPARAM (")?;
+                    let mut excl_first = true;
+                    let mut excl_sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
+                        if !std::mem::take(&mut excl_first) {
+                            write!(f, ", ")?;
+                        }
+                        Ok(())
+                    };
+                    if self.autoparam.exclude_joins {
+                        excl_sep(f)?;
+                        write!(f, "EXCLUDE_JOINS")?;
+                    }
+                    if self.autoparam.exclude_exists {
+                        excl_sep(f)?;
+                        write!(f, "EXCLUDE_EXISTS")?;
+                    }
+                    if self.autoparam.exclude_subqueries {
+                        excl_sep(f)?;
+                        write!(f, "EXCLUDE_SUBQUERIES")?;
+                    }
+                    write!(f, ")")?;
                 }
                 write!(f, ") ")?;
             }

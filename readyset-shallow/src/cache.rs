@@ -241,6 +241,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             trx_cache_policy: info.trx_cache_policy,
             concurrently: false,
             topk_buffer_multiplier: None,
+            autoparam: Default::default(),
         }
     }
 }

@@ -353,6 +353,7 @@ impl WorkloadSpec {
                     trx_cache_policy: TrxCachePolicy::Never,
                     concurrently: false,
                     topk_buffer_multiplier: None,
+                    autoparam: Default::default(),
                 };
 
                 let _ = conn
