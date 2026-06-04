@@ -568,7 +568,17 @@ fn build_select_count_zero_mappings_recursive(
     // Keep existing behavior for direct COUNT-like fields at this level
     analyse_lone_aggregates_subquery_fields(stmt, stmt_alias.clone(), out_map)?;
 
-    // Supplement for wrapper-by-projection cases
+    // Supplement for wrapper-by-projection cases.
+    //
+    // `or_insert` here is intentional: `analyse_lone_aggregates_subquery_fields`
+    // ran first and already inserted for any field whose `f_expr` is a
+    // direct lone aggregate (e.g. `count(*) AS cnt`).  This loop then RE-VISITS
+    // those same fields via `extract_aggregate_fallback_for_expr` (which also
+    // returns `Some` for the lone-aggregate shape).  Without `or_insert` we'd
+    // false-positive on those re-visits.  The genuine collision case (two
+    // different wrapper-by-projection fields sharing an effective output name)
+    // would still be silently keep-first here — narrower bug surface than the
+    // lone-aggregate path; tracked separately if it surfaces.
     for f in &stmt.fields {
         let (expr, alias) = expect_field_as_expr(f);
         if let Some(zero_expr) = extract_aggregate_fallback_for_expr(expr, stmt)? {
@@ -3035,6 +3045,39 @@ FROM
             "nested_lateral_four_levels_no_flatten",
             original_text,
             expected_text,
+        );
+    }
+
+    /// Pre-fix `analyse_lone_aggregates_subquery_fields` used `HashMap::insert`
+    /// which silently overwrites — two lone-aggregate fields sharing an effective
+    /// output name would lose one of the two COALESCE-zero mappings.  On
+    /// empty-LATERAL outer rows the dropped column would surface NULL instead of
+    /// its zero-fallback, diverging from the per-aggregate semantics.
+    ///
+    /// In normal pipeline paths, upstream `fix_duplicate_aliases` (run via the
+    /// correlation-key projection step) deduplicates the body's fields before
+    /// this helper sees them, so the collision is rare end-to-end.  But the
+    /// helper is `pub(crate)`-callable from elsewhere, and pipeline ordering
+    /// could change — the defensive duplicate-detection is load-bearing.
+    ///
+    /// Post-fix the helper rejects the shape with an `internal!` error.  Both
+    /// aggregates here have constant non-null fallbacks (count → 0) so both
+    /// reach the insert path.  `sum` would NOT exercise the collision — its
+    /// fallback is NULL, not constant non-null.
+    #[test]
+    fn analyse_lone_aggregates_errors_on_duplicate_alias() {
+        let body = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT count(*) AS c, count(test2.i) AS c FROM test2",
+        )
+        .expect("body parses");
+        let mut fields_map = HashMap::new();
+        let result =
+            super::analyse_lone_aggregates_subquery_fields(&body, "sub".into(), &mut fields_map);
+        assert!(
+            result.is_err(),
+            "expected error on duplicate effective-name lone-aggregate mapping; got Ok with map containing {} entries",
+            fields_map.len(),
         );
     }
 }

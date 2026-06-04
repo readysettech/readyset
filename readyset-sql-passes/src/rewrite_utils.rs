@@ -15,6 +15,7 @@ use readyset_sql::ast::{
     SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::mem;
@@ -1584,13 +1585,28 @@ pub(crate) fn analyse_lone_aggregates_subquery_fields(
                 name: f_alias.clone(),
                 table: Some(stmt_alias.clone().into()),
             };
-            fields_map.insert(
-                f_col.clone(),
-                Ok(Expr::Call(FunctionExpr::Coalesce(vec![
-                    Expr::Column(f_col),
-                    fallback,
-                ]))),
-            );
+            // Detect duplicate-key collisions explicitly.  `HashMap::insert` would
+            // silently overwrite the first mapping when two fields share an effective
+            // output name (e.g. two same-aliased aggregates, or one alias colliding
+            // with another field's default-of-bare-column).  Either way the lost
+            // mapping yields a wrong COALESCE rewrite for at least one of the
+            // columns.  Upstream passes typically run `fix_duplicate_aliases` before
+            // reaching here (via correlation-key projection on the body), so a
+            // collision at this point indicates a pipeline-ordering anomaly.
+            match fields_map.entry(f_col.clone()) {
+                Entry::Vacant(e) => {
+                    e.insert(Ok(Expr::Call(FunctionExpr::Coalesce(vec![
+                        Expr::Column(f_col),
+                        fallback,
+                    ]))));
+                }
+                Entry::Occupied(e) => {
+                    internal!(
+                        "Duplicate output column name '{}' in aggregate-fallback mapping",
+                        e.key().name
+                    );
+                }
+            }
         }
     }
     Ok(())
