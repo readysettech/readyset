@@ -1518,14 +1518,15 @@ where
                     runtime.shutdown_background();
                 })?;
         }
-
-        let shallow_max_capacity = options.shallow_memory_percent.and_then(|percent| {
-            if memory_limit > 0 {
-                Some((memory_limit as f64 * percent / 100.0) as u64)
-            } else {
-                None
-            }
-        });
+        let shallow_max_capacity = options
+            .shallow_memory_percent
+            .filter(|_| memory_limit > 0)
+            .map(|percent| (memory_limit as f64 * percent / 100.0) as u64)
+            .or_else(|| {
+                (memory_limit > 0 && options.cache_mode == CacheMode::Shallow)
+                    .then_some(memory_limit as u64)
+            });
+        info!("Total Shallow memory: {:?}", shallow_max_capacity);
         let shallow = Arc::new(CacheManager::<
             _,
             <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
