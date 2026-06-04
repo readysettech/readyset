@@ -2315,6 +2315,7 @@ mod failure_injection_tests {
             unparsed_stmt: "CREATE CACHE test_query FROM SELECT * FROM users;".to_string(),
             schema_search_path: vec!["postgres".into(), "public".into()],
             dialect: Dialect::DEFAULT_POSTGRESQL,
+            cache_name: Some("test_query".into()),
         };
         assert_eq!(expected, *cache_ddl_requests.first().unwrap());
 

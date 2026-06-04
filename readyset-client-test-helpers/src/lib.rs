@@ -18,10 +18,10 @@ use readyset_adapter::query_status_cache::{
 };
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
-    Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase,
-    ViewsSynchronizer,
+    recreate_shallow_caches, Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig,
+    UpstreamDatabase, ViewsSynchronizer,
 };
-use readyset_client::consensus::{Authority, LocalAuthorityStore};
+use readyset_client::consensus::{Authority, AuthorityControl, LocalAuthorityStore};
 use readyset_client_metrics::QueryLogMode;
 use readyset_data::upstream_system_props::{
     init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
@@ -208,6 +208,7 @@ enum FallbackBehavior {
     #[default]
     NoFallback,
     UseReplicationUpstream,
+    UpstreamWithoutReplication,
 }
 
 /// A builder for an adapter integration test case.
@@ -238,6 +239,7 @@ pub struct TestBuilder {
     replication_lag_interval: Option<u16>,
     replication_heartbeat: bool,
     auth_plugin: AuthPlugin,
+    upstream_only_db: Option<String>,
 }
 
 impl Default for TestBuilder {
@@ -273,6 +275,7 @@ impl TestBuilder {
             replication_lag_interval: None,
             replication_heartbeat: false,
             auth_plugin: AuthPlugin::default(),
+            upstream_only_db: None,
         }
     }
 
@@ -309,6 +312,13 @@ impl TestBuilder {
         } else {
             FallbackBehavior::NoFallback
         };
+        self
+    }
+
+    /// Configure the adapter to proxy to an upstream without the server replicating from it.
+    pub fn fallback_without_replication(mut self, db_name: &str) -> Self {
+        self.fallback = FallbackBehavior::UpstreamWithoutReplication;
+        self.upstream_only_db = Some(db_name.to_string());
         self
     }
 
@@ -452,8 +462,22 @@ impl TestBuilder {
             }
         };
 
+        // Adapter upstream without server replication: derive an upstream URL but do not configure
+        // CDC, so the adapter can fall through to upstream (and serve shallow caches) while the
+        // server does not snapshot or stream.
+        let upstream_only_db = (self.fallback == FallbackBehavior::UpstreamWithoutReplication)
+            .then(|| {
+                self.upstream_only_db
+                    .as_deref()
+                    .unwrap_or("noria")
+                    .to_owned()
+            });
+        let upstream_only_url = upstream_only_db.as_deref().map(A::upstream_url);
+
         if self.recreate_database {
             if let Some((_, db_name)) = &cdc_url_and_db_name {
+                A::recreate_database(db_name).await;
+            } else if let Some(db_name) = &upstream_only_db {
                 A::recreate_database(db_name).await;
             }
         }
@@ -556,17 +580,40 @@ impl TestBuilder {
         let cdc_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         let mut cdc_upstream_config = if let Some(f) = &cdc_url {
             UpstreamConfig::from_url(f)
+        } else if let Some(url) = &upstream_only_url {
+            UpstreamConfig::from_url(url)
         } else {
             UpstreamConfig::default()
         };
         cdc_upstream_config.replication_heartbeat = self.replication_heartbeat;
         let shallow = Arc::new(CacheManager::new(None, None));
+
+        // Replay any persisted shallow caches, mirroring the production adapter startup.
+        let mut rh = ReadySetHandle::new(authority.clone()).await;
+        let rewrite_params = rh.adapter_rewrite_params().await.unwrap();
+        let shallow_ddl = authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap_or_default();
+        recreate_shallow_caches(
+            shallow.clone(),
+            query_status_cache,
+            shallow_ddl,
+            self.parsing_preset,
+            rewrite_params,
+            self.backend_builder.get_default_ttl_ms(),
+            self.backend_builder.get_default_coalesce_ms(),
+            self.backend_builder.get_cache_mode(),
+        )
+        .await
+        .unwrap();
+
         let shared_upstream_config = self
             .backend_builder
             .get_upstream_config()
             .cloned()
             .unwrap_or_else(|| Arc::new(RwLock::new(cdc_upstream_config.clone())));
-        let shallow_refresh_pool = if cdc_url.is_some() {
+        let shallow_refresh_pool = if cdc_url.is_some() || upstream_only_url.is_some() {
             Some(ShallowRefreshPool::<A::Upstream>::new(
                 &tokio::runtime::Handle::current(),
                 Arc::clone(&shared_upstream_config),
@@ -632,7 +679,8 @@ impl TestBuilder {
 
                     let fallback_upstream = match self.fallback {
                         FallbackBehavior::NoFallback => None,
-                        FallbackBehavior::UseReplicationUpstream => match &upstream_url {
+                        FallbackBehavior::UseReplicationUpstream
+                        | FallbackBehavior::UpstreamWithoutReplication => match &upstream_url {
                             Some(url) => Some(A::make_upstream(url.clone()).await),
                             None => cdc_upstream,
                         },

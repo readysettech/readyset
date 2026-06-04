@@ -1597,10 +1597,194 @@ async fn caches_go_in_authority_list() {
         unparsed_stmt,
         schema_search_path,
         dialect,
+        cache_name,
     } = res.first().unwrap();
     assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t");
     assert_eq!(*dialect, Dialect::DEFAULT_POSTGRESQL);
     assert!(schema_search_path.is_empty());
+    assert_eq!(*cache_name, Some("q".into()));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_cache_removes_authority_entry() {
+    readyset_tracing::init_test_logging();
+
+    let (builder, authority, _dir) =
+        setup_standalone_with_authority("dropping_cache_removes_authority_entry", None);
+    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
+
+    let conn = connect(config).await;
+    for query in [
+        "CREATE TABLE t (x int)",
+        "CREATE CACHE q FROM SELECT x FROM t",
+        "DROP CACHE q",
+    ] {
+        conn.simple_query(query).await.expect("query failed");
+        sleep().await;
+    }
+
+    let reqs = authority.cache_ddl_requests().await.unwrap();
+    assert!(reqs.is_empty(), "drop should leave no stored entry: {reqs:?}");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_drop_create_stores_one_entry() {
+    readyset_tracing::init_test_logging();
+
+    let (builder, authority, _dir) =
+        setup_standalone_with_authority("create_drop_create_stores_one_entry", None);
+    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
+
+    let conn = connect(config).await;
+    for query in [
+        "CREATE TABLE t (x int)",
+        "CREATE CACHE q FROM SELECT x FROM t",
+        "DROP CACHE q",
+        "CREATE CACHE q FROM SELECT x FROM t",
+    ] {
+        conn.simple_query(query).await.expect("query failed");
+        sleep().await;
+    }
+
+    let reqs = authority.cache_ddl_requests().await.unwrap();
+    assert_eq!(
+        reqs.len(),
+        1,
+        "create/drop/create should store one entry: {reqs:?}"
+    );
+    assert_eq!(reqs[0].cache_name, Some("q".into()));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn dropping_shallow_cache_removes_entry() {
+    readyset_tracing::init_test_logging();
+
+    let (builder, authority, _dir) =
+        setup_standalone_with_authority("dropping_shallow_cache_removes_entry", None);
+    let (config, _handle, shutdown_tx) = builder
+        .fallback_without_replication("noria")
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let conn = connect(config).await;
+    for query in [
+        "CREATE TABLE shallow (a INT)",
+        "INSERT INTO shallow VALUES (42)",
+        "CREATE SHALLOW CACHE q FROM SELECT a FROM shallow",
+    ] {
+        conn.simple_query(query).await.expect("query failed");
+        sleep().await;
+    }
+
+    assert_eq!(
+        authority.shallow_cache_ddl_requests().await.unwrap().len(),
+        1
+    );
+    assert!(
+        authority.cache_ddl_requests().await.unwrap().is_empty(),
+        "creating a shallow cache must not write to the deep list",
+    );
+
+    conn.simple_query("DROP CACHE q").await.expect("drop failed");
+    sleep().await;
+
+    assert!(
+        authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap()
+            .is_empty(),
+        "dropped shallow cache should leave no stored entry",
+    );
+    assert!(
+        authority.cache_ddl_requests().await.unwrap().is_empty(),
+        "dropping a shallow cache must not write to the deep list",
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn dropped_shallow_cache_does_not_resurrect_after_restart() {
+    readyset_tracing::init_test_logging();
+
+    let dir = {
+        let (builder, authority, dir) =
+            setup_standalone_with_authority("shallow_no_resurrect", None);
+        let (config, handle, shutdown_tx) = builder
+            .fallback_without_replication("noria")
+            .build::<PostgreSQLAdapter>()
+            .await;
+
+        let mut conn = DatabaseURL::from(config)
+            .connect(&ServerCertVerification::Default)
+            .await
+            .unwrap();
+        for query in [
+            "CREATE TABLE shallow (a INT)",
+            "INSERT INTO shallow VALUES (42)",
+            "CREATE SHALLOW CACHE q FROM SELECT a FROM shallow",
+        ] {
+            conn.simple_query(query).await.expect("query failed");
+            sleep().await;
+        }
+
+        // Warm the cache so the second read is served by the shallow cache.
+        conn.simple_query("SELECT a FROM shallow").await.unwrap();
+        conn.simple_query("SELECT a FROM shallow").await.unwrap();
+        let info = explain_last_statement(&mut conn).await;
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+
+        conn.simple_query("DROP CACHE q").await.expect("drop failed");
+        sleep().await;
+        assert!(authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap()
+            .is_empty());
+
+        drop(conn);
+        shutdown_tx.shutdown().await;
+        sleep().await;
+        drop(handle);
+        while std::sync::Arc::strong_count(&authority) > 1 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+        dir
+    };
+
+    // Restart against the same storage and authority. The harness replays persisted shallow
+    // caches; the dropped one must not come back.
+    let (builder, _authority, _dir) =
+        setup_standalone_with_authority("shallow_no_resurrect", Some(dir));
+    let (config, _handle, shutdown_tx) = builder
+        .recreate_database(false)
+        .fallback_without_replication("noria")
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let mut conn = DatabaseURL::from(config)
+        .connect(&ServerCertVerification::Default)
+        .await
+        .unwrap();
+    conn.simple_query("SELECT a FROM shallow").await.unwrap();
+    conn.simple_query("SELECT a FROM shallow").await.unwrap();
+    let info = explain_last_statement(&mut conn).await;
+    assert!(
+        !matches!(info.destination, QueryDestination::ReadysetShallow),
+        "dropped shallow cache resurrected after restart: {:?}",
+        info.destination,
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1858,34 +2042,6 @@ mod multiple_create_and_drop {
 
         shutdown_tx.shutdown().await;
     }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn drop_caches_go_in_authority_list() {
-    readyset_tracing::init_test_logging();
-
-    let (builder, authority, _) =
-        setup_standalone_with_authority("drop_caches_go_in_authority_list", None);
-    let (config, _handle, shutdown_tx) = builder.build::<PostgreSQLAdapter>().await;
-
-    let queries = [
-        "CREATE TABLE t (x int);",
-        "CREATE CACHE q FROM SELECT x FROM t;",
-        "DROP CACHE q;",
-    ];
-
-    let conn = connect(config).await;
-    for query in queries {
-        let _res = conn.simple_query(query).await.expect("query failed");
-        // give it some time to propagate
-        sleep().await;
-    }
-
-    let res = authority.cache_ddl_requests().await.unwrap();
-    let unparsed_stmt = &res.get(1).unwrap().unparsed_stmt;
-    assert_eq!(unparsed_stmt, "DROP CACHE q");
-
-    shutdown_tx.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

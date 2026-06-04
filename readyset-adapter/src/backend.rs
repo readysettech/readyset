@@ -111,8 +111,8 @@ use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::ast::{
     self, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
-    CreateMcpTokenStatement, DeallocateStatement, DropAllCachesStatement, DropCacheStatement,
-    DropMcpTokenStatement, ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
+    CreateMcpTokenStatement, DeallocateStatement, DropAllCachesStatement, DropMcpTokenStatement,
+    ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
     McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
     SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
     StatementIdentifier, TrxCachePolicy, UseStatement,
@@ -802,6 +802,18 @@ impl BackendBuilder {
         &self.users
     }
 
+    pub fn get_cache_mode(&self) -> CacheMode {
+        self.cache_mode
+    }
+
+    pub fn get_default_ttl_ms(&self) -> u64 {
+        self.default_ttl_ms
+    }
+
+    pub fn get_default_coalesce_ms(&self) -> u64 {
+        self.default_coalesce_ms
+    }
+
     pub fn require_authentication(mut self, require_authentication: bool) -> Self {
         self.require_authentication = require_authentication;
         self
@@ -1276,7 +1288,6 @@ where
         &self,
         name: Option<&Relation>,
         query_id: Option<QueryId>,
-        ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
         let info = self
             .shallow
@@ -1285,20 +1296,25 @@ where
 
         self.shallow.drop_cache(name, query_id.as_ref())?;
 
-        if let Some(CacheInfo {
+        // The cache held the exact `CREATE CACHE` request that was persisted; remove that entry.
+        // Matching the stored request (rather than the drop statement) also handles entries
+        // written before `cache_name` existed.
+        let Some(CacheInfo {
             query,
             schema_search_path,
+            ddl_req,
             ..
         }) = info
-        {
-            let view_request = ShallowViewRequest::new(query, schema_search_path);
-            self.drop_shallow_view_request(&view_request);
+        else {
+            return Ok(());
         };
+
+        let view_request = ShallowViewRequest::new(query, schema_search_path);
+        self.drop_shallow_view_request(&view_request);
 
         if let Err(e) = retry_with_exponential_backoff!(
             || async {
-                self
-                    .authority
+                self.authority
                     .remove_shallow_cache_ddl_request(ddl_req.clone())
                     .await
             },
@@ -1306,10 +1322,7 @@ where
             delay: 1,
             backoff: 2,
         ) {
-            warn!(
-                error = %e,
-                "Failed to remove shallow cache DDL request"
-            );
+            warn!(error = %e, "Failed to remove shallow cache DDL request");
         }
 
         Ok(())
@@ -3536,7 +3549,7 @@ where
         topk_buffer_multiplier: Option<usize>,
         schema_generation: SchemaGeneration,
         manual_mapping: Option<ManualMappingInfo>,
-        ddl_req: Option<CacheDDLRequest>,
+        mut ddl_req: Option<CacheDDLRequest>,
         quiet: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let deep = deep?;
@@ -3568,6 +3581,9 @@ where
             })
             .transpose()?;
 
+        if let Some(req) = &mut ddl_req {
+            req.cache_name = Some(name.clone());
+        }
         if let Some(ref ddl_req) = ddl_req {
             state
                 .authority
@@ -3696,9 +3712,10 @@ where
         policy: Option<ast::EvictionPolicy>,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
-        ddl_req: CacheDDLRequest,
+        mut ddl_req: CacheDDLRequest,
         quiet: bool,
     ) -> ReadySetResult<()> {
+        ddl_req.cache_name = Some(name.clone());
         state
             .authority
             .add_shallow_cache_ddl_request(ddl_req.clone())
@@ -4224,7 +4241,6 @@ where
             name,
             query_id,
             query,
-            ddl_req,
             ..
         } in state.shallow.list_caches(query_id, name)
         {
@@ -4238,7 +4254,7 @@ where
                 "Dropping previously shallow-cached query",
             );
             state
-                .drop_shallow_cached_query(name.as_ref(), Some(query_id), ddl_req)
+                .drop_shallow_cached_query(name.as_ref(), Some(query_id))
                 .await?;
         }
         Ok(())
@@ -4687,6 +4703,7 @@ where
                         unparsed_stmt: unparsed_create_cache_statement.clone(),
                         schema_search_path: connectors.noria.schema_search_path().to_owned(),
                         dialect: settings.dialect.into(),
+                        cache_name: None,
                     };
                     Some(ddl_req)
                 } else {
@@ -4779,21 +4796,12 @@ where
                 if !settings.allow_cache_ddl {
                     unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG)
                 }
-                let ddl_req = CacheDDLRequest {
-                    unparsed_stmt: drop_cache.display_unquoted().to_string(),
-                    // drop cache statements explicitly don't use a search path, as the only schema
-                    // we need to resolve is the cache name.
-                    schema_search_path: vec![],
-                    dialect: settings.dialect.into(),
-                };
-                state
-                    .authority
-                    .add_cache_ddl_request(ddl_req.clone())
-                    .await?;
-                let DropCacheStatement { name } = drop_cache;
+                let name = &drop_cache.name;
 
+                // Try shallow first: a shallow cache also removes its persisted entry, matched by
+                // the cache's own stored request.
                 if state
-                    .drop_shallow_cached_query(Some(name), None, ddl_req.clone())
+                    .drop_shallow_cached_query(Some(name), None)
                     .await
                     .is_ok()
                 {
@@ -4802,28 +4810,34 @@ where
                     })
                 } else {
                     let res = Self::drop_cached_query(connectors, state, name).await;
-                    // `drop_cached_query` may return an Err, but if the cache fails to be
-                    // dropped for certain reasons, we can also see an Ok(Delete) here with
-                    // num_rows_deleted set to 0.
-                    if res.is_err()
-                        || matches!(
-                            res,
-                            Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted < 1
-                        )
-                    {
-                        let remove_res = retry_with_exponential_backoff!(
+                    // `drop_cached_query` can report Ok with zero rows deleted, in which case
+                    // nothing was cached and there is no persisted entry to remove.
+                    let dropped = matches!(
+                        res,
+                        Ok(noria_connector::QueryResult::Delete { num_rows_deleted }) if num_rows_deleted >= 1
+                    );
+                    if dropped {
+                        let matched = retry_with_exponential_backoff!(
                             || async {
-                                let ddl_req = ddl_req.clone();
-                                state.authority.remove_cache_ddl_request(ddl_req).await
+                                state.authority.remove_cache_ddl_requests_named(name).await
                             },
                             retries: 5,
                             delay: 1,
                             backoff: 2,
-                        );
-                        if remove_res.is_err() {
-                            error!(
-                                "Failed to remove stored 'drop cache' request. It will be re-run if there is a backwards incompatible upgrade"
-                            );
+                        )
+                        .unwrap_or(false);
+                        // Entries written before `cache_name` existed can't be matched by name.
+                        // Store a DROP marker so the controller still cancels them on replay.
+                        if !matched {
+                            let marker = CacheDDLRequest {
+                                unparsed_stmt: drop_cache.display_unquoted().to_string(),
+                                schema_search_path: vec![],
+                                dialect: settings.dialect.into(),
+                                cache_name: None,
+                            };
+                            if let Err(e) = state.authority.add_cache_ddl_request(marker).await {
+                                error!(error = %e, "Failed to store 'drop cache' fallback request");
+                            }
                         }
                     }
                     res
@@ -5164,6 +5178,7 @@ where
             unparsed_stmt: ddl_stmt,
             schema_search_path: connectors.noria.schema_search_path().to_owned(),
             dialect: settings.dialect.into(),
+            cache_name: None,
         };
 
         match Self::create_shallow_cache_core(

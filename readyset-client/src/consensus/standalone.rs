@@ -552,6 +552,7 @@ mod tests {
                     unparsed_stmt: stmt.to_string(),
                     schema_search_path: vec![],
                     dialect: Dialect::DEFAULT_POSTGRESQL,
+                    cache_name: None,
                 };
                 tokio::spawn(async move { authority.add_cache_ddl_request(ddl_req).await.unwrap() })
             })

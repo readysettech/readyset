@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -51,6 +53,8 @@ pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
     pub schema_search_path: Vec<SqlIdentifier>,
     pub dialect: Dialect,
+    #[serde(default)]
+    pub cache_name: Option<Relation>,
 }
 
 /// One entry in the persisted schema catalog: canonical DDL text for a table or view that
@@ -280,8 +284,12 @@ pub trait AuthorityControl: Send + Sync {
     /// These are stored separately from the controller state so that it's always available, using
     /// backwards-compatible serialization, for if the controller state can't be deserialized
     async fn add_cache_ddl_request(&self, cache_ddl_req: CacheDDLRequest) -> ReadySetResult<()> {
+        let name = cache_ddl_req.cache_name.clone();
         let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_cache_ddl_requests(self, move |stmts| {
+            if let Some(name) = &name {
+                stmts.retain(|stmt| cache_ddl_request_name(stmt).as_ref() != Some(name));
+            }
             stmts.push(cache_ddl_req.clone());
         })
         .await
@@ -291,8 +299,12 @@ pub trait AuthorityControl: Send + Sync {
         &self,
         cache_ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
+        let name = cache_ddl_req.cache_name.clone();
         let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_shallow_cache_ddl_requests(self, move |stmts| {
+            if let Some(name) = &name {
+                stmts.retain(|stmt| cache_ddl_request_name(stmt).as_ref() != Some(name));
+            }
             stmts.push(cache_ddl_req.clone());
         })
         .await
@@ -316,6 +328,37 @@ pub trait AuthorityControl: Send + Sync {
             stmts.retain(|stmt| *stmt != cache_ddl_req);
         })
         .await
+    }
+
+    /// Removes `CREATE CACHE` request for `name`, returning whether any entry matched.
+    async fn remove_cache_ddl_requests_named(&self, name: &Relation) -> ReadySetResult<bool> {
+        let removed = Arc::new(AtomicBool::new(false));
+        let flag = removed.clone();
+        let name = name.clone();
+        modify_cache_ddl_requests(self, move |stmts| {
+            let before = stmts.len();
+            stmts.retain(|stmt| cache_ddl_request_name(stmt).as_ref() != Some(&name));
+            flag.store(stmts.len() != before, Ordering::Relaxed);
+        })
+        .await?;
+        Ok(removed.load(Ordering::Relaxed))
+    }
+
+    /// Shallow counterpart to [`AuthorityControl::remove_cache_ddl_requests_named`].
+    async fn remove_shallow_cache_ddl_requests_named(
+        &self,
+        name: &Relation,
+    ) -> ReadySetResult<bool> {
+        let removed = Arc::new(AtomicBool::new(false));
+        let flag = removed.clone();
+        let name = name.clone();
+        modify_shallow_cache_ddl_requests(self, move |stmts| {
+            let before = stmts.len();
+            stmts.retain(|stmt| cache_ddl_request_name(stmt).as_ref() != Some(&name));
+            flag.store(stmts.len() != before, Ordering::Relaxed);
+        })
+        .await?;
+        Ok(removed.load(Ordering::Relaxed))
     }
 
     /// Removes all stored cache ddl requests
@@ -479,6 +522,12 @@ pub trait AuthorityControl: Send + Sync {
     }
 }
 
+fn cache_ddl_request_name(raw: &str) -> Option<Relation> {
+    serde_json::from_str::<CacheDDLRequest>(raw)
+        .ok()
+        .and_then(|req| req.cache_name)
+}
+
 async fn modify_ddl_requests<A, F>(authority: &A, path: &str, mut f: F) -> ReadySetResult<()>
 where
     A: AuthorityControl + ?Sized,
@@ -578,5 +627,90 @@ impl AuthorityType {
                 })?,
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_ddl_tests {
+    use super::*;
+
+    fn req(stmt: &str, name: Option<&str>) -> CacheDDLRequest {
+        CacheDDLRequest {
+            unparsed_stmt: stmt.to_string(),
+            schema_search_path: vec![],
+            dialect: Dialect::DEFAULT_POSTGRESQL,
+            cache_name: name.map(Relation::from),
+        }
+    }
+
+    #[tokio::test]
+    async fn add_cache_ddl_request_is_idempotent_by_name() {
+        let authority = LocalAuthority::new();
+        authority
+            .add_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        authority
+            .add_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        assert_eq!(authority.cache_ddl_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remove_cache_ddl_requests_named_removes_match() {
+        let authority = LocalAuthority::new();
+        authority
+            .add_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        let removed = authority
+            .remove_cache_ddl_requests_named(&"foo".into())
+            .await
+            .unwrap();
+        assert!(removed);
+        assert!(authority.cache_ddl_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_cache_ddl_requests_named_reports_no_match() {
+        let authority = LocalAuthority::new();
+        authority
+            .add_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        let removed = authority
+            .remove_cache_ddl_requests_named(&"bar".into())
+            .await
+            .unwrap();
+        assert!(!removed);
+        assert_eq!(authority.cache_ddl_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn shallow_remove_named_is_independent() {
+        let authority = LocalAuthority::new();
+        authority
+            .add_shallow_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        authority
+            .add_shallow_cache_ddl_request(req("CREATE CACHE foo FROM SELECT 1", Some("foo")))
+            .await
+            .unwrap();
+        assert_eq!(
+            authority.shallow_cache_ddl_requests().await.unwrap().len(),
+            1
+        );
+        let removed = authority
+            .remove_shallow_cache_ddl_requests_named(&"foo".into())
+            .await
+            .unwrap();
+        assert!(removed);
+        assert!(authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

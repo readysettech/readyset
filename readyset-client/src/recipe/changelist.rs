@@ -588,16 +588,19 @@ impl Change {
                     adapter_rewrite_context,
                 )?;
 
-                // An unnamed CREATE CACHE recomputes the name the adapter resolved at create
-                // time, the query id of the rewritten statement under the request's schema
-                // search path, so implicit cache names survive replay.
-                let name = name.unwrap_or_else(|| {
-                    QueryId::from(&ViewCreateRequest::new(
-                        statement.as_ref().clone(),
-                        ddl_req.schema_search_path.clone(),
-                    ))
-                    .into()
-                });
+                // An unnamed CREATE CACHE keeps the name the adapter resolved at create time so
+                // implicit cache names survive replay. Entries persisted before `cache_name`
+                // existed recompute it the same way the adapter does: the query id of the
+                // rewritten statement under the request's schema search path.
+                let name = name
+                    .or_else(|| ddl_req.cache_name.clone())
+                    .unwrap_or_else(|| {
+                        QueryId::from(&ViewCreateRequest::new(
+                            statement.as_ref().clone(),
+                            ddl_req.schema_search_path.clone(),
+                        ))
+                        .into()
+                    });
 
                 Ok(Change::CreateCache(CreateCache {
                     name: Some(name),
@@ -730,11 +733,12 @@ mod tests {
 
         use super::*;
 
-        fn convert(unparsed_stmt: &str) -> CreateCache {
+        fn convert(unparsed_stmt: &str, cache_name: Option<&str>) -> CreateCache {
             let ddl_req = CacheDDLRequest {
                 unparsed_stmt: unparsed_stmt.into(),
                 schema_search_path: vec!["public".into()],
                 dialect: Dialect::DEFAULT_POSTGRESQL,
+                cache_name: cache_name.map(Relation::from),
             };
             let mut catalog = SchemaCatalog::default();
             catalog.view_schemas.insert(
@@ -764,8 +768,26 @@ mod tests {
         }
 
         #[test]
+        fn unnamed_takes_name_from_request() {
+            let create_cache = convert(
+                "CREATE CACHE FROM SELECT x FROM t WHERE x = 1",
+                Some("q_deadbeef"),
+            );
+            assert_eq!(create_cache.name, Some(Relation::from("q_deadbeef")));
+        }
+
+        #[test]
+        fn explicit_name_wins_over_request_name() {
+            let create_cache = convert(
+                "CREATE CACHE foo FROM SELECT x FROM t WHERE x = 1",
+                Some("q_deadbeef"),
+            );
+            assert_eq!(create_cache.name, Some(Relation::from("foo")));
+        }
+
+        #[test]
         fn unnamed_derives_query_id() {
-            let create_cache = convert("CREATE CACHE FROM SELECT x FROM t WHERE x = 1");
+            let create_cache = convert("CREATE CACHE FROM SELECT x FROM t WHERE x = 1", None);
             let expected: Relation = QueryId::from(&ViewCreateRequest::new(
                 create_cache.statement.as_ref().clone(),
                 vec!["public".into()],
