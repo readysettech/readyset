@@ -3760,15 +3760,16 @@ where
     }
 
     /// Extract the deep and shallow representations of the query. When autoparameterization is
-    /// suppressed (`AUTOPARAM OFF`), also computes the [`ManualMappingInfo`] that routes incoming
-    /// SELECTs (which still autoparameterize fully) to the manually parameterized cache.
+    /// suppressed or scoped (`AUTOPARAM OFF` / `AUTOPARAM (EXCLUDE_*)`), also computes the
+    /// [`ManualMappingInfo`] that routes incoming SELECTs (which still autoparameterize fully)
+    /// to the manually parameterized cache.
     #[allow(clippy::type_complexity)]
     async fn query_from_cache_inner(
         connectors: &BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &BackendState<DB>,
         inner: &CacheInner,
-        autoparameterize: bool,
+        autoparam: ast::AutoparamControl,
     ) -> ReadySetResult<(
         ReadySetResult<ViewCreateRequest>,
         ReadySetResult<ShallowViewRequest>,
@@ -3791,13 +3792,16 @@ where
                     // AUTOPARAM OFF turns off the autoparameterization pass for this cache so
                     // it's built with exactly the placeholders the user wrote.
                     let mut rewrite_params = connectors.noria.rewrite_params();
-                    rewrite_params.autoparameterize = autoparameterize;
+                    rewrite_params.autoparameterize = !autoparam.off;
                     match deep {
                         Ok(mut deep) => {
                             // Incoming SELECTs hash to the standard (fully autoparameterized)
                             // form, so keep a pre-rewrite copy to compute that form alongside
                             // the manual one.
-                            let standard_src = (!autoparameterize).then(|| (*deep).clone());
+                            let standard_src = (!autoparam.is_default()).then(|| (*deep).clone());
+                            // EXCLUDE_* scopes mark their literals before the rewrite pipeline
+                            // hoists them out of their clause of origin.
+                            adapter_rewrites::wrap_autoparam_exclusions(&mut deep, &autoparam);
                             match adapter_rewrites::rewrite_query(
                                 &mut deep,
                                 rewrite_params,
@@ -3810,7 +3814,8 @@ where
                                             connectors.noria.rewrite_params(),
                                             &rewrite_context,
                                         )?;
-                                        let frozen = params.auto_parameters().to_vec();
+                                        let frozen =
+                                            adapter_rewrites::derive_frozen(&standard, &deep)?;
                                         // With nothing frozen the two forms agree and the
                                         // regular lookup path already finds the cache.
                                         if !frozen.is_empty() {
@@ -3918,7 +3923,8 @@ where
         };
 
         let (deep, shallow, schema_generation, _) =
-            Self::query_from_cache_inner(connectors, settings, state, inner, true).await?;
+            Self::query_from_cache_inner(connectors, settings, state, inner, Default::default())
+                .await?;
         Ok((deep, shallow, schema_generation))
     }
 
@@ -4667,14 +4673,8 @@ where
                     autoparam,
                 } = create_cache_stmt;
                 let (deep, shallow, schema_generation, manual_mapping) =
-                    Self::query_from_cache_inner(
-                        connectors,
-                        settings,
-                        state,
-                        inner,
-                        !autoparam.off,
-                    )
-                    .await?;
+                    Self::query_from_cache_inner(connectors, settings, state, inner, *autoparam)
+                        .await?;
 
                 // Log a telemetry event
                 if let Some(ref telemetry_sender) = state.telemetry_sender {

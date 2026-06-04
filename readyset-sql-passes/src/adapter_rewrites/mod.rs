@@ -1,3 +1,4 @@
+mod autoparam_exclusions;
 mod autoparameterize;
 mod post_lookup_decomposition;
 mod shallow_cache_rewrites;
@@ -7,6 +8,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
 
+pub use autoparam_exclusions::{derive_frozen, wrap_autoparam_exclusions};
 pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools, repeat_n};
 use readyset_data::{DfType, DfValue};
@@ -465,6 +467,9 @@ pub fn rewrite_for_readyset(
         trace!(parent: &span, pass = "auto_parameterize_query", skipped = true);
         auto_parameters
     };
+    // Both autoparameterization phases have honored any `AUTOPARAM (EXCLUDE_*)` markers; unwrap
+    // them so the final form holds plain literals.
+    autoparameterize::unwrap_all_preserved(query);
     let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
     trace!(parent: &span, pass="collapse_where_in", query = %query.display(flags.dialect), rewritten_in_conditions=?rewritten_in_conditions);
 
@@ -2209,6 +2214,256 @@ mod tests {
                 "SELECT users.id FROM users WHERE users.credit_card_number = 'pii' AND users.id = $1",
                 Dialect::PostgreSQL,
             );
+        }
+
+        /// `wrap_autoparam_exclusions` + the full rewrite keep the excluded literal inline,
+        /// autoparameterize the rest, and leak no transient `Preserved` marker.
+        #[test]
+        fn autoparam_exclusions_survive_full_rewrite() {
+            use readyset_sql::ast::AutoparamControl;
+
+            let mut query = parse_select_statement(
+                "SELECT id FROM users WHERE id = 3 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 'frozen')",
+                Dialect::PostgreSQL,
+            );
+            wrap_autoparam_exclusions(
+                &mut query,
+                &AutoparamControl {
+                    exclude_exists: true,
+                    ..Default::default()
+                },
+            );
+            rewrite_query(
+                &mut query,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+
+            let displayed = query.display(Dialect::PostgreSQL).to_string();
+            assert!(displayed.contains("'frozen'"), "{displayed}");
+            assert!(displayed.contains("$1"), "{displayed}");
+            assert!(
+                !format!("{query:?}").contains("Preserved"),
+                "transient marker leaked: {displayed}"
+            );
+        }
+
+        /// After the full pipeline (unnest included), the supported EXCLUDE_EXISTS query's standard
+        /// and manual forms stay structurally aligned, so the guard in `derive_frozen` accepts them
+        /// and derives exactly the one frozen literal. Regression guard that the alignment check
+        /// does not reject the supported case.
+        #[test]
+        fn derive_frozen_through_full_pipeline_excludes_exists() {
+            use readyset_sql::ast::AutoparamControl;
+
+            let query = "SELECT id FROM users WHERE id = 3 AND EXISTS \
+                         (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 'frozen')";
+
+            let mut standard = parse_select_statement(query, Dialect::PostgreSQL);
+            rewrite_query(
+                &mut standard,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+
+            let mut manual = parse_select_statement(query, Dialect::PostgreSQL);
+            wrap_autoparam_exclusions(
+                &mut manual,
+                &AutoparamControl {
+                    exclude_exists: true,
+                    ..Default::default()
+                },
+            );
+            rewrite_query(
+                &mut manual,
+                rewrite_params(Dialect::PostgreSQL),
+                rewrite_context(Dialect::PostgreSQL),
+            )
+            .unwrap();
+
+            let frozen =
+                derive_frozen(&standard, &manual).expect("aligned forms must not be rejected");
+            assert_eq!(
+                frozen.len(),
+                1,
+                "only the EXISTS literal is frozen: {frozen:?}"
+            );
+            assert_eq!(frozen[0].1, Literal::String("frozen".into()));
+        }
+
+        /// Falsification probe: drive a battery of adversarial EXCLUDE queries through the REAL
+        /// pipeline and check, independently of `derive_frozen`'s own guard, whether the standard
+        /// (bare -> all parameterized) and manual (Preserved-wrapped -> excluded literals frozen)
+        /// forms ever come out with EQUAL literal count but DIFFERENT structure. That is the only
+        /// shape that would make positional pairing freeze a value against the wrong column. If
+        /// this test fails, the equal-count reordering bug is reachable through the pipeline.
+        #[test]
+        fn probe_exclude_forms_alignment_through_pipeline() {
+            use readyset_sql::analysis::visit::Visitor;
+            use readyset_sql::analysis::visit_mut::VisitorMut;
+            use readyset_sql::ast::AutoparamControl;
+
+            fn skeleton(stmt: &SelectStatement) -> SelectStatement {
+                struct Blank;
+                impl<'ast> VisitorMut<'ast> for Blank {
+                    type Error = std::convert::Infallible;
+                    fn visit_literal(&mut self, l: &'ast mut Literal) -> Result<(), Self::Error> {
+                        *l = Literal::Null;
+                        Ok(())
+                    }
+                }
+                let mut s = stmt.clone();
+                let Ok(()) = Blank.visit_select_statement(&mut s);
+                s
+            }
+            fn count_literals(stmt: &SelectStatement) -> usize {
+                struct C(usize);
+                impl<'ast> Visitor<'ast> for C {
+                    type Error = std::convert::Infallible;
+                    fn visit_literal(&mut self, _l: &'ast Literal) -> Result<(), Self::Error> {
+                        self.0 += 1;
+                        Ok(())
+                    }
+                }
+                let mut c = C(0);
+                let Ok(()) = Visitor::visit_select_statement(&mut c, stmt);
+                c.0
+            }
+
+            let exclude_all = AutoparamControl {
+                exclude_joins: true,
+                exclude_exists: true,
+                exclude_subqueries: true,
+                ..Default::default()
+            };
+
+            // Available tables: users(id,name,credit_card_number), t(x,y), t2(x,y,z),
+            // t3(x,y,z,w,q), z(a,b), x(y).
+            let queries = [
+                "SELECT id FROM users WHERE users.id = 3 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5) AND users.id = 3",
+                "SELECT id FROM users WHERE users.id = 3 AND users.name = 'a' AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5 AND t.x = 7)",
+                "SELECT id FROM users WHERE users.id = 3 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND EXISTS \
+                 (SELECT 1 FROM t2 WHERE t2.x = t.y AND t2.z = 9))",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5) AND EXISTS \
+                 (SELECT 1 FROM t2 WHERE t2.x = users.id AND t2.z = 9)",
+                "SELECT id FROM users WHERE users.id = 5 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5)",
+                "SELECT id FROM users WHERE users.id = 5 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND users.id = 5)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = 5 AND t.y = 5)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t2 WHERE t2.x = 1 AND t2.y = 1 AND t2.z = 1)",
+                "SELECT id FROM users WHERE users.id IN (SELECT t.x FROM t WHERE t.y = 8)",
+                "SELECT id FROM users WHERE users.name = 'a' AND users.id IN \
+                 (SELECT t.x FROM t WHERE t.y = 8 AND t.x = 2)",
+                "SELECT id FROM users WHERE users.id NOT IN (SELECT t.x FROM t WHERE t.y = 8)",
+                "SELECT users.id FROM users JOIN t ON users.id = t.x AND t.y = 1",
+                "SELECT users.id FROM users JOIN t ON users.id = t.x AND t.y = 1 \
+                 WHERE users.name = 'b'",
+                "SELECT users.id FROM users JOIN t ON users.id = t.x AND t.y = 1 \
+                 JOIN t2 ON t.x = t2.x AND t2.z = 2",
+                "SELECT d.x FROM (SELECT t.x FROM t WHERE t.y = 4) d WHERE d.x = 9",
+                "SELECT d.x FROM (SELECT t.x, t.y FROM t WHERE t.y = 4) d \
+                 JOIN users ON users.id = d.x WHERE users.name = 'q'",
+                "SELECT id FROM users WHERE users.id = 3 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5) ORDER BY users.id LIMIT 10",
+                "SELECT id FROM users WHERE users.id = 3 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5) LIMIT 10 OFFSET 5",
+                "SELECT id FROM users WHERE users.id = 5 AND users.id = 5 AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 9)",
+                "SELECT id FROM users WHERE users.name = 'a' AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5) AND users.id = 3 \
+                 AND EXISTS (SELECT 1 FROM t2 WHERE t2.x = users.id AND t2.z = 'a')",
+                "SELECT a.x FROM t AS a JOIN t AS b ON a.x = b.x AND a.y = 1 \
+                 JOIN t2 AS c ON b.x = c.x AND c.z = 2",
+                "SELECT a.x FROM t AS a JOIN t2 AS b ON a.x = b.x AND a.y = 1 AND a.y = 1 \
+                 JOIN t3 AS c ON c.x = b.x AND c.w = 4",
+                "SELECT id FROM users WHERE users.id IN \
+                 (SELECT t.x FROM t WHERE t.y = 1 AND t.x = 2 AND t.y = 1)",
+                "SELECT id FROM users WHERE users.name = 'a' AND EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND users.name = 'a')",
+                "SELECT id FROM users WHERE EXISTS (SELECT 1 FROM t JOIN t2 \
+                 ON t.x = t2.x AND t2.z = 3 WHERE t.x = users.id AND t.y = 1)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND (t.y = 1 OR t.y = 2))",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y IN (1, 2, 3))",
+                "SELECT id FROM users WHERE users.id = 3 AND NOT EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = 5)",
+                "SELECT id FROM users WHERE users.id = (SELECT t.x FROM t WHERE t.y = 7)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t3 WHERE t3.x = users.id AND t3.y BETWEEN 10 AND 20)",
+                "SELECT id FROM users WHERE EXISTS \
+                 (SELECT 1 FROM t WHERE t.x = users.id AND t.y = NULL)",
+                "SELECT d.x FROM (SELECT t.x FROM t WHERE t.y = 2 ORDER BY t.x LIMIT 5) d \
+                 WHERE d.x = 1",
+            ];
+
+            let mut equal_count_divergences: Vec<&str> = vec![];
+            let mut reports: Vec<String> = vec![];
+            for q in queries {
+                let mut std_ast = parse_select_statement(q, Dialect::PostgreSQL);
+                let std_res = rewrite_query(
+                    &mut std_ast,
+                    rewrite_params(Dialect::PostgreSQL),
+                    rewrite_context(Dialect::PostgreSQL),
+                );
+                let mut man_ast = parse_select_statement(q, Dialect::PostgreSQL);
+                wrap_autoparam_exclusions(&mut man_ast, &exclude_all);
+                let man_res = rewrite_query(
+                    &mut man_ast,
+                    rewrite_params(Dialect::PostgreSQL),
+                    rewrite_context(Dialect::PostgreSQL),
+                );
+                match (std_res, man_res) {
+                    (Ok(_), Ok(_)) => {
+                        let sc = count_literals(&std_ast);
+                        let mc = count_literals(&man_ast);
+                        let aligned = skeleton(&std_ast) == skeleton(&man_ast);
+                        let frozen = derive_frozen(&std_ast, &man_ast);
+                        assert_eq!(
+                            aligned,
+                            frozen.is_ok(),
+                            "derive_frozen must accept exactly the aligned forms: {q}"
+                        );
+                        let status = if aligned {
+                            "ALIGNED"
+                        } else if sc == mc {
+                            equal_count_divergences.push(q);
+                            "EQUAL-COUNT-DIVERGENCE"
+                        } else {
+                            "count-diff"
+                        };
+                        reports.push(format!(
+                            "{status:>22}  std_lits={sc} man_lits={mc} frozen={:?}  {q}",
+                            frozen.map(|f| f.len()).map_err(|_| "rejected")
+                        ));
+                    }
+                    (s, m) => reports.push(format!(
+                        "{:>22}  std_err={} man_err={}  {q}",
+                        "REWRITE-ERR",
+                        s.is_err(),
+                        m.is_err()
+                    )),
+                }
+            }
+            assert!(
+                equal_count_divergences.is_empty(),
+                "equal-count divergence(s) found -- the reordering bug IS reachable through the \
+                 pipeline:\n{}",
+                reports.join("\n")
+            );
+            println!("{}", reports.join("\n"));
         }
 
         /// `apply_frozen` verifies the incoming values at frozen positions against the manual

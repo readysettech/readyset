@@ -100,9 +100,10 @@ pub enum Literal {
     /// A literal tagged by the autoparameterization-exclusion machinery
     /// (`CREATE CACHE ... WITH (AUTOPARAM (EXCLUDE_*))`) to be kept inline rather than
     /// auto-parameterized. This variant is strictly transient: it is introduced by the
-    /// exclusion pre-pass and fully consumed (unwrapped) inside `auto_parameterize_query`, so it
-    /// must never reach hashing, Display, dataflow lowering, or any persisted form. Code that
-    /// encounters it outside the rewrite pipeline should treat it as a bug.
+    /// exclusion pre-pass before the Readyset rewrite and fully consumed (unwrapped) by the
+    /// sweep at the end of `rewrite_for_readyset`, so it must never reach hashing, Display,
+    /// dataflow lowering, or any persisted form. Code that encounters it outside the rewrite
+    /// pipeline should treat it as a bug.
     #[weight(0)]
     Preserved(Box<Literal>),
 }
@@ -269,8 +270,9 @@ impl DialectDisplay for Literal {
                     b.iter().map(|bit| if bit { "1" } else { "0" }).join("")
                 )
             }
-            // Transient marker that should be consumed inside `auto_parameterize_query`. If one
-            // ever reaches Display, render the wrapped literal transparently rather than panic.
+            // Transient marker that should be consumed by the end of the Readyset rewrite. If
+            // one ever reaches Display, render the wrapped literal transparently rather than
+            // panic.
             Literal::Preserved(inner) => write!(f, "{}", inner.display(dialect)),
         })
     }

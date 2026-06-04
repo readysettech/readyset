@@ -74,8 +74,7 @@ struct AutoParameterizeVisitor {
 }
 
 /// Replace a `Literal::Preserved(inner)` marker with its inner literal, in place. No-op for any
-/// other literal. The autoparam-exclusion pre-pass wraps literals it wants kept inline; this is
-/// how the marker is consumed so the literal stays a plain constant.
+/// other literal.
 fn unwrap_preserved(literal: &mut Literal) {
     if matches!(literal, Literal::Preserved(_))
         && let Literal::Preserved(inner) = mem::replace(literal, Literal::Null)
@@ -86,10 +85,10 @@ fn unwrap_preserved(literal: &mut Literal) {
 
 impl AutoParameterizeVisitor {
     fn replace_literal(&mut self, literal: &mut Literal) {
-        // A literal frozen by the exclusion pre-pass must not be parameterized: unwrap it and
-        // leave the plain constant in place.
+        // A literal frozen by the exclusion pre-pass must not be parameterized. The marker stays
+        // in place so the second autoparameterization phase preserves it too; the final sweep at
+        // the end of the Readyset rewrite unwraps it.
         if matches!(literal, Literal::Preserved(_)) {
-            unwrap_preserved(literal);
             return;
         }
         let literal = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
@@ -98,17 +97,22 @@ impl AutoParameterizeVisitor {
     }
 }
 
-/// Final sweep that unwraps every remaining `Literal::Preserved` marker to its inner literal, so
-/// no marker survives `auto_parameterize_query` regardless of which visitor arms fired.
-struct UnwrapPreservedVisitor;
+/// Sweep that unwraps every `Literal::Preserved` marker to its inner literal. Run once at the
+/// end of the Readyset rewrite, after both autoparameterization phases have honored the markers,
+/// so none survives into the stored or executed form.
+pub(super) fn unwrap_all_preserved(query: &mut SelectStatement) {
+    struct UnwrapPreservedVisitor;
 
-impl<'ast> VisitorMut<'ast> for UnwrapPreservedVisitor {
-    type Error = std::convert::Infallible;
+    impl<'ast> VisitorMut<'ast> for UnwrapPreservedVisitor {
+        type Error = std::convert::Infallible;
 
-    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
-        unwrap_preserved(literal);
-        Ok(())
+        fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+            unwrap_preserved(literal);
+            Ok(())
+        }
     }
+
+    let Ok(()) = UnwrapPreservedVisitor.visit_select_statement(query);
 }
 
 impl<'ast> VisitorMut<'ast> for AutoParameterizeVisitor {
@@ -560,13 +564,8 @@ pub fn auto_parameterize_query(
             // comparisons only, since we don't support mixed comparisons yet
             (false, false) => (true, false),
             // If the query contains equal and range placeholders, we bail, since we don't support
-            // mixed comparisons yet. Still consume any exclusion markers before returning.
-            (true, true) => {
-                UnwrapPreservedVisitor
-                    .visit_select_statement(query)
-                    .unwrap();
-                return Ok(vec![]);
-            }
+            // mixed comparisons yet
+            (true, true) => return Ok(vec![]),
         }
     };
 
@@ -580,11 +579,6 @@ pub fn auto_parameterize_query(
         ..Default::default()
     };
     visitor.visit_select_statement(query)?;
-    // Consume any exclusion markers that no parameterizing arm reached, so no `Literal::Preserved`
-    // survives this function.
-    UnwrapPreservedVisitor
-        .visit_select_statement(query)
-        .unwrap();
     Ok(visitor.out)
 }
 
@@ -720,7 +714,7 @@ mod tests {
 
     /// A literal frozen by the autoparam-exclusion machinery (wrapped in `Literal::Preserved`, as
     /// the pre-pass produces) is kept inline by `auto_parameterize_query` while sibling literals
-    /// are still parameterized, and no marker survives the call.
+    /// are still parameterized, and the final sweep unwraps the marker to a plain literal.
     #[test]
     fn autoparam_keeps_preserved_literal_inline() {
         struct FreezeStrings;
@@ -743,9 +737,10 @@ mod tests {
         FreezeStrings.visit_select_statement(&mut query).unwrap();
 
         let params = auto_parameterize_query(&mut query, Vec::new(), false, true).unwrap();
+        unwrap_all_preserved(&mut query);
 
         // `name` stays an inline constant; `id` is autoparameterized. Equality also proves no
-        // `Literal::Preserved` survived (it would not equal the plain `String`).
+        // `Literal::Preserved` survived the sweep (it would not equal the plain `String`).
         let expected = parse_select_statement(
             "SELECT id FROM users WHERE name = \"frozen\" AND id = ?",
             dialect,
@@ -785,6 +780,7 @@ mod tests {
             .unwrap();
 
         let params = auto_parameterize_query(&mut query, Vec::new(), false, true).unwrap();
+        unwrap_all_preserved(&mut query);
 
         let expected =
             parse_select_statement("SELECT id FROM users WHERE id = ? AND age > 10", dialect);
