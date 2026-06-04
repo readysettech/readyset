@@ -1798,14 +1798,26 @@ pub(crate) fn resolve_field_expr_by_alias<'a>(
     // otherwise, compute the *default* alias for the expression and match on that.
     // This keeps consistency with `make_first_field_ref_name` /
     // `as_joinable_derived_table_with_opts`, which assign the same default later.
-    stmt.fields.iter().find_map(|f| match f {
+    //
+    // Returns `None` on ambiguous match (two or more fields whose effective output
+    // names equal `alias_name` — e.g. one explicit alias colliding with another
+    // field's default-of-bare-column).  Pre-fix this returned the first match,
+    // potentially the wrong expression for callers that use the result to drive
+    // substitution / aggregate-fallback rewriting.  None forces callers to
+    // gracefully decline the rewrite rather than silently picking one.
+    let mut iter = stmt.fields.iter().filter_map(|f| match f {
         FieldDefinitionExpr::Expr { expr, alias } => match alias {
             Some(a) if a == alias_name => Some(expr),
             None if default_alias_for_select_item_expression(expr) == alias_name => Some(expr),
             _ => None,
         },
         _ => None,
-    })
+    });
+    let first = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
+    Some(first)
 }
 
 /// Build `expr IS NULL` (when `is_null = true`) or `expr IS NOT NULL` (when `is_null = false`).
@@ -4096,5 +4108,67 @@ mod row_number_cap_tests {
         );
         let pred = where_predicate(&stmt);
         assert!(predicate_caps_row_number(pred, &stmt).is_none());
+    }
+}
+
+#[cfg(test)]
+mod resolve_field_expr_by_alias_tests {
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
+
+    use super::*;
+
+    /// Pre-fix `resolve_field_expr_by_alias` returned the first matching field
+    /// when an explicit alias collided with another field's bare-column default
+    /// name.  For `SELECT t.x + 1 AS foo, t.foo FROM t`, looking up `foo`
+    /// returned `t.x + 1` (the explicit-alias-first match) when the caller may
+    /// have meant `t.foo`.  Callers that drive substitution / aggregate-fallback
+    /// rewriting on the result would silently produce wrong rewrites.
+    ///
+    /// Post-fix the helper returns `None` on ambiguous matches.  All three
+    /// callers (`unnest_subqueries.rs::extract_aggregate_fallback_for_first_field`,
+    /// the `ForEachVisitor` in `rewrite_utils.rs`, and
+    /// `array_constructor.rs::derived_table_projection`) gracefully handle
+    /// `None` by skipping their respective rewrites — strictly safer than the
+    /// first-match-wins prior behavior.
+    #[test]
+    fn returns_none_on_ambiguous_alias_vs_default_collision() {
+        let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.x + 1 AS foo, t.foo FROM t")
+            .expect("parses");
+        let result = resolve_field_expr_by_alias(&stmt, &"foo".into());
+        assert!(
+            result.is_none(),
+            "expected None on ambiguous match (one explicit alias `foo` collides with another field's default-of-bare-column `foo`); got Some({result:?})",
+        );
+    }
+
+    /// Two explicit aliases sharing a name are ambiguous in PG output as well;
+    /// helper returns None rather than picking the first.
+    #[test]
+    fn returns_none_on_two_explicit_aliases_colliding() {
+        let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.x AS foo, t.y AS foo FROM t")
+            .expect("parses");
+        let result = resolve_field_expr_by_alias(&stmt, &"foo".into());
+        assert!(result.is_none(), "expected None; got Some({result:?})");
+    }
+
+    /// Single matching field: helper returns the matching `Expr`.  Sanity check
+    /// that the post-fix early-return-on-second-match doesn't regress the
+    /// common single-match path.
+    #[test]
+    fn returns_some_on_unique_alias_match() {
+        let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.x AS foo, t.y AS bar FROM t")
+            .expect("parses");
+        let result = resolve_field_expr_by_alias(&stmt, &"foo".into());
+        assert!(matches!(result, Some(Expr::Column(c)) if c.name.as_str() == "x"));
+    }
+
+    /// Default-alias match (no explicit alias) when there's only one bare
+    /// column with the requested name.
+    #[test]
+    fn returns_some_on_unique_default_alias_match() {
+        let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.x, t.y FROM t").expect("parses");
+        let result = resolve_field_expr_by_alias(&stmt, &"x".into());
+        assert!(matches!(result, Some(Expr::Column(c)) if c.name.as_str() == "x"));
     }
 }
