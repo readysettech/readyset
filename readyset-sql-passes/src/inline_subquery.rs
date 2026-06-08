@@ -495,31 +495,74 @@ fn compute_upstream_for_position(
     }
 }
 
+/// Returns `true` if the outer statement has any predicate
+/// (WHERE / HAVING / JOIN ON) that references `inner_rel`.  These are the
+/// positions that — after inlining merges the inner body into the outer FROM
+/// — would be evaluated against the un-limited row set, producing different
+/// semantics than the original LIMIT-then-filter.  The SELECT list and outer
+/// ORDER BY don't change LIMIT semantics and are not checked here.
+fn outer_predicates_reference_inner(
+    outer_stmt: &SelectStatement,
+    inner_rel: &Relation,
+) -> ReadySetResult<bool> {
+    if let Some(w) = &outer_stmt.where_clause
+        && refs_rel_anywhere(w, inner_rel)?
+    {
+        return Ok(true);
+    }
+    if let Some(h) = &outer_stmt.having
+        && refs_rel_anywhere(h, inner_rel)?
+    {
+        return Ok(true);
+    }
+    for jc in &outer_stmt.join {
+        if let JoinConstraint::On(on_expr) = &jc.constraint
+            && refs_rel_anywhere(on_expr, inner_rel)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Shared cardinality-barrier eligibility predicate used by both
 /// [`can_inline_subquery`] and `derived_tables_rewrite::can_inline_from_item`.
 ///
-/// Rejects inlining (returns `true`) when the inner statement carries a
-/// cardinality barrier (a `LIMIT`/`OFFSET`, or aggregation/grouping that
-/// collapses rows) **and** the outer has a cardinality-sensitive operation
-/// (aggregation/`GROUP BY`/`DISTINCT`, or a window function in the SELECT list).
+/// Rejects inlining (returns `true`) in two distinct cases:
 ///
-/// Absorbing the inner into such an outer either changes the row set those
-/// operations see (LIMIT moves outward → WF/DISTINCT/aggregate evaluate over
-/// un-bounded rows) or lands the WF in an engine-unsupported context
-/// (inner GROUP BY → outer becomes aggregated + WF, which violates §9).
+/// **Inner cardinality barrier (LIMIT or aggregate/grouping) with
+/// cardinality-sensitive outer (aggregate/grouped or window function in the
+/// SELECT list)**: absorbing the inner into such an outer changes the row set
+/// the outer's aggregate/WF/DISTINCT sees — LIMIT moves outward, or the
+/// inner's row-collapse lands the outer aggregate in an engine-unsupported
+/// shape.
 ///
-/// `is_outer_agg` and `is_inner_agg` are expected to equal
-/// `is_aggregation_or_grouped(...)` for their respective statements; callers
-/// typically already have them computed.
+/// **Inner `LIMIT`/`OFFSET` with an outer WHERE / HAVING / JOIN-ON
+/// referencing the inner alias**: the inner LIMIT pins which rows reach the
+/// outer; inlining merges the inner body into the outer FROM, after which the
+/// outer predicate is evaluated against the un-limited row set.  Filter-then-
+/// LIMIT is not the same as LIMIT-then-filter: the two disagree whenever the
+/// LIMIT-`N` row doesn't satisfy the outer predicate but some other row does.
+/// When no outer predicate references the inner, the inner LIMIT carries up
+/// via `apply_inline`'s LIMIT composition and the inlining is sound.
 fn cardinality_barrier_blocks_inlining(
     outer_stmt: &SelectStatement,
     inner_stmt: &SelectStatement,
+    inner_rel: &Relation,
     is_outer_agg: bool,
     is_inner_agg: bool,
-) -> bool {
+) -> ReadySetResult<bool> {
     let inner_is_cardinality_barrier = !inner_stmt.limit_clause.is_empty() || is_inner_agg;
     let outer_is_cardinality_sensitive = is_outer_agg || contains_wf!(outer_stmt);
-    inner_is_cardinality_barrier && outer_is_cardinality_sensitive
+    if inner_is_cardinality_barrier && outer_is_cardinality_sensitive {
+        return Ok(true);
+    }
+    if !inner_stmt.limit_clause.is_empty()
+        && outer_predicates_reference_inner(outer_stmt, inner_rel)?
+    {
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// Return true if any downstream derived table (other than the inlinable itself)
@@ -1442,9 +1485,10 @@ fn check_cardinality_barrier<U: UniqueColumnsSchema>(
     let blocked = cardinality_barrier_blocks_inlining(
         ctx.outer_stmt,
         ctx.inner_stmt,
+        &ctx.inner_rel,
         ctx.is_outer_agg,
         ctx.is_inner_agg,
-    );
+    )?;
     Ok(!blocked)
 }
 

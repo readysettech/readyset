@@ -4179,3 +4179,36 @@ fn dtr_topk_inner_with_outer_wf_does_not_inline() {
         expect_text,
     );
 }
+
+/// Inner `ORDER BY ... LIMIT N` in a derived table, with an outer `WHERE`
+/// that references the derived table's projected columns and no aggregate /
+/// window function in the outer.
+///
+/// Inlining this shape is unsound: the inner LIMIT pins which rows reach the
+/// outer, so folding the inner into the outer FROM evaluates the outer's
+/// `WHERE` against the un-limited row set — filter-then-LIMIT, not the
+/// LIMIT-then-filter the original spelled out.  The two diverge whenever the
+/// LIMIT-`N` row doesn't satisfy the outer predicate but some other row does:
+/// the original returns 0 rows, the inlined form returns up to `N`.
+///
+/// `cardinality_barrier_blocks_inlining`'s LIMIT-with-outer-predicate arm
+/// must catch this — the legacy WF/aggregate arm on the outer doesn't fire
+/// for plain SELECTs.
+#[test]
+fn dtr_inner_limit_with_outer_predicate_does_not_inline() {
+    let original_text = r#"
+        SELECT "T"."k", "T"."v"
+        FROM (SELECT "t"."k", "t"."v" FROM "test1" AS "t" ORDER BY "t"."k" LIMIT 1) AS "T"
+        WHERE "T"."v" = 5
+    "#;
+    let expect_text = r#"
+        SELECT "T"."k", "T"."v"
+        FROM (SELECT "t"."k", "t"."v" FROM "test1" AS "t" ORDER BY "t"."k" NULLS LAST LIMIT 1) AS "T"
+        WHERE ("T"."v" = 5)
+    "#;
+    test_it(
+        "dtr_inner_limit_with_outer_predicate_does_not_inline",
+        original_text,
+        expect_text,
+    );
+}
