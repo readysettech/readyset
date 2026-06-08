@@ -2162,11 +2162,11 @@ pub(crate) fn apply_inline(
                 }
             }
         }
-        if let Some(lhs_having) = prepared.stmt.having {
+        if let Some(lhs_having) = prepared.stmt.having.take() {
             base_stmt.having =
                 and_predicates_skip_true(mem::take(&mut base_stmt.having), lhs_having);
         }
-        if let Some(lhs_where) = prepared.stmt.where_clause {
+        if let Some(lhs_where) = prepared.stmt.where_clause.take() {
             base_stmt.where_clause =
                 and_predicates_skip_true(mem::take(&mut base_stmt.where_clause), lhs_where);
         }
@@ -2190,48 +2190,77 @@ pub(crate) fn apply_inline(
     // Safety: we only do this after verifying the outer ORDER BY is either absent or compatible
     // with the LHS ORDER BY under projection rebinding (see `orders_equivalent_under_projection`).
     // Compatibility is checked earlier using `orders_equivalent_under_projection` function.
-    if !prepared.stmt.limit_clause.is_empty() {
-        base_stmt.order = mem::take(&mut prepared.stmt.order);
+    carry_inner_limit_and_order(base_stmt, &mut prepared.stmt)?;
+
+    Ok(())
+}
+
+/// Carry an inner subquery's `ORDER BY` + `LIMIT`/`OFFSET` up to `base_stmt`
+/// when the inner has a non-empty `limit_clause`.
+///
+/// LIMIT composition: when both have LIMIT, result LIMIT =
+/// `min(base_lim, inner_lim - base_offs)`, result OFFSET =
+/// `inner_offs + base_offs`.  Both `limit` and `offset` must already be
+/// numeric literals — the gate-chain's `check_limit_composition` enforces
+/// this.
+///
+/// ORDER BY: inner's ORDER BY is taken unconditionally when inner has LIMIT.
+/// `check_order_limit_safety` has already verified that the outer's ORDER is
+/// either absent or equivalent to the inner's under projection rebinding, so
+/// replacement is sound.  Inner ORDER BY with numeric/alias `FieldReference`s
+/// must be resolved against `inner.fields` BEFORE calling this helper —
+/// inner's fields are mutated/consumed by the caller's downstream
+/// substitutions and may not be available afterwards.
+///
+/// No-op when inner's `limit_clause` is empty.  ORDER BY without LIMIT is
+/// presentation-only in an intermediate subquery and is intentionally not
+/// carried up (the outermost ORDER BY determines result order).
+pub(crate) fn carry_inner_limit_and_order(
+    base_stmt: &mut SelectStatement,
+    inner: &mut SelectStatement,
+) -> ReadySetResult<()> {
+    if inner.limit_clause.is_empty() {
+        return Ok(());
     }
 
-    if !prepared.stmt.limit_clause.is_empty() {
-        if base_stmt.limit_clause.is_empty() {
-            base_stmt.limit_clause = prepared.stmt.limit_clause;
-        } else {
-            let (base_lim, base_offs) = limit_clause_as_numbers(&base_stmt.limit_clause)?;
-            let (lhs_lim, lhs_offs) = limit_clause_as_numbers(&prepared.stmt.limit_clause)?;
+    base_stmt.order = mem::take(&mut inner.order);
 
-            let lim_num = base_lim.min(lhs_lim.saturating_sub(base_offs));
-            let offs_num = lhs_offs.saturating_add(base_offs);
-
-            let limit = if lim_num == u64::MAX {
-                None
-            } else {
-                Some(LimitValue::Literal(
-                    if matches!(base_stmt.limit_clause.limit(), Some(Literal::Integer(_))) {
-                        Literal::Integer(lim_num as i64)
-                    } else {
-                        Literal::UnsignedInteger(lim_num)
-                    },
-                ))
-            };
-
-            let offset = if offs_num == 0 {
-                None
-            } else {
-                Some(
-                    if matches!(base_stmt.limit_clause.offset(), Some(Literal::Integer(_))) {
-                        Literal::Integer(offs_num as i64)
-                    } else {
-                        Literal::UnsignedInteger(offs_num)
-                    },
-                )
-            };
-
-            base_stmt.limit_clause = LimitClause::LimitOffset { limit, offset };
-        }
+    if base_stmt.limit_clause.is_empty() {
+        base_stmt.limit_clause = mem::take(&mut inner.limit_clause);
+        return Ok(());
     }
 
+    let (base_lim, base_offs) = limit_clause_as_numbers(&base_stmt.limit_clause)?;
+    let (lhs_lim, lhs_offs) = limit_clause_as_numbers(&inner.limit_clause)?;
+
+    let lim_num = base_lim.min(lhs_lim.saturating_sub(base_offs));
+    let offs_num = lhs_offs.saturating_add(base_offs);
+
+    let limit = if lim_num == u64::MAX {
+        None
+    } else {
+        Some(LimitValue::Literal(
+            if matches!(base_stmt.limit_clause.limit(), Some(Literal::Integer(_))) {
+                Literal::Integer(lim_num as i64)
+            } else {
+                Literal::UnsignedInteger(lim_num)
+            },
+        ))
+    };
+
+    let offset = if offs_num == 0 {
+        None
+    } else {
+        Some(
+            if matches!(base_stmt.limit_clause.offset(), Some(Literal::Integer(_))) {
+                Literal::Integer(offs_num as i64)
+            } else {
+                Literal::UnsignedInteger(offs_num)
+            },
+        )
+    };
+
+    base_stmt.limit_clause = LimitClause::LimitOffset { limit, offset };
     Ok(())
 }
 

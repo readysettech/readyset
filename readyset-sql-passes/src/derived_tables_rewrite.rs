@@ -1,6 +1,7 @@
 use crate::infer_nullability::{derive_from_stmt, is_expr_null_preserving};
 use crate::inline_subquery::{
-    can_inline_subquery, compute_downstream_for_position, inline_from_item_position_checks,
+    can_inline_subquery, carry_inner_limit_and_order, compute_downstream_for_position,
+    inline_from_item_position_checks,
 };
 use crate::rewrite_joins::{
     get_join_rhs_relations, move_applicable_where_conditions_to_joins,
@@ -513,28 +514,37 @@ fn inline_rhs_in_place(
         }
     }
 
-    // Take ORDER BY if eligible, with aggregation-aware guard.
-    // - If the parent (`base_stmt`) is aggregated or grouped, any ORDER BY inside the
-    //   inlined child does not affect the parent's semantics (grouping/aggregates or
-    //   ordered-aggregates dictate result order), so we DROP the child's ORDER BY.
-    // - If the parent already has an explicit ORDER BY, it prevails (keep it) and
-    //   we do not adopt the child's.
-    // - Only when the parent is NOT aggregated and has NO ORDER BY do we adopt the
-    //   child's ORDER BY to preserve presentation order.
-    if is_single_from_item!(base_stmt)
+    // Resolve numeric and alias ORDER BY references against the inlined
+    // subquery's own SELECT fields before transferring (same rationale as
+    // GROUP BY above).  Done unconditionally so the references are valid
+    // whether the order ends up carried up below or dropped silently.
+    if let Some(order) = &mut inl_stmt.order {
+        for ord_by in &mut order.order_by {
+            ord_by.field =
+                FieldReference::Expr(resolve_field_reference(&inl_stmt.fields, &ord_by.field)?);
+        }
+    }
+
+    if !inl_stmt.limit_clause.is_empty() {
+        // Inner has LIMIT — carry both ORDER and LIMIT up to base via the
+        // shared `apply_inline` helper.  The gate chain in
+        // `can_inline_from_item` already verified outer ORDER is None or
+        // equivalent under projection (`check_order_limit_safety`), both
+        // LIMITs are numeric (`check_limit_composition`), and other FROM
+        // items are cardinality-preserving
+        // (`check_join_partners_cardinality_preserving`), so the carry-up
+        // and LIMIT composition are sound.
+        carry_inner_limit_and_order(base_stmt, &mut inl_stmt)?;
+    } else if is_single_from_item!(base_stmt)
         && !is_base_aggregated
         && base_stmt.order.is_none()
         && base_stmt.limit_clause.is_empty()
     {
-        // Resolve numeric and alias ORDER BY references against the
-        // inlined subquery's own SELECT fields before transferring,
-        // same rationale as GROUP BY above.
-        if let Some(order) = &mut inl_stmt.order {
-            for ord_by in &mut order.order_by {
-                ord_by.field =
-                    FieldReference::Expr(resolve_field_reference(&inl_stmt.fields, &ord_by.field)?);
-            }
-        }
+        // Inner has ORDER but no LIMIT.  ORDER BY without LIMIT is a no-op
+        // in intermediate subqueries (only the outermost ORDER BY determines
+        // result order), so this adoption is presentation-only.  Narrow
+        // conditions match prior behavior: base must be single-FROM, not
+        // aggregated, with no own ORDER or LIMIT.
         base_stmt.order = mem::take(&mut inl_stmt.order);
     }
 

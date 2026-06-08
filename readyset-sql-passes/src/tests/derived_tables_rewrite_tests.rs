@@ -4212,3 +4212,40 @@ fn dtr_inner_limit_with_outer_predicate_does_not_inline() {
         expect_text,
     );
 }
+
+/// `inline_rhs_in_place` previously dropped the inlinable's ORDER BY and LIMIT
+/// on the floor: the function takes `inl_stmt` by value and never reads or
+/// writes `inl_stmt.limit_clause`, and the existing ORDER carry-up at line
+/// ~524 is gated by `is_single_from_item!(base_stmt)` which is false once the
+/// inlinable's other side is present.  Pre-LIMIT-preservation the silent drop
+/// was unreachable because `rewrite_top_k_in_place` materialised any
+/// LIMIT-bearing subquery into a `ROW_NUMBER() <= K` projection + filter
+/// before DTR ran; post-preservation, raw `limit_clause` survives and the
+/// gate-chain in `can_inline_from_item` (cardinality-barrier without outer
+/// predicate ref, order-limit-safety on `(true, false)`, join-partners
+/// cardinality preserved by the ExactlyOne `a`) admits the inline — at which
+/// point `inline_rhs_in_place` drops the LIMIT.
+///
+/// Concretely: the outer CROSS JOINs `a` (ExactlyOne — scalar aggregate) with
+/// `s` (top-3 of `u` by `b`).  The original returns 3 rows.  Pre-fix the
+/// rewrite dropped `ORDER BY u.b LIMIT 3` entirely and returned `|u|` rows.
+#[test]
+fn dtr_rhs_inline_carries_inner_limit_and_order() {
+    let original_text = r#"
+        SELECT "a"."cnt", "s"."b"
+        FROM (SELECT count(*) AS "cnt" FROM "v") AS "a"
+        CROSS JOIN (SELECT "u"."b" FROM "u" ORDER BY "u"."b" LIMIT 3) AS "s"
+    "#;
+    let expect_text = r#"
+        SELECT "a"."cnt", "u"."b"
+        FROM (SELECT count(*) AS "cnt" FROM "v") AS "a"
+        CROSS JOIN "u"
+        ORDER BY "u"."b" NULLS LAST
+        LIMIT 3
+    "#;
+    test_it(
+        "dtr_rhs_inline_carries_inner_limit_and_order",
+        original_text,
+        expect_text,
+    );
+}
