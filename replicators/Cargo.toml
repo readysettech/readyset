@@ -70,7 +70,6 @@ replication-offset = { path = "../replication-offset" }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 bincode = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }

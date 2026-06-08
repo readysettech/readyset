@@ -1,9 +1,9 @@
+use std::assert_matches;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use assert_matches::assert_matches;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;

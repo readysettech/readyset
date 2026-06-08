@@ -22,6 +22,7 @@
 //! This test suite will connect to a local MySQL database, will create tables and run DML on this tables
 //! after each operation, it will check the results from MySQL and Readyset.
 
+use std::assert_matches;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter, Result};
@@ -29,7 +30,6 @@ use std::iter::once;
 use std::panic::AssertUnwindSafe;
 use std::time::Duration;
 
-use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;

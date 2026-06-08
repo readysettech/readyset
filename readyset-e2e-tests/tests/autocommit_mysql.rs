@@ -1,4 +1,5 @@
-use assert_matches::assert_matches;
+use std::assert_matches;
+
 use mysql_async::prelude::*;
 use mysql_async::{Conn, Row};
 use readyset_adapter::BackendBuilder;

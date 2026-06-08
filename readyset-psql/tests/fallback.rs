@@ -1,7 +1,7 @@
+use std::assert_matches;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
-use assert_matches::assert_matches;
 use chrono::NaiveDate;
 use postgres_types::private::BytesMut;
 use readyset_adapter::BackendBuilder;

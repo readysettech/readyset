@@ -1,9 +1,9 @@
 //! REA-6568: AVG over BIGINT through a cached query with range/`WHERE IN`
 //! parameters (post-lookup aggregation) must match upstream byte-for-byte.
 
+use std::assert_matches;
 use std::panic::AssertUnwindSafe;
 
-use assert_matches::assert_matches;
 use mysql_async::prelude::Queryable;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{

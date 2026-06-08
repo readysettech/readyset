@@ -18,10 +18,10 @@ async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
     reason = "pre-existing structure; only triggers after test-discovery consolidation"
 )]
 mod types {
+    use std::assert_matches;
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;
 
-    use assert_matches::assert_matches;
     use cidr::IpInet;
     use eui48::MacAddress;
     use proptest::collection::vec;

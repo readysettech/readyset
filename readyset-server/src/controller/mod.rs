@@ -2137,9 +2137,9 @@ async fn handle_controller_request(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::collections::HashSet;
 
-    use assert_matches::assert_matches;
     use petgraph::visit::IntoNodeReferences;
 
     use dataflow::DomainIndex;

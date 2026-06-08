@@ -1,4 +1,5 @@
-use assert_matches::assert_matches;
+use std::assert_matches;
+
 use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_client_metrics::QueryDestination;

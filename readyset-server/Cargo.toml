@@ -105,7 +105,6 @@ schema-catalog = { path = "../schema-catalog" }
 
 [dev-dependencies]
 assert_approx_eq = { workspace = true }
-assert_matches = { workspace = true }
 chrono = { workspace = true }
 criterion = { workspace = true }
 dataflow = { path = "../readyset-dataflow", package = "readyset-dataflow" }

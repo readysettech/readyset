@@ -15,7 +15,6 @@ test-discovery = { path = "../test-discovery" }
 
 [dependencies]
 anyhow = { workspace = true }
-assert_matches = { workspace = true }
 async-trait = { workspace = true }
 bit-vec = { workspace = true, features = ["serde"] }
 cidr = { workspace = true }

@@ -1,4 +1,5 @@
-use assert_matches::assert_matches;
+use std::assert_matches;
+
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use tokio::test;

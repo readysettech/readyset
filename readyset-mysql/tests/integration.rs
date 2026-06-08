@@ -1,9 +1,9 @@
+use std::assert_matches;
 use std::env;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
-use assert_matches::assert_matches;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use mysql_async::{params, Conn, Row, Value};

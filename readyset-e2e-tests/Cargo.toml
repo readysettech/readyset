@@ -15,7 +15,6 @@ test-discovery = { path = "../test-discovery" }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-assert_matches = { workspace = true }
 chrono = { workspace = true }
 database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }

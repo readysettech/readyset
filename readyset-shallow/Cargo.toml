@@ -27,7 +27,6 @@ readyset-util = { path = "../readyset-util" }
 bench = []
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 futures = { workspace = true }
 proptest = { workspace = true }

@@ -339,7 +339,8 @@ impl GroupedOperation for Aggregator {
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
+    use std::assert_matches;
+
     use readyset_decimal::Decimal;
 
     use super::*;
@@ -1517,7 +1518,7 @@ mod tests {
         };
         assert_eq!(r[0], 1.into());
         // sum=8 (weight 0), count=2 (weight 0), rscale = 16 - 0*4 = 16
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(16)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(16));
     }
 
     /// Postgres AVG scale decreases with larger magnitude results.
@@ -1533,7 +1534,7 @@ mod tests {
             unreachable!()
         };
         // 40000 has weight=1 in base-10000, so scale = 16 - 1*4 = 12
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(12));
     }
 
     /// Postgres AVG on small NUMERIC fractions (< 1) should not panic and
@@ -1562,7 +1563,7 @@ mod tests {
         // sum=0.03 (weight -1, first 300), count=2 (weight 0, first 2)
         // qweight = -1 - 0 = -1 (no decrement since 300 > 2)
         // rscale = 16 - (-1)*4 = 20
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(20)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(20));
     }
 
     /// MySQL AVG output type varies by integer subtype.
@@ -1639,7 +1640,7 @@ mod tests {
             unreachable!()
         };
         // sum=8 (weight 0), count=2 (weight 0), rscale = 16 - 0*4 = 16
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(16)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(16));
     }
 
     /// REA-6199: Postgres AVG on NUMERIC(10,6) should return result with appropriate
@@ -1666,7 +1667,7 @@ mod tests {
         };
         // Decimal::select_div_scale for sum≈66874.6 (weight 1, first 6),
         // count=2 (weight 0, first 2) yields rscale = 16 - 1*4 = 12.
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(12)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(12));
     }
 
     /// REA-6118: MySQL AVG on INT should return DECIMAL with scale 4, not Double.
@@ -1686,7 +1687,7 @@ mod tests {
         let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
             unreachable!()
         };
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(4)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(4));
     }
 
     /// REA-5423: MySQL AVG on DECIMAL(7,2) should return DECIMAL with scale 6
@@ -1714,7 +1715,7 @@ mod tests {
         let Record::Positive(r) = rs.into_iter().find(|r| r.is_positive()).unwrap() else {
             unreachable!()
         };
-        assert_matches!(&r[1], DfValue::Numeric(dec) => assert_eq!(dec.scale(), Some(6)));
+        assert_matches!(&r[1], DfValue::Numeric(dec) if dec.scale() == Some(6));
     }
 
     /// REA-5423: MySQL SUM on DECIMAL(10,2) should preserve scale 2, not use

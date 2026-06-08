@@ -1,4 +1,5 @@
-use assert_matches::assert_matches;
+use std::assert_matches;
+
 use chrono::{NaiveDate, NaiveDateTime};
 use test_utils::{tags, upstream};
 use tokio_postgres::{CommandCompleteContents, SimpleQueryMessage};

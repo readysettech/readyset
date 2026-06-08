@@ -392,12 +392,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c07dab4369547dbe5114677b33fbbf724971019f3818172d59a97a61c774ffd"
 
 [[package]]
-name = "assert_matches"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
-
-[[package]]
 name = "async-bincode"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6209,7 +6203,6 @@ version = "0.7.0"
 dependencies = [
  "ahash",
  "antithesis_sdk",
- "assert_matches",
  "async-bincode",
  "bincode",
  "bufstream",
@@ -6285,7 +6278,6 @@ name = "readyset-e2e-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "chrono",
  "database-utils",
  "dataflow-state",
@@ -6485,7 +6477,6 @@ name = "readyset-mysql"
 version = "0.4.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "async-trait",
  "bincode",
  "chrono",
@@ -6537,7 +6528,6 @@ name = "readyset-psql"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "async-trait",
  "bit-vec 0.6.3",
  "chrono",
@@ -6654,7 +6644,6 @@ dependencies = [
  "antithesis_sdk",
  "anyhow",
  "assert_approx_eq",
- "assert_matches",
  "async-bincode",
  "axum",
  "base64 0.22.1",
@@ -6741,7 +6730,6 @@ dependencies = [
 name = "readyset-shallow"
 version = "0.0.1"
 dependencies = [
- "assert_matches",
  "criterion",
  "dashmap",
  "futures",
@@ -7055,7 +7043,6 @@ version = "0.1.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
- "assert_matches",
  "async-trait",
  "atoi",
  "bincode",
