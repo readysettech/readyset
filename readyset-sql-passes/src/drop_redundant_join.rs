@@ -1,7 +1,7 @@
 use crate::rewrite_utils::{
     alias_for_expr, as_sub_query_with_alias_mut, deep_columns_visitor, deep_columns_visitor_mut,
     expect_field_as_expr, expect_sub_query_with_alias_mut, get_from_item_reference_name,
-    is_column_eq_column, project_columns_if_not_exist_fix_duplicate_aliases,
+    is_column_eq_column, project_columns_if_not_exist_fix_duplicate_aliases, split_expr_mut,
 };
 use crate::{
     BaseSchemasContext, as_column, get_local_from_items_iter, get_local_from_items_iter_mut,
@@ -150,17 +150,20 @@ struct DropRedundantJoinContext<'a, U: UniqueColumnsSchema> {
 }
 
 impl<U: UniqueColumnsSchema> DropRedundantJoinContext<'_, U> {
-    fn is_unique_column(&self, table: &Relation, name: &SqlIdentifier) -> bool {
-        if let Some(unique_cols) = self.unique_cols_schema.unique_columns_of(table)
-            && unique_cols.contains(&Column {
-                name: name.clone(),
-                table: Some(table.clone()),
-            })
-        {
-            true
-        } else {
-            false
-        }
+    /// Returns `true` when the `names` set covers all columns of some
+    /// unique key on `table` — i.e., one of the keys in
+    /// `unique_keys_of(table)` is a subset of `names`.  Used to admit
+    /// single- and multi-column equi-predicate joins (`a=a` or
+    /// `a=a AND b=b ...`) against a `PRIMARY KEY` or NOT-NULL-gated
+    /// `UNIQUE`.
+    fn covers_unique_key(&self, table: &Relation, names: &HashSet<SqlIdentifier>) -> bool {
+        let Some(keys) = self.unique_cols_schema.unique_keys_of(table) else {
+            return false;
+        };
+        keys.iter().any(|key| {
+            key.iter()
+                .all(|k| k.table.as_ref() == Some(table) && names.contains(&k.name))
+        })
     }
 }
 
@@ -171,6 +174,50 @@ pub(crate) fn drop_redundant_self_joins_main<U: UniqueColumnsSchema>(
     let ctx = DropRedundantJoinContext { unique_cols_schema };
     drop_redundant_self_joins(stmt, &ctx)?;
     Ok(())
+}
+
+/// Walk `on_expr` collecting `lhs_rel.col = rhs_rel.col` equality pairs
+/// (in either orientation), descending through AND-conjunctions.  The
+/// returned tuples are oriented `(lhs_col, rhs_col)`.  Returns `None`
+/// when the ON contains any atom that isn't a table-qualified `col = col`
+/// equality between `lhs_rel` and `rhs_rel` — in that case the join's
+/// predicate isn't fully expressible as key coverage and removing the
+/// join would change semantics.
+fn collect_cross_eqs(
+    on_expr: &Expr,
+    lhs_rel: &Relation,
+    rhs_rel: &Relation,
+) -> Option<Vec<(Column, Column)>> {
+    let mut pairs = Vec::new();
+    let mut sink = Vec::new();
+    let remainder = split_expr_mut(
+        on_expr,
+        &mut |atom| {
+            let mut found: Option<(Column, Column)> = None;
+            is_column_eq_column(atom, |l, r| {
+                if is_column_of!(l, *lhs_rel) && is_column_of!(r, *rhs_rel) {
+                    found = Some((l.clone(), r.clone()));
+                    true
+                } else if is_column_of!(l, *rhs_rel) && is_column_of!(r, *lhs_rel) {
+                    found = Some((r.clone(), l.clone()));
+                    true
+                } else {
+                    false
+                }
+            });
+            if let Some(p) = found {
+                pairs.push(p);
+                true
+            } else {
+                false
+            }
+        },
+        &mut sink,
+    );
+    if remainder.is_some() {
+        return None;
+    }
+    Some(pairs)
 }
 
 /// Prove that the LHS key is a subset of the RHS key domain and that joining on
@@ -189,11 +236,14 @@ pub(crate) fn drop_redundant_self_joins_main<U: UniqueColumnsSchema>(
 fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
     base_stmt: &SelectStatement,
     lhs_rel: &Relation,
-    lhs_col: &Column,
     rhs_rel: &Relation,
-    rhs_col: &Column,
+    pairs: &[(Column, Column)],
     ctx: &DropRedundantJoinContext<U>,
 ) -> ReadySetResult<bool> {
+    if pairs.is_empty() {
+        return Ok(false);
+    }
+
     let mut maybe_lhs_table_expr = None;
     let mut maybe_rhs_table_expr = None;
     for t in get_local_from_items_iter!(base_stmt) {
@@ -213,7 +263,13 @@ fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
         return Ok(false);
     };
 
-    if !ctx.is_unique_column(rhs_base_table, &rhs_col.name) {
+    // The set of RHS columns in the equi-pairs must cover some unique key on
+    // `rhs_base_table` — single-column or composite.  `covers_unique_key`
+    // honors the NULLS-DISTINCT gate from `UniqueColumnsSchemaImpl::from`
+    // (table-level UNIQUE requires every member NOT NULL; PRIMARY KEY is
+    // unconditional).
+    let rhs_names: HashSet<SqlIdentifier> = pairs.iter().map(|(_, r)| r.name.clone()).collect();
+    if !ctx.covers_unique_key(rhs_base_table, &rhs_names) {
         return Ok(false);
     }
 
@@ -229,17 +285,28 @@ fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
     let Some(lhs_first_table) = lhs_base_stmt.tables.first() else {
         return Ok(false); // FROM-less inner subquery — cannot prove subset
     };
-    if let TableExpr {
+    let TableExpr {
         inner: TableExprInner::Table(lhs_base_table),
         ..
     } = lhs_first_table
-        && lhs_base_table.eq(rhs_base_table)
-    {
-        // Extending the projection of a grouping subquery could change its cardinality;
-        // we only support aggregate-free LHS subqueries here.
-        if lhs_base_stmt.group_by.is_some() || lhs_base_stmt.having.is_some() {
-            return Ok(false);
-        }
+    else {
+        return Ok(false);
+    };
+    if lhs_base_table != rhs_base_table {
+        return Ok(false);
+    }
+    // Extending the projection of a grouping subquery could change its cardinality;
+    // we only support aggregate-free LHS subqueries here.
+    if lhs_base_stmt.group_by.is_some() || lhs_base_stmt.having.is_some() {
+        return Ok(false);
+    }
+    let lhs_first_ref = get_from_item_reference_name(lhs_first_table)?;
+    // Every (lhs_col, rhs_col) pair must be a direct projection of the same
+    // base column from the LHS subquery: the projection aliased as
+    // `lhs_col.name` must resolve to `<lhs_first_ref>.rhs_col.name`.  When
+    // this holds for all pairs, the LHS's keyset is a subset of the RHS's
+    // keyset and the join is redundant.
+    for (lhs_col, rhs_col) in pairs {
         let lhs_field = lhs_base_stmt.fields.iter().find_map(|fe| {
             let (f_expr, f_alias) = expect_field_as_expr(fe);
             if alias_for_expr(f_expr, f_alias).eq(&lhs_col.name) {
@@ -248,17 +315,14 @@ fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
                 None
             }
         });
-        if let Some(Expr::Column(Column { name, table })) = lhs_field
-            && name.eq(&rhs_col.name)
-            && table.as_ref() == Some(&get_from_item_reference_name(lhs_first_table)?)
-        {
-            return Ok(true);
+        let Some(Expr::Column(Column { name, table })) = lhs_field else {
+            return Ok(false);
+        };
+        if name != &rhs_col.name || table.as_ref() != Some(&lhs_first_ref) {
+            return Ok(false);
         }
     }
-
-    // Any other shape (different base table, non-column projection, mismatched names, etc.)
-    // is considered unsafe for this very targeted optimization.
-    Ok(false)
+    Ok(true)
 }
 
 /// Collects the *names* of all columns that reference `rhs_rel` anywhere in `stmt`,
@@ -406,38 +470,23 @@ fn drop_redundant_self_joins<U: UniqueColumnsSchema>(
         return Ok(any_rewrite);
     };
 
-    let mut cross_eq = None;
-    if !is_column_eq_column(on_expr, |lhs_col, rhs_col| {
-        if is_column_of!(lhs_col, lhs_rel) && is_column_of!(rhs_col, rhs_rel) {
-            cross_eq = Some((lhs_col.clone(), rhs_col.clone()));
-            return true;
-        }
-        if is_column_of!(lhs_col, rhs_rel) && is_column_of!(rhs_col, lhs_rel) {
-            cross_eq = Some((rhs_col.clone(), lhs_col.clone()));
-            return true;
-        }
-        false
-    }) {
+    let Some(pairs) = collect_cross_eqs(on_expr, &lhs_rel, &rhs_rel) else {
+        return Ok(any_rewrite);
+    };
+    if pairs.is_empty() {
         return Ok(any_rewrite);
     }
 
-    let Some((lhs_col, rhs_col)) = &cross_eq else {
-        return Ok(any_rewrite);
-    };
-
-    if !lhs_is_subset_of_rhs(stmt, &lhs_rel, lhs_col, &rhs_rel, rhs_col, ctx)? {
+    if !lhs_is_subset_of_rhs(stmt, &lhs_rel, &rhs_rel, &pairs, ctx)? {
         return Ok(any_rewrite);
     }
 
     // Remove both RHS and LHS from `stmt`. We will restore the LHS before exit.
     //
-    // IMPORTANT COUPLING: the join is removed BEFORE `collect_rhs_refs` runs. This is safe
-    // because `is_column_eq_column` (above) guarantees the ON is a single `col = col`
-    // equality — both columns are the join key, already handled by `lhs_col`/`rhs_col`.
-    // If `is_column_eq_column` is ever relaxed to accept AND-conjunctions (multi-column
-    // keys), additional RHS columns in the ON would be missed by `collect_rhs_refs` since
-    // the join is already gone.  Any such extension MUST also update this section to walk
-    // the removed ON before collection, or defer the removal until after collection.
+    // The join is removed BEFORE `collect_rhs_refs` runs.  Every column on
+    // either side of the equi-pairs is already handled by `pairs`, so any
+    // `rhs.col` reference still scattered through the rest of the stmt
+    // (SELECT list, WHERE, etc.) gets collected and rebound to the LHS.
     stmt.join.remove(0);
     let mut stmt_tables = mem::take(&mut stmt.tables);
 
@@ -843,6 +892,84 @@ mod tests {
                    LEFT JOIN "t" ON "sq"."id" = "t"."id""#
             ),
             "should bail: inner LHS has GROUP BY"
+        );
+    }
+
+    // ── DRJ-2 composite-key tests (T1 of REA-6651) ──
+
+    /// Mock schema: `t` has a composite PRIMARY KEY on `(a, b)` — neither
+    /// column individually unique.
+    struct TestCompositeKeySchema;
+
+    impl UniqueColumnsSchema for TestCompositeKeySchema {
+        fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+            // Composite key has no single-column unique columns.
+            None
+        }
+
+        fn unique_keys_of(&self, rel: &Relation) -> Option<HashSet<Vec<Column>>> {
+            if rel.name == "t" {
+                Some(HashSet::from([vec![mk_col("t", "a"), mk_col("t", "b")]]))
+            } else {
+                None
+            }
+        }
+    }
+
+    fn did_eliminate_with<S: UniqueColumnsSchema>(sql: &str, schema: &S) -> bool {
+        let mut stmt =
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"));
+        let join_count_before = stmt.join.len();
+        drop_redundant_self_joins_main(&mut stmt, schema)
+            .unwrap_or_else(|e| panic!("rewrite failed: {e}\n  sql: {sql}"));
+        stmt.join.len() < join_count_before
+    }
+
+    /// AND-conjoined equi-predicates that cover every column of a composite
+    /// PRIMARY KEY are enough to prove redundancy.  Pre-T1 the single-pair
+    /// matcher rejected ANDs outright; post-T1 `collect_cross_eqs` admits
+    /// them and `covers_unique_key` confirms the composite is fully pinned.
+    #[test]
+    fn composite_key_fully_covered_eliminates_join() {
+        assert!(
+            did_eliminate_with(
+                r#"SELECT "sq"."a", "t"."x"
+                   FROM (SELECT "t"."a", "t"."b" FROM "t" WHERE "t"."x" > 0) AS "sq"
+                   LEFT JOIN "t" ON "sq"."a" = "t"."a" AND "sq"."b" = "t"."b""#,
+                &TestCompositeKeySchema,
+            ),
+            "composite PK (a, b) fully pinned by AND-conjoined ON should eliminate the join"
+        );
+    }
+
+    /// Pinning only one column of a composite PRIMARY KEY does NOT prove
+    /// the join is redundant — the key isn't covered.  Stays as-is.
+    #[test]
+    fn composite_key_partially_covered_preserves_join() {
+        assert!(
+            !did_eliminate_with(
+                r#"SELECT "sq"."a", "t"."x"
+                   FROM (SELECT "t"."a", "t"."b" FROM "t" WHERE "t"."x" > 0) AS "sq"
+                   LEFT JOIN "t" ON "sq"."a" = "t"."a""#,
+                &TestCompositeKeySchema,
+            ),
+            "composite PK (a, b) only partially pinned should bail"
+        );
+    }
+
+    /// One ON pair references a column outside the composite PK: the set
+    /// of RHS columns does not cover the key, so bail.
+    #[test]
+    fn composite_key_with_extra_non_key_pair_preserves_join() {
+        assert!(
+            !did_eliminate_with(
+                r#"SELECT "sq"."a", "t"."x"
+                   FROM (SELECT "t"."a", "t"."x" FROM "t") AS "sq"
+                   LEFT JOIN "t" ON "sq"."a" = "t"."a" AND "sq"."x" = "t"."x""#,
+                &TestCompositeKeySchema,
+            ),
+            "ON includes a non-key column (x); pair set covers no unique key — bail"
         );
     }
 
