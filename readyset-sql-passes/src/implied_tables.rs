@@ -17,6 +17,10 @@ use crate::{RewriteDialectContext, get_local_from_items_iter, outermost_table_ex
 
 pub trait ImpliedTablesContext: RewriteDialectContext {
     /// An exhaustive list of all view and table schemas in the database.
+    /// Production impls must include both compiled views/base tables and
+    /// uncompiled views: column resolution needs the full schema universe
+    /// or unqualified columns of uncompiled views go unresolved and trip
+    /// `validate_pipeline_invariants`'s internal error.
     // TODO(mvzink): Find a better way to do this
     fn all_schemas(&self) -> impl IntoIterator<Item = (Relation, Vec<SqlIdentifier>)>;
 }

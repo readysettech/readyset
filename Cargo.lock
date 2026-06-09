@@ -7516,6 +7516,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
+ "readyset-sql-parsing",
  "readyset-sql-passes",
  "readyset-util",
  "serde",

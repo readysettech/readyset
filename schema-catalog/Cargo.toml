@@ -25,6 +25,7 @@ bincode = { workspace = true }
 fail = { workspace = true, optional = true }
 
 [dev-dependencies]
+readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 tokio = { workspace = true, features = ["test-util"] }
 
 [features]

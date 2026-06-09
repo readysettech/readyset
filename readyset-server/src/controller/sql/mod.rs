@@ -1763,7 +1763,17 @@ impl StarExpansionContext for SqlIncorporatorRewriteContext<'_> {
 
 impl ImpliedTablesContext for SqlIncorporatorRewriteContext<'_> {
     fn all_schemas(&self) -> impl IntoIterator<Item = (Relation, Vec<SqlIdentifier>)> {
-        self.this.view_schemas.clone()
+        // Mirror `schema_catalog::RewriteContext::all_schemas`: include both
+        // compiled and uncompiled views so column resolution sees the full
+        // schema universe.  `view_schemas` wins when a relation appears in
+        // both buckets.
+        let mut combined = self.this.view_schemas.clone();
+        for (rel, view) in &self.this.uncompiled_views {
+            combined
+                .entry(rel.clone())
+                .or_insert_with(|| view.schema.clone());
+        }
+        combined
     }
 }
 

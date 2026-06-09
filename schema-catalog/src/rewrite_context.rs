@@ -166,6 +166,138 @@ impl RewriteDialectContext for RewriteContext {
 
 impl ImpliedTablesContext for RewriteContext {
     fn all_schemas(&self) -> impl IntoIterator<Item = (Relation, Vec<SqlIdentifier>)> {
-        self.schema_catalog.view_schemas.clone()
+        // Both compiled views/base tables and uncompiled views need to be
+        // visible to `expand_implied_tables`; otherwise unqualified column
+        // references whose owning relation is an uncompiled VIEW go
+        // unresolved and trip `validate_pipeline_invariants`'s "Unresolved
+        // column" internal error.  When a relation appears in both buckets
+        // (e.g. transient inconsistency during compile), `view_schemas`
+        // wins via `entry(..).or_insert_with(..)`.
+        let mut combined = self.schema_catalog.view_schemas.clone();
+        for (rel, cols) in &self.schema_catalog.uncompiled_views {
+            combined.entry(rel.clone()).or_insert_with(|| cols.clone());
+        }
+        combined
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use super::*;
+
+    fn ctx_with(
+        view_schemas: HashMap<Relation, Vec<SqlIdentifier>>,
+        uncompiled_views: HashMap<Relation, Vec<SqlIdentifier>>,
+    ) -> RewriteContext {
+        let catalog = SchemaCatalog {
+            generation: SchemaGeneration::INITIAL,
+            base_schemas: HashMap::new(),
+            uncompiled_views,
+            custom_types: HashMap::new(),
+            view_schemas,
+            non_replicated_relations: HashSet::new(),
+        };
+        RewriteContext::new(Dialect::DEFAULT_POSTGRESQL, Arc::new(catalog), vec![])
+    }
+
+    /// Uncompiled views must be visible to `all_schemas` so column resolution
+    /// can match unqualified columns against them.  Pre-fix the production
+    /// impl returned only `view_schemas`, dropping uncompiled views and
+    /// causing the "Unresolved column" internal error.
+    #[test]
+    fn all_schemas_includes_uncompiled_views() {
+        let view_schemas = HashMap::from([(
+            Relation::from("supplier"),
+            vec!["s_suppkey".into(), "s_name".into()],
+        )]);
+        let uncompiled_views = HashMap::from([(
+            Relation::from("revenues"),
+            vec!["supplier_no".into(), "total_revenue".into()],
+        )]);
+        let ctx = ctx_with(view_schemas, uncompiled_views);
+        let combined: HashMap<Relation, Vec<SqlIdentifier>> =
+            ctx.all_schemas().into_iter().collect();
+        assert_eq!(combined.len(), 2);
+        assert_eq!(
+            combined[&Relation::from("revenues")],
+            vec![
+                SqlIdentifier::from("supplier_no"),
+                SqlIdentifier::from("total_revenue")
+            ]
+        );
+    }
+
+    /// On key collision, `view_schemas` wins.  The same relation appearing
+    /// in both buckets is a transient state during compile; the compiled
+    /// schema is the authoritative one.
+    #[test]
+    fn all_schemas_prefers_view_schemas_on_collision() {
+        let view_schemas =
+            HashMap::from([(Relation::from("revenues"), vec!["compiled_col".into()])]);
+        let uncompiled_views =
+            HashMap::from([(Relation::from("revenues"), vec!["uncompiled_col".into()])]);
+        let ctx = ctx_with(view_schemas, uncompiled_views);
+        let combined: HashMap<Relation, Vec<SqlIdentifier>> =
+            ctx.all_schemas().into_iter().collect();
+        assert_eq!(combined.len(), 1);
+        assert_eq!(
+            combined[&Relation::from("revenues")],
+            vec![SqlIdentifier::from("compiled_col")]
+        );
+    }
+
+    #[test]
+    fn expand_implied_tables_resolves_uncompiled_view_columns_q15_shape() {
+        use readyset_sql::{Dialect as SqlDialect, DialectDisplay};
+        use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
+        use readyset_sql_passes::ImpliedTableExpansion;
+
+        let view_schemas = HashMap::from([(
+            Relation::from("supplier"),
+            vec![
+                "s_suppkey".into(),
+                "s_name".into(),
+                "s_address".into(),
+                "s_phone".into(),
+            ],
+        )]);
+        let uncompiled_views = HashMap::from([(
+            Relation::from("revenues"),
+            vec!["supplier_no".into(), "total_revenue".into()],
+        )]);
+        let ctx = ctx_with(view_schemas, uncompiled_views);
+
+        let mut q = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            SqlDialect::PostgreSQL,
+            "SELECT s_suppkey, s_name, total_revenue \
+             FROM supplier, revenues \
+             WHERE s_suppkey = supplier_no \
+             ORDER BY s_suppkey",
+        )
+        .expect("Q15-shape query parses");
+
+        q.expand_implied_tables(&ctx)
+            .expect("expand_implied_tables succeeds when uncompiled views are visible");
+
+        let expected = parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            SqlDialect::PostgreSQL,
+            "SELECT \"supplier\".\"s_suppkey\", \"supplier\".\"s_name\", \"revenues\".\"total_revenue\" \
+             FROM \"supplier\", \"revenues\" \
+             WHERE \"supplier\".\"s_suppkey\" = \"revenues\".\"supplier_no\" \
+             ORDER BY \"supplier\".\"s_suppkey\"",
+        )
+        .expect("expected query parses");
+
+        assert_eq!(
+            q,
+            expected,
+            "\n  left: {}\n right: {}",
+            q.display(SqlDialect::PostgreSQL),
+            expected.display(SqlDialect::PostgreSQL)
+        );
     }
 }
