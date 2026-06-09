@@ -7255,3 +7255,73 @@ WHERE s.sn NOT IN (
         expected_text,
     );
 }
+
+/// QA-shaped LATERAL `ARRAY(SELECT ...)` regression test.  When the array
+/// element type is derivable, `array_constructor::rewrite_single_array_constructor`
+/// (post-REA-6187) wraps the empty-array fallback in a Cast carrying the
+/// element type: the LATERAL body projects
+/// `COALESCE(array_subq.agg_result, ARRAY[]::char[])`.
+///
+/// When `unnest_subqueries` Resolves the LATERAL into a `LEFT OUTER JOIN`
+/// with a GROUP-BY derived table, the COALESCE substitution machinery
+/// (driven by `analyse_lone_aggregates_subquery_fields` →
+/// `extract_aggregate_fallback_for_expr` → `make_aggregate_fallback_for_expr`
+/// → `simplify_constant_coalesce`) must recognise the `Cast(ARRAY[], char[])`
+/// fallback as a structural constant.  Pre-fix the `Expr::Literal | Expr::Array`
+/// guard in `simplify_constant_coalesce` rejected the Cast wrapper, the
+/// fallback was lost, and the outer projection ended up bare —
+/// producing NULL on no-match instead of `{}` (empty array) as the original
+/// `ARRAY(SELECT ...)` semantics demand.
+///
+/// Post-fix the helper peeks through Cast; the outer projection wraps
+/// `tags.tags` and `concepts.concepts` in `COALESCE(..., ARRAY[]::char[])`,
+/// correctly handling LEFT-OUTER-JOIN null extension for `s` rows that
+/// have no matching `qa.p.jn` or `qa.spj.pn`.
+///
+/// The query baked-in casts (`::char`) on the projected column give
+/// `array_constructor`'s type-derivation what it needs without a
+/// BaseSchemas fixture — the exact type is incidental to the bug.
+#[test]
+fn test_qa_array_lateral_typed_fallback_outer_coalesce() {
+    let original_text = r#"
+        SELECT
+            "inner".sn, "inner".pn, "inner".jn, tags.tags, concepts.concepts
+        FROM (SELECT s.sn, s.pn, s.jn, d1.test_varchar AS _o0, s.sn AS _o1
+            FROM qa.s AS s
+            INNER JOIN qa.datatypes1 AS d1 ON d1.rownum = s.status
+            WHERE s.city != 'ATHENS' AND s.pn >= 'P00000'
+            ORDER BY _o0 ASC NULLS LAST, _o1 ASC NULLS LAST
+            LIMIT 41
+        ) AS "inner", LATERAL (SELECT ARRAY(SELECT p.pn::char FROM qa.p AS p
+                WHERE p.jn = "inner".jn
+                ORDER BY p.pn ASC
+            ) AS tags
+        ) AS tags, LATERAL (SELECT ARRAY(SELECT spj.sn::char FROM qa.spj AS spj
+                WHERE spj.pn = "inner".pn
+                ORDER BY spj.sn ASC
+            ) AS concepts
+        ) AS concepts
+        ORDER BY "inner"._o0 ASC NULLS LAST, "inner"._o1 ASC NULLS LAST"#;
+
+    let rewritten = rewrite(
+        "test_qa_array_lateral_typed_fallback_outer_coalesce",
+        original_text,
+        get_schema_guard(),
+    );
+    println!(">>> Rewritten:\n{rewritten}");
+
+    // The outer projection MUST wrap both LATERAL-derived columns in the
+    // Cast fallback `array_constructor` produced — otherwise LEFT-OUTER-JOIN
+    // null extension on no-match leaks NULL where the original ARRAY(SELECT ...)
+    // demands `{}`.  Cast type is incidental; the wrapper must be present.
+    assert!(
+        rewritten.contains(r#"coalesce("tags"."tags", (ARRAY[]::CHAR[]))"#),
+        "outer projection must wrap `tags.tags` in COALESCE(_, ARRAY[]::char[]); \
+         pre-fix it was bare which yields NULL on no-match.\nGot:\n{rewritten}"
+    );
+    assert!(
+        rewritten.contains(r#"coalesce("concepts"."concepts", (ARRAY[]::CHAR[]))"#),
+        "outer projection must wrap `concepts.concepts` in COALESCE(_, ARRAY[]::char[]); \
+         pre-fix it was bare which yields NULL on no-match.\nGot:\n{rewritten}"
+    );
+}

@@ -1648,27 +1648,49 @@ fn make_aggregate_fallback_for_expr(mut fallback_expr: Expr) -> Option<Expr> {
     }
 }
 
-/// Returns `true` if the expression is a constant, non-NULL value suitable for use as an
-/// aggregate fallback.  This includes non-NULL literals **and** array constructors whose
-/// elements are all constant (e.g. `ARRAY[]` or `ARRAY[1, 2]`).  Array constructors cannot
-/// be represented as a single [`Literal`] after REA-6335 prevented array-to-string coercion
-/// in constant folding, so we must accept them explicitly here.
+/// Returns `true` if the expression is a *structural* constant, non-NULL value
+/// suitable for use as an aggregate fallback.  Recognises:
+///
+/// - non-NULL literals,
+/// - array constructors whose elements are all structural constants
+///   (e.g. `ARRAY[]` or `ARRAY[1, 2]`),
+/// - casts wrapping any of the above (e.g. `ARRAY[]::char(8)[]` as produced by
+///   [`crate::array_constructor`] for typed empty fallbacks).
+///
+/// This is *structural* detection — it pattern-matches on the AST without
+/// invoking the constant folder.  Use [`constant_fold_expr`] first when runtime
+/// evaluation is also needed (e.g. arithmetic reduction); this helper exists
+/// because Array constructors (and their typed-Cast wrappers) cannot be
+/// represented as a single `Literal`, so the folder leaves them intact — see
+/// REA-6335 for the Array case and REA-6187 for the Cast wrapper.
 fn is_constant_non_null(expr: &Expr) -> bool {
     match expr {
         Expr::Literal(lit) => !matches!(lit, Literal::Null),
         Expr::Array(ArrayArguments::List(elems)) => elems.iter().all(is_constant_non_null),
+        Expr::Cast { expr, .. } => is_constant_non_null(expr),
         _ => false,
     }
 }
-/// Simplify a `coalesce(args…)` call whose arguments are all constants by replacing
-/// it with the first non-NULL constant argument.  This handles the case where the constant
-/// folder was unable to reduce the call because the result type (e.g. `DfValue::Array`) has no
-/// `Literal` representation.
+
+/// Like [`is_constant_non_null`] but also admits `NULL`.  Used as the
+/// reducibility gate for [`simplify_constant_coalesce`]: every `COALESCE`
+/// argument must be a structural constant-or-NULL for the reduction to be
+/// sound.
+fn is_structural_constant(expr: &Expr) -> bool {
+    matches!(expr, Expr::Literal(Literal::Null)) || is_constant_non_null(expr)
+}
+
+/// Simplify a `coalesce(args…)` call whose arguments are all *structural*
+/// constants by replacing it with the first non-NULL constant argument.  This
+/// handles the case where the constant folder was unable to reduce the call
+/// because the result type (e.g. `DfValue::Array`) has no `Literal`
+/// representation — including typed `Cast(ARRAY[], …[])` fallbacks produced by
+/// `array_constructor` after REA-6187.
 fn simplify_constant_coalesce(expr: &mut Expr) {
     let dominated_by_constants = matches!(
         expr,
         Expr::Call(FunctionExpr::Coalesce(args))
-            if args.iter().all(|a| matches!(a, Expr::Literal(_) | Expr::Array(_)))
+            if args.iter().all(is_structural_constant)
     );
     if !dominated_by_constants {
         return;
@@ -4170,5 +4192,77 @@ mod resolve_field_expr_by_alias_tests {
         let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.x, t.y FROM t").expect("parses");
         let result = resolve_field_expr_by_alias(&stmt, &"x".into());
         assert!(matches!(result, Some(Expr::Column(c)) if c.name.as_str() == "x"));
+    }
+}
+
+#[cfg(test)]
+mod simplify_constant_coalesce_tests {
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_expr;
+
+    use super::*;
+
+    /// Bare `ARRAY[]` fallback (pre-REA-6187 shape) — `simplify_constant_coalesce`
+    /// reduces `COALESCE(NULL, ARRAY[])` to the empty array directly.  Pins
+    /// behaviour the structural recognizer must continue to handle.
+    #[test]
+    fn reduces_coalesce_with_bare_array_fallback() {
+        let mut expr = parse_expr(Dialect::PostgreSQL, "coalesce(NULL, ARRAY[])").expect("parses");
+        simplify_constant_coalesce(&mut expr);
+        assert!(
+            matches!(&expr, Expr::Array(ArrayArguments::List(elems)) if elems.is_empty()),
+            "expected bare empty Array, got {expr:?}",
+        );
+        assert!(is_constant_non_null(&expr));
+    }
+
+    /// Typed `ARRAY[]::char(8)[]` fallback (post-REA-6187 shape produced by
+    /// `array_constructor::rewrite_single_array_constructor` at `:609-617`).
+    /// Pre-fix the structural recognizer didn't peek through the Cast, so the
+    /// COALESCE reduction silently failed and `analyse_lone_aggregates_subquery_fields`
+    /// never registered the outer-substitution mapping for ARRAY(SELECT)
+    /// LATERAL bodies — the outer projection ended up bare, and LEFT OUTER
+    /// JOIN null-extension produced NULL where the original semantics demand
+    /// an empty array.
+    #[test]
+    fn reduces_coalesce_with_cast_wrapped_array_fallback() {
+        let mut expr =
+            parse_expr(Dialect::PostgreSQL, "coalesce(NULL, ARRAY[]::char(8)[])").expect("parses");
+        simplify_constant_coalesce(&mut expr);
+        // Cast preserved — type annotation is load-bearing for lowering after
+        // REA-6187.
+        assert!(
+            matches!(&expr, Expr::Cast { .. }),
+            "expected Cast, got {expr:?}"
+        );
+        assert!(is_constant_non_null(&expr));
+    }
+
+    /// Non-empty typed array literal: `COALESCE(NULL, ARRAY[1, 2]::int[])`.
+    /// Cast recursion still recognises this as constant.
+    #[test]
+    fn reduces_coalesce_with_cast_wrapped_non_empty_array() {
+        let mut expr =
+            parse_expr(Dialect::PostgreSQL, "coalesce(NULL, ARRAY[1, 2]::int[])").expect("parses");
+        simplify_constant_coalesce(&mut expr);
+        assert!(
+            matches!(&expr, Expr::Cast { .. }),
+            "expected Cast, got {expr:?}"
+        );
+        assert!(is_constant_non_null(&expr));
+    }
+
+    /// Non-constant Array element (a column reference): the helper must NOT
+    /// reduce — the array's value can't be determined statically.
+    #[test]
+    fn does_not_reduce_coalesce_with_column_reference_array() {
+        let mut expr =
+            parse_expr(Dialect::PostgreSQL, "coalesce(NULL, ARRAY[t.x])").expect("parses");
+        let before = expr.clone();
+        simplify_constant_coalesce(&mut expr);
+        assert_eq!(
+            expr, before,
+            "COALESCE with non-constant Array element must not reduce"
+        );
     }
 }
