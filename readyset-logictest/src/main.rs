@@ -33,6 +33,7 @@ pub mod from_query_log;
 pub mod generate;
 pub mod parser;
 pub mod permute;
+pub mod rewrite;
 pub mod runner;
 
 #[cfg(feature = "in-process-readyset")]
@@ -290,6 +291,18 @@ struct Verify {
     #[arg(long, env = "LOGICTEST_IGNORE_ERROR_TAGS")]
     ignore_error_tags: bool,
 
+    /// Re-run each query against the target database and rewrite its recorded result section in
+    /// place with the actual results, instead of comparing. Requires an upstream `--database-url`.
+    ///
+    /// Comments, blank lines, SQL, and `error:` tags are preserved verbatim; only the recorded
+    /// result block after each `----` is replaced, and the existing hash-vs-inline form is kept.
+    /// Queries carrying an `error:` tag (unless `--ignore-error-tags` is set) or that error against
+    /// the target keep their existing recorded results, and `statement error` records run only for
+    /// their side effects. Use this to record expected values for a new test, or to refresh
+    /// recordings after upstream behavior changes.
+    #[arg(long)]
+    rewrite: bool,
+
     /// Per-query timeout in seconds. If a single query or statement execution takes longer than
     /// this, it will be aborted with a timeout error. Prevents hangs when domain threads panic.
     #[arg(long, default_value = "60")]
@@ -468,6 +481,7 @@ impl From<&Verify> for RunOptions {
             verbose: verify.verbose,
             no_fail_fast: verify.no_fail_fast,
             ignore_error_tags: verify.ignore_error_tags,
+            rewrite: verify.rewrite,
             query_timeout: Duration::from_secs(verify.query_timeout),
             script_timeout: Some(Duration::from_secs(verify.script_timeout)),
             task_idx: 0,

@@ -1,0 +1,13 @@
+# fixture for verify --rewrite: the recorded result below is intentionally wrong
+statement ok
+CREATE TABLE t (x INT, PRIMARY KEY (x))
+
+statement ok
+INSERT INTO t (x) VALUES (1), (2), (3)
+
+# REA-0000 sentinel comment that must survive a rewrite
+query I rowsort
+SELECT x FROM t WHERE x >= 2
+----
+999
+

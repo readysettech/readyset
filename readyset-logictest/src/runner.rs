@@ -10,7 +10,7 @@ use std::{io, mem};
 use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
 use tokio::time::{sleep, timeout};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 #[cfg(feature = "in-process-readyset")]
 use tracing::error;
@@ -89,6 +89,9 @@ pub struct RunOptions {
     pub no_fail_fast: bool,
     /// Skip query-level `error:` pattern matching; see `--ignore-error-tags` on the CLI.
     pub ignore_error_tags: bool,
+    /// Re-run each query and rewrite its recorded result section in place from the actual results,
+    /// rather than comparing. See `--rewrite` on the CLI.
+    pub rewrite: bool,
     /// Per-query timeout. If a single query or statement execution takes longer than this, it will
     /// be aborted with a timeout error. This prevents hangs when domain threads panic and drop
     /// response channels.
@@ -115,6 +118,7 @@ impl RunOptions {
             verbose: false,
             no_fail_fast: false,
             ignore_error_tags: false,
+            rewrite: false,
             query_timeout: Duration::from_secs(60),
             script_timeout: None,
             task_idx: 0,
@@ -154,6 +158,34 @@ fn compare_results(results: &[Value], expected: &[Value], type_sensitive: bool) 
         .iter()
         .zip(expected)
         .all(|(res, expected)| res.compare_type_insensitive(expected))
+}
+
+/// Whether a record's [`Conditional`]s mean it should be skipped against the current target
+/// (`is_readyset` plus the configured database engine).
+fn should_skip(conditionals: &[Conditional], db_type: &DatabaseType, is_readyset: bool) -> bool {
+    conditionals.iter().any(|s| match s {
+        Conditional::SkipIf(c) if c == "readyset" => is_readyset,
+        Conditional::OnlyIf(c) if c == "readyset" => !is_readyset,
+        Conditional::SkipIf(c) => c == &db_type.to_string(),
+        Conditional::OnlyIf(c) => c != &db_type.to_string(),
+        _ => false,
+    })
+}
+
+/// During `--rewrite`, whether a query's existing recorded results must be kept verbatim rather
+/// than re-recorded from the target. Conditionally-skipped queries never run against the target,
+/// and a query carrying an `error:` tag records a (usually Readyset-specific) failure the target
+/// typically will not reproduce; re-recording either would clobber a valid recording.
+fn rewrite_preserves_recording(query: &Query, opts: &RunOptions, is_readyset: bool) -> bool {
+    should_skip(&query.conditionals, &opts.database_type, is_readyset)
+        || (!opts.ignore_error_tags && query.expected_error.is_some())
+}
+
+/// During `--rewrite`, whether to skip enforcing a statement's recorded pass/fail expectation. A
+/// `statement error` is re-run only for its side effects, so its (usually Readyset-specific)
+/// expectation is neither re-checked nor re-recorded; verify still enforces it.
+fn rewrite_skips_statement_check(result: &StatementResult, rewrite: bool) -> bool {
+    rewrite && matches!(result, StatementResult::Error { .. })
 }
 
 /// Decode `QueryResults` into a row-major `Vec<Vec<Value>>`.
@@ -359,8 +391,21 @@ impl TestScript {
                     .await?;
             }
 
-            self.run_on_database(&opts, &mut conn, opts.upstream_database_is_readyset)
-                .await?;
+            if opts.rewrite {
+                let new_results = self
+                    .rewrite_on_database(&opts, &mut conn, opts.upstream_database_is_readyset)
+                    .await?;
+                let src = std::fs::read_to_string(&self.path)
+                    .with_context(|| format!("Reading {} for rewrite", self.path.display()))?;
+                let rewritten = crate::rewrite::substitute_query_results(&src, &new_results)?;
+                std::fs::write(&self.path, rewritten)
+                    .with_context(|| format!("Writing rewritten {}", self.path.display()))?;
+            } else {
+                self.run_on_database(&opts, &mut conn, opts.upstream_database_is_readyset)
+                    .await?;
+            }
+        } else if opts.rewrite {
+            bail!("--rewrite requires an upstream --database-url to record results against");
         } else {
             self.run_on_noria(&opts, out_of_band_migration).await?;
         };
@@ -431,16 +476,6 @@ impl TestScript {
         conn: &mut DatabaseConnection,
         is_readyset: bool,
     ) -> anyhow::Result<()> {
-        let conditional_skip = |conditionals: &[Conditional]| {
-            conditionals.iter().any(|s| match s {
-                Conditional::SkipIf(c) if c == "readyset" => is_readyset,
-                Conditional::OnlyIf(c) if c == "readyset" => !is_readyset,
-                Conditional::SkipIf(c) => c == &opts.database_type.to_string(),
-                Conditional::OnlyIf(c) => c != &opts.database_type.to_string(),
-                _ => false,
-            })
-        };
-
         #[cfg(feature = "in-process-readyset")]
         let mut update_system_timezone = false;
 
@@ -473,7 +508,7 @@ impl TestScript {
 
             match record {
                 Record::Statement(stmt) => {
-                    if conditional_skip(&stmt.conditionals) {
+                    if should_skip(&stmt.conditionals, &opts.database_type, is_readyset) {
                         continue;
                     }
                     #[cfg(feature = "in-process-readyset")]
@@ -486,7 +521,7 @@ impl TestScript {
                     debug!(command = stmt.command, "Running statement");
                     let stmt_result = retry_with_exponential_backoff!(
                         {
-                        self.run_statement(stmt, conn, opts.query_timeout, is_readyset)
+                        self.run_statement(stmt, conn, opts.query_timeout, is_readyset, false)
                             .await
                             .with_context(|| format!("Running statement {}", stmt.command))
                         },
@@ -515,7 +550,7 @@ impl TestScript {
                 }
 
                 Record::Query(query) => {
-                    if conditional_skip(&query.conditionals) {
+                    if should_skip(&query.conditionals, &opts.database_type, is_readyset) {
                         continue;
                     }
 
@@ -609,16 +644,78 @@ impl TestScript {
         Ok(())
     }
 
+    /// Re-run the script against `conn`, returning one [`QueryResults`] per `query` record (in
+    /// order) reflecting the database's actual output. Statements are executed to build up state
+    /// (their recorded pass/fail expectation is not enforced during a rewrite). Queries that are
+    /// conditionally skipped, carry an `error:` tag, or error against the target keep their existing
+    /// recorded results so the corresponding result block is left unchanged. The result form (hash
+    /// vs. inline values) of each existing recording is preserved so rewrites stay minimal.
+    async fn rewrite_on_database(
+        &self,
+        opts: &RunOptions,
+        conn: &mut DatabaseConnection,
+        is_readyset: bool,
+    ) -> anyhow::Result<Vec<QueryResults>> {
+        let mut new_results = Vec::new();
+        for (line_num, record) in &self.records {
+            match record {
+                Record::Statement(stmt) => {
+                    if should_skip(&stmt.conditionals, &opts.database_type, is_readyset) {
+                        continue;
+                    }
+                    self.run_statement(stmt, conn, opts.query_timeout, is_readyset, true)
+                        .await
+                        .with_context(|| {
+                            format!("Running statement during rewrite: {}", stmt.command)
+                        })?;
+                }
+                Record::Query(query) => {
+                    if rewrite_preserves_recording(query, opts, is_readyset) {
+                        new_results.push(query.results.clone());
+                        continue;
+                    }
+                    match self
+                        .compute_query_vals(query, conn, is_readyset, opts)
+                        .await
+                    {
+                        Ok(vals) => new_results.push(match &query.results {
+                            QueryResults::Hash { .. } => QueryResults::hash(&vals),
+                            QueryResults::Results(_) => QueryResults::Results(vals),
+                        }),
+                        Err(e) => {
+                            warn!(
+                                line = line_num,
+                                query = query.query,
+                                error = %root_cause_message(&e),
+                                "rewrite: query errored, keeping existing recorded results"
+                            );
+                            new_results.push(query.results.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(new_results)
+    }
+
     async fn run_statement(
         &self,
         stmt: &Statement,
         conn: &mut DatabaseConnection,
         query_timeout: Duration,
         is_readyset: bool,
+        rewrite: bool,
     ) -> anyhow::Result<()> {
         let res = timeout(query_timeout, conn.query_drop(&stmt.command))
             .await
             .map_err(|_| anyhow!("Statement timed out after {query_timeout:?}"))?;
+        if rewrite_skips_statement_check(&stmt.result, rewrite) {
+            // A `statement error` is re-run during rewrite only for its side effects; its recorded
+            // pass/fail expectation (often Readyset-specific) is neither re-checked nor re-recorded,
+            // so a success against the target must not abort the re-recording.
+            return Ok(());
+        }
         match stmt.result {
             StatementResult::Ok => {
                 if let Err(e) = res {
@@ -726,13 +823,16 @@ impl TestScript {
         }
     }
 
-    async fn run_query_inner(
+    /// Execute `query` against `conn` and return its results as a flat, sort-mode-applied
+    /// `Vec<Value>`, without comparing against the recorded results. Shared by `run_query_inner`
+    /// (which compares) and the `--rewrite` path (which re-records).
+    async fn compute_query_vals(
         &self,
         query: &Query,
         conn: &mut DatabaseConnection,
         is_readyset: bool,
         opts: &RunOptions,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<Value>> {
         // If this is readyset, drop proxied queries, so that if we are retrying a SELECT and it was
         // previously unsupported (e.g. because a required table hadn't yet been replicated), we
         // will retry caching it instead of assuming it still can't be cached and just proxying it.
@@ -815,6 +915,20 @@ impl TestScript {
             }
         };
 
+        Ok(vals)
+    }
+
+    async fn run_query_inner(
+        &self,
+        query: &Query,
+        conn: &mut DatabaseConnection,
+        is_readyset: bool,
+        opts: &RunOptions,
+    ) -> anyhow::Result<()> {
+        let vals = self
+            .compute_query_vals(query, conn, is_readyset, opts)
+            .await?;
+
         match &query.results {
             QueryResults::Hash { count, digest } => {
                 if *count != vals.len() {
@@ -896,5 +1010,64 @@ mod tests {
         let url = per_task_db_url(&base, 0);
         assert!(url.is_postgres());
         assert_eq!(url.db_name(), Some("noria_upstream_0"));
+    }
+
+    #[test]
+    fn rewrite_preserves_error_tagged_query() {
+        // A query carrying an `error:` tag records a (usually Readyset-specific) failure that the
+        // rewrite target typically will not reproduce. Re-recording it would clobber the recorded
+        // block while leaving the tag, turning a valid test into one that always fails, so the
+        // rewrite must keep the existing recording.
+        let opts = RunOptions::default_for_database(DatabaseType::MySQL);
+        let tagged = Query {
+            query: "SELECT 1".into(),
+            expected_error: Some("Wrong number of results".into()),
+            ..Default::default()
+        };
+        assert!(rewrite_preserves_recording(&tagged, &opts, false));
+
+        let plain = Query {
+            query: "SELECT 1".into(),
+            ..Default::default()
+        };
+        assert!(!rewrite_preserves_recording(&plain, &opts, false));
+    }
+
+    #[test]
+    fn rewrite_rerecords_error_tagged_query_when_tags_ignored() {
+        // `--ignore-error-tags` opts into re-recording error-tagged queries as ordinary ones.
+        let opts = RunOptions {
+            ignore_error_tags: true,
+            ..RunOptions::default_for_database(DatabaseType::MySQL)
+        };
+        let tagged = Query {
+            query: "SELECT 1".into(),
+            expected_error: Some("boom".into()),
+            ..Default::default()
+        };
+        assert!(!rewrite_preserves_recording(&tagged, &opts, false));
+    }
+
+    #[test]
+    fn rewrite_preserves_conditionally_skipped_query() {
+        // `onlyif readyset` against a non-readyset target is skipped, so its recording is kept.
+        let opts = RunOptions::default_for_database(DatabaseType::MySQL);
+        let skipped = Query {
+            query: "SELECT 1".into(),
+            conditionals: vec![Conditional::OnlyIf("readyset".into())],
+            ..Default::default()
+        };
+        assert!(rewrite_preserves_recording(&skipped, &opts, false));
+    }
+
+    #[test]
+    fn rewrite_runs_statement_errors_for_side_effects_only() {
+        // A `statement error` re-run during rewrite must not abort the file when it succeeds
+        // against the target; verify (rewrite = false) still enforces the expectation, and a
+        // `statement ok` is always enforced.
+        let err = StatementResult::Error { pattern: None };
+        assert!(rewrite_skips_statement_check(&err, true));
+        assert!(!rewrite_skips_statement_check(&err, false));
+        assert!(!rewrite_skips_statement_check(&StatementResult::Ok, true));
     }
 }

@@ -1,0 +1,24 @@
+# fixture for verify --rewrite: error-tagged records must survive a rewrite verbatim, and a
+# statement-error that succeeds upstream must not abort the re-recording.
+statement ok
+CREATE TABLE t (x INT, PRIMARY KEY (x))
+
+statement ok
+INSERT INTO t (x) VALUES (1), (2), (3)
+
+# Readyset-specific statement failure that succeeds against vanilla upstream; the rewrite runs it
+# for its side effect (inserting 4) and must not abort.
+statement error
+INSERT INTO t (x) VALUES (4)
+
+# REA-0000 fails on readyset but succeeds upstream; its recorded block must be preserved, not
+# re-recorded to the upstream rows.
+query I rowsort error: readyset-specific query failure
+SELECT x FROM t WHERE x >= 2
+----
+42
+
+query I rowsort
+SELECT x FROM t WHERE x >= 3
+----
+999
