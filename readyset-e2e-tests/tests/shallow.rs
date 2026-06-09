@@ -1,6 +1,7 @@
+use std::assert_matches;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use database_utils::UpstreamConfig;
 use mysql_async::prelude::Queryable;
@@ -2270,6 +2271,63 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache_prepared() {
     assert_eq!(
         psql_helpers::last_query_info(&rs).await.destination,
         QueryDestination::ReadysetShallow,
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn coalesce_upstream_query_failure_midflight() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let mut readyset_a = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    let mut readyset_b = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    readyset_a.query_drop(format!("USE {test_name}")).await.unwrap();
+    readyset_b.query_drop(format!("USE {test_name}")).await.unwrap();
+
+    let create_table = "CREATE TABLE foo (a INT); INSERT INTO foo VALUES (42)";
+    let drop_table = "DROP TABLE foo";
+    let query = "SELECT a FROM foo WHERE a = 42";
+    let create_cache = format!(
+        "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS COALESCE 5 SECONDS FROM {query}",
+    );
+
+    // Create the cache.
+    upstream.query_drop(create_table).await.unwrap();
+    readyset_a.query_drop(create_cache).await.unwrap();
+
+    // Drop the table so the first miss fails to get a result from upstream.
+    upstream.query_drop(drop_table).await.unwrap();
+    assert_matches!(readyset_a.query_drop(query).await, Err(..));
+
+    // Restore the table so the next miss can complete.
+    upstream.query_drop(create_table).await.unwrap();
+
+    // Measure how long the second query takes.
+    let start = Instant::now();
+    readyset_b.query_drop(query).await.unwrap();
+    let elapsed = start.elapsed();
+    let destination = last_query_info(&mut readyset_b).await.destination;
+    assert_eq!(destination, QueryDestination::Upstream);
+
+    // Check if the second miss waited the COALESCE window or not.
+    // XXX JCD We currently wait for a result that will never come (REA-6673).
+    assert!(
+        elapsed >= Duration::from_secs(4),
+        "second query did not wait for COALESCE window after first query failed",
     );
 
     shutdown_tx.shutdown().await;
