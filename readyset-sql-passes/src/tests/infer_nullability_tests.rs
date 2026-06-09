@@ -550,3 +550,55 @@ fn null_inf_31_concat_of_present_rhs_and_present_derived() {
         "#;
     assert_nullability(sql, false, &TestSchema::new());
 }
+
+#[test]
+fn null_inf_32_or_same_column_both_disjuncts_promote() {
+    // Both disjuncts null-reject p.city → intersection contains p.city → p present.
+    let sql = r#"
+        SELECT p.city
+        FROM spj
+        LEFT JOIN p ON spj.pn = p.pn
+        WHERE p.city = 'LONDON' OR p.city = 'PARIS'
+        "#;
+    assert_nullability(sql, true, &TestSchema::new());
+}
+
+#[test]
+fn null_inf_33_or_same_column_mixed_strict_ops_promotes() {
+    // Equality + LIKE both null-reject p.city → intersection still contains p.city.
+    let sql = r#"
+        SELECT p.city
+        FROM spj
+        LEFT JOIN p ON spj.pn = p.pn
+        WHERE p.city = 'LONDON' OR p.city LIKE 'P%'
+        "#;
+    assert_nullability(sql, true, &TestSchema::new());
+}
+
+#[test]
+fn null_inf_34_or_of_and_compounds_shared_column_promotes() {
+    // (A AND B) OR (A AND C): A is in both disjuncts; B/C are each in only one.
+    // Intersection retains p.city; p.weight (LHS-only) and p.pn (RHS-only) are excluded.
+    let sql = r#"
+        SELECT p.city
+        FROM spj
+        LEFT JOIN p ON spj.pn = p.pn
+        WHERE (p.city = 'LONDON' AND p.weight > 0)
+           OR (p.city = 'PARIS'  AND p.pn = 'P1')
+        "#;
+    assert_nullability(sql, true, &TestSchema::new());
+}
+
+#[test]
+fn null_inf_35_or_inside_and_promotes_via_disjunctive_evidence() {
+    // (A OR B) AND C: the AND arm adds C's evidence and recurses into the OR;
+    // OR's intersection of A,B contributes p.city.
+    let sql = r#"
+        SELECT p.city
+        FROM spj
+        LEFT JOIN p ON spj.pn = p.pn
+        WHERE (p.city = 'LONDON' OR p.city = 'PARIS')
+          AND spj.qty > 0
+        "#;
+    assert_nullability(sql, true, &TestSchema::new());
+}

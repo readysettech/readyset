@@ -186,6 +186,10 @@ fn is_null_rejecting_binary_op(op: &BinaryOperator) -> bool {
 ///
 /// Evidence sources:
 /// - Conjunctive descent (`AND`) and strict binary ops (e.g., `=`, `>`, `LIKE`).
+/// - Disjunctive descent (`OR`): a column is proven non-NULL only when BOTH disjuncts
+///   prove it (intersection of per-disjunct evidence). Sound under 3VL because if
+///   `P1 OR P2` is TRUE, at least one disjunct is TRUE, and a column in the intersection
+///   is rejected by whichever side held.
 /// - `x IS NOT NULL` and normalized `NOT (x IS NULL)`.
 /// - `BETWEEN` (operand/min/max must all be non-NULL to be TRUE).
 /// - `IN (...)` / `IN (subquery)` (LHS must be non-NULL to be TRUE).
@@ -201,6 +205,20 @@ fn derive_from_expr(predicate: &Expr, non_null_columns: &mut HashSet<Column>) {
         {
             derive_from_expr(lhs.as_ref(), non_null_columns);
             derive_from_expr(rhs.as_ref(), non_null_columns)
+        }
+        // `OR` -> intersection of disjunct evidence
+        Expr::BinaryOp {
+            op: BinaryOperator::Or,
+            lhs,
+            rhs,
+        } => {
+            let mut lhs_set = HashSet::new();
+            let mut rhs_set = HashSet::new();
+            derive_from_expr(lhs.as_ref(), &mut lhs_set);
+            derive_from_expr(rhs.as_ref(), &mut rhs_set);
+            for col in lhs_set.intersection(&rhs_set) {
+                non_null_columns.insert(col.clone());
+            }
         }
         // x IS NOT NULL -> null rejecting
         Expr::BinaryOp {
