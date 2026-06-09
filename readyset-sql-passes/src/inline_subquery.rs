@@ -1096,25 +1096,23 @@ fn is_upstream_item_safe_for_lateral_flatten<U: UniqueColumnsSchema>(
     else {
         return Ok(false);
     };
-    let Some(unique_cols) = unique_cols_schema.unique_columns_of(base_rel) else {
+    let Some(keys) = unique_cols_schema.unique_keys_of(base_rel) else {
         return Ok(false);
     };
-    // TODO: composite-key coverage.  The catalog stores only single-
-    // column unique keys (`UniqueColumnsSchemaImpl::from` filters
-    // composite PK/UNIQUE entries — see `known_core_limitations.md`
-    // invariant 15).  A table with `PRIMARY KEY (a, b)` whose LATERAL
-    // body correlates on BOTH `a` AND `b` is semantically safe to
-    // flatten (the composite is the key, post-flatten GROUP BY on the
-    // pair preserves identity), but lands in the reject branch below
-    // because neither `a` nor `b` is individually unique.  Closing this
-    // gap requires extending the catalog to expose composite keys and
-    // checking subset-superkey coverage here.
-    Ok(corr_cols.iter().any(|c| {
-        unique_cols.contains(&Column {
-            name: c.name.clone(),
-            table: Some(base_rel.clone()),
-        })
-    }))
+    // Subset-superkey coverage: admit the LATERAL flatten when the
+    // body's correlation column set is a superkey of *some* unique key
+    // on the upstream regular table.  Single-column keys are 1-element
+    // vecs (so the prior "any single-column unique key in corr_cols"
+    // semantic continues to hold); composite keys (PK or NOT-NULL-gated
+    // UNIQUE) are admitted when ALL member columns appear in the
+    // correlation set — post-flatten GROUP BY on the composite key
+    // preserves per-row identity exactly as it does for single-column
+    // keys.  The catalog's NULLS-DISTINCT gate already prevents
+    // nullable composite UNIQUE from reaching here.
+    let corr_names: HashSet<&SqlIdentifier> = corr_cols.iter().map(|c| &c.name).collect();
+    Ok(keys
+        .iter()
+        .any(|key| key.iter().all(|k| corr_names.contains(&k.name))))
 }
 
 /// Validate that the items joined to the LATERAL's position from
