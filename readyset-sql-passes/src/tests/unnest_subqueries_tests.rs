@@ -1,6 +1,8 @@
 use crate::ArrayConstructorRewrite;
 use crate::drop_redundant_join::{UniqueColumnsSchema, drop_redundant_self_joins_main};
-use crate::unnest_subqueries::{NonNullSchema, unnest_subqueries_main};
+use crate::unnest_subqueries::{
+    NonNullSchema, is_correlation_pinned_at_most_one, unnest_subqueries_main,
+};
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Column, Relation, SelectStatement};
 use readyset_sql::{Dialect, DialectDisplay};
@@ -7255,7 +7257,6 @@ WHERE s.sn NOT IN (
         expected_text,
     );
 }
-
 /// QA-shaped LATERAL `ARRAY(SELECT ...)` regression test.  When the array
 /// element type is derivable, `array_constructor::rewrite_single_array_constructor`
 /// (post-REA-6187) wraps the empty-array fallback in a Cast carrying the
@@ -7324,4 +7325,90 @@ fn test_qa_array_lateral_typed_fallback_outer_coalesce() {
         "outer projection must wrap `concepts.concepts` in COALESCE(_, ARRAY[]::char[]); \
          pre-fix it was bare which yields NULL on no-match.\nGot:\n{rewritten}"
     );
+}
+
+fn parse_inner_body(sql: &str) -> SelectStatement {
+    parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql).expect("parse")
+}
+
+#[test]
+fn at_most_one_correlation_in_where_classifies() {
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k, COUNT(*) AS cnt
+        FROM b
+        WHERE b.k = outer_t.k
+        GROUP BY b.k
+        "#,
+    );
+    assert!(is_correlation_pinned_at_most_one(&stmt).unwrap());
+}
+
+#[test]
+fn at_most_one_correlation_in_inner_join_on_classifies() {
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k, COUNT(*) AS cnt
+        FROM b
+        INNER JOIN c ON c.id = b.c_id AND b.k = outer_t.k
+        GROUP BY b.k
+        "#,
+    );
+    assert!(is_correlation_pinned_at_most_one(&stmt).unwrap());
+}
+
+#[test]
+fn at_most_one_correlation_mixed_join_on_and_where_classifies() {
+    // First GBY column pinned by JOIN-ON; second by WHERE.
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k1, b.k2, COUNT(*) AS cnt
+        FROM b
+        INNER JOIN c ON c.id = b.c_id AND b.k1 = outer_t.k1
+        WHERE b.k2 = outer_t.k2
+        GROUP BY b.k1, b.k2
+        "#,
+    );
+    assert!(is_correlation_pinned_at_most_one(&stmt).unwrap());
+}
+
+#[test]
+fn at_most_one_correlation_in_left_join_on_does_not_classify() {
+    // LEFT JOIN ON correlation must NOT be moved (would change null-extension
+    // semantics).  The mover skips it, so the classifier sees no WHERE evidence.
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k, COUNT(*) AS cnt
+        FROM b
+        LEFT JOIN c ON c.id = b.c_id AND b.k = outer_t.k
+        GROUP BY b.k
+        "#,
+    );
+    assert!(!is_correlation_pinned_at_most_one(&stmt).unwrap());
+}
+
+#[test]
+fn at_most_one_no_group_by_does_not_classify() {
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k
+        FROM b
+        INNER JOIN c ON c.id = b.c_id AND b.k = outer_t.k
+        "#,
+    );
+    assert!(!is_correlation_pinned_at_most_one(&stmt).unwrap());
+}
+
+#[test]
+fn at_most_one_unpinned_group_by_column_does_not_classify() {
+    // GROUP BY has two columns; only one is correlation-pinned.
+    let stmt = parse_inner_body(
+        r#"
+        SELECT b.k1, b.k2, COUNT(*) AS cnt
+        FROM b
+        INNER JOIN c ON c.id = b.c_id AND b.k1 = outer_t.k1
+        GROUP BY b.k1, b.k2
+        "#,
+    );
+    assert!(!is_correlation_pinned_at_most_one(&stmt).unwrap());
 }

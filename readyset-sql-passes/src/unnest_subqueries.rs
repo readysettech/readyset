@@ -223,25 +223,23 @@ pub(crate) fn unnest_subqueries_main<U: UniqueColumnsSchema>(
         rewrite_status.rewrite();
     }
 
-    // Refresh LATERAL hints against the **post-hoist** AST.  The
-    // hoist's `move_correlated_constraints_from_join_to_where` lifts
-    // correlated INNER JOIN ON predicates into WHERE, so a body whose
-    // correlation lived only in JOIN ON (invisible to the pre-hoist
-    // `is_correlation_pinned_at_most_one` classifier, which inspects
-    // WHERE) now qualifies as AtMostOne.  Closes the I3 pass-ordering
-    // gap documented in `known_core_limitations.md` §5.5.
-    //
-    // Set inserts are additive — the pre-hoist call's entries are
-    // preserved; this call only adds.  Both timings are needed because
-    // each classifier's structural property is preserved (never added)
-    // by the hoist:
+    // Refresh LATERAL hints against the **post-hoist** AST.  Set
+    // inserts are additive — the pre-hoist call's entries are
+    // preserved; this call only adds.  Both timings cover different
+    // structural concerns:
     //   - ExactlyOne: aggregate-only-no-GBY shape is captured pre-hoist
     //     (the hoist may demote via TOP-K materialization but never
     //     promotes a non-agg body to agg).
-    //   - AtMostOne: correlation-pinned GROUP BY shape is captured
-    //     post-hoist (the hoist may promote via JOIN ON → WHERE move
-    //     but never demotes by removing GROUP BY).
+    //   - AtMostOne: `is_correlation_pinned_at_most_one` internally
+    //     clones the body and runs `move_correlated_constraints_from_
+    //     join_to_where` before classifying, so JOIN-ON correlation is
+    //     admitted at either timing.  The post-hoist call still helps
+    //     when the hoist enables a previously-blocked classification
+    //     (e.g., new groupings exposed by TOP-K materialization).
     //   - trivial_on: outer-wrap JOIN ON, untouched by either timing.
+    //
+    // Background: closes the I3 pass-ordering gap documented in
+    // `known_core_limitations.md` §5.5.
     collect_lateral_hints(stmt, &mut ctx)?;
 
     // Rewrite supported cases of subqueries found in `lateral` FROM, WHERE and select list
@@ -2568,25 +2566,36 @@ pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
 ///
 /// Requirements:
 ///   - body has a GROUP BY,
-///   - every GROUP BY column is correlation-pinned by at least one WHERE-
-///     clause equality predicate against an outside relation,
-///   - HAVING is absent or always-true (HAVING can drop the single group →
-///     0 rows, which is still AtMostOne, so HAVING is allowed).
-fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<bool> {
+///   - every GROUP BY column is correlation-pinned by at least one
+///     equality predicate against an outside relation, supplied via
+///     WHERE OR via an INNER JOIN ON (which is structurally equivalent
+///     to WHERE under selection-pushdown commutativity),
+///   - HAVING is permitted regardless of its predicate: when HAVING drops
+///     the single group the body yields 0 rows, which still satisfies
+///     AtMostOne (0 OR 1 row per outer).
+///
+/// JOIN-ON correlation is admitted by running
+/// `move_correlated_constraints_from_join_to_where` on a clone of `stmt`
+/// before classifying.  The clone keeps the caller's `stmt` untouched,
+/// so the function is safe to invoke at any pipeline phase without
+/// disturbing later passes.
+pub(crate) fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> ReadySetResult<bool> {
     let Some(_group_by) = &stmt.group_by else {
         return Ok(false);
     };
-    let Some(where_expr) = &stmt.where_clause else {
+    let locals = collect_local_from_items(stmt)?;
+    let mut normalized = stmt.clone();
+    move_correlated_constraints_from_join_to_where(&mut normalized, &|rel| !locals.contains(rel))?;
+    let Some(where_expr) = &normalized.where_clause else {
         return Ok(false);
     };
-    let locals = collect_local_from_items(stmt)?;
     let (Some(corr), _remaining) =
         partition_correlated_predicates(where_expr, &|rel| !locals.contains(rel))
     else {
         return Ok(false);
     };
     let cols_set = extract_correlation_keys(&corr, &locals)?;
-    are_group_by_keys_pinned_by_correlation(&cols_set, stmt)
+    are_group_by_keys_pinned_by_correlation(&cols_set, &normalized)
 }
 
 /// Walk the statement and collect, for each LATERAL subquery, three hints:
