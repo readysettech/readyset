@@ -443,11 +443,36 @@ fn drop_redundant_self_joins<U: UniqueColumnsSchema>(
         }
     }
 
-    if stmt.tables.len() != 1 || stmt.join.is_empty() {
-        return Ok(any_rewrite);
+    // Walk joins by index, eliminating redundant self-joins regardless of position.
+    // When a join is removed, leave `i` unchanged so the next clause slides into it.
+    let mut i = 0;
+    while i < stmt.join.len() {
+        if try_drop_self_join_at(stmt, i, ctx)? {
+            any_rewrite = true;
+        } else {
+            i += 1;
+        }
     }
 
-    let join_clause = &stmt.join[0];
+    Ok(any_rewrite)
+}
+
+/// Attempt to eliminate `stmt.join[join_idx]` as a redundant self-join
+/// against any of the relations already listed in `stmt.tables` (the
+/// comma-separated FROM list, before any explicit JOIN keyword).
+/// Returns `true` when the join was removed; `false` otherwise.
+///
+/// The candidate LHS pool is `stmt.tables[*]`; the join's RHS must be a base
+/// table that matches the LHS's underlying base table (per
+/// `lhs_is_subset_of_rhs`).  The eligibility checks (operator, RHS shape,
+/// equi-pair ON, subset-of-unique-key) mirror the single-position version
+/// they replaced.
+fn try_drop_self_join_at<U: UniqueColumnsSchema>(
+    stmt: &mut SelectStatement,
+    join_idx: usize,
+    ctx: &DropRedundantJoinContext<U>,
+) -> ReadySetResult<bool> {
+    let join_clause = &stmt.join[join_idx];
     match join_clause.operator {
         JoinOperator::Join
         | JoinOperator::LeftJoin
@@ -455,76 +480,78 @@ fn drop_redundant_self_joins<U: UniqueColumnsSchema>(
         | JoinOperator::InnerJoin
         | JoinOperator::CrossJoin => {}
         JoinOperator::RightJoin | JoinOperator::RightOuterJoin | JoinOperator::StraightJoin => {
-            return Ok(any_rewrite);
+            return Ok(false);
         }
     }
 
     let JoinRightSide::Table(rhs_base_table) = &join_clause.right else {
-        return Ok(any_rewrite);
+        return Ok(false);
     };
-
-    let lhs_rel = get_from_item_reference_name(&stmt.tables[0])?;
     let rhs_rel = get_from_item_reference_name(rhs_base_table)?;
 
     let JoinConstraint::On(on_expr) = &join_clause.constraint else {
-        return Ok(any_rewrite);
+        return Ok(false);
     };
 
-    let Some(pairs) = collect_cross_eqs(on_expr, &lhs_rel, &rhs_rel) else {
-        return Ok(any_rewrite);
-    };
-    if pairs.is_empty() {
-        return Ok(any_rewrite);
-    }
+    for tab_idx in 0..stmt.tables.len() {
+        let lhs_rel = get_from_item_reference_name(&stmt.tables[tab_idx])?;
+        if lhs_rel == rhs_rel {
+            continue;
+        }
 
-    if !lhs_is_subset_of_rhs(stmt, &lhs_rel, &rhs_rel, &pairs, ctx)? {
-        return Ok(any_rewrite);
-    }
+        let Some(pairs) = collect_cross_eqs(on_expr, &lhs_rel, &rhs_rel) else {
+            continue;
+        };
+        if pairs.is_empty() {
+            continue;
+        }
 
-    // Remove both RHS and LHS from `stmt`. We will restore the LHS before exit.
-    //
-    // The join is removed BEFORE `collect_rhs_refs` runs.  Every column on
-    // either side of the equi-pairs is already handled by `pairs`, so any
-    // `rhs.col` reference still scattered through the rest of the stmt
-    // (SELECT list, WHERE, etc.) gets collected and rebound to the LHS.
-    stmt.join.remove(0);
-    let mut stmt_tables = mem::take(&mut stmt.tables);
+        if !lhs_is_subset_of_rhs(stmt, &lhs_rel, &rhs_rel, &pairs, ctx)? {
+            continue;
+        }
 
-    let mut rhs_refs = HashSet::new();
-    collect_rhs_refs(stmt, &rhs_rel, &mut rhs_refs)?;
+        // The join is removed BEFORE `collect_rhs_refs` runs.  Every column on
+        // either side of the equi-pairs is already handled by `pairs`, so any
+        // `rhs.col` reference still scattered through the rest of the stmt
+        // (SELECT list, WHERE, etc.) gets collected and rebound to the LHS.
+        stmt.join.remove(join_idx);
+        let mut stmt_tables = mem::take(&mut stmt.tables);
 
-    // SAFETY: `lhs_is_subset_of_rhs` returned `Ok(true)` only if stmt_tables[0] is a
-    // subquery whose first FROM item is the same base table as the RHS.
-    let (lhs_stmt, _) = expect_sub_query_with_alias_mut(&mut stmt_tables[0]);
-    let inner_lhs_rel = get_from_item_reference_name(&lhs_stmt.tables[0])?;
+        let mut rhs_refs = HashSet::new();
+        collect_rhs_refs(stmt, &rhs_rel, &mut rhs_refs)?;
 
-    let proj_exprs = rhs_refs
-        .into_iter()
-        .map(|c_name| {
-            Expr::Column(Column {
-                name: c_name,
-                table: Some(inner_lhs_rel.clone()),
+        // SAFETY: `lhs_is_subset_of_rhs` returned `Ok(true)` only if
+        // `stmt_tables[tab_idx]` is a subquery whose first FROM item is the same
+        // base table as the RHS.
+        let (lhs_stmt, _) = expect_sub_query_with_alias_mut(&mut stmt_tables[tab_idx]);
+        let inner_lhs_rel = get_from_item_reference_name(&lhs_stmt.tables[0])?;
+
+        let proj_exprs = rhs_refs
+            .into_iter()
+            .map(|c_name| {
+                Expr::Column(Column {
+                    name: c_name,
+                    table: Some(inner_lhs_rel.clone()),
+                })
             })
-        })
-        .sorted()
-        .collect::<Vec<_>>();
+            .sorted()
+            .collect::<Vec<_>>();
 
-    let proj_aliases = project_columns_if_not_exist_fix_duplicate_aliases(lhs_stmt, &proj_exprs);
+        let proj_aliases =
+            project_columns_if_not_exist_fix_duplicate_aliases(lhs_stmt, &proj_exprs);
 
-    let col_to_alias = proj_exprs
-        .into_iter()
-        .zip(proj_aliases)
-        .map(|(expr, (_, alias))| (as_column!(expr).name, alias))
-        .collect::<HashMap<_, _>>();
+        let col_to_alias = proj_exprs
+            .into_iter()
+            .zip(proj_aliases)
+            .map(|(expr, (_, alias))| (as_column!(expr).name, alias))
+            .collect::<HashMap<_, _>>();
 
-    rebind_rhs_refs(stmt, &rhs_rel, &col_to_alias, &lhs_rel)?;
+        rebind_rhs_refs(stmt, &rhs_rel, &col_to_alias, &lhs_rel)?;
+        stmt.tables = stmt_tables;
+        return Ok(true);
+    }
 
-    // Restore the LHS.
-    stmt.tables = stmt_tables;
-
-    any_rewrite = true;
-
-    Ok(any_rewrite)
+    Ok(false)
 }
 
 #[cfg(test)]
@@ -1016,5 +1043,113 @@ mod tests {
             ),
             "should bail: inner subquery has no FROM clause"
         );
+    }
+
+    /// Mock schema also recognises `u.id` as unique so we can build
+    /// multi-table FROM shapes where one of the sibling tables is the
+    /// redundancy target.
+    struct TwoUniqueSchema;
+    impl UniqueColumnsSchema for TwoUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            match rel.name.as_str() {
+                "t" => Some(HashSet::from([mk_col("t", "id")])),
+                "u" => Some(HashSet::from([mk_col("u", "id")])),
+                _ => None,
+            }
+        }
+    }
+
+    fn parse_and_rewrite_with<U: UniqueColumnsSchema>(sql: &str, schema: &U) -> SelectStatement {
+        let mut stmt =
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"));
+        drop_redundant_self_joins_main(&mut stmt, schema)
+            .unwrap_or_else(|e| panic!("rewrite failed: {e}\n  sql: {sql}"));
+        stmt
+    }
+
+    #[test]
+    fn self_join_at_non_zero_position_is_eliminated() {
+        // Redundant self-join sits at join[1] behind an unrelated INNER JOIN.
+        // The original single-position pass would have inspected join[0] only
+        // and left join[1] in place.
+        let stmt = parse_and_rewrite(
+            r#"SELECT "sq"."id", "u"."name", "t"."weight"
+               FROM (SELECT "t"."id" FROM "t") AS "sq"
+               INNER JOIN "u" ON "u"."id" = "sq"."id"
+               LEFT JOIN "t" ON "sq"."id" = "t"."id""#,
+        );
+        assert_eq!(
+            stmt.join.len(),
+            1,
+            "redundant self-join at join[1] should be eliminated"
+        );
+        let surviving = &stmt.join[0];
+        assert!(
+            matches!(&surviving.right, JoinRightSide::Table(t) if t.inner == TableExprInner::Table("u".into())),
+            "the surviving join should be against `u`, not `t`"
+        );
+    }
+
+    #[test]
+    fn self_join_in_multi_table_from_is_eliminated() {
+        // Multi-table FROM (`tables.len() > 1`) was the over-restrictive
+        // precondition in the original code.  Here `sq` wraps `t`, sibling
+        // `(SELECT 1)` is an unrelated FROM-list entry, and the LEFT JOIN
+        // to `t` is redundant.
+        let stmt = parse_and_rewrite(
+            r#"SELECT "sq"."id", "sib"."y", "t"."name"
+               FROM (SELECT "t"."id" FROM "t") AS "sq", (SELECT 1 AS "y") AS "sib"
+               LEFT JOIN "t" ON "sq"."id" = "t"."id""#,
+        );
+        assert!(
+            stmt.join.is_empty(),
+            "redundant self-join should be eliminated even with a sibling FROM-list entry"
+        );
+        assert_eq!(
+            stmt.tables.len(),
+            2,
+            "sibling FROM-list entries should be preserved"
+        );
+    }
+
+    #[test]
+    fn two_redundant_self_joins_both_eliminated() {
+        // `sq` wraps `t`; two aliased redundant self-joins to `t` chained.
+        let stmt = parse_and_rewrite(
+            r#"SELECT "sq"."id", "ta"."name", "tb"."weight"
+               FROM (SELECT "t"."id" FROM "t") AS "sq"
+               LEFT JOIN "t" AS "ta" ON "sq"."id" = "ta"."id"
+               LEFT JOIN "t" AS "tb" ON "sq"."id" = "tb"."id""#,
+        );
+        assert!(
+            stmt.join.is_empty(),
+            "both redundant aliased self-joins should be eliminated"
+        );
+    }
+
+    #[test]
+    fn non_redundant_neighbour_preserved_when_other_join_eliminated() {
+        // Two-schema variant: redundant self-join on `t` lives between two
+        // non-redundant joins on `u`.
+        let stmt = parse_and_rewrite_with(
+            r#"SELECT "sq"."id", "u1"."name", "t"."weight", "u2"."extra"
+               FROM (SELECT "t"."id" FROM "t") AS "sq"
+               INNER JOIN "u" AS "u1" ON "u1"."id" = "sq"."id"
+               LEFT JOIN "t" ON "sq"."id" = "t"."id"
+               INNER JOIN "u" AS "u2" ON "u2"."id" = "sq"."id""#,
+            &TwoUniqueSchema,
+        );
+        assert_eq!(
+            stmt.join.len(),
+            2,
+            "two non-redundant `u` joins should remain"
+        );
+        for j in &stmt.join {
+            assert!(
+                matches!(&j.right, JoinRightSide::Table(t) if t.inner == TableExprInner::Table("u".into())),
+                "remaining joins should all be `u`-joins"
+            );
+        }
     }
 }
