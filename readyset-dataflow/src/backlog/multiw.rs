@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use ahash::RandomState;
-use dataflow_expression::PreInsertion;
 use reader_map::{BatchEntry, BatchSegment, EvictionQuantity};
 use readyset_data::Bound;
 use readyset_util::SizeOf;
 use readyset_util::ranges::RangeBounds;
 
 use super::{Key, key_to_single};
+use crate::PreInsertion;
 use crate::prelude::*;
 
 pub(super) enum Handle {

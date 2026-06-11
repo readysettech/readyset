@@ -1,7 +1,6 @@
 use std::convert::TryFrom;
 
 use postgres_types::Kind;
-use readyset_adapter::backend as cl;
 use readyset_data::{Collation, DfType, PgEnumMetadata};
 use readyset_errors::unsupported;
 use {psql_srv as ps, tokio_postgres as pgsql};
@@ -10,7 +9,7 @@ use crate::Error;
 
 /// A simple wrapper around `noria_client`'s `SelectSchema` facilitating conversion to
 /// `psql_srv::Schema`.
-pub struct SelectSchema<'a>(pub cl::SelectSchema<'a>);
+pub struct SelectSchema<'a>(pub readyset_client::schema::SelectSchema<'a>);
 
 impl TryFrom<SelectSchema<'_>> for Vec<ps::Column> {
     type Error = Error;

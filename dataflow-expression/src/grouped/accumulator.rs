@@ -30,7 +30,7 @@ use strum::IntoStaticStr;
 
 /// Truncate a GROUP_CONCAT result to `max_len` bytes, respecting
 /// UTF-8 character boundaries.
-pub(crate) fn truncate_group_concat(s: &str, max_len: usize) -> &str {
+pub fn truncate_group_concat(s: &str, max_len: usize) -> &str {
     &s[..s.floor_char_boundary(max_len)]
 }
 

@@ -11,7 +11,6 @@ use dataflow::ops::grouped::aggregate::Aggregation;
 use dataflow::ops::union;
 use dataflow::ops::window::WindowOperationKind;
 use dataflow_expression::grouped::accumulator::AccumulationOp;
-use dataflow_expression::PostLookupAggregateFunction;
 use lazy_static::lazy_static;
 use mir::graph::MirGraph;
 use mir::node::node_inner::MirNodeInner;
@@ -21,6 +20,7 @@ use mir::DfNodeIndex;
 pub use mir::{Column, NodeIndex};
 use petgraph::visit::Reversed;
 use petgraph::Direction;
+use readyset_client::post_processing::PostLookupAggregateFunction;
 use readyset_client::ViewPlaceholder;
 use readyset_data::Dialect;
 use readyset_errors::{

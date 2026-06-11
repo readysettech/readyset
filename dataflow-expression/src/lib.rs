@@ -4,7 +4,6 @@ pub mod grouped;
 pub mod like;
 mod lower;
 mod promotion;
-mod reader_processing;
 pub mod utils;
 
 use std::fmt::{self, Display, Formatter};
@@ -21,10 +20,6 @@ use vec1::Vec1;
 
 pub use crate::binary_operator::*;
 pub use crate::lower::LowerContext;
-pub use crate::reader_processing::{
-    PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
-    PostLookupDistinct, PreInsertion, ReaderProcessing,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, EnumDiscriminants)]
 #[strum_discriminants(derive(Serialize, Deserialize, EnumIter))]

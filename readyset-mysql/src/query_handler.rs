@@ -5,11 +5,11 @@ use std::str::FromStr;
 use lazy_static::lazy_static;
 use mysql_srv::AuthKeys;
 use readyset_adapter::backend::noria_connector::QueryResult;
-use readyset_adapter::backend::SelectSchema;
 #[cfg(test)]
 use readyset_adapter::SessionTimezone;
 use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior};
 use readyset_client::results::Results;
+use readyset_client::schema::SelectSchema;
 use readyset_client::ColumnSchema;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};

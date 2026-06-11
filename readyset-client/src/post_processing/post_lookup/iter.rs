@@ -3,16 +3,16 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use dataflow_expression::{
-    grouped::accumulator::AccumulatorData, Expr, PostLookup, PostLookupAggregates,
-    PostLookupDistinct,
-};
+use dataflow_expression::{grouped::accumulator::AccumulatorData, Expr};
 use readyset_data::DfValue;
 use readyset_sql::ast::{NullOrder, OrderType};
 use smallvec::SmallVec;
 use streaming_iterator::StreamingIterator;
 use tournament_kway::{Comparator, StreamingTournament};
 
+use crate::post_processing::post_lookup::spec::{
+    PostLookup, PostLookupAggregates, PostLookupDistinct,
+};
 use crate::ReadReplyStats;
 
 /// A lookup key into a reader
@@ -643,7 +643,10 @@ enum AggregateHolder {
 }
 
 impl AggregateHolder {
-    fn finish(self, function: &dataflow_expression::PostLookupAggregateFunction) -> DfValue {
+    fn finish(
+        self,
+        function: &crate::post_processing::post_lookup::spec::PostLookupAggregateFunction,
+    ) -> DfValue {
         match self {
             AggregateHolder::Simple(v) => v,
             AggregateHolder::Accumulated(mut data) => function
@@ -880,10 +883,10 @@ impl From<ResultIterator> for Vec<Vec<DfValue>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataflow_expression::grouped::accumulator::AccumulationOp;
-    use dataflow_expression::{
+    use crate::post_processing::post_lookup::spec::{
         PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
     };
+    use dataflow_expression::grouped::accumulator::AccumulationOp;
 
     /// Build SharedResults from a list of key result sets.
     /// Each element of `keys_data` is the set of rows for one lookup key.

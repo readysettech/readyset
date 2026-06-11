@@ -400,7 +400,6 @@ mod tests {
 
     use futures::{StreamExt, TryStreamExt};
     use psql_srv::PsqlValue;
-    use readyset_adapter::backend as cl;
     use readyset_client::ColumnSchema;
     use readyset_client::results::Results;
     use readyset_data::{DfType, DfValue};
@@ -427,7 +426,7 @@ mod tests {
     #[tokio::test]
     async fn create_resultset() {
         let results = vec![];
-        let schema = SelectSchema(cl::SelectSchema {
+        let schema = SelectSchema(readyset_client::schema::SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
@@ -446,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn stream_resultset() {
         let results = vec![Results::new(vec![vec![DfValue::Int(10)]])];
-        let schema = SelectSchema(cl::SelectSchema {
+        let schema = SelectSchema(readyset_client::schema::SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
@@ -468,7 +467,7 @@ mod tests {
             Results::new(Vec::<Vec<DfValue>>::new()),
             Results::new(vec![vec![DfValue::Int(11)], vec![DfValue::Int(12)]]),
         ];
-        let schema = SelectSchema(cl::SelectSchema {
+        let schema = SelectSchema(readyset_client::schema::SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,

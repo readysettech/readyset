@@ -2,9 +2,10 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use lazy_static::lazy_static;
+use readyset_adapter::backend::noria_connector;
 use readyset_adapter::backend::noria_connector::QueryResult;
-use readyset_adapter::backend::{SelectSchema, noria_connector};
 use readyset_adapter::{QueryHandler, SetBehavior, parse_timezone};
+use readyset_client::schema::SelectSchema;
 use readyset_errors::ReadySetResult;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{

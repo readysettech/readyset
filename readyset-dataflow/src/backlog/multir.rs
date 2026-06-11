@@ -4,15 +4,16 @@ use std::convert::TryInto;
 
 use ahash::RandomState;
 use common::DfValue;
-use dataflow_expression::PreInsertion;
 use reader_map::refs::Miss;
 use readyset_client::KeyComparison;
-use readyset_client::results::{SharedResults, SharedRows};
+use readyset_client::post_processing::{SharedResults, SharedRows};
 use readyset_errors::ReadySetError;
 use readyset_util::ranges::RangeBounds;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 use vec1::{Vec1, vec1};
+
+use crate::PreInsertion;
 
 /// A [`ReadHandle`] to a map whose key is a single [`DfValue`], for faster lookup (compared to a
 /// Vec with len == 1)

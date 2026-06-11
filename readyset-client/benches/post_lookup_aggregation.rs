@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use dataflow_expression::grouped::accumulator::AccumulationOp;
-use dataflow_expression::{
+use readyset_client::post_processing::{
     PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
 };
 use readyset_client::results::{ResultIterator, SharedResults};

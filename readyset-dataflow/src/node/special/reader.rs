@@ -1,6 +1,5 @@
 use std::time::SystemTime;
 
-use dataflow_expression::ReaderProcessing;
 use failpoint_macros::failpoint;
 use metrics::histogram;
 use readyset_client::metrics::recorded;
@@ -10,6 +9,7 @@ use readyset_util::failpoints;
 use serde::{Deserialize, Serialize};
 use tracing::{trace, warn};
 
+use crate::ReaderProcessing;
 use crate::backlog;
 use crate::prelude::*;
 

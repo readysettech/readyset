@@ -1,17 +1,15 @@
-use std::cmp::{self, Ordering};
+use std::cmp;
 use std::fmt::{self, Debug, Write};
 use std::sync::Arc;
 
-use partial_map::InsertionOrder;
+use dataflow_expression::grouped::accumulator::{
+    finalize_raw_json, truncate_group_concat, AccumulationOp, AccumulatorData,
+};
 use readyset_data::upstream_system_props::get_group_concat_max_len;
 use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
-
-use crate::grouped::accumulator::{
-    finalize_raw_json, truncate_group_concat, AccumulationOp, AccumulatorData,
-};
 
 /// Representation of an aggregate function
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
@@ -365,68 +363,6 @@ impl<Column> PostLookupAggregates<Column> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
-/// Operations to perform on rows before insertion into a reader or after a lookup
-pub struct ReaderProcessing {
-    /// Pre processing on rows prior to insertion into a reader
-    pub pre_processing: PreInsertion,
-    /// Post processing on result sets after a lookup is finished
-    pub post_processing: PostLookup,
-}
-
-impl ReaderProcessing {
-    /// Constructs a new [`ReaderProcessing`]
-    pub fn new(
-        order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
-        limit: Option<usize>,
-        returned_cols: Option<Vec<usize>>,
-        default_row: Option<Vec<DfValue>>,
-        aggregates: Option<PostLookupAggregates>,
-        distinct: PostLookupDistinct,
-    ) -> ReadySetResult<Self> {
-        if let Some(cols) = &returned_cols {
-            if cols.iter().enumerate().any(|(i, v)| i != *v) {
-                internal!("Returned columns must be projected in order");
-            }
-        }
-
-        if matches!(distinct, PostLookupDistinct::Sorted { .. }) && aggregates.is_some() {
-            internal!(
-                "Sorted DISTINCT must not be combined with real aggregates; use HashBased instead"
-            );
-        }
-
-        let post_processing = PostLookup {
-            order_by,
-            limit,
-            returned_cols,
-            default_row: default_row.map(|r| Arc::new(r.into_boxed_slice())),
-            aggregates,
-            distinct,
-        };
-
-        let pre_processing = PreInsertion {
-            order_by: post_processing.order_by.clone(),
-            group_by: match &post_processing.distinct {
-                // Sorted dedup needs per-key rows sorted by all projected columns
-                // so the k-way merge produces globally sorted output for dedup.
-                PostLookupDistinct::Sorted { dedup_aggregates } => {
-                    Some(dedup_aggregates.group_by.clone())
-                }
-                _ => post_processing
-                    .aggregates
-                    .as_ref()
-                    .map(|v| v.group_by.clone()),
-            },
-        };
-
-        Ok(ReaderProcessing {
-            pre_processing,
-            post_processing,
-        })
-    }
-}
-
 /// Operations to perform on the results of a lookup after it's loaded from the map in a
 /// reader
 ///
@@ -435,7 +371,7 @@ impl ReaderProcessing {
 /// query are loaded. We extract these operations as part of migration, and store them on the reader
 /// node in this struct.
 ///
-/// A previous version provided these operations as part of [`ViewQuery`] rather than storing them
+/// A previous version provided these operations as part of `ViewQuery` rather than storing them
 /// on the reader node - they've been moved here so that the post-lookup operations can be based on
 /// the desugared query rather than the original query.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
@@ -467,7 +403,7 @@ pub struct PostLookup {
 /// Two strategies exist because the optimal approach depends on the input ordering:
 ///
 /// - **Sorted**: When there are no aggregates, input rows can be merge-sorted by all
-///   projected columns. The [`AggregateIterator`] with empty aggregates collapses
+///   projected columns. The `AggregateIterator` with empty aggregates collapses
 ///   consecutive duplicate rows, using O(1) extra memory. This is the preferred strategy
 ///   for high-cardinality results (e.g. `SELECT DISTINCT col FROM t WHERE id > ?`).
 ///
@@ -477,7 +413,6 @@ pub struct PostLookup {
 ///   `HashSet` of seen rows is used instead. This costs O(unique_rows) memory but works
 ///   regardless of input ordering.
 ///
-/// [`AggregateIterator`]: readyset_client::view::results::AggregateIterator
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
 pub enum PostLookupDistinct {
     /// No deduplication.
@@ -488,10 +423,9 @@ pub enum PostLookupDistinct {
     ///
     /// Used for `SELECT DISTINCT` without aggregates. The pre-built
     /// [`PostLookupAggregates`] (with empty aggregates and group_by = all projected
-    /// columns) is injected into the [`AggregateIterator`] at query time to perform
+    /// columns) is injected into the `AggregateIterator` at query time to perform
     /// the merge-sort dedup without per-query allocation.
     ///
-    /// [`AggregateIterator`]: readyset_client::view::results::AggregateIterator
     Sorted {
         /// Pre-built aggregates spec for merge-sort dedup (empty aggregates,
         /// group_by = all projected columns). Constructed once at lowering time.
@@ -502,47 +436,4 @@ pub enum PostLookupDistinct {
     /// Used for `SELECT DISTINCT` with aggregates, where post-aggregation output
     /// is not sorted by all projected columns.
     HashBased,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
-/// Operations to perform on a row before it is stored in the map in a reader.
-pub struct PreInsertion {
-    /// Column indices to order by, and whether or not to reverse order on each index.
-    ///
-    /// If an empty `Vec` is specified, rows are sorted in lexicographic order.
-    order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
-    /// The set of column indices to group the aggregate by, `group_by` takes precedence over
-    /// `order_by` when determining row order, so that aggregates are processed one by one.
-    group_by: Option<Vec<usize>>,
-}
-
-impl InsertionOrder<Box<[DfValue]>> for PreInsertion {
-    fn cmp(&self, a: &Box<[DfValue]>, b: &Box<[DfValue]>) -> Ordering {
-        if let Some(cols) = &self.group_by {
-            cols.iter()
-                .map(|&idx| a[idx].cmp(&b[idx]))
-                .try_fold(Ordering::Equal, |acc, next| match acc {
-                    Ordering::Equal => Ok(next),
-                    ord => Err(ord),
-                })
-                .unwrap_or_else(|ord| ord)
-                .then(a.cmp(b))
-        } else if let Some(indices) = self.order_by.as_deref() {
-            indices
-                .iter()
-                .map(|&(idx, order_type, null_order)| {
-                    null_order
-                        .apply(a[idx].is_none(), b[idx].is_none())
-                        .then(order_type.apply(a[idx].cmp(&b[idx])))
-                })
-                .try_fold(Ordering::Equal, |acc, next| match acc {
-                    Ordering::Equal => Ok(next),
-                    ord => Err(ord),
-                })
-                .unwrap_or_else(|ord| ord)
-                .then(a.cmp(b))
-        } else {
-            a.cmp(b)
-        }
-    }
 }

@@ -13,6 +13,7 @@ pub mod utils;
 
 pub mod domain;
 mod node_map;
+pub mod pre_insertion;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt::{self, Display};
@@ -20,9 +21,33 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 
 use readyset_client::ReaderAddress;
+use readyset_data::DfValue;
+use readyset_errors::{ReadySetResult, internal};
+use readyset_sql::ast::{NullOrder, OrderType};
 use serde::{Deserialize, Serialize};
 
+use crate::prelude::Executor;
+
+pub use dataflow_expression::{BinaryOperator, BuiltinFunction, Expr, LowerContext};
+pub use dataflow_state::{
+    BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
+};
+pub use readyset_client::post_processing::{
+    PostLookup, PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates,
+    PostLookupDistinct,
+};
+
 pub use crate::backlog::{LookupError, ReaderUpdatedNotifier, SingleReadHandle};
+pub use crate::domain::channel::{
+    BaseWriteStream, ChannelCoordinator, DomainReceiver, DomainSender, ReplayReceiver, ReplaySender,
+};
+pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
+pub use crate::node_map::NodeMap;
+pub use crate::payload::{
+    DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, TriggerEndpoint,
+};
+pub use crate::pre_insertion::PreInsertion;
+pub use crate::processing::LookupIndex;
 
 /// A [`ReaderMap`] maps a [`ReaderAddress`] to the [`SingleReadHandle`] to access the reader at
 /// that address.
@@ -33,24 +58,67 @@ pub type Readers = Arc<Mutex<ReaderMap>>;
 
 pub type DomainConfig = domain::Config;
 
-pub use dataflow_expression::{
-    BinaryOperator, BuiltinFunction, Expr, LowerContext, PostLookup, PostLookupAggregate,
-    PostLookupAggregateFunction, PostLookupAggregates, PostLookupDistinct, ReaderProcessing,
-};
-pub use dataflow_state::{
-    BaseTableState, DurabilityMode, MaterializedNodeState, PersistenceParameters, PersistentState,
-};
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Eq, PartialEq)]
+/// Operations to perform on rows before insertion into a reader or after a lookup
+pub struct ReaderProcessing {
+    /// Pre processing on rows prior to insertion into a reader
+    pub pre_processing: PreInsertion,
+    /// Post processing on result sets after a lookup is finished
+    pub post_processing: PostLookup,
+}
 
-pub use crate::domain::channel::{
-    BaseWriteStream, ChannelCoordinator, DomainReceiver, DomainSender, ReplayReceiver, ReplaySender,
-};
-pub use crate::domain::{Domain, DomainBuilder, DomainIndex, ReplayPath, ReplayPathWithContext};
-pub use crate::node_map::NodeMap;
-pub use crate::payload::{
-    DomainRequest, Packet, PacketDiscriminants, ReplayPathSegment, TriggerEndpoint,
-};
-use crate::prelude::Executor;
-pub use crate::processing::LookupIndex;
+impl ReaderProcessing {
+    /// Constructs a new [`ReaderProcessing`]
+    pub fn new(
+        order_by: Option<Vec<(usize, OrderType, NullOrder)>>,
+        limit: Option<usize>,
+        returned_cols: Option<Vec<usize>>,
+        default_row: Option<Vec<DfValue>>,
+        aggregates: Option<PostLookupAggregates>,
+        distinct: PostLookupDistinct,
+    ) -> ReadySetResult<Self> {
+        if let Some(cols) = &returned_cols
+            && cols.iter().enumerate().any(|(i, v)| i != *v)
+        {
+            internal!("Returned columns must be projected in order");
+        }
+
+        if matches!(distinct, PostLookupDistinct::Sorted { .. }) && aggregates.is_some() {
+            internal!(
+                "Sorted DISTINCT must not be combined with real aggregates; use HashBased instead"
+            );
+        }
+
+        let post_processing = PostLookup {
+            order_by,
+            limit,
+            returned_cols,
+            default_row: default_row.map(|r| Arc::new(r.into_boxed_slice())),
+            aggregates,
+            distinct,
+        };
+
+        let pre_processing = PreInsertion {
+            order_by: post_processing.order_by.clone(),
+            group_by: match &post_processing.distinct {
+                // Sorted dedup needs per-key rows sorted by all projected columns
+                // so the k-way merge produces globally sorted output for dedup.
+                PostLookupDistinct::Sorted { dedup_aggregates } => {
+                    Some(dedup_aggregates.group_by.clone())
+                }
+                _ => post_processing
+                    .aggregates
+                    .as_ref()
+                    .map(|v| v.group_by.clone()),
+            },
+        };
+
+        Ok(ReaderProcessing {
+            pre_processing,
+            post_processing,
+        })
+    }
+}
 
 /// Kept only so older persisted `ControllerState` payloads (which include `Node.sharded_by`) can
 /// still be deserialized. Never consulted at runtime — sharding was removed and the variants are

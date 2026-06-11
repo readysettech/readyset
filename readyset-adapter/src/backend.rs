@@ -93,6 +93,7 @@ use readyset_client::consensus::mcp_tokens::{
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
 use readyset_client::recipe::CacheExpr;
 use readyset_client::results::Results;
+use readyset_client::schema::SelectSchema;
 use readyset_client::status::CacheProperties;
 use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest};
 use readyset_client::{ShallowViewRequest, query::*};
@@ -1600,21 +1601,6 @@ pub enum MigrationMode {
     /// or --query-caching=explicit which enables special syntax to perform
     /// migrations "CREATE CACHE ..." may be used.
     OutOfBand,
-}
-
-#[derive(Debug, Clone)]
-pub struct SelectSchema<'a> {
-    pub schema: Cow<'a, [ColumnSchema]>,
-    pub columns: Cow<'a, [SqlIdentifier]>,
-}
-
-impl SelectSchema<'_> {
-    pub fn into_owned(self) -> SelectSchema<'static> {
-        SelectSchema {
-            schema: Cow::Owned(self.schema.into_owned()),
-            columns: Cow::Owned(self.columns.into_owned()),
-        }
-    }
 }
 
 /// Adapter clients need only one of the prepare results returned from prepare().

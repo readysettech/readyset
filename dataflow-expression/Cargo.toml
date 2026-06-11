@@ -43,7 +43,6 @@ readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-spatial = { path = "../readyset-spatial" }
-partial-map = { path = "../partial-map" }
 
 [dev-dependencies]
 criterion = { workspace = true }

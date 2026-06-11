@@ -240,8 +240,10 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 mod controller;
 pub mod events;
 pub mod metrics;
+pub mod post_processing;
 pub mod query;
 pub mod recipe;
+pub mod schema;
 pub mod status;
 mod table;
 mod view;
@@ -268,10 +270,8 @@ use schema_catalog::{SchemaCatalogProvider, SchemaCatalogUpdate};
 use serde::{Deserialize, Serialize};
 use tokio::task_local;
 
-pub use view::{
-    ColumnBase, ColumnSchema, KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder,
-    ViewSchema,
-};
+pub use schema::{ColumnBase, ColumnSchema, ViewSchema};
+pub use view::{KeyColumnIdx, PlaceholderIdx, ReaderHandle, ViewPlaceholder};
 
 use crate::events::ControllerEvent;
 
@@ -285,7 +285,9 @@ pub mod prelude {
 
 /// Wrapper types for ReadySet query results.
 pub mod results {
-    pub use super::view::results::{Key, ResultIterator, Results, Row, SharedResults, SharedRows};
+    pub use super::post_processing::{
+        Key, ResultIterator, Results, Row, SharedResults, SharedRows,
+    };
 }
 
 task_local! {
@@ -351,13 +353,14 @@ pub use crate::consensus::WorkerDescriptor;
 pub use crate::controller::{
     ControllerConnectionPool, ControllerDescriptor, GraphvizOptions, ReadySetHandle,
 };
+pub use crate::schema::SchemaType;
 pub use crate::table::{
     Modification, Operation, PacketData, PacketPayload, PacketTrace, PersistencePoint, Table,
     TableOperation, TableRequest, TableStatus, TABLE_STATUS_REPORT_INTERVAL,
 };
 pub use crate::view::{
     KeyComparison, KeyComparisonRef, LookupResult, ReadQuery, ReadReply, ReadReplyBatch,
-    ReadReplyStats, ReplayKeys, SchemaType, ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
+    ReadReplyStats, ReplayKeys, ShallowViewRequest, View, ViewCreateRequest, ViewQuery,
 };
 
 pub mod builders {

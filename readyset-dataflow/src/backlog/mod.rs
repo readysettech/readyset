@@ -3,15 +3,15 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use ahash::RandomState;
-use dataflow_expression::{PostLookup, ReaderProcessing};
 use reader_map::{EvictionQuantity, EvictionStrategy};
 use readyset_client::KeyComparison;
-use readyset_client::results::SharedResults;
+use readyset_client::post_processing::{PostLookup, SharedResults};
 use readyset_data::Bound;
 use readyset_util::SizeOf;
 use vec1::Vec1;
 
 pub use self::multir::LookupError;
+use crate::ReaderProcessing;
 use crate::prelude::*;
 
 /// The kind of reader update notification, currently the eviction epoch of the writer

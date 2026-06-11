@@ -52,6 +52,7 @@ dataflow-expression = { path = "../dataflow-expression" }
 dataflow-state = { path = "../dataflow-state" }
 failpoint-macros = { path = "../failpoint-macros" }
 merging-interval-tree = { path = "../merging-interval-tree" }
+partial-map = { path = "../partial-map" }
 reader-map = { path = "../reader-map" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-client = { path = "../readyset-client" }

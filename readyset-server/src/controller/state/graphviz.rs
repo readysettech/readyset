@@ -3,9 +3,11 @@ use std::fmt::{self, Display, Write};
 
 use dataflow::prelude::{Graph, NodeIndex};
 use dataflow::{DomainIndex, NodeMap};
-use dataflow_expression::{PostLookup, PostLookupAggregateFunction, PostLookupDistinct};
 use petgraph::Direction;
 use readyset_client::debug::info::NodeSize;
+use readyset_client::post_processing::{
+    PostLookup, PostLookupAggregateFunction, PostLookupDistinct,
+};
 
 use crate::controller::migrate::materialization::Materializations;
 
@@ -194,7 +196,7 @@ fn write_reader_processing(
         )],
     >,
     limit: Option<usize>,
-    aggregates: Option<&dataflow_expression::PostLookupAggregates>,
+    aggregates: Option<&readyset_client::post_processing::PostLookupAggregates>,
     distinct: &PostLookupDistinct,
 ) -> fmt::Result {
     match distinct {
