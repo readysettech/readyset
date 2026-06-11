@@ -4,11 +4,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use futures::FutureExt;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{Relation, ShallowCacheQuery, TrxCachePolicy};
 use readyset_util::SizeOf;
+use tokio::test;
 use tokio::time::sleep;
 
 use crate::{CacheManager, CacheResult, EvictionPolicy, QueryMetadata};
@@ -135,7 +137,7 @@ where
     hits
 }
 
-#[tokio::test]
+#[test]
 async fn test_create_cache_with_relation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
@@ -150,7 +152,7 @@ async fn test_create_cache_with_relation() {
     assert!(manager.exists(Some(&relation), None));
 }
 
-#[tokio::test]
+#[test]
 async fn test_list_caches_and_drop_all() {
     let manager = CacheManager::<String, String>::new(None);
 
@@ -194,7 +196,7 @@ async fn test_list_caches_and_drop_all() {
     assert_eq!(caches.len(), 0);
 }
 
-#[tokio::test]
+#[test]
 async fn test_create_cache_with_query_id() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -204,7 +206,7 @@ async fn test_create_cache_with_query_id() {
     assert!(manager.exists(None, Some(&query_id)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_create_cache_with_both_identifiers() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
@@ -218,7 +220,7 @@ async fn test_create_cache_with_both_identifiers() {
     assert!(manager.exists(Some(&relation), Some(&query_id)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_duplicate_cache_creation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
@@ -240,7 +242,7 @@ async fn test_duplicate_cache_creation() {
     assert_matches!(result, Err(ReadySetError::ViewAlreadyExists(_)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_drop_cache_by_relation() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("test_table");
@@ -259,7 +261,7 @@ async fn test_drop_cache_by_relation() {
     assert!(!manager.exists(Some(&relation), None));
 }
 
-#[tokio::test]
+#[test]
 async fn test_drop_cache_by_query_id() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -272,7 +274,7 @@ async fn test_drop_cache_by_query_id() {
     assert!(!manager.exists(None, Some(&query_id)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_drop_nonexistent_cache() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("nonexistent");
@@ -281,7 +283,7 @@ async fn test_drop_nonexistent_cache() {
     assert_matches!(result, Err(ReadySetError::ViewNotFound(_)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_drop_cache_without_identifiers() {
     let manager = CacheManager::<String, String>::new(None);
 
@@ -289,7 +291,7 @@ async fn test_drop_cache_without_identifiers() {
     assert_matches!(result, Err(ReadySetError::Internal(_)));
 }
 
-#[tokio::test]
+#[test]
 async fn test_get_or_start_insert_not_cached() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -300,7 +302,7 @@ async fn test_get_or_start_insert_not_cached() {
     assert_matches!(result, CacheResult::NotCached);
 }
 
-#[tokio::test]
+#[test]
 async fn test_get_or_start_insert_miss() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -310,7 +312,7 @@ async fn test_get_or_start_insert_miss() {
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_get_or_start_insert_hit() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -331,7 +333,7 @@ async fn test_get_or_start_insert_hit() {
     .await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_cache_insert_guard_not_filled() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -351,7 +353,7 @@ async fn test_cache_insert_guard_not_filled() {
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 #[should_panic(expected = "no metadata for result set")]
 async fn test_cache_insert_guard_filled_without_metadata() {
     let manager = CacheManager::<String, String>::new(None);
@@ -369,7 +371,7 @@ async fn test_cache_insert_guard_filled_without_metadata() {
     drop(guard.filled());
 }
 
-#[tokio::test]
+#[test]
 async fn test_cache_isolation() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
@@ -387,7 +389,7 @@ async fn test_cache_isolation() {
     check_hit(&manager, &query_id_1, "key1".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_concurrent_cache_creation() {
     const COUNT: usize = 10;
 
@@ -412,7 +414,7 @@ async fn test_concurrent_cache_creation() {
     assert_eq!(successes, COUNT);
 }
 
-#[tokio::test]
+#[test]
 async fn test_concurrent_cache_creation_same_name() {
     const COUNT: usize = 10;
 
@@ -453,7 +455,7 @@ async fn test_concurrent_cache_creation_same_name() {
     assert_eq!(errors, COUNT - 1);
 }
 
-#[tokio::test]
+#[test]
 async fn test_concurrent_inserts_different_keys() {
     const COUNT: usize = 20;
 
@@ -483,7 +485,7 @@ async fn test_concurrent_inserts_different_keys() {
     }
 }
 
-#[tokio::test]
+#[test]
 async fn test_concurrent_reads_and_writes() {
     const PRE_POPULATE: usize = 5;
     const TOTAL_KEYS: usize = 10;
@@ -532,7 +534,7 @@ async fn test_concurrent_reads_and_writes() {
     }
 }
 
-#[tokio::test]
+#[test]
 async fn test_concurrent_create_and_drop() {
     const COUNT: usize = 10;
 
@@ -560,7 +562,7 @@ async fn test_concurrent_create_and_drop() {
     }
 }
 
-#[tokio::test]
+#[test]
 async fn test_ttl_refresh_ahead() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -593,7 +595,7 @@ async fn test_ttl_refresh_ahead() {
     assert_matches!(result, CacheResult::HitAndRefresh(..));
 }
 
-#[tokio::test]
+#[test]
 async fn test_ttl_expiration() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -620,7 +622,7 @@ async fn test_ttl_expiration() {
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_max_capacity_enforcement() {
     const COUNT: usize = 15;
 
@@ -642,7 +644,7 @@ async fn test_max_capacity_enforcement() {
     assert!(hits < COUNT, "expected {hits} < {COUNT}");
 }
 
-#[tokio::test]
+#[test]
 async fn test_multi_cache_capacity_sharing() {
     const COUNT: usize = 10;
 
@@ -680,7 +682,7 @@ async fn test_multi_cache_capacity_sharing() {
     );
 }
 
-#[tokio::test]
+#[test]
 async fn test_cache_result_debug() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -708,7 +710,7 @@ async fn test_cache_result_debug() {
     assert!(debug_str.contains("Hit"));
 }
 
-#[tokio::test]
+#[test]
 async fn test_cache_insert_guard_debug() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -732,7 +734,7 @@ async fn test_cache_insert_guard_debug() {
     assert!(debug_str.contains("filled"));
 }
 
-#[tokio::test]
+#[test]
 async fn test_ttl_and_period_refresh() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -767,7 +769,7 @@ async fn test_ttl_and_period_refresh() {
     assert_matches!(result, CacheResult::HitAndRefresh(..));
 }
 
-#[tokio::test]
+#[test]
 async fn test_coalesce_concurrent_requests() {
     let manager = Arc::new(CacheManager::<String, String>::new(None));
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -838,7 +840,64 @@ async fn test_coalesce_concurrent_requests() {
     );
 }
 
-#[tokio::test]
+#[test]
+async fn test_coalesce_initial_insert_failure() {
+    let manager = Arc::new(CacheManager::<String, String>::new(None));
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    manager
+        .create_cache(
+            None,
+            query_id,
+            test_stmt(),
+            vec![],
+            test_policy(),
+            test_ddl_req(),
+            TrxCachePolicy::Never,
+            Some(Duration::from_millis(5000)),
+        )
+        .unwrap();
+
+    // First get misses and creates the loading stub.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    let CacheResult::Miss(guard) = result else {
+        panic!("first get should miss");
+    };
+
+    // While the first insert guard is still held, a subsequent get must block for coalescing.
+    assert_matches!(
+        manager
+            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+            .now_or_never(),
+        None,
+        "coalescing get should block while the stub is still loading",
+    );
+
+    // Fail to insert anything before dropping the guard.
+    drop(guard);
+
+    // A subsequent get must not block on coalescing after the failed insert.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .now_or_never()
+        .expect("coalescing get should not block after the initial insert failed");
+    let CacheResult::Miss(mut guard) = result else {
+        panic!("get should reclaim the dead stub as a miss");
+    };
+    guard.push("value1".to_string());
+    guard.set_metadata(QueryMetadata::Test);
+    guard.filled().await;
+
+    // Should now hit.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    assert_matches!(result, CacheResult::Hit(..));
+}
+
+#[test]
 async fn test_periodic_refresh_callback() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -913,7 +972,7 @@ async fn test_periodic_refresh_callback() {
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[test(flavor = "multi_thread")]
 async fn test_slow_refresh_serves_stale_data() {
     let manager = CacheManager::<String, u32>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
@@ -1004,7 +1063,7 @@ async fn test_slow_refresh_serves_stale_data() {
     updater.abort();
 }
 
-#[tokio::test]
+#[test]
 async fn test_flush_all_caches_clears_entries_preserves_definitions() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
@@ -1033,7 +1092,7 @@ async fn test_flush_all_caches_clears_entries_preserves_definitions() {
     check_miss(&manager, &query_id_2, "key2".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_flush_cache_clears_entries_preserves_definition() {
     let manager = CacheManager::<String, String>::new(None);
     let relation = test_relation("my_cache");
@@ -1056,7 +1115,7 @@ async fn test_flush_cache_clears_entries_preserves_definition() {
     check_miss(&manager, &query_id, "key1".to_string()).await;
 }
 
-#[tokio::test]
+#[test]
 async fn test_flush_cache_only_affects_target() {
     let manager = CacheManager::<String, String>::new(None);
     let relation_1 = test_relation("cache_1");

@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use moka::policy::Expiry;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::watch::{Receiver, Sender};
+use tokio::sync::{Mutex, oneshot, watch};
 use tokio::time::{interval, timeout};
 
 use metrics::{Counter, counter};
@@ -71,55 +72,16 @@ pub(crate) struct CacheValues<V> {
     pub(crate) execution_ms: u64,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct CacheStubInner {
-    loaded: bool,
-    waiters: Vec<oneshot::Sender<()>>,
-}
-
 #[derive(Debug)]
 pub(crate) struct CacheStub {
-    inserted: Instant,
-    inner: Arc<Mutex<CacheStubInner>>,
-}
-
-impl Default for CacheStub {
-    fn default() -> Self {
-        Self {
-            inserted: Instant::now(),
-            inner: Default::default(),
-        }
-    }
-}
-
-impl CacheStub {
-    async fn coalesce(&self, coalesce_ms: u64) {
-        let wait = Duration::from_millis(coalesce_ms).saturating_sub(self.inserted.elapsed());
-        if wait.is_zero() {
-            return; // stub is stale, maybe previous load failed, return a miss
-        }
-
-        let mut inner = self.inner.lock().await;
-        if inner.loaded {
-            return;
-        }
-        let (tx, rx) = oneshot::channel();
-        inner.waiters.push(tx);
-        drop(inner);
-        let _ = timeout(wait, rx).await;
-    }
+    /// Indicates that the creator of this stub has either finished populating or failed.
+    done: Receiver<()>,
 }
 
 #[derive(Debug)]
 pub(crate) enum CacheEntry<V> {
     Present(CacheValues<V>),
     Loading(CacheStub),
-}
-
-impl<V> Default for CacheEntry<V> {
-    fn default() -> Self {
-        Self::Loading(Default::default())
-    }
 }
 
 impl<V> SizeOf for CacheEntry<V>
@@ -142,6 +104,16 @@ where
     fn size_is_empty(&self) -> bool {
         false
     }
+}
+
+#[derive(Debug)]
+pub(crate) enum Lookup<K, V>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    Hit(QueryResult<V>, bool),
+    Miss(CacheInsertGuard<K, V>),
 }
 
 pub(crate) struct CacheExpiration;
@@ -358,7 +330,11 @@ where
         cache
     }
 
-    fn make_guard(cache: Arc<Cache<K, V>>, key: K) -> CacheInsertGuard<K, V> {
+    fn make_guard(
+        cache: Arc<Cache<K, V>>,
+        key: K,
+        done: Option<Sender<()>>,
+    ) -> CacheInsertGuard<K, V> {
         CacheInsertGuard {
             cache,
             key: Some(key),
@@ -366,6 +342,7 @@ where
             metadata: None,
             filled: false,
             requested: Instant::now(),
+            done,
         }
     }
 
@@ -399,7 +376,7 @@ where
                     // across slightly different instants rather than collapsing
                     // them all to a single point in time.
                     let deadline = refresh_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
-                    let guard = Self::make_guard(Arc::clone(&cache), key.clone());
+                    let guard = Self::make_guard(Arc::clone(&cache), key.clone(), None);
                     callback(guard);
                     if let Some(deadline) = deadline {
                         to_reschedule.push((deadline, key, version, callback));
@@ -499,34 +476,16 @@ where
         }
     }
 
-    async fn notify_waiters(waiters: Option<Arc<Mutex<CacheStubInner>>>) {
-        let Some(waiters) = waiters else {
-            return;
-        };
-        let mut inner = waiters.lock().await;
-        inner.loaded = true;
-        for tx in inner.waiters.drain(..) {
-            let _ = tx.send(());
-        }
-    }
-
-    async fn insert_entry(&self, k: K, new: CacheValues<V>) -> Option<Arc<Mutex<CacheStubInner>>> {
-        let mut waiters = None;
+    async fn insert_entry(&self, k: K, new: CacheValues<V>) {
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
                 match e {
                     Some(e) => {
-                        match &**e.value() {
-                            CacheEntry::Present(e) => {
-                                let acc = e.accessed_ms.load(Ordering::Relaxed);
-                                new.accessed_ms.store(acc, Ordering::Relaxed);
-                            }
-                            CacheEntry::Loading(stub) => {
-                                waiters = Some(Arc::clone(&stub.inner));
-                            }
+                        if let CacheEntry::Present(old) = &**e.value() {
+                            let acc = old.accessed_ms.load(Ordering::Relaxed);
+                            new.accessed_ms.store(acc, Ordering::Relaxed);
                         }
-
                         let new = Arc::new(CacheEntry::Present(new));
                         future::ready(Op::Put(new))
                     }
@@ -538,7 +497,6 @@ where
                 }
             })
             .await;
-        waiters
     }
 
     /// Schedule a refresh callback for a key from the miss path.
@@ -576,11 +534,10 @@ where
     ) {
         let metadata = self.dedupe_metadata(metadata);
         let entry = self.make_entry(v, metadata, execution);
-        let waiters = self.insert_entry(k.clone(), entry).await;
-        Self::notify_waiters(waiters).await;
+        self.insert_entry(k, entry).await;
     }
 
-    fn get_hit(&self, values: &CacheValues<V>) -> Option<(QueryResult<V>, bool)> {
+    fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, bool) {
         let now = current_timestamp_ms();
         values.accessed_ms.store(now, Ordering::Relaxed);
         let refresh = if let Some(refresh_ms) = self.refresh_ms
@@ -601,13 +558,13 @@ where
             .or_else(|| self.cache_metadata.get())
             .expect("No metadata available for cached result");
 
-        Some((
+        (
             QueryResult {
                 values: Arc::clone(&values.values),
                 metadata: Arc::clone(metadata),
             },
             refresh,
-        ))
+        )
     }
 
     pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
@@ -615,36 +572,76 @@ where
         let result = if let Some(entry) = self.inner.get(&k).await
             && let CacheEntry::Present(values) = &*entry
         {
-            self.get_hit(values)
+            Some(self.get_hit(values))
         } else {
             None
         };
         (result, k.1)
     }
 
-    pub(crate) async fn get_on_miss(&self, k: K) -> Option<(QueryResult<V>, bool)> {
-        const MAX_RETRIES: usize = 1;
+    fn hit(&self, values: &CacheValues<V>) -> Lookup<K, V> {
+        let (res, refresh) = self.get_hit(values);
+        Lookup::Hit(res, refresh)
+    }
 
-        let k = (self.id, k);
+    /// Wait the allowed duration while for a stub entry for this key to populate.
+    ///
+    /// Returns immediately if the key is already populated or if the producer of a stub entry
+    /// already dropped.
+    async fn coalesce(&self, k: &(u64, K), wait: Duration) {
+        let Some(entry) = self.inner.get(k).await else {
+            return;
+        };
+        let CacheEntry::Loading(stub) = &*entry else {
+            return;
+        };
+        let _ = timeout(wait, stub.done.clone().changed()).await;
+    }
+
+    /// Create an insert guard and associated cache stub.
+    fn start_fill(self: &Arc<Self>, key: K) -> (Arc<CacheEntry<V>>, CacheInsertGuard<K, V>) {
+        let (tx, rx) = watch::channel(());
+        let stub = Arc::new(CacheEntry::Loading(CacheStub { done: rx }));
+        let guard = Self::make_guard(Arc::clone(self), key, Some(tx));
+        (stub, guard)
+    }
+
+    pub(crate) async fn get_on_miss(self: &Arc<Self>, k: K) -> Lookup<K, V> {
+        let mk = (self.id, k.clone());
 
         if let Some(coalesce_ms) = self.coalesce_ms {
-            for i in 0..=MAX_RETRIES {
-                let e = self.inner.entry(k.clone()).or_default().await;
-                match &**e.value() {
-                    CacheEntry::Loading(_) if i == MAX_RETRIES => break, // bad luck?
-                    CacheEntry::Loading(_) if e.is_fresh() => break,     // first miss
-                    CacheEntry::Loading(stub) => stub.coalesce(coalesce_ms).await,
-                    CacheEntry::Present(values) => return self.get_hit(values),
-                }
-            }
-            None
-        } else {
-            let e = self.inner.entry(k).or_default().await;
-            match &**e.value() {
-                CacheEntry::Present(values) => self.get_hit(values),
-                CacheEntry::Loading(_) => None,
-            }
+            self.coalesce(&mk, Duration::from_millis(coalesce_ms)).await;
         }
+
+        let mut lookup = None;
+        self.inner
+            .entry(mk)
+            .and_compute_with(|e| {
+                let op = match e.as_ref().map(|e| &**e.value()) {
+                    Some(CacheEntry::Present(values)) => {
+                        lookup = Some(self.hit(values));
+                        Op::Nop
+                    }
+                    // There's still an active stub here, but we aren't waiting anymore.
+                    Some(CacheEntry::Loading(stub)) if stub.done.has_changed().is_ok() => {
+                        lookup = Some(Lookup::Miss(Self::make_guard(
+                            Arc::clone(self),
+                            k.clone(),
+                            None,
+                        )));
+                        Op::Nop
+                    }
+                    // Found either nothing or an exhausted stub; insert a fresh stub.
+                    None | Some(CacheEntry::Loading(..)) => {
+                        let (stub, guard) = self.start_fill(k.clone());
+                        lookup = Some(Lookup::Miss(guard));
+                        Op::Put(stub)
+                    }
+                };
+                future::ready(op)
+            })
+            .await;
+        lookup.expect("present or starting fill")
     }
 
     pub fn get_info(&self) -> CacheInfo {
@@ -707,7 +704,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{assert_matches, time::Duration};
 
     use crate::{CacheManager, EvictionPolicy, QueryMetadata};
 
@@ -748,8 +745,8 @@ mod tests {
         cache: &Arc<Cache<Vec<&str>, Vec<&str>>>,
         key: &[&'static str],
     ) {
-        // Insert a guard entry to allow a subsequent insert.
-        assert!(cache.get_on_miss(key.to_owned()).await.is_none());
+        // Insert a stub entry to allow a subsequent insert.
+        assert_matches!(cache.get_on_miss(key.to_owned()).await, Lookup::Miss(..));
     }
 
     #[tokio::test]

@@ -2277,7 +2277,7 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache_prepared() {
 }
 
 #[test]
-#[tags(serial, slow)]
+#[tags(serial)]
 #[upstream(mysql)]
 async fn coalesce_upstream_query_failure_midflight() {
     init_test_logging();
@@ -2323,11 +2323,10 @@ async fn coalesce_upstream_query_failure_midflight() {
     let destination = last_query_info(&mut readyset_b).await.destination;
     assert_eq!(destination, QueryDestination::Upstream);
 
-    // Check if the second miss waited the COALESCE window or not.
-    // XXX JCD We currently wait for a result that will never come (REA-6673).
+    // Check if the second miss waited the COALESCE window or not (REA-6673).
     assert!(
-        elapsed >= Duration::from_secs(4),
-        "second query did not wait for COALESCE window after first query failed",
+        elapsed < Duration::from_secs(1),
+        "second query waited for COALESCE window, even though first query failed",
     );
 
     shutdown_tx.shutdown().await;

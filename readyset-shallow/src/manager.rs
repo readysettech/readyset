@@ -10,6 +10,7 @@ use moka::future::Cache as MokaCache;
 use moka::notification::RemovalCause;
 use papaya::HashMap;
 use seize::Collector;
+use tokio::sync::watch::Sender;
 use tracing::info;
 
 use readyset_client::consensus::CacheDDLRequest;
@@ -19,7 +20,9 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy};
 use readyset_util::SizeOf;
 
-use crate::cache::{Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache};
+use crate::cache::{
+    Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache, Lookup,
+};
 use crate::{EvictionPolicy, QueryMetadata};
 use readyset_util::hash::hash;
 
@@ -356,6 +359,7 @@ where
             metadata: None,
             filled: false,
             requested: Instant::now(),
+            done: None,
         }
     }
 
@@ -377,12 +381,19 @@ where
                 (res, needs_refresh, key)
             }
             Some(_) | None => match cache.get_on_miss(key.clone()).await {
-                Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
+                Lookup::Hit(res, needs_refresh)
+                    if res.values.first().is_none_or(&is_compatible) =>
+                {
                     (res, needs_refresh, key)
                 }
-                _ => {
+                Lookup::Hit(..) => {
+                    // An entry was there, but it wasn't compatible.
                     cache.increment_miss();
                     return CacheResult::Miss(Self::make_guard(cache, key));
+                }
+                Lookup::Miss(guard) => {
+                    cache.increment_miss();
+                    return CacheResult::Miss(guard);
                 }
             },
         };
@@ -465,6 +476,7 @@ where
     pub(crate) metadata: Option<QueryMetadata>,
     pub(crate) filled: bool,
     pub(crate) requested: Instant,
+    pub(crate) done: Option<Sender<()>>,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -516,20 +528,38 @@ where
         self.filled = true;
         async {
             if self.filled {
-                let (metadata, cache, key, results, execution) = self.take();
+                let (metadata, cache, key, results, execution, done) = self.take();
                 cache.insert(key, results, metadata, execution).await;
+                drop(done);
             }
         }
     }
 
     #[allow(clippy::type_complexity)]
-    fn take(&mut self) -> (QueryMetadata, Arc<Cache<K, V>>, K, Vec<V>, Duration) {
+    fn take(
+        &mut self,
+    ) -> (
+        QueryMetadata,
+        Arc<Cache<K, V>>,
+        K,
+        Vec<V>,
+        Duration,
+        Option<Sender<()>>,
+    ) {
         let metadata = self.metadata.take().expect("no metadata for result set");
         let cache = Arc::clone(&self.cache);
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
+        let done = self.done.take();
         self.filled = false;
-        (metadata, cache, key, results, self.requested.elapsed())
+        (
+            metadata,
+            cache,
+            key,
+            results,
+            self.requested.elapsed(),
+            done,
+        )
     }
 }
 
@@ -540,9 +570,10 @@ where
 {
     fn drop(&mut self) {
         if self.filled {
-            let (metadata, cache, key, results, execution) = self.take();
+            let (metadata, cache, key, results, execution, done) = self.take();
             tokio::spawn(async move {
                 cache.insert(key, results, metadata, execution).await;
+                drop(done);
             });
         }
     }
