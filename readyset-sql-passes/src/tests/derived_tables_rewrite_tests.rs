@@ -4249,3 +4249,96 @@ fn dtr_rhs_inline_carries_inner_limit_and_order() {
         expect_text,
     );
 }
+
+/// Dual-LIMIT composition in the LHS-inline path.  Inner has
+/// `ORDER BY t.k LIMIT 10`; outer also carries `ORDER BY s.k LIMIT 5`.
+/// The outer ORDER is equivalent under projection rebinding (`s.k` → `t.k`),
+/// and the outer LIMIT is tighter than the inner's, so the composition
+/// engine should emit `ORDER BY t.k LIMIT min(5, 10) = 5`.
+///
+/// Pins `check_order_limit_safety`'s `(true, true)` admission for matching
+/// ORDERs + `carry_inner_limit_and_order`'s `min(outer_lim, inner_lim)`
+/// algebra in the DTR LHS path.  Sibling ILDT test19 covers the same
+/// composition in the leading-derived-table path; this test fills the
+/// coverage gap in the DTR-LHS path.
+#[test]
+fn dtr_lhs_inline_dual_limit_same_order_composes() {
+    let original_text = r#"
+        SELECT "s"."k", "sc"."cnt"
+        FROM (SELECT "t"."k" FROM "test1" AS "t" ORDER BY "t"."k" LIMIT 10) AS "s"
+        INNER JOIN (SELECT count(*) AS "cnt" FROM "test2" AS "t2") AS "sc" ON TRUE
+        ORDER BY "s"."k" LIMIT 5
+    "#;
+    let expect_text = r#"
+        SELECT "t"."k", "sc"."cnt"
+        FROM (SELECT count(*) AS "cnt" FROM "test2" AS "t2") AS "sc"
+        CROSS JOIN "test1" AS "t"
+        ORDER BY "t"."k" NULLS LAST
+        LIMIT 5
+    "#;
+    test_it(
+        "dtr_lhs_inline_dual_limit_same_order_composes",
+        original_text,
+        expect_text,
+    );
+}
+
+/// Dual-LIMIT composition in the RHS-inline path.  Inner sits on the RHS
+/// of a CROSS JOIN with an ExactlyOne LHS (`a` = scalar aggregate); both
+/// inner and outer carry an ORDER BY + LIMIT on the same column.
+/// Mirrors `dtr_lhs_inline_dual_limit_same_order_composes` for the RHS
+/// path, exercising `inline_rhs_in_place`'s call to
+/// `carry_inner_limit_and_order` introduced in Change 13564.
+#[test]
+fn dtr_rhs_inline_dual_limit_same_order_composes() {
+    let original_text = r#"
+        SELECT "a"."cnt", "s"."b"
+        FROM (SELECT count(*) AS "cnt" FROM "v") AS "a"
+        CROSS JOIN (SELECT "u"."b" FROM "u" ORDER BY "u"."b" LIMIT 3) AS "s"
+        ORDER BY "s"."b" LIMIT 2
+    "#;
+    let expect_text = r#"
+        SELECT "a"."cnt", "u"."b"
+        FROM (SELECT count(*) AS "cnt" FROM "v") AS "a"
+        CROSS JOIN "u"
+        ORDER BY "u"."b" NULLS LAST
+        LIMIT 2
+    "#;
+    test_it(
+        "dtr_rhs_inline_dual_limit_same_order_composes",
+        original_text,
+        expect_text,
+    );
+}
+
+/// Dual-OFFSET composition: inner `ORDER BY t.k LIMIT 10 OFFSET 5`, outer
+/// `ORDER BY s.k LIMIT 7 OFFSET 2`.  The composition engine should emit
+/// `composed_offset = inner_offs + outer_offs = 5 + 2 = 7` and
+/// `composed_limit = min(outer_lim, inner_lim - outer_offs) = min(7, 10 - 2) = 7`.
+///
+/// Row-set check: pre-inline yields rows `7..14` of `test1` sorted by `t.k`
+/// (inner picks rows 5..15, outer skips 2 and takes 7 of those).  Composed
+/// form `LIMIT 7 OFFSET 7 ORDER BY t.k` produces the same row range.
+/// Pins the saturating-add / saturating-sub algebra in
+/// `carry_inner_limit_and_order` against future drift.
+#[test]
+fn dtr_lhs_inline_dual_limit_with_offsets_composes() {
+    let original_text = r#"
+        SELECT "s"."k", "sc"."cnt"
+        FROM (SELECT "t"."k" FROM "test1" AS "t" ORDER BY "t"."k" LIMIT 10 OFFSET 5) AS "s"
+        INNER JOIN (SELECT count(*) AS "cnt" FROM "test2" AS "t2") AS "sc" ON TRUE
+        ORDER BY "s"."k" LIMIT 7 OFFSET 2
+    "#;
+    let expect_text = r#"
+        SELECT "t"."k", "sc"."cnt"
+        FROM (SELECT count(*) AS "cnt" FROM "test2" AS "t2") AS "sc"
+        CROSS JOIN "test1" AS "t"
+        ORDER BY "t"."k" NULLS LAST
+        LIMIT 7 OFFSET 7
+    "#;
+    test_it(
+        "dtr_lhs_inline_dual_limit_with_offsets_composes",
+        original_text,
+        expect_text,
+    );
+}
