@@ -903,11 +903,10 @@ fn from_items_cardinality_preserving(
 /// no unique-cols entry for the table, or if no cross-equality in
 /// `on_expr` references a unique column of the table.
 ///
-/// Intended for future use by LATERAL flatten downstream-cardinality
-/// checks to admit regular-table RHS at LEFT JOIN positions.  Mirrors
-/// the upstream-side cardinality argument used by
+/// Used by LATERAL flatten downstream-cardinality checks to admit
+/// regular-table RHS at INNER / LEFT JOIN positions.  Mirrors the
+/// upstream-side cardinality argument used by
 /// [`is_upstream_item_safe_for_lateral_flatten`].
-#[allow(dead_code)]
 fn is_join_pinned_to_unique_key<U: UniqueColumnsSchema>(
     item: &TableExpr,
     on_expr: &Expr,
@@ -963,15 +962,18 @@ fn is_join_pinned_to_unique_key<U: UniqueColumnsSchema>(
 ///   - Body cardinality signal: unions canonical structural checks with
 ///     pre-hoist set membership via [`is_lateral_friendly_exactly_one`] and
 ///     [`is_lateral_friendly_at_most_one`].
-fn from_items_cardinality_preserving_lateral(
+fn from_items_cardinality_preserving_lateral<U: UniqueColumnsSchema>(
     downstream_tables: &[TableExpr],
     downstream_joins: &[JoinClause],
     exactly_one_set: &HashSet<Relation>,
     at_most_one_set: &HashSet<Relation>,
     flattened_aliases: &HashSet<Relation>,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     for dt in downstream_tables {
-        if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+        // CSV-FROM position: no per-item ON, so regular-table RHS via Class B
+        // pinning isn't reachable here.
+        if !is_lateral_friendly_exactly_one(dt, None, exactly_one_set, unique_cols_schema)? {
             return Ok(false);
         }
     }
@@ -982,15 +984,30 @@ fn from_items_cardinality_preserving_lateral(
         if !is_on_nonrejecting_or_lateral_correlation(&jc.constraint, flattened_aliases) {
             return Ok(false);
         }
+        // Class B activation: forward the JOIN's ON to the per-item helper
+        // so a regular-table RHS pinned by a unique-key equi-pair admits.
+        // `Empty` / `Using` constraints carry no ON expression — pass None
+        // (only Subquery-RHS cardinality applies there).
+        let on_expr = if let JoinConstraint::On(e) = &jc.constraint {
+            Some(e)
+        } else {
+            None
+        };
         if jc.operator.is_inner_join() {
-            if !is_lateral_friendly_exactly_one(dt, exactly_one_set)? {
+            if !is_lateral_friendly_exactly_one(dt, on_expr, exactly_one_set, unique_cols_schema)? {
                 return Ok(false);
             }
         } else if matches!(
             jc.operator,
             JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
         ) {
-            if !is_lateral_friendly_at_most_one(dt, exactly_one_set, at_most_one_set)? {
+            if !is_lateral_friendly_at_most_one(
+                dt,
+                on_expr,
+                exactly_one_set,
+                at_most_one_set,
+                unique_cols_schema,
+            )? {
                 return Ok(false);
             }
         } else {
@@ -1629,23 +1646,30 @@ fn is_on_nonrejecting_or_lateral_correlation(
 /// without a match in an AtMostOne RHS would be dropped, changing the
 /// outer's cardinality.
 ///
-/// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
-/// considered.  Extending this acceptance to regular-table RHS based on
-/// schema-known single-column unique keys is the scope of a future
-/// downstream-broadening change; the catalog plumbed through
-/// `InliningContext::unique_cols_schema` is the seam.
-fn is_lateral_friendly_exactly_one(
+/// Class B (regular-table RHS) is admitted when `on_expr` pins a
+/// single-column unique key on the table per [`is_join_pinned_to_unique_key`].
+/// For CSV-FROM positions (no per-item ON), pass `None` for `on_expr`;
+/// regular-table RHS is then still rejected at those positions.
+fn is_lateral_friendly_exactly_one<U: UniqueColumnsSchema>(
     dt: &TableExpr,
+    on_expr: Option<&Expr>,
     exactly_one_set: &HashSet<Relation>,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
-    let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) else {
-        return Ok(false);
-    };
-    let rel: Relation = alias.into();
-    if exactly_one_set.contains(&rel) {
-        return Ok(true);
+    if let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) {
+        let rel: Relation = alias.into();
+        if exactly_one_set.contains(&rel) {
+            return Ok(true);
+        }
+        return is_exactly_one_card(rhs_stmt);
     }
-    is_exactly_one_card(rhs_stmt)
+    // Class B fallback: regular-table RHS pinned by a unique-key equi-pair
+    // in the join's ON.  Requires a per-item ON — CSV-FROM positions
+    // (`on_expr = None`) pass through to the original reject.
+    if let Some(on) = on_expr {
+        return is_join_pinned_to_unique_key(dt, on, unique_cols_schema);
+    }
+    Ok(false)
 }
 
 /// LATERAL-aware AtMostOne body-cardinality check.  Unions the canonical
@@ -1657,24 +1681,30 @@ fn is_lateral_friendly_exactly_one(
 /// rows without a body match get NULL on the right side, preserving outer
 /// cardinality.
 ///
-/// Class B (regular-table RHS) stays rejected: only `Subquery` RHS is
-/// considered.  Extending this acceptance to regular-table RHS based on
-/// schema-known single-column unique keys is the scope of a future
-/// downstream-broadening change; the catalog plumbed through
-/// `InliningContext::unique_cols_schema` is the seam.
-fn is_lateral_friendly_at_most_one(
+/// Class B (regular-table RHS) is admitted when `on_expr` pins a
+/// single-column unique key on the table per [`is_join_pinned_to_unique_key`]
+/// — a uniquely-pinned join contributes 0 or 1 rows per outer, satisfying
+/// the LEFT-JOIN-RHS AtMostOne semantics.  For CSV-FROM positions (no
+/// per-item ON), pass `None` for `on_expr`; regular-table RHS is then
+/// still rejected at those positions.
+fn is_lateral_friendly_at_most_one<U: UniqueColumnsSchema>(
     dt: &TableExpr,
+    on_expr: Option<&Expr>,
     exactly_one_set: &HashSet<Relation>,
     at_most_one_set: &HashSet<Relation>,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
-    let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) else {
-        return Ok(false);
-    };
-    let rel: Relation = alias.into();
-    if exactly_one_set.contains(&rel) || at_most_one_set.contains(&rel) {
-        return Ok(true);
+    if let Some((rhs_stmt, alias)) = as_sub_query_with_alias(dt) {
+        let rel: Relation = alias.into();
+        if exactly_one_set.contains(&rel) || at_most_one_set.contains(&rel) {
+            return Ok(true);
+        }
+        return is_at_most_one_deep(rhs_stmt);
     }
-    is_at_most_one_deep(rhs_stmt)
+    if let Some(on) = on_expr {
+        return is_join_pinned_to_unique_key(dt, on, unique_cols_schema);
+    }
+    Ok(false)
 }
 
 /// Verify that the items joined to the inlinable's position preserve
@@ -1761,6 +1791,7 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
                 exactly_one_set,
                 at_most_one_set,
                 flattened_aliases,
+                unique_cols_schema,
             )? {
                 return Ok(false);
             }
@@ -2379,6 +2410,138 @@ mod is_join_pinned_to_unique_key_tests {
         assert!(
             is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
             "PK match should pin the join when item-side is on RHS of equality"
+        );
+    }
+}
+
+/// T2 — Class B downstream activation: regular-table RHS in LATERAL flatten.
+///
+/// Pre-T2 the LATERAL-friendly cardinality helpers
+/// (`is_lateral_friendly_exactly_one`, `is_lateral_friendly_at_most_one`)
+/// rejected any FROM item that wasn't a subquery.  Post-T2 they admit a
+/// regular-table RHS when the join's ON pins a single-column unique key on
+/// the table per `is_join_pinned_to_unique_key`, mirroring the upstream-side
+/// Class B argument used by `is_upstream_item_safe_for_lateral_flatten`.
+#[cfg(test)]
+mod is_lateral_friendly_class_b_tests {
+    use super::*;
+    use readyset_sql::ast::{JoinConstraint, JoinRightSide};
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    struct AddrIdUniqueSchema;
+    impl UniqueColumnsSchema for AddrIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "addr" {
+                let col = Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                };
+                Some(HashSet::from([col]))
+            } else {
+                None
+            }
+        }
+    }
+
+    struct EmptyUniqueSchema;
+    impl UniqueColumnsSchema for EmptyUniqueSchema {
+        fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+            None
+        }
+    }
+
+    fn parse(sql: &str) -> SelectStatement {
+        parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+            .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"))
+    }
+
+    fn first_join(stmt: &SelectStatement) -> (&TableExpr, &Expr) {
+        let jc = stmt.join.first().expect("expected a JOIN clause");
+        let item = match &jc.right {
+            JoinRightSide::Table(t) => t,
+            _ => panic!("expected single-table RHS"),
+        };
+        let on = match &jc.constraint {
+            JoinConstraint::On(e) => e,
+            _ => panic!("expected ON constraint"),
+        };
+        (item, on)
+    }
+
+    #[test]
+    fn exactly_one_admits_regular_table_with_unique_key_pin_in_on() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        let (item, on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            is_lateral_friendly_exactly_one(item, Some(on), &empty, &AddrIdUniqueSchema).unwrap(),
+            "regular-table RHS pinned by unique-key equality in ON should admit"
+        );
+    }
+
+    #[test]
+    fn exactly_one_rejects_regular_table_without_unique_key_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."region" = "o"."region""#);
+        let (item, on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            !is_lateral_friendly_exactly_one(item, Some(on), &empty, &AddrIdUniqueSchema).unwrap(),
+            "regular-table RHS not pinned by any unique-key equality should reject"
+        );
+    }
+
+    #[test]
+    fn exactly_one_rejects_regular_table_when_catalog_has_no_entry() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        let (item, on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            !is_lateral_friendly_exactly_one(item, Some(on), &empty, &EmptyUniqueSchema).unwrap(),
+            "empty catalog must not admit any regular-table RHS"
+        );
+    }
+
+    #[test]
+    fn exactly_one_rejects_regular_table_when_on_is_none() {
+        // CSV-FROM position has no per-item ON.  Even with a unique-key catalog
+        // entry, the Class B fallback cannot fire — it requires the JOIN's ON
+        // to carry the equi-pin that proves cardinality.
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        let (item, _on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            !is_lateral_friendly_exactly_one(item, None, &empty, &AddrIdUniqueSchema).unwrap(),
+            "regular-table RHS with no ON should reject (CSV-FROM position cannot prove pin)"
+        );
+    }
+
+    #[test]
+    fn at_most_one_admits_regular_table_with_unique_key_pin_in_on() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" LEFT JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        let (item, on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            is_lateral_friendly_at_most_one(item, Some(on), &empty, &empty, &AddrIdUniqueSchema)
+                .unwrap(),
+            "regular-table RHS pinned by unique-key in LEFT-JOIN ON should admit (0..1 row)"
+        );
+    }
+
+    #[test]
+    fn at_most_one_rejects_regular_table_without_unique_key_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" LEFT JOIN "addr" ON "addr"."region" = "o"."region""#);
+        let (item, on) = first_join(&stmt);
+        let empty = HashSet::new();
+        assert!(
+            !is_lateral_friendly_at_most_one(item, Some(on), &empty, &empty, &AddrIdUniqueSchema)
+                .unwrap(),
+            "non-pinning ON should not admit Class B fallback"
         );
     }
 }
