@@ -130,6 +130,7 @@ impl ProbeRegistry {
                         preserve_top_k_for_exists: true,
                         ..Default::default()
                     },
+                    &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
                 )?
             };
         }
@@ -141,6 +142,7 @@ impl ProbeRegistry {
                     &mut $stmt,
                     $stmt_alias,
                     $opts,
+                    &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
                 )?
             };
         }

@@ -1082,11 +1082,12 @@ fn is_definitely_empty_subquery(stmt: &SelectStatement) -> ReadySetResult<bool> 
 /// ## Errors & limits
 /// - Same limitations as the decorrelation framework (equality correlations, no outer-join correlation, etc.).
 /// - Bubble requires an aliasable first field; this function ensures such an alias before any field clearing.
-pub(crate) fn as_joinable_derived_table_with_opts(
+pub(crate) fn as_joinable_derived_table_with_opts<U: UniqueColumnsSchema>(
     ctx: SubqueryContext,
     stmt: &mut SelectStatement,
     stmt_alias: SqlIdentifier,
     opts: AsJoinableOpts,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<(TableExpr, Option<Expr>)> {
     // True iff this SELECT **or** a chain of single-child projecting wrappers beneath it
     // contains an explicit `LIMIT 1` (with optional `OFFSET 0`). Capture this *before*
@@ -1216,6 +1217,12 @@ pub(crate) fn as_joinable_derived_table_with_opts(
             // yielding "exactly one row per outer row" even when the top-level field is not an aggregate
             // and there's no explicit LIMIT 1. Defer rejection to the post-hoist checks in that case.
             let may_be_single_via_corr = subquery_has_correlation(stmt, &local_from_items);
+            // (d') Structural single-row proof via unique-key pinning on the inner FROM.
+            // `WHERE base.pk_col = <rhs>` (or every column of a composite unique key) with
+            // an RHS that doesn't reference the base table — see `is_unique_key_pinned_scalar`.
+            // Independent of correlation: a constant equi-pin on a PK proves at-most-one row.
+            let is_single_by_unique_key = matches!(ctx, SubqueryContext::Scalar)
+                && is_unique_key_pinned_scalar(stmt, unique_cols_schema)?;
             // Scalar validation and WHERE-correlation/top-k handling
             let (field_expr, field_expr_alias) = expect_field_as_expr_mut(
                 stmt.fields
@@ -1227,15 +1234,17 @@ pub(crate) fn as_joinable_derived_table_with_opts(
                 *field_expr_alias = Some(default_alias_for_select_item_expression(field_expr));
             }
             if matches!(ctx, SubqueryContext::Scalar) {
-                // Accept three ways to be single-valued for Scalar:
+                // Accept four ways to be single-valued for Scalar:
                 //  (a) the projected field is an aggregated expression, OR
                 //  (b) there is an explicit LIMIT 1 (possibly under wrappers), OR
                 //  (c) the subquery is aggregate-only without GROUP BY and HAVING is TRUE/absent
-                //      (wrapper-aware via agg_only_no_gby_cardinality).
+                //      (wrapper-aware via agg_only_no_gby_cardinality), OR
+                //  (d) structural unique-key pinning by WHERE equi-predicates.
                 if !is_aggregated_expr(field_expr)?
                     && !has_limit_one
                     && !is_single_by_shape
                     && !may_be_single_via_corr
+                    && !is_single_by_unique_key
                 {
                     invalid_query!("Subquery should be aggregated or have LIMIT 1");
                 }
@@ -1243,6 +1252,7 @@ pub(crate) fn as_joinable_derived_table_with_opts(
                     && !has_limit_one
                     && !is_single_by_shape
                     && !may_be_single_via_corr
+                    && !is_single_by_unique_key
                 {
                     invalid_query!("Subquery returns more than 1 row");
                 }
@@ -1490,12 +1500,19 @@ fn apply_exists_probe_shaping(
 }
 
 /// Backwards-compatible wrapper (existing callers stay unchanged).
-pub(crate) fn as_joinable_derived_table(
+pub(crate) fn as_joinable_derived_table<U: UniqueColumnsSchema>(
     ctx: SubqueryContext,
     stmt: &mut SelectStatement,
     stmt_alias: SqlIdentifier,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<(TableExpr, Option<Expr>)> {
-    as_joinable_derived_table_with_opts(ctx, stmt, stmt_alias, AsJoinableOpts::default())
+    as_joinable_derived_table_with_opts(
+        ctx,
+        stmt,
+        stmt_alias,
+        AsJoinableOpts::default(),
+        unique_cols_schema,
+    )
 }
 
 fn is_comparison_op(op: &BinaryOperator) -> bool {
@@ -2161,6 +2178,7 @@ fn unnest_subqueries_in_where<U: UniqueColumnsSchema>(
             subquery_desc.ctx,
             &mut subquery_desc.stmt,
             get_unique_alias(&collect_local_from_items(stmt)?, "GNL"),
+            ctx.unique_cols_schema,
         )?;
 
         let mut apply_3vl_guard = None;
@@ -2409,6 +2427,7 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
                 subquery_desc.ctx,
                 &mut subquery_desc.stmt,
                 get_unique_alias(&local_from_items, "GNL"),
+                ctx.unique_cols_schema,
             )?;
 
             if let Some(join_on_expr) = &join_on {
@@ -2551,6 +2570,92 @@ pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
     let status2 = unnest_subqueries_in_fields(stmt, ctx)?;
     let status3 = unnest_lateral_subqueries(stmt, ctx)?;
     Ok(status1.combine(status2).combine(status3))
+}
+
+/// A `UniqueColumnsSchema` impl that reports no unique keys for any relation.
+/// Used as a placeholder by call sites that route through
+/// `as_joinable_derived_table_with_opts` exclusively with `SubqueryContext::Exists`
+/// (where the unique-key cardinality proof never fires) and that do not have a
+/// real schema handy.
+pub(crate) struct UnusedUniqueColumnsSchema;
+
+impl UniqueColumnsSchema for UnusedUniqueColumnsSchema {
+    fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+        None
+    }
+}
+
+/// Returns `true` if `stmt` is structurally proven to return at most one row,
+/// based on the WHERE clause pinning every column of some unique key on the
+/// inner FROM's base table.
+///
+/// Shape:
+///   - exactly one local FROM item, which is a base `Table` (not a subquery
+///     / VALUES / nested derived);
+///   - no `GROUP BY` (those cases route through
+///     [`is_correlation_pinned_at_most_one`] / `is_at_most_one_deep`'s GBY arm);
+///   - WHERE is a top-level conjunction whose equi-predicates of shape
+///     `base_alias.col = <rhs>` collectively name every column of some unique
+///     key on `base_table` per `unique_keys_of`.
+///
+/// The right-hand side of each equi-predicate must not itself reference the
+/// base table — otherwise the predicate constrains the join of `base` with
+/// itself rather than pinning to a single row.  Outer-scope references,
+/// placeholders, literals, and other-relation references are all admissible
+/// RHS shapes.  Non-equi atoms (range, IS NULL, function predicates) are
+/// ignored: they may further restrict the row set but do not contribute to
+/// the cardinality proof.
+///
+/// Both operand orders are accepted (`col = rhs` and `rhs = col`): the join
+/// canonicalization pass that swaps eq-operands runs later in the pipeline,
+/// so the check must be order-agnostic here.
+fn is_unique_key_pinned_scalar<U: UniqueColumnsSchema>(
+    stmt: &SelectStatement,
+    unique_cols_schema: &U,
+) -> ReadySetResult<bool> {
+    let [table_expr] = stmt.tables.as_slice() else {
+        return Ok(false);
+    };
+    if !stmt.join.is_empty() || stmt.group_by.is_some() {
+        return Ok(false);
+    }
+    let TableExprInner::Table(base_table) = &table_expr.inner else {
+        return Ok(false);
+    };
+    let base_alias = get_from_item_reference_name(table_expr)?;
+    let Some(where_expr) = &stmt.where_clause else {
+        return Ok(false);
+    };
+
+    let mut pinned: HashSet<SqlIdentifier> = HashSet::new();
+    let atoms = decompose_conjuncts(where_expr).unwrap_or_else(|| vec![where_expr.clone()]);
+    for atom in &atoms {
+        let Expr::BinaryOp {
+            lhs,
+            op: BinaryOperator::Equal,
+            rhs,
+        } = atom
+        else {
+            continue;
+        };
+        let (col_expr, other_expr) = match (lhs.as_ref(), rhs.as_ref()) {
+            (Expr::Column(c), other) if c.table.as_ref() == Some(&base_alias) => (c, other),
+            (other, Expr::Column(c)) if c.table.as_ref() == Some(&base_alias) => (c, other),
+            _ => continue,
+        };
+        if columns_iter(other_expr).any(|c| c.table.as_ref() == Some(&base_alias)) {
+            continue;
+        }
+        pinned.insert(col_expr.name.clone());
+    }
+
+    let Some(keys) = unique_cols_schema.unique_keys_of(base_table) else {
+        return Ok(false);
+    };
+    Ok(keys.iter().any(|key| {
+        key.iter()
+            .all(|k| k.table.as_ref() == Some(base_table) && pinned.contains(&k.name))
+    }))
 }
 
 /// Returns `true` if the body's GROUP BY is fully pinned by correlation

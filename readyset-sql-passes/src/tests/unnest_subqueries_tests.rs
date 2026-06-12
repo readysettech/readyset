@@ -7412,3 +7412,111 @@ fn at_most_one_unpinned_group_by_column_does_not_classify() {
     );
     assert!(!is_correlation_pinned_at_most_one(&stmt).unwrap());
 }
+
+/// T4 — Scalar subquery cardinality proofs from structural facts.
+///
+/// Pre-T4 rejection at `unnest_subqueries.rs::as_joinable_derived_table_with_opts`
+/// required either an aggregate-only-no-GBY body, an explicit `LIMIT 1`, or a
+/// correlated WHERE.  T4 adds a fourth admit condition: WHERE has equi-predicates
+/// pinning every column of some unique key on the inner FROM's base table.
+fn assert_rewrite_succeeds(sql: &str) {
+    let result = rewrite_statement(sql, get_schema_guard());
+    if let Err(e) = result {
+        panic!("expected rewrite to succeed, got error: {e}\nsql: {sql}");
+    }
+}
+
+fn assert_rewrite_fails_with(sql: &str, expected_substr: &str) {
+    let result = rewrite_statement(sql, get_schema_guard());
+    match result {
+        Ok(stmt) => panic!(
+            "expected rewrite to fail with '{expected_substr}', got success: {}\nsql: {sql}",
+            stmt.display(Dialect::PostgreSQL)
+        ),
+        Err(e) => {
+            let msg = format!("{e}");
+            assert!(
+                msg.contains(expected_substr),
+                "expected error containing '{expected_substr}', got: {msg}\nsql: {sql}"
+            );
+        }
+    }
+}
+
+#[test]
+fn t4_scalar_with_constant_pin_on_unique_col_admits() {
+    // `datatypes.rownum` is registered as a unique column on `SpjUniqueSchema`.  The constant
+    // equi-pin on it proves the scalar subquery returns at most one row.
+    assert_rewrite_succeeds(
+        r#"SELECT s.sn, (SELECT d.test_int FROM datatypes AS d WHERE d.rownum = 5) AS scalar_val
+           FROM s"#,
+    );
+}
+
+#[test]
+fn t4_scalar_with_placeholder_pin_on_unique_col_admits() {
+    // Placeholder RHS counts as a non-base-table reference — the equi-pin still proves
+    // at-most-one row regardless of the bound value.
+    assert_rewrite_succeeds(
+        r#"SELECT s.sn, (SELECT d.test_int FROM datatypes AS d WHERE d.rownum = $1) AS scalar_val
+           FROM s"#,
+    );
+}
+
+#[test]
+fn t4_scalar_with_reversed_operand_order_admits() {
+    // Pre-canonicalization, the equi-pin may appear with the column on the RHS of `=`.  The
+    // helper must accept either operand order.
+    assert_rewrite_succeeds(
+        r#"SELECT s.sn, (SELECT d.test_int FROM datatypes AS d WHERE 5 = d.rownum) AS scalar_val
+           FROM s"#,
+    );
+}
+
+#[test]
+fn t4_scalar_with_extra_non_pin_conjunct_admits() {
+    // Non-equi atoms (here a range filter on a non-unique column) don't break the proof — they
+    // further restrict the row set but the unique-key pin still bounds cardinality to 1.
+    assert_rewrite_succeeds(
+        r#"SELECT s.sn,
+                  (SELECT d.test_int
+                   FROM datatypes AS d
+                   WHERE d.rownum = 5 AND d.test_int > 0) AS scalar_val
+           FROM s"#,
+    );
+}
+
+#[test]
+fn t4_scalar_without_unique_pin_still_rejected() {
+    // No unique-key pinning — the existing rejection still fires.  WHERE on a non-unique column
+    // does not prove cardinality.
+    assert_rewrite_fails_with(
+        r#"SELECT s.sn, (SELECT d.test_int FROM datatypes AS d WHERE d.test_int = 5) AS scalar_val
+           FROM s"#,
+        "Subquery should be aggregated or have LIMIT 1",
+    );
+}
+
+#[test]
+fn t4_scalar_with_rhs_self_reference_still_rejected() {
+    // The equi-predicate's RHS references the base table itself (`d.test_int`) — not a constant
+    // pin, since both operands depend on the row.  Cardinality is not proven; rejection stays.
+    assert_rewrite_fails_with(
+        r#"SELECT s.sn,
+                  (SELECT d.test_int FROM datatypes AS d WHERE d.rownum = d.test_int) AS scalar_val
+           FROM s"#,
+        "Subquery should be aggregated or have LIMIT 1",
+    );
+}
+
+#[test]
+fn t4_scalar_with_or_join_in_where_still_rejected() {
+    // `OR` is not a top-level conjunction — `decompose_conjuncts` returns the OR as a single
+    // atom that does not classify as an equi-predicate.  The unique-key pin is not proven.
+    assert_rewrite_fails_with(
+        r#"SELECT s.sn,
+                  (SELECT d.test_int FROM datatypes AS d WHERE d.rownum = 5 OR d.rownum = 6) AS v
+           FROM s"#,
+        "Subquery should be aggregated or have LIMIT 1",
+    );
+}
