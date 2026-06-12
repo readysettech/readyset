@@ -34,6 +34,7 @@ use crate::drop_redundant_join::{DropRedundantSelfJoin as _, UniqueColumnsSchema
 use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
+use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
 use crate::rewrite_utils::contains_question_mark_placeholders;
 use crate::unnest_subqueries::UnnestSubqueries as _;
@@ -335,6 +336,8 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, pass="expand_implied_tables", query = %query.display(flags.dialect));
     query.expand_join_on_using(&context)?;
     trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
+    query.normalize_right_join()?;
+    trace!(parent: &span, pass="normalize_right_join", query = %query.display(flags.dialect));
     if !contains_question_mark_placeholders(query)? {
         let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
         trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
