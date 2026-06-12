@@ -12,9 +12,7 @@ use std::mem;
 
 use readyset_data::{AvgScaleMode, DfType, DfValue, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
-use readyset_sql_passes::adapter_rewrites::{
-    PostLookupColumn, PostLookupDecomposition, PostLookupPlan,
-};
+use readyset_post_lookup::{PostLookupColumn, PostLookupDecomposition, PostLookupPlan};
 use tracing::{error, warn};
 
 use crate::post_processing::post_lookup::iter::{ResultIterator, Results};
@@ -208,10 +206,8 @@ pub fn postprocess_decompositions<'a>(
 #[cfg(test)]
 mod tests {
     use readyset_data::{DfType, DfValue};
+    use readyset_post_lookup::{PostLookupAggregateKind, PostLookupDecomposition, SourceColumn};
     use readyset_sql::ast::{self, SqlIdentifier};
-    use readyset_sql_passes::adapter_rewrites::{
-        PostLookupAggregateKind, PostLookupDecomposition, SourceColumn,
-    };
 
     use super::*;
 

@@ -2,7 +2,9 @@
 //!
 //! Describes *what* decomposition was applied and *how* to recompose the
 //! result. The SQL rewrite pass that produces a [`PostLookupPlan`] lives in
-//! the parent [`super`] module.
+//! readyset-sql-passes (`adapter_rewrites::post_lookup_decomposition`); the
+//! recompose stage that consumes it lives in readyset-client's
+//! post-processing pipeline.
 
 use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, DfValue, Dialect as DataDialect};
 use readyset_errors::{ReadySetResult, internal};
@@ -89,7 +91,7 @@ impl PostLookupAggregateKind {
     ///
     /// Returns `(kind, inner_expression)` if the function can be decomposed
     /// into simpler aggregates for post-lookup recomputation.
-    pub(crate) fn try_match(func: &FunctionExpr) -> Option<(Self, Box<Expr>)> {
+    pub fn try_match(func: &FunctionExpr) -> Option<(Self, Box<Expr>)> {
         match func {
             FunctionExpr::Avg {
                 expr,
@@ -103,7 +105,7 @@ impl PostLookupAggregateKind {
     ///
     /// The first element replaces the original aggregate in-place; subsequent
     /// elements are appended as new columns.
-    pub(crate) fn decompose(&self, expr: Box<Expr>) -> Vec<FunctionExpr> {
+    pub fn decompose(&self, expr: Box<Expr>) -> Vec<FunctionExpr> {
         match self {
             Self::Avg => vec![
                 FunctionExpr::Sum {

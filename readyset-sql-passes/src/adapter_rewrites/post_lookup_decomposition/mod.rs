@@ -6,14 +6,8 @@
 //! that *can* be re-aggregated, then recomputes the original value in
 //! [`postprocess_decompositions`](crate::adapter_rewrites::postprocess_decompositions).
 
-mod plan;
-
-pub use self::plan::{
-    PostLookupAggregateKind, PostLookupColumn, PostLookupDecomposition, PostLookupPlan,
-    SourceColumn,
-};
-
 use readyset_errors::{ReadySetResult, unsupported};
+use readyset_post_lookup::{PostLookupAggregateKind, PostLookupDecomposition, SourceColumn};
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{Expr, FieldDefinitionExpr, Literal, SelectStatement, SqlIdentifier};
 use readyset_sql::{Dialect, DialectDisplay};
@@ -220,6 +214,7 @@ pub(super) fn decompose_aggregates_for_post_lookup(
 #[cfg(test)]
 mod tests {
     use readyset_data::{AvgScaleMode, DfType, DfValue, Dialect as DataDialect};
+    use readyset_post_lookup::{PostLookupColumn, PostLookupPlan};
 
     use super::*;
 

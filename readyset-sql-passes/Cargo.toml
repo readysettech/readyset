@@ -14,6 +14,7 @@ vec1 = { workspace = true }
 
 # Local dependencies
 readyset-errors = { path = "../readyset-errors" }
+readyset-post-lookup = { path = "../readyset-post-lookup" }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }

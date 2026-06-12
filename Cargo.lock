@@ -6013,6 +6013,7 @@ dependencies = [
  "readyset-data",
  "readyset-errors",
  "readyset-multiplex",
+ "readyset-post-lookup",
  "readyset-sql",
  "readyset-sql-parsing",
  "readyset-sql-passes",
@@ -6524,6 +6525,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-post-lookup"
+version = "0.1.0"
+dependencies = [
+ "readyset-data",
+ "readyset-errors",
+ "readyset-sql",
+]
+
+[[package]]
 name = "readyset-psql"
 version = "0.1.0"
 dependencies = [
@@ -6824,6 +6834,7 @@ dependencies = [
  "readyset-data",
  "readyset-decimal",
  "readyset-errors",
+ "readyset-post-lookup",
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",

@@ -51,6 +51,7 @@ members = [
     "readyset-mir",
     "readyset-multiplex",
     "readyset-mysql",
+    "readyset-post-lookup",
     "readyset-psql",
     "readyset-query-logger",
     "readyset-repl",
