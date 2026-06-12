@@ -39,11 +39,13 @@ pub trait LocalReader: Send {
 
 /// Rows + schema + per-read metrics returned by a cache read.
 #[derive(Debug)]
-pub struct ReadResult {
+pub struct ReadResult<'a> {
     /// The row stream (post-lookup pipeline applied).
     pub rows: ResultIterator,
     /// The client-facing schema for `rows`, after recompose has been applied.
-    pub schema: SelectSchema<'static>,
+    /// Borrows from the view's reader handle; owned only when a decomposition
+    /// plan rewrote it.
+    pub schema: SelectSchema<'a>,
     /// Number of lookup keys issued (cardinality of the parameter
     /// explosion). Surfaced to the adapter for metric composition.
     pub num_keys: u64,
@@ -59,16 +61,17 @@ pub struct ReadResult {
 /// returned [`ReadResult::schema`] matches the post-decompose row layout.
 ///
 /// The adapter passes ownership of nothing besides the inputs and gets back
-/// a value-typed result; no further transformation on the adapter side.
+/// rows plus a schema borrowing from `view`; no further transformation on
+/// the adapter side.
 pub async fn read_cache<'a>(
     view: &'a mut View,
-    local_reader: Option<&mut (dyn LocalReader + 'a)>,
-    raw_keys: Vec<Cow<'a, [DfValue]>>,
+    local_reader: Option<&mut (dyn LocalReader + '_)>,
+    raw_keys: Vec<Cow<'_, [DfValue]>>,
     limit: Option<usize>,
     offset: Option<usize>,
     plan: &PostLookupPlan,
     dialect: Dialect,
-) -> ReadySetResult<ReadResult> {
+) -> ReadySetResult<ReadResult<'a>> {
     let plan_present = !plan.is_empty();
     let plan_for_query = plan_present.then(|| plan.clone());
 
@@ -103,18 +106,18 @@ pub async fn read_cache<'a>(
 
     let cache_misses = rows.total_stats().map(|s| s.cache_misses).unwrap_or(0);
 
-    // Build the pre-decompose schema (`Cow::Owned` so the result outlives
-    // `view`/`reader_handle`'s borrow) and feed it to the recompose-schema
-    // transform. With an empty plan this is a pass-through.
+    // Borrow the pre-decompose schema from the reader handle and feed it to
+    // the recompose-schema transform: plan-less reads stay zero-copy; the
+    // transform allocates only when a plan rewrites the schema.
+    let reader_handle = &*reader_handle;
     let raw_schema = SelectSchema {
-        schema: Cow::Owned(
+        schema: Cow::Borrowed(
             reader_handle
                 .schema()
                 .ok_or_else(|| internal_err!("Reader missing schema for cached query"))?
-                .schema(SchemaType::ReturnedSchema)
-                .to_vec(),
+                .schema(SchemaType::ReturnedSchema),
         ),
-        columns: Cow::Owned(reader_handle.columns().to_vec()),
+        columns: Cow::Borrowed(reader_handle.columns()),
     };
     let schema = crate::post_processing::post_lookup::transform_schema(raw_schema, plan, dialect)?;
 
