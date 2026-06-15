@@ -363,7 +363,7 @@ fn absorb_flatten<'a, U: UniqueColumnsSchema>(
         pre_hoist_lateral_exactly_one: Some(pre_hoist_lateral_exactly_one),
         pre_hoist_lateral_at_most_one: Some(pre_hoist_lateral_at_most_one),
         preceding_flattened_lateral_aliases: Some(preceding_from_items),
-        unique_cols_schema: Some(unique_cols_schema),
+        unique_cols_schema,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {

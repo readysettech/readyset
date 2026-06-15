@@ -88,6 +88,7 @@
 //!   outermost expressions must be a bare `rel.col` so it can become a GROUP BY key; mixed expressions over downstream outputs are rejected.
 //! * **Engine constraint**: GROUP BY must project at least one aggregate-derived field; we bail if hoisting would produce a GROUP BY
 //!   query with no aggregate-derived projection.
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::get_local_from_items_iter;
 use crate::inline_subquery::{
     apply_inline, can_inline_subquery, normalize_field_reference, normalize_order_by,
@@ -114,12 +115,25 @@ use std::mem;
 use tracing::trace;
 
 pub trait InlineLeadingDerivedTable: Sized {
-    fn inline_leading_derived_table(&mut self) -> ReadySetResult<&mut Self>;
+    /// Hoist the leading-FROM derived table when possible.
+    ///
+    /// `unique_cols_schema` plumbs the unique-column catalog through to the
+    /// inlining-eligibility check, where the canonical (non-LATERAL)
+    /// cardinality-preservation arm consults it for the Class B regular-
+    /// table-RHS admit.
+    fn inline_leading_derived_table<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl InlineLeadingDerivedTable for SelectStatement {
-    fn inline_leading_derived_table(&mut self) -> ReadySetResult<&mut Self> {
-        let mut rewritten = hoist_lhsmost_derived_table_rewrite_impl(self, true)?;
+    fn inline_leading_derived_table<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self> {
+        let mut rewritten =
+            hoist_lhsmost_derived_table_rewrite_impl(self, true, unique_cols_schema)?;
 
         if rewritten {
             // If hoisting happened, try to move the parametrizable filters, that
@@ -306,9 +320,10 @@ fn normalize_group_by(
     Ok(norm_group_by)
 }
 
-fn hoist_lhsmost_derived_table(
+fn hoist_lhsmost_derived_table<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     is_top_select: bool,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     // Normalize LATERAL at position 0.  The flag's only expressive
     // capability is correlation to preceding FROM siblings — which do not
@@ -355,9 +370,7 @@ fn hoist_lhsmost_derived_table(
     // window functions, nested aggregation, GROUP BY compat, ORDER/LIMIT,
     // cardinality, self-join, downstream non-trivial output, unnesting guards.
     // Leftmost position — downstream = everything after position 0.
-    let ctx = crate::inline_subquery::InliningContext::<
-        crate::drop_redundant_join::UniqueColumnsSchemaImpl,
-    > {
+    let ctx = crate::inline_subquery::InliningContext {
         inner_stmt: lhs_stmt,
         outer_stmt: stmt,
         inner_alias: &lhs_alias,
@@ -373,7 +386,7 @@ fn hoist_lhsmost_derived_table(
         pre_hoist_lateral_exactly_one: None,
         pre_hoist_lateral_at_most_one: None,
         preceding_flattened_lateral_aliases: None,
-        unique_cols_schema: None,
+        unique_cols_schema,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
@@ -386,9 +399,10 @@ fn hoist_lhsmost_derived_table(
 }
 
 /// Recursively inlines nested FROM subqueries, then inline items at this query level.
-fn hoist_lhsmost_derived_table_rewrite_impl(
+fn hoist_lhsmost_derived_table_rewrite_impl<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     is_top_select: bool,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     let mut rewritten = false;
 
@@ -403,11 +417,12 @@ fn hoist_lhsmost_derived_table_rewrite_impl(
     }) = stmt.tables.first_mut()
     {
         // Normalize the inner left-spine only; do not repeat per-iteration.
-        rewritten |= hoist_lhsmost_derived_table_rewrite_impl(inner_stmt, false)?;
+        rewritten |=
+            hoist_lhsmost_derived_table_rewrite_impl(inner_stmt, false, unique_cols_schema)?;
     }
 
     // Single hoist attempt for this level.
-    rewritten |= hoist_lhsmost_derived_table(stmt, is_top_select)?;
+    rewritten |= hoist_lhsmost_derived_table(stmt, is_top_select, unique_cols_schema)?;
 
     Ok(rewritten)
 }
@@ -424,7 +439,11 @@ mod tests {
     fn rewrite_statement(sql_text: &str) -> ReadySetResult<SelectStatement> {
         let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql_text)?;
         stmt.rewrite_array_constructors(&crate::EmptyBaseSchemas)?;
-        hoist_lhsmost_derived_table_rewrite_impl(&mut stmt, true)?;
+        hoist_lhsmost_derived_table_rewrite_impl(
+            &mut stmt,
+            true,
+            &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+        )?;
         Ok(stmt)
     }
 

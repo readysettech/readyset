@@ -349,11 +349,11 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
                 query.drop_redundant_join(&unique_cols_schema)?;
                 trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
-                query.inline_leading_derived_table()?;
+                query.inline_leading_derived_table(&unique_cols_schema)?;
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
                 query.unnest_subqueries(&context, &unique_cols_schema)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
-                query.derived_tables_rewrite(flags.dialect)?;
+                query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
                 trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
                 query.query_optimization_rewrite(
                     &context,

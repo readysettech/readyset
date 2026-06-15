@@ -39,8 +39,12 @@ fn parse_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// Parse `sql`, run `normalize_joins_shape`, and return the MySQL display string.
 fn normalize(sql: &str) -> SelectStatement {
     let mut stmt = parse_mysql(sql);
-    derived_tables_rewrite_main(&mut stmt, Dialect::MySQL)
-        .unwrap_or_else(|e| panic!("normalize_joins_shape failed: {e}\n  sql: {sql}"));
+    derived_tables_rewrite_main(
+        &mut stmt,
+        Dialect::MySQL,
+        &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+    )
+    .unwrap_or_else(|e| panic!("normalize_joins_shape failed: {e}\n  sql: {sql}"));
     println!(">>> Normalized: {}", stmt.display(Dialect::PostgreSQL));
     stmt
 }

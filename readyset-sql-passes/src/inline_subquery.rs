@@ -108,13 +108,11 @@ pub(crate) struct InliningContext<'a, U: UniqueColumnsSchema> {
     pub(crate) pre_hoist_lateral_at_most_one: Option<&'a HashSet<Relation>>,
     pub(crate) preceding_flattened_lateral_aliases: Option<&'a HashSet<Relation>>,
 
-    /// Unique-column catalog, plumbed from the orchestrator.  `Some` only when
-    /// the caller has schema context (LATERAL path via `absorb_flatten`).
-    /// Non-LATERAL callers (DTR, `inline_leading_derived_table`) pass `None`
-    /// because their eligibility checks do not consult the catalog.  Consumed
-    /// by the LATERAL-arm upstream-cardinality check to require column-level
-    /// superkey coverage of correlated regular-table upstreams.
-    pub(crate) unique_cols_schema: Option<&'a U>,
+    /// Unique-column catalog, plumbed from the orchestrator.  Required by every
+    /// caller: the LATERAL arm uses it for upstream column-level superkey
+    /// coverage, and the canonical (non-LATERAL) arm uses it for the Class B
+    /// regular-table-RHS admit in `from_items_cardinality_preserving`.
+    pub(crate) unique_cols_schema: &'a U,
 }
 
 /// Extract the inner statement from a `TableExpr` subquery and build the
@@ -851,9 +849,10 @@ fn is_on_nonrejecting(c: &JoinConstraint) -> bool {
 ///       noted above, the dispatcher rejects this for the upstream
 ///       direction; only downstream LEFT JOINs reach this branch in
 ///       practice.
-fn from_items_cardinality_preserving(
+fn from_items_cardinality_preserving<U: UniqueColumnsSchema>(
     tables: &[TableExpr],
     joins: &[JoinClause],
+    _unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     for dt in tables {
         let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) else {
@@ -1962,21 +1961,15 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
         ctx.pre_hoist_lateral_exactly_one,
         ctx.pre_hoist_lateral_at_most_one,
         ctx.preceding_flattened_lateral_aliases,
-        ctx.unique_cols_schema,
     ) {
-        (
-            Some(exactly_one_set),
-            Some(at_most_one_set),
-            Some(flattened_aliases),
-            Some(unique_cols_schema),
-        ) => {
+        (Some(exactly_one_set), Some(at_most_one_set), Some(flattened_aliases)) => {
             if !from_items_cardinality_preserving_lateral(
                 ctx.downstream_tables,
                 ctx.downstream_joins,
                 exactly_one_set,
                 at_most_one_set,
                 flattened_aliases,
-                unique_cols_schema,
+                ctx.unique_cols_schema,
             )? {
                 return Ok(false);
             }
@@ -1999,7 +1992,7 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
                 &body_corr_cols,
                 exactly_one_set,
                 at_most_one_set,
-                unique_cols_schema,
+                ctx.unique_cols_schema,
             )
         }
         _ => {
@@ -2011,7 +2004,11 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
             // product.  The asymmetric downstream-only check is insufficient
             // when the inlinable lives at a non-leftmost position in a
             // multi-FROM base.
-            if !from_items_cardinality_preserving(ctx.downstream_tables, ctx.downstream_joins)? {
+            if !from_items_cardinality_preserving(
+                ctx.downstream_tables,
+                ctx.downstream_joins,
+                ctx.unique_cols_schema,
+            )? {
                 return Ok(false);
             }
             let (up_tables, up_joins) =
@@ -2028,7 +2025,7 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
             if up_joins.iter().any(|jc| !jc.operator.is_inner_join()) {
                 return Ok(false);
             }
-            from_items_cardinality_preserving(up_tables, up_joins)
+            from_items_cardinality_preserving(up_tables, up_joins, ctx.unique_cols_schema)
         }
     }
 }

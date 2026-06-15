@@ -1,5 +1,6 @@
 use crate::derived_tables_rewrite::derived_tables_rewrite_main;
 use crate::hoist_parametrizable_filters::hoist_parametrizable_filters;
+use crate::unnest_subqueries::UnusedUniqueColumnsSchema;
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
 
@@ -8,7 +9,11 @@ const PARSING_CONFIG: ParsingPreset = ParsingPreset::OnlySqlparser;
 fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
     let rewritten_stmt =
         match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, original_text) {
-            Ok(mut stmt) => match derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL) {
+            Ok(mut stmt) => match derived_tables_rewrite_main(
+                &mut stmt,
+                Dialect::PostgreSQL,
+                &UnusedUniqueColumnsSchema,
+            ) {
                 Ok(has_dt_rw) => match hoist_parametrizable_filters(&mut stmt) {
                     Ok(has_opt_rw) => {
                         if has_dt_rw || has_opt_rw {

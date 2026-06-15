@@ -49,8 +49,12 @@ fn parse_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// and return the final statement for assertion.
 fn hoist_pg(sql: &str) -> readyset_sql::ast::SelectStatement {
     let mut stmt = parse_pg(sql);
-    derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL)
-        .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
+    derived_tables_rewrite_main(
+        &mut stmt,
+        Dialect::PostgreSQL,
+        &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+    )
+    .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
     hoist_parametrizable_filters(&mut stmt)
         .unwrap_or_else(|e| panic!("hoist_parametrizable_filters failed: {e}\n  sql: {sql}"));
     println!(">>> Hoisted (PG): {}", stmt.display(Dialect::PostgreSQL));
@@ -60,8 +64,12 @@ fn hoist_pg(sql: &str) -> readyset_sql::ast::SelectStatement {
 /// Parse `sql` with MySQL dialect, run derived-tables rewrite then hoist pass.
 fn hoist_mysql(sql: &str) -> readyset_sql::ast::SelectStatement {
     let mut stmt = parse_mysql(sql);
-    derived_tables_rewrite_main(&mut stmt, Dialect::MySQL)
-        .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
+    derived_tables_rewrite_main(
+        &mut stmt,
+        Dialect::MySQL,
+        &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+    )
+    .unwrap_or_else(|e| panic!("derived_tables_rewrite_main failed: {e}\n  sql: {sql}"));
     hoist_parametrizable_filters(&mut stmt)
         .unwrap_or_else(|e| panic!("hoist_parametrizable_filters failed: {e}\n  sql: {sql}"));
     println!(">>> Hoisted (MySQL): {}", stmt.display(Dialect::MySQL));
@@ -448,8 +456,12 @@ fn second_pass_does_not_duplicate_predicates() {
         r#"SELECT sub.x, sub.total
            FROM (SELECT t.x, SUM(t.v) AS total FROM t GROUP BY t.x HAVING t.x = $1 LIMIT 100) AS sub"#,
     );
-    derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL)
-        .expect("derived_tables_rewrite_main");
+    derived_tables_rewrite_main(
+        &mut stmt,
+        Dialect::PostgreSQL,
+        &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+    )
+    .expect("derived_tables_rewrite_main");
 
     // Post-C.2 dedup, DTR already flattened: hoist is a no-op on both passes.
     let _changed_1 = hoist_parametrizable_filters(&mut stmt).expect("first hoist");

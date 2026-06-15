@@ -1,3 +1,4 @@
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::infer_nullability::{derive_from_stmt, is_expr_null_preserving};
 use crate::inline_subquery::{
     can_inline_subquery, carry_inner_limit_and_order, compute_downstream_for_position,
@@ -55,12 +56,25 @@ pub trait DerivedTablesRewrite: Sized {
     /// 1. Subqueries unnesting & inlining
     /// 2. Join normalization and filter hoisting
     /// 3. Aggregated‐subquery filter extraction
-    fn derived_tables_rewrite(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self>;
+    ///
+    /// `unique_cols_schema` plumbs the unique-column catalog through to the
+    /// inlining-eligibility check, where the canonical (non-LATERAL)
+    /// cardinality-preservation arm consults it for the Class B regular-
+    /// table-RHS admit.
+    fn derived_tables_rewrite<U: UniqueColumnsSchema>(
+        &mut self,
+        dialect: Dialect,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl DerivedTablesRewrite for SelectStatement {
-    fn derived_tables_rewrite(&mut self, dialect: Dialect) -> ReadySetResult<&mut Self> {
-        if derived_tables_rewrite_main(self, dialect)? {
+    fn derived_tables_rewrite<U: UniqueColumnsSchema>(
+        &mut self,
+        dialect: Dialect,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self> {
+        if derived_tables_rewrite_main(self, dialect, unique_cols_schema)? {
             trace!(
                 name = "Derived tables rewritten",
                 "{}",
@@ -220,11 +234,12 @@ pub(crate) fn can_inline_left_join_rhs_safe(
 ///
 /// `inl_from_item_ord_idx` is a flat ordinal over `base_stmt.tables ++ join_rhs_items`,
 /// computed fresh before each inlining pass and never reused after mutation.
-fn can_inline_from_item(
+fn can_inline_from_item<U: UniqueColumnsSchema>(
     base_stmt: &SelectStatement,
     inl_from_item: &TableExpr,
     inl_from_item_ord_idx: usize,
     is_top_select: bool,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<Option<Vec<Expr>>> {
     let Some((inl_stmt, inl_stmt_alias)) = as_sub_query_with_alias(inl_from_item) else {
         return Ok(None);
@@ -253,9 +268,7 @@ fn can_inline_from_item(
 
     let (ds_tables, ds_joins) = compute_downstream_for_position(base_stmt, inl_from_item_ord_idx);
 
-    let ctx = crate::inline_subquery::InliningContext::<
-        crate::drop_redundant_join::UniqueColumnsSchemaImpl,
-    > {
+    let ctx = crate::inline_subquery::InliningContext {
         inner_stmt: inl_stmt,
         outer_stmt: base_stmt,
         inner_alias: &inl_stmt_alias,
@@ -274,7 +287,7 @@ fn can_inline_from_item(
         pre_hoist_lateral_exactly_one: None,
         pre_hoist_lateral_at_most_one: None,
         preceding_flattened_lateral_aliases: None,
-        unique_cols_schema: None,
+        unique_cols_schema,
     };
 
     let Some(downstream_group_by_additions) = can_inline_subquery(&ctx)? else {
@@ -704,9 +717,10 @@ fn inline_from_item(
 }
 
 /// Repeatedly inline all eligible FROM items in the statement until stabilization.
-fn try_inline_from_items(
+fn try_inline_from_items<U: UniqueColumnsSchema>(
     base_stmt: &mut SelectStatement,
     is_top_select: bool,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     let mut inlined_count = 0;
     loop {
@@ -719,9 +733,13 @@ fn try_inline_from_items(
         // 3. No reuse across mutations
         let mut inl_from_item_idx_and_additions: Option<(usize, Vec<Expr>)> = None;
         for (from_item_idx, from_item) in get_local_from_items_iter!(base_stmt).enumerate() {
-            if let Some(additions) =
-                can_inline_from_item(base_stmt, from_item, from_item_idx, is_top_select)?
-            {
+            if let Some(additions) = can_inline_from_item(
+                base_stmt,
+                from_item,
+                from_item_idx,
+                is_top_select,
+                unique_cols_schema,
+            )? {
                 inl_from_item_idx_and_additions = Some((from_item_idx, additions));
                 break;
             }
@@ -742,15 +760,16 @@ fn try_inline_from_items(
 /// then attempts inlining at the current level via [`try_inline_from_items`]. Bottom-up
 /// ordering ensures inner subqueries are already flattened before the outer level tries to
 /// inline them, maximising the candidates visible at each level.
-fn derived_tables_rewrite_impl(
+fn derived_tables_rewrite_impl<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     is_top_select: bool,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     let mut rewritten = false;
     // Recurse into each subquery
     for from_item in get_local_from_items_iter_mut!(stmt) {
         if let Some((from_stmt, _)) = as_sub_query_with_alias_mut(from_item)
-            && derived_tables_rewrite_impl(from_stmt, false)?
+            && derived_tables_rewrite_impl(from_stmt, false, unique_cols_schema)?
         {
             rewritten = true;
         }
@@ -765,7 +784,7 @@ fn derived_tables_rewrite_impl(
     // This is a per-level check: residual subqueries deep inside a
     // non-inlined FROM item do not block inlining at this level.
     if !contains_subquery_predicates(stmt)? {
-        rewritten |= try_inline_from_items(stmt, is_top_select)?;
+        rewritten |= try_inline_from_items(stmt, is_top_select, unique_cols_schema)?;
     }
     Ok(rewritten)
 }
@@ -965,9 +984,10 @@ fn strip_redundant_distinct(stmt: &mut SelectStatement) -> ReadySetResult<bool> 
 /// 8. **DISTINCT fix** — convert `GROUP BY` without aggregates to `SELECT DISTINCT`.
 ///
 /// Returns `true` if any rewrite was applied.
-pub(crate) fn derived_tables_rewrite_main(
+pub(crate) fn derived_tables_rewrite_main<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     dialect: Dialect,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     let mut rewritten = false;
 
@@ -995,7 +1015,7 @@ pub(crate) fn derived_tables_rewrite_main(
     }
 
     // Flatten derived tables
-    rewritten |= derived_tables_rewrite_impl(stmt, true)?;
+    rewritten |= derived_tables_rewrite_impl(stmt, true, unique_cols_schema)?;
 
     // Structural join reordering (canonicalization)
     rewritten |= normalize_joins_shape(stmt, dialect)?;
