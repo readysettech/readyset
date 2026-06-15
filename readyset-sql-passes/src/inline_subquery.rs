@@ -852,8 +852,11 @@ fn is_on_nonrejecting(c: &JoinConstraint) -> bool {
 fn from_items_cardinality_preserving<U: UniqueColumnsSchema>(
     tables: &[TableExpr],
     joins: &[JoinClause],
-    _unique_cols_schema: &U,
+    unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
+    // CSV-FROM positions carry no per-item ON, so Class B (regular-table
+    // RHS) pinning isn't reachable here; only subquery-body cardinality
+    // applies.
     for dt in tables {
         let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) else {
             return Ok(false);
@@ -866,24 +869,49 @@ fn from_items_cardinality_preserving<U: UniqueColumnsSchema>(
         let Ok(dt) = jc.right.table_exprs().exactly_one() else {
             return Ok(false);
         };
-        if !is_on_nonrejecting(&jc.constraint) {
+        // Subquery RHS: the subquery's body proves cardinality, so the
+        // ON predicate must be vacuous — any row-rejecting ON could turn
+        // an ExactlyOne body into 0 rows at this position, breaking the
+        // cardinality guarantee.
+        if let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) {
+            if !is_on_nonrejecting(&jc.constraint) {
+                return Ok(false);
+            }
+            if jc.operator.is_inner_join() {
+                if !is_exactly_one_card(rhs_stmt)? {
+                    return Ok(false);
+                }
+            } else if matches!(
+                jc.operator,
+                JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+            ) {
+                if !is_at_most_one_deep(rhs_stmt)? {
+                    return Ok(false);
+                }
+            } else {
+                return Ok(false);
+            }
+            continue;
+        }
+        // Class B fallback: regular-table RHS pinned by a unique-key
+        // equi-pair in the JOIN's ON.  The pin is the join predicate
+        // AND the cardinality proof; no `is_on_nonrejecting` gate
+        // applies — the pin is by design row-selecting.  Admits at
+        // both INNER (proves ExactlyOne) and LEFT (proves AtMostOne)
+        // positions; other operators and Empty/Using constraints don't
+        // reach this admit shape.
+        if !jc.operator.is_inner_join()
+            && !matches!(
+                jc.operator,
+                JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+            )
+        {
             return Ok(false);
         }
-        let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) else {
+        let JoinConstraint::On(on_expr) = &jc.constraint else {
             return Ok(false);
         };
-        if jc.operator.is_inner_join() {
-            if !is_exactly_one_card(rhs_stmt)? {
-                return Ok(false);
-            }
-        } else if matches!(
-            jc.operator,
-            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
-        ) {
-            if !is_at_most_one_deep(rhs_stmt)? {
-                return Ok(false);
-            }
-        } else {
+        if !is_join_pinned_to_unique_key(dt, on_expr, unique_cols_schema)? {
             return Ok(false);
         }
     }
@@ -2808,6 +2836,115 @@ mod is_lateral_friendly_class_b_tests {
             !is_lateral_friendly_at_most_one(item, Some(on), &empty, &empty, &AddrIdUniqueSchema)
                 .unwrap(),
             "non-pinning ON should not admit Class B fallback"
+        );
+    }
+}
+
+/// T2 V2 — Class B downstream activation: regular-table RHS in the
+/// canonical (non-LATERAL) cardinality-preservation check.
+///
+/// Pre-T2-V2 the canonical helper `from_items_cardinality_preserving`
+/// rejected any FROM item that wasn't a subquery.  Post-T2-V2 it admits a
+/// regular-table RHS at INNER or LEFT JOIN positions when the ON pins a
+/// single-column unique key on that RHS table per
+/// `is_join_pinned_to_unique_key`, mirroring the LATERAL-side admission
+/// added by T2 V1.
+#[cfg(test)]
+mod from_items_cardinality_preserving_class_b_tests {
+    use super::*;
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    struct AddrIdUniqueSchema;
+    impl UniqueColumnsSchema for AddrIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "addr" {
+                let col = Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                };
+                Some(HashSet::from([col]))
+            } else {
+                None
+            }
+        }
+    }
+
+    struct EmptyUniqueSchema;
+    impl UniqueColumnsSchema for EmptyUniqueSchema {
+        fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+            None
+        }
+    }
+
+    fn parse(sql: &str) -> SelectStatement {
+        parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+            .unwrap_or_else(|e| panic!("parse failed: {e}\n  sql: {sql}"))
+    }
+
+    #[test]
+    fn inner_join_admits_regular_table_with_unique_key_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        assert!(
+            from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
+                .unwrap(),
+            "INNER JOIN with unique-key pin on regular-table RHS should admit"
+        );
+    }
+
+    #[test]
+    fn left_join_admits_regular_table_with_unique_key_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" LEFT JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        assert!(
+            from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
+                .unwrap(),
+            "LEFT JOIN with unique-key pin on regular-table RHS should admit (0..1 row)"
+        );
+    }
+
+    #[test]
+    fn inner_join_rejects_regular_table_without_unique_key_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."region" = "o"."region""#);
+        assert!(
+            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
+                .unwrap(),
+            "INNER JOIN whose ON pins a non-unique column should reject"
+        );
+    }
+
+    #[test]
+    fn inner_join_rejects_when_catalog_has_no_entry() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        assert!(
+            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &EmptyUniqueSchema)
+                .unwrap(),
+            "empty catalog must not admit any regular-table RHS"
+        );
+    }
+
+    #[test]
+    fn right_join_rejects_regular_table_even_with_pin() {
+        let stmt =
+            parse(r#"SELECT "o"."k" FROM "o" RIGHT JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
+        assert!(
+            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
+                .unwrap(),
+            "RIGHT JOIN is not in the Class B admit set (T3 swap pass handles RIGHT separately)"
+        );
+    }
+
+    #[test]
+    fn csv_from_rejects_regular_table_even_with_catalog() {
+        // CSV-FROM position: no per-item ON; Class B's pin-based proof has
+        // no expression to inspect, so the first-loop reject still fires.
+        let stmt = parse(r#"SELECT "o"."k", "addr"."city" FROM "o", "addr""#);
+        assert!(
+            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
+                .unwrap(),
+            "CSV-FROM regular-table position must reject (no ON to carry the pin)"
         );
     }
 }
