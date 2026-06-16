@@ -52,10 +52,25 @@ pub(crate) trait UniqueColumnsSchema {
         self.unique_columns_of(rel)
             .map(|cols| cols.into_iter().map(|c| vec![c]).collect())
     }
+
+    /// Columns proven `NOT NULL` by inline constraint or by being a member
+    /// of a `PRIMARY KEY`.  Returns `None` when the relation has no
+    /// catalog entry; callers should treat that as "no NOT NULL guarantees
+    /// available".  Used by `drop_redundant_join` to decide whether
+    /// extras in a self-join's ON beyond the unique-key cover are
+    /// tautological (NOT NULL `col = col` is always TRUE) or potentially
+    /// null-rejecting (nullable `col = col` is NULL on NULL rows).
+    ///
+    /// The default impl returns `None` so test/mock schemas degrade to
+    /// the most conservative behavior (treat all extras as nullable).
+    fn not_null_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+        None
+    }
 }
 
 pub(crate) struct UniqueColumnsSchemaImpl {
     unique_keys: HashMap<Relation, HashSet<Vec<Column>>>,
+    not_null_cols: HashMap<Relation, HashSet<Column>>,
 }
 
 impl UniqueColumnsSchema for UniqueColumnsSchemaImpl {
@@ -77,11 +92,16 @@ impl UniqueColumnsSchema for UniqueColumnsSchemaImpl {
     fn unique_keys_of(&self, rel: &Relation) -> Option<HashSet<Vec<Column>>> {
         self.unique_keys.get(rel).cloned()
     }
+
+    fn not_null_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+        self.not_null_cols.get(rel).cloned()
+    }
 }
 
 impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
     fn from(ctx: C) -> Self {
         let mut unique_keys: HashMap<Relation, HashSet<Vec<Column>>> = HashMap::new();
+        let mut not_null_cols_by_rel: HashMap<Relation, HashSet<Column>> = HashMap::new();
 
         for (rel, body) in ctx.base_schemas() {
             // Single walk over body.fields populates two sets:
@@ -139,9 +159,28 @@ impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
             if !keys.is_empty() {
                 unique_keys.insert((*rel).clone(), keys);
             }
+            // Table-level PRIMARY KEY members are NOT NULL by SQL semantics —
+            // fold them into `not_null_cols` alongside the inline-derived ones
+            // so single-table queries that declare PKs only at the table level
+            // also expose member nullability info to downstream passes.
+            if let Some(table_keys) = &body.keys {
+                for key in table_keys {
+                    if key.is_primary_key() {
+                        for c in key.get_columns() {
+                            not_null_cols.insert((*c).clone());
+                        }
+                    }
+                }
+            }
+            if !not_null_cols.is_empty() {
+                not_null_cols_by_rel.insert((*rel).clone(), not_null_cols);
+            }
         }
 
-        UniqueColumnsSchemaImpl { unique_keys }
+        UniqueColumnsSchemaImpl {
+            unique_keys,
+            not_null_cols: not_null_cols_by_rel,
+        }
     }
 }
 
@@ -150,19 +189,47 @@ struct DropRedundantJoinContext<'a, U: UniqueColumnsSchema> {
 }
 
 impl<U: UniqueColumnsSchema> DropRedundantJoinContext<'_, U> {
-    /// Returns `true` when the `names` set covers all columns of some
-    /// unique key on `table` — i.e., one of the keys in
-    /// `unique_keys_of(table)` is a subset of `names`.  Used to admit
-    /// single- and multi-column equi-predicate joins (`a=a` or
-    /// `a=a AND b=b ...`) against a `PRIMARY KEY` or NOT-NULL-gated
-    /// `UNIQUE`.
-    fn covers_unique_key(&self, table: &Relation, names: &HashSet<SqlIdentifier>) -> bool {
+    /// Returns `true` when `names` covers (as a superset) some unique key
+    /// on `table` AND every extra column (`names` ∖ key) is provably
+    /// `NOT NULL`.  Admits single- and multi-column equi-predicate joins
+    /// (`a=a` or `a=a AND b=b ...`) against a `PRIMARY KEY` or NOT-NULL-
+    /// gated `UNIQUE`, with extras tolerated only when they are
+    /// tautological (`NOT NULL col = NOT NULL col` is `TRUE` for every
+    /// row; dropping the JOIN preserves semantics).
+    ///
+    /// Nullable extras force a bail: in the original JOIN they reject
+    /// rows where the column is `NULL` (since `NULL = NULL` evaluates to
+    /// `NULL`, not `TRUE`); dropping the JOIN loses that filter (INNER)
+    /// or the corresponding RHS null-extension (LEFT).  An INNER-only
+    /// relaxation that emits `IS NOT NULL` filters for nullable extras
+    /// is tracked as a follow-up.
+    fn covers_unique_key_with_safe_extras(
+        &self,
+        table: &Relation,
+        names: &HashSet<SqlIdentifier>,
+    ) -> bool {
         let Some(keys) = self.unique_cols_schema.unique_keys_of(table) else {
             return false;
         };
+        let not_null = self.unique_cols_schema.not_null_columns_of(table);
+        let is_not_null_in_table = |n: &SqlIdentifier| {
+            not_null.as_ref().is_some_and(|nn| {
+                nn.iter()
+                    .any(|c| c.name == *n && c.table.as_ref() == Some(table))
+            })
+        };
         keys.iter().any(|key| {
+            let in_key = |n: &SqlIdentifier| {
+                key.iter()
+                    .any(|k| k.name == *n && k.table.as_ref() == Some(table))
+            };
+            // Cover: every table-qualified key column appears in `names`.
+            // Safe extras: every name in `names` not part of this key is
+            // proven NOT NULL (the extra equi-pair is then tautological
+            // and dropping the JOIN preserves semantics).
             key.iter()
                 .all(|k| k.table.as_ref() == Some(table) && names.contains(&k.name))
+                && names.iter().all(|n| in_key(n) || is_not_null_in_table(n))
         })
     }
 }
@@ -263,13 +330,18 @@ fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
         return Ok(false);
     };
 
-    // The set of RHS columns in the equi-pairs must cover some unique key on
-    // `rhs_base_table` — single-column or composite.  `covers_unique_key`
-    // honors the NULLS-DISTINCT gate from `UniqueColumnsSchemaImpl::from`
+    // The set of RHS columns in the equi-pairs must cover some unique key
+    // on `rhs_base_table` (single-column or composite) AND every extra
+    // column beyond the unique key must be provably NOT NULL — extras on
+    // NOT NULL columns are tautologies (`col = col` is always TRUE), while
+    // extras on nullable columns carry null-rejection semantics that
+    // dropping the JOIN would silently lose (INNER: rows where the column
+    // is NULL would survive; LEFT: rows would lose RHS null-extension).
+    // Honors the NULLS-DISTINCT gate from `UniqueColumnsSchemaImpl::from`
     // (table-level UNIQUE requires every member NOT NULL; PRIMARY KEY is
     // unconditional).
     let rhs_names: HashSet<SqlIdentifier> = pairs.iter().map(|(_, r)| r.name.clone()).collect();
-    if !ctx.covers_unique_key(rhs_base_table, &rhs_names) {
+    if !ctx.covers_unique_key_with_safe_extras(rhs_base_table, &rhs_names) {
         return Ok(false);
     }
 
@@ -997,6 +1069,81 @@ mod tests {
                 &TestCompositeKeySchema,
             ),
             "ON includes a non-key column (x); pair set covers no unique key — bail"
+        );
+    }
+
+    /// Null-rejection guard: extra equi-pair beyond a covering unique key
+    /// on a nullable column is rejected.  `TestUniqueSchema` doesn't
+    /// declare any column NOT NULL (its `not_null_columns_of` default
+    /// returns `None`), so `c` is treated as nullable.  The extra
+    /// `nullable_col = nullable_col` conjunct in the original JOIN
+    /// filters NULL rows; dropping the JOIN would admit those rows
+    /// (INNER) or change RHS column values from null-extended to row-as-
+    /// is (LEFT).  See
+    /// `[[drop-redundant-join-extra-nullable-pair-inner-only-relaxation]]`
+    /// for the INNER-only follow-up that admits + emits `IS NOT NULL`.
+    #[test]
+    fn extra_pair_on_nullable_column_preserves_join() {
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id", "t"."c"
+                   FROM (SELECT "t"."id", "t"."c" FROM "t") AS "sq"
+                   INNER JOIN "t" ON "sq"."id" = "t"."id" AND "sq"."c" = "t"."c""#,
+            ),
+            "INNER JOIN with PK pin + nullable extra `c = c` must NOT drop \
+             (original JOIN's null-rejection would be lost)"
+        );
+        assert!(
+            !did_eliminate(
+                r#"SELECT "sq"."id", "t"."c"
+                   FROM (SELECT "t"."id", "t"."c" FROM "t") AS "sq"
+                   LEFT JOIN "t" ON "sq"."id" = "t"."id" AND "sq"."c" = "t"."c""#,
+            ),
+            "LEFT JOIN with PK pin + nullable extra `c = c` must NOT drop \
+             (RHS null-extension on the dropped column would be lost)"
+        );
+    }
+
+    /// Positive companion to `extra_pair_on_nullable_column_preserves_join`:
+    /// when the extra equi-pair is on a column proven NOT NULL,
+    /// `col = col` is `TRUE` for every row (no null-rejection effect) —
+    /// dropping the JOIN is sound.  Custom schema declares `t.c` NOT NULL.
+    #[test]
+    fn extra_pair_on_not_null_column_eliminates_join() {
+        struct PkAndNotNullSchema;
+        impl UniqueColumnsSchema for PkAndNotNullSchema {
+            fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+                if rel.name == "t" {
+                    Some(HashSet::from([mk_col("t", "id")]))
+                } else {
+                    None
+                }
+            }
+            fn not_null_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+                if rel.name == "t" {
+                    Some(HashSet::from([mk_col("t", "id"), mk_col("t", "c")]))
+                } else {
+                    None
+                }
+            }
+        }
+        assert!(
+            did_eliminate_with(
+                r#"SELECT "sq"."id", "t"."c"
+                   FROM (SELECT "t"."id", "t"."c" FROM "t") AS "sq"
+                   INNER JOIN "t" ON "sq"."id" = "t"."id" AND "sq"."c" = "t"."c""#,
+                &PkAndNotNullSchema,
+            ),
+            "INNER JOIN with PK pin + NOT NULL extra `c = c` is tautological — drop"
+        );
+        assert!(
+            did_eliminate_with(
+                r#"SELECT "sq"."id", "t"."c"
+                   FROM (SELECT "t"."id", "t"."c" FROM "t") AS "sq"
+                   LEFT JOIN "t" ON "sq"."id" = "t"."id" AND "sq"."c" = "t"."c""#,
+                &PkAndNotNullSchema,
+            ),
+            "LEFT JOIN with PK pin + NOT NULL extra `c = c` is tautological — drop"
         );
     }
 
