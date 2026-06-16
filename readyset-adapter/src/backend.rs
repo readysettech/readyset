@@ -120,7 +120,7 @@ use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
-    convert_placeholders_to_question_marks,
+    auto_cache_skip_reason, convert_placeholders_to_question_marks,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -136,7 +136,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
-use crate::auto_cache_eligibility::auto_cache_skip_reason;
 use crate::backend::noria_connector::ExecuteSelectContext;
 use crate::query_handler::SetBehavior;
 use crate::query_status_cache::{ManualCacheEntry, QueryStatusCache};
@@ -1731,9 +1730,10 @@ where
     }
 }
 
-/// What caused [`Backend::try_auto_create_shallow_cache`] to fire.  Used both
-/// for log/telemetry labels and to gate the eligibility filter, which only
-/// applies to the implicit in-request-path trigger.
+/// What caused [`Backend::try_auto_create_shallow_cache`] to fire.  Used for
+/// log/telemetry labels and to decide whether an eligibility rejection is
+/// remembered in the in-request-path skip set; explicit hints are always
+/// re-evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AutoCreateTrigger {
     /// Explicit `/*rs+ CREATE SHALLOW CACHE */` hint — user opt-in.
@@ -5105,8 +5105,8 @@ where
         // The skip set in `query_status_cache` is consulted only here, so a
         // remembered rejection cannot block an explicit `CREATE SHALLOW
         // CACHE` DDL or a `/*rs+ CREATE SHALLOW CACHE */` hint.
+        let query_id = QueryId::from(shallow);
         if matches!(trigger, AutoCreateTrigger::InRequestPath) {
-            let query_id = QueryId::from(shallow);
             if state
                 .query_status_cache
                 .is_shallow_auto_create_skipped(query_id)
@@ -5148,7 +5148,7 @@ where
             return None;
         }
 
-        let (query_id, name) = Self::resolve_id_and_name(None, QueryId::from(shallow));
+        let (query_id, name) = Self::resolve_id_and_name(None, query_id);
         let query_text = shallow.query.display(DB::SQL_DIALECT).to_string();
         let ddl_stmt = build_hint_ddl_string(DB::SQL_DIALECT, &opts, &query_text);
         let ddl_req = CacheDDLRequest {

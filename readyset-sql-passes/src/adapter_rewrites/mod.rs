@@ -1,3 +1,4 @@
+mod auto_cache_eligibility;
 mod autoparam_exclusions;
 mod autoparameterize;
 mod post_lookup_decomposition;
@@ -8,6 +9,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
 
+pub use auto_cache_eligibility::auto_cache_skip_reason;
 pub use autoparam_exclusions::{derive_frozen, wrap_autoparam_exclusions};
 pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools, repeat_n};
