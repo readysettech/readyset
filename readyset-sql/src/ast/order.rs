@@ -117,13 +117,12 @@ impl TryFromDialect<sqlparser::ast::OrderByExpr> for OrderBy {
             with_fill: _,
         } = value;
 
-        let order_type = options.asc.map(|asc| {
-            if asc {
-                OrderType::OrderAscending
-            } else {
-                OrderType::OrderDescending
-            }
-        });
+        let order_type = match options.sort {
+            Some(sqlparser::ast::OrderBySort::Asc) => Some(OrderType::OrderAscending),
+            Some(sqlparser::ast::OrderBySort::Desc) => Some(OrderType::OrderDescending),
+            Some(sqlparser::ast::OrderBySort::Using(op)) => unsupported!("ORDER BY USING {op:?}")?,
+            None => None,
+        };
 
         let null_order = options.nulls_first.map(|first| {
             if first {

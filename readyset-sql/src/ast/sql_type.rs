@@ -299,7 +299,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                 Err(_) => Ok(Self::Other(name.try_into_dialect(dialect)?)),
             },
             Array(def) => Ok(Self::Array(Box::new(def.try_into_dialect(dialect)?))),
-            Map(_data_type, _data_type1) => unsupported!("MAP type"),
+            Map(_data_type, _data_type1, _bracket_kind) => unsupported!("MAP type"),
             Tuple(_vec) => unsupported!("TUPLE type"),
             Nested(_vec) => unsupported!("NESTED type"),
             // XXX bits is a Clickhouse extension for ENUM8/ENUM16

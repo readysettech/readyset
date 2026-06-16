@@ -79,6 +79,9 @@ impl TryFrom<&sqlparser::ast::JoinOperator> for JoinOperator {
             | JoinOp::RightAnti(..)
             | JoinOp::CrossApply
             | JoinOp::OuterApply
+            | JoinOp::ArrayJoin
+            | JoinOp::LeftArrayJoin
+            | JoinOp::InnerArrayJoin
             | JoinOp::AsOf { .. } => unsupported!("Unsupported join operator: {value:?}"),
         }
     }
@@ -143,6 +146,9 @@ impl TryFromDialect<sqlparser::ast::JoinOperator> for JoinConstraint {
             | JoinOp::CrossJoin(constraint)
             | JoinOp::AsOf { constraint, .. } => constraint.try_into_dialect(dialect),
             JoinOp::CrossApply | JoinOp::OuterApply => Ok(Self::Empty),
+            JoinOp::ArrayJoin | JoinOp::LeftArrayJoin | JoinOp::InnerArrayJoin => {
+                unsupported!("ARRAY JOIN is not supported")
+            }
         }
     }
 }

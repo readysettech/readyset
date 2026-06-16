@@ -1558,7 +1558,7 @@ dependencies = [
  "parking_lot",
  "rand 0.9.4",
  "regex",
- "sqlparser 0.61.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.61.0",
  "tempfile",
  "tokio",
  "url",
@@ -1632,7 +1632,7 @@ dependencies = [
  "object_store",
  "paste",
  "recursive",
- "sqlparser 0.61.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.61.0",
  "tokio",
  "web-time",
 ]
@@ -1797,7 +1797,7 @@ dependencies = [
  "paste",
  "recursive",
  "serde_json",
- "sqlparser 0.61.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.61.0",
 ]
 
 [[package]]
@@ -2130,7 +2130,7 @@ dependencies = [
  "log",
  "recursive",
  "regex",
- "sqlparser 0.61.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.61.0",
 ]
 
 [[package]]
@@ -4497,7 +4497,7 @@ dependencies = [
  "proptest",
  "readyset-sql",
  "readyset-util",
- "sqlparser 0.61.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.62.0",
  "test-strategy",
  "test-utils",
 ]
@@ -5938,7 +5938,7 @@ dependencies = [
  "serde_json",
  "slab",
  "sqlformat",
- "sqlparser 0.61.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.62.0",
  "streaming-iterator",
  "test-strategy",
  "tokio",
@@ -6791,7 +6791,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-util",
  "serde",
- "sqlparser 0.61.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.62.0",
  "stacker",
  "strum",
  "test-strategy",
@@ -6814,7 +6814,7 @@ dependencies = [
  "readyset-sql",
  "readyset-util",
  "serde",
- "sqlparser 0.61.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.62.0",
  "test-discovery",
  "test-strategy",
  "test-utils",
@@ -6838,7 +6838,7 @@ dependencies = [
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",
- "sqlparser 0.61.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser 0.62.0",
  "strum",
  "tracing",
  "vec1",
@@ -7986,13 +7986,13 @@ dependencies = [
 
 [[package]]
 name = "sqlparser"
-version = "0.61.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#7eba3ca17fe16471ce32e1c7dad6cc179f5d780f"
+version = "0.62.0"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential#e27b8e7170f4669d0d2cb8ffa32ae0c840406199"
 dependencies = [
  "log",
  "recursive",
  "serde",
- "sqlparser_derive 0.5.0 (git+https://github.com/apache/datafusion-sqlparser-rs?branch=main)",
+ "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential)",
 ]
 
 [[package]]
@@ -8009,7 +8009,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.5.0"
-source = "git+https://github.com/apache/datafusion-sqlparser-rs?branch=main#7eba3ca17fe16471ce32e1c7dad6cc179f5d780f"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential#e27b8e7170f4669d0d2cb8ffa32ae0c840406199"
 dependencies = [
  "proc-macro2",
  "quote",

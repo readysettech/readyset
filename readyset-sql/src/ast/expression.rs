@@ -1760,6 +1760,7 @@ impl TryFrom<sqlparser::ast::BinaryOperator> for BinaryOperator {
             BinOp::Custom(_) => unsupported!("Custom operator {value:?}")?,
             BinOp::Divide => Self::Divide,
             BinOp::DuckIntegerDivide => unsupported!("DuckDB // {value:?}")?,
+            BinOp::Glob => unsupported!("GLOB {value:?}")?,
             BinOp::Eq => Self::Equal,
             BinOp::Gt => Self::Greater,
             BinOp::GtEq => Self::GreaterOrEqual,
@@ -2740,11 +2741,12 @@ impl TryFromDialect<sqlparser::ast::OrderByOptions> for (OrderType, NullOrder) {
         value: sqlparser::ast::OrderByOptions,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        let sqlparser::ast::OrderByOptions { asc, nulls_first } = value;
+        let sqlparser::ast::OrderByOptions { sort, nulls_first } = value;
 
-        let order_type = match asc {
-            Some(true) | None => OrderType::OrderAscending,
-            Some(false) => OrderType::OrderDescending,
+        let order_type = match sort {
+            Some(sqlparser::ast::OrderBySort::Desc) => OrderType::OrderDescending,
+            Some(sqlparser::ast::OrderBySort::Asc) | None => OrderType::OrderAscending,
+            Some(sqlparser::ast::OrderBySort::Using(op)) => unsupported!("ORDER BY USING {op:?}")?,
         };
 
         let null_order = nulls_first

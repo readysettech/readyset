@@ -107,6 +107,7 @@ impl TryFromDialect<sqlparser::ast::CreateIndex> for CreateIndexStatement {
             predicate,
             index_options,
             alter_options: _,
+            r#async: _, // Ignore async index creation for now
         } = value;
 
         // Convert index columns to our Column type
