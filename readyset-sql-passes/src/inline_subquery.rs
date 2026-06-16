@@ -852,16 +852,30 @@ fn is_on_nonrejecting(c: &JoinConstraint) -> bool {
 fn from_items_cardinality_preserving<U: UniqueColumnsSchema>(
     tables: &[TableExpr],
     joins: &[JoinClause],
+    attaching_on: Option<&Expr>,
     unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
-    // CSV-FROM positions carry no per-item ON, so Class B (regular-table
-    // RHS) pinning isn't reachable here; only subquery-body cardinality
-    // applies.
+    // CSV-FROM positions carry no per-item ON of their own, but when the
+    // dispatcher is checking an upstream partition with this helper, the
+    // *inlinable's* attaching-join ON (one slot down the join chain) can
+    // pin a leading-FROM regular table to one of its unique keys.  That
+    // pin proves the upstream × inlinable combination is cardinality-
+    // preserving even though the table itself has no ON in this slice.
+    // Downstream callers pass `None` (downstream items have their own
+    // per-join ON in the `joins` loop below).
     for dt in tables {
-        let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) else {
+        if let Some((rhs_stmt, _)) = as_sub_query_with_alias(dt) {
+            if !is_exactly_one_card(rhs_stmt)? {
+                return Ok(false);
+            }
+            continue;
+        }
+        // Class B leading-FROM fallback: regular table pinned by the
+        // inlinable's attaching ON on one of its unique keys.
+        let Some(on) = attaching_on else {
             return Ok(false);
         };
-        if !is_exactly_one_card(rhs_stmt)? {
+        if !is_join_pinned_to_unique_key(dt, on, unique_cols_schema)? {
             return Ok(false);
         }
     }
@@ -2032,9 +2046,15 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
             // product.  The asymmetric downstream-only check is insufficient
             // when the inlinable lives at a non-leftmost position in a
             // multi-FROM base.
+            //
+            // Downstream call passes `attaching_on = None`: downstream items
+            // either are CSV-FROM siblings (to which the inlinable's
+            // attaching ON does not apply) or carry their own per-join ON
+            // in the `joins` loop.
             if !from_items_cardinality_preserving(
                 ctx.downstream_tables,
                 ctx.downstream_joins,
+                None,
                 ctx.unique_cols_schema,
             )? {
                 return Ok(false);
@@ -2053,7 +2073,27 @@ fn check_join_partners_cardinality_preserving<U: UniqueColumnsSchema>(
             if up_joins.iter().any(|jc| !jc.operator.is_inner_join()) {
                 return Ok(false);
             }
-            from_items_cardinality_preserving(up_tables, up_joins, ctx.unique_cols_schema)
+            // Upstream call: when the inlinable is at a JOIN-RHS position,
+            // the join slot attaching it carries an ON that can pin a
+            // leading-FROM regular table to one of its unique keys.  That
+            // pin proves the upstream × inlinable combination is
+            // cardinality-preserving even though the table has no ON of
+            // its own.  LHS-FROM-positioned inlinables have no attaching
+            // join, so `find_rhs_join_clause` returns `None` and the
+            // upstream tables loop sees no attaching ON.
+            let attaching_on = find_rhs_join_clause(ctx.outer_stmt, ctx.inl_from_item_ord_idx)
+                .and_then(
+                    |(jc_idx, _)| match &ctx.outer_stmt.join[jc_idx].constraint {
+                        JoinConstraint::On(e) => Some(e),
+                        _ => None,
+                    },
+                );
+            from_items_cardinality_preserving(
+                up_tables,
+                up_joins,
+                attaching_on,
+                ctx.unique_cols_schema,
+            )
         }
     }
 }
@@ -2886,8 +2926,13 @@ mod from_items_cardinality_preserving_class_b_tests {
         let stmt =
             parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
         assert!(
-            from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
-                .unwrap(),
+            from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
             "INNER JOIN with unique-key pin on regular-table RHS should admit"
         );
     }
@@ -2897,8 +2942,13 @@ mod from_items_cardinality_preserving_class_b_tests {
         let stmt =
             parse(r#"SELECT "o"."k" FROM "o" LEFT JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
         assert!(
-            from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
-                .unwrap(),
+            from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
             "LEFT JOIN with unique-key pin on regular-table RHS should admit (0..1 row)"
         );
     }
@@ -2908,8 +2958,13 @@ mod from_items_cardinality_preserving_class_b_tests {
         let stmt =
             parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."region" = "o"."region""#);
         assert!(
-            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
-                .unwrap(),
+            !from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
             "INNER JOIN whose ON pins a non-unique column should reject"
         );
     }
@@ -2919,8 +2974,13 @@ mod from_items_cardinality_preserving_class_b_tests {
         let stmt =
             parse(r#"SELECT "o"."k" FROM "o" INNER JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
         assert!(
-            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &EmptyUniqueSchema)
-                .unwrap(),
+            !from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &EmptyUniqueSchema,
+            )
+            .unwrap(),
             "empty catalog must not admit any regular-table RHS"
         );
     }
@@ -2930,21 +2990,151 @@ mod from_items_cardinality_preserving_class_b_tests {
         let stmt =
             parse(r#"SELECT "o"."k" FROM "o" RIGHT JOIN "addr" ON "addr"."id" = "o"."addr_id""#);
         assert!(
-            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
-                .unwrap(),
+            !from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
             "RIGHT JOIN is not in the Class B admit set (T3 swap pass handles RIGHT separately)"
         );
     }
 
     #[test]
-    fn csv_from_rejects_regular_table_even_with_catalog() {
-        // CSV-FROM position: no per-item ON; Class B's pin-based proof has
-        // no expression to inspect, so the first-loop reject still fires.
+    fn csv_from_rejects_regular_table_when_no_attaching_on() {
+        // CSV-FROM position with `attaching_on = None`: the tables-loop
+        // Class B branch has no expression to inspect, so it falls through
+        // to the regular-table reject path.  This is the downstream-call
+        // shape from the dispatcher (downstream items always pass None).
         let stmt = parse(r#"SELECT "o"."k", "addr"."city" FROM "o", "addr""#);
         assert!(
-            !from_items_cardinality_preserving(&stmt.tables[1..], &stmt.join, &AddrIdUniqueSchema)
-                .unwrap(),
-            "CSV-FROM regular-table position must reject (no ON to carry the pin)"
+            !from_items_cardinality_preserving(
+                &stmt.tables[1..],
+                &stmt.join,
+                None,
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
+            "CSV-FROM regular-table position must reject when no attaching ON"
+        );
+    }
+
+    /// Extract the ON expression from `stmt`'s first join clause for
+    /// use as the `attaching_on` argument in V3 tests.  Panics if the
+    /// join's constraint isn't `ON expr`.
+    fn first_join_on(stmt: &SelectStatement) -> &Expr {
+        match &stmt.join[0].constraint {
+            JoinConstraint::On(e) => e,
+            other => panic!("expected ON constraint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leading_table_admits_when_attaching_on_pins_unique_key() {
+        // Models the dispatcher's upstream call when the inlinable is
+        // attached by an INNER JOIN whose ON pins the leading FROM
+        // table's PK.  Production shape: post-decorrelation
+        // `FROM addr INNER JOIN sub ON addr.id = sub.fk`.
+        let stmt = parse(r#"SELECT 1 FROM "addr" INNER JOIN "sub" ON "addr"."id" = "sub"."fk""#);
+        assert!(
+            from_items_cardinality_preserving(
+                &stmt.tables,
+                &[],
+                Some(first_join_on(&stmt)),
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
+            "leading regular table must admit when attaching ON pins its unique key"
+        );
+    }
+
+    #[test]
+    fn leading_table_rejects_when_attaching_on_pins_non_unique() {
+        let stmt =
+            parse(r#"SELECT 1 FROM "addr" INNER JOIN "sub" ON "addr"."region" = "sub"."region""#);
+        assert!(
+            !from_items_cardinality_preserving(
+                &stmt.tables,
+                &[],
+                Some(first_join_on(&stmt)),
+                &AddrIdUniqueSchema,
+            )
+            .unwrap(),
+            "attaching ON pinning a non-unique column must not admit"
+        );
+    }
+
+    #[test]
+    fn leading_table_rejects_when_catalog_has_no_entry() {
+        let stmt = parse(r#"SELECT 1 FROM "addr" INNER JOIN "sub" ON "addr"."id" = "sub"."fk""#);
+        assert!(
+            !from_items_cardinality_preserving(
+                &stmt.tables,
+                &[],
+                Some(first_join_on(&stmt)),
+                &EmptyUniqueSchema,
+            )
+            .unwrap(),
+            "empty catalog must not admit a leading regular table"
+        );
+    }
+
+    #[test]
+    fn multi_leading_tables_admit_when_attaching_on_pins_each() {
+        // Two regular tables in the CSV-FROM list, both pinned by AND-
+        // conjoined equi-predicates in the attaching ON.  Models a
+        // comma-FROM upstream partition where each table needs its own
+        // pin.
+        struct TwoAddrUniqueSchema;
+        impl UniqueColumnsSchema for TwoAddrUniqueSchema {
+            fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+                if rel.name == "addr1" || rel.name == "addr2" {
+                    Some(HashSet::from([Column {
+                        name: "id".into(),
+                        table: Some(rel.clone()),
+                    }]))
+                } else {
+                    None
+                }
+            }
+        }
+        let stmt = parse(
+            r#"SELECT 1 FROM "addr1", "addr2" INNER JOIN "sub"
+               ON "addr1"."id" = "sub"."fk1" AND "addr2"."id" = "sub"."fk2""#,
+        );
+        assert!(
+            from_items_cardinality_preserving(
+                &stmt.tables,
+                &[],
+                Some(first_join_on(&stmt)),
+                &TwoAddrUniqueSchema,
+            )
+            .unwrap(),
+            "both leading tables must admit when AND-conjoined ON pins each unique key"
+        );
+    }
+
+    #[test]
+    fn leading_subquery_admits_via_exactly_one_card_with_attaching_on_present() {
+        // Control: when the leading FROM is a subquery (not a regular
+        // table), V3's Class B branch is skipped and the existing
+        // subquery-body cardinality check is the deciding factor.
+        // attaching_on is present but unused for the subquery path.
+        let stmt = parse(
+            r#"SELECT 1
+               FROM (SELECT COUNT(*) AS n FROM "src") sub_one
+               INNER JOIN "sub" ON "sub_one"."n" = "sub"."fk""#,
+        );
+        assert!(
+            from_items_cardinality_preserving(
+                &stmt.tables,
+                &[],
+                Some(first_join_on(&stmt)),
+                &EmptyUniqueSchema,
+            )
+            .unwrap(),
+            "leading subquery with ExactlyOne body must admit regardless of catalog"
         );
     }
 }
