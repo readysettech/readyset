@@ -1276,6 +1276,70 @@ pub(crate) fn outermost_expression_mut(
     outermost_expression_iter!(stmt, iter_mut, mut)
 }
 
+/// Position of an outermost expression relative to a (potentially merged-
+/// in-from-an-inlined-subquery) GROUP BY.  Distinguishes positions whose
+/// semantics requires GROUP BY membership (post-aggregation: SELECT
+/// items, HAVING, ORDER BY) from positions that filter rows before
+/// aggregation (pre-aggregation: WHERE, JOIN ON).
+///
+/// Consumed by `check_group_by_compatibility` to apply per-position
+/// rules when admitting subquery inlining: post-aggregation references
+/// to non-inlinable rels need to be GROUP BY keys (bare Column refs
+/// today; future relaxations could broaden); pre-aggregation references
+/// run before the GROUP BY and need no GROUP BY membership.
+//
+// Plumbing for an upcoming `check_group_by_compatibility` refactor — the
+// gate will iterate `tagged_outermost_expressions` and apply per-position
+// rules.  Until that caller lands the enum and iterator are exercised
+// only by unit tests; tolerate the dead-code lint here.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OuterPosition {
+    /// `WHERE`, `JOIN ON` — pre-aggregation filters.  No restriction on
+    /// expression shape for references to non-inlinable rels.
+    PreAgg,
+    /// `SELECT` items, `HAVING`, `ORDER BY` — positions evaluated after
+    /// the GROUP BY (whether the outer's own or one pulled up from an
+    /// inlined inner).  References to non-inlinable rels here must be
+    /// admissible as GROUP BY keys.
+    PostAgg,
+}
+
+/// Iterate `stmt`'s outermost expressions paired with their
+/// [`OuterPosition`].  Iteration order matches [`outermost_expression`]:
+/// SELECT items, JOIN ON, WHERE, HAVING, ORDER BY.  GROUP BY field
+/// expressions are intentionally skipped — they are the keys themselves
+/// and are handled by the GROUP-BY-merging logic at the call site, not
+/// by per-position checks.
+#[allow(dead_code)]
+pub(crate) fn tagged_outermost_expressions(
+    stmt: &SelectStatement,
+) -> impl Iterator<Item = (&Expr, OuterPosition)> {
+    let selects = stmt.fields.iter().filter_map(|fde| match fde {
+        FieldDefinitionExpr::Expr { expr, .. } => Some((expr, OuterPosition::PostAgg)),
+        FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => None,
+    });
+    let join_ons = stmt.join.iter().filter_map(|join| match &join.constraint {
+        JoinConstraint::On(expr) => Some((expr, OuterPosition::PreAgg)),
+        JoinConstraint::Using(_) | JoinConstraint::Empty => None,
+    });
+    let where_clause = stmt.where_clause.iter().map(|e| (e, OuterPosition::PreAgg));
+    let having = stmt.having.iter().map(|e| (e, OuterPosition::PostAgg));
+    let order_by = stmt.order.iter().flat_map(|oc| {
+        oc.order_by
+            .iter()
+            .filter_map(|OrderBy { field, .. }| match field {
+                FieldReference::Expr(expr) => Some((expr, OuterPosition::PostAgg)),
+                _ => None,
+            })
+    });
+    selects
+        .chain(join_ons)
+        .chain(where_clause)
+        .chain(having)
+        .chain(order_by)
+}
+
 /// Gather those as a flat `Vec<&mut Expr::Column(column)>` so we can inspect or replace columns.
 /// Collect mutable references to all `Expr::Column` nodes in a single expression tree,
 /// skipping nested `SelectStatement` subqueries.
@@ -4264,5 +4328,90 @@ mod simplify_constant_coalesce_tests {
             expr, before,
             "COALESCE with non-constant Array element must not reduce"
         );
+    }
+}
+
+#[cfg(test)]
+mod tagged_outermost_expressions_tests {
+    use super::*;
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
+
+    /// Comprehensive shape: SELECT items + JOIN ON + WHERE + HAVING +
+    /// GROUP BY + ORDER BY.  Verifies (a) every non-GROUP-BY position
+    /// emits with the correct tag and (b) GROUP BY field expressions are
+    /// skipped entirely.
+    #[test]
+    fn tags_every_position_correctly_and_skips_group_by() {
+        let stmt = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT t.a, t.b
+             FROM t
+             INNER JOIN u ON u.id = t.id
+             WHERE t.x > 0
+             GROUP BY t.a, t.b
+             HAVING SUM(t.x) > 10
+             ORDER BY t.a",
+        )
+        .expect("parses");
+        let tagged: Vec<OuterPosition> = tagged_outermost_expressions(&stmt)
+            .map(|(_, pos)| pos)
+            .collect();
+        // Expected order: SELECT items (t.a, t.b — PostAgg), JOIN ON
+        // (PreAgg), WHERE (PreAgg), HAVING (PostAgg), ORDER BY (PostAgg).
+        // GROUP BY field exprs skipped.
+        assert_eq!(
+            tagged,
+            vec![
+                OuterPosition::PostAgg, // SELECT t.a
+                OuterPosition::PostAgg, // SELECT t.b
+                OuterPosition::PreAgg,  // JOIN ON u.id = t.id
+                OuterPosition::PreAgg,  // WHERE t.x > 0
+                OuterPosition::PostAgg, // HAVING SUM(t.x) > 10
+                OuterPosition::PostAgg, // ORDER BY t.a
+            ],
+        );
+    }
+
+    /// Minimal shape — only a SELECT.  Confirms the iterator handles the
+    /// absence of every optional position cleanly.
+    #[test]
+    fn handles_absent_positions() {
+        let stmt = parse_select(Dialect::PostgreSQL, "SELECT t.a FROM t").expect("parses");
+        let tagged: Vec<OuterPosition> = tagged_outermost_expressions(&stmt)
+            .map(|(_, pos)| pos)
+            .collect();
+        assert_eq!(tagged, vec![OuterPosition::PostAgg]);
+    }
+
+    /// `JoinConstraint::Using` and `JoinConstraint::Empty` carry no
+    /// expression — must not yield anything for the JOIN position.
+    #[test]
+    fn skips_using_and_empty_join_constraints() {
+        let stmt = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT t.a FROM t INNER JOIN u USING (id)",
+        )
+        .expect("parses");
+        let tagged: Vec<OuterPosition> = tagged_outermost_expressions(&stmt)
+            .map(|(_, pos)| pos)
+            .collect();
+        assert_eq!(
+            tagged,
+            vec![OuterPosition::PostAgg],
+            "USING constraint carries no ON expression"
+        );
+    }
+
+    /// `SELECT *` (FieldDefinitionExpr::All) carries no Expr — skipped.
+    #[test]
+    fn skips_select_star() {
+        let stmt =
+            parse_select(Dialect::PostgreSQL, "SELECT * FROM t WHERE t.x > 0").expect("parses");
+        let tagged: Vec<OuterPosition> = tagged_outermost_expressions(&stmt)
+            .map(|(_, pos)| pos)
+            .collect();
+        // `*` skipped; only WHERE remains.
+        assert_eq!(tagged, vec![OuterPosition::PreAgg]);
     }
 }
