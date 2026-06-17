@@ -1484,6 +1484,22 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
     let mut downstream_group_by_additions: Vec<Expr> = Vec::new();
 
     if ctx.is_inner_agg && !ctx.is_outer_agg {
+        // Invariant: `is_aggregation_or_grouped` returns true for any
+        // outer with DISTINCT, aggregates, or GROUP BY — but explicitly
+        // not for HAVING alone.  An outer with HAVING but no aggregates,
+        // no GROUP BY, and no DISTINCT is semantically a WHERE filter
+        // and is normalized to one by `normalize_having_and_group_by`
+        // before this gate runs.  Reaching this branch with `is_outer_agg
+        // = false` AND a HAVING clause indicates the normalization
+        // prerequisite wasn't applied — surface as an internal error
+        // rather than silently miscategorizing HAVING as a PostAgg
+        // position in the iteration below.
+        if ctx.outer_stmt.having.is_some() {
+            return Err(internal_err!(
+                "check_group_by_compatibility: outer has HAVING with `is_outer_agg = false`; \
+                 `normalize_having_and_group_by` must run before this gate"
+            ));
+        }
         let mut other_rels = collect_local_from_items(ctx.outer_stmt)?;
         other_rels.remove(&ctx.inner_rel);
 
@@ -1498,17 +1514,88 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
         // aggregation shapes stay under the old rejection until an
         // explicit downstream proof admits them.
         for (e, pos) in tagged_outermost_expressions(ctx.outer_stmt) {
-            let is_refs_other_rels = refs_any_of_rels_anywhere(e, &other_rels)?;
-            if !is_refs_other_rels {
+            let refs_inlinable = refs_rel_anywhere(e, &ctx.inner_rel)?;
+            let refs_other = refs_any_of_rels_anywhere(e, &other_rels)?;
+            if !refs_inlinable && !refs_other {
                 continue;
             }
             match pos {
                 OuterPosition::PreAgg => {
+                    // Direct contamination of the outer PreAgg expression
+                    // (subquery, aggregate, or window function present
+                    // literally in `e`).  Aggregates and WFs in WHERE /
+                    // JOIN-ON are SQL-invalid in strict mode but may
+                    // reach us via non-strict parsing — defensive
+                    // rejection.  Subqueries are SQL-valid in WHERE,
+                    // but post-substitution engine support is uncertain
+                    // — conservative rejection.  The pre-substitution
+                    // shape is independent of which rels are referenced;
+                    // an unrelated subquery still survives inlining.
                     if contains_select(e) || contains_aggregate(e) || is_window_function_expr!(e) {
                         return Ok(None);
                     }
+                    // Resolve-and-check: when the conjunct references the
+                    // inlinable's alias, the resolved inner expression
+                    // (via `ext_to_int`) must be compatible with the
+                    // conjunct's post-substitution position.
+                    //
+                    // Heuristic: LHS-only WHERE conjuncts migrate to
+                    // HAVING in Phase C's apply step (`goes_to_having =
+                    // !refs_other`); mixed-ref WHERE conjuncts stay in
+                    // WHERE (they can't migrate because the non-inlinable
+                    // ref would then be in a post-aggregation position).
+                    // JOIN ON conjuncts always stay in JOIN ON; the
+                    // `goes_to_having` flag misclassifies them as "going
+                    // to HAVING" when LHS-only, but Pass 2 catches that
+                    // case with its stricter must-be-GB-key rule, so the
+                    // imprecision is harmless here.
+                    //
+                    // Per-resolved-expression rules:
+                    //   - Window function: invalid in WHERE, HAVING, and
+                    //     JOIN ON (legal only in SELECT and ORDER BY).
+                    //     Reject unconditionally.
+                    //   - Nested subquery: engine support for post-
+                    //     substitution subqueries in WHERE / HAVING is
+                    //     uncertain.  Reject conservatively.
+                    //   - Aggregate: invalid in WHERE, valid in HAVING.
+                    //     Reject only when the conjunct stays in WHERE
+                    //     (mixed-ref → `!goes_to_having`).
+                    if refs_inlinable {
+                        let goes_to_having = !refs_other;
+                        for col in columns_iter(e) {
+                            if !is_column_of!(col, ctx.inner_rel) {
+                                continue;
+                            }
+                            let Some(inner_expr) = ctx.ext_to_int.get(col) else {
+                                continue;
+                            };
+                            if is_window_function_expr!(inner_expr) || contains_select(inner_expr) {
+                                return Ok(None);
+                            }
+                            if !goes_to_having && contains_aggregate(inner_expr) {
+                                return Ok(None);
+                            }
+                        }
+                    }
                 }
                 OuterPosition::PostAgg => {
+                    // PostAgg covers SELECT items, HAVING, and ORDER BY
+                    // per `tagged_outermost_expressions`, but HAVING is
+                    // ruled out by the invariant asserted at this gate's
+                    // entry (HAVING-without-aggregates is normalized to
+                    // WHERE upstream).  So in practice `e` is a SELECT
+                    // item or an ORDER BY field — both projection /
+                    // sort positions, not filters.  This arm collects
+                    // bare-Column refs to non-inlinable rels (to be
+                    // promoted to outer GROUP BY keys by Phase C's
+                    // apply step) and rejects compound expressions that
+                    // the apply step can't transparently promote.
+                    // Filter migration (WHERE/HAVING/JOIN-ON partition)
+                    // is the apply step's responsibility, not this
+                    // gate's.
+                    if !refs_other {
+                        continue;
+                    }
                     if matches!(e, Expr::Column(Column { table: Some(t), .. })
                                    if other_rels.contains(t))
                     {
@@ -1533,7 +1620,7 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
         // multi-table predicate that the engine's join operators don't
         // reliably support.
         //
-        // `resolve_group_by_exprs` normalises three GB-key shapes to a
+        // `resolve_group_by_exprs` normalizes three GB-key shapes to a
         // single owned-`Expr` list:
         //   - direct qualified `Expr::Column` keys (passed through);
         //   - bare-name `Expr::Column` keys matching a SELECT-list
@@ -2237,9 +2324,6 @@ pub(crate) fn apply_inline(
             let refs_lhs = refs_rel_anywhere(&e, &lhs_rel)?;
             let refs_other = refs_any_of_rels_anywhere(&e, &base_other_rels)?;
             if refs_lhs && !refs_other {
-                if contains_select(&e) {
-                    invalid_query!("Cannot hoist: would push a subquery into HAVING");
-                }
                 move_to_having.push(e);
             } else {
                 kept_where = and_predicates_skip_true(kept_where, e);
