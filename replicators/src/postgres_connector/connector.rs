@@ -874,6 +874,24 @@ impl Drop for PostgresWalConnector {
     }
 }
 
+/// Whether a group-commit deadline flush should fire now.
+///
+/// Flushes only at a transaction boundary. Flushing pending (already-committed)
+/// rows while a later transaction is open would tag them with that
+/// transaction's BEGIN position: its BEGIN clobbers `cur_pos` to
+/// `(T_open.final_lsn, 0)`, so the flush records a non-monotonic offset that
+/// collides with `T_open`'s real commit position and silently drops the
+/// trailing row downstream. Deferring until the open transaction completes
+/// flushes at the correct committed position (`cur_pos == last_committed_pos`).
+/// See REA-6675.
+fn should_deadline_flush(
+    deadline_expired: bool,
+    pending_row_count: usize,
+    in_transaction: bool,
+) -> bool {
+    deadline_expired && pending_row_count > 0 && !in_transaction
+}
+
 #[async_trait]
 impl Connector for PostgresWalConnector {
     /// Process WAL events and batch them into actions.
@@ -900,18 +918,31 @@ impl Connector for PostgresWalConnector {
                 return Ok((vec![ReplicationAction::LogPosition], cur_pos.into()));
             }
 
-            // When a group commit window is active, use it as the read
-            // timeout so we flush promptly when no more transactions arrive.
-            let read_timeout = if let Some(deadline) = self.group_commit.deadline {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    // Group commit deadline expired — flush immediately
-                    let actions = self.flush_pending_actions_with_log_position();
-                    return Ok((actions, cur_pos.into()));
+            // When a group commit window is active, the deadline drives the
+            // read timeout so we flush promptly when no more transactions
+            // arrive.
+            let read_timeout = match self.group_commit.deadline {
+                Some(deadline) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if should_deadline_flush(
+                        remaining.is_zero(),
+                        self.group_commit.pending_row_count,
+                        self.in_transaction,
+                    ) {
+                        let actions = self.flush_pending_actions_with_log_position();
+                        return Ok((actions, cur_pos.into()));
+                    }
+                    // While a later transaction is open we defer the flush, so
+                    // an already-expired deadline must not drive a zero read
+                    // timeout (which would busy-loop). Wait for the open
+                    // transaction's events instead.
+                    if self.in_transaction {
+                        Duration::from_secs(30)
+                    } else {
+                        remaining
+                    }
                 }
-                remaining
-            } else {
-                Duration::from_secs(30)
+                None => Duration::from_secs(30),
             };
 
             // Send a status update to the upstream database if the interval
@@ -950,8 +981,13 @@ impl Connector for PostgresWalConnector {
                 None => match self.next_event_with_timeout(read_timeout).await {
                     Ok(Some(ev)) => Ok(ev),
                     Ok(None) => {
-                        // Timeout expired
-                        if self.group_commit.pending_row_count > 0 {
+                        // Timeout expired (treated as a due deadline). Flush only
+                        // at a transaction boundary; see `should_deadline_flush`.
+                        if should_deadline_flush(
+                            true,
+                            self.group_commit.pending_row_count,
+                            self.in_transaction,
+                        ) {
                             let actions = self.flush_pending_actions_with_log_position();
                             return Ok((actions, cur_pos.into()));
                         }
