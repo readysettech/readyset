@@ -1535,6 +1535,7 @@ async fn run_queries_body(
                 // Antithesis findings with low-cardinality payloads.
                 match last_mismatch {
                     Some(mismatch_msg) => {
+                        error!(query_idx, "{mismatch_msg}");
                         query_mismatched_probes += 1;
                         assert_unreachable!(
                             "Result mismatch between upstream and Readyset after retries",
@@ -1553,7 +1554,6 @@ async fn run_queries_body(
                                 })
                             );
                         }
-                        error!(query_idx, "{mismatch_msg}");
                     }
                     None => {
                         // Readyset never produced a comparable result, so this
