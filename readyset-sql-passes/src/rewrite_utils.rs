@@ -1287,12 +1287,6 @@ pub(crate) fn outermost_expression_mut(
 /// to non-inlinable rels need to be GROUP BY keys (bare Column refs
 /// today; future relaxations could broaden); pre-aggregation references
 /// run before the GROUP BY and need no GROUP BY membership.
-//
-// Plumbing for an upcoming `check_group_by_compatibility` refactor — the
-// gate will iterate `tagged_outermost_expressions` and apply per-position
-// rules.  Until that caller lands the enum and iterator are exercised
-// only by unit tests; tolerate the dead-code lint here.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OuterPosition {
     /// `WHERE`, `JOIN ON` — pre-aggregation filters.  No restriction on
@@ -1311,7 +1305,6 @@ pub(crate) enum OuterPosition {
 /// expressions are intentionally skipped — they are the keys themselves
 /// and are handled by the GROUP-BY-merging logic at the call site, not
 /// by per-position checks.
-#[allow(dead_code)]
 pub(crate) fn tagged_outermost_expressions(
     stmt: &SelectStatement,
 ) -> impl Iterator<Item = (&Expr, OuterPosition)> {

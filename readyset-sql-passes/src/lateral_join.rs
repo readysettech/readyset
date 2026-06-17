@@ -2439,16 +2439,20 @@ FROM
         );
     }
 
-    /// Negative: correlation-pinned grouped body, but the outer has a
-    /// downstream INNER JOIN whose ON predicate `d.k = a.k` is a non-bare-
-    /// column expression referencing relations OTHER than the inner alias.
-    /// `check_group_by_compatibility` rejects this — it can only
-    /// add bare column refs to the outer GROUP BY when hoisting an
-    /// aggregated body, and a binary equality predicate on `d.k = a.k`
-    /// can't be added directly.  Falls through to Resolved (which here
-    /// also rejects via correlation-in-LEFT-JOIN-ON).
+    /// Positive: correlation-pinned grouped body with a downstream INNER
+    /// JOIN whose ON pins the joined table's unique key.  Pre-Phase B
+    /// `check_group_by_compatibility` rejected because its position-
+    /// blind rule treated the outer JOIN ON's `d.k = a.k` (a non-bare-
+    /// column expression referencing `d`) as inadmissible.  Phase B's
+    /// per-position rules recognise the JOIN ON as a pre-aggregation
+    /// position with no GROUP-BY-key requirement, so the relaxation
+    /// admits.  Cardinality is preserved by composition with
+    /// `check_join_partners_cardinality_preserving`'s LATERAL Class B
+    /// admit (V1): `d.k = a.k` pins `d`'s unique key per the catalog,
+    /// so `d.x` added to the outer GROUP BY doesn't split groups (it's
+    /// functionally dependent on `a.k`).
     #[test]
-    fn grouped_lateral_with_multi_row_downstream_bails() {
+    fn grouped_lateral_with_pinned_downstream_flattens() {
         let original_text = r#"
         SELECT a.k, l1.cnt, d.x
         FROM qa.a AS a,
@@ -2461,9 +2465,162 @@ FROM
              ) AS l1
         JOIN qa.d AS d ON d.k = a.k
         "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt", "d"."x"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            JOIN "qa"."d" AS "d" ON ("d"."k" = "a"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "b"."k", "a"."k", "d"."x""#;
+        test_it(
+            "grouped_lateral_with_pinned_downstream_flattens",
+            original_text,
+            expected_text,
+        );
+    }
+
+    // ─── Phase B (per-position check_group_by_compatibility) tests ───
+
+    /// Phase B PreAgg admit: outer WHERE referencing a non-inlinable
+    /// rel in a simple BinaryOp (`a.status = 1`) is admitted as a pre-
+    /// aggregation filter.  Pre-Phase-B rejected via the position-blind
+    /// non-bare-Column rule; Phase B's PreAgg-skip + simple-expression
+    /// gate admits it.
+    #[test]
+    fn outer_where_with_simple_binary_op_admits() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        WHERE a.status = 1
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            WHERE (("a"."status" = 1) AND ("b"."k" = "a"."k"))
+            GROUP BY "b"."k", "a"."k""#;
+        test_it(
+            "outer_where_with_simple_binary_op_admits",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Phase B PreAgg reject: outer WHERE referencing a non-inlinable
+    /// rel via a subquery is rejected by the simple-expression
+    /// tightening.  `WHERE a.status IN (SELECT ...)` would produce a
+    /// post-substitution WHERE-with-subquery the engine doesn't
+    /// reliably handle; the gate rejects here rather than letting
+    /// `validate_pipeline_invariants` catch it later.
+    #[test]
+    fn outer_where_with_subquery_on_other_rel_bails() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        WHERE a.status IN (SELECT status FROM qa.d)
+        "#;
         let expected_text = r#""#;
         test_it(
-            "grouped_lateral_with_multi_row_downstream_bails",
+            "outer_where_with_subquery_on_other_rel_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Phase B PostAgg regression: outer SELECT referencing a non-
+    /// inlinable rel via a compound expression (`a.k + 1`) stays
+    /// rejected — the rule needs each non-inlinable rel ref expressible
+    /// as a GROUP BY key, and a compound expression isn't (yet)
+    /// admissible.  Preserved behaviour from pre-Phase-B.
+    #[test]
+    fn outer_select_with_arithmetic_on_other_rel_bails() {
+        let original_text = r#"
+        SELECT a.k + 1, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "outer_select_with_arithmetic_on_other_rel_bails",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Phase B Pass 2 admit: outer JOIN ON references the inlinable's
+    /// alias via a bare-Column projection that resolves through
+    /// `ext_to_int` to one of the inner's GROUP BY keys.  The post-
+    /// substitution JOIN ON becomes a bare-Column equality on the
+    /// inner's underlying base table — engine-supported and semantics-
+    /// preserving.
+    #[test]
+    fn join_on_inlinable_alias_resolves_to_gb_key_admits() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        JOIN qa.d AS d ON d.k = l1.k
+        "#;
+        let expected_text = r#"SELECT "a"."k", count("c"."x") AS "cnt"
+            FROM "qa"."a" AS "a", "qa"."b" AS "b"
+            LEFT JOIN "qa"."c" AS "c" ON ("c"."k" = "a"."k")
+            JOIN "qa"."d" AS "d" ON ("d"."k" = "b"."k")
+            WHERE ("b"."k" = "a"."k")
+            GROUP BY "b"."k", "a"."k""#;
+        test_it(
+            "join_on_inlinable_alias_resolves_to_gb_key_admits",
+            original_text,
+            expected_text,
+        );
+    }
+
+    /// Phase B Pass 2 reject: outer JOIN ON references the inlinable's
+    /// alias via the aggregate-result projection (`l1.cnt`).
+    /// `ext_to_int(l1.cnt)` resolves to `COUNT(c.x)` — not a bare
+    /// Column, not in the inner's GROUP BY field list — so the gate
+    /// rejects rather than producing a post-substitution
+    /// `JOIN ... ON COUNT(...) = ...` shape the engine doesn't support.
+    #[test]
+    fn join_on_inlinable_alias_resolves_to_aggregate_bails() {
+        let original_text = r#"
+        SELECT a.k, l1.cnt
+        FROM qa.a AS a,
+             LATERAL (
+                 SELECT b.k, COUNT(c.x) AS cnt
+                 FROM qa.b AS b
+                 LEFT JOIN qa.c AS c ON c.k = a.k
+                 WHERE b.k = a.k
+                 GROUP BY b.k
+             ) AS l1
+        JOIN qa.d AS d ON d.x = l1.cnt
+        "#;
+        let expected_text = r#""#;
+        test_it(
+            "join_on_inlinable_alias_resolves_to_aggregate_bails",
             original_text,
             expected_text,
         );

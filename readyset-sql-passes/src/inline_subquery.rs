@@ -32,7 +32,7 @@ use crate::derived_tables_rewrite::{
 };
 use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::rewrite_utils::{
-    OnAtom, and_predicates_skip_true, are_group_by_keys_pinned_by_correlation,
+    OnAtom, OuterPosition, and_predicates_skip_true, are_group_by_keys_pinned_by_correlation,
     as_sub_query_with_alias, build_ext_to_int_fields_map, classify_on_atom,
     collect_local_from_items, columns_iter, contains_select, deep_columns_expr_visitor,
     deep_columns_visitor, deep_columns_visitor_mut, expect_field_as_expr, expect_field_as_expr_mut,
@@ -41,8 +41,8 @@ use crate::rewrite_utils::{
     get_from_item_reference_name, get_select_item_alias, is_aggregated_expr,
     is_aggregation_or_grouped, is_always_true_filter, is_column_eq_column,
     is_simple_parametrizable_filter, literal_as_number, outermost_expression,
-    partition_correlated_predicates, resolve_field_reference, split_expr, split_expr_mut,
-    substitute_columns_in_expr,
+    partition_correlated_predicates, resolve_field_reference, resolve_group_by_exprs, split_expr,
+    split_expr_mut, substitute_columns_in_expr, tagged_outermost_expressions,
 };
 use crate::unnest_subqueries::{
     AggNoGbyCardinality, agg_only_no_gby_cardinality, has_limit_one_deep,
@@ -1443,14 +1443,27 @@ fn is_agg_derived_outputs(
 /// GROUP BY compatibility check — grouped inner into non-grouped outer.
 ///
 /// When the inner is aggregated/grouped and the outer is not, inlining
-/// lifts the inner's GROUP BY into the outer.  Two passes:
+/// lifts the inner's GROUP BY into the outer.  Three passes:
 ///
-/// - Pass 1 (all outermost positions): collect `downstream_group_by_
-///   additions` — bare column references to relations OTHER than
-///   `inner_rel`, which will need to become GROUP BY keys in the
-///   post-inline outer.  Rejects expressions that reference other
-///   relations in any non-bare-column shape.
-/// - Pass 2 (SELECT fields only): enforce that any SELECT expression
+/// - Pass 1 (post-aggregation positions only — SELECT items, HAVING,
+///   ORDER BY): collect `downstream_group_by_additions` — bare column
+///   references to relations OTHER than `inner_rel`, which will need to
+///   become GROUP BY keys in the post-inline outer.  Rejects
+///   expressions that reference other relations in any non-bare-column
+///   shape — those can't be expressed as GROUP BY keys.  Pre-aggregation
+///   positions (WHERE, JOIN ON) are skipped: they filter rows before
+///   the lifted GROUP BY runs, so any expression shape is admissible.
+///
+/// - Pass 2 (JOIN ON inlinable-alias refs): for every outer JOIN ON
+///   reference to `inner_rel` (e.g., `agg.X`), resolve `X` through the
+///   inner's SELECT projection and admit only when the resolved
+///   expression is a bare `Column` whose name appears in the inner's
+///   GROUP BY field list.  Aggregate-function results and non-GB
+///   non-aggregate columns are rejected: post-inline the JOIN ON would
+///   reference an expression evaluated against a different aggregation
+///   scope than the original, changing semantics.
+///
+/// - Pass 3 (SELECT fields only): enforce that any SELECT expression
 ///   touching `inner_rel` has all of its `inner_rel` columns mapped to
 ///   aggregate-derived inner expressions.  Narrowed to SELECT only
 ///   (since the 2026-04-21 bug fix); WHERE/HAVING/ORDER-BY/ON
@@ -1459,30 +1472,105 @@ fn is_agg_derived_outputs(
 ///
 /// Returns `None` on rejection, `Some(additions)` on accept — the
 /// additions are threaded out as the return value of the overall
-/// `can_inline_subquery` call.
+/// `can_inline_subquery` call.  Cardinality of the rewritten outer is
+/// preserved by composition with `check_join_partners_cardinality_
+/// preserving`: that gate ensures the JOIN is pinned to the non-
+/// inlinable rel's unique key, making the `downstream_group_by_
+/// additions` functionally dependent on the inner's pulled-up GROUP BY
+/// keys and therefore non-group-splitting.
 fn check_group_by_compatibility<U: UniqueColumnsSchema>(
     ctx: &InliningContext<U>,
 ) -> ReadySetResult<Option<Vec<Expr>>> {
     let mut downstream_group_by_additions: Vec<Expr> = Vec::new();
 
     if ctx.is_inner_agg && !ctx.is_outer_agg {
-        // Pass 1: scan all outermost positions.
         let mut other_rels = collect_local_from_items(ctx.outer_stmt)?;
         other_rels.remove(&ctx.inner_rel);
 
-        for e in outermost_expression(ctx.outer_stmt) {
+        // Pass 1: per-position scan.  PostAgg positions require non-
+        // inlinable rel refs to be bare Columns (so they can become
+        // GROUP BY keys in the post-inline outer); PreAgg positions are
+        // pre-aggregation filters whose expression shape is irrelevant
+        // for GROUP-BY validity — but we additionally require they be
+        // "simple" (no nested subqueries, no aggregate function calls,
+        // no window functions) so the post-substitution shape stays
+        // within what the engine reliably handles.  More complex pre-
+        // aggregation shapes stay under the old rejection until an
+        // explicit downstream proof admits them.
+        for (e, pos) in tagged_outermost_expressions(ctx.outer_stmt) {
             let is_refs_other_rels = refs_any_of_rels_anywhere(e, &other_rels)?;
-            if is_refs_other_rels {
-                if matches!(e, Expr::Column(Column { table: Some(t), .. }) if other_rels.contains(t))
-                {
-                    downstream_group_by_additions.push(e.clone());
-                } else {
+            if !is_refs_other_rels {
+                continue;
+            }
+            match pos {
+                OuterPosition::PreAgg => {
+                    if contains_select(e) || contains_aggregate(e) || is_window_function_expr!(e) {
+                        return Ok(None);
+                    }
+                }
+                OuterPosition::PostAgg => {
+                    if matches!(e, Expr::Column(Column { table: Some(t), .. })
+                                   if other_rels.contains(t))
+                    {
+                        downstream_group_by_additions.push(e.clone());
+                    } else {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+
+        // Pass 2: JOIN ON references to the inlinable's alias must
+        // resolve, through the inner's SELECT projection, to one of the
+        // inner's bare-Column GROUP BY keys (matched by full Column,
+        // not just name).  Aggregate-function results in the JOIN ON
+        // would re-evaluate under a different aggregation scope post-
+        // inline; non-GB non-aggregate refs (non-strict SQL inner)
+        // would silently change which row "wins" the join.
+        // Expression GROUP BY keys (e.g. `GROUP BY UPPER(x)` or
+        // multi-relation `sp.pn + spj.qty`) are conservatively rejected
+        // — the post-substitution JOIN ON would be an expression-or-
+        // multi-table predicate that the engine's join operators don't
+        // reliably support.
+        //
+        // `resolve_group_by_exprs` normalises three GB-key shapes to a
+        // single owned-`Expr` list:
+        //   - direct qualified `Expr::Column` keys (passed through);
+        //   - bare-name `Expr::Column` keys matching a SELECT-list
+        //     explicit alias (resolved to the projected expression);
+        //   - `FieldReference::Numeric(i)` keys (resolved to the i-th
+        //     SELECT item's expression).
+        // We then keep only the bare-Column shapes for matching against
+        // the JOIN-ON resolved column.
+        let inner_gb_resolved = resolve_group_by_exprs(ctx.inner_stmt)?;
+        let inner_gb_cols: HashSet<&Column> = inner_gb_resolved
+            .iter()
+            .filter_map(|e| match e {
+                Expr::Column(c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        for jc in &ctx.outer_stmt.join {
+            let JoinConstraint::On(on_expr) = &jc.constraint else {
+                continue;
+            };
+            for col in columns_iter(on_expr) {
+                if !is_column_of!(col, ctx.inner_rel) {
+                    continue;
+                }
+                let Some(inner_expr) = ctx.ext_to_int.get(col) else {
+                    return Ok(None);
+                };
+                let Expr::Column(resolved) = inner_expr else {
+                    return Ok(None);
+                };
+                if !inner_gb_cols.contains(resolved) {
                     return Ok(None);
                 }
             }
         }
 
-        // Pass 2: SELECT fields only — enforce is_agg_derived_outputs.
+        // Pass 3: SELECT fields only — enforce is_agg_derived_outputs.
         for fe in &ctx.outer_stmt.fields {
             let (fe_expr, _) = expect_field_as_expr(fe);
             if let Expr::Column(c) = fe_expr
