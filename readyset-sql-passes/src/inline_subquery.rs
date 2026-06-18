@@ -191,6 +191,108 @@ pub(crate) fn visible_base_rels_except(
     Ok(base)
 }
 
+/// Reference-scope classification of a WHERE conjunct relative to an
+/// inlinable relation `inl_rel` and the other visible base relations
+/// of the outer statement.  Used during derived-table inlining to
+/// partition or filter WHERE conjuncts by which scopes they touch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WhereConjunctScope {
+    /// References the inlinable only.  Safe to migrate to HAVING
+    /// (post-aggregation slot of the post-inline outer) when the
+    /// inlinable is aggregated.
+    InlinableOnly,
+    /// References both the inlinable and at least one other base rel.
+    /// Must stay in WHERE — migrating would place inlinable-side
+    /// aggregate refs in a post-aggregation position relative to non-
+    /// inlinable rels, which is engine-invalid.
+    Mixed,
+    /// References non-inlinable rels only.  Stays in WHERE as a pre-
+    /// aggregation filter.
+    OtherOnly,
+    /// References neither (e.g. literal-only conjuncts).  Stays in
+    /// WHERE.
+    Neither,
+}
+
+/// Split `where_expr` into AND-conjuncts and classify each by its
+/// reference scope relative to `inl_rel` and the other visible base
+/// relations of `stmt`.  See [`WhereConjunctScope`] for the meanings.
+///
+/// `stmt` is consulted via [`visible_base_rels_except`] for the set
+/// of non-inlinable rels; callers may have already taken ownership of
+/// `stmt.where_clause` (this function does not read it).
+pub(crate) fn classify_where_conjuncts(
+    stmt: &SelectStatement,
+    where_expr: &Expr,
+    inl_rel: &Relation,
+) -> ReadySetResult<Vec<(Expr, WhereConjunctScope)>> {
+    let base_other_rels = visible_base_rels_except(stmt, inl_rel)?;
+    let mut conjuncts = Vec::new();
+    let _ = split_expr(where_expr, &|_| true, &mut conjuncts);
+
+    let mut classified = Vec::with_capacity(conjuncts.len());
+    for c in conjuncts {
+        let refs_inl = refs_rel_anywhere(&c, inl_rel)?;
+        let refs_other = refs_any_of_rels_anywhere(&c, &base_other_rels)?;
+        let scope = match (refs_inl, refs_other) {
+            (true, false) => WhereConjunctScope::InlinableOnly,
+            (true, true) => WhereConjunctScope::Mixed,
+            (false, true) => WhereConjunctScope::OtherOnly,
+            (false, false) => WhereConjunctScope::Neither,
+        };
+        classified.push((c, scope));
+    }
+    Ok(classified)
+}
+
+/// Partition `stmt.where_clause` by inlinable-scope: route conjuncts
+/// that reference only `inl_rel` (and no other visible base rel) to
+/// `stmt.having`; keep mixed-ref and non-inlinable-only conjuncts in
+/// `stmt.where_clause`.  No-op when `stmt.where_clause` is `None`.
+///
+/// Used by the derived-table inlining apply step (both DTR's RHS path
+/// from `inline_from_item` and the LHS path in `apply_inline`) when
+/// the inlinable is aggregated.  The migrated conjuncts become HAVING
+/// filters in the post-inline outer, where the inner's GROUP BY has
+/// been lifted; the kept conjuncts remain as pre-aggregation filters.
+///
+/// **Must run BEFORE column substitution.**  Post-substitution, refs
+/// to the inlinable's alias are gone and the per-conjunct
+/// classification can no longer distinguish inlinable-only from mixed
+/// — every conjunct would be classified `Neither` and stay in WHERE,
+/// leaving aggregate predicates marooned (engine-invalid).
+///
+/// The partition over-migrates conjuncts that resolve through the
+/// inlinable to bare GROUP BY keys (e.g. `sub.fk = 5` where
+/// `sub.fk → t.fk` is in the inner GROUP BY): semantically those
+/// could stay in WHERE.  The downstream
+/// `move_group_key_filters_from_having_to_where` pass in
+/// `hoist_parametrizable_filters` reverses the over-migration for
+/// non-aggregated GB-key-only HAVING conjuncts, so the final emitted
+/// shape is WHERE-placed.  The intermediate HAVING placement is
+/// internal — relying on that downstream relocation keeps the
+/// partition simple (one rule: inlinable-only → HAVING) without
+/// losing the efficient WHERE placement at the boundary.
+pub(crate) fn partition_inlinable_only_where_to_having(
+    stmt: &mut SelectStatement,
+    inl_rel: &Relation,
+) -> ReadySetResult<()> {
+    let Some(where_expr) = stmt.where_clause.take() else {
+        return Ok(());
+    };
+    let classified = classify_where_conjuncts(stmt, &where_expr, inl_rel)?;
+    let mut kept_where: Option<Expr> = None;
+    for (e, scope) in classified {
+        if scope == WhereConjunctScope::InlinableOnly {
+            stmt.having = and_predicates_skip_true(stmt.having.take(), e);
+        } else {
+            kept_where = and_predicates_skip_true(kept_where, e);
+        }
+    }
+    stmt.where_clause = kept_where;
+    Ok(())
+}
+
 /// Return true if `expr` references `rel` anywhere, descending into nested subqueries
 /// but skipping subqueries that shadow `rel` with a local FROM-item of the same name.
 pub(crate) fn refs_rel_anywhere(expr: &Expr, rel: &Relation) -> ReadySetResult<bool> {
@@ -910,10 +1012,17 @@ fn from_items_cardinality_preserving<U: UniqueColumnsSchema>(
         // Class B fallback: regular-table RHS pinned by a unique-key
         // equi-pair in the JOIN's ON.  The pin is the join predicate
         // AND the cardinality proof; no `is_on_nonrejecting` gate
-        // applies — the pin is by design row-selecting.  Admits at
-        // both INNER (proves ExactlyOne) and LEFT (proves AtMostOne)
-        // positions; other operators and Empty/Using constraints don't
-        // reach this admit shape.
+        // applies — the pin is by design row-selecting.  The pin
+        // proves AtMostOne (≤1 row per outer-key value), not
+        // ExactlyOne; the AtMostOne is sufficient for cardinality-
+        // preservation at INNER positions because the pre-inline outer
+        // JOIN already drops no-match rows symmetrically with the
+        // post-inline inner-body JOIN (zero matches at one position
+        // means zero output rows at the other, no semantic divergence).
+        // For LEFT positions, both pre- and post-inline NULL-extend
+        // no-match rows, also symmetric.  Admits at INNER and LEFT;
+        // other operators and Empty/Using constraints don't reach this
+        // admit shape.
         if !jc.operator.is_inner_join()
             && !matches!(
                 jc.operator,
@@ -1259,12 +1368,34 @@ fn check_nested_aggregation<U: UniqueColumnsSchema>(
 }
 
 /// Grouped-engine validation.  Engine constraint: after inlining,
-/// if the outer acquires a GROUP BY from the inner, the outer SELECT
-/// must EITHER reference at least one aggregate-derived inner column
-/// OR project every GROUP BY key as a standalone column reference
-/// (the downstream `fix_groupby_without_aggregates` pass converts the
-/// latter to DISTINCT, matching each GROUP BY key against a complete
-/// SELECT field verbatim).
+/// if the outer acquires a GROUP BY from the inner, the post-inline
+/// outer must EITHER carry at least one aggregate reference (via the
+/// inlinable's `ext_to_int` mapping) in a position that defeats
+/// `fix_groupby_without_aggregates`'s `!is_aggregated_select`
+/// precondition — SELECT, ORDER BY, or a HAVING-bound migrated WHERE
+/// conjunct — OR project every GROUP BY key as a standalone column
+/// reference (the downstream `fix_groupby_without_aggregates` pass
+/// converts the latter to DISTINCT, matching each GROUP BY key against
+/// a complete SELECT field verbatim).
+///
+/// The aggregate-anywhere admit is **self-contained**: it inspects
+/// only the pre-inline positions whose contribution to the post-inline
+/// outer is known by construction.  JOIN-ON and the outer HAVING are
+/// not scanned because aggregate refs there cannot reach this gate:
+///
+/// - JOIN-ON inner-aggregate refs are rejected upstream by Phase B
+///   Pass 2's strict bare-Column GB-key check on resolved inlinable
+///   refs.
+/// - The outer's HAVING is `None` here by Phase B's entry invariant
+///   (`check_group_by_compatibility` hard-errors when
+///   `is_outer_agg=false && outer.having.is_some()`).
+///
+/// Mixed-ref WHERE conjuncts referencing inner aggregates (e.g.
+/// `sub.cnt > outer.threshold`) are gated by checking LHS-only-ness
+/// per conjunct here — those that mix refs to non-inlinable rels are
+/// also rejected by Phase B Pass 1's `!goes_to_having &&
+/// contains_aggregate` rule, but this gate doesn't rely on that
+/// upstream composition.
 fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
     ctx: &InliningContext<U>,
     downstream_group_by_additions: &[Expr],
@@ -1273,16 +1404,59 @@ fn check_grouped_engine_validation<U: UniqueColumnsSchema>(
         return Ok(true);
     };
 
-    let has_select_aggregate = ctx.outer_stmt.fields.iter().any(|f| {
-        let (expr, _) = expect_field_as_expr(f);
-        columns_iter(expr).any(|c| {
+    let refs_inner_aggregate = |e: &Expr| {
+        columns_iter(e).any(|c| {
             ctx.ext_to_int
                 .get(c)
-                .is_some_and(|e| is_aggregated_expr(e).unwrap_or(false))
+                .is_some_and(|inner_e| is_aggregated_expr(inner_e).unwrap_or(false))
         })
-    });
+    };
 
-    let select_projection_ok = if has_select_aggregate {
+    // Self-contained predicate: detect whether the post-inline outer
+    // will carry an aggregate in one of the positions
+    // `is_aggregated_select` checks (SELECT, HAVING, ORDER BY — see
+    // `rewrite_utils.rs:1540-1561`).  When true,
+    // `fix_groupby_without_aggregates`'s `!is_aggregated_select`
+    // precondition fails and no GROUP-BY-to-DISTINCT conversion is
+    // attempted, so the post-inline grouped outer is engine-valid.
+    //
+    // Three load-bearing pre-inline positions contribute:
+    //
+    // - SELECT inner-aggregate ref → stays in SELECT after substitution.
+    // - ORDER BY inner-aggregate ref → stays in ORDER BY after
+    //   substitution (and `is_aggregated_select` scans ORDER BY).
+    // - LHS-only WHERE conjunct with inner-aggregate ref → Phase C's
+    //   per-conjunct partition migrates it to HAVING.
+    //
+    // JOIN-ON and the outer HAVING are intentionally NOT scanned:
+    // - JOIN-ON aggregate refs are rejected upstream by Phase B Pass 2
+    //   (the bare-Column GB-key check on resolved inlinable refs).
+    // - Outer HAVING is `None` here by Phase B's entry invariant
+    //   (`check_group_by_compatibility` hard-errors otherwise).
+    let post_inline_outer_aggregates = {
+        let select_carries = ctx.outer_stmt.fields.iter().any(|f| {
+            let (expr, _) = expect_field_as_expr(f);
+            refs_inner_aggregate(expr)
+        });
+        let order_by_carries = ctx.outer_stmt.order.as_ref().is_some_and(|oc| {
+            oc.order_by.iter().any(|ob| match &ob.field {
+                FieldReference::Expr(e) => refs_inner_aggregate(e),
+                _ => false,
+            })
+        });
+        let where_inlinable_only_carries = if let Some(we) = &ctx.outer_stmt.where_clause {
+            classify_where_conjuncts(ctx.outer_stmt, we, &ctx.inner_rel)?
+                .iter()
+                .any(|(c, scope)| {
+                    *scope == WhereConjunctScope::InlinableOnly && refs_inner_aggregate(c)
+                })
+        } else {
+            false
+        };
+        select_carries || order_by_carries || where_inlinable_only_carries
+    };
+
+    let select_projection_ok = if post_inline_outer_aggregates {
         true
     } else {
         let standalone_select_inner: Vec<&Expr> = ctx
@@ -1590,6 +1764,23 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
                     // to HAVING" when LHS-only, but Pass 2 catches that
                     // case with its stricter must-be-GB-key rule, so the
                     // imprecision is harmless here.
+                    //
+                    // **Load-bearing implicit dependency**: the post-
+                    // substitution shape of a JOIN-ON conjunct is NOT
+                    // re-validated after DTR (the pipeline runs
+                    // `validate_query_semantics` BEFORE inlining, and no
+                    // pass re-checks `validate_no_aggregates_in_join_on`
+                    // post-substitution).  An aggregate that survives
+                    // here would only be caught at engine execution.
+                    // Pass 2's strict `inner_gb_cols.contains(resolved)`
+                    // check is therefore the sole pre-execution guard
+                    // for JOIN-ON aggregates in admitted shapes.  Any
+                    // future relaxation of Pass 2 (e.g. for expression
+                    // GROUP BY keys) MUST first split this PreAgg arm
+                    // by position (WHERE vs JOIN-ON) and compute
+                    // `goes_to_having` only for WHERE — otherwise the
+                    // LHS-only-JOIN-ON aggregate path would silently
+                    // start admitting through Pass 1.
                     //
                     // Per-resolved-expression rules:
                     //   - Window function: invalid in WHERE, HAVING, and
@@ -2372,33 +2563,9 @@ pub(crate) fn apply_inline(
 
     // In case the hoistable statement is aggregated, move only the WHERE conjuncts that
     // reference the hoistable relation (lhs) and *no other base relations* into HAVING.
-    // We classify per conjunct with scope-aware reference checks.
-    if is_lhs_stmt_aggregation_or_grouped && let Some(where_expr) = base_stmt.where_clause.take() {
+    if is_lhs_stmt_aggregation_or_grouped {
         let lhs_rel: Relation = prepared.alias.clone().into();
-        let base_other_rels = visible_base_rels_except(base_stmt, &lhs_rel)?;
-
-        // Flatten WHERE into conjuncts
-        let mut conjuncts = Vec::new();
-        let _ = split_expr(&where_expr, &|_| true, &mut conjuncts);
-
-        // Rebuild WHERE from the conjuncts we *keep*; push lhs-only into HAVING
-        let mut kept_where = None;
-        let mut move_to_having = Vec::new();
-
-        for e in conjuncts {
-            let refs_lhs = refs_rel_anywhere(&e, &lhs_rel)?;
-            let refs_other = refs_any_of_rels_anywhere(&e, &base_other_rels)?;
-            if refs_lhs && !refs_other {
-                move_to_having.push(e);
-            } else {
-                kept_where = and_predicates_skip_true(kept_where, e);
-            }
-        }
-
-        base_stmt.where_clause = kept_where;
-        for e in move_to_having {
-            base_stmt.having = and_predicates_skip_true(base_stmt.having.take(), e);
-        }
+        partition_inlinable_only_where_to_having(base_stmt, &lhs_rel)?;
     }
 
     replace_columns_with_inlinable_expr(

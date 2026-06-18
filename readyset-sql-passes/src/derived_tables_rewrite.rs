@@ -2,8 +2,7 @@ use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::infer_nullability::{derive_from_stmt, is_expr_null_preserving};
 use crate::inline_subquery::{
     can_inline_subquery, carry_inner_limit_and_order, compute_downstream_for_position,
-    inline_from_item_position_checks, refs_any_of_rels_anywhere, refs_rel_anywhere,
-    visible_base_rels_except,
+    inline_from_item_position_checks, partition_inlinable_only_where_to_having,
 };
 use crate::rewrite_joins::{
     get_join_rhs_relations, move_applicable_where_conditions_to_joins,
@@ -398,8 +397,7 @@ fn inline_rhs_in_place(
     downstream_group_by_additions: Vec<Expr>,
 ) -> ReadySetResult<()> {
     // Get the inlinable FROM item's statement
-    let (inl_stmt, inl_alias) = expect_sub_query_with_alias_mut(&mut inl_from_item);
-    let inl_alias = inl_alias.clone();
+    let (inl_stmt, _inl_alias) = expect_sub_query_with_alias_mut(&mut inl_from_item);
     let mut inl_stmt = mem::take(inl_stmt);
 
     // Normalize HAVING-without-aggregates-or-GROUP-BY to WHERE. When the inner
@@ -491,15 +489,14 @@ fn inline_rhs_in_place(
     // Aggregated subquery: lift GROUP BY, HAVING, DISTINCT, and ORDER BY
     // from the inlined subquery into the base.
     //
-    // The base's existing WHERE is partitioned per-conjunct: conjuncts that
-    // reference only the inlinable's alias (lhs) migrate to HAVING because
-    // they now apply post-aggregation (the inner's GROUP BY is the outer's).
-    // Conjuncts that reference any other base relation stay in WHERE — they
-    // remain pre-aggregation filters on rows feeding the joined cross-
-    // product, and the GROUP BY lift doesn't change their semantics.
-    //
-    // The inner's own WHERE is then conjoined into the kept base WHERE
-    // (not used to replace it), so neither side's filters are lost.
+    // The base WHERE's per-conjunct partition (LHS-only → HAVING, rest →
+    // WHERE) was applied pre-substitution by `inline_from_item` (see the
+    // call to `partition_base_where_for_aggregated_rhs`).  At this point
+    // `base_stmt.where_clause` holds the kept conjuncts (post-substitution)
+    // and `base_stmt.having` holds the LHS-only migrations.  Here we
+    // conjoin the inner's WHERE / HAVING into their respective clauses
+    // (rather than overwriting) so the pre-substitution partition's
+    // results aren't clobbered.
     //
     // `downstream_group_by_additions` carries bare-Column refs to non-
     // inlinable rels that appeared in post-aggregation positions of the
@@ -510,32 +507,14 @@ fn inline_rhs_in_place(
     // §5.4 for the composition argument.
     if is_inl_aggregated {
         base_stmt.distinct = inl_stmt.distinct;
-        base_stmt.having = mem::take(&mut inl_stmt.having);
-
-        let inl_rel: Relation = inl_alias.into();
-        let base_other_rels = visible_base_rels_except(base_stmt, &inl_rel)?;
-        let mut kept_where: Option<Expr> = None;
-        let mut move_to_having: Vec<Expr> = Vec::new();
-        if let Some(base_where_expr) = base_stmt.where_clause.take() {
-            let mut conjuncts = Vec::new();
-            let _ = split_expr(&base_where_expr, &|_| true, &mut conjuncts);
-            for e in conjuncts {
-                let refs_inl = refs_rel_anywhere(&e, &inl_rel)?;
-                let refs_other = refs_any_of_rels_anywhere(&e, &base_other_rels)?;
-                if refs_inl && !refs_other {
-                    move_to_having.push(e);
-                } else {
-                    kept_where = and_predicates_skip_true(kept_where, e);
-                }
-            }
-        }
-        for e in move_to_having {
-            base_stmt.having = and_predicates_skip_true(base_stmt.having.take(), e);
+        if let Some(inl_having) = mem::take(&mut inl_stmt.having) {
+            base_stmt.having =
+                and_predicates_skip_true(mem::take(&mut base_stmt.having), inl_having);
         }
         if let Some(inl_where) = mem::take(&mut inl_stmt.where_clause) {
-            kept_where = and_predicates_skip_true(kept_where, inl_where);
+            base_stmt.where_clause =
+                and_predicates_skip_true(mem::take(&mut base_stmt.where_clause), inl_where);
         }
-        base_stmt.where_clause = kept_where;
 
         // Resolve numeric/alias GROUP BY references against the inlined
         // subquery's own SELECT fields before transferring to the outer
@@ -687,9 +666,21 @@ fn inline_from_item(
             downstream_group_by_additions,
         )?;
     } else {
-        // RHS path: substitute first (inline_rhs_in_place doesn't), then RHS splice
-        // + bespoke RHS transformation in inline_rhs_in_place.
+        // RHS path: pre-substitution WHERE/HAVING partition (when the
+        // inlinable is aggregated) → substitute → RHS splice + bespoke
+        // RHS transformation in inline_rhs_in_place.
+        //
+        // The partition must run BEFORE `replace_columns_with_inlinable_expr`:
+        // post-substitution, conjuncts no longer carry `inl_rel.col`
+        // references (they've been replaced with the inner expressions),
+        // so the inlinable-only-vs-mixed distinction needed to route
+        // aggregate predicates to HAVING is no longer recoverable.  See
+        // `partition_inlinable_only_where_to_having`'s doc for the full
+        // contract.
         let inl_rel: Relation = candidate.alias.clone().into();
+        if is_inl_aggregated {
+            partition_inlinable_only_where_to_having(base_stmt, &inl_rel)?;
+        }
         crate::inline_subquery::replace_columns_with_inlinable_expr(
             base_stmt,
             &inl_rel,

@@ -1,18 +1,35 @@
 use crate::derived_tables_rewrite::derived_tables_rewrite_main;
+use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::hoist_parametrizable_filters::hoist_parametrizable_filters;
 use crate::unnest_subqueries::UnusedUniqueColumnsSchema;
+use readyset_sql::ast::{Column, Relation};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+use std::collections::HashSet;
 
 const PARSING_CONFIG: ParsingPreset = ParsingPreset::OnlySqlparser;
 
 fn test_it(test_name: &str, original_text: &str, expect_text: &str) {
+    test_it_with_schema(
+        test_name,
+        original_text,
+        expect_text,
+        &UnusedUniqueColumnsSchema,
+    );
+}
+
+fn test_it_with_schema<U: UniqueColumnsSchema>(
+    test_name: &str,
+    original_text: &str,
+    expect_text: &str,
+    unique_cols_schema: &U,
+) {
     let rewritten_stmt =
         match parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, original_text) {
             Ok(mut stmt) => match derived_tables_rewrite_main(
                 &mut stmt,
                 Dialect::PostgreSQL,
-                &UnusedUniqueColumnsSchema,
+                unique_cols_schema,
             ) {
                 Ok(has_dt_rw) => match hoist_parametrizable_filters(&mut stmt) {
                     Ok(has_opt_rw) => {
@@ -4345,5 +4362,179 @@ fn dtr_lhs_inline_dual_limit_with_offsets_composes() {
         "dtr_lhs_inline_dual_limit_with_offsets_composes",
         original_text,
         expect_text,
+    );
+}
+
+/// Regression test for the DTR RHS apply-step ordering bug (brutal-
+/// review finding #1, 2026-06-17).  Pre-fix: `replace_columns_with_
+/// inlinable_expr` ran BEFORE the per-conjunct WHERE partition inside
+/// `inline_rhs_in_place`, so any outer-WHERE conjunct referencing the
+/// inlinable's alias had been substituted to the inner expression by
+/// the time the partition ran.  `refs_rel_anywhere(&e, &inl_rel)` then
+/// returned `false` for every conjunct → all conjuncts landed in
+/// `kept_where`.  An aggregate predicate like `WHERE sub.cnt > 5`
+/// would post-substitute to `WHERE COUNT(*) > 5` — invalid SQL,
+/// engine-rejected, semantically divergent from the original (which
+/// applies the predicate post-aggregation, i.e. HAVING).
+///
+/// Post-fix: the partition runs pre-substitution in `inline_from_item`
+/// before `replace_columns_with_inlinable_expr`.  The LHS-only conjunct
+/// `sub.cnt > 5` is routed to HAVING; substitution then rewrites it to
+/// `HAVING COUNT(*) > 5`, which is correct.
+///
+/// Setup: `outer_t.id` declared as a unique key so V3's leading-FROM
+/// admit fires (otherwise the cardinality gate would reject the
+/// inlining and the bug path wouldn't be exercised).
+#[test]
+fn dtr_rhs_aggregate_where_migrates_to_having() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    let original_text = r#"
+        SELECT "outer_t"."k", "sub"."cnt"
+        FROM "outer_t"
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+        WHERE ("sub"."cnt" > 5)
+    "#;
+    // The HAVING references `cnt` (the outer SELECT-list alias for
+    // count(*)) rather than the fully-substituted aggregate.  Both
+    // resolve to `count(*) > 5` at evaluation; the alias-preserving
+    // form is what `replace_columns_with_inlinable_expr` produces
+    // when the inner's aggregate is projected with an explicit alias.
+    // The structural assertion is: HAVING (not WHERE) carries the
+    // aggregate predicate, and `outer_t.k` was correctly added to
+    // GROUP BY by Phase C's apply step.
+    let expect_text = r#"
+        SELECT "outer_t"."k", count(*) AS "cnt"
+        FROM "outer_t"
+        INNER JOIN "t" ON ("outer_t"."id" = "t"."fk")
+        GROUP BY "t"."fk", "outer_t"."k"
+        HAVING ("cnt" > 5)
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_aggregate_where_migrates_to_having",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
+    );
+}
+
+/// Variant of `dtr_rhs_aggregate_where_migrates_to_having` where the outer
+/// SELECT does NOT project the inlinable's aggregate-derived alias.  The
+/// post-inline shape — `SELECT outer_t.k FROM outer_t INNER JOIN t ON ...
+/// GROUP BY t.fk, outer_t.k HAVING cnt > 5` — is engine-valid: `outer_t.k`
+/// is a GROUP BY key (added via `downstream_group_by_additions`) and the
+/// HAVING references the inner's aggregate output.  Today
+/// `check_grouped_engine_validation` rejects this shape because it predates
+/// `downstream_group_by_additions` and demands the inner GROUP BY keys be
+/// projected via the inlinable's alias in the outer SELECT.
+#[test]
+fn dtr_rhs_aggregate_where_migrates_to_having_without_inner_in_select() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    let original_text = r#"
+        SELECT "outer_t"."k"
+        FROM "outer_t"
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+        WHERE ("sub"."cnt" > 5)
+    "#;
+    let expect_text = r#"
+        SELECT "outer_t"."k"
+        FROM "outer_t"
+        INNER JOIN "t" ON ("outer_t"."id" = "t"."fk")
+        GROUP BY "t"."fk", "outer_t"."k"
+        HAVING (count(*) > 5)
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_aggregate_where_migrates_to_having_without_inner_in_select",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
+    );
+}
+
+/// Outer ORDER BY references the inlinable's aggregate alias, with
+/// the outer SELECT also projecting it (so the post-inline outer
+/// carries the aggregate in both positions).  Exercises the
+/// `has_outer_aggregate_ref` scan via the uniform
+/// `tagged_outermost_expressions` iterator, which now covers SELECT,
+/// JOIN ON, WHERE, HAVING, AND ORDER BY positions in a single pass.
+/// `check_outer_order_against_inner_group_by` admits because the
+/// post-inline SELECT carries the aggregate (condition (b)).
+///
+/// Pre-refactor the gate's manual `fields.any || where_clause || having`
+/// chain still found the aggregate via the SELECT scan, so this shape
+/// was already admitted.  The test locks the contract for the
+/// tagged-iterator-based scan and serves as a regression for the
+/// post-inline ORDER BY substitution path.
+#[test]
+fn dtr_rhs_order_by_inner_aggregate_with_aggregate_in_select() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    let original_text = r#"
+        SELECT "outer_t"."k", "sub"."cnt"
+        FROM "outer_t"
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+        ORDER BY "sub"."cnt"
+    "#;
+    let expect_text = r#"
+        SELECT "outer_t"."k", count(*) AS "cnt"
+        FROM "outer_t"
+        INNER JOIN "t" ON ("outer_t"."id" = "t"."fk")
+        GROUP BY "t"."fk", "outer_t"."k"
+        ORDER BY "cnt"
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_order_by_inner_aggregate_with_aggregate_in_select",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
     );
 }
