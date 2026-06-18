@@ -892,16 +892,18 @@ fn from_items_cardinality_preserving(
 }
 
 /// Returns `true` if `on_expr` pins `item` (a regular table) to at most
-/// one row via a single-column unique-key match.  Walks AND-conjuncts in
-/// `on_expr`; for each cross-table equality `lhs.col = rhs.col` (or
-/// symmetric), checks whether the column belonging to `item`'s base
-/// relation is a single-column unique key in the catalog.  Any matching
-/// equality is sufficient — additional predicates in `on_expr` only
-/// further constrain.
+/// one row via a unique-key match.  Supports both single-column and
+/// composite keys: walks AND-conjuncts in `on_expr` collecting the set
+/// of `item`-side column names referenced by `col = col` equi-pairs,
+/// then admits when any unique key in the catalog's `unique_keys_of`
+/// entry for `item`'s base relation is fully covered by the collected
+/// names.
 ///
 /// Returns `false` if `item` isn't a regular table, if the catalog has
-/// no unique-cols entry for the table, or if no cross-equality in
-/// `on_expr` references a unique column of the table.
+/// no unique-keys entry for the table, or if no catalog key is fully
+/// covered by `on_expr`'s equi-pairs on the item's side.  Additional
+/// predicates in `on_expr` that don't reference `item` only further
+/// constrain the join — they don't relax the pin requirement.
 ///
 /// Used by LATERAL flatten downstream-cardinality checks to admit
 /// regular-table RHS at INNER / LEFT JOIN positions.  Mirrors the
@@ -919,35 +921,42 @@ fn is_join_pinned_to_unique_key<U: UniqueColumnsSchema>(
     else {
         return Ok(false);
     };
-    let Some(unique_cols) = unique_cols_schema.unique_columns_of(base_rel) else {
+    let Some(unique_keys) = unique_cols_schema.unique_keys_of(base_rel) else {
         return Ok(false);
     };
     let item_ref_rel = get_from_item_reference_name(item)?;
-    // Walk every top-level AND conjunct.  `is_column_eq_column` matches
-    // only a bare `col = col` shape, so AND-trees must be enumerated by
-    // the caller.
+
+    // Collect the set of item-side column names referenced in
+    // `col = col` equi-pairs of `on_expr`.  Walks top-level AND
+    // conjuncts; for each `lhs.col = rhs.col` atom, captures the
+    // column whose qualifier matches `item_ref_rel`.  `is_column_eq_
+    // column` matches only the bare `col = col` shape, so AND-trees
+    // must be enumerated by the caller.
+    let mut item_side_names: HashSet<SqlIdentifier> = HashSet::new();
     let mut conjuncts = Vec::new();
     split_expr(on_expr, &|_| true, &mut conjuncts);
     for conjunct in &conjuncts {
-        if is_column_eq_column(conjunct, |lhs_col, rhs_col| {
-            let item_side_col = if lhs_col.table.as_ref() == Some(&item_ref_rel) {
-                Some(lhs_col)
-            } else if rhs_col.table.as_ref() == Some(&item_ref_rel) {
-                Some(rhs_col)
-            } else {
-                None
-            };
-            item_side_col.is_some_and(|col| {
-                unique_cols.contains(&Column {
-                    name: col.name.clone(),
-                    table: Some(base_rel.clone()),
-                })
-            })
-        }) {
-            return Ok(true);
-        }
+        is_column_eq_column(conjunct, |lhs_col, rhs_col| {
+            if lhs_col.table.as_ref() == Some(&item_ref_rel) {
+                item_side_names.insert(lhs_col.name.clone());
+            }
+            if rhs_col.table.as_ref() == Some(&item_ref_rel) {
+                item_side_names.insert(rhs_col.name.clone());
+            }
+            // Return value is unused; we collect side-effects only.
+            false
+        });
     }
-    Ok(false)
+
+    // Admit iff any unique key is fully covered by the collected
+    // item-side names.  Composite keys (e.g. `(tenant_id, addr_id)`)
+    // admit when every column of any one key appears in the JOIN's
+    // equi-conjuncts on the item's side; single-column keys are the
+    // degenerate one-column case of the same check.
+    Ok(unique_keys.iter().any(|key| {
+        key.iter()
+            .all(|k| k.table.as_ref() == Some(base_rel) && item_side_names.contains(&k.name))
+    }))
 }
 
 /// Lower-level LATERAL variant of [`from_items_cardinality_preserving`].
@@ -1647,7 +1656,7 @@ fn is_on_nonrejecting_or_lateral_correlation(
 /// outer's cardinality.
 ///
 /// Class B (regular-table RHS) is admitted when `on_expr` pins a
-/// single-column unique key on the table per [`is_join_pinned_to_unique_key`].
+/// unique key (single-column or composite) on the table per [`is_join_pinned_to_unique_key`].
 /// For CSV-FROM positions (no per-item ON), pass `None` for `on_expr`;
 /// regular-table RHS is then still rejected at those positions.
 fn is_lateral_friendly_exactly_one<U: UniqueColumnsSchema>(
@@ -1682,9 +1691,10 @@ fn is_lateral_friendly_exactly_one<U: UniqueColumnsSchema>(
 /// cardinality.
 ///
 /// Class B (regular-table RHS) is admitted when `on_expr` pins a
-/// single-column unique key on the table per [`is_join_pinned_to_unique_key`]
-/// — a uniquely-pinned join contributes 0 or 1 rows per outer, satisfying
-/// the LEFT-JOIN-RHS AtMostOne semantics.  For CSV-FROM positions (no
+/// unique key (single-column or composite) on the table per
+/// [`is_join_pinned_to_unique_key`] — a uniquely-pinned join
+/// contributes 0 or 1 rows per outer, satisfying the LEFT-JOIN-RHS
+/// AtMostOne semantics.  For CSV-FROM positions (no
 /// per-item ON), pass `None` for `on_expr`; regular-table RHS is then
 /// still rejected at those positions.
 fn is_lateral_friendly_at_most_one<U: UniqueColumnsSchema>(
@@ -2410,6 +2420,93 @@ mod is_join_pinned_to_unique_key_tests {
         assert!(
             is_join_pinned_to_unique_key(item, on, &AddrIdUniqueSchema).unwrap(),
             "PK match should pin the join when item-side is on RHS of equality"
+        );
+    }
+
+    /// Mock catalog: `addr` has a composite unique key on `(tenant_id,
+    /// id)`.  No single-column unique key exists.
+    struct AddrCompositeUniqueSchema;
+    impl UniqueColumnsSchema for AddrCompositeUniqueSchema {
+        fn unique_columns_of(&self, _rel: &Relation) -> Option<HashSet<Column>> {
+            // Composite PK is not exposed via the single-column view —
+            // exercises the `unique_keys_of` path exclusively.
+            None
+        }
+        fn unique_keys_of(&self, rel: &Relation) -> Option<HashSet<Vec<Column>>> {
+            if rel.name == "addr" {
+                let key = vec![
+                    Column {
+                        name: "tenant_id".into(),
+                        table: Some(rel.clone()),
+                    },
+                    Column {
+                        name: "id".into(),
+                        table: Some(rel.clone()),
+                    },
+                ];
+                Some(HashSet::from([key]))
+            } else {
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_composite_pk_match_full_cover() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               INNER JOIN "addr"
+                 ON "addr"."tenant_id" = "outer_t"."tenant_id"
+                AND "addr"."id" = "outer_t"."addr_id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrCompositeUniqueSchema).unwrap(),
+            "composite PK match (all columns covered) should pin the join"
+        );
+    }
+
+    #[test]
+    fn rejects_composite_pk_partial_cover() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               INNER JOIN "addr" ON "addr"."tenant_id" = "outer_t"."tenant_id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            !is_join_pinned_to_unique_key(item, on, &AddrCompositeUniqueSchema).unwrap(),
+            "composite PK partial cover (only tenant_id pinned, not id) should not pin"
+        );
+    }
+
+    #[test]
+    fn accepts_composite_pk_with_additional_predicate() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               INNER JOIN "addr"
+                 ON "addr"."tenant_id" = "outer_t"."tenant_id"
+                AND "addr"."id" = "outer_t"."addr_id"
+                AND "addr"."status" = 'active'"#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrCompositeUniqueSchema).unwrap(),
+            "composite PK match should pin even with additional predicates"
+        );
+    }
+
+    #[test]
+    fn accepts_composite_pk_mixed_orientation() {
+        let stmt = parse_select(
+            r#"SELECT "outer_t"."k" FROM "outer_t"
+               INNER JOIN "addr"
+                 ON "outer_t"."tenant_id" = "addr"."tenant_id"
+                AND "addr"."id" = "outer_t"."addr_id""#,
+        );
+        let (item, on) = first_join_rhs_and_on(&stmt);
+        assert!(
+            is_join_pinned_to_unique_key(item, on, &AddrCompositeUniqueSchema).unwrap(),
+            "composite PK match should pin regardless of equi-pair orientation"
         );
     }
 }
