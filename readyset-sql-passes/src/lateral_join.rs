@@ -2539,13 +2539,14 @@ FROM
         );
     }
 
-    /// Phase B PostAgg regression: outer SELECT referencing a non-
-    /// inlinable rel via a compound expression (`a.k + 1`) stays
-    /// rejected — the rule needs each non-inlinable rel ref expressible
-    /// as a GROUP BY key, and a compound expression isn't (yet)
-    /// admissible.  Preserved behaviour from pre-Phase-B.
+    /// Phase B PostAgg widening (sub-shape (a) of finding #3): outer
+    /// SELECT referencing a non-inlinable rel via a compound expression
+    /// (`a.k + 1`) now admits.  The whole expression is pushed into
+    /// `downstream_group_by_additions` and becomes a GROUP BY key in
+    /// the post-inline outer; SELECT `a.k + 1` is verbatim-matched
+    /// against `GROUP BY a.k + 1`, engine-valid.
     #[test]
-    fn outer_select_with_arithmetic_on_other_rel_bails() {
+    fn outer_select_with_arithmetic_on_other_rel_admits() {
         let original_text = r#"
         SELECT a.k + 1, l1.cnt
         FROM qa.a AS a,
@@ -2557,9 +2558,15 @@ FROM
                  GROUP BY b.k
              ) AS l1
         "#;
-        let expected_text = r#""#;
+        let expected_text = r#"
+        SELECT a.k + 1, count(c.x) AS cnt
+        FROM qa.a AS a, qa.b AS b
+             LEFT JOIN qa.c AS c ON c.k = a.k
+        WHERE b.k = a.k
+        GROUP BY b.k, a.k + 1
+        "#;
         test_it(
-            "outer_select_with_arithmetic_on_other_rel_bails",
+            "outer_select_with_arithmetic_on_other_rel_admits",
             original_text,
             expected_text,
         );

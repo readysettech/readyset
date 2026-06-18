@@ -1734,21 +1734,35 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
             if !refs_inlinable && !refs_other {
                 continue;
             }
+            // Position-independent contamination check: any direct
+            // aggregate / window function / nested subquery literally
+            // present in `e` is rejected.  Per-position rationale:
+            //
+            // - PreAgg (WHERE / JOIN ON): aggregates and WFs are
+            //   SQL-invalid here in strict mode (may reach us via
+            //   non-strict parsing — defensive rejection).  Subqueries
+            //   are SQL-valid in WHERE but post-substitution engine
+            //   support is uncertain — conservative rejection.  The
+            //   pre-substitution shape is independent of which rels are
+            //   referenced; an unrelated subquery still survives
+            //   inlining.
+            //
+            // - PostAgg (SELECT / ORDER BY): direct aggregates here
+            //   would mean `is_outer_agg = true`, contradicting this
+            //   gate body's `is_inner_agg && !is_outer_agg` precondition
+            //   — effectively dead but defensive.  Direct WFs are
+            //   gated upstream by `check_window_function_interaction`.
+            //   Nested subqueries survive inlining; engine support
+            //   uncertain — conservative rejection.
+            //
+            // Aggregates introduced via `ext_to_int` substitution from
+            // the inlinable side are fine — they appear in `e` only
+            // after the apply step, not in the pre-rewrite outer.
+            if contains_aggregate(e) || contains_select(e) || is_window_function_expr!(e) {
+                return Ok(None);
+            }
             match pos {
                 OuterPosition::PreAgg => {
-                    // Direct contamination of the outer PreAgg expression
-                    // (subquery, aggregate, or window function present
-                    // literally in `e`).  Aggregates and WFs in WHERE /
-                    // JOIN-ON are SQL-invalid in strict mode but may
-                    // reach us via non-strict parsing — defensive
-                    // rejection.  Subqueries are SQL-valid in WHERE,
-                    // but post-substitution engine support is uncertain
-                    // — conservative rejection.  The pre-substitution
-                    // shape is independent of which rels are referenced;
-                    // an unrelated subquery still survives inlining.
-                    if contains_select(e) || contains_aggregate(e) || is_window_function_expr!(e) {
-                        return Ok(None);
-                    }
                     // Resolve-and-check: when the conjunct references the
                     // inlinable's alias, the resolved inner expression
                     // (via `ext_to_int`) must be compatible with the
@@ -1817,23 +1831,60 @@ fn check_group_by_compatibility<U: UniqueColumnsSchema>(
                     // entry (HAVING-without-aggregates is normalized to
                     // WHERE upstream).  So in practice `e` is a SELECT
                     // item or an ORDER BY field — both projection /
-                    // sort positions, not filters.  This arm collects
-                    // bare-Column refs to non-inlinable rels (to be
-                    // promoted to outer GROUP BY keys by Phase C's
-                    // apply step) and rejects compound expressions that
-                    // the apply step can't transparently promote.
-                    // Filter migration (WHERE/HAVING/JOIN-ON partition)
-                    // is the apply step's responsibility, not this
-                    // gate's.
+                    // sort positions, not filters.  Filter migration
+                    // (WHERE/HAVING/JOIN-ON partition) is the apply
+                    // step's responsibility, not this gate's.
+                    //
+                    // Two admit shapes by ref-scope:
+                    //
+                    // - Pure non-inlinable expression (`refs_inlinable
+                    //   = false`): push the whole expression as a GB
+                    //   key.  Post-inline outer carries `e` verbatim in
+                    //   SELECT/ORDER BY; `GROUP BY e` makes it engine-
+                    //   valid.  Bare `Expr::Column` on a non-inlinable
+                    //   rel is the degenerate one-column case.
+                    //
+                    // - Mixed-ref expression (`refs_inlinable = true`
+                    //   AND `refs_other = true`): extract bare-Column
+                    //   non-inlinable refs from `e` (each becomes a GB
+                    //   addition); admit the full expression in
+                    //   SELECT/ORDER BY.  `ext_to_int` substitutes
+                    //   inlinable-side refs to inner expressions
+                    //   (aggregates or GB keys); the substituted shape
+                    //   is engine-valid because each non-inlinable
+                    //   col-ref is in the post-inline GROUP BY and the
+                    //   inlinable-side substituted shape is gated by
+                    //   Pass 3 / `check_outer_order_against_inner_group_by`.
+                    //
+                    // Restriction on both shapes: non-inlinable column
+                    // refs all on a single relation.  Multi-rel
+                    // expression GB keys (e.g., `a.x + b.y` with both
+                    // `a` and `b` in non-inlinable scope) have uncertain
+                    // engine support — stay conservative until an
+                    // explicit admit shape covers them.  Direct
+                    // aggregate / WF / nested-subquery shapes are
+                    // rejected by the position-independent check above
+                    // the `match`.
                     if !refs_other {
                         continue;
                     }
-                    if matches!(e, Expr::Column(Column { table: Some(t), .. })
-                                   if other_rels.contains(t))
-                    {
+                    let outer_rels_touched: HashSet<&Relation> = columns_iter(e)
+                        .filter_map(|c| c.table.as_ref())
+                        .filter(|r| other_rels.contains(*r))
+                        .collect();
+                    if outer_rels_touched.len() != 1 {
+                        return Ok(None);
+                    }
+                    if !refs_inlinable {
                         downstream_group_by_additions.push(e.clone());
                     } else {
-                        return Ok(None);
+                        for col in columns_iter(e) {
+                            if let Some(t) = &col.table
+                                && other_rels.contains(t)
+                            {
+                                downstream_group_by_additions.push(Expr::Column(col.clone()));
+                            }
+                        }
                     }
                 }
             }

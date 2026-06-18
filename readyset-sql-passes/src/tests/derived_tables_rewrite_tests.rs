@@ -4538,3 +4538,150 @@ fn dtr_rhs_order_by_inner_aggregate_with_aggregate_in_select() {
         &OuterIdUniqueSchema,
     );
 }
+
+/// Phase B PostAgg widening — sub-shape (a) of finding #3: outer
+/// SELECT contains a compound expression over a non-inlinable
+/// relation (`UPPER(outer_t.k)`).  Pre-fix the bare-Column-only check
+/// rejected.  Post-fix the whole expression is pushed into
+/// `downstream_group_by_additions`, and the post-inline outer's
+/// `GROUP BY UPPER(outer_t.k), ...` matches the SELECT entry
+/// verbatim — engine-valid.
+#[test]
+fn dtr_rhs_postagg_pure_non_inlinable_expression_admits() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    let original_text = r#"
+        SELECT upper("outer_t"."k"), "sub"."cnt"
+        FROM "outer_t"
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+    "#;
+    let expect_text = r#"
+        SELECT upper("outer_t"."k"), count(*) AS "cnt"
+        FROM "outer_t"
+        INNER JOIN "t" ON ("outer_t"."id" = "t"."fk")
+        GROUP BY "t"."fk", upper("outer_t"."k")
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_postagg_pure_non_inlinable_expression_admits",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
+    );
+}
+
+/// Phase B PostAgg widening — sub-shape (b) of finding #3, alias
+/// M-4: outer SELECT mixes an inlinable-aggregate ref with a non-
+/// inlinable bare-Column ref in a compound expression
+/// (`sub.cnt + outer_t.weight`).  Pre-fix the bare-Column-only check
+/// rejected.  Post-fix the bare-Column outer-rel sub-refs are
+/// extracted into `downstream_group_by_additions` (here `outer_t.k`),
+/// and the full expression is admitted in SELECT.  `ext_to_int`
+/// substitutes `sub.cnt → count(*)`, yielding the engine-valid post-
+/// inline `SELECT count(*) + outer_t.k ... GROUP BY t.fk, outer_t.k`.
+#[test]
+fn dtr_rhs_postagg_mixed_ref_expression_admits() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    let original_text = r#"
+        SELECT ("sub"."cnt" + "outer_t"."k")
+        FROM "outer_t"
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+    "#;
+    let expect_text = r#"
+        SELECT (count(*) + "outer_t"."k")
+        FROM "outer_t"
+        INNER JOIN "t" ON ("outer_t"."id" = "t"."fk")
+        GROUP BY "t"."fk", "outer_t"."k"
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_postagg_mixed_ref_expression_admits",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
+    );
+}
+
+/// Phase B PostAgg widening — multi-rel reject: outer SELECT
+/// references TWO non-inlinable relations in a compound expression
+/// (`a.x + b.y`).  Engine support for multi-relation expression GB
+/// keys is uncertain; the widening conservatively rejects this shape.
+#[test]
+fn dtr_rhs_postagg_multi_other_rel_expression_rejects() {
+    struct OuterIdUniqueSchema;
+    impl UniqueColumnsSchema for OuterIdUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            if rel.name == "outer_t" {
+                Some(HashSet::from([Column {
+                    name: "id".into(),
+                    table: Some(rel.clone()),
+                }]))
+            } else {
+                None
+            }
+        }
+    }
+
+    // Expect the subquery to survive (no inlining): the rewrite rejects
+    // when the SELECT expression touches multiple non-inlinable rels.
+    // The FROM-side join canonicalization that runs alongside DTR may
+    // reorient operands; the structural assertion is that `sub` stays
+    // as a wrapped subquery (no Class B flatten).
+    let original_text = r#"
+        SELECT ("outer_t"."k" + "outer_t2"."m"), "sub"."cnt"
+        FROM "outer_t"
+        INNER JOIN "outer_t2" ON ("outer_t"."id" = "outer_t2"."id")
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+    "#;
+    let expect_text = r#"
+        SELECT ("outer_t"."k" + "outer_t2"."m"), "sub"."cnt"
+        FROM "outer_t2"
+        INNER JOIN "outer_t" ON ("outer_t2"."id" = "outer_t"."id")
+        INNER JOIN (
+            SELECT "t"."fk", count(*) AS "cnt"
+            FROM "t"
+            GROUP BY "t"."fk"
+        ) AS "sub" ON ("outer_t"."id" = "sub"."fk")
+    "#;
+    test_it_with_schema(
+        "dtr_rhs_postagg_multi_other_rel_expression_rejects",
+        original_text,
+        expect_text,
+        &OuterIdUniqueSchema,
+    );
+}
