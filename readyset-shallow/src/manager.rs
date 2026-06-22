@@ -38,6 +38,14 @@ where
         .unwrap_or(u32::MAX)
 }
 
+fn cost<K, V>(_k: &(u64, K), v: &Arc<CacheEntry<V>>) -> u32 {
+    // Bias retention toward entries that were expensive to fetch upstream.
+    match v.as_ref() {
+        CacheEntry::Present(values) => values.execution_ms.try_into().unwrap_or(u32::MAX),
+        CacheEntry::Loading(_) => 0,
+    }
+}
+
 pub struct CacheManager<K, V>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
@@ -64,8 +72,10 @@ where
     pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
         let mut builder = MokaCache::builder()
             .support_invalidation_closures()
+            .eviction_policy(moka::policy::EvictionPolicy::cost_aware_lfu())
             .expire_after(CacheExpiration)
             .weigher(weight)
+            .cost(cost)
             .eviction_listener(|_, _, cause| {
                 if cause == RemovalCause::Size {
                     counter!(recorded::SHALLOW_EVICT_MEMORY).increment(1);

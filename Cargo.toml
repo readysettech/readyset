@@ -1,4 +1,5 @@
 [patch.crates-io]
+moka = { git = "https://github.com/readysettech/moka", branch = "cost-aware-lfu" }
 mysql_async = { git = "https://github.com/readysettech/mysql_async", branch="gtid_tags" }
 mysql_common = { git = "https://github.com/readysettech/rust_mysql_common" }
 postgres = { git = "https://github.com/readysettech/rust-postgres.git", tag = "readyset-20260324" }
@@ -86,6 +87,7 @@ resolver = "2"
 ########################
 
 # versions are overridden by [patch.crates-io] above
+moka = { version = "*", features = ["future"] }
 mysql_async = { version = "*", features = ["native-tls-tls"] }
 mysql_common = "*"
 postgres = "*"
@@ -184,7 +186,6 @@ linkme = "0.3"
 log-once = "0.4.1"
 lru = "0.18.0"
 machine-uid = "0.5"
-moka = { version = "0.12", features = ["future"] }
 md5 = "0.8.0"
 metrics = "0.24.0"
 metrics-exporter-prometheus = { version = "0.18.1", default-features = false }
