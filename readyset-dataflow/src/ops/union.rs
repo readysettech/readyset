@@ -741,6 +741,19 @@ impl Ingredient for Union {
                     }
                 }
             }
+            ReplayContext::FullStart { .. } => {
+                // The replay-start barrier (REA-6688) carries no records; its only job is to flip
+                // the target domain to `Replaying` ahead of the replay data. Forward it straight
+                // through without touching `full_wait_state`/`bag_union_state`: folding an empty
+                // barrier into the full-replay accounting consumes the shared `BagUnionState`
+                // before any data arrives, which drops the deduplication that `a OR a` relies on
+                // and doubles every overlapping row. One barrier crosses per ancestor; each is
+                // empty, so the redundant downstream flips are harmless.
+                Ok(RawProcessingResult::FullReplay(
+                    process_records(from, rs, &self.emit, None)?,
+                    false,
+                ))
+            }
             ReplayContext::Partial {
                 key_cols,
                 keys,

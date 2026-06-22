@@ -113,3 +113,8 @@ pub const REPLICATION_LAG_CONNECT: &str = "replication-lag-connect";
 /// driving the cache-fallback path in `select_ack_lsn` so end-to-end tests
 /// can verify the replicator stays alive across RPC failures.
 pub const POSTGRES_MIN_PERSISTED_RPC: &str = "postgres-min-persisted-rpc";
+
+/// Source-domain full-replay chunker, after the snapshot is taken but before any ReplayPiece is
+/// sent. Tests hold a reader-migration replay open here so a racing write lands mid-window
+/// (REA-6688).
+pub const FULL_REPLAY_POST_SNAPSHOT: &str = "full-replay-post-snapshot";

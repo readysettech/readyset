@@ -192,6 +192,18 @@ impl Node {
                             trace!(?data, %tag, last, "received full replay");
                             (data, ReplayContext::Full { last, tag })
                         }
+                        Packet::ReplayPiece(ReplayPiece {
+                            ref mut data,
+                            context: payload::ReplayPieceContext::FullStart,
+                            tag,
+                            ..
+                        }) => {
+                            // The replay-start barrier is empty and never terminal. Keep it a
+                            // distinct context so a union forwards it without folding it into its
+                            // replay/dedup accounting (REA-6688).
+                            trace!(?data, %tag, "received replay-start barrier");
+                            (data, ReplayContext::FullStart { tag })
+                        }
                         Packet::Update(ref mut x) => {
                             let data = x.data_mut();
                             trace!(?data, "received regular message");
@@ -256,16 +268,19 @@ impl Node {
                     }
 
                     if let Some(new_last) = set_replay_last {
-                        if let Packet::ReplayPiece(ReplayPiece {
-                            context: payload::ReplayPieceContext::Full { ref mut last, .. },
-                            ..
-                        }) = *m
-                        {
-                            *last = new_last;
-                        } else {
+                        match *m {
+                            Packet::ReplayPiece(ReplayPiece {
+                                context: payload::ReplayPieceContext::Full { ref mut last },
+                                ..
+                            }) => *last = new_last,
+                            // The replay-start barrier is never terminal; it has no `last` to set.
+                            Packet::ReplayPiece(ReplayPiece {
+                                context: payload::ReplayPieceContext::FullStart,
+                                ..
+                            }) => {}
                             // TODO: Scope for future refactor:
                             // https://readysettech.atlassian.net/browse/ENG-455
-                            unreachable!("only a ReplayPiece can release a ReplayPiece")
+                            _ => unreachable!("only a ReplayPiece can release a ReplayPiece"),
                         }
                     }
                 }

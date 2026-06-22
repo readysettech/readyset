@@ -176,11 +176,17 @@ pub enum ReplayPieceContext {
         /// The set of keys that are being replayed.
         for_keys: ReplayKeys,
     },
-    /// Context for a full replay
+    /// A batch of records in a full replay.
     Full {
         /// Is this the last batch of records for this full replay?
         last: bool,
     },
+    /// Empty barrier emitted before the replay data to flip the target domain to `Replaying`, so
+    /// writes processed after the snapshot buffer instead of being dropped at the not-ready guard
+    /// (REA-6688). A distinct variant so it survives the short-circuit that drops empty `Full`
+    /// pieces and is never mistaken for data. Never terminal; a `Full { last: true }` ends the
+    /// replay.
+    FullStart,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]

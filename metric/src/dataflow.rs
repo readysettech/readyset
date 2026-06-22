@@ -108,6 +108,11 @@ pub const DOMAIN_FINISH_REPLAY_TIME: &str = "readyset_domain.finish_replay_time_
 /// | cache_name | The name of the cache associated with this replay.
 pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_replay_time_us";
 
+/// Gauge: Live writes buffered behind an in-progress full replay (REA-6688), draining to zero
+/// when the replay completes. A value that climbs without draining means writes are arriving
+/// faster than the replay finishes.
+pub const DOMAIN_REPLAY_BUFFERED_WRITES: &str = "readyset_domain.replay_buffered_writes";
+
 /// Histogram: The amount of time spent handling an eviction request.
 pub const EVICTION_TIME: &str = "readyset_eviction_time_us";
 

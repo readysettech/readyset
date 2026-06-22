@@ -284,6 +284,37 @@ mod tests {
         );
     }
 
+    /// The REA-6688 barrier separates pre- from post-snapshot writes using FIFO ordering in the
+    /// reader domain's egress, which requires the reader in a domain of its own. Co-locating it
+    /// with its base would reopen the drop window; this test trips if a planner change does that.
+    #[test]
+    fn reader_lands_in_own_domain_distinct_from_base() {
+        let (mut graph, source) = graph_with_source();
+
+        let base = graph.add_node(Node::new(
+            "base",
+            make_columns(&["id"]),
+            node::special::Base::new(),
+        ));
+        graph.add_edge(source, base, ());
+
+        let reader = graph.add_node(Node::new(
+            "reader",
+            make_columns(&["id"]),
+            node::special::Reader::new(base, Default::default()),
+        ));
+        graph.add_edge(base, reader, ());
+
+        let mut ndomains = 0;
+        assign_inner(&mut graph, &mut ndomains, &[base, reader]).unwrap();
+
+        assert_ne!(
+            graph[base].domain(),
+            graph[reader].domain(),
+            "reader must land in a domain distinct from its base (REA-6688)",
+        );
+    }
+
     /// A Constant feeding a Join must land in the Join's domain rather than its own. The
     /// previous behavior, driven by `is_source()` returning true for both Bases and
     /// Constants, gave every VALUES clause an OS thread for a node that does no ongoing

@@ -33,7 +33,7 @@ use futures_util::stream::StreamExt;
 pub use internal::DomainIndex;
 use itertools::Itertools;
 use merging_interval_tree::IntervalTreeSet;
-use metrics::{counter, histogram};
+use metrics::{Gauge, counter, gauge, histogram};
 use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
@@ -673,6 +673,11 @@ impl DomainBuilder {
             materialization_persistence: self.config.materialization_persistence,
             table_status_tx,
             replay_sender,
+            replay_buffered_writes: gauge!(
+                metric::DOMAIN_REPLAY_BUFFERED_WRITES,
+                "index" => self.index.to_string(),
+                "shard" => self.shard.unwrap_or_default().to_string(),
+            ),
         };
 
         (domain, replay_receiver)
@@ -771,6 +776,9 @@ pub struct Domain {
     /// Sender for the bounded replay channel. Cloned and moved into the replay thread
     /// for backpressure during full materialization replays.
     replay_sender: ReplaySender,
+    /// Gauge handle for live writes buffered behind an in-progress full replay (REA-6688),
+    /// resolved once at build time so the per-dispatch buffering path avoids re-hashing labels.
+    replay_buffered_writes: Gauge,
 }
 
 /// Creates the materialized node state for the given node.
@@ -1320,7 +1328,12 @@ impl Domain {
                 ref mut buffered,
                 ..
             } if to == &me => {
+                // Write to the target after its snapshot, before the replay finishes. The barrier
+                // already flipped us to `Replaying`, so it buffers here instead of falling to the
+                // not-ready guard below and being dropped (REA-6688). Drained by `finish_replay`.
+                assert_reachable!("live write buffered for a node migrating its reader (REA-6688)");
                 buffered.push_back(m);
+                self.replay_buffered_writes.set(buffered.len() as f64);
                 return Ok(());
             }
             DomainMode::Replaying { .. } => (),
@@ -2147,7 +2160,6 @@ impl Domain {
             .state
             .get(from)
             .expect("migration replay path started with non-materialized node");
-        let is_empty = state.size_is_empty();
         let mut all_records = state.all_records();
 
         debug!(
@@ -2166,11 +2178,6 @@ impl Domain {
         // part of state.
         let data = Default::default();
         let cache_name = MIGRATION_CACHE_NAME_STUB.into();
-        let context = ReplayPieceContext::Full {
-            // NOTE: If we're replaying from persistent state this might be wrong, since
-            // it's backed by an *estimate* of the number of keys in the state
-            last: is_empty,
-        };
 
         let added_cols = self.ingress_inject.get(from).cloned();
         let default = {
@@ -2200,6 +2207,10 @@ impl Domain {
 
         let replay_tx = self.replay_sender.clone();
 
+        // The chunker signals here once it has pinned the snapshot, gating the barrier below.
+        // Capacity 1 so the send never blocks; a dropped receiver makes it a no-op.
+        let (pin_tx, pin_rx) = std::sync::mpsc::sync_channel::<()>(1);
+
         let address = self.address();
         std::thread::Builder::new()
             .name(format!("replay{}.{}", self.index(), link.src))
@@ -2218,9 +2229,23 @@ impl Domain {
                     .enumerate()
                     .peekable();
 
+                // `iter()` has pinned the snapshot; signal the main thread to emit the barrier. A
+                // send error means the main thread dropped the receiver (it timed out and is failing
+                // the domain), so this replay is unwanted: abandon it rather than finish behind a
+                // domain that is being torn down.
+                if pin_tx.send(()).is_err() {
+                    debug!(node = %link.dst, "main thread abandoned replay; stopping chunker");
+                    return;
+                }
+
+                // REA-6688 repro pause point: after `iter()` pins the snapshot above and before the
+                // chunker starts sending below. A pause holds a RocksDB superversion open, so keep
+                // it bounded.
+                set_failpoint!(failpoints::FULL_REPLAY_POST_SNAPSHOT);
+
                 // process all records in state to completion within domain and then
                 // forward via the bounded replay channel (provides backpressure)
-                let mut sent_last = is_empty;
+                let mut sent_last = false;
                 while let Some((i, chunk)) = iter.next() {
                     let len = chunk.len();
                     let last = iter.peek().is_none();
@@ -2240,11 +2265,8 @@ impl Domain {
                     }
                 }
 
-                // Since we're using `is_empty` above to send a `last: true` packet
-                // before launching the thread, and that's based on a potentially
-                // inaccurate estimate, it might be the case that we started this thread
-                // with no records - if so, we need to send a `last: true` packet to
-                // tell the target domain we're done
+                // The barrier only flips the target; it is never terminal. If the source had no
+                // records the loop sent nothing, so send an empty `last: true` to end the replay.
                 if !sent_last {
                     trace!("Sending empty last batch");
                     if let Err(error) = replay_tx.blocking_send(Packet::ReplayPiece(ReplayPiece {
@@ -2269,7 +2291,23 @@ impl Domain {
                     .increment(time.as_micros() as u64);
                 histogram!(metric::DOMAIN_CHUNKED_REPLAY_TIME).record(time.as_micros() as f64);
             })?;
-        self.handle_replay(link, tag, data, context, cache_name, executor)?;
+
+        // Replay-start barrier (REA-6688). It orders ahead of post-snapshot writes only because the
+        // reader has its own domain, so writes and replay pieces share one egress FIFO; the
+        // `reader_lands_in_own_domain_distinct_from_base` test guards that placement.
+        let context = ReplayPieceContext::FullStart;
+
+        // Emit the barrier only after the chunker pins the snapshot, ordering it (and the writes
+        // this single-threaded loop processes next) after the snapshot. Bounded: the chunker's
+        // `read()` can queue behind a WAL-flush lock. If we can't confirm the pin -- a timeout, or
+        // a dead chunker that dropped the sender -- the barrier can't be safely ordered and the
+        // detached chunker can't be cancelled, so fail the whole domain (the controller rebuilds
+        // it) rather than silently reopening the drop window.
+        const SNAPSHOT_PIN_TIMEOUT: time::Duration = time::Duration::from_secs(30);
+        match pin_rx.recv_timeout(SNAPSHOT_PIN_TIMEOUT) {
+            Ok(()) => self.handle_replay(link, tag, data, context, cache_name, executor)?,
+            Err(error) => internal!("replay snapshot pin unconfirmed ({error}); failing domain"),
+        }
 
         self.total_replay_time.stop();
         self.metrics.rec_chunked_replay_start_time(start.elapsed());
@@ -3870,10 +3908,12 @@ impl Domain {
                     }
                 }
 
-                // we're all good -- continue propagating
+                // Drop empty non-terminal `Full` pieces. `FullStart` is a distinct variant and not
+                // matched here: the barrier is empty but must cross the egress to flip the target
+                // (REA-6688).
                 if m.is_empty()
                     && let ReplayPiece {
-                        context: ReplayPieceContext::Full { last: false, .. },
+                        context: ReplayPieceContext::Full { last: false },
                         ..
                     } = m
                 {
@@ -3916,14 +3956,14 @@ impl Domain {
             }
 
             match m.context {
-                ReplayPieceContext::Full { last, .. } if last => {
+                ReplayPieceContext::Full { last } if last => {
                     debug!(terminal = notify_done, "last batch processed");
                     if notify_done {
                         debug!(local = dst.id(), "last batch received");
                         finished = Some((tag, dst, target.unwrap(), None));
                     }
                 }
-                ReplayPieceContext::Full { .. } => {
+                ReplayPieceContext::Full { .. } | ReplayPieceContext::FullStart => {
                     debug!("batch processed");
                 }
                 ReplayPieceContext::Partial { for_keys, .. } => {
@@ -4172,6 +4212,7 @@ impl Domain {
                 }
             }
 
+            self.replay_buffered_writes.set(buffered.len() as f64);
             buffered.is_empty()
         } else {
             // we're told to continue replay, but nothing is being replayed

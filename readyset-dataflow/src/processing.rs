@@ -299,6 +299,13 @@ pub(crate) enum ReplayContext<'a> {
         last: bool,
         tag: Tag,
     },
+    /// The replay-start barrier (REA-6688): an empty, non-terminal piece emitted ahead of the
+    /// replay data to flip the target domain to `Replaying`. Distinct from [`Full`] so a
+    /// deduplicating union forwards it straight through rather than folding it into its full-replay
+    /// accounting, which would consume the shared dedup state before any data arrives.
+    FullStart {
+        tag: Tag,
+    },
 }
 
 impl<'a> ReplayContext<'a> {
@@ -331,6 +338,7 @@ impl<'a> ReplayContext<'a> {
         match self {
             Self::Partial { tag, .. } => Some(*tag),
             Self::Full { tag, .. } => Some(*tag),
+            Self::FullStart { tag } => Some(*tag),
             _ => None,
         }
     }

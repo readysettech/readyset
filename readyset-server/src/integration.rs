@@ -3236,6 +3236,168 @@ async fn state_replay_migration_query() {
     shutdown_tx.shutdown().await;
 }
 
+/// REA-6688: a row committed while a base is migrating a reader must not be dropped from the
+/// reader. The barrier flips the reader to `Replaying` before the racing write arrives, so the
+/// write buffers and is applied when the replay drains. A failpoint holds the chunker open to pin
+/// the write inside the snapshot/flip window, and we sync on the `replay_buffered_writes` gauge so
+/// the release races nothing. The reader replays through an `Identity`, exercising the barrier
+/// crossing an intermediate operator.
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+async fn write_during_reader_migration_is_not_dropped() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use readyset_util::failpoints::FULL_REPLAY_POST_SNAPSHOT;
+
+    static SNAPSHOT_REACHED: AtomicBool = AtomicBool::new(false);
+    static RELEASE: AtomicBool = AtomicBool::new(false);
+
+    // Release the held chunker and disarm the failpoint even on panic, so a failure neither wedges
+    // the chunker thread nor leaves the failpoint armed.
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            RELEASE.store(true, Ordering::SeqCst);
+            let _ = fail::cfg(FULL_REPLAY_POST_SNAPSHOT, "off");
+        }
+    }
+
+    SNAPSHOT_REACHED.store(false, Ordering::SeqCst);
+    RELEASE.store(false, Ordering::SeqCst);
+    // Install the recorder before the server starts so the buffered-writes gauge is recorded; the
+    // writer task below reads it back to know the racing write was buffered.
+    register_metric_recorder();
+    let _guard = Guard;
+
+    let (mut g, shutdown_tx) = start_simple_unsharded("write_during_reader_migration").await;
+
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(vec!["CREATE TABLE t (id int)"], Dialect::DEFAULT_MYSQL)
+                .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+    let mut mutt = g.table("t").await.unwrap();
+    mutt.insert_many((0..10i32).map(|id| vec![DfValue::from(id)]))
+        .await
+        .unwrap();
+    // Let the seed settle into the base materialization so it lands in the replay snapshot.
+    sleep().await;
+
+    fail::cfg_callback(FULL_REPLAY_POST_SNAPSHOT, || {
+        SNAPSHOT_REACHED.store(true, Ordering::SeqCst);
+        // Hold the chunker until released, bounded so a panic before release degrades to "replay
+        // proceeds" rather than a hung thread.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !RELEASE.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    })
+    .unwrap();
+
+    // Race a write against the migration: once the snapshot is pinned (chunker held), commit id 10,
+    // wait for it to be buffered behind the barrier (the gauge ticks up), then release.
+    let writer = tokio::spawn(async move {
+        eventually!(attempts: 6000, sleep: Duration::from_millis(5), {
+            SNAPSHOT_REACHED.load(Ordering::SeqCst)
+        });
+        mutt.insert(vec![DfValue::from(10)]).await.unwrap();
+        let handle = readyset_metrics::metrics_handle().expect("recorder installed");
+        eventually!(attempts: 6000, sleep: Duration::from_millis(5), {
+            let [buffered] = handle.gauges([metric::DOMAIN_REPLAY_BUFFERED_WRITES], []);
+            buffered.get() >= 1.0
+        });
+        RELEASE.store(true, Ordering::SeqCst);
+    });
+
+    // The keyless full-table cache fills by full replay, which holds at the chunker until the writer
+    // above releases it.
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q FROM SELECT id FROM t"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    writer.await.unwrap();
+
+    let mut view = g.view("q").await.unwrap().into_reader_handle().unwrap();
+    // The migrated cache must contain the racing write, not just the snapshot rows.
+    eventually!(attempts: 200, sleep: Duration::from_millis(25), {
+        view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec()
+            .contains(&vec![DfValue::from(10)])
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// REA-6688 follow-up: the replay-start barrier must not disable a union's deduplication. `a OR a`
+/// lowers to a deduplicating (bag) union across two branches that match the same rows, so each row
+/// must appear once. When the cache fills by a full-replay reader migration, one barrier crosses
+/// the union per branch; if a barrier is folded into the union's dedup accounting it consumes the
+/// shared state before any data arrives, and every overlapping row is then emitted twice.
+#[tokio::test(flavor = "multi_thread")]
+async fn overlapping_or_not_doubled_after_reader_migration() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("overlapping_or_not_doubled").await;
+
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(vec!["CREATE TABLE t (id int)"], Dialect::DEFAULT_MYSQL)
+                .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+    let mut mutt = g.table("t").await.unwrap();
+    mutt.insert_many((0..10i32).map(|id| vec![DfValue::from(id)]))
+        .await
+        .unwrap();
+    // Let the rows settle into the base materialization so the cache fills by full replay.
+    sleep().await;
+
+    // Both branches of the OR match every non-null row; a deduplicating union must still yield each
+    // row once. Filling by full replay routes a per-branch barrier through that union.
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q FROM SELECT id FROM t WHERE (id IS NOT NULL) OR (id IS NOT NULL)"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let mut view = g.view("q").await.unwrap().into_reader_handle().unwrap();
+    eventually!(attempts: 200, sleep: Duration::from_millis(25), {
+        view.lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec()
+            .len()
+            >= 10
+    });
+    let rows = view
+        .lookup(&[0.into()], Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec();
+    assert_eq!(
+        rows.len(),
+        10,
+        "overlapping-OR cache doubled rows through the full-replay reader migration (REA-6688)"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates() {
     let r_txt = vec!["CREATE TABLE b (a text, c text, x text);\n"];

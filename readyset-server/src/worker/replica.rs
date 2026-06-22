@@ -54,6 +54,16 @@ fn next_token() -> u64 {
     NEXT_TOKEN.fetch_add(1, atomic::Ordering::Relaxed)
 }
 
+/// Whether a *failed* domain request should bring the whole domain down -- propagated as an error
+/// out of the replica loop, which exits the domain so the controller rebuilds it -- rather than
+/// only being reported back to the controller. `StartReplay` qualifies: a replay that fails to
+/// start can leave a detached chunker thread we can't cancel (REA-6688), and only tearing the
+/// domain down also tears that down, preventing a half-finished replay from completing behind the
+/// controller's back. Every other request reports its error and the domain keeps running.
+fn domain_request_is_fatal_on_error(req: &DomainRequest) -> bool {
+    matches!(req, DomainRequest::StartReplay { .. })
+}
+
 /// A domain request wrapped together with the sender to which to send the processing result
 pub struct WrappedDomainRequest {
     pub req: DomainRequest,
@@ -377,14 +387,18 @@ impl Replica {
     ) -> Option<ReadySetResult<()>> {
         match req {
             Some(req) => {
-                if req
-                    .done_tx
-                    .send(domain.domain_request(req.req, out))
-                    .is_err()
-                {
+                let fatal_on_error = domain_request_is_fatal_on_error(&req.req);
+                let res = domain.domain_request(req.req, out);
+                // Report the error to the controller as usual, then, for a fatal request, propagate
+                // it to end the replica loop and bring the domain down.
+                let fatal = res.as_ref().err().filter(|_| fatal_on_error).cloned();
+                if req.done_tx.send(res).is_err() {
                     warn!("domain request sender hung up");
                 }
-                Some(Ok(()))
+                match fatal {
+                    Some(error) => Some(Err(error)),
+                    None => Some(Ok(())),
+                }
             }
             None => {
                 warn!("domain request stream ended");
@@ -616,5 +630,29 @@ impl Replica {
     pub async fn run(self) -> ReadySetResult<()> {
         let span = self.span();
         self.run_inner().instrument(span).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use common::Tag;
+    use readyset_client::internal::LocalNodeIndex;
+
+    use super::*;
+
+    #[test]
+    fn only_start_replay_failure_brings_down_the_domain() {
+        let start_replay = DomainRequest::StartReplay {
+            tag: Tag::new(0),
+            from: LocalNodeIndex::make(0),
+            targeting_domain: DomainIndex::new(0),
+        };
+        assert!(domain_request_is_fatal_on_error(&start_replay));
+
+        // A failed QueryReplayDone is reported to the controller; the domain keeps running.
+        let other = DomainRequest::QueryReplayDone {
+            node: LocalNodeIndex::make(0),
+        };
+        assert!(!domain_request_is_fatal_on_error(&other));
     }
 }
