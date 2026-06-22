@@ -39,6 +39,10 @@ pub enum SqlQuery {
     Use(UseStatement),
     Show(ShowStatement),
     Explain(ExplainStatement),
+    // Postgres-only and not round-trippable through both dialects, so excluded from proptest
+    // generation; mirrors the other `#[weight(0)]` variants here.
+    #[weight(0)]
+    Discard(DiscardStatement),
     // Unfortunately, weight(0) is a special case that removes this option from the generated
     // `prop_oneof!`, but actually having a weight of 0 is not supported. If that worked, we could
     // generate this only for PostgreSQL like so:
@@ -92,6 +96,7 @@ impl DialectDisplay for SqlQuery {
             Self::Use(use_db) => write!(f, "{use_db}"),
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
             Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
+            Self::Discard(discard) => write!(f, "{discard}"),
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
@@ -246,6 +251,40 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             RenameTable(rename) => Ok(Self::RenameTable(RenameTableStatement {
                 ops: rename.try_into_dialect(dialect)?,
             })),
+            Discard { object_type } => Ok(Self::Discard(DiscardStatement {
+                object_type: object_type.try_into()?,
+            })),
+            // `RESET ALL` resets all run-time parameters; PG documents it as a
+            // strict subset of `DISCARD ALL`. Readyset observes it only to reset
+            // mirrored session state and proxies the original text upstream
+            // verbatim, so model it as the session reset it triggers.
+            Reset(sqlparser::ast::ResetStatement {
+                reset: sqlparser::ast::Reset::ALL,
+            }) => Ok(Self::Discard(DiscardStatement {
+                object_type: DiscardObject::All,
+            })),
+            // `RESET <name>` is `SET <name> TO DEFAULT` in Postgres; model it as
+            // such so the session mirror resets the parameter (the role or a
+            // policy-keyed GUC) through the same path as an explicit
+            // `SET ... = DEFAULT`. The dotted parameter name is rejoined so a
+            // namespaced GUC like `request.jwt.claims` keys against the same
+            // name the `set_config` path stores.
+            Reset(sqlparser::ast::ResetStatement {
+                reset: sqlparser::ast::Reset::ConfigurationParameter(name),
+            }) => {
+                let name = name
+                    .0
+                    .iter()
+                    .filter_map(|part| part.as_ident().map(|ident| ident.value.as_str()))
+                    .join(".");
+                Ok(Self::Set(SetStatement::PostgresParameter(
+                    SetPostgresParameter {
+                        scope: Some(PostgresParameterScope::Session),
+                        name: name.into(),
+                        value: SetPostgresParameterValue::Default,
+                    },
+                )))
+            }
             _ => not_yet_implemented!("other query: {value:?}"),
         }
     }
@@ -312,6 +351,7 @@ impl SqlQuery {
             Self::Use(_) => "USE",
             Self::Show(_) => "SHOW",
             Self::Explain(_) => "EXPLAIN",
+            Self::Discard(_) => "DISCARD",
             Self::Comment(_) => "COMMENT",
             Self::Deallocate(_) => "DEALLOCATE",
             Self::Truncate(_) => "TRUNCATE",
@@ -372,6 +412,7 @@ impl SqlQuery {
             | Self::Set(_)
             | Self::Show(_)
             | Self::Explain(_)
+            | Self::Discard(_)
             | Self::Comment(_)
             | Self::Use(_)
             | Self::Deallocate(_)
@@ -449,6 +490,7 @@ impl SqlQuery {
             | SqlQuery::RenameTable(_)
             | SqlQuery::Use(_)
             | SqlQuery::Truncate(_)
+            | SqlQuery::Discard(_)
             | SqlQuery::Comment(_) => false,
         }
     }

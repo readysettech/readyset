@@ -6049,6 +6049,7 @@ where
                     SqlQuery::Set(_)
                     | SqlQuery::CompoundSelect(_)
                     | SqlQuery::Show(_)
+                    | SqlQuery::Discard(_)
                     | SqlQuery::Comment(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream

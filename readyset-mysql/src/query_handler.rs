@@ -1022,7 +1022,7 @@ impl QueryHandler for MySqlQueryHandler {
                     .set_results_encoding(encoding)
                     .unsupported(names.collation.is_some());
             }
-            SetStatement::PostgresParameter(_) => {
+            SetStatement::PostgresParameter(_) | SetStatement::SessionAuthorization(_) => {
                 behavior = behavior.unsupported(true);
             }
         }

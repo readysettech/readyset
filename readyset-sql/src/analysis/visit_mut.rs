@@ -1414,6 +1414,7 @@ pub fn walk_set_statement<'a, V: VisitorMut<'a>>(
         SetStatement::PostgresParameter(set_postgres_parameter) => {
             visitor.visit_set_postgres_parameter(set_postgres_parameter)
         }
+        SetStatement::SessionAuthorization(_) => Ok(()),
     }
 }
 
@@ -1525,9 +1526,10 @@ pub fn walk_sql_query<'a, V: VisitorMut<'a>>(
         SqlQuery::CreateDatabase(statement) => visitor.visit_create_database_statement(statement),
         SqlQuery::CreateRls(statement) => visitor.visit_create_rls_statement(statement),
         SqlQuery::DropRls(statement) => visitor.visit_drop_rls_statement(statement),
-        SqlQuery::CreateMcpToken(_) | SqlQuery::DropMcpToken(_) | SqlQuery::AlterMcpToken(_) => {
-            Ok(())
-        }
+        SqlQuery::CreateMcpToken(_)
+        | SqlQuery::DropMcpToken(_)
+        | SqlQuery::AlterMcpToken(_)
+        | SqlQuery::Discard(_) => Ok(()),
     }
 }
 

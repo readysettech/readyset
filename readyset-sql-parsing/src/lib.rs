@@ -9,9 +9,9 @@ use readyset_sql::ast::{
     CacheType, ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions,
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
     EvictionPolicy, Expr, FlushAllShallowCachesStatement, FlushCacheStatement,
-    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SetEviction,
-    SetReplicationPositionStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery, SqlQuery,
-    SqlType, TableKey, TrxCachePolicy,
+    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue,
+    SetEviction, SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
+    ShallowCacheAllowedFunctions, ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -1669,9 +1669,73 @@ fn parse_readyset_query(
         parse_show(parser, dialect)
     } else if parser.parse_keyword(Keyword::FLUSH) {
         parse_flush(parser, dialect)
+    } else if let Some(query) = parse_reset_session_authorization(parser)? {
+        // `RESET SESSION AUTHORIZATION` is not handled by the upstream `parse_statement`, so we
+        // intercept it here and model it as the `DEFAULT` authorization.
+        Ok(query)
+    } else if let Some(query) = parse_set_local_session_authorization(parser, dialect)? {
+        // `SET LOCAL SESSION AUTHORIZATION ...` requires two scope keywords, which the upstream
+        // `parse_set` does not accept; the bare `SET SESSION AUTHORIZATION ...` form is handled
+        // natively and flows through `parse_statement` below.
+        Ok(query)
     } else {
         Ok(parser.parse_statement()?.try_into_dialect(dialect)?)
     }
+}
+
+/// Parse `RESET SESSION AUTHORIZATION`, modeling it as `SET SESSION AUTHORIZATION DEFAULT`.
+///
+/// Returns `None` (without consuming tokens) when the input is not this statement, so other
+/// `RESET` forms fall through to the default parser.
+fn parse_reset_session_authorization(
+    parser: &mut Parser,
+) -> Result<Option<SqlQuery>, ReadysetParsingError> {
+    let parsed = parser.maybe_parse(|parser| {
+        if parser.parse_keywords(&[Keyword::RESET, Keyword::SESSION, Keyword::AUTHORIZATION]) {
+            Ok(true)
+        } else {
+            parser.expected("RESET SESSION AUTHORIZATION", parser.peek_token())
+        }
+    })?;
+    Ok(parsed.map(|_| {
+        SqlQuery::Set(SetStatement::SessionAuthorization(
+            SetSessionAuthorization {
+                local: false,
+                value: SessionAuthorizationValue::Default,
+            },
+        ))
+    }))
+}
+
+/// Parse `SET LOCAL SESSION AUTHORIZATION { user | DEFAULT }`.
+///
+/// Returns `None` (without consuming tokens) when the input is not this statement, so other `SET`
+/// forms fall through to the default parser.
+fn parse_set_local_session_authorization(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<Option<SqlQuery>, ReadysetParsingError> {
+    let value = parser.maybe_parse(|parser| {
+        if !parser.parse_keywords(&[
+            Keyword::SET,
+            Keyword::LOCAL,
+            Keyword::SESSION,
+            Keyword::AUTHORIZATION,
+        ]) {
+            return parser.expected("SET LOCAL SESSION AUTHORIZATION", parser.peek_token());
+        }
+        if parser.parse_keyword(Keyword::DEFAULT) {
+            Ok(SessionAuthorizationValue::Default)
+        } else {
+            let ident = parser.parse_identifier()?;
+            Ok(SessionAuthorizationValue::User(ident.into_dialect(dialect)))
+        }
+    })?;
+    Ok(value.map(|value| {
+        SqlQuery::Set(SetStatement::SessionAuthorization(
+            SetSessionAuthorization { local: true, value },
+        ))
+    }))
 }
 
 fn parse_readyset_expr(
@@ -2147,7 +2211,7 @@ export_parser!(
 mod tests {
     use super::*;
     use readyset_sql::ast::SqlQuery;
-    use readyset_sql::{Dialect, TryFromDialect};
+    use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 
     /// Converting the sqlparser AST from a shallow parse must produce the same Readyset AST as
     /// a sqlparser-only full parse of the query text; the adapter relies on this to skip the
@@ -2170,6 +2234,214 @@ mod tests {
                 assert_eq!(converted, parsed, "{dialect} {query}");
             }
         }
+    }
+
+    fn parse_pg_sqlparser(input: &str) -> SqlQuery {
+        parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, input)
+            .unwrap_or_else(|e| panic!("failed to parse {input:?}: {e}"))
+    }
+
+    fn assert_pg_round_trip(input: &str, expected: &str) {
+        let query = parse_pg_sqlparser(input);
+        assert_eq!(
+            query.display(Dialect::PostgreSQL).to_string(),
+            expected,
+            "round-trip mismatch for {input:?}",
+        );
+    }
+
+    #[test]
+    fn discard_statements_round_trip() {
+        use readyset_sql::ast::{DiscardObject, DiscardStatement};
+
+        for (input, object_type) in [
+            ("DISCARD ALL", DiscardObject::All),
+            ("DISCARD PLANS", DiscardObject::Plans),
+            ("DISCARD SEQUENCES", DiscardObject::Sequences),
+            ("DISCARD TEMPORARY", DiscardObject::Temporary),
+        ] {
+            let query = parse_pg_sqlparser(input);
+            assert_eq!(query, SqlQuery::Discard(DiscardStatement { object_type }));
+            assert_eq!(query.display(Dialect::PostgreSQL).to_string(), input);
+        }
+    }
+
+    #[test]
+    fn reset_all_models_as_full_discard() {
+        use readyset_sql::ast::{DiscardObject, DiscardStatement};
+
+        // `RESET ALL` is modeled as the session reset it triggers so the
+        // adapter mirrors it the same way as `DISCARD ALL`; the original text
+        // is still proxied upstream verbatim.
+        let query = parse_pg_sqlparser("RESET ALL");
+        assert_eq!(
+            query,
+            SqlQuery::Discard(DiscardStatement {
+                object_type: DiscardObject::All
+            })
+        );
+    }
+
+    #[test]
+    fn reset_parameter_models_as_set_default() {
+        use readyset_sql::ast::{
+            PostgresParameterScope, SetPostgresParameter, SetPostgresParameterValue,
+        };
+
+        // `RESET <name>` is `SET <name> TO DEFAULT`; model it so the adapter
+        // resets the mirrored parameter. A namespaced GUC keeps its dotted
+        // name so it keys against the `set_config` form.
+        for (input, expected_name) in [
+            ("RESET role", "role"),
+            ("RESET app.tenant_id", "app.tenant_id"),
+            ("RESET request.jwt.claims", "request.jwt.claims"),
+        ] {
+            let query = parse_pg_sqlparser(input);
+            assert_eq!(
+                query,
+                SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter {
+                    scope: Some(PostgresParameterScope::Session),
+                    name: expected_name.into(),
+                    value: SetPostgresParameterValue::Default,
+                })),
+                "unexpected parse for {input:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn set_namespaced_guc_rejoins_dotted_name() {
+        use readyset_sql::ast::{SetPostgresParameter, SetPostgresParameterValue};
+
+        // Namespaced GUCs (`request.jwt.claims`, `app.tenant_id`) must parse so
+        // a psql / simple-protocol `SET` mirrors into the session the same way
+        // `set_config('<name>', ...)` does. A plain `SET` carries no scope
+        // keyword, so `scope` is `None` (session scope by default).
+        for (input, expected_name) in [
+            (
+                "SET request.jwt.claims = '{\"sub\":\"bob\"}'",
+                "request.jwt.claims",
+            ),
+            ("SET app.tenant_id = 'bob'", "app.tenant_id"),
+        ] {
+            let query = parse_pg_sqlparser(input);
+            let SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter {
+                scope,
+                name,
+                value,
+            })) = query
+            else {
+                panic!("expected PostgresParameter for {input:?}, got {query:?}");
+            };
+            assert_eq!(name.as_str(), expected_name, "name for {input:?}");
+            assert_eq!(scope, None, "scope for {input:?}");
+            assert!(matches!(value, SetPostgresParameterValue::Value(_)));
+        }
+    }
+
+    #[test]
+    fn set_role_keyword_maps_to_role_parameter() {
+        use readyset_sql::ast::{
+            PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner,
+            SetPostgresParameter, SetPostgresParameterValue,
+        };
+
+        // `SET [SESSION|LOCAL] ROLE <name>` is modeled as the `role` GUC so the
+        // session mirror resolves the effective role + bypass; `SET ROLE NONE`
+        // resets it to the startup role (`role = DEFAULT`).
+        let query = parse_pg_sqlparser("SET ROLE authenticated");
+        assert_eq!(
+            query,
+            SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter {
+                scope: None,
+                name: "role".into(),
+                value: SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                    PostgresParameterValueInner::Identifier("authenticated".into())
+                )),
+            }))
+        );
+
+        let session = parse_pg_sqlparser("SET SESSION ROLE authenticated");
+        let SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter { scope, .. })) =
+            session
+        else {
+            panic!("expected role parameter for SET SESSION ROLE");
+        };
+        assert_eq!(scope, Some(PostgresParameterScope::Session));
+
+        let none = parse_pg_sqlparser("SET ROLE NONE");
+        assert_eq!(
+            none,
+            SqlQuery::Set(SetStatement::PostgresParameter(SetPostgresParameter {
+                scope: None,
+                name: "role".into(),
+                value: SetPostgresParameterValue::Default,
+            }))
+        );
+    }
+
+    #[test]
+    fn set_session_authorization_round_trips() {
+        let query = parse_pg_sqlparser("SET SESSION AUTHORIZATION alice");
+        assert_eq!(
+            query,
+            SqlQuery::Set(SetStatement::SessionAuthorization(
+                SetSessionAuthorization {
+                    local: false,
+                    value: SessionAuthorizationValue::User("alice".into()),
+                }
+            ))
+        );
+        assert_pg_round_trip(
+            "SET SESSION AUTHORIZATION alice",
+            "SET SESSION AUTHORIZATION alice",
+        );
+        assert_pg_round_trip(
+            "SET SESSION AUTHORIZATION DEFAULT",
+            "SET SESSION AUTHORIZATION DEFAULT",
+        );
+    }
+
+    #[test]
+    fn set_local_session_authorization_round_trips() {
+        let query = parse_pg_sqlparser("SET LOCAL SESSION AUTHORIZATION DEFAULT");
+        assert_eq!(
+            query,
+            SqlQuery::Set(SetStatement::SessionAuthorization(
+                SetSessionAuthorization {
+                    local: true,
+                    value: SessionAuthorizationValue::Default,
+                }
+            ))
+        );
+        assert_pg_round_trip(
+            "SET LOCAL SESSION AUTHORIZATION DEFAULT",
+            "SET LOCAL SESSION AUTHORIZATION DEFAULT",
+        );
+        assert_pg_round_trip(
+            "SET LOCAL SESSION AUTHORIZATION bob",
+            "SET LOCAL SESSION AUTHORIZATION bob",
+        );
+    }
+
+    #[test]
+    fn reset_session_authorization_maps_to_default() {
+        let query = parse_pg_sqlparser("RESET SESSION AUTHORIZATION");
+        assert_eq!(
+            query,
+            SqlQuery::Set(SetStatement::SessionAuthorization(
+                SetSessionAuthorization {
+                    local: false,
+                    value: SessionAuthorizationValue::Default,
+                }
+            ))
+        );
+        // `RESET SESSION AUTHORIZATION` is modeled as the `DEFAULT` authorization, so it
+        // round-trips through the canonical `SET SESSION AUTHORIZATION DEFAULT` rendering.
+        assert_eq!(
+            query.display(Dialect::PostgreSQL).to_string(),
+            "SET SESSION AUTHORIZATION DEFAULT",
+        );
     }
 
     #[test]

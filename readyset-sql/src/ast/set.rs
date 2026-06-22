@@ -18,6 +18,11 @@ pub enum SetStatement {
     Variable(SetVariables),
     Names(SetNames),
     PostgresParameter(SetPostgresParameter),
+    // `SET SESSION AUTHORIZATION` is Postgres-only and not round-trippable through both dialects,
+    // so it is excluded from proptest generation, mirroring the `#[weight(0)]` variants on
+    // `SqlQuery`.
+    #[weight(0)]
+    SessionAuthorization(SetSessionAuthorization),
 }
 
 impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
@@ -35,18 +40,22 @@ impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
             } => match dialect {
                 Dialect::PostgreSQL => {
                     let scope = scope.map(TryInto::try_into).transpose()?;
-                    let variable = variable
+                    // Postgres GUC names can be namespaced (`request.jwt.claims`,
+                    // `app.tenant_id`). sqlparser yields one ObjectName part per
+                    // dotted segment; rejoin them into a single identifier so the
+                    // session mirror keys on the same `schema.name` string the
+                    // `set_config` path records.
+                    let parts = variable
                         .0
                         .into_iter()
-                        .exactly_one()
-                        .map_err(|_| {
-                            not_yet_implemented_err!("SET with namespaced Postgres parameter names")
-                        })?
-                        .try_into_dialect(dialect)?;
+                        .map(|part| part.try_into_dialect(dialect))
+                        .collect::<Result<Vec<SqlIdentifier>, _>>()?;
+                    let name: SqlIdentifier =
+                        parts.iter().map(SqlIdentifier::as_str).join(".").into();
                     let value = values.try_into_dialect(dialect)?;
                     Ok(Self::PostgresParameter(SetPostgresParameter {
                         scope,
-                        name: variable,
+                        name,
                         value,
                     }))
                 }
@@ -92,6 +101,32 @@ impl TryFromDialect<sqlparser::ast::Set> for SetStatement {
                 charset: "default".to_string(),
                 collation: None,
             })),
+            Set::SetSessionAuthorization(param) => {
+                Ok(Self::SessionAuthorization(param.try_into_dialect(dialect)?))
+            }
+            // `SET [SESSION|LOCAL] ROLE <name>` is Postgres's keyword form for
+            // the `role` GUC. Model it as the equivalent `SET role = <name>`
+            // parameter so it flows through the same session mirror
+            // (`apply_set_statement` resolves `role` + bypass) and proxies
+            // upstream verbatim. `SET ROLE NONE` (no name) resets to the
+            // session's startup role, i.e. `role = DEFAULT`.
+            Set::SetRole {
+                context_modifier,
+                role_name,
+            } => {
+                let scope = context_modifier.map(TryInto::try_into).transpose()?;
+                let value = match role_name {
+                    Some(role) => SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                        PostgresParameterValueInner::Identifier(role.value.into()),
+                    )),
+                    None => SetPostgresParameterValue::Default,
+                };
+                Ok(Self::PostgresParameter(SetPostgresParameter {
+                    scope,
+                    name: "role".into(),
+                    value,
+                }))
+            }
             set => unsupported!("SET statement kind: {set}"),
         }
     }
@@ -105,6 +140,7 @@ impl DialectDisplay for SetStatement {
                 Self::Variable(set) => write!(f, "{}", set.display(dialect)),
                 Self::Names(set) => write!(f, "{set}"),
                 Self::PostgresParameter(set) => write!(f, "{}", set.display(dialect)),
+                Self::SessionAuthorization(set) => write!(f, "{set}"),
             }
         })
     }
@@ -113,7 +149,9 @@ impl DialectDisplay for SetStatement {
 impl SetStatement {
     pub fn variables(&self) -> Option<&[(Variable, Expr)]> {
         match self {
-            SetStatement::Names(_) | SetStatement::PostgresParameter { .. } => None,
+            SetStatement::Names(_)
+            | SetStatement::PostgresParameter { .. }
+            | SetStatement::SessionAuthorization(_) => None,
             SetStatement::Variable(set) => Some(&set.variables),
         }
     }
@@ -521,5 +559,61 @@ impl DialectDisplay for SetPostgresParameter {
             }
             write!(f, "{} = {}", self.name, self.value.display(dialect))
         })
+    }
+}
+
+/// The target authorization of a `SET [LOCAL] SESSION AUTHORIZATION` statement. `RESET SESSION
+/// AUTHORIZATION` is modeled as the [`SessionAuthorizationValue::Default`] case.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum SessionAuthorizationValue {
+    Default,
+    User(SqlIdentifier),
+}
+
+impl fmt::Display for SessionAuthorizationValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SessionAuthorizationValue::Default => write!(f, "DEFAULT"),
+            SessionAuthorizationValue::User(user) => write!(f, "{user}"),
+        }
+    }
+}
+
+/// A Postgres `SET [LOCAL] SESSION AUTHORIZATION { user | DEFAULT }` statement.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct SetSessionAuthorization {
+    pub local: bool,
+    pub value: SessionAuthorizationValue,
+}
+
+impl TryFromDialect<sqlparser::ast::SetSessionAuthorizationParam> for SetSessionAuthorization {
+    fn try_from_dialect(
+        value: sqlparser::ast::SetSessionAuthorizationParam,
+        dialect: Dialect,
+    ) -> Result<Self, AstConversionError> {
+        use sqlparser::ast::{ContextModifier, SetSessionAuthorizationParamKind};
+        let local = match value.scope {
+            ContextModifier::Local => true,
+            ContextModifier::Session => false,
+            ContextModifier::Global => {
+                unsupported!("SET GLOBAL SESSION AUTHORIZATION is not supported")?
+            }
+        };
+        let auth = match value.kind {
+            SetSessionAuthorizationParamKind::Default => SessionAuthorizationValue::Default,
+            SetSessionAuthorizationParamKind::User(ident) => {
+                SessionAuthorizationValue::User(ident.into_dialect(dialect))
+            }
+        };
+        Ok(Self { local, value: auth })
+    }
+}
+
+impl fmt::Display for SetSessionAuthorization {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.local {
+            write!(f, "LOCAL ")?;
+        }
+        write!(f, "SESSION AUTHORIZATION {}", self.value)
     }
 }
