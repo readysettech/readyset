@@ -10,6 +10,7 @@ async-trait = { workspace = true }
 datafusion = { workspace = true }
 futures = { workspace = true }
 linkme = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 tokio-postgres = { workspace = true }

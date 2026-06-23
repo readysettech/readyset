@@ -464,9 +464,12 @@ where
     miss_counter: Counter,
     refresh_changed_counter: Counter,
     refresh_unchanged_counter: Counter,
-    coalesce_wait_histogram: Histogram,
-    coalesce_resolved_counter: Counter,
+    coalesce_counter: Counter,
     coalesce_timeout_counter: Counter,
+    coalesce_abort_counter: Counter,
+    coalesce_wait: Histogram,
+    coalesce_timeout_wait: Histogram,
+    coalesce_abort_wait: Histogram,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -539,12 +542,18 @@ where
             .then(|| gauge!(metric::SHALLOW_SCHEDULER_QUEUE_DEPTH, "query_id" => label.clone()));
         let refresh_unchanged_counter =
             counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label.clone());
-        let coalesce_wait_histogram =
-            histogram!(metric::SHALLOW_COALESCE_WAIT_TIME, "query_id" => label.clone());
-        let coalesce_resolved_counter =
-            counter!(metric::SHALLOW_COALESCE_RESOLVED, "query_id" => label.clone());
+        let coalesce_counter =
+            counter!(metric::SHALLOW_COALESCE_SUCCESS, "query_id" => label.clone());
         let coalesce_timeout_counter =
-            counter!(metric::SHALLOW_COALESCE_TIMEOUT, "query_id" => label);
+            counter!(metric::SHALLOW_COALESCE_TIMEOUT, "query_id" => label.clone());
+        let coalesce_abort_counter =
+            counter!(metric::SHALLOW_COALESCE_ABORT, "query_id" => label.clone());
+        let coalesce_wait =
+            histogram!(metric::SHALLOW_COALESCE_SUCCESS_WAIT, "query_id" => label.clone());
+        let coalesce_timeout_wait =
+            histogram!(metric::SHALLOW_COALESCE_TIMEOUT_WAIT, "query_id" => label.clone());
+        let coalesce_abort_wait =
+            histogram!(metric::SHALLOW_COALESCE_ABORT_WAIT, "query_id" => label);
 
         let cache = Arc::new(Self {
             id,
@@ -571,9 +580,12 @@ where
             miss_counter,
             refresh_changed_counter,
             refresh_unchanged_counter,
-            coalesce_wait_histogram,
-            coalesce_resolved_counter,
+            coalesce_counter,
             coalesce_timeout_counter,
+            coalesce_abort_counter,
+            coalesce_wait,
+            coalesce_timeout_wait,
+            coalesce_abort_wait,
         });
 
         if let Some(scheduler) = scheduler {
@@ -963,26 +975,17 @@ where
         Lookup::Hit(res, refresh)
     }
 
-    /// Wait the allowed duration while for a stub entry for this key to populate.
-    ///
-    /// Returns immediately if the key is already populated or if the producer of a stub entry
-    /// already dropped.
-    async fn coalesce(&self, k: &(u64, K), wait: Duration) {
-        let Some(entry) = self.inner.get(k).await else {
-            return;
-        };
+    /// Wait up to `wait` for an in-flight load of this key to resolve, returning how long we
+    /// actually blocked.  Returns `None` without blocking when there is no in-flight load to
+    /// coalesce with: the key is already populated, or absent entirely.
+    async fn coalesce(&self, k: &(u64, K), wait: Duration) -> Option<Duration> {
+        let entry = self.inner.get(k).await?;
         let CacheEntry::Loading(stub) = &*entry else {
-            return;
+            return None;
         };
         let start = Instant::now();
-        let result = timeout(wait, stub.done.clone().changed()).await;
-        self.coalesce_wait_histogram
-            .record(start.elapsed().as_micros() as f64);
-        // A dropped producer counts as resolved: the wait ended before the deadline.
-        match result {
-            Ok(_) => self.coalesce_resolved_counter.increment(1),
-            Err(_) => self.coalesce_timeout_counter.increment(1),
-        }
+        let _ = timeout(wait, stub.done.clone().changed()).await;
+        Some(start.elapsed())
     }
 
     /// Create an insert guard and associated cache stub.
@@ -996,21 +999,37 @@ where
     pub(crate) async fn get_on_miss(self: &Arc<Self>, k: K) -> Lookup<K, V> {
         let mk = (self.id, k.clone());
 
-        if let Some(coalesce_ms) = self.coalesce_ms {
-            self.coalesce(&mk, Duration::from_millis(coalesce_ms)).await;
-        }
+        let coalescing = self.coalesce_ms.is_some();
+        let waited = match self.coalesce_ms {
+            Some(coalesce_ms) => self.coalesce(&mk, Duration::from_millis(coalesce_ms)).await,
+            None => None,
+        };
 
         let mut lookup = None;
         self.inner
             .entry(mk)
             .and_compute_with(|e| {
                 let op = match e.as_ref().map(|e| &**e.value()) {
+                    // Another request's fill populated the entry since our miss.
                     Some(CacheEntry::Present(values)) => {
+                        if coalescing {
+                            self.increment_coalesce();
+                            if let Some(waited) = waited {
+                                self.record_coalesce_wait(waited);
+                            }
+                        }
                         lookup = Some(self.hit(values));
                         Op::Nop
                     }
-                    // There's still an active stub here, but we aren't waiting anymore.
+                    // Another request's fill is still in flight; leave its stub in place and load
+                    // ourselves.
                     Some(CacheEntry::Loading(stub)) if stub.done.has_changed().is_ok() => {
+                        if coalescing {
+                            self.increment_coalesce_timeout();
+                            if let Some(waited) = waited {
+                                self.record_coalesce_timeout_wait(waited);
+                            }
+                        }
                         lookup = Some(Lookup::Miss(Self::make_guard(
                             Arc::clone(self),
                             k.clone(),
@@ -1019,8 +1038,21 @@ where
                         )));
                         Op::Nop
                     }
-                    // Found either nothing or an exhausted stub; insert a fresh stub.
-                    None | Some(CacheEntry::Loading(..)) => {
+                    // A fill died without populating its stub; replace the stub and load
+                    // ourselves.
+                    Some(CacheEntry::Loading(..)) => {
+                        if coalescing {
+                            self.increment_coalesce_abort();
+                            if let Some(waited) = waited {
+                                self.record_coalesce_abort_wait(waited);
+                            }
+                        }
+                        let (stub, guard) = self.start_fill(k.clone());
+                        lookup = Some(Lookup::Miss(guard));
+                        Op::Put(stub)
+                    }
+                    // No entry at all; start a fresh load.
+                    None => {
                         let (stub, guard) = self.start_fill(k.clone());
                         lookup = Some(Lookup::Miss(guard));
                         Op::Put(stub)
@@ -1098,6 +1130,30 @@ where
 
     pub(crate) fn increment_miss(&self) {
         self.miss_counter.increment(1);
+    }
+
+    pub(crate) fn increment_coalesce(&self) {
+        self.coalesce_counter.increment(1);
+    }
+
+    pub(crate) fn increment_coalesce_timeout(&self) {
+        self.coalesce_timeout_counter.increment(1);
+    }
+
+    pub(crate) fn increment_coalesce_abort(&self) {
+        self.coalesce_abort_counter.increment(1);
+    }
+
+    pub(crate) fn record_coalesce_wait(&self, waited: Duration) {
+        self.coalesce_wait.record(waited.as_micros() as f64);
+    }
+
+    pub(crate) fn record_coalesce_timeout_wait(&self, waited: Duration) {
+        self.coalesce_timeout_wait.record(waited.as_micros() as f64);
+    }
+
+    pub(crate) fn record_coalesce_abort_wait(&self, waited: Duration) {
+        self.coalesce_abort_wait.record(waited.as_micros() as f64);
     }
 }
 

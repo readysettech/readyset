@@ -1,5 +1,6 @@
 use std::hash::Hash;
 
+use metrics_exporter_prometheus::Distribution;
 use readyset_client::query::QueryId;
 use readyset_data::DfType;
 use readyset_metrics::metrics_handle;
@@ -46,13 +47,14 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("misses", DfType::UnsignedBigInt),
     ("refreshes", DfType::UnsignedBigInt),
     ("wasted_refreshes", DfType::UnsignedBigInt),
+    ("coalesces", DfType::UnsignedBigInt),
 ];
 
 fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
     let dialect = ctx.dialect;
     let caches = ctx.shallow.list_caches(None, None);
     Box::pin(async move {
-        let [hits, misses, refreshes, wasted] = metrics_handle()
+        let [hits, misses, refreshes, wasted, coalesces] = metrics_handle()
             .map(|h| {
                 h.counters_by_label(
                     [
@@ -60,6 +62,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                         metric::SHALLOW_MISS,
                         metric::SHALLOW_REFRESH,
                         metric::SHALLOW_REFRESH_WASTED,
+                        metric::SHALLOW_COALESCE_SUCCESS,
                     ],
                     "query_id",
                     [],
@@ -84,6 +87,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 misses.get(&query_id).into(),
                 refreshes.get(&query_id).into(),
                 wasted.get(&query_id).into(),
+                coalesces.get(&query_id).into(),
             ]
         }));
         Ok(rows)
@@ -118,6 +122,97 @@ bind_vrel!(
     shallow_cache_refresh_stats,
     SHALLOW_CACHE_REFRESH_STATS_SCHEMA,
     shallow_cache_refresh_stats_read
+);
+
+fn summary_stats(dist: &Distribution) -> (u64, u64) {
+    match dist {
+        Distribution::Summary(summary, _quantiles, sum) => (summary.count() as u64, *sum as u64),
+        _ => (0, 0),
+    }
+}
+
+const SHALLOW_CACHE_COALESCE_STATS_SCHEMA: &[(&str, DfType)] = &[
+    ("query_id", DfType::DEFAULT_TEXT),
+    ("coalesce_timeouts", DfType::UnsignedBigInt),
+    ("coalesce_aborts", DfType::UnsignedBigInt),
+    ("total_us", DfType::UnsignedBigInt),
+    ("avg_us", DfType::UnsignedBigInt),
+    ("upstream_saved_total_us", DfType::UnsignedBigInt),
+    ("upstream_saved_avg_us", DfType::UnsignedBigInt),
+    ("timeout_total_us", DfType::UnsignedBigInt),
+    ("timeout_avg_us", DfType::UnsignedBigInt),
+    ("abort_total_us", DfType::UnsignedBigInt),
+    ("abort_avg_us", DfType::UnsignedBigInt),
+];
+
+fn shallow_cache_coalesce_stats_read(ctx: &VrelContext) -> VrelRead {
+    let caches = ctx.shallow.list_caches(None, None);
+    Box::pin(async move {
+        let Some(handle) = metrics_handle() else {
+            return Ok(Box::new(std::iter::empty()) as VrelRows);
+        };
+        let [timeouts, aborts] = handle.counters_by_label(
+            [
+                metric::SHALLOW_COALESCE_TIMEOUT,
+                metric::SHALLOW_COALESCE_ABORT,
+            ],
+            "query_id",
+            [],
+        );
+        let [waits, timeout_waits, abort_waits] = handle.distributions_by_label(
+            [
+                metric::SHALLOW_COALESCE_SUCCESS_WAIT,
+                metric::SHALLOW_COALESCE_TIMEOUT_WAIT,
+                metric::SHALLOW_COALESCE_ABORT_WAIT,
+            ],
+            "query_id",
+            [],
+        );
+        let [upstream_times] = handle.distributions_by_label(
+            [metric::QUERY_LOG_EXECUTION_TIME],
+            "query_id",
+            [("database_type", "upstream")],
+        );
+
+        let avg = |total: u64, count: u64| total.checked_div(count).unwrap_or(0);
+
+        let rows: VrelRows = Box::new(caches.into_iter().map(move |cache| {
+            let query_id = cache.query_id.to_string();
+
+            let (coalesce_count, wait_total_us) = summary_stats(waits.get(&query_id));
+            let (timeout_count, timeout_total_us) = summary_stats(timeout_waits.get(&query_id));
+            let (abort_count, abort_total_us) = summary_stats(abort_waits.get(&query_id));
+            let (upstream_count, upstream_total_us) = summary_stats(upstream_times.get(&query_id));
+
+            let wait_avg_us = avg(wait_total_us, coalesce_count);
+            let avg_upstream_us = avg(upstream_total_us, upstream_count);
+
+            let upstream_saved_total_us = coalesce_count
+                .saturating_mul(avg_upstream_us)
+                .saturating_sub(wait_total_us);
+            let upstream_saved_avg_us = avg_upstream_us.saturating_sub(wait_avg_us);
+
+            vec![
+                query_id.clone().into(),
+                timeouts.get(&query_id).into(),
+                aborts.get(&query_id).into(),
+                wait_total_us.into(),
+                wait_avg_us.into(),
+                upstream_saved_total_us.into(),
+                upstream_saved_avg_us.into(),
+                timeout_total_us.into(),
+                avg(timeout_total_us, timeout_count).into(),
+                abort_total_us.into(),
+                avg(abort_total_us, abort_count).into(),
+            ]
+        }));
+        Ok(rows)
+    })
+}
+bind_vrel!(
+    shallow_cache_coalesce_stats,
+    SHALLOW_CACHE_COALESCE_STATS_SCHEMA,
+    shallow_cache_coalesce_stats_read
 );
 
 const SHALLOW_CACHE_ENTRIES_SCHEMA: &[(&str, DfType)] = &[

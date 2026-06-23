@@ -467,6 +467,363 @@ async fn shallow_cache_millisecond_units() {
     shutdown_tx.shutdown().await;
 }
 
+/// Concurrent identical requests against a slow upstream query should coalesce onto a single
+/// in-flight load. The coalesce count surfaces in `shallow_caches` (`coalesces`), and the
+/// timeout/abort counts, wait times, and an estimated savings in `shallow_cache_coalesce_stats`.
+#[test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_coalesce_stats() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream
+        .query_drop("CREATE TABLE coalesce_foo (a INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO coalesce_foo VALUES (1)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    // A slow upstream query (SLEEP) under a generous coalesce window, so concurrent identical
+    // requests wait on one in-flight load rather than each hitting upstream.
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY
+               TTL 120 SECONDS
+               REFRESH 60 SECONDS
+               COALESCE 30 SECONDS
+             coalesce_cache FROM SELECT a, SLEEP(3) FROM coalesce_foo WHERE a = ?",
+        )
+        .await
+        .unwrap();
+
+    async fn connect(opts: mysql_async::Opts, db: &str) -> mysql_async::Conn {
+        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+        conn.query_drop(format!("USE {db}")).await.unwrap();
+        conn
+    }
+
+    async fn run_cached_query(mut conn: mysql_async::Conn) {
+        conn.query_drop("SELECT a, SLEEP(3) FROM coalesce_foo WHERE a = 1")
+            .await
+            .unwrap();
+    }
+
+    // Open every connection up front, so the leader's head start below only has to cover query
+    // dispatch rather than connection setup.
+    let leader_conn = connect(readyset_opts.clone(), &test_name).await;
+    let mut follower_conns = Vec::new();
+    for _ in 0..4 {
+        follower_conns.push(connect(readyset_opts.clone(), &test_name).await);
+    }
+
+    // Leader: the first request misses and runs the slow query upstream, holding the loading stub.
+    let leader = tokio::spawn(run_cached_query(leader_conn));
+
+    // Let the leader install the stub before the followers arrive.
+    sleep(Duration::from_secs(1)).await;
+
+    // Followers: arrive mid-flight and coalesce onto the leader's load.
+    let followers: Vec<_> = follower_conns
+        .into_iter()
+        .map(|conn| tokio::spawn(run_cached_query(conn)))
+        .collect();
+
+    leader.await.unwrap();
+    for follower in followers {
+        follower.await.unwrap();
+    }
+
+    // Let the query logger flush the upstream execution time behind the saved estimate.
+    sleep(Duration::from_secs(2)).await;
+
+    let rows: Vec<(u64,)> = readyset
+        .query(
+            "SELECT coalesces \
+             FROM readyset.shallow_caches WHERE name = 'coalesce_cache'",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+    let (coalesces,) = rows[0];
+    assert!(coalesces >= 1, "expected coalesced requests, got {coalesces}");
+
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(u64, u64, u64, u64, u64, u64, u64, u64)> = readyset
+        .query(
+            "SELECT total_us, avg_us, coalesce_timeouts, coalesce_aborts, \
+                    timeout_total_us, abort_total_us, upstream_saved_total_us, \
+                    upstream_saved_avg_us \
+             FROM readyset.shallow_cache_coalesce_stats",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+    let (
+        total_us,
+        avg_us,
+        timeouts,
+        aborts,
+        timeout_total_us,
+        abort_total_us,
+        upstream_saved_total_us,
+        upstream_saved_avg_us,
+    ) = rows[0];
+    assert!(
+        total_us > 0,
+        "expected positive total coalesce wait, got {total_us}"
+    );
+    assert!(avg_us > 0, "expected positive avg coalesce wait, got {avg_us}");
+    assert_eq!(timeouts, 0, "expected no coalesce timeouts, got {timeouts}");
+    assert_eq!(aborts, 0, "expected no coalesce aborts, got {aborts}");
+    assert_eq!(
+        timeout_total_us, 0,
+        "expected no timeout wait, got {timeout_total_us}"
+    );
+    assert_eq!(
+        abort_total_us, 0,
+        "expected no abort wait, got {abort_total_us}"
+    );
+    assert!(
+        upstream_saved_total_us > 0,
+        "expected positive estimated total savings, got {upstream_saved_total_us}"
+    );
+    assert!(
+        upstream_saved_avg_us > 0,
+        "expected positive estimated avg savings, got {upstream_saved_avg_us}"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Concurrent requests against a slow query with a coalesce window shorter than the query: the
+/// followers time out before the leader finishes and go upstream, surfacing in
+/// `shallow_cache_coalesce_stats`.
+#[test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_coalesce_timeout_stats() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream
+        .query_drop("CREATE TABLE coalesce_foo (a INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO coalesce_foo VALUES (1)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    // The coalesce window (1s) is shorter than the query (SLEEP 4), so followers give up waiting on
+    // the leader's in-flight load and run upstream themselves.
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY
+               TTL 120 SECONDS
+               REFRESH 60 SECONDS
+               COALESCE 1 SECONDS
+             coalesce_cache FROM SELECT a, SLEEP(4) FROM coalesce_foo WHERE a = ?",
+        )
+        .await
+        .unwrap();
+
+    async fn connect(opts: mysql_async::Opts, db: &str) -> mysql_async::Conn {
+        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+        conn.query_drop(format!("USE {db}")).await.unwrap();
+        conn
+    }
+
+    async fn run_cached_query(mut conn: mysql_async::Conn) {
+        conn.query_drop("SELECT a, SLEEP(4) FROM coalesce_foo WHERE a = 1")
+            .await
+            .unwrap();
+    }
+
+    // Open every connection up front, so the leader's head start below only has to cover query
+    // dispatch rather than connection setup.
+    let leader_conn = connect(readyset_opts.clone(), &test_name).await;
+    let mut follower_conns = Vec::new();
+    for _ in 0..4 {
+        follower_conns.push(connect(readyset_opts.clone(), &test_name).await);
+    }
+
+    // Leader: misses and holds the loading stub for the length of the slow query.
+    let leader = tokio::spawn(run_cached_query(leader_conn));
+
+    // Let the leader install the stub before the followers arrive.
+    sleep(Duration::from_secs(1)).await;
+
+    // Followers: coalesce onto the leader, then time out after the 1s window with it still loading.
+    let followers: Vec<_> = follower_conns
+        .into_iter()
+        .map(|conn| tokio::spawn(run_cached_query(conn)))
+        .collect();
+
+    leader.await.unwrap();
+    for follower in followers {
+        follower.await.unwrap();
+    }
+
+    let rows: Vec<(u64, u64, u64, u64)> = readyset
+        .query(
+            "SELECT coalesce_timeouts, coalesce_aborts, timeout_total_us, abort_total_us \
+             FROM readyset.shallow_cache_coalesce_stats",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+    let (timeouts, aborts, timeout_total_us, abort_total_us) = rows[0];
+    assert!(timeouts >= 1, "expected coalesce timeouts, got {timeouts}");
+    assert!(
+        timeout_total_us > 0,
+        "expected positive timeout wait, got {timeout_total_us}"
+    );
+    assert_eq!(aborts, 0, "expected no coalesce aborts, got {aborts}");
+    assert_eq!(abort_total_us, 0, "expected no abort wait, got {abort_total_us}");
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A leader whose upstream load fails mid-flight drops the loading stub without a result, so a
+/// follower coalescing on it aborts, surfacing in `shallow_cache_coalesce_stats`.
+#[test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_coalesce_abort_stats() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream
+        .query_drop("CREATE TABLE coalesce_foo (a INT, j TEXT)")
+        .await
+        .unwrap();
+    // The second row's invalid JSON makes the cached query fail upstream, but only after the
+    // per-row SLEEPs (evaluated first in the select list) have held the load in flight long
+    // enough for the follower to coalesce onto it.
+    upstream
+        .query_drop("INSERT INTO coalesce_foo VALUES (1, '{}'), (1, 'not json')")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("DROP ALL SHALLOW CACHES")
+        .await
+        .unwrap();
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE POLICY
+               TTL 120 SECONDS
+               REFRESH 60 SECONDS
+               COALESCE 30 SECONDS
+             coalesce_cache FROM
+               SELECT a, SLEEP(3), JSON_EXTRACT(j, '$.x') FROM coalesce_foo WHERE a = ?",
+        )
+        .await
+        .unwrap();
+
+    async fn connect(opts: mysql_async::Opts, db: &str) -> mysql_async::Conn {
+        let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+        conn.query_drop(format!("USE {db}")).await.unwrap();
+        conn
+    }
+
+    // The query errors on the poisoned row, so both the leader and the follower (which loads
+    // upstream itself after its coalesce aborts) get an error back.
+    async fn run_failing_query(mut conn: mysql_async::Conn) {
+        let result = conn
+            .query_drop("SELECT a, SLEEP(3), JSON_EXTRACT(j, '$.x') FROM coalesce_foo WHERE a = 1")
+            .await;
+        assert!(result.is_err(), "expected the poisoned query to fail");
+    }
+
+    // Open both connections up front, so the leader's head start below only has to cover query
+    // dispatch rather than connection setup.
+    let leader_conn = connect(readyset_opts.clone(), &test_name).await;
+    let follower_conn = connect(readyset_opts.clone(), &test_name).await;
+
+    // Leader: misses and holds the loading stub until the upstream query fails.
+    let leader = tokio::spawn(run_failing_query(leader_conn));
+
+    // Let the leader install the stub before the follower arrives.
+    sleep(Duration::from_secs(1)).await;
+
+    // Follower: coalesces onto the leader's load, then aborts when the failed load drops the stub.
+    let follower = tokio::spawn(run_failing_query(follower_conn));
+
+    leader.await.unwrap();
+    follower.await.unwrap();
+
+    let rows: Vec<(u64, u64)> = readyset
+        .query("SELECT coalesce_aborts, abort_total_us FROM readyset.shallow_cache_coalesce_stats")
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+    let (aborts, abort_total_us) = rows[0];
+    assert!(aborts >= 1, "expected coalesce aborts, got {aborts}");
+    assert!(
+        abort_total_us > 0,
+        "expected positive abort wait, got {abort_total_us}"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 #[test]
 #[tags(serial)]
 #[upstream(mysql)]

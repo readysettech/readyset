@@ -74,28 +74,52 @@ pub const SHALLOW_ADAPTIVE_OVER_CAP: &str = "readyset_shallow.shallow_adaptive_o
 /// | query_id | The query ID for the scheduled cached query. |
 pub const SHALLOW_SCHEDULER_QUEUE_DEPTH: &str = "readyset_shallow.shallow_scheduler_queue_depth";
 
-/// Histogram: The amount of time in microseconds a shallow cache miss spent waiting for an
-/// in-flight fill of the same key. Only recorded when a wait actually occurred.
+/// Counter: Number of coalesces that were successfully served using the results from an already
+/// in-flight fill.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
 /// | query_id | The query ID for the cached query. |
-pub const SHALLOW_COALESCE_WAIT_TIME: &str = "readyset_shallow.shallow_coalesce_wait_time_us";
+pub const SHALLOW_COALESCE_SUCCESS: &str = "readyset_shallow.shallow_coalesce_success";
 
-/// Counter: Number of coalesce waits that ended before the deadline, either because the
-/// in-flight fill completed or because its producer went away.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | query_id | The query ID for the cached query. |
-pub const SHALLOW_COALESCE_RESOLVED: &str = "readyset_shallow.shallow_coalesce_resolved";
-
-/// Counter: Number of coalesce waits that reached the deadline with the fill still in flight.
+/// Counter: Number of coalesce waits that reached the timeout with the fill still in flight.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
 /// | query_id | The query ID for the cached query. |
 pub const SHALLOW_COALESCE_TIMEOUT: &str = "readyset_shallow.shallow_coalesce_timeout";
+
+/// Counter: Number of coalesce waits that ended because the in-flight fill dropped without a
+/// result.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_ABORT: &str = "readyset_shallow.shallow_coalesce_abort";
+
+/// Histogram: The amount of time in microseconds a shallow cache miss spent waiting for a
+/// successful result from an in-flight fill of the same key.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_SUCCESS_WAIT: &str = "readyset_shallow.shallow_coalesce_success_wait_us";
+
+/// Histogram: The amount of time in microseconds a shallow cache miss spent waiting before a
+/// coalesce timed out, and it went upstream.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_TIMEOUT_WAIT: &str = "readyset_shallow.shallow_coalesce_timeout_wait_us";
+
+/// Histogram: The amount of time in microseconds a shallow cache miss spent waiting before a
+/// coalesce aborted for reasons other than timing out, and it went upstream.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_ABORT_WAIT: &str = "readyset_shallow.shallow_coalesce_abort_wait_us";
 
 /// Gauge: Total size in bytes of resident entries (keys plus values) in the entry store shared
 /// by all shallow caches, as tracked by the store's own size accounting.

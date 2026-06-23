@@ -6753,6 +6753,7 @@ dependencies = [
  "futures",
  "linkme",
  "metric",
+ "metrics-exporter-prometheus",
  "mysql-srv",
  "mysql_async",
  "mysql_common",
