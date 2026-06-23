@@ -383,6 +383,13 @@ pub struct Options {
     )]
     shallow_memory_percent: Option<f64>,
 
+    /// Maximum size in bytes of a single shallow cache entry's values. Result sets larger than
+    /// this are served from upstream but not cached.  This parameter is only intended to be
+    /// tuned in the event that cost-aware admission control is insufficient in a pathological
+    /// situation.  (0 = unlimited)
+    #[arg(long, env = "SHALLOW_MAX_ENTRY_BYTES", default_value = "1073741824")]
+    shallow_max_entry_bytes: usize,
+
     /// Specifies how large the pool of shallow cache refresh workers should be.
     ///
     /// These workers are responsible for refreshing shallow caches by running queries on the
@@ -1528,10 +1535,12 @@ where
                     .then_some(memory_limit as u64)
             });
         info!("Total Shallow memory: {:?}", shallow_max_capacity);
+        let shallow_max_entry_bytes =
+            (options.shallow_max_entry_bytes > 0).then_some(options.shallow_max_entry_bytes);
         let shallow = Arc::new(CacheManager::<
             _,
             <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
-        >::new(shallow_max_capacity));
+        >::new(shallow_max_capacity, shallow_max_entry_bytes));
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {

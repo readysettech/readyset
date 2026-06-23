@@ -560,7 +560,7 @@ impl TestBuilder {
             UpstreamConfig::default()
         };
         cdc_upstream_config.replication_heartbeat = self.replication_heartbeat;
-        let shallow = Arc::new(CacheManager::new(None));
+        let shallow = Arc::new(CacheManager::new(None, None));
         let shared_upstream_config = self
             .backend_builder
             .get_upstream_config()

@@ -210,6 +210,7 @@ pub const SHALLOW_HIT: &str = "readyset_shallow.shallow_result_hit";
 pub const SHALLOW_MISS: &str = "readyset_shallow.shallow_result_miss";
 pub const SHALLOW_REFRESH: &str = "readyset_shallow.shallow_result_refresh";
 pub const SHALLOW_EVICT_MEMORY: &str = "readyset_shallow.shallow_evict_memory";
+pub const SHALLOW_SKIP_TOO_LARGE: &str = "readyset_shallow.shallow_skip_too_large";
 pub const SHALLOW_REFRESH_QUEUE_EXCEEDED: &str = "readyset_shallow.shallow_refresh_queue_exceeded";
 
 /// Histogram: The amount of time in microseconds spent executing the upstream query during a

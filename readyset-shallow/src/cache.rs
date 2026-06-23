@@ -233,6 +233,8 @@ where
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
+    max_entry_bytes: Option<usize>,
+    entry_sizer: fn(&Vec<V>) -> usize,
     ddl_req: CacheDDLRequest,
     trx_cache_policy: TrxCachePolicy,
     scheduler: Option<Scheduler<K, V>>,
@@ -273,7 +275,11 @@ where
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
-    ) -> Arc<Self> {
+        max_entry_bytes: Option<usize>,
+    ) -> Arc<Self>
+    where
+        V: SizeOf,
+    {
         let (ttl_ms, refresh_ms, schedule) = match policy {
             EvictionPolicy::Ttl { ttl } => {
                 let ttl_ms = ttl.as_millis().try_into().unwrap_or(u64::MAX);
@@ -312,6 +318,8 @@ where
             ttl_ms,
             refresh_ms,
             coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
+            max_entry_bytes,
+            entry_sizer: <Vec<V> as SizeOf>::deep_size_of,
             ddl_req,
             trx_cache_policy,
             scheduler: scheduler.clone(),
@@ -532,9 +540,33 @@ where
         metadata: QueryMetadata,
         execution: Duration,
     ) {
+        if let Some(cap) = self.max_entry_bytes
+            && (self.entry_sizer)(&v) > cap
+        {
+            counter!(metric::SHALLOW_SKIP_TOO_LARGE, "query_id" => self.query_id.to_string())
+                .increment(1);
+            self.clear_stub(k).await;
+            return;
+        }
         let metadata = self.dedupe_metadata(metadata);
         let entry = self.make_entry(v, metadata, execution);
         self.insert_entry(k, entry).await;
+    }
+
+    /// Remove a loading stub left behind when an insert is skipped, so the key
+    /// reverts to a normal miss. A concurrently-inserted present entry is left
+    /// untouched.
+    async fn clear_stub(&self, k: K) {
+        self.inner
+            .entry((self.id, k))
+            .and_compute_with(|e| {
+                let op = match e.as_ref().map(|e| &**e.value()) {
+                    Some(CacheEntry::Loading(..)) => Op::Remove,
+                    Some(CacheEntry::Present(..)) | None => Op::Nop,
+                };
+                future::ready(op)
+            })
+            .await;
     }
 
     fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, Option<Arc<AtomicBool>>) {
@@ -726,6 +758,18 @@ mod tests {
         K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
         V: Send + Sync + SizeOf + 'static,
     {
+        new_capped(max_capacity, policy, None)
+    }
+
+    fn new_capped<K, V>(
+        max_capacity: Option<u64>,
+        policy: EvictionPolicy,
+        max_entry_bytes: Option<usize>,
+    ) -> Arc<Cache<K, V>>
+    where
+        K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
+        V: Send + Sync + SizeOf + 'static,
+    {
         let inner = CacheManager::new_inner(max_capacity);
         Cache::new(
             ID,
@@ -738,6 +782,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            max_entry_bytes,
         )
     }
 
@@ -747,6 +792,38 @@ mod tests {
     ) {
         // Insert a stub entry to allow a subsequent insert.
         assert_matches!(cache.get_on_miss(key.to_owned()).await, Lookup::Miss(..));
+    }
+
+    #[tokio::test]
+    async fn test_per_entry_size_cap() {
+        let policy = EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(60),
+        };
+        let result = vec![vec!["a", "b", "c"]];
+
+        // A tiny cap rejects the result: the loading stub is cleared and nothing is cached.
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> = new_capped(None, policy, Some(1));
+        mark_fresh_insert_intent(&cache, &["k"]).await;
+        cache
+            .insert(
+                vec!["k"],
+                result.clone(),
+                QueryMetadata::Test,
+                ZERO_DURATION,
+            )
+            .await;
+        assert!(cache.get(vec!["k"]).await.0.is_none());
+        assert_eq!(cache.count().await, 0);
+
+        // A generous cap caches the same result.
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> =
+            new_capped(None, policy, Some(10 * 1024 * 1024));
+        mark_fresh_insert_intent(&cache, &["k"]).await;
+        cache
+            .insert(vec!["k"], result, QueryMetadata::Test, ZERO_DURATION)
+            .await;
+        assert!(cache.get(vec!["k"]).await.0.is_some());
+        assert_eq!(cache.count().await, 1);
     }
 
     #[tokio::test]
@@ -820,6 +897,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            None,
         );
         let cache_1 = Cache::new(
             1,
@@ -831,6 +909,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             TrxCachePolicy::Never,
+            None,
             None,
         );
 
@@ -1057,6 +1136,7 @@ mod tests {
             vec![],
             test_ddl_req(),
             TrxCachePolicy::Never,
+            None,
             None,
         );
 

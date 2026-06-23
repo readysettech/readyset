@@ -70,7 +70,7 @@ where
 }
 
 async fn run_insert_then_retrieve(keys: Vec<String>) -> Result<(), TestCaseError> {
-    let manager = CacheManager::<String, String>::new(None);
+    let manager = CacheManager::<String, String>::new(None, None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     create_test_cache(&manager, None, query_id, test_policy()).unwrap();
@@ -135,7 +135,7 @@ async fn verify_keys(
 }
 
 async fn run_cache_isolation(keys1: Vec<String>, keys2: Vec<String>) -> Result<(), TestCaseError> {
-    let manager = CacheManager::<String, String>::new(None);
+    let manager = CacheManager::<String, String>::new(None, None);
     let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
     let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
 
@@ -152,7 +152,7 @@ async fn run_cache_isolation(keys1: Vec<String>, keys2: Vec<String>) -> Result<(
 }
 
 async fn run_no_data_loss(keys: HashSet<String>) -> Result<(), TestCaseError> {
-    let manager = CacheManager::<String, String>::new(None);
+    let manager = CacheManager::<String, String>::new(None, None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     create_test_cache(&manager, None, query_id, test_policy()).unwrap();
@@ -182,7 +182,7 @@ async fn run_no_data_loss(keys: HashSet<String>) -> Result<(), TestCaseError> {
 }
 
 async fn run_idempotent_reads(key: String, reads: usize) -> Result<(), TestCaseError> {
-    let manager = CacheManager::<String, String>::new(None);
+    let manager = CacheManager::<String, String>::new(None, None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     create_test_cache(&manager, None, query_id, test_policy()).unwrap();
@@ -205,7 +205,7 @@ async fn run_idempotent_reads(key: String, reads: usize) -> Result<(), TestCaseE
 }
 
 async fn run_memory_accounting(value_sizes: Vec<usize>) -> Result<(), TestCaseError> {
-    let manager = CacheManager::<String, String>::new(Some(10240));
+    let manager = CacheManager::<String, String>::new(Some(10240), None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     create_test_cache(&manager, None, query_id, test_policy()).unwrap();

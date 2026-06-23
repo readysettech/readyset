@@ -54,6 +54,7 @@ where
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
     inner: InnerCache<K, V>,
+    max_entry_bytes: Option<usize>,
     // This lock also synchronizes inserts into the three HashMaps.
     next_id: Mutex<u64>,
 }
@@ -86,12 +87,13 @@ where
         Arc::new(builder.build())
     }
 
-    pub fn new(max_capacity: Option<u64>) -> Self {
+    pub fn new(max_capacity: Option<u64>, max_entry_bytes: Option<usize>) -> Self {
         Self {
             caches: new_table(),
             names: new_table(),
             query_ids: new_table(),
             inner: Self::new_inner(max_capacity),
+            max_entry_bytes,
             next_id: Default::default(),
         }
     }
@@ -168,6 +170,7 @@ where
             ddl_req,
             trx_cache_policy,
             coalesce_ms,
+            self.max_entry_bytes,
         );
 
         if let Some(name) = name {
@@ -626,14 +629,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_entries_empty_manager() {
-        let manager: CacheManager<String, String> = CacheManager::new(None);
+        let manager: CacheManager<String, String> = CacheManager::new(None, None);
         let entries = manager.list_entries(None, None);
         assert!(entries.is_empty());
     }
 
     #[tokio::test]
     async fn test_list_entries_returns_all_entries() {
-        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None, None);
 
         let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
         let query_id_2 = QueryId::from_unparsed_select("SELECT 2");
@@ -703,7 +706,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_entries_filters_by_query_id() {
-        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None, None);
 
         let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
         let query_id_2 = QueryId::from_unparsed_select("SELECT 2");
@@ -772,7 +775,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_entries_nonexistent_query_id() {
-        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None, None);
 
         let query_id_1 = QueryId::from_unparsed_select("SELECT 1");
         let nonexistent = QueryId::from_unparsed_select("SELECT nonexistent");
@@ -809,7 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_entries_respects_limit() {
-        let manager: CacheManager<String, String> = CacheManager::new(None);
+        let manager: CacheManager<String, String> = CacheManager::new(None, None);
 
         let query_id = QueryId::from_unparsed_select("SELECT 1");
 
@@ -861,7 +864,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_entries_skips_loading_entries() {
-        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None);
+        let manager: CacheManager<Vec<&str>, Vec<&str>> = CacheManager::new(None, None);
 
         let query_id = QueryId::from_unparsed_select("SELECT 1");
 

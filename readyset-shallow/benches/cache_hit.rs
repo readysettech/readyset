@@ -18,7 +18,7 @@ fn bench_cache_hit(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
     let manager: Arc<CacheManager<Vec<readyset_data::DfValue>, String>> =
-        Arc::new(CacheManager::new(None));
+        Arc::new(CacheManager::new(None, None));
 
     let query_id = QueryId::from_unparsed_select("SELECT bench");
 
@@ -88,7 +88,7 @@ fn bench_cache_insert(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
     let manager: Arc<CacheManager<Vec<readyset_data::DfValue>, String>> =
-        Arc::new(CacheManager::new(None));
+        Arc::new(CacheManager::new(None, None));
 
     let query_id = QueryId::from_unparsed_select("SELECT bench_insert");
 
