@@ -12,10 +12,13 @@ use async_trait::async_trait;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
-use readyset_adapter::backend::{BackendBuilder, MigrationMode, QueryDestination, QueryInfo};
+use readyset_adapter::backend::{
+    BackendBuilder, MigrationMode, QueryDestination, QueryInfo, UnsupportedSetMode,
+};
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
+use readyset_adapter::rls_coordinator::RlsCoordinator;
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
     recreate_shallow_caches, Backend, QueryHandler, ReadySetStatusReporter, UpstreamConfig,
@@ -240,6 +243,8 @@ pub struct TestBuilder {
     replication_heartbeat: bool,
     auth_plugin: AuthPlugin,
     upstream_only_db: Option<String>,
+    rls: bool,
+    rls_poll_interval: Option<Duration>,
 }
 
 impl Default for TestBuilder {
@@ -276,7 +281,34 @@ impl TestBuilder {
             replication_heartbeat: false,
             auth_plugin: AuthPlugin::default(),
             upstream_only_db: None,
+            rls: false,
+            rls_poll_interval: None,
         }
+    }
+
+    /// Bootstrap the RLS policy registry from the (Postgres) upstream and wire
+    /// an [`RlsCoordinator`] into the backend, so shallow caches over
+    /// RLS-active tables partition per session. Mirrors the adapter binary's
+    /// bootstrap. No-op for non-Postgres upstreams.
+    pub fn rls(mut self, rls: bool) -> Self {
+        self.rls = rls;
+        self
+    }
+
+    /// Override the RLS catalog poll interval (default 60s). Tests that exercise
+    /// policy-change invalidation set this low (e.g. 1s) so the poller detects
+    /// the change within the test's timeout. Clamped to `[1s, 24h]`.
+    pub fn rls_poll_interval(mut self, interval: Duration) -> Self {
+        self.rls_poll_interval = Some(interval);
+        self
+    }
+
+    /// Set the cache mode (default `Deep`). RLS tests use `Shallow` to match the
+    /// `--auto-cache` deployment, where InRequestPath auto-migration creates
+    /// RLS-aware shallow scoped caches.
+    pub fn cache_mode(mut self, cache_mode: readyset_client::CacheMode) -> Self {
+        self.backend_builder = self.backend_builder.cache_mode(cache_mode);
+        self
     }
 
     /// Set the MySQL authentication plugin used by the adapter for client
@@ -319,6 +351,11 @@ impl TestBuilder {
     pub fn fallback_without_replication(mut self, db_name: &str) -> Self {
         self.fallback = FallbackBehavior::UpstreamWithoutReplication;
         self.upstream_only_db = Some(db_name.to_string());
+        self
+    }
+
+    pub fn unsupported_set_mode(mut self, mode: UnsupportedSetMode) -> Self {
+        self.backend_builder = self.backend_builder.unsupported_set_mode(mode);
         self
     }
 
@@ -628,12 +665,65 @@ impl TestBuilder {
         };
         let schema_catalog_clone = schema_catalog.clone();
 
+        // Bootstrap the RLS registry + coordinator from the upstream when
+        // requested, mirroring the adapter binary. `bootstrap_from_url`
+        // synchronously loads the catalog snapshot, so the registry is seeded
+        // (and `CREATE CACHE` will see policies) before any connection is
+        // served. No-op for non-Postgres upstreams (returns `Ok(None)`).
+        //
+        // The returned `BootstrapHandle` owns the poller's shutdown sender;
+        // dropping it closes the channel and stops the poller, so it is held
+        // alive for the adapter's lifetime (moved into the server task below) to
+        // keep catalog polling running.
+        let (rls_registry, rls_coordinator, rls_bootstrap_handle) = if self.rls {
+            match cdc_url.as_deref() {
+                Some(url) => {
+                    let sink = Arc::new(readyset_rls::DeferredSink::new());
+                    let rls_config = match self.rls_poll_interval {
+                        Some(interval) => {
+                            readyset_rls::RlsConfig::default().with_poll_interval(interval)
+                        }
+                        None => readyset_rls::RlsConfig::default(),
+                    };
+                    match readyset_rls::bootstrap_from_url(
+                        url,
+                        rls_config,
+                        Some(Arc::clone(&sink) as Arc<dyn readyset_rls::InvalidationSink>),
+                    )
+                    .await
+                    {
+                        Ok(Some(handle)) => {
+                            let registry = Arc::clone(&handle.registry);
+                            let coordinator = Arc::new(RlsCoordinator::new(
+                                Arc::clone(&registry),
+                                Arc::clone(&shallow),
+                                query_status_cache,
+                            ));
+                            sink.set(
+                                Arc::clone(&coordinator) as Arc<dyn readyset_rls::InvalidationSink>
+                            );
+                            (Some(registry), Some(coordinator), Some(handle))
+                        }
+                        Ok(None) => (None, None, None),
+                        Err(e) => panic!("RLS bootstrap failed in test harness: {e}"),
+                    }
+                }
+                None => (None, None, None),
+            }
+        } else {
+            (None, None, None)
+        };
+
         let shallow_for_schema = Arc::clone(&shallow);
 
         let auth_cache = AuthCache::new();
         auth_cache.populate(self.backend_builder.get_users());
 
         tokio::spawn(async move {
+            // Keep the RLS bootstrap handle alive for the server's lifetime: it
+            // owns the poller's shutdown sender, so dropping it would stop catalog
+            // polling. It is released (poller stops) when this task ends.
+            let _rls_bootstrap_handle = rls_bootstrap_handle;
             let controller = ReadySetHandle::new(authority.clone()).await;
             let readyset_schema =
                 ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, controller, &())
@@ -643,6 +733,10 @@ impl TestBuilder {
                 loop {
                     let (s, _) = listener.accept().await.unwrap();
                     let backend_builder = self.backend_builder.clone();
+                    let backend_builder = match &rls_registry {
+                        Some(registry) => backend_builder.policy_registry(Arc::clone(registry)),
+                        None => backend_builder,
+                    };
                     let auto_increments = auto_increments.clone();
 
                     let upstream_url =
@@ -731,7 +825,7 @@ impl TestBuilder {
                             status_reporter,
                             adapter_start_time,
                             shallow.clone(),
-                            None,
+                            rls_coordinator.clone(),
                             shallow_refresh_pool.clone(),
                         )
                         .await;

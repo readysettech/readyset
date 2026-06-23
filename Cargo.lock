@@ -6162,6 +6162,7 @@ dependencies = [
  "readyset-mysql",
  "readyset-psql",
  "readyset-query-logger",
+ "readyset-rls",
  "readyset-schema",
  "readyset-server",
  "readyset-shallow",
