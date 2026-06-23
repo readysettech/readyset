@@ -22,7 +22,7 @@ fn binary_op_int_int(name: &'static str, op: BinaryOperator) -> Pattern {
     b.column_type_class(c2, TypeClass::Integer);
     b.from(t);
     b.project_binary_op((c1, t), op, (c2, t));
-    b.tags(&["expr_eval", "binary_op", "arithmetic", "int_int"]);
+    b.tags(&["expr_eval"]);
     b.build()
 }
 
@@ -69,7 +69,7 @@ fn binary_op_exact_pair(
     b.column_type_class(c2, TypeClass::Exact(right_ty));
     b.from(t);
     b.project_binary_op((c1, t), op, (c2, t));
-    let mut tags: Vec<&'static str> = vec!["expr_eval", "binary_op", "arithmetic"];
+    let mut tags: Vec<&'static str> = vec!["expr_eval"];
     tags.extend_from_slice(extra_tags);
     b.tags(&tags);
     b.set_dialect_support(dialect_support);
@@ -86,7 +86,7 @@ pub fn binary_op_signed_unsigned_modulo() -> Pattern {
         SqlType::Int(None),
         BinaryOperator::Modulo,
         SqlType::IntUnsigned(None),
-        &["signedness", "mixed_type", "mysql_only"],
+        &["signedness", "mixed_type"],
         DialectSupport::MySqlOnly,
     )
 }
@@ -106,7 +106,7 @@ pub fn binary_op_float_double_add() -> Pattern {
         SqlType::Real,
         BinaryOperator::Add,
         SqlType::Double,
-        &["mixed_precision", "float", "postgres_only"],
+        &["mixed_precision", "float"],
         DialectSupport::PostgresOnly,
     )
 }
@@ -117,7 +117,7 @@ pub fn binary_op_float_double_subtract() -> Pattern {
         SqlType::Real,
         BinaryOperator::Subtract,
         SqlType::Double,
-        &["mixed_precision", "float", "postgres_only"],
+        &["mixed_precision", "float"],
         DialectSupport::PostgresOnly,
     )
 }
@@ -128,7 +128,7 @@ pub fn binary_op_float_double_multiply() -> Pattern {
         SqlType::Real,
         BinaryOperator::Multiply,
         SqlType::Double,
-        &["mixed_precision", "float", "postgres_only"],
+        &["mixed_precision", "float"],
         DialectSupport::PostgresOnly,
     )
 }
@@ -139,7 +139,7 @@ pub fn binary_op_float_double_divide() -> Pattern {
         SqlType::Real,
         BinaryOperator::Divide,
         SqlType::Double,
-        &["mixed_precision", "float", "postgres_only"],
+        &["mixed_precision", "float"],
         DialectSupport::PostgresOnly,
     )
 }
@@ -194,7 +194,7 @@ pub fn cast_decimal_to_bigint() -> Pattern {
         "cast_decimal_to_bigint",
         SqlType::Decimal(10, 4),
         SqlType::BigInt(None),
-        &["numeric_to_int", "postgres_only"],
+        &["numeric_to_int"],
         DialectSupport::PostgresOnly,
     )
 }
@@ -239,13 +239,7 @@ pub fn where_lookup_decimal_eq_int_div_int() -> Pattern {
         BinaryOperator::Divide,
         (c2, t),
     );
-    b.tags(&[
-        "expr_eval",
-        "lookup_key",
-        "where_filter",
-        "int_int",
-        "join_condition_class",
-    ]);
+    b.tags(&["expr_eval", "lookup_key"]);
     b.set_dialect_support(DialectSupport::MySqlOnly);
     // Three example-pinned rows surface the lookup-key coercion class:
     //   - RS-includes-only: lookup=2.0000 matches RS's Int(8/3)=2 coerced
@@ -337,9 +331,7 @@ mod tests {
         let p = binary_op_int_int_add();
         assert_eq!(p.name, "binary_op_int_int_add");
         assert!(p.tags.contains(&"expr_eval"));
-        assert!(p.tags.contains(&"binary_op"));
-        assert!(p.tags.contains(&"arithmetic"));
-        assert!(p.tags.contains(&"int_int"));
+        assert_eq!(p.tags, vec!["expr_eval"]);
     }
 
     #[test]
@@ -408,7 +400,6 @@ mod tests {
         let sql = resolve_pattern(&p, Dialect::MySQL);
         assert!(sql.contains(" % "), "expected ` % ` in sql: {sql}");
         assert!(p.tags.contains(&"signedness"));
-        assert!(p.tags.contains(&"mysql_only"));
     }
 
     #[test]

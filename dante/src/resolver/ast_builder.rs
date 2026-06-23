@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use data_generator::ColumnGenerationSpec;
 use readyset_sql::Dialect;
 use readyset_sql::ast::{
-    BinaryOperator, Column, CommonTableExpr, CompoundSelectOperator, CompoundSelectStatement, Expr,
-    FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, InValue, ItemPlaceholder,
-    JoinClause, JoinConstraint, JoinRightSide, LimitClause, LimitValue, Literal, NullOrder,
-    OrderBy, OrderClause, OrderType, Relation, SelectSpecification, SelectStatement, SqlIdentifier,
-    SqlType, TableExpr, TableExprInner,
+    BinaryOperator, Column, CommonTableExpr, CompoundSelectOperator, CompoundSelectStatement,
+    DistinctOption, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
+    InValue, ItemPlaceholder, JoinClause, JoinConstraint, JoinRightSide, LimitClause, LimitValue,
+    Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation, SelectSpecification,
+    SelectStatement, SqlIdentifier, SqlType, TableExpr, TableExprInner,
 };
 
 use super::{Binding, DdlStep, Env, ParamMeta, ResolveError};
@@ -18,6 +18,9 @@ use crate::constraint::{
 use crate::entropy::Entropy;
 use crate::state::GenerationState;
 use crate::var::{VarId, VarKind};
+
+/// Entry type for the `join_values` stash: `(rows, col_names, alias_name)`.
+type JoinValuesEntry = (Vec<Vec<Expr>>, Vec<SqlIdentifier>, SqlIdentifier);
 
 /// Return type for functions that build a SELECT statement with parameter metadata
 /// and a VarId-to-placeholder-index map.
@@ -97,6 +100,10 @@ fn build_select_inner(
     // VarId. The sibling `Join { right: JoinRight::Table(alias) }` looks
     // it up to emit `JOIN (SELECT ...) AS sqN`.
     let mut join_subqueries: HashMap<VarId, (SelectStatement, SqlIdentifier)> = HashMap::new();
+    // Stash (values_rows, col_names, alias_name) for each `ValuesRelation`,
+    // keyed by alias VarId. The sibling Join arm consumes this to emit
+    // `JOIN (VALUES ...) AS vN(col0, col1, ...)`.
+    let mut join_values: HashMap<VarId, JoinValuesEntry> = HashMap::new();
 
     let parent_type_compat: Vec<Constraint> = constraints
         .iter()
@@ -134,6 +141,24 @@ fn build_select_inner(
                 let func_expr = make_aggregate_expr(function, col_expr);
                 fields.push(FieldDefinitionExpr::Expr {
                     expr: Expr::Call(func_expr),
+                    alias: None,
+                });
+            }
+            Constraint::ProjectArrayToStringAgg { col, table } => {
+                let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                let col_expr = make_column_expr(&col_name, &table_name);
+                let array_agg = Expr::Call(FunctionExpr::Udf {
+                    schema: None,
+                    name: SqlIdentifier::from("ARRAY_AGG"),
+                    arguments: vec![col_expr],
+                });
+                let delimiter = Expr::Literal(Literal::String(",".to_string()));
+                fields.push(FieldDefinitionExpr::Expr {
+                    expr: Expr::Call(FunctionExpr::ArrayToString(
+                        Box::new(array_agg),
+                        Box::new(delimiter),
+                        None,
+                    )),
                     alias: None,
                 });
             }
@@ -355,6 +380,14 @@ fn build_select_inner(
                     rhs: Box::new(Expr::Literal(Literal::Null)),
                 });
             }
+            Constraint::WhereLiteralEq { col, table } => {
+                let (col_name, table_name) = get_col_table(env, *col, *table)?;
+                where_clauses.push(Expr::BinaryOp {
+                    lhs: Box::new(make_column_expr(&col_name, &table_name)),
+                    op: BinaryOperator::Equal,
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                });
+            }
             Constraint::WhereColumnCompare {
                 left_col,
                 left_table,
@@ -440,6 +473,32 @@ fn build_select_inner(
                     where_clauses.push(combined);
                 }
             }
+            Constraint::ValuesRelation {
+                alias,
+                col_names,
+                rows,
+            } => {
+                let alias_name = get_table_name(env, *alias)?;
+                let exprs: Vec<Vec<Expr>> = rows
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|s| {
+                                // Parse the literal: try integer first, then
+                                // fall back to a string literal.
+                                if let Ok(n) = s.parse::<i64>() {
+                                    Expr::Literal(Literal::Integer(n))
+                                } else {
+                                    Expr::Literal(Literal::String((*s).to_string()))
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let col_idents: Vec<SqlIdentifier> =
+                    col_names.iter().map(|n| SqlIdentifier::from(*n)).collect();
+                join_values.insert(*alias, (exprs, col_idents, alias_name));
+            }
             Constraint::Join {
                 operator,
                 right: crate::constraint::JoinRight::Table(t),
@@ -456,44 +515,69 @@ fn build_select_inner(
                 let rc_name;
                 let effective_rt_name;
 
-                let right_side = if let Some((inner_query, sq_alias)) = join_subqueries.remove(t) {
-                    effective_rt_name = sq_alias.clone();
-                    rc_name = first_projected_column(&inner_query).ok_or_else(|| {
-                        ResolveError::TypeMismatch {
-                            expected: "join subquery to project at least one column".into(),
-                            actual: "no projected column".into(),
-                        }
-                    })?;
-                    JoinRightSide::Table(TableExpr {
-                        inner: TableExprInner::Subquery(Box::new(inner_query)),
-                        alias: Some(sq_alias),
-                        column_aliases: vec![],
-                    })
-                } else {
-                    let (rcn, rtn) = get_col_and_table_for_join(env, *right_col)?;
-                    rc_name = rcn;
-                    effective_rt_name = rtn;
-                    let (tn, t_alias) = get_table_name_and_alias(env, *t)?;
-                    JoinRightSide::Table(TableExpr {
-                        inner: TableExprInner::Table(Relation {
-                            schema: None,
-                            name: tn,
-                        }),
-                        alias: t_alias,
-                        column_aliases: vec![],
-                    })
-                };
+                let right_side =
+                    if let Some((inner_query, sq_alias)) = join_subqueries.remove(t) {
+                        effective_rt_name = sq_alias.clone();
+                        rc_name = first_projected_column(&inner_query).ok_or_else(|| {
+                            ResolveError::TypeMismatch {
+                                expected: "join subquery to project at least one column".into(),
+                                actual: "no projected column".into(),
+                            }
+                        })?;
+                        JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Subquery(Box::new(inner_query)),
+                            alias: Some(sq_alias),
+                            column_aliases: vec![],
+                        })
+                    } else if let Some((rows, col_idents, v_alias)) = join_values.remove(t) {
+                        // VALUES relation join: emit `JOIN (VALUES ...) AS vN(col0, ...)`
+                        // The right-side join column is the first column of the VALUES
+                        // relation (by convention in values_join patterns).
+                        effective_rt_name = v_alias.clone();
+                        rc_name = col_idents.first().cloned().ok_or_else(|| {
+                            ResolveError::TypeMismatch {
+                                expected: "values relation to have at least one column".into(),
+                                actual: "empty col_names".into(),
+                            }
+                        })?;
+                        JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Values { rows },
+                            alias: Some(v_alias),
+                            column_aliases: col_idents,
+                        })
+                    } else {
+                        let (rcn, rtn) = get_col_and_table_for_join(env, *right_col)?;
+                        rc_name = rcn;
+                        effective_rt_name = rtn;
+                        let (tn, t_alias) = get_table_name_and_alias(env, *t)?;
+                        JoinRightSide::Table(TableExpr {
+                            inner: TableExprInner::Table(Relation {
+                                schema: None,
+                                name: tn,
+                            }),
+                            alias: t_alias,
+                            column_aliases: vec![],
+                        })
+                    };
 
-                let on_expr = Expr::BinaryOp {
-                    lhs: Box::new(make_column_expr(&lc_name, &lt_name)),
-                    op: BinaryOperator::Equal,
-                    rhs: Box::new(make_column_expr(&rc_name, &effective_rt_name)),
+                // CROSS JOIN takes no join condition: PostgreSQL rejects
+                // `CROSS JOIN ... ON` with a syntax error. The join columns
+                // still participate in resolution (they pin column/table
+                // bindings); they just don't appear in the emitted SQL.
+                let constraint = if *operator == readyset_sql::ast::JoinOperator::CrossJoin {
+                    JoinConstraint::Empty
+                } else {
+                    JoinConstraint::On(Expr::BinaryOp {
+                        lhs: Box::new(make_column_expr(&lc_name, &lt_name)),
+                        op: BinaryOperator::Equal,
+                        rhs: Box::new(make_column_expr(&rc_name, &effective_rt_name)),
+                    })
                 };
 
                 joins.push(JoinClause {
                     operator: *operator,
                     right: right_side,
-                    constraint: JoinConstraint::On(on_expr),
+                    constraint,
                 });
             }
             Constraint::GroupBy { col, table } => {
@@ -608,12 +692,14 @@ fn build_select_inner(
                     SubqueryExprKind::ExistsUncorrelated | SubqueryExprKind::ExistsCorrelated => {
                         where_clauses.push(Expr::Exists(Box::new(inner_query)));
                     }
-                    SubqueryExprKind::InSubquery => {
+                    SubqueryExprKind::InSubquery | SubqueryExprKind::NotInSubquery => {
+                        let negated = matches!(kind, SubqueryExprKind::NotInSubquery);
                         let outer_var =
                             *shared_vars
                                 .first()
                                 .ok_or_else(|| ResolveError::TypeMismatch {
-                                    expected: "shared_vars for InSubquery".to_string(),
+                                    expected: "shared_vars for InSubquery/NotInSubquery"
+                                        .to_string(),
                                     actual: "empty shared_vars".to_string(),
                                 })?;
                         match env.get(outer_var).cloned() {
@@ -624,7 +710,7 @@ fn build_select_inner(
                                 where_clauses.push(Expr::In {
                                     lhs: Box::new(make_column_expr(&name, &table_name)),
                                     rhs: InValue::Subquery(Box::new(inner_query)),
-                                    negated: false,
+                                    negated,
                                 });
                             }
                             _ => return Err(ResolveError::Unbound(outer_var)),
@@ -725,11 +811,12 @@ fn build_select_inner(
                         alias: None,
                     },
                 );
-                let (inner_query, inner_params, inner_ddl) = resolve_inner_subquery(
+                let (inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
                     inner_constraints,
                     env,
                     var_kinds,
                     shared_vars,
+                    *alias_var,
                     state,
                     entropy,
                     placeholder_idx,
@@ -774,6 +861,50 @@ fn build_select_inner(
                     inner: TableExprInner::Subquery(Box::new(inner_query)),
                     alias: Some(sq_alias),
                     column_aliases: vec![],
+                });
+            }
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::LateralJoin { operator },
+                alias: alias_var,
+                constraints: inner_constraints,
+                shared_vars,
+            } => {
+                let sq_alias = state.fresh_subquery_alias();
+                env.bind(
+                    *alias_var,
+                    Binding::Table {
+                        name: sq_alias.clone(),
+                        alias: None,
+                    },
+                );
+                // Use the CTE resolver path so projected inner columns are
+                // propagated to the outer env retargeted to the sq_alias. This
+                // lets outer ProjectColumn constraints reference sq.c_inner_proj
+                // rather than the inner table directly.
+                let (mut inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
+                    inner_constraints,
+                    env,
+                    var_kinds,
+                    shared_vars,
+                    *alias_var,
+                    state,
+                    entropy,
+                    placeholder_idx,
+                    param_map,
+                    &parent_type_compat,
+                )?;
+                // Set lateral = true so display emits LATERAL before the subquery body.
+                inner_query.lateral = true;
+                params.extend(inner_params);
+                env.ddl_steps.extend(inner_ddl);
+                joins.push(JoinClause {
+                    operator: *operator,
+                    right: JoinRightSide::Table(TableExpr {
+                        inner: TableExprInner::Subquery(Box::new(inner_query)),
+                        alias: Some(sq_alias),
+                        column_aliases: vec![],
+                    }),
+                    constraint: JoinConstraint::On(Expr::Literal(Literal::Boolean(true))),
                 });
             }
             Constraint::WindowFunction {
@@ -835,6 +966,35 @@ fn build_select_inner(
                     alias: None,
                 });
             }
+            Constraint::JoinUsing {
+                operator,
+                rhs_table,
+                col,
+                ..
+            } => {
+                let col_name = match env.get(*col) {
+                    Some(Binding::Column { name, .. }) => name.clone(),
+                    _ => {
+                        return Err(ResolveError::Unbound(*col));
+                    }
+                };
+                let (rhs_name, rhs_alias) = get_table_name_and_alias(env, *rhs_table)?;
+                joins.push(JoinClause {
+                    operator: *operator,
+                    right: JoinRightSide::Table(TableExpr {
+                        inner: TableExprInner::Table(Relation {
+                            schema: None,
+                            name: rhs_name,
+                        }),
+                        alias: rhs_alias,
+                        column_aliases: vec![],
+                    }),
+                    constraint: JoinConstraint::Using(vec![Column {
+                        name: col_name,
+                        table: None,
+                    }]),
+                });
+            }
             // CompoundSelect is handled at the resolve() level, not here.
             Constraint::CompoundSelect { .. } => {}
             // Schema and unification constraints don't produce AST nodes
@@ -845,7 +1005,9 @@ fn build_select_inner(
             | Constraint::ColumnTypeClass { .. }
             | Constraint::TypeCompatible(_, _)
             | Constraint::Eq(_, _)
-            | Constraint::NotEq(_, _) => {}
+            | Constraint::SameColumnEq(_, _)
+            | Constraint::NotEq(_, _)
+            | Constraint::ColumnUniqueNotNull { .. } => {}
             // Example constraints are resolved in resolve_examples; nothing to do here.
             Constraint::Example { .. } => {}
             // Or constraints should have been expanded by
@@ -886,7 +1048,11 @@ fn build_select_inner(
     // non-deterministic — and under LIMIT/OFFSET the returned row SET non-deterministic —
     // producing spurious upstream-vs-Readyset mismatches. Skipped when the order already targets
     // the primary key or the table has no resolvable base-table PK (e.g. a derived relation).
-    if let Some(tb_table) = order_tiebreak_table
+    // Also skipped under GROUP BY: the PK is not a grouped column, so appending it makes MySQL
+    // reject the query under only_full_group_by (ERROR 1055); the grouped columns already give a
+    // total order over the one-row-per-group result.
+    if group_by.is_none()
+        && let Some(tb_table) = order_tiebreak_table
         && let Ok(physical) = get_physical_table_name(env, tb_table)
         && let Some(pk) = state.table(&physical).and_then(|s| s.primary_key.clone())
     {
@@ -1033,6 +1199,7 @@ pub(super) fn build_compound_select(
             | Constraint::ColumnTypeClass { .. }
             | Constraint::TypeCompatible(_, _)
             | Constraint::Eq(_, _)
+            | Constraint::SameColumnEq(_, _)
             | Constraint::NotEq(_, _) => {}
             // Anything else — outer-level predicates, projections, joins —
             // would need a wrapper SELECT around the compound that we don't
@@ -1139,7 +1306,7 @@ fn get_col_type(env: &mut Env, col: VarId) -> Result<SqlType, ResolveError> {
 fn aggregate_result_type(function: &AggregateFn, col_type: &SqlType) -> SqlType {
     use AggregateFn::*;
     match function {
-        Count { .. } => SqlType::BigInt(None),
+        Count { .. } | CountStar => SqlType::BigInt(None),
         Sum { .. } => match col_type {
             SqlType::TinyInt(_) | SqlType::SmallInt(_) | SqlType::Int(_) | SqlType::BigInt(_) => {
                 SqlType::BigInt(None)
@@ -1157,7 +1324,7 @@ fn aggregate_result_type(function: &AggregateFn, col_type: &SqlType) -> SqlType 
             _ => SqlType::Double,
         },
         Min | Max => col_type.clone(),
-        GroupConcat | JsonObjectAgg => SqlType::Text,
+        GroupConcat | JsonObjectAgg | StringAgg => SqlType::Text,
         ArrayAgg => col_type.clone(),
     }
 }
@@ -1493,12 +1660,15 @@ fn resolve_cte_inner_subquery(
 }
 
 /// Convert an AggregateFn constraint to a FunctionExpr AST node.
+///
+/// `col_expr` is ignored for `CountStar` since `COUNT(*)` takes no argument.
 fn make_aggregate_expr(function: &AggregateFn, col_expr: Expr) -> FunctionExpr {
     match function {
         AggregateFn::Count { distinct } => FunctionExpr::Count {
             expr: Box::new(col_expr),
             distinct: *distinct,
         },
+        AggregateFn::CountStar => FunctionExpr::CountStar,
         AggregateFn::Sum { distinct } => FunctionExpr::Sum {
             expr: Box::new(col_expr),
             distinct: *distinct,
@@ -1514,15 +1684,21 @@ fn make_aggregate_expr(function: &AggregateFn, col_expr: Expr) -> FunctionExpr {
             name: SqlIdentifier::from("GROUP_CONCAT"),
             arguments: vec![col_expr],
         },
-        AggregateFn::JsonObjectAgg => FunctionExpr::Udf {
-            schema: None,
-            name: SqlIdentifier::from("JSON_OBJECT_AGG"),
-            arguments: vec![col_expr],
+        AggregateFn::JsonObjectAgg => FunctionExpr::JsonObjectAgg {
+            key: Box::new(col_expr.clone()),
+            value: Box::new(col_expr),
+            allow_duplicate_keys: true,
         },
         AggregateFn::ArrayAgg => FunctionExpr::Udf {
             schema: None,
             name: SqlIdentifier::from("ARRAY_AGG"),
             arguments: vec![col_expr],
+        },
+        AggregateFn::StringAgg => FunctionExpr::StringAgg {
+            expr: Box::new(col_expr),
+            separator: Some(",".to_owned()),
+            distinct: DistinctOption::NotDistinct,
+            order_by: None,
         },
     }
 }
@@ -1702,6 +1878,259 @@ fn make_scalar_fn_expr(
                 arguments: args,
             })
         }
+        ScalarFn::Ascii | ScalarFn::JsonQuote | ScalarFn::JsonValid | ScalarFn::JsonDepth => {
+            // Bare single-argument UDF calls.
+            let name = match function {
+                ScalarFn::Ascii => "ASCII",
+                ScalarFn::JsonQuote => "JSON_QUOTE",
+                ScalarFn::JsonValid => "JSON_VALID",
+                _ => "JSON_DEPTH",
+            };
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from(name),
+                arguments: args,
+            })
+        }
+        ScalarFn::SplitPart => {
+            // SPLIT_PART(col, ',', 1)
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::String(",".to_string())));
+            arguments.push(Expr::Literal(Literal::Integer(1)));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("SPLIT_PART"),
+                arguments,
+            })
+        }
+        ScalarFn::DateTrunc => {
+            // DATE_TRUNC('day', col)
+            let mut arguments = vec![Expr::Literal(Literal::String("day".to_string()))];
+            arguments.extend(args);
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("DATE_TRUNC"),
+                arguments,
+            })
+        }
+        ScalarFn::JsonOverlaps => {
+            // JSON_OVERLAPS(col, '[]')
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::String("[]".to_string())));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("JSON_OVERLAPS"),
+                arguments,
+            })
+        }
+        ScalarFn::JsonObject | ScalarFn::JsonBuildObject | ScalarFn::JsonbBuildObject => {
+            // JSON_OBJECT('k', col) / json_build_object('k', col) / jsonb_build_object('k', col)
+            let name = match function {
+                ScalarFn::JsonObject => "JSON_OBJECT",
+                ScalarFn::JsonBuildObject => "json_build_object",
+                _ => "jsonb_build_object",
+            };
+            let mut arguments = vec![Expr::Literal(Literal::String("k".to_string()))];
+            arguments.extend(args);
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from(name),
+                arguments,
+            })
+        }
+        ScalarFn::DateFormat => {
+            // DATE_FORMAT(col, '%Y-%m-%d')
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::String("%Y-%m-%d".to_string())));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("DATE_FORMAT"),
+                arguments,
+            })
+        }
+        ScalarFn::TimeDiff => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("TIMEDIFF"),
+            arguments: args,
+        }),
+        ScalarFn::AddTime => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("ADDTIME"),
+            arguments: args,
+        }),
+        ScalarFn::ConvertTz => {
+            // CONVERT_TZ(col, '+00:00', '+05:30')
+            let mut arguments = args;
+            arguments.push(Expr::Literal(Literal::String("+00:00".to_string())));
+            arguments.push(Expr::Literal(Literal::String("+05:30".to_string())));
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("CONVERT_TZ"),
+                arguments,
+            })
+        }
+        ScalarFn::Hex => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("HEX"),
+            arguments: args,
+        }),
+        ScalarFn::StAsText => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("ST_AsText"),
+            arguments: args,
+        }),
+        ScalarFn::StAsEwkt => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from("ST_AsEWKT"),
+            arguments: args,
+        }),
+        ScalarFn::JsonStripNulls | ScalarFn::JsonTypeof | ScalarFn::JsonExtractPathText => {
+            // These PG functions require a json-typed argument. Wrap the
+            // VARCHAR column in json_build_object('k', col) to produce a
+            // json value that PG accepts (no implicit varchar->json cast).
+            let json_arg = Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("json_build_object"),
+                arguments: vec![
+                    Expr::Literal(Literal::String("k".to_string())),
+                    args.into_iter()
+                        .next()
+                        .unwrap_or(Expr::Literal(Literal::Null)),
+                ],
+            });
+            match function {
+                ScalarFn::JsonStripNulls => Expr::Call(FunctionExpr::Udf {
+                    schema: None,
+                    name: SqlIdentifier::from("json_strip_nulls"),
+                    arguments: vec![json_arg],
+                }),
+                ScalarFn::JsonTypeof => Expr::Call(FunctionExpr::Udf {
+                    schema: None,
+                    name: SqlIdentifier::from("json_typeof"),
+                    arguments: vec![json_arg],
+                }),
+                _ => {
+                    // json_extract_path_text(json_build_object('k', col), 'k')
+                    Expr::Call(FunctionExpr::Udf {
+                        schema: None,
+                        name: SqlIdentifier::from("json_extract_path_text"),
+                        arguments: vec![json_arg, Expr::Literal(Literal::String("k".to_string()))],
+                    })
+                }
+            }
+        }
+        ScalarFn::JsonbStripNulls | ScalarFn::JsonbPretty | ScalarFn::JsonbExtractPath => {
+            // These functions require a jsonb-typed argument. Wrap the column
+            // in jsonb_build_object('k', col) to produce a jsonb value.
+            let jsonb_arg = Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("jsonb_build_object"),
+                arguments: vec![
+                    Expr::Literal(Literal::String("k".to_string())),
+                    args.into_iter()
+                        .next()
+                        .unwrap_or(Expr::Literal(Literal::Null)),
+                ],
+            });
+            match function {
+                ScalarFn::JsonbStripNulls => Expr::Call(FunctionExpr::Udf {
+                    schema: None,
+                    name: SqlIdentifier::from("jsonb_strip_nulls"),
+                    arguments: vec![jsonb_arg],
+                }),
+                ScalarFn::JsonbPretty => Expr::Call(FunctionExpr::Udf {
+                    schema: None,
+                    name: SqlIdentifier::from("jsonb_pretty"),
+                    arguments: vec![jsonb_arg],
+                }),
+                _ => {
+                    // jsonb_extract_path(jsonb_build_object('k', col), 'k')
+                    Expr::Call(FunctionExpr::Udf {
+                        schema: None,
+                        name: SqlIdentifier::from("jsonb_extract_path"),
+                        arguments: vec![jsonb_arg, Expr::Literal(Literal::String("k".to_string()))],
+                    })
+                }
+            }
+        }
+        ScalarFn::JsonbSet | ScalarFn::JsonbSetLax | ScalarFn::JsonbInsert => {
+            // jsonb_set(jsonb_build_object('k', col), '{k}', '"new"')
+            // jsonb_set_lax(jsonb_build_object('k', col), '{k}', '"new"')
+            // jsonb_insert(jsonb_build_object('k', col), '{k}', '"added"')
+            //
+            // The second argument is a text-array path: the string '{k}' is
+            // accepted by PG as a text[] literal. The third argument is a
+            // jsonb scalar literal (a JSON-encoded string value).
+            let jsonb_arg = Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("jsonb_build_object"),
+                arguments: vec![
+                    Expr::Literal(Literal::String("k".to_string())),
+                    args.into_iter()
+                        .next()
+                        .unwrap_or(Expr::Literal(Literal::Null)),
+                ],
+            });
+            let path_arg = Expr::Literal(Literal::String("{k}".to_string()));
+            let (fn_name, new_val) = match function {
+                ScalarFn::JsonbInsert => (
+                    "jsonb_insert",
+                    Expr::Literal(Literal::String("\"added\"".to_string())),
+                ),
+                _ => (
+                    if matches!(function, ScalarFn::JsonbSetLax) {
+                        "jsonb_set_lax"
+                    } else {
+                        "jsonb_set"
+                    },
+                    Expr::Literal(Literal::String("\"new\"".to_string())),
+                ),
+            };
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from(fn_name),
+                arguments: vec![jsonb_arg, path_arg, new_val],
+            })
+        }
+        ScalarFn::JsonArrayLength => {
+            // json_array_length(json_build_array(col)) — wraps the column in
+            // json_build_array so the argument is a valid JSON array.
+            let arr_arg = Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("json_build_array"),
+                arguments: args,
+            });
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("json_array_length"),
+                arguments: vec![arr_arg],
+            })
+        }
+        ScalarFn::JsonbArrayLength => {
+            // jsonb_array_length(jsonb_build_array(col)) — wraps the column in
+            // jsonb_build_array so the argument is a valid JSONB array.
+            let arr_arg = Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("jsonb_build_array"),
+                arguments: args,
+            });
+            Expr::Call(FunctionExpr::Udf {
+                schema: None,
+                name: SqlIdentifier::from("jsonb_array_length"),
+                arguments: vec![arr_arg],
+            })
+        }
+        // JsonBuildArray and JsonbBuildArray are intermediate-only: they are
+        // nested inside JsonArrayLength / JsonbArrayLength and never emitted as
+        // top-level patterns on their own.
+        ScalarFn::JsonBuildArray | ScalarFn::JsonbBuildArray => Expr::Call(FunctionExpr::Udf {
+            schema: None,
+            name: SqlIdentifier::from(match function {
+                ScalarFn::JsonBuildArray => "json_build_array",
+                _ => "jsonb_build_array",
+            }),
+            arguments: args,
+        }),
     }
 }
 

@@ -414,6 +414,13 @@ impl PatternBuilder {
         self.constraints.push(Constraint::Eq(a, b));
     }
 
+    /// Emit a `SameColumnEq` constraint: two column variables (on aliases of the
+    /// same table) must resolve to the SAME physical column name, producing a
+    /// same-column self-join (`a0.c = a1.c`).
+    pub fn same_column_eq(&mut self, a: VarId, b: VarId) {
+        self.constraints.push(Constraint::SameColumnEq(a, b));
+    }
+
     /// Emit a `NotEq` constraint (two variables must differ).
     pub fn not_eq(&mut self, a: VarId, b: VarId) {
         self.constraints.push(Constraint::NotEq(a, b));
@@ -443,6 +450,11 @@ impl PatternBuilder {
             col,
             table,
         });
+    }
+
+    pub fn project_array_to_string_agg(&mut self, col: VarId, table: VarId) {
+        self.constraints
+            .push(Constraint::ProjectArrayToStringAgg { col, table });
     }
 
     pub fn project_function(&mut self, function: ScalarFn, args: Vec<(VarId, VarId)>) {
@@ -642,6 +654,24 @@ impl PatternBuilder {
         self.constraints.push(Constraint::Limit { limit, offset });
     }
 
+    /// Emit a `WHERE col = 1` predicate using a concrete integer literal,
+    /// not a placeholder. Exercises the `order_limit_removal` pass, which
+    /// fires when a unique-key column is pinned by a literal equality.
+    pub fn where_literal_eq(&mut self, col: VarId, table: VarId) {
+        self.constraints
+            .push(Constraint::WhereLiteralEq { col, table });
+    }
+
+    /// Mark `col` as the primary key of its table (NOT NULL, unique).
+    ///
+    /// The schema resolver promotes the column to the table's PRIMARY KEY,
+    /// satisfying `UniqueColumnsSchemaImpl`'s requirement for unique-key
+    /// recognition used by the `order_limit_removal` pass.
+    pub fn column_unique_not_null(&mut self, col: VarId) {
+        self.constraints
+            .push(Constraint::ColumnUniqueNotNull { col });
+    }
+
     pub fn distinct(&mut self) {
         self.constraints.push(Constraint::Distinct);
     }
@@ -675,6 +705,61 @@ impl PatternBuilder {
             left_col,
             right_col,
         });
+    }
+
+    /// Emit a `JoinUsing` constraint: `JOIN rhs_table USING (col_name)`.
+    ///
+    /// `col` must be a column var already declared on the left (primary)
+    /// table. The resolver ensures the same-named column exists in
+    /// `rhs_table`'s DDL so the USING clause is valid. The LHS table is
+    /// inferred from `col`'s `VarKind::Column { table }` metadata.
+    pub fn join_table_using(&mut self, operator: JoinOperator, rhs_table: VarId, col: VarId) {
+        let lhs_table = match self.allocator.kind(col) {
+            Some(crate::var::VarKind::Column { table }) => *table,
+            _ => panic!("join_table_using: col must be a Column var"),
+        };
+        self.constraints.push(Constraint::JoinUsing {
+            operator,
+            lhs_table,
+            rhs_table,
+            col,
+        });
+    }
+
+    /// Declare a VALUES relation and emit a `Join` using it as the right side.
+    ///
+    /// Returns the alias `VarId` (a `DerivedRelation` var) and a dummy
+    /// `right_col` VarId. The alias var resolves to a fresh `vN` SQL
+    /// identifier at build time; the join emits
+    /// `JOIN (VALUES ...) AS vN(col0, col1, ...) ON left_col = vN.col0`.
+    ///
+    /// `col_names[0]` is used as the VALUES join-key column (the right side
+    /// of the ON clause). Any additional columns are accessible in the SELECT
+    /// list via the alias.
+    pub fn values_join(
+        &mut self,
+        operator: JoinOperator,
+        left_col: VarId,
+        col_names: &'static [&'static str],
+        rows: &'static [&'static [&'static str]],
+    ) -> VarId {
+        let alias = self.allocator.alloc(VarKind::DerivedRelation);
+        // Dummy right_col var: the resolver overrides it from col_names[0]
+        // for ValuesRelation joins, but constraint_var_ids still needs a valid
+        // VarId here.
+        let dummy_right_col = self.allocator.alloc(VarKind::Column { table: alias });
+        self.constraints.push(Constraint::ValuesRelation {
+            alias,
+            col_names,
+            rows,
+        });
+        self.constraints.push(Constraint::Join {
+            operator,
+            right: JoinRight::Table(alias),
+            left_col,
+            right_col: dummy_right_col,
+        });
+        alias
     }
 
     /// Begin building a subquery scope on top of this pattern.
@@ -1010,6 +1095,30 @@ impl<'a> SubqueryBuilder<'a> {
         });
     }
 
+    /// Commit the subquery scope as a LATERAL join.
+    ///
+    /// Emits `JOIN LATERAL (SELECT ...) AS sqN ON TRUE`. The inner
+    /// subquery may reference outer-scope vars via `WhereColumnCompare`
+    /// constraints; those vars appear in `shared_vars` and the resolver
+    /// propagates their bindings into the inner env.
+    ///
+    /// Returns the alias `VarId` so outer `project_column` calls can
+    /// reference columns projected by the lateral subquery.
+    pub fn commit_as_lateral(self, operator: JoinOperator) -> VarId {
+        let shared_vars = self.compute_shared_vars();
+        let SubqueryBuilder {
+            outer, constraints, ..
+        } = self;
+        let alias = outer.allocator.alloc(VarKind::DerivedRelation);
+        outer.constraints.push(Constraint::SubqueryRelation {
+            kind: SubqueryRelationKind::LateralJoin { operator },
+            alias,
+            constraints,
+            shared_vars,
+        });
+        alias
+    }
+
     /// Commit the subquery scope as a CTE. Returns a fresh `VarId` for
     /// the CTE's alias relation; outer constraints (`from`,
     /// `project_column`, joins) should reference this var so the SQL
@@ -1072,7 +1181,10 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
         Constraint::AliasOf { alias, original } => vec![*alias, *original],
         Constraint::ColumnExists { col, table } => vec![*col, *table],
         Constraint::ColumnTypeClass { col, .. } => vec![*col],
-        Constraint::TypeCompatible(a, b) | Constraint::Eq(a, b) | Constraint::NotEq(a, b) => {
+        Constraint::TypeCompatible(a, b)
+        | Constraint::Eq(a, b)
+        | Constraint::SameColumnEq(a, b)
+        | Constraint::NotEq(a, b) => {
             vec![*a, *b]
         }
         Constraint::From(v) => vec![*v],
@@ -1085,7 +1197,8 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
         Constraint::ProjectColumn { col, table }
         | Constraint::GroupBy { col, table }
         | Constraint::WhereIsNull { col, table, .. } => vec![*col, *table],
-        Constraint::ProjectAggregate { col, table, .. } => vec![*col, *table],
+        Constraint::ProjectAggregate { col, table, .. }
+        | Constraint::ProjectArrayToStringAgg { col, table } => vec![*col, *table],
         Constraint::WhereRangeParam { col, table, lo, hi }
         | Constraint::WhereBetweenParam { col, table, lo, hi } => {
             vec![*col, *table, *lo, *hi]
@@ -1156,6 +1269,7 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             // Don't recurse into nested constraint sets
             vec![]
         }
+        Constraint::ValuesRelation { alias, .. } => vec![*alias],
         Constraint::WindowFunction {
             partition_col,
             order_col,
@@ -1177,8 +1291,16 @@ pub fn constraint_var_ids(c: &Constraint) -> Vec<VarId> {
             ids.extend(fallback.iter().flat_map(constraint_var_ids));
             ids
         }
+        Constraint::JoinUsing {
+            lhs_table,
+            rhs_table,
+            col,
+            ..
+        } => vec![*lhs_table, *rhs_table, *col],
         // Example constraints are resolved in resolve_examples; nothing to do here.
         Constraint::Example { cells, .. } => cells.iter().map(|c| c.var).collect(),
+        Constraint::WhereLiteralEq { col, table } => vec![*col, *table],
+        Constraint::ColumnUniqueNotNull { col } => vec![*col],
     }
 }
 
@@ -1820,7 +1942,7 @@ mod tests {
         b.join_table(JoinOperator::InnerJoin, t2, c1, c2);
         b.project_column(c1, t1);
         b.project_column(c2, t2);
-        b.tags(&["join", "two_table"]);
+        b.tags(&["join"]);
         b.build()
     }
 

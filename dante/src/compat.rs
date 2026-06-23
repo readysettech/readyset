@@ -3,7 +3,7 @@
 //! The compatibility system prevents conflicting patterns from being
 //! combined in the same query.
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, DialectSupport};
 use crate::var::VarId;
 
 /// A rule that declares when constraint sets are incompatible.
@@ -41,6 +41,13 @@ pub struct SelectionFilter {
     pub excluded_tags: Vec<&'static str>,
     /// Maximum allowed `min_depth` for a pattern. `None` means unlimited.
     pub max_depth: Option<usize>,
+    /// If set, only patterns whose `dialect_support` exactly matches this
+    /// value are eligible. `None` (the default) permits any dialect support.
+    ///
+    /// This is a targeted-testing axis, parallel to tags but separate from
+    /// the swarm universe. It lets a user target e.g. only MySqlOnly patterns
+    /// without polluting the swarm coin universe with dialect strings.
+    pub dialect_support: Option<DialectSupport>,
 }
 
 impl SelectionFilter {
@@ -105,6 +112,7 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::ColumnTypeClass { .. }
         | Constraint::TypeCompatible(_, _)
         | Constraint::Eq(_, _)
+        | Constraint::SameColumnEq(_, _)
         | Constraint::NotEq(_, _) => false,
         // Anything else is a structural/projection/filter that would need a
         // wrapper SELECT around the compound, which we don't emit.
@@ -112,6 +120,7 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::Join { .. }
         | Constraint::ProjectColumn { .. }
         | Constraint::ProjectAggregate { .. }
+        | Constraint::ProjectArrayToStringAgg { .. }
         | Constraint::ProjectFunction { .. }
         | Constraint::ProjectBinaryOp { .. }
         | Constraint::ProjectCast { .. }
@@ -119,6 +128,7 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::ProjectLiteral { .. }
         | Constraint::SubqueryExpr { .. }
         | Constraint::SubqueryRelation { .. }
+        | Constraint::ValuesRelation { .. }
         | Constraint::Or(_, _)
         | Constraint::WhereParam { .. }
         | Constraint::WhereInParam { .. }
@@ -132,9 +142,15 @@ fn forbids_compound_compose(c: &Constraint) -> bool {
         | Constraint::Having { .. }
         | Constraint::HavingKeyFilter { .. }
         | Constraint::Distinct
-        | Constraint::WindowFunction { .. } => true,
+        | Constraint::WindowFunction { .. }
+        // WhereLiteralEq is a structural WHERE constraint; it can't appear
+        // alongside CompoundSelect at the outer level.
+        | Constraint::WhereLiteralEq { .. }
+        | Constraint::JoinUsing { .. } => true,
         // Examples are oracle-only metadata; they don't block compound composition.
         Constraint::Example { .. } => false,
+        // ColumnUniqueNotNull is a schema-level constraint, not structural.
+        Constraint::ColumnUniqueNotNull { .. } => false,
     }
 }
 
@@ -189,7 +205,27 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
     vec![
         CompatibilityRule {
             name: "distinct_with_bare_aggregate",
-            condition: CompatCondition::TagConflict("distinct", "aggregate_without_group_by"),
+            condition: CompatCondition::Custom(|constraints| {
+                // Distinct + a bare aggregate (ProjectAggregate with no
+                // corresponding GroupBy) is semantically dubious: the DB
+                // would deduplicate the output of an aggregate that already
+                // collapses all rows to one. Derived structurally so it
+                // fires regardless of which tags the patterns carry.
+                let has_distinct =
+                    has_constraint(constraints, |c| matches!(c, Constraint::Distinct));
+                if !has_distinct {
+                    return false;
+                }
+                let has_aggregate = has_constraint(constraints, |c| {
+                    matches!(c, Constraint::ProjectAggregate { .. })
+                });
+                if !has_aggregate {
+                    return false;
+                }
+                let has_group_by =
+                    has_constraint(constraints, |c| matches!(c, Constraint::GroupBy { .. }));
+                !has_group_by
+            }),
             reason: "DISTINCT with bare aggregate (no GROUP BY) is semantically dubious",
         },
         CompatibilityRule {
@@ -655,11 +691,54 @@ mod tests {
     }
 
     #[test]
-    fn check_rules_returns_first_violation() {
-        let rules = default_rules();
+    fn distinct_with_bare_aggregate_tag_never_fires() {
+        // The old TagConflict("distinct", "aggregate_without_group_by") rule
+        // is dead because no registered pattern carries "aggregate_without_group_by".
+        // Prove it by showing the constraint set that SHOULD trigger it (Distinct
+        // + ProjectAggregate, no GroupBy) is not caught by the old tag rule.
+        use crate::constraint::AggregateFn;
 
-        // DISTINCT + aggregate_without_group_by should trigger TagConflict
-        let result = check_rules(&rules, &[], &["distinct", "aggregate_without_group_by"]);
+        let rules = default_rules();
+        // These are the constraints a composed distinct + bare-aggregate recipe
+        // actually carries. With the old tag rule, this passes because neither
+        // pattern would have the "aggregate_without_group_by" tag.
+        let constraints = vec![
+            Constraint::Distinct,
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: crate::var::VarId(1),
+                table: crate::var::VarId(0),
+            },
+        ];
+        // The structural predicate must catch this combination.
+        let result = check_rules(&rules, &constraints, &["distinct", "aggregate"]);
+        assert!(
+            result.is_some(),
+            "DISTINCT + bare ProjectAggregate (no GroupBy) must be rejected by \
+             the structural predicate"
+        );
+        assert!(
+            result.expect("should have violation").contains("DISTINCT"),
+            "violation reason should mention DISTINCT"
+        );
+    }
+
+    #[test]
+    fn check_rules_returns_first_violation() {
+        use crate::constraint::AggregateFn;
+
+        let rules = default_rules();
+        // DISTINCT with a bare ProjectAggregate (no GroupBy) triggers the
+        // structural predicate.
+        let constraints = vec![
+            Constraint::Distinct,
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: crate::var::VarId(1),
+                table: crate::var::VarId(0),
+            },
+        ];
+        let result = check_rules(&rules, &constraints, &["distinct", "aggregate"]);
         assert!(result.is_some());
         assert!(result.expect("should have violation").contains("DISTINCT"));
     }
@@ -1056,7 +1135,7 @@ mod tests {
     #[test]
     fn readyset_compat_allows_regular_join() {
         let rules = readyset_compat_rules();
-        let result = check_rules(&rules, &[], &["join", "two_table"]);
+        let result = check_rules(&rules, &[], &["join"]);
         assert!(result.is_none(), "regular joins should be allowed");
     }
 
@@ -1104,12 +1183,22 @@ mod tests {
 
     #[test]
     fn readyset_compat_combined_with_default_rules() {
-        // When both default + readyset rules are active, both should apply
+        use crate::constraint::AggregateFn;
+
+        // When both default + readyset rules are active, both should apply.
         let mut rules = default_rules();
         rules.extend(readyset_compat_rules());
 
-        // Default rule: DISTINCT + aggregate_without_group_by
-        let result = check_rules(&rules, &[], &["distinct", "aggregate_without_group_by"]);
+        // Default rule: DISTINCT with bare ProjectAggregate (structural predicate).
+        let bare_agg_constraints = vec![
+            Constraint::Distinct,
+            Constraint::ProjectAggregate {
+                function: AggregateFn::Count { distinct: false },
+                col: crate::var::VarId(1),
+                table: crate::var::VarId(0),
+            },
+        ];
+        let result = check_rules(&rules, &bare_agg_constraints, &["distinct", "aggregate"]);
         assert!(result.is_some());
 
         // Readyset rule: self_join

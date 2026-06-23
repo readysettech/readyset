@@ -3099,6 +3099,7 @@ impl ConstraintFuzz {
         // the default (no restriction) — same behavior as before.
         let selection_filter = dante::compat::SelectionFilter {
             max_depth: None,
+            dialect_support: None,
             required_tags: self
                 .required_tags
                 .iter()

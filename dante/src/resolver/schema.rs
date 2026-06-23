@@ -61,23 +61,32 @@ fn resolve_constraint_set(
     let mut table_exists = Vec::new();
     let mut alias_of = Vec::new();
     let mut eq_constraints = Vec::new();
+    let mut same_column_eq = Vec::new();
     let mut column_exists = Vec::new();
     let mut type_constraints = Vec::new();
     let mut not_eq_constraints = Vec::new();
     let mut or_constraints = Vec::new();
+    let mut values_relations = Vec::new();
+    let mut join_using = Vec::new();
     let mut structural = Vec::new();
+
+    let mut unique_not_null = Vec::new();
 
     for c in constraints {
         match c {
             Constraint::BaseTable(_) => table_exists.push(c),
             Constraint::AliasOf { .. } => alias_of.push(c),
             Constraint::Eq(_, _) => eq_constraints.push(c),
+            Constraint::SameColumnEq(_, _) => same_column_eq.push(c),
             Constraint::ColumnExists { .. } => column_exists.push(c),
             Constraint::ColumnTypeClass { .. } | Constraint::TypeCompatible(_, _) => {
                 type_constraints.push(c)
             }
             Constraint::NotEq(_, _) => not_eq_constraints.push(c),
             Constraint::Or(_, _) => or_constraints.push(c),
+            Constraint::ValuesRelation { .. } => values_relations.push(c),
+            Constraint::ColumnUniqueNotNull { .. } => unique_not_null.push(c),
+            Constraint::JoinUsing { .. } => join_using.push(c),
             // Structural constraints (From, ProjectColumn, Join, …) are
             // handled by ast_builder, not the schema phase.
             _ => structural.push(c),
@@ -123,6 +132,31 @@ fn resolve_constraint_set(
         }
     }
 
+    // 2c2: Resolve ValuesRelation aliases (after BaseTable/AliasOf)
+    for c in &values_relations {
+        if let Constraint::ValuesRelation { alias, .. } = c {
+            resolve_values_relation(env, *alias, state)?;
+        }
+    }
+
+    // 2c3: Resolve ColumnUniqueNotNull (after ColumnExists so the column is bound)
+    for c in &unique_not_null {
+        if let Constraint::ColumnUniqueNotNull { col } = c {
+            resolve_column_unique_not_null(env, *col, state)?;
+        }
+    }
+
+    // 2c4: Resolve JoinUsing shared-column-name requirement.
+    // After all ColumnExists constraints are processed, the USING column is
+    // bound to a name in lhs_table. We now ensure the same column name
+    // exists in rhs_table's DDL so the SQL `JOIN t USING (col_name)` is
+    // valid (the column must appear with the same name in both tables).
+    for c in &join_using {
+        if let Constraint::JoinUsing { rhs_table, col, .. } = c {
+            resolve_join_using_shared_column(env, *col, *rhs_table, state)?;
+        }
+    }
+
     // 2d: Process type constraints (verify/apply)
     for c in &type_constraints {
         match c {
@@ -140,6 +174,15 @@ fn resolve_constraint_set(
     for c in &not_eq_constraints {
         if let Constraint::NotEq(a, b) = c {
             resolve_not_eq(env, *a, *b)?;
+        }
+    }
+
+    // 2e2: Resolve SameColumnEq -- after ColumnExists and type constraints so
+    // both columns are bound and typed. Rebinds the second column to the first's
+    // physical column name, yielding a same-column self-join.
+    for c in &same_column_eq {
+        if let Constraint::SameColumnEq(a, b) = c {
+            resolve_same_column_eq(env, *a, *b)?;
         }
     }
 
@@ -324,6 +367,108 @@ fn resolve_alias_of(
     Ok(())
 }
 
+/// Resolve a ValuesRelation constraint: bind `alias` to a fresh `vN`
+/// identifier. The VALUES table is inline literal data; no schema
+/// table is created. The AST phase (ast_builder) uses this binding to
+/// emit the `JOIN (VALUES ...) AS vN(col0, ...)` expression.
+fn resolve_values_relation(
+    env: &mut Env,
+    alias: VarId,
+    state: &mut GenerationState,
+) -> Result<(), ResolveError> {
+    let name = state.fresh_values_alias();
+    env.bind(alias, Binding::Table { name, alias: None });
+    Ok(())
+}
+
+/// Promote `col` to the primary key of its table.
+///
+/// If the table already has a primary key set to a different column, this
+/// replaces it so the resolver can always satisfy the constraint. The column
+/// must already be bound (via a `ColumnExists` constraint resolved earlier).
+fn resolve_column_unique_not_null(
+    env: &mut Env,
+    col: VarId,
+    state: &mut GenerationState,
+) -> Result<(), ResolveError> {
+    let (col_name, table_var) = match env.get(col) {
+        Some(Binding::Column {
+            name, table_var, ..
+        }) => (name.clone(), *table_var),
+        _ => return Err(ResolveError::Unbound(col)),
+    };
+    let table_name = match env.get(table_var) {
+        Some(Binding::Table { name, .. }) => name.clone(),
+        _ => return Err(ResolveError::Unbound(table_var)),
+    };
+    if let Some(schema) = state.table_mut(&table_name) {
+        // Promoting to PRIMARY KEY only fixes the DDL; the column must also
+        // generate unique values, or the oracle drops colliding rows on insert
+        // and the declared key is cosmetic.
+        if let Some(meta) = schema.columns.get_mut(&col_name) {
+            meta.gen_spec = ColumnGenerationSpec::Unique;
+        }
+        schema.primary_key = Some(col_name);
+    }
+    Ok(())
+}
+
+/// Ensure the column named `col` exists with the SAME name in `rhs_table`'s
+/// DDL. This is required for `JOIN t USING (col_name)` to be valid SQL: the
+/// shared column must appear in both the left and right table schemas.
+///
+/// After normal `ColumnExists` resolution, `col` has a concrete name (e.g.
+/// `c1`) in lhs_table. This function replicates that same-named column into
+/// rhs_table, using a compatible SQL type (same type class as the original).
+fn resolve_join_using_shared_column(
+    env: &mut Env,
+    col: VarId,
+    rhs_table: VarId,
+    state: &mut GenerationState,
+) -> Result<(), ResolveError> {
+    let (col_name, col_type) = match env.get(col) {
+        Some(Binding::Column { name, sql_type, .. }) => (name.clone(), sql_type.clone()),
+        _ => return Err(ResolveError::Unbound(col)),
+    };
+
+    let rhs_table_name = match env.get(rhs_table) {
+        Some(Binding::Table { name, .. }) => name.clone(),
+        _ => return Err(ResolveError::Unbound(rhs_table)),
+    };
+
+    let rhs_schema = state
+        .table_mut(&rhs_table_name)
+        .ok_or(ResolveError::Unbound(rhs_table))?;
+
+    // If rhs_table already has a column with this name, nothing to do.
+    if rhs_schema.columns.contains_key(&col_name) {
+        return Ok(());
+    }
+
+    // Add the column with the same name and a join-key generation spec.
+    // Use `add_column_with_name_advance` so that the counter advances past
+    // this name and future `fresh_column_name` calls on rhs_table don't
+    // collide with the shared column.
+    let meta = ColumnMeta {
+        sql_type: col_type,
+        gen_spec: ColumnGenerationSpec::Uniform(
+            readyset_data::DfValue::Int(1),
+            readyset_data::DfValue::Int(1000),
+        ),
+    };
+    rhs_schema.add_column_with_name_advance(col_name.clone(), meta.clone());
+
+    // Emit DDL for pre-existing rhs tables.
+    if !env.new_tables.contains(&rhs_table_name) {
+        env.ddl_steps.push(DdlStep::AddColumn {
+            table: rhs_table_name,
+            column_name: col_name,
+            meta,
+        });
+    }
+
+    Ok(())
+}
 /// The role of a column, used to select an appropriate ColumnGenerationSpec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ColumnRole {
@@ -633,6 +778,52 @@ fn resolve_type_compatible(
     Ok(())
 }
 
+/// Rebind column `b` to resolve to the SAME physical column name as `a`. Both
+/// columns must already be bound (after `ColumnExists`) to aliases of the same
+/// underlying table, so the shared name is a valid column on both sides. This
+/// turns a default different-column self-join (`a0.c2 = a1.c3`) into a
+/// same-column one (`a0.c = a1.c`).
+fn resolve_same_column_eq(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError> {
+    let (name_a, type_a, table_a) = match env.get(a) {
+        Some(Binding::Column {
+            name,
+            sql_type,
+            table_var,
+        }) => (name.clone(), sql_type.clone(), *table_var),
+        _ => return Err(ResolveError::Unbound(a)),
+    };
+    let table_b = match env.get(b) {
+        Some(Binding::Column { table_var, .. }) => *table_var,
+        _ => return Err(ResolveError::Unbound(b)),
+    };
+    // Both columns must live on aliases of the same physical table, so `name_a`
+    // is a real column on `b`'s table too. `Binding::Table::name` is the
+    // physical table; self-join aliases share it.
+    let phys_a = match env.get(table_a) {
+        Some(Binding::Table { name, .. }) => name.clone(),
+        _ => return Err(ResolveError::Unbound(table_a)),
+    };
+    let phys_b = match env.get(table_b) {
+        Some(Binding::Table { name, .. }) => name.clone(),
+        _ => return Err(ResolveError::Unbound(table_b)),
+    };
+    if phys_a != phys_b {
+        return Err(ResolveError::Unsupported {
+            variant: "SameColumnEq across distinct physical tables",
+            location: "resolve_same_column_eq",
+        });
+    }
+    env.bind(
+        b,
+        Binding::Column {
+            name: name_a,
+            sql_type: type_a,
+            table_var: table_b,
+        },
+    );
+    Ok(())
+}
+
 fn resolve_not_eq(env: &mut Env, a: VarId, b: VarId) -> Result<(), ResolveError> {
     let rep_a = env.union_find.find(a.0);
     let rep_b = env.union_find.find(b.0);
@@ -768,6 +959,8 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Diale
                 .expect("orderable class slice is non-empty");
             pick_type_for_class(&class, entropy, dialect)
         }
+        // Always synthesize PostgisPoint; data-generator produces valid EWKB bytes for it.
+        TypeClass::Geometry => SqlType::PostgisPoint,
         TypeClass::Exact(t) => t.clone(),
     }
 }
@@ -1260,6 +1453,43 @@ mod tests {
         assert!(
             has_zipfian,
             "expected at least one filter column with Zipfian spec, got: {ddl:?}",
+        );
+    }
+
+    #[test]
+    fn column_unique_not_null_sets_unique_gen_spec() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let t = VarId(0);
+        let c = VarId(1);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::ColumnUniqueNotNull { col: c },
+            Constraint::From(t),
+            Constraint::ProjectColumn { col: c, table: t },
+        ];
+        let var_kinds = vec![VarKind::Relation, VarKind::Column { table: t }];
+
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve");
+
+        // The column promoted to PRIMARY KEY must also generate unique values.
+        // Otherwise the declared key is duplicate-prone and the oracle drops
+        // colliding rows on insert, silently shrinking the table.
+        let ddl = env.into_ddl_steps(&state).expect("ddl should build");
+        let pk_is_unique = ddl.iter().any(|s| match s {
+            DdlStep::CreateTable { schema, .. } => schema
+                .primary_key
+                .as_ref()
+                .and_then(|pk| schema.columns.get(pk))
+                .is_some_and(|m| matches!(m.gen_spec, ColumnGenerationSpec::Unique)),
+            DdlStep::AddColumn { .. } => false,
+        });
+        assert!(
+            pk_is_unique,
+            "primary-key column must have Unique gen_spec, got: {ddl:?}",
         );
     }
 

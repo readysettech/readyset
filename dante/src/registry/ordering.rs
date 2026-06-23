@@ -48,6 +48,27 @@ pub fn paginate() -> Pattern {
     b.build()
 }
 
+/// SELECT t.c1 FROM t WHERE t.c0 = 1 ORDER BY t.c1 ASC LIMIT 1
+///
+/// The WHERE clause pins the unique key to a concrete literal (not a placeholder),
+/// so the `order_limit_removal` rewrite pass can eliminate the ORDER BY and LIMIT
+/// at query planning time (at most one row matches a unique key).
+pub fn topk_unique_key_eq() -> Pattern {
+    let mut b = PatternBuilder::new("topk_unique_key_eq");
+    let t = b.table();
+    let c_proj = b.column(t);
+    let c_key = b.column(t);
+    b.column_type_class(c_key, crate::constraint::TypeClass::Integer);
+    b.column_unique_not_null(c_key);
+    b.from(t);
+    b.project_column(c_proj, t);
+    b.where_literal_eq(c_key, t);
+    b.order_by(c_proj, t, OrderType::OrderAscending, None);
+    b.limit(1, None);
+    b.tags(&["ordering", "limit", "order_limit_removal"]);
+    b.build()
+}
+
 #[cfg(test)]
 mod tests {
     use readyset_sql::Dialect;
@@ -146,5 +167,50 @@ mod tests {
         assert!(sql.contains("ORDER BY"), "sql: {sql}");
         assert!(sql.contains("LIMIT"), "sql: {sql}");
         assert!(sql.contains("OFFSET"), "sql: {sql}");
+    }
+
+    #[test]
+    fn topk_unique_key_eq_builds() {
+        let p = topk_unique_key_eq();
+        assert_eq!(p.name, "topk_unique_key_eq");
+        assert!(p.tags.contains(&"order_limit_removal"));
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::WhereLiteralEq { .. }))
+        );
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::OrderBy { .. }))
+        );
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::Limit { .. }))
+        );
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::ColumnUniqueNotNull { .. }))
+        );
+    }
+
+    #[test]
+    fn topk_unique_key_eq_resolves() {
+        let p = topk_unique_key_eq();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        // Must have a concrete literal, not a parameter placeholder.
+        assert!(
+            sql.contains("= 1"),
+            "sql should have concrete literal: {sql}"
+        );
+        assert!(!sql.contains("= ?"), "sql must not have placeholder: {sql}");
+        assert!(
+            !sql.contains("= $"),
+            "sql must not have PG placeholder: {sql}"
+        );
+        assert!(sql.contains("ORDER BY"), "sql: {sql}");
+        assert!(sql.contains("LIMIT"), "sql: {sql}");
     }
 }

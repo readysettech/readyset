@@ -107,6 +107,45 @@ pub fn having_to_where_promotion() -> Pattern {
     b.build()
 }
 
+/// SELECT sq.c_group, sq.total, t1.c0
+/// FROM (
+///   SELECT t0.c_group, SUM(t0.c_agg) AS total FROM t0 GROUP BY t0.c_group
+/// ) AS sq
+/// INNER JOIN t1 ON sq.c_group = t1.c_pk
+///
+/// Aggregated derived table in the leftmost FROM position, joined to an
+/// outer table. Exercises the aggregated variant of `inline_leading_derived_table`
+/// (or `derived_tables_rewrite` if the pass defers aggregated subqueries).
+pub fn from_aggregated_subquery_join() -> Pattern {
+    let mut b = PatternBuilder::new("from_aggregated_subquery_join");
+    let t_outer = b.table();
+    let c_outer_proj = b.column(t_outer);
+    let c_outer_join = b.column(t_outer);
+    b.column_type_class(c_outer_join, TypeClass::Integer);
+
+    let mut sq = b.subquery();
+    let t_inner = sq.table();
+    let c_group = sq.column(t_inner);
+    let c_agg = sq.column(t_inner);
+    sq.column_type_class(c_group, TypeClass::Integer);
+    sq.column_type_class(c_agg, TypeClass::Numeric);
+    sq.from(t_inner);
+    sq.project_column(c_group, t_inner);
+    sq.project_aggregate(AggregateFn::Sum { distinct: false }, c_agg, t_inner);
+    sq.group_by(c_group, t_inner);
+    let _sq_alias = sq.commit_as_from();
+
+    // The subquery is the leading FROM item; t_outer is joined onto it.
+    // c_group is projected by the subquery and propagated to the outer env
+    // via the FromSubquery column-propagation path, so it can be used as
+    // the left side of the ON clause.
+    b.join_table(JoinOperator::InnerJoin, t_outer, c_group, c_outer_join);
+    b.project_column(c_outer_proj, t_outer);
+
+    b.tags(&["subquery", "aggregate", "group_by", "inline_leading"]);
+    b.build()
+}
+
 /// SELECT sq.c0, sq.c1
 /// FROM (SELECT t.c0, t.c1 FROM t WHERE t.c2 = ?) AS sq
 ///
@@ -129,7 +168,7 @@ pub fn from_subquery_filter() -> Pattern {
     sq.where_param(c_filter, t_inner, BinaryOperator::Equal);
     let _derived_alias = sq.commit_as_from();
 
-    b.tags(&["subquery", "inline_leading"]);
+    b.tags(&["subquery"]);
     b.set_weight(3);
     b.build()
 }
@@ -241,7 +280,6 @@ mod tests {
         let p = from_subquery_filter();
         assert_eq!(p.name, "from_subquery_filter");
         assert!(p.tags.contains(&"subquery"));
-        assert!(p.tags.contains(&"inline_leading"));
         assert!(p.min_depth >= 1);
         // Primary is the FROM-subquery alias and must be DerivedRelation
         // so `compose` refuses to unify it with a partner pattern's
@@ -266,5 +304,73 @@ mod tests {
             sql.contains("`sq"),
             "expected sq alias reference in sql: {sql}"
         );
+    }
+
+    #[test]
+    fn from_aggregated_subquery_join_builds() {
+        let p = from_aggregated_subquery_join();
+        assert_eq!(p.name, "from_aggregated_subquery_join");
+        assert!(p.tags.contains(&"subquery"));
+        assert!(p.tags.contains(&"aggregate"));
+        assert!(p.tags.contains(&"group_by"));
+        assert!(p.tags.contains(&"inline_leading"));
+        assert!(p.min_depth >= 1);
+        // Must have a FromSubquery relation (subquery in leading FROM position)
+        assert!(p.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::SubqueryRelation {
+                kind: crate::constraint::SubqueryRelationKind::FromSubquery,
+                ..
+            }
+        )));
+        // Must have a Join constraint (outer table joined to subquery alias)
+        assert!(p.constraints.iter().any(|c| matches!(
+            c,
+            Constraint::Join {
+                right: crate::constraint::JoinRight::Table(_),
+                ..
+            }
+        )));
+        // Inner subquery must carry GROUP BY and aggregate
+        let inner_constraints = p
+            .constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::SubqueryRelation {
+                    kind: crate::constraint::SubqueryRelationKind::FromSubquery,
+                    constraints,
+                    ..
+                } => Some(constraints),
+                _ => None,
+            })
+            .expect("expected FromSubquery constraint");
+        assert!(
+            inner_constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::GroupBy { .. })),
+            "inner subquery must have GroupBy"
+        );
+        assert!(
+            inner_constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::ProjectAggregate { .. })),
+            "inner subquery must have ProjectAggregate"
+        );
+    }
+
+    #[test]
+    fn from_aggregated_subquery_join_resolves() {
+        let p = from_aggregated_subquery_join();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        // Subquery in FROM position with GROUP BY
+        assert!(sql.contains("GROUP BY"), "expected GROUP BY in sql: {sql}");
+        assert!(
+            sql.contains("SUM(") || sql.contains("sum("),
+            "expected SUM in sql: {sql}"
+        );
+        // Outer table joined to subquery alias
+        assert!(sql.contains("JOIN"), "expected JOIN in sql: {sql}");
+        // Subquery is in the FROM clause (leading position), not the right of a JOIN
+        assert!(sql.contains("FROM ("), "expected FROM ( in sql: {sql}");
     }
 }

@@ -53,7 +53,7 @@ pub fn int_int_divide_bait() -> Pattern {
         ],
     );
 
-    b.tags(&["example", "filter", "parameter"]);
+    b.tags(&["filter", "parameter"]);
     b.build()
 }
 
@@ -110,7 +110,6 @@ mod tests {
     fn int_int_divide_bait_pattern_builds() {
         let p = int_int_divide_bait();
         assert_eq!(p.name, "int_int_divide_bait");
-        assert!(p.tags.contains(&"example"));
         assert!(p.tags.contains(&"filter"));
         // table + c1 + c2 + param = 4 vars
         assert_eq!(p.num_vars(), 4);

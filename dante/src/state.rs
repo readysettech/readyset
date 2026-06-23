@@ -59,6 +59,22 @@ impl TableSchema {
         self.column_counter += 1;
         name
     }
+
+    /// Add a column with an explicit name, advancing the counter if needed to
+    /// keep `fresh_column_name` from re-using the same name. Used when an
+    /// external caller (e.g. `JoinUsing` shared-column resolution) must insert
+    /// a column with a specific name that was minted on a different table.
+    pub fn add_column_with_name_advance(&mut self, name: SqlIdentifier, meta: ColumnMeta) {
+        // If the name follows the "cN" pattern, advance the counter past N.
+        let name_str = name.as_str();
+        if let Some(suffix) = name_str.strip_prefix('c')
+            && let Ok(n) = suffix.parse::<usize>()
+            && self.column_counter <= n
+        {
+            self.column_counter = n + 1;
+        }
+        self.add_column(name, meta);
+    }
 }
 
 /// Configuration for the query generator.
@@ -103,6 +119,7 @@ pub(crate) struct StateCheckpoint {
     alias_counter: usize,
     subquery_alias_counter: usize,
     cte_alias_counter: usize,
+    values_alias_counter: usize,
 }
 
 /// The long-lived state that persists across multiple query generations.
@@ -114,6 +131,7 @@ pub struct GenerationState {
     alias_counter: usize,
     subquery_alias_counter: usize,
     cte_alias_counter: usize,
+    values_alias_counter: usize,
     config: GeneratorConfig,
 }
 
@@ -127,6 +145,7 @@ impl GenerationState {
             alias_counter: 0,
             subquery_alias_counter: 0,
             cte_alias_counter: 0,
+            values_alias_counter: 0,
             config,
         }
     }
@@ -224,6 +243,13 @@ impl GenerationState {
         name
     }
 
+    /// Generate a fresh VALUES relation alias (v0, v1, ...).
+    pub fn fresh_values_alias(&mut self) -> SqlIdentifier {
+        let name = SqlIdentifier::from(format!("v{}", self.values_alias_counter));
+        self.values_alias_counter += 1;
+        name
+    }
+
     /// Capture a checkpoint of the current state for backtracking.
     pub(crate) fn checkpoint(&self) -> StateCheckpoint {
         StateCheckpoint {
@@ -232,6 +258,7 @@ impl GenerationState {
             alias_counter: self.alias_counter,
             subquery_alias_counter: self.subquery_alias_counter,
             cte_alias_counter: self.cte_alias_counter,
+            values_alias_counter: self.values_alias_counter,
         }
     }
 
@@ -242,6 +269,7 @@ impl GenerationState {
         self.alias_counter = cp.alias_counter;
         self.subquery_alias_counter = cp.subquery_alias_counter;
         self.cte_alias_counter = cp.cte_alias_counter;
+        self.values_alias_counter = cp.values_alias_counter;
     }
 }
 

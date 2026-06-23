@@ -151,7 +151,19 @@ impl ConstraintRegistry {
     ///
     /// Returns `Err` if any `Constraint::Example` cell references a var that
     /// is out of range or has the wrong `VarKind`.
+    ///
+    /// # Panics (debug builds)
+    ///
+    /// Panics if the pattern carries a `"mysql_only"` or `"postgres_only"` tag.
+    /// Dialect is structural metadata expressed via `Pattern::dialect_support`;
+    /// dialect tags in the swarm universe would become coins that silently
+    /// restrict dialect-specific patterns from campaigns that roll them off.
     pub fn register(&mut self, pattern: Pattern) -> Result<(), PatternRegistrationError> {
+        debug_assert!(
+            !pattern.tags.contains(&"mysql_only") && !pattern.tags.contains(&"postgres_only"),
+            "pattern {:?} carries a dialect tag; use set_dialect_support instead",
+            pattern.name
+        );
         Self::validate_examples(&pattern)?;
         self.patterns.push(pattern);
         Ok(())
@@ -293,6 +305,10 @@ impl ConstraintRegistry {
                 !excluded.contains(i)
                     && filter.matches(&p.tags, p.min_depth)
                     && p.dialect_support.supports(dialect)
+                    && filter
+                        .dialect_support
+                        .as_ref()
+                        .is_none_or(|ds| *ds == p.dialect_support)
             })
             .collect();
 
@@ -363,6 +379,10 @@ impl ConstraintRegistry {
             .expect("pattern is malformed");
         reg.register(aggregates::multi_aggregate())
             .expect("pattern is malformed");
+        // Multi-aggregate without GROUP BY or parameters targets the
+        // JoinAggregates empty group_by Antithesis assertion.
+        reg.register(aggregates::multi_aggregate_no_group_by())
+            .expect("pattern is malformed");
         reg.register(aggregates::in_list_aggregate())
             .expect("pattern is malformed");
         // Max as a bare aggregate and as a post-lookup aggregate.
@@ -375,6 +395,33 @@ impl ConstraintRegistry {
         reg.register(aggregates::avg_in_list())
             .expect("pattern is malformed");
         reg.register(aggregates::count_in_list())
+            .expect("pattern is malformed");
+        // JsonObjectAgg accumulation (Antithesis Accumulation: JsonObjectAgg) and
+        // post-lookup (Post-lookup aggregate: JsonObjectAgg); GroupConcat
+        // post-lookup (Post-lookup aggregate: GroupConcat). All MySQL-only.
+        reg.register(aggregates::json_object_agg_grouped())
+            .expect("pattern is malformed");
+        reg.register(aggregates::json_object_agg_in_list())
+            .expect("pattern is malformed");
+        reg.register(aggregates::group_concat_in_list())
+            .expect("pattern is malformed");
+        // StringAgg accumulation (Antithesis Accumulation: StringAgg) and
+        // post-lookup (Post-lookup aggregate: StringAgg). PostgreSQL-only.
+        reg.register(aggregates::string_agg_grouped())
+            .expect("pattern is malformed");
+        reg.register(aggregates::string_agg_in_list())
+            .expect("pattern is malformed");
+        // CountStar post-lookup (Post-lookup aggregate::CountStar). Both dialects.
+        reg.register(aggregates::count_star_in_list())
+            .expect("pattern is malformed");
+        // ArrayAgg post-lookup (Post-lookup aggregate::ArrayAgg). PostgreSQL-only.
+        reg.register(aggregates::array_agg_in_list())
+            .expect("pattern is malformed");
+        // array_to_string(ARRAY_AGG(col), ',') — scalar over aggregate. PostgreSQL-only.
+        reg.register(aggregates::array_to_string_agg())
+            .expect("pattern is malformed");
+        // normalize_topk_with_aggregate: aggregate without GROUP BY + ORDER BY/LIMIT.
+        reg.register(aggregates::aggregate_no_group_by_with_topk())
             .expect("pattern is malformed");
 
         // Filter patterns
@@ -395,9 +442,24 @@ impl ConstraintRegistry {
             .expect("pattern is malformed");
         reg.register(joins::self_join())
             .expect("pattern is malformed");
+        reg.register(joins::self_join_with_filter())
+            .expect("pattern is malformed");
+        reg.register(joins::self_join_same_column())
+            .expect("pattern is malformed");
         reg.register(joins::cross_join())
             .expect("pattern is malformed");
         reg.register(joins::left_join_with_rhs_filter())
+            .expect("pattern is malformed");
+        reg.register(joins::straddled_inner_join_with_both_filters())
+            .expect("pattern is malformed");
+        reg.register(joins::values_join())
+            .expect("pattern is malformed");
+        reg.register(joins::inner_join_using())
+            .expect("pattern is malformed");
+        reg.register(joins::redundant_join_on_unique_key())
+            .expect("pattern is malformed");
+        // lateral_join pass: LATERAL correlated subquery (PostgreSQL-only).
+        reg.register(joins::lateral_correlated_subquery())
             .expect("pattern is malformed");
 
         // Ordering patterns
@@ -406,6 +468,8 @@ impl ConstraintRegistry {
         reg.register(ordering::order_by())
             .expect("pattern is malformed");
         reg.register(ordering::paginate())
+            .expect("pattern is malformed");
+        reg.register(ordering::topk_unique_key_eq())
             .expect("pattern is malformed");
 
         // Subquery patterns
@@ -416,6 +480,8 @@ impl ConstraintRegistry {
         reg.register(subqueries::scalar_subquery())
             .expect("pattern is malformed");
         reg.register(subqueries::join_subquery())
+            .expect("pattern is malformed");
+        reg.register(subqueries::not_in_subquery())
             .expect("pattern is malformed");
 
         // CTE patterns
@@ -434,6 +500,8 @@ impl ConstraintRegistry {
         reg.register(hoisting::having_to_where_promotion())
             .expect("pattern is malformed");
         reg.register(hoisting::from_subquery_filter())
+            .expect("pattern is malformed");
+        reg.register(hoisting::from_aggregated_subquery_join())
             .expect("pattern is malformed");
 
         // Compound patterns
@@ -487,6 +555,16 @@ impl ConstraintRegistry {
             .expect("pattern is malformed");
         reg.register(functions::greatest())
             .expect("pattern is malformed");
+        reg.register(functions::concat_ws())
+            .expect("pattern is malformed");
+        reg.register(functions::least())
+            .expect("pattern is malformed");
+        reg.register(functions::ascii())
+            .expect("pattern is malformed");
+        reg.register(functions::split_part())
+            .expect("pattern is malformed");
+        reg.register(functions::date_trunc())
+            .expect("pattern is malformed");
         reg.register(functions::upper())
             .expect("pattern is malformed");
         reg.register(functions::lower())
@@ -496,6 +574,56 @@ impl ConstraintRegistry {
         reg.register(functions::lower_in_list())
             .expect("pattern is malformed");
         reg.register(functions::substring_in_list())
+            .expect("pattern is malformed");
+        reg.register(functions::json_object())
+            .expect("pattern is malformed");
+        reg.register(functions::json_quote())
+            .expect("pattern is malformed");
+        reg.register(functions::json_overlaps())
+            .expect("pattern is malformed");
+        reg.register(functions::json_valid())
+            .expect("pattern is malformed");
+        reg.register(functions::json_depth())
+            .expect("pattern is malformed");
+        reg.register(functions::json_build_object())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_build_object())
+            .expect("pattern is malformed");
+        reg.register(functions::json_strip_nulls())
+            .expect("pattern is malformed");
+        reg.register(functions::json_typeof())
+            .expect("pattern is malformed");
+        reg.register(functions::json_extract_path_text())
+            .expect("pattern is malformed");
+        reg.register(functions::date_format())
+            .expect("pattern is malformed");
+        reg.register(functions::timediff())
+            .expect("pattern is malformed");
+        reg.register(functions::addtime())
+            .expect("pattern is malformed");
+        reg.register(functions::convert_tz())
+            .expect("pattern is malformed");
+        reg.register(functions::hex())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_strip_nulls())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_pretty())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_extract_path())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_set())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_set_lax())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_insert())
+            .expect("pattern is malformed");
+        reg.register(functions::st_astext())
+            .expect("pattern is malformed");
+        reg.register(functions::st_asewkt())
+            .expect("pattern is malformed");
+        reg.register(functions::json_array_length())
+            .expect("pattern is malformed");
+        reg.register(functions::jsonb_array_length())
             .expect("pattern is malformed");
 
         // Expression-eval patterns (tagged `expr_eval`)
@@ -654,7 +782,8 @@ impl Generator {
             // that share the descriptive "compound" tag but are not
             // compound SELECTs.
             if !pattern.vars.is_empty() && !pattern.is_compound() {
-                let partners = self.pick_composition_partners(entropy, pattern);
+                let partners =
+                    self.pick_composition_partners(entropy, pattern, &filter.excluded_tags);
                 for partner in &partners {
                     recipe = recipe.compose(partner);
                     composed_names.push(partner.name.to_string());
@@ -877,6 +1006,7 @@ impl Generator {
         &'a self,
         entropy: &mut Entropy<'_>,
         base: &Pattern,
+        excluded_tags: &[&'static str],
     ) -> Vec<&'a Pattern> {
         // Geometric distribution: keep flipping until we get tails.
         // p=0.8 gives ~20% bare, ~16% depth-2, ~13% depth-3, and ~33%
@@ -904,7 +1034,14 @@ impl Generator {
         let mut tried_indices: Vec<usize> = Vec::new();
 
         while partners.len() < target {
-            let filter = SelectionFilter::default();
+            // Honor the run's excluded tags for partners too: an excluded
+            // pattern must never appear, as a base OR a composed partner.
+            // (required_tags is intentionally NOT applied -- partners stay
+            // diverse; dialect is enforced via the `dialect` arg below.)
+            let filter = SelectionFilter {
+                excluded_tags: excluded_tags.to_vec(),
+                ..Default::default()
+            };
             let candidate =
                 self.registry
                     .pick_random_excluding(entropy, &filter, dialect, &tried_indices);
@@ -984,11 +1121,154 @@ mod tests {
         let reg = ConstraintRegistry::default_registry();
         let tags = reg.all_tags();
         assert!(tags.contains("expr_eval"), "expected expr_eval in {tags:?}");
-        assert!(
-            tags.contains("postgres_only"),
-            "expected postgres_only in {tags:?}"
-        );
         assert!(!tags.contains("definitely_not_a_real_tag"));
+    }
+
+    #[test]
+    fn no_registered_pattern_carries_dialect_tags() {
+        // Dialect is expressed via Pattern::dialect_support (structural) and
+        // filtered via pick_random (structural). Dialect strings in the tag
+        // universe become swarm coins: a MySQL-connected campaign that rolls
+        // "mysql_only" off silently restricts itself to Both-dialect patterns.
+        // This test is the regression guard: dialect selection must never be a
+        // swarm coin.
+        let reg = ConstraintRegistry::default_registry();
+        let dialect_tags = ["mysql_only", "postgres_only"];
+        for p in reg.patterns.iter() {
+            for dt in &dialect_tags {
+                assert!(
+                    !p.tags.contains(dt),
+                    "pattern {:?} carries dialect tag {:?}; use \
+                     set_dialect_support instead",
+                    p.name,
+                    dt
+                );
+            }
+        }
+        // Also verify they don't appear in the swarm universe.
+        let universe = reg.all_tags();
+        for dt in &dialect_tags {
+            assert!(
+                !universe.contains(*dt),
+                "dialect tag {:?} must not appear in all_tags() swarm universe",
+                dt
+            );
+        }
+    }
+
+    // Pin the tag universe. If this test fails, update the expected set below
+    // and the taxonomy doc in
+    // aidoc/projects/sql-generator-rewrite/design/tag-taxonomy.md.
+    #[test]
+    fn tag_universe_is_pinned() {
+        let reg = ConstraintRegistry::default_registry();
+        let got = reg.all_tags();
+        let expected: std::collections::BTreeSet<&str> = [
+            "3vl",
+            "accumulator",
+            "advanced",
+            "aggregate",
+            "base",
+            "cast",
+            "compound",
+            "correlated",
+            "cross_join",
+            "cte",
+            "datetime",
+            "distinct",
+            "drop_redundant_join",
+            "expr_eval",
+            "filter",
+            "float",
+            "float_widen",
+            "function",
+            "group_by",
+            "group_concat",
+            "having",
+            "hoisting",
+            "inline_leading",
+            "join",
+            "json",
+            "lateral",
+            "json_object_agg",
+            "limit",
+            "literal",
+            "loj_promotion",
+            "lookup_key",
+            "mixed_precision",
+            "mixed_type",
+            "multi_aggregate",
+            "multi_join",
+            "normalize_topk",
+            "not_in",
+            "numeric",
+            "numeric_scale",
+            "numeric_to_int",
+            "order_limit_removal",
+            "ordering",
+            "paginate",
+            "parameter",
+            "post_lookup",
+            "same_column",
+            "self_join",
+            "self_join_filter",
+            "signedness",
+            "spatial",
+            "straddled",
+            "string",
+            "subquery",
+            "topk",
+            "union",
+            "using",
+            "values",
+            "window",
+        ]
+        .into_iter()
+        .collect();
+        let extra: Vec<_> = got.difference(&expected).collect();
+        let missing: Vec<_> = expected.difference(&got).collect();
+        assert!(
+            extra.is_empty() && missing.is_empty(),
+            "tag universe mismatch\n  extra (in registry, not expected): {extra:?}\n  \
+             missing (expected, not in registry): {missing:?}"
+        );
+    }
+
+    #[test]
+    fn selection_filter_dialect_support_restricts_patterns() {
+        use crate::constraint::DialectSupport;
+
+        // The SelectionFilter::dialect_support field, when set, restricts
+        // pick_random to patterns whose DialectSupport exactly matches.
+        let reg = ConstraintRegistry::default_registry();
+
+        // A filter for MySqlOnly patterns: every picked pattern must have
+        // dialect_support == MySqlOnly.
+        let mysql_filter = SelectionFilter {
+            dialect_support: Some(DialectSupport::MySqlOnly),
+            ..Default::default()
+        };
+        // Run enough picks to get a non-trivial sample.
+        let mut saw_mysql_only = false;
+        for seed in 0u64..50 {
+            let mut rng2 = SmallRng::seed_from_u64(seed);
+            let mut e2 = Entropy::new(&mut rng2);
+            if let Some(p) = reg.pick_random(&mut e2, &mysql_filter, Dialect::MySQL) {
+                assert_eq!(
+                    p.dialect_support,
+                    DialectSupport::MySqlOnly,
+                    "pick_random with dialect_support=MySqlOnly must only return MySqlOnly \
+                     patterns; got {:?} with support {:?}",
+                    p.name,
+                    p.dialect_support,
+                );
+                saw_mysql_only = true;
+            }
+        }
+        assert!(
+            saw_mysql_only,
+            "at least one MySqlOnly pattern must be picked with the dialect filter"
+        );
     }
 
     #[test]
@@ -1091,6 +1371,31 @@ mod tests {
                 !p.tags.contains(&"subquery"),
                 "should not contain subquery tag"
             );
+        }
+    }
+
+    #[test]
+    fn composition_honors_excluded_tags() {
+        // Regression for REA-6683: an excluded tag must also be kept out of
+        // composition partners, not just base selection. The values_join
+        // pattern (tag "values") lowers to a Constant node that panics Readyset
+        // under left-join composition, so a run excluding "values" must never
+        // emit it -- as a base pattern OR as a composed partner.
+        let mut generator = Generator::new(Dialect::PostgreSQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let filter = SelectionFilter {
+            excluded_tags: vec!["values"],
+            ..Default::default()
+        };
+        for _ in 0..300 {
+            if let Ok(out) = generator.generate_with_ddl_filtered(&mut entropy, &filter) {
+                assert!(
+                    !out.pattern_name.contains("values_join"),
+                    "excluded 'values' pattern composed into recipe: {}",
+                    out.pattern_name
+                );
+            }
         }
     }
 
@@ -1787,6 +2092,7 @@ mod tests {
                 "in_subquery",
                 "scalar_subquery",
                 "join_subquery",
+                "not_in_subquery",
             ],
             &["between", "in_list", "like", "is_null", "compound_where"],
         ];
@@ -2050,7 +2356,11 @@ mod tests {
         let mut entropy = Entropy::new(&mut rng);
 
         let filter = SelectionFilter {
-            required_tags: vec!["multi_aggregate"],
+            // Require group_by too: the multi_aggregate tag also matches
+            // multi_aggregate_no_group_by, so composition can otherwise select
+            // the no-GROUP-BY sibling as the base pattern, making this test
+            // sensitive to registry size via the seeded selection stream.
+            required_tags: vec!["multi_aggregate", "group_by"],
             ..Default::default()
         };
 
@@ -2154,6 +2464,10 @@ mod tests {
             (
                 "join_subquery",
                 crate::registry::subqueries::join_subquery(),
+            ),
+            (
+                "not_in_subquery",
+                crate::registry::subqueries::not_in_subquery(),
             ),
         ];
 

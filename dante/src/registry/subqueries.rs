@@ -1,6 +1,6 @@
 //! Subquery patterns: exists_subquery, in_subquery, scalar_subquery, join_subquery.
 
-use readyset_sql::ast::JoinOperator;
+use readyset_sql::ast::{JoinOperator, OrderType};
 
 use crate::constraint::{Constraint, SubqueryExprKind, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
@@ -62,7 +62,38 @@ pub fn in_subquery() -> Pattern {
     b.build()
 }
 
-/// SELECT (SELECT t1.c0 FROM t1 LIMIT 1), t0.c0 FROM t0
+/// SELECT t0.c0 FROM t0 WHERE t0.c1 NOT IN (SELECT t1.c1 FROM t1)
+///
+/// Both NOT IN columns are promoted to unique, NOT NULL keys
+/// (`column_unique_not_null`): under three-valued logic, NOT IN with a NULL on
+/// either side returns NULL rather than FALSE, which would diverge from the
+/// upstream DB. The Integer type class keeps the two sides comparable.
+pub fn not_in_subquery() -> Pattern {
+    let mut b = PatternBuilder::new("not_in_subquery");
+    let t_outer = b.table();
+    let c_outer_proj = b.column(t_outer);
+    let c_outer_not_in = b.column(t_outer);
+    b.column_type_class(c_outer_not_in, TypeClass::Integer);
+    b.column_unique_not_null(c_outer_not_in);
+
+    let mut sq = b.subquery();
+    let t_inner = sq.table();
+    let c_inner = sq.column(t_inner);
+    sq.column_type_class(c_inner, TypeClass::Integer);
+    sq.constraint(Constraint::ColumnUniqueNotNull { col: c_inner });
+    sq.from(t_inner);
+    sq.project_column(c_inner, t_inner);
+    sq.constraint(Constraint::TypeCompatible(c_outer_not_in, c_inner));
+    sq.commit_as_where(SubqueryExprKind::NotInSubquery);
+
+    b.from(t_outer);
+    b.project_column(c_outer_proj, t_outer);
+
+    b.tags(&["subquery", "not_in", "3vl"]);
+    b.build()
+}
+
+/// SELECT (SELECT t1.c0 FROM t1 ORDER BY t1.c0 LIMIT 1), t0.c0 FROM t0
 pub fn scalar_subquery() -> Pattern {
     let mut b = PatternBuilder::new("scalar_subquery");
     let t_outer = b.table();
@@ -73,6 +104,14 @@ pub fn scalar_subquery() -> Pattern {
     let c_inner = sq.column(t_inner);
     sq.from(t_inner);
     sq.project_column(c_inner, t_inner);
+    // ORDER BY the projected column so LIMIT 1 returns a deterministic scalar.
+    // Without it MySQL may return any row, producing spurious oracle mismatches.
+    sq.constraint(Constraint::OrderBy {
+        col: c_inner,
+        table: t_inner,
+        direction: OrderType::OrderAscending,
+        null_order: None,
+    });
     sq.constraint(Constraint::Limit {
         limit: 1,
         offset: None,
@@ -151,6 +190,26 @@ mod tests {
         assert_eq!(p.name, "scalar_subquery");
         assert!(p.tags.contains(&"subquery"));
         assert!(p.min_depth >= 1);
+    }
+
+    #[test]
+    fn scalar_subquery_orders_before_limit() {
+        // The scalar subquery's LIMIT 1 must be paired with an ORDER BY, else it
+        // returns a nondeterministic row in MySQL and the oracle reports a
+        // spurious upstream-vs-Readyset mismatch. Resolve to SQL and confirm
+        // ORDER BY precedes LIMIT.
+        let p = scalar_subquery();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        let order_pos = sql
+            .find("ORDER BY")
+            .unwrap_or_else(|| panic!("no ORDER BY in: {sql}"));
+        let limit_pos = sql
+            .find("LIMIT")
+            .unwrap_or_else(|| panic!("no LIMIT in: {sql}"));
+        assert!(
+            order_pos < limit_pos,
+            "ORDER BY must precede LIMIT in: {sql}"
+        );
     }
 
     #[test]
@@ -263,6 +322,55 @@ mod tests {
                 .any(|c| matches!(c, Constraint::TypeCompatible(..))),
             "exists_subquery inner constraints must include TypeCompatible \
              for the correlated column pair"
+        );
+    }
+
+    #[test]
+    fn not_in_subquery_builds() {
+        let p = not_in_subquery();
+        assert_eq!(p.name, "not_in_subquery");
+        assert!(p.tags.contains(&"subquery"));
+        assert!(p.tags.contains(&"not_in"));
+        assert!(p.tags.contains(&"3vl"));
+
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::SubqueryExpr { .. }))
+        );
+    }
+
+    #[test]
+    fn not_in_subquery_resolves() {
+        let p = not_in_subquery();
+        let sql = resolve_pattern(&p, Dialect::MySQL);
+        assert!(sql.contains("NOT IN (SELECT"), "sql: {sql}");
+    }
+
+    #[test]
+    fn not_in_subquery_constrains_both_columns_not_null() {
+        // NOT IN is non-deterministic under three-valued logic if either side
+        // can be NULL (it returns NULL, not FALSE), so both the outer filter
+        // column and the inner projected column must be NOT NULL for the oracle
+        // to agree with the upstream DB.
+        let p = not_in_subquery();
+        assert!(
+            p.constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::ColumnUniqueNotNull { .. })),
+            "outer NOT IN column must be a unique, NOT NULL key",
+        );
+        let inner_has_unique = p.constraints.iter().any(|c| match c {
+            Constraint::SubqueryExpr {
+                constraints: inner, ..
+            } => inner
+                .iter()
+                .any(|c| matches!(c, Constraint::ColumnUniqueNotNull { .. })),
+            _ => false,
+        });
+        assert!(
+            inner_has_unique,
+            "inner subquery column must be a unique, NOT NULL key",
         );
     }
 

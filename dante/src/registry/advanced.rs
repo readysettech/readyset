@@ -176,7 +176,7 @@ pub fn multi_join() -> Pattern {
     b.project_column(c1, t1);
     b.project_column(c2, t2);
 
-    b.tags(&["advanced", "join", "multi_join", "three_table"]);
+    b.tags(&["advanced", "join", "multi_join"]);
     b.build()
 }
 
@@ -219,7 +219,6 @@ mod tests {
         let p = multi_join();
         assert_eq!(p.name, "multi_join");
         assert!(p.tags.contains(&"multi_join"));
-        assert!(p.tags.contains(&"three_table"));
 
         // Should have exactly 2 Join constraints
         let join_count = p

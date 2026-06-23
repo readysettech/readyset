@@ -40,6 +40,9 @@ pub enum TypeClass {
     /// Types PostgreSQL accepts for MIN/MAX and ordering: numeric, string,
     /// and date/time. Excludes boolean, which has no min/max aggregate in PG.
     Orderable,
+    /// PostGIS geometry types (GEOMETRY(POINT), GEOMETRY(POLYGON)).
+    /// Used by spatial function patterns like st_astext, st_asewkt.
+    Geometry,
     /// Exact SQL type
     Exact(SqlType),
 }
@@ -94,6 +97,9 @@ impl TypeClass {
                     || TypeClass::String.matches(sql_type)
                     || TypeClass::DateTime.matches(sql_type)
             }
+            TypeClass::Geometry => {
+                matches!(sql_type, SqlType::PostgisPoint | SqlType::PostgisPolygon)
+            }
             TypeClass::Exact(exact) => sql_type == exact,
         }
     }
@@ -123,14 +129,27 @@ impl TypeClass {
 /// Aggregate function specifier for `ProjectAggregate` and `Having` constraints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AggregateFn {
-    Count { distinct: bool },
-    Sum { distinct: bool },
-    Avg { distinct: bool },
+    Count {
+        distinct: bool,
+    },
+    /// `COUNT(*)` -- counts all rows, not a specific column.
+    ///
+    /// Unlike `Count { distinct: false }` (which emits `COUNT(col)`),
+    /// `CountStar` emits `COUNT(*)` and fires the `CountStar` arm in
+    /// Readyset's grouped.rs rather than the `Count` arm.
+    CountStar,
+    Sum {
+        distinct: bool,
+    },
+    Avg {
+        distinct: bool,
+    },
     Min,
     Max,
     GroupConcat,
     JsonObjectAgg,
     ArrayAgg,
+    StringAgg,
 }
 
 /// Scalar function specifier for `ProjectFunction` constraints.
@@ -152,6 +171,39 @@ pub enum ScalarFn {
     DayOfWeek,
     Greatest,
     Least,
+    Ascii,
+    SplitPart,
+    DateTrunc,
+    JsonObject,
+    JsonQuote,
+    JsonOverlaps,
+    JsonValid,
+    JsonDepth,
+    JsonBuildObject,
+    JsonbBuildObject,
+    JsonBuildArray,
+    JsonbBuildArray,
+    JsonArrayLength,
+    JsonbArrayLength,
+    JsonStripNulls,
+    JsonTypeof,
+    JsonExtractPathText,
+    JsonbStripNulls,
+    JsonbPretty,
+    JsonbExtractPath,
+    JsonbSet,
+    JsonbSetLax,
+    JsonbInsert,
+    DateFormat,
+    TimeDiff,
+    AddTime,
+    ConvertTz,
+    Hex,
+    /// `ST_AsText(col)` — converts geometry bytes to WKT. Supported by both
+    /// MySQL and PostgreSQL (via PostGIS).
+    StAsText,
+    /// `ST_AsEWKT(col)` — PostGIS-only; returns EWKT (with SRID prefix).
+    StAsEwkt,
 }
 
 /// Window function specifier for `WindowFunction` constraints.
@@ -185,6 +237,8 @@ pub enum SubqueryExprKind {
     ExistsCorrelated,
     /// `col IN (SELECT ...)`
     InSubquery,
+    /// `col NOT IN (SELECT ...)` -- exercises the 3-valued-logic NOT IN path
+    NotInSubquery,
     /// Scalar subquery in SELECT or WHERE
     ScalarSubquery,
 }
@@ -206,6 +260,14 @@ pub enum SubqueryRelationKind {
     JoinTarget,
     /// Derived table in FROM position (`FROM (SELECT ...) AS sq`).
     FromSubquery,
+    /// LATERAL join: `JOIN LATERAL (SELECT ...) AS sq ON TRUE`.
+    ///
+    /// The inner subquery is correlated: it may reference columns from
+    /// preceding FROM items via `WhereColumnCompare` constraints that cross
+    /// the scope boundary (outer VarIds appear as `shared_vars`). The
+    /// resolver emits the inner SELECT with `lateral: true` and appends
+    /// `ON TRUE` so the join predicate is always satisfied.
+    LateralJoin { operator: JoinOperator },
 }
 
 /// What the right side of a JOIN is. Always a relation var -- base table,
@@ -283,6 +345,12 @@ pub enum Constraint {
     // --- Variable equality/inequality ---
     /// Two variables must resolve to the SAME value (e.g., same table for self-join).
     Eq(VarId, VarId),
+    /// Two column variables must resolve to the SAME physical column name. Both
+    /// must be bound (after `ColumnExists`) to aliases of the same underlying
+    /// table; the second column is rebound to the first's name, producing a
+    /// same-column self-join (`a0.c = a1.c`) rather than the default
+    /// different-column shape (`a0.c2 = a1.c3`).
+    SameColumnEq(VarId, VarId),
     /// Two variables must resolve to DIFFERENT values (e.g., force non-self-join).
     NotEq(VarId, VarId),
 
@@ -304,6 +372,12 @@ pub enum Constraint {
         col: VarId,
         table: VarId,
     },
+    /// `array_to_string(ARRAY_AGG(col), ',')` in the SELECT list.
+    ///
+    /// Exercises the scalar-over-aggregate composition path: ARRAY_AGG is
+    /// extracted as the grouped node, and array_to_string is applied as a
+    /// post-aggregate projection. PostgreSQL only.
+    ProjectArrayToStringAgg { col: VarId, table: VarId },
     /// A scalar function call appears in the SELECT list.
     ProjectFunction {
         function: ScalarFn,
@@ -491,6 +565,37 @@ pub enum Constraint {
         order_type: Option<OrderType>,
     },
 
+    /// A `JOIN t USING (col)` clause. The shared column must have the same
+    /// name in both the left table (implicit, determined by `lhs_table`) and
+    /// the right table (`rhs_table`). The resolver ensures that the column
+    /// name bound to `col` is also present in `rhs_table`'s DDL.
+    ///
+    /// Desugared to `JOIN t ON lhs.col = rhs.col` by the
+    /// `expand_join_on_using` rewrite pass.
+    JoinUsing {
+        operator: JoinOperator,
+        lhs_table: VarId,
+        rhs_table: VarId,
+        col: VarId,
+    },
+
+    /// A VALUES clause used as the right side of a JOIN. The relation is
+    /// inline constant data, not a base table.
+    ///
+    /// `alias` is a `VarKind::DerivedRelation` var that the resolver binds to
+    /// a fresh `vN` SQL identifier. A sibling `Join { right:
+    /// JoinRight::Table(alias) }` references this var so the JOIN renders as
+    /// `JOIN (VALUES ...) AS vN(col0, col1, ...)`.
+    ///
+    /// `col_names` are the column aliases in the VALUES relation.
+    /// `rows` is the literal row data as static strings (converted to SQL
+    /// literals at resolve time).
+    ValuesRelation {
+        alias: VarId,
+        col_names: &'static [&'static str],
+        rows: &'static [&'static [&'static str]],
+    },
+
     /// Concrete (row + parameter) probe authored alongside a pattern's shape.
     /// Examples don't influence the generated SQL -- they ride through the
     /// resolver and are materialized into `ResolvedExample` overrides for the
@@ -504,6 +609,19 @@ pub enum Constraint {
         /// Per-var bindings for this example.
         cells: Vec<ExampleCell>,
     },
+
+    /// A WHERE clause predicate that compares a column to a concrete integer
+    /// literal (`col = 1`), not a placeholder. Used to exercise the
+    /// `order_limit_removal` pass, which fires when a unique-key column is
+    /// pinned by a literal equality rather than a parameter.
+    WhereLiteralEq { col: VarId, table: VarId },
+
+    /// Marks a column as the primary key of its table.
+    ///
+    /// The schema resolver makes the column the table's PRIMARY KEY (NOT NULL,
+    /// unique). This satisfies `UniqueColumnsSchemaImpl`'s requirement for
+    /// recognizing unique keys, which is needed for `order_limit_removal`.
+    ColumnUniqueNotNull { col: VarId },
 }
 
 impl Constraint {
@@ -514,7 +632,10 @@ impl Constraint {
             Constraint::AliasOf { alias, original } => vec![*alias, *original],
             Constraint::ColumnExists { col, table } => vec![*col, *table],
             Constraint::ColumnTypeClass { col, .. } => vec![*col],
-            Constraint::TypeCompatible(a, b) | Constraint::Eq(a, b) | Constraint::NotEq(a, b) => {
+            Constraint::TypeCompatible(a, b)
+            | Constraint::Eq(a, b)
+            | Constraint::SameColumnEq(a, b)
+            | Constraint::NotEq(a, b) => {
                 vec![*a, *b]
             }
             Constraint::From(v) => vec![*v],
@@ -524,10 +645,17 @@ impl Constraint {
                 right_col,
                 ..
             } => vec![*left_col, *right_col, *t],
+            Constraint::JoinUsing {
+                lhs_table,
+                rhs_table,
+                col,
+                ..
+            } => vec![*lhs_table, *rhs_table, *col],
             Constraint::ProjectColumn { col, table }
             | Constraint::GroupBy { col, table }
             | Constraint::WhereIsNull { col, table, .. } => vec![*col, *table],
-            Constraint::ProjectAggregate { col, table, .. } => vec![*col, *table],
+            Constraint::ProjectAggregate { col, table, .. }
+            | Constraint::ProjectArrayToStringAgg { col, table } => vec![*col, *table],
             Constraint::WhereInParam {
                 col, table, params, ..
             } => {
@@ -596,6 +724,7 @@ impl Constraint {
             Constraint::OrderBy { col, table, .. } => vec![*col, *table],
             Constraint::SubqueryExpr { .. } => vec![],
             Constraint::SubqueryRelation { alias, .. } => vec![*alias],
+            Constraint::ValuesRelation { alias, .. } => vec![*alias],
             Constraint::CompoundSelect { .. } => vec![],
             Constraint::Or(preferred, fallback) => {
                 let mut ids: Vec<VarId> = preferred.iter().flat_map(|c| c.var_ids()).collect();
@@ -619,6 +748,8 @@ impl Constraint {
                 ids
             }
             Constraint::Example { cells, .. } => cells.iter().map(|c| c.var).collect(),
+            Constraint::WhereLiteralEq { col, table } => vec![*col, *table],
+            Constraint::ColumnUniqueNotNull { col } => vec![*col],
         }
     }
 
@@ -641,6 +772,7 @@ impl Constraint {
             },
             Constraint::TypeCompatible(a, b) => Constraint::TypeCompatible(f(*a), f(*b)),
             Constraint::Eq(a, b) => Constraint::Eq(f(*a), f(*b)),
+            Constraint::SameColumnEq(a, b) => Constraint::SameColumnEq(f(*a), f(*b)),
             Constraint::NotEq(a, b) => Constraint::NotEq(f(*a), f(*b)),
             Constraint::From(v) => Constraint::From(f(*v)),
             Constraint::Join {
@@ -653,6 +785,17 @@ impl Constraint {
                 right: JoinRight::Table(f(*t)),
                 left_col: f(*left_col),
                 right_col: f(*right_col),
+            },
+            Constraint::JoinUsing {
+                operator,
+                lhs_table,
+                rhs_table,
+                col,
+            } => Constraint::JoinUsing {
+                operator: *operator,
+                lhs_table: f(*lhs_table),
+                rhs_table: f(*rhs_table),
+                col: f(*col),
             },
             Constraint::ProjectColumn { col, table } => Constraint::ProjectColumn {
                 col: f(*col),
@@ -667,6 +810,12 @@ impl Constraint {
                 col: f(*col),
                 table: f(*table),
             },
+            Constraint::ProjectArrayToStringAgg { col, table } => {
+                Constraint::ProjectArrayToStringAgg {
+                    col: f(*col),
+                    table: f(*table),
+                }
+            }
             Constraint::ProjectFunction { function, args } => Constraint::ProjectFunction {
                 function: function.clone(),
                 args: args.iter().map(|(c, t)| (f(*c), f(*t))).collect(),
@@ -871,6 +1020,15 @@ impl Constraint {
                 order_col: order_col.map(|(c, t)| (f(c), f(t))),
                 order_type: *order_type,
             },
+            Constraint::ValuesRelation {
+                alias,
+                col_names,
+                rows,
+            } => Constraint::ValuesRelation {
+                alias: f(*alias),
+                col_names,
+                rows,
+            },
             Constraint::Example {
                 note,
                 dialect,
@@ -886,6 +1044,13 @@ impl Constraint {
                     })
                     .collect(),
             },
+            Constraint::WhereLiteralEq { col, table } => Constraint::WhereLiteralEq {
+                col: f(*col),
+                table: f(*table),
+            },
+            Constraint::ColumnUniqueNotNull { col } => {
+                Constraint::ColumnUniqueNotNull { col: f(*col) }
+            }
         }
     }
 }
@@ -964,6 +1129,7 @@ mod tests {
             col: c,
             table: t,
         };
+        let _ = Constraint::ProjectArrayToStringAgg { col: c, table: t };
         let _ = Constraint::ProjectFunction {
             function: ScalarFn::Coalesce,
             args: vec![(c, t)],
@@ -1344,5 +1510,21 @@ mod tests {
         };
         let ids = ex.var_ids();
         assert_eq!(ids, vec![VarId(5), VarId(7)]);
+    }
+
+    #[test]
+    fn geometry_type_class_matches_postgis_types() {
+        use readyset_sql::ast::SqlType;
+        let tc = TypeClass::Geometry;
+        assert!(tc.matches(&SqlType::PostgisPoint));
+        assert!(tc.matches(&SqlType::PostgisPolygon));
+        assert!(!tc.matches(&SqlType::Text));
+        assert!(!tc.matches(&SqlType::Int(None)));
+        assert!(!tc.matches(&SqlType::ByteArray));
+    }
+
+    #[test]
+    fn geometry_type_class_accepts_any_literal() {
+        assert!(TypeClass::Geometry.accepts_literal("anything"));
     }
 }
