@@ -15,18 +15,59 @@ running the oracle.
 
 ## Contents
 
-1. [How it works](#how-it-works)
-2. [Build](#build)
-3. [Prerequisites](#prerequisites)
-4. [Running against MySQL](#running-against-mysql)
-5. [Running against PostgreSQL](#running-against-postgresql)
-6. [CLI reference](#cli-reference)
-7. [Interpreting output](#interpreting-output)
-8. [Targeted testing](#targeted-testing)
-9. [Reproduction capture](#reproduction-capture)
-10. [Antithesis assertion analysis](#antithesis-assertion-analysis)
-11. [Multi-seed runs](#multi-seed-runs)
-12. [Cleanup](#cleanup)
+1. [Quickstart](#quickstart)
+2. [How it works](#how-it-works)
+3. [Build](#build)
+4. [Prerequisites](#prerequisites)
+5. [Running against MySQL](#running-against-mysql)
+6. [Running against PostgreSQL](#running-against-postgresql)
+7. [CLI reference](#cli-reference)
+8. [Interpreting output](#interpreting-output)
+9. [Targeted testing](#targeted-testing)
+10. [Reproduction capture](#reproduction-capture)
+11. [Antithesis assertion analysis](#antithesis-assertion-analysis)
+12. [Multi-seed runs](#multi-seed-runs)
+13. [Cleanup](#cleanup)
+
+## Quickstart
+
+One self-contained MySQL session against a local Readyset. Copy, paste,
+watch the final line for `mismatched=0`.
+
+```bash
+cd public/
+
+# Build both binaries (once).
+cargo build --bin readyset --bin readyset-dante-oracle --features antithesis_sdk/full
+
+# Fresh database and storage.
+mysql -h 127.0.0.1 -P 3306 -u root -pnoria \
+  -e "DROP DATABASE IF EXISTS cfuzz; CREATE DATABASE cfuzz;"
+rm -rf /tmp/rs-cfuzz.db
+
+# Start Readyset on port 3307. Every FEATURE_* must be on (see Feature flags).
+FEATURE_FULL_MATERIALIZATION=true FEATURE_MATERIALIZATION_PERSISTENCE=true \
+FEATURE_MIXED_COMPARISONS=true FEATURE_NON_BLOCKING_INDEX_BUILD=true \
+FEATURE_PAGINATION=true FEATURE_PLACEHOLDER_INLINING=true \
+FEATURE_POST_LOOKUP=true FEATURE_STRADDLED_JOINS=true FEATURE_TOPK=true \
+LOG_LEVEL=error target/debug/readyset \
+  --upstream-db-url mysql://root:noria@127.0.0.1:3306/cfuzz \
+  --address 0.0.0.0:3307 --storage-dir /tmp/rs-cfuzz.db \
+  --cache-mode deep-then-shallow --query-caching in-request-path &
+sleep 8
+
+# Run the oracle against that Readyset.
+target/debug/readyset-dante-oracle \
+  --readyset-mode \
+  --compare-to mysql://root:noria@127.0.0.1:3306/cfuzz \
+  --readyset-url mysql://root:noria@127.0.0.1:3307/cfuzz \
+  --seed 42 --max-queries 200 --rows-per-table 50
+```
+
+`--readyset-mode` tells the oracle the endpoint is a real Readyset
+instance, so it creates caches and runs the EXPLAIN probes. Drop it only
+when the endpoint is a transparent proxy (e.g. SQP). For PostgreSQL,
+per-flag detail, or targeted feature runs, read on.
 
 ## How it works
 
@@ -45,8 +86,9 @@ Each iteration of the inner loop:
    Readyset picks them up via replication.
 5. **Insert data.** One row per `Constraint::Example` (using its row
    overrides) plus `--rows-per-table` random-fill rows.
-6. **Issue a `CREATE CACHE`** for the query (unless skipped by the
-   single-pattern path; see CLI reference).
+6. **Issue a `CREATE DEEP CACHE`** for the query (only under
+   `--readyset-mode`; without it the endpoint is treated as a transparent
+   proxy and decides its own routing).
 7. **Execute the query.** Once with random-fill parameters, then once per
    example with that example's parameter overrides. Each result is
    compared to the upstream's response for the same parameters.
@@ -166,7 +208,7 @@ target/debug/readyset-dante-oracle \
   --readyset-mode \
   --compare-to mysql://root:noria@127.0.0.1:3306/cfuzz_s42 \
   --readyset-url mysql://root:noria@127.0.0.1:3307/cfuzz_s42 \
-  --seed 42 -n 200 --rows-per-table 50
+  --seed 42 --max-queries 200 --rows-per-table 50
 ```
 
 ## Running against PostgreSQL
@@ -208,7 +250,7 @@ target/debug/readyset-dante-oracle \
     --readyset-mode \
     --compare-to postgresql://postgres:noria@127.0.0.1:5432/cfuzz_pg_test \
     --readyset-url postgresql://postgres:noria@127.0.0.1:5433/cfuzz_pg_test \
-    --seed 142 -n 500 --rows-per-table 50 \
+    --seed 142 --max-queries 500 --rows-per-table 50 \
     --dump-repro /tmp/dante-pg-soak/repro.sql
 ```
 
@@ -222,7 +264,7 @@ pgrep -fl 'target/debug/readyset --upstream-db-url postgresql'
 
 | Argument | Default | Description |
 |---|---|---|
-| `-n`, `--num-queries` | `100` | Total queries generated and tested. |
+| `--max-queries` | `1000` | Hard upper bound on queries per run. A fallback so a run can never spin forever; the coin flip is the intended stop, so this rarely binds. |
 | `--rows-per-table` | `100` | Random-fill rows inserted per new table. Examples add one row each on top. |
 | `--seed` | random | Fixed RNG seed for deterministic replay. Pair with the same `--seed` and unchanged registry for byte-identical repros. |
 | `--antithesis-entropy` | off | Use the Antithesis entropy source instead of a seed or system RNG. Only useful inside the Antithesis sandbox. |
@@ -232,7 +274,9 @@ pgrep -fl 'target/debug/readyset --upstream-db-url postgresql'
 | `--dump-repro <path>` | unset | Stream a replayable SQL script to `<path>`. See [Reproduction capture](#reproduction-capture). |
 | `--required-tags <tag,..>` | unset | Restrict pattern selection to patterns carrying **all** of these tags. See [Targeted testing](#targeted-testing). |
 | `--excluded-tags <tag,..>` | unset | Drop patterns carrying **any** of these tags. |
-| `--single-pattern` | off | One pattern per iteration, no composition partners. Use for focused feature runs (especially `expr_eval` patterns). |
+| `--single-pattern` | off | One pattern per iteration, no composition partners. Test a feature in isolation. See [Targeted testing](#targeted-testing). |
+| `--keep-going` | off | Continue past non-fatal terminal SELECT errors (`ErrorClass::Other`) instead of aborting. Each is logged, surfaced as an Antithesis assertion failure, and counted as `errored`. A closed connection (`ErrorClass::Fatal`) still bails. Use for full-coverage soak runs that would otherwise stop at the first novel bug. |
+| `--readyset-mode` | off | Treat `--readyset-url` as a real Readyset instance: apply the deep-cache compatibility rules, `CREATE DEEP CACHE` per query, run the EXPLAIN probes, and wait on `SHOW READYSET TABLES`. Off by default, the endpoint is a transparent proxy (e.g. SQP) and none of those run. See [Targeted testing](#targeted-testing). |
 
 ## Interpreting output
 
@@ -261,29 +305,41 @@ Row count mismatch for query 90: SELECT ...
 
 ## Targeted testing
 
-Three knobs let you narrow the harness from "every pattern, composed
-deeply" down to "this one pattern, alone, with my hand-picked inputs".
+The default run is "every pattern, composed deeply" -- broad coverage, but
+a specific feature can be washed out by the rest. Two flags narrow the
+focus: `--required-tags` picks *which* feature to exercise, and
+`--single-pattern` picks *how* -- combined with other patterns (default) or
+in isolation.
 
-### Tags (`--required-tags`, `--excluded-tags`)
+| Goal | Flags |
+|---|---|
+| Exercise a feature **in combination** with others (deeper queries, broad shapes) | `--required-tags <tags>` |
+| Exercise a feature **in isolation** (one pattern, no partners, reproducible) | `--required-tags <tags> --single-pattern` |
 
-Every pattern carries a list of `&'static str` tags (`base`, `aggregate`,
-`expr_eval`, `mysql_only`, `cte`, `compound`, `lookup_key`, ...). A pattern
-is kept only if it carries every required tag and none of the excluded
-tags.
+Both modes still want `--readyset-mode` (below) whenever the endpoint is
+real Readyset.
 
-Example — only expression-evaluation patterns:
+### Required tags (`--required-tags`, `--excluded-tags`)
+
+Every pattern carries a list of tags (`base`, `aggregate`, `expr_eval`,
+`mysql_only`, `cte`, `compound`, `lookup_key`, ...). A pattern is kept only
+if it carries every required tag and none of the excluded tags; multiple
+required tags are AND-ed.
+
+With `--required-tags` alone, composition stays on: the tagged pattern is
+still combined with random partners, so you test the feature **as it
+appears inside larger queries**. This is the right choice for "make sure
+`expr_eval` is well-covered across realistic shapes" runs.
 
 ```bash
+# Expression-evaluation patterns, composed as usual.
 target/debug/readyset-dante-oracle \
+  --readyset-mode \
   --compare-to mysql://... --readyset-url mysql://... \
-  --seed 42 -n 500 \
+  --seed 42 --max-queries 500 \
   --required-tags expr_eval
-```
 
-Multiple required tags are AND-ed. To run only MySQL-tagged division
-patterns:
-
-```bash
+# Narrow further -- only MySQL-tagged integer division.
 --required-tags expr_eval,arithmetic,int_int
 ```
 
@@ -293,31 +349,52 @@ Browse the available tags by grepping the registry:
 grep -rh 'b\.tags(' public/dante/src/registry/ | sort -u
 ```
 
-### Skip composition (`--single-pattern`)
+### Single pattern (`--single-pattern`)
 
-By default each pattern is composed with random partners to make queries
-deeper. That is great for breadth but bad for surfacing a specific bug
-class: composition partners (self-join, aggregate compose helpers,
-problematic placeholder positions) frequently block `CREATE DEEP CACHE`,
-which forces the query to proxy upstream and hides expression-evaluation
-divergences entirely.
+Add `--single-pattern` to test the feature **in isolation**: each iteration
+resolves exactly one pattern via `try_resolve`, with no composition
+partners.
 
-`--single-pattern` resolves each pattern standalone via `try_resolve`. Use it
-whenever you want a divergence to surface reliably, especially in
-combination with `--required-tags`:
+This matters because composition partners (self-join, aggregate compose
+helpers, awkward placeholder positions) frequently block `CREATE DEEP
+CACHE`. A blocked cache forces the query to proxy upstream, where it
+trivially matches and hides the very divergence you are hunting. Resolving
+one pattern at a time keeps the query deep-cacheable so divergences surface
+reliably.
 
 ```bash
+# expr_eval, one pattern at a time -- divergences surface reliably.
 target/debug/readyset-dante-oracle \
+  --readyset-mode \
   --compare-to mysql://... --readyset-url mysql://... \
-  --seed 42 -n 200 \
+  --seed 42 --max-queries 200 \
   --required-tags expr_eval \
   --single-pattern
 ```
 
-Under `--single-pattern` the harness also drops the generator's column-reuse
-preference so patterns that need three distinct columns of overlapping
-type classes (e.g. `lookup + c1 + c2`, all Integer-ish) actually get
-three columns instead of collapsing onto the auto-allocated PK.
+`--single-pattern` also drops the generator's column-reuse preference, so a
+pattern needing three distinct columns of overlapping type classes (e.g.
+`lookup + c1 + c2`, all Integer-ish) actually gets three columns instead of
+collapsing onto the auto-allocated PK.
+
+### Readyset mode vs proxy (`--readyset-mode`)
+
+The oracle compares two endpoints regardless of what `--readyset-url`
+points at. `--readyset-mode` controls how much Readyset-specific behavior
+it drives:
+
+- **With `--readyset-mode`** (real Readyset): the generator applies the
+  deep-cache compatibility rules, every query gets a `CREATE DEEP CACHE`,
+  and the EXPLAIN / `SHOW READYSET TABLES` probes run. This is what forces
+  results through dataflow instead of proxying to upstream, so use it for
+  any run whose goal is to find Readyset divergences.
+- **Without it** (default, transparent proxy such as SQP): no
+  Readyset-specific DDL or probes run, and the proxy decides its own
+  routing. Compound SELECTs still get their helper VIEW so the same SQL
+  runs on both sides.
+
+Almost every targeted run wants `--readyset-mode`; omit it only when the
+endpoint genuinely is not Readyset.
 
 ### Example pinning
 
@@ -335,9 +412,10 @@ To stress a specific example, combine all three knobs:
 
 ```bash
 target/debug/readyset-dante-oracle \
+  --readyset-mode \
   --compare-to mysql://root:noria@127.0.0.1:3306/cfuzz_s42 \
   --readyset-url mysql://root:noria@127.0.0.1:3307/cfuzz_s42 \
-  --seed 42 -n 50 \
+  --seed 42 --max-queries 50 \
   --required-tags expr_eval,int_int \
   --single-pattern
 ```
@@ -418,7 +496,7 @@ target/debug/readyset-dante-oracle \
   --readyset-mode \
   --compare-to mysql://root:noria@127.0.0.1:3306/$DB \
   --readyset-url mysql://root:noria@127.0.0.1:$PORT/$DB \
-  --seed $SEED -n $N --rows-per-table 50 ; \
+  --seed $SEED --max-queries $N --rows-per-table 50 ; \
 kill $RS_PID 2>/dev/null; wait $RS_PID 2>/dev/null
 ```
 

@@ -579,10 +579,40 @@ impl Ord for Value {
     }
 }
 
-/// Structural total order on [`JsonValue`] that agrees with derived
-/// `PartialEq`. `serde_json::Value` does not implement `Ord` (numbers can be
-/// arbitrary-precision and float NaN has no total order), so we walk the tree
-/// recursively and use [`f64::total_cmp`] for numeric leaves.
+/// JSON-aware total order on `Text` values, used by both [`Value::value_eq`]
+/// and [`Value::cmp_compat`] so equality and ordering stay consistent.
+///
+/// MySQL JSON columns arrive as `Text`, and the two engines serialize JSON with
+/// different insignificant whitespace (MySQL `{"k": 1}` vs Readyset `{"k":1}`).
+/// Each side is classified independently: a value that parses as a JSON
+/// object/array is compared structurally via [`cmp_json`] (so a cosmetic
+/// whitespace difference is not a divergence); anything else is compared as a
+/// raw string (so `" 5 "` is not equated with `"5"`). The two classes are
+/// ordered by a fixed tag, giving each value a single sort key independent of
+/// its counterpart — a genuine total order, so sorting results stays
+/// transitive even when JSON and plain text are mixed in one column.
+fn json_text_cmp(a: &str, b: &str) -> cmp::Ordering {
+    // A JSON object/array always begins (after whitespace) with '{' or '['.
+    // Parse only then — the common non-JSON varchar path skips the allocation.
+    fn as_container(s: &str) -> Option<JsonValue> {
+        if !matches!(s.trim_start().as_bytes().first(), Some(b'{' | b'[')) {
+            return None;
+        }
+        match serde_json::from_str::<JsonValue>(s) {
+            Ok(v) if v.is_object() || v.is_array() => Some(v),
+            _ => None,
+        }
+    }
+    match (as_container(a), as_container(b)) {
+        (Some(ja), Some(jb)) => cmp_json(&ja, &jb),
+        // A JSON container and a raw string never compare Equal; the fixed
+        // ordering (JSON after raw) only needs to be total and consistent.
+        (Some(_), None) => cmp::Ordering::Greater,
+        (None, Some(_)) => cmp::Ordering::Less,
+        (None, None) => a.cmp(b),
+    }
+}
+
 fn cmp_json(a: &JsonValue, b: &JsonValue) -> cmp::Ordering {
     fn variant_tag(v: &JsonValue) -> u8 {
         match v {
@@ -708,6 +738,7 @@ impl Value {
             (DateTime(naive), TimestampTz(ts)) | (TimestampTz(ts), DateTime(naive)) => {
                 *naive == ts.naive_utc()
             }
+            (Text(a), Text(b)) => a == b || json_text_cmp(a, b).is_eq(),
             _ => self == other,
         }
     }
@@ -733,6 +764,7 @@ impl Value {
             (Numeric(d), UnsignedInteger(u)) => d.cmp(&Decimal::from(*u)),
             (DateTime(naive), TimestampTz(ts)) => naive.cmp(&ts.naive_utc()),
             (TimestampTz(ts), DateTime(naive)) => ts.naive_utc().cmp(naive),
+            (Text(a), Text(b)) => json_text_cmp(a, b),
             _ => self.cmp(other),
         }
     }
@@ -1040,6 +1072,23 @@ mod tests {
     }
 
     #[test]
+    fn value_eq_json_text_ignores_whitespace() {
+        use Value::Text;
+        // MySQL serializes JSON with a space after the colon, Readyset compact;
+        // a JSON column arrives as Text on both sides. Same JSON -> equal.
+        assert!(Text(r#"{"k": "x"}"#.to_string()).value_eq(&Text(r#"{"k":"x"}"#.to_string())));
+        // Structurally different JSON stays not-equal.
+        assert!(!Text(r#"{"k": 1}"#.to_string()).value_eq(&Text(r#"{"k": 2}"#.to_string())));
+        // Non-container scalars are NOT JSON-normalized (no " 5 " == "5" false-equate).
+        assert!(!Text(" 5 ".to_string()).value_eq(&Text("5".to_string())));
+        // cmp_compat must agree with value_eq: whitespace-equal JSON sorts Equal.
+        assert_eq!(
+            Text(r#"{"k": "x"}"#.to_string()).cmp_compat(&Text(r#"{"k":"x"}"#.to_string())),
+            std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
     fn cross_variant_partial_eq_remains_structural() {
         // Derived PartialEq must remain strict so that Ord can agree with Eq.
         assert_ne!(Value::Integer(5), Value::UnsignedInteger(5));
@@ -1102,6 +1151,52 @@ mod tests {
             assert_eq!(a.cmp_compat(b), cmp::Ordering::Equal, "{a:?} vs {b:?}");
             assert_eq!(b.cmp_compat(a), cmp::Ordering::Equal, "{b:?} vs {a:?}");
         }
+    }
+
+    #[test]
+    fn cmp_compat_agrees_with_value_eq_for_unequal_json() {
+        use Value::Text;
+        // The JSON-aware Text arms must keep ordering consistent with equality:
+        // unequal JSON containers must NOT sort `Equal`, or sort-then-zip would
+        // mispair rows and silently swallow a real divergence.
+        let pairs: &[(Value, Value)] = &[
+            (
+                Text(r#"{"k": 1}"#.to_string()),
+                Text(r#"{"k": 2}"#.to_string()),
+            ),
+            (Text("[1, 2]".to_string()), Text("[1, 3]".to_string())),
+            // Keys collated the same on both sides, but a value differs.
+            (
+                Text(r#"{"a": 1, "b": 2}"#.to_string()),
+                Text(r#"{"b": 2, "a": 9}"#.to_string()),
+            ),
+        ];
+        for (a, b) in pairs {
+            assert!(!a.value_eq(b), "precondition: unequal JSON {a:?} vs {b:?}");
+            assert_ne!(a.cmp_compat(b), cmp::Ordering::Equal, "{a:?} vs {b:?}");
+            // Antisymmetric: the two directions are reverses, so a stable sort
+            // pairs the same rows regardless of input side order.
+            assert_eq!(a.cmp_compat(b), b.cmp_compat(a).reverse(), "{a:?} vs {b:?}");
+        }
+    }
+
+    #[test]
+    fn cmp_compat_json_text_order_is_transitive_against_raw_text() {
+        use Value::Text;
+        // `[ 1]` and `[1]` are the same array (only whitespace differs), so they
+        // must compare Equal. `[!]` is not valid JSON, so it is ordered as raw
+        // text. Two values that compare Equal must order identically against any
+        // third value; comparing JSON structurally against one side but raw
+        // against the other breaks that and makes the sort non-transitive.
+        let a = Text("[ 1]".to_string());
+        let b = Text("[1]".to_string());
+        let c = Text("[!]".to_string());
+        assert_eq!(a.cmp_compat(&b), cmp::Ordering::Equal);
+        assert_eq!(
+            a.cmp_compat(&c),
+            b.cmp_compat(&c),
+            "equal JSON values must order identically against a raw-text value",
+        );
     }
 
     #[test]

@@ -890,6 +890,7 @@ impl PatternStats {
 async fn run_queries(
     dialect: Dialect,
     num_queries: usize,
+    continue_probability: Option<f64>,
     rows_per_table: usize,
     rng: &mut dyn Rng,
     upstream_url: &DatabaseURL,
@@ -898,7 +899,7 @@ async fn run_queries(
     readyset: &mut DatabaseConnection,
     stats: &mut PatternStats,
     repro: &mut ReproLog,
-    selection_filter: dante::compat::SelectionFilter,
+    selection_filter: &dante::compat::SelectionFilter,
     single_pattern: bool,
     keep_going: bool,
     readyset_mode: bool,
@@ -907,6 +908,7 @@ async fn run_queries(
     let result = run_queries_body(
         dialect,
         num_queries,
+        continue_probability,
         rows_per_table,
         rng,
         upstream_url,
@@ -930,6 +932,7 @@ async fn run_queries(
 async fn run_queries_body(
     dialect: Dialect,
     num_queries: usize,
+    continue_probability: Option<f64>,
     rows_per_table: usize,
     rng: &mut dyn Rng,
     upstream_url: &DatabaseURL,
@@ -939,7 +942,7 @@ async fn run_queries_body(
     stats: &mut PatternStats,
     repro: &mut ReproLog,
     created_views: &mut Vec<String>,
-    selection_filter: dante::compat::SelectionFilter,
+    selection_filter: &dante::compat::SelectionFilter,
     single_pattern: bool,
     keep_going: bool,
     readyset_mode: bool,
@@ -978,7 +981,7 @@ async fn run_queries_body(
             // etc.) that block `CREATE DEEP CACHE`.
             let pattern = generator
                 .registry()
-                .pick_random(&mut entropy, &selection_filter, dialect)
+                .pick_random(&mut entropy, selection_filter, dialect)
                 .ok_or_else(|| {
                     anyhow::anyhow!("no pattern matches --required-tags / --excluded-tags filter")
                 })?;
@@ -989,7 +992,7 @@ async fn run_queries_body(
             dante::QueryOutput::from_resolver(ro, pattern_name, dialect)
         } else {
             generator
-                .generate_with_ddl_filtered(&mut entropy, &selection_filter)
+                .generate_with_ddl_filtered(&mut entropy, selection_filter)
                 .with_context(|| format!("generating query {query_idx}"))?
         };
 
@@ -1389,13 +1392,9 @@ async fn run_queries_body(
                             err = %format!("{err:#}"),
                             "upstream rejected query (likely generator bug)"
                         );
-                        assert_unreachable!(
-                            "Upstream rejected generated query",
-                            &json!({
-                                "pattern": &pattern_name,
-                                "code": code,
-                            })
-                        );
+                        let mut details = select_error_details(pattern_name, &select_sql, &err);
+                        details["code"] = json!(code);
+                        assert_unreachable!("Upstream rejected generated query", &details);
                         stats.entry(pattern_name).skipped += 1;
                         continue 'query;
                     }
@@ -1479,7 +1478,7 @@ async fn run_queries_body(
                                 );
                                 assert_unreachable!(
                                     "Readyset SELECT errored (keep-going swallowed)",
-                                    &json!({ "pattern": &pattern_name })
+                                    &select_error_details(pattern_name, &select_sql, &err)
                                 );
                                 match classify_query(
                                     query_matched_probes,
@@ -1535,7 +1534,6 @@ async fn run_queries_body(
                 // Antithesis findings with low-cardinality payloads.
                 match last_mismatch {
                     Some(mismatch_msg) => {
-                        error!(query_idx, "{mismatch_msg}");
                         query_mismatched_probes += 1;
                         assert_unreachable!(
                             "Result mismatch between upstream and Readyset after retries",
@@ -1554,6 +1552,10 @@ async fn run_queries_body(
                                 })
                             );
                         }
+                        // Stable "DANTE_MISMATCH" prefix + pattern field so triage can grep this
+                        // line in the captured logs and jump from the grouped finding (keyed on
+                        // pattern) straight to the failing SQL + row diff in mismatch_msg.
+                        error!(query_idx, %pattern_name, "DANTE_MISMATCH {mismatch_msg}");
                     }
                     None => {
                         // Readyset never produced a comparable result, so this
@@ -1795,6 +1797,16 @@ async fn run_queries_body(
                 })
             );
         }
+
+        // Geometric stop: after each query, continue with
+        // `continue_probability`; otherwise end the run. The --max-queries bound
+        // (num_queries) is the fallback. Drawn from the same entropy stream as
+        // generation, so a --seed-pinned run stops at the same query count.
+        let coin = entropy.rng_mut().next_u64() as f64 / u64::MAX as f64;
+        if coin_flip_stops_run(continue_probability, coin) {
+            info!(query_idx, coin, "coin flip ended the run");
+            break 'query;
+        }
     }
 
     // Verify that queries actually created caches. Runs only in
@@ -1830,7 +1842,7 @@ async fn run_queries_body(
         &json!({
             "matched": matched_count,
             "mismatched": mismatched_count,
-            "total_queries": num_queries,
+            "max_queries": num_queries,
         })
     );
 
@@ -1872,7 +1884,7 @@ async fn run_queries_body(
         "Hoisting pattern was generated",
         &json!({
             "hoisting_generated": hoisting_generated,
-            "total_queries": num_queries,
+            "max_queries": num_queries,
         })
     );
     assert_sometimes!(
@@ -2232,11 +2244,14 @@ fn compare_results(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ErrorClass {
     Fatal,
+    /// `code` carries the upstream's error code as a string: the numeric
+    /// server code for MySQL (e.g. "1054"), the SQLSTATE for Postgres (e.g.
+    /// "42601"). `None` only for client-side failures with no server code.
     UpstreamKnownLimit {
-        code: Option<u16>,
+        code: Option<String>,
     },
     UpstreamGeneratorBug {
-        code: Option<u16>,
+        code: Option<String>,
     },
     /// Upstream-side transient infrastructure error (e.g. query timeout
     /// during an Antithesis-injected network partition). Tolerable under
@@ -2364,11 +2379,23 @@ fn classify_query(
     }
 }
 
+/// Whether the per-query coin flip ends the run early. With
+/// `--continue-probability p`, the run continues after a query with probability
+/// `p`; a draw `coin` in [0, 1] at or above `p` stops the loop. Absent the flag
+/// the coin never stops the run (the `--max-queries` fallback bounds it).
+fn coin_flip_stops_run(continue_probability: Option<f64>, coin: f64) -> bool {
+    matches!(continue_probability, Some(p) if coin >= p)
+}
+
 fn classify_mysql_code(code: u16) -> ErrorClass {
     if MYSQL_KNOWN_LIMIT_CODES.contains(&code) {
-        ErrorClass::UpstreamKnownLimit { code: Some(code) }
+        ErrorClass::UpstreamKnownLimit {
+            code: Some(code.to_string()),
+        }
     } else {
-        ErrorClass::UpstreamGeneratorBug { code: Some(code) }
+        ErrorClass::UpstreamGeneratorBug {
+            code: Some(code.to_string()),
+        }
     }
 }
 
@@ -2376,14 +2403,21 @@ fn classify_mysql_code(code: u16) -> ErrorClass {
 ///
 /// Data-dependent errors that the generator cannot avoid (numeric overflow,
 /// division by zero) are `UpstreamKnownLimit`, mirroring MySQL code 1038.
+/// Statement timeouts (57014) are also `UpstreamKnownLimit`: the generator
+/// can produce queries with unbounded CROSS JOIN fan-out; upstream cancelling
+/// them is expected and not a SUT divergence. See qp:qxhqgqcafpzz.
 /// All other server rejections are `UpstreamGeneratorBug` so the bad-SQL
 /// pattern surfaces as an Antithesis assertion.
 fn classify_pg_sqlstate(state: &tokio_postgres::error::SqlState) -> ErrorClass {
     use tokio_postgres::error::SqlState;
-    if *state == SqlState::NUMERIC_VALUE_OUT_OF_RANGE || *state == SqlState::DIVISION_BY_ZERO {
-        ErrorClass::UpstreamKnownLimit { code: None }
+    let code = Some(state.code().to_string());
+    if *state == SqlState::NUMERIC_VALUE_OUT_OF_RANGE
+        || *state == SqlState::DIVISION_BY_ZERO
+        || *state == SqlState::QUERY_CANCELED
+    {
+        ErrorClass::UpstreamKnownLimit { code }
     } else {
-        ErrorClass::UpstreamGeneratorBug { code: None }
+        ErrorClass::UpstreamGeneratorBug { code }
     }
 }
 
@@ -2406,6 +2440,42 @@ fn classify_pg_sqlstate(state: &tokio_postgres::error::SqlState) -> ErrorClass {
 /// (e.g. `ARRAY_AGG` over a timestamp column) is the durable guard.
 fn pg_error_is_client_decode(msg: &str) -> bool {
     msg.starts_with("error deserializing column")
+}
+
+/// SQLSTATE (PG) or SQL-state string (MySQL) carried by a server error in
+/// `err`'s cause chain, if any. Client-side and infrastructure errors have
+/// none.
+fn error_sqlstate(err: &anyhow::Error) -> Option<String> {
+    use database_utils::DatabaseError;
+
+    err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<DatabaseError>()
+            .and_then(|db| match db {
+                DatabaseError::PostgreSQL(pg) => {
+                    pg.as_db_error().map(|d| d.code().code().to_string())
+                }
+                DatabaseError::MySQL(mysql_async::Error::Server(e)) => Some(e.state.clone()),
+                _ => None,
+            })
+    })
+}
+
+/// Details payload for SELECT-error assertions. The Antithesis log stream
+/// does not capture the oracle's stderr, so the assertion details must be
+/// self-sufficient for adjudication: failing SQL, full error text, and
+/// SQLSTATE when a server reported one.
+fn select_error_details(
+    pattern_name: &str,
+    select_sql: &str,
+    err: &anyhow::Error,
+) -> serde_json::Value {
+    json!({
+        "pattern": pattern_name,
+        "select_sql": select_sql,
+        "error": format!("{err:#}"),
+        "sqlstate": error_sqlstate(err),
+    })
 }
 
 struct SentinelInfo {
@@ -2614,22 +2684,28 @@ async fn query_cache_mode(readyset: &mut DatabaseConnection) -> CacheMode {
         Ok(r) => r,
         Err(_) => return CacheMode::Unknown,
     };
-    for row in &rows {
-        if row.len() >= 2 {
-            let key = row[0].to_string();
-            let val = row[1].to_string();
-            if key.contains("Query_destination") {
-                if val.starts_with("readyset(") || val == "readyset" {
-                    return CacheMode::Deep;
-                } else if val == "readyset_shallow" {
-                    return CacheMode::Shallow;
-                } else {
-                    return CacheMode::Proxy;
-                }
-            }
-        }
+    classify_destination(&rows)
+}
+
+/// Classify the cache mode from an `EXPLAIN LAST STATEMENT` result. The result
+/// is COLUMNAR: one data row whose first column (`Query_destination`) holds the
+/// destination -- "readyset(<id>)" or "readyset" => served from a deep cache,
+/// "readyset_shallow" => shallow, anything else (e.g. "upstream") => proxied.
+/// The column NAME lives in the header, not in the returned data, so we read the
+/// value positionally from `row[0]` rather than scanning for a "Query_destination"
+/// key (which never appears in the data rows).
+fn classify_destination(rows: &[Vec<Value>]) -> CacheMode {
+    let Some(dest) = rows.first().and_then(|r| r.first()) else {
+        return CacheMode::Unknown;
+    };
+    let dest = dest.to_string();
+    if dest.starts_with("readyset(") || dest == "readyset" {
+        CacheMode::Deep
+    } else if dest == "readyset_shallow" {
+        CacheMode::Shallow
+    } else {
+        CacheMode::Proxy
     }
-    CacheMode::Unknown
 }
 
 /// Returns true if `query` references the SQL identifier `name` at a word
@@ -2903,18 +2979,50 @@ async fn connect_and_setup(url: &DatabaseURL) -> anyhow::Result<DatabaseConnecti
         )
         .await
         .context("creating citext extension")?;
+        // Set statement_timeout slightly below the per-op timeout so PG
+        // cancels slow queries (e.g. unbounded CROSS JOIN fan-out) with
+        // SQLSTATE 57014 before with_op_timeout fires. 57014 classifies as
+        // UpstreamKnownLimit, turning a driver-aborting hard error into a
+        // skipped query. See qp:qxhqgqcafpzz.
+        let timeout_ms = db_op_timeout()
+            .saturating_sub(Duration::from_secs(2))
+            .as_millis();
+        if timeout_ms > 0 {
+            with_op_timeout(
+                "SET statement_timeout",
+                conn.query_drop(format!("SET statement_timeout = {timeout_ms}")),
+            )
+            .await
+            .context("setting PG statement_timeout")?;
+        }
     }
 
     Ok(conn)
 }
 
 /// Fuzz-test Readyset using the constraint-based SQL generator.
+/// Which dialect-support class of patterns to generate. Mirrors
+/// `dante::constraint::DialectSupport`; kept as a separate type so clap
+/// validates `--target-dialect` at parse time instead of panicking at run time.
+#[derive(clap::ValueEnum, Debug, Clone, Copy)]
+enum TargetDialect {
+    MysqlOnly,
+    PostgresOnly,
+    Both,
+}
+
+impl From<TargetDialect> for dante::constraint::DialectSupport {
+    fn from(value: TargetDialect) -> Self {
+        match value {
+            TargetDialect::MysqlOnly => Self::MySqlOnly,
+            TargetDialect::PostgresOnly => Self::PostgresOnly,
+            TargetDialect::Both => Self::Both,
+        }
+    }
+}
+
 #[derive(Parser, Debug, Clone)]
 struct ConstraintFuzz {
-    /// Total number of queries to generate and test.
-    #[arg(long, short = 'n', default_value = "100")]
-    num_queries: usize,
-
     /// Number of rows to insert per table when a new table is created.
     #[arg(long, default_value = "100")]
     rows_per_table: usize,
@@ -2966,16 +3074,30 @@ struct ConstraintFuzz {
     #[arg(long, value_delimiter = ',')]
     excluded_tags: Vec<String>,
 
+    /// Restrict pattern selection to patterns with this exact dialect support.
+    /// One of: `mysql-only`, `postgres-only`, `both`. Maps to
+    /// `dante::compat::SelectionFilter::dialect_support`.
+    #[arg(long, value_enum)]
+    target_dialect: Option<TargetDialect>,
+
     /// Skip composition: each iteration picks ONE pattern and resolves it
-    /// alone via `resolver::try_resolve`. Composition would otherwise pair
-    /// patterns with partners like `self_join` or aggregate compose helpers
-    /// that block `CREATE DEEP CACHE` (Readyset rejects self-joins-on-same-
-    /// column / unsupported placeholder positions), which forces the query
-    /// to proxy upstream and hides expression-eval divergences. Use with
-    /// `--required-tags expr_eval` for the focused expression-eval bug
-    /// coverage flow.
+    /// alone via `resolver::try_resolve`, under the plain
+    /// `--required-tags`/`--excluded-tags` filter. Composition would
+    /// otherwise pair patterns with partners like `self_join` or aggregate
+    /// compose helpers that block `CREATE DEEP CACHE` (Readyset rejects
+    /// self-joins-on-same-column / unsupported placeholder positions), which
+    /// forces the query to proxy upstream and hides expression-eval
+    /// divergences. Use with `--required-tags expr_eval` for the focused
+    /// expression-eval bug coverage flow.
     #[arg(long)]
     single_pattern: bool,
+
+    /// Hard upper bound on the number of queries a single run executes. The
+    /// per-query coin flip (`--continue-probability`) is the intended stop;
+    /// this is only a fallback so a run can never spin forever and is not meant
+    /// to bind in practice.
+    #[arg(long, default_value = "1000")]
+    max_queries: usize,
 
     /// Continue past non-fatal terminal SELECT errors instead of aborting
     /// the run. Errors classified as `ErrorClass::Other` from either the
@@ -3002,6 +3124,15 @@ struct ConstraintFuzz {
     /// on both sides.
     #[arg(long)]
     readyset_mode: bool,
+
+    /// Per-query coin flip: after each query, continue with this probability
+    /// (0.0..=1.0), otherwise stop the run. The realized query count is
+    /// geometric, so a run reaches a different depth each time -- Antithesis
+    /// explores the draw -- bounded by `--max-queries`. Omit to run until the
+    /// max-queries fallback. The draw comes from the query-generation RNG, i.e.
+    /// the entropy stream under `--antithesis-entropy`.
+    #[arg(long)]
+    continue_probability: Option<f64>,
 }
 
 impl ConstraintFuzz {
@@ -3021,6 +3152,31 @@ impl ConstraintFuzz {
             Box::new(AntithesisRngAdapter)
         } else {
             Box::new(StdRng::try_from_rng(&mut SysRng).expect("SysRng should not fail"))
+        }
+    }
+
+    /// Resolve user-supplied CLI tag strings to `&'static str`. CLI strings
+    /// live for the whole run, so leaking is the only way to get a `'static`
+    /// borrow without re-architecting `SelectionFilter`.
+    fn resolve_static_tags(tags: &[String]) -> Vec<&'static str> {
+        tags.iter()
+            .map(|s| -> &'static str { Box::leak(s.clone().into_boxed_str()) })
+            .collect()
+    }
+
+    /// Parse `--target-dialect` into a `DialectSupport` filter value.
+    fn target_dialect(&self) -> Option<dante::constraint::DialectSupport> {
+        self.target_dialect.map(Into::into)
+    }
+
+    /// Build the `SelectionFilter` for the run from the user's
+    /// `--required-tags`/`--excluded-tags`/`--target-dialect` flags.
+    fn selection_filter(&self) -> dante::compat::SelectionFilter {
+        dante::compat::SelectionFilter {
+            max_depth: None,
+            required_tags: Self::resolve_static_tags(&self.required_tags),
+            excluded_tags: Self::resolve_static_tags(&self.excluded_tags),
+            dialect_support: self.target_dialect(),
         }
     }
 
@@ -3046,9 +3202,13 @@ impl ConstraintFuzz {
         };
         info!(
             seed = %seed_display,
-            num_queries = self.num_queries,
+            max_queries = self.max_queries,
+            continue_probability = ?self.continue_probability,
             rows_per_table = self.rows_per_table,
+            single_pattern = self.single_pattern,
             ?dialect,
+            required_tags = ?self.required_tags,
+            excluded_tags = ?self.excluded_tags,
             "starting readyset-dante-oracle"
         );
 
@@ -3071,20 +3231,6 @@ impl ConstraintFuzz {
             )?;
         }
 
-        // 5 retries × exponential backoff (1s, 2s, 4s, 8s, 16s ≈ 31s budget)
-        // through the shared helper introduced in uuszulpw, so upstream and
-        // Readyset use one policy. Auth/permission errors bypass retries via
-        // is_permanent_connection_error.
-        let mut upstream =
-            connect_and_setup_with_retry(&upstream_url, 5, Duration::from_secs(1), 2)
-                .await
-                .context("connecting to upstream")?;
-        let mut readyset =
-            connect_and_setup_with_retry(&readyset_url, 5, Duration::from_secs(1), 2)
-                .await
-                .context("connecting to readyset")?;
-        assert_reachable!("Connected to both upstream and Readyset", &json!({}));
-
         // Open the repro log up front when the user asked for an explicit
         // dump path so writes stream directly through a BufWriter and memory
         // stays bounded regardless of run length. Otherwise keep the bounded
@@ -3095,48 +3241,72 @@ impl ConstraintFuzz {
             None => ReproLog::new(dialect, seed_display.clone()),
         };
 
-        // Build the SelectionFilter from CLI arg slices. Empty vecs give
-        // the default (no restriction) — same behavior as before.
-        let selection_filter = dante::compat::SelectionFilter {
-            max_depth: None,
-            dialect_support: None,
-            required_tags: self
-                .required_tags
-                .iter()
-                .map(String::as_str)
-                // `SelectionFilter` holds `&'static str`. CLI strings live for
-                // the lifetime of the run, so `Box::leak` is the only way to
-                // get a `'static` borrow without re-architecting the filter
-                // type.
-                .map(|s| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) })
-                .collect(),
-            excluded_tags: self
-                .excluded_tags
-                .iter()
-                .map(String::as_str)
-                .map(|s| -> &'static str { Box::leak(s.to_owned().into_boxed_str()) })
-                .collect(),
+        // Race the query workload (connection setup included) against
+        // SIGINT/SIGTERM. A soak bounded by `timeout` or ended with `kill`
+        // would otherwise terminate the process before the finalization below
+        // runs, stranding the buffered reproduction script. The connection
+        // retry budget alone is ~31s per endpoint, so the signal must be able
+        // to interrupt before queries even begin. On interruption we cancel the
+        // workload and fall through to the same finalization the normal path
+        // uses.
+        let work = async {
+            // 5 retries × exponential backoff (1s, 2s, 4s, 8s, 16s ≈ 31s
+            // budget) through the shared helper introduced in uuszulpw, so
+            // upstream and Readyset use one policy. Auth/permission errors
+            // bypass retries via is_permanent_connection_error.
+            let mut upstream =
+                connect_and_setup_with_retry(&upstream_url, 5, Duration::from_secs(1), 2)
+                    .await
+                    .context("connecting to upstream")?;
+            let mut readyset =
+                connect_and_setup_with_retry(&readyset_url, 5, Duration::from_secs(1), 2)
+                    .await
+                    .context("connecting to readyset")?;
+            assert_reachable!("Connected to both upstream and Readyset", &json!({}));
+
+            // One execution is one query loop. The per-query coin flip (inside
+            // run_queries) ends the run early; --max-queries is the fallback
+            // bound. PatternStats accumulates across the whole run.
+            let filter = self.selection_filter();
+            assert_reachable!("Run started", &json!({}));
+            run_queries(
+                dialect,
+                self.max_queries,
+                self.continue_probability,
+                self.rows_per_table,
+                &mut *rng,
+                &upstream_url,
+                &readyset_url,
+                &mut upstream,
+                &mut readyset,
+                &mut stats,
+                &mut repro,
+                &filter,
+                self.single_pattern,
+                self.keep_going,
+                self.readyset_mode,
+            )
+            .await
         };
 
-        let result = run_queries(
-            dialect,
-            self.num_queries,
-            self.rows_per_table,
-            &mut *rng,
-            &upstream_url,
-            &readyset_url,
-            &mut upstream,
-            &mut readyset,
-            &mut stats,
-            &mut repro,
-            selection_filter,
-            self.single_pattern,
-            self.keep_going,
-            self.readyset_mode,
-        )
-        .await;
+        let (result, interrupted) = match run_until_shutdown(work, shutdown_signal()).await {
+            RunOutcome::Completed(result) => (Some(result), false),
+            RunOutcome::Interrupted => {
+                // A user-requested shutdown (timeout/kill). The SDK coverage
+                // catalog is already on disk (it flushes per assertion), but the
+                // streamed reproduction script lives in a BufWriter that the
+                // default signal disposition would discard. Fall through to the
+                // same finalization the normal path uses, then exit cleanly.
+                info!("shutdown signal received, finalizing artifacts and exiting");
+                (None, true)
+            }
+        };
 
-        match (self.dump_repro.is_some(), result.is_err()) {
+        // Flush the streamed reproduction script (when `--dump-repro` is set) or
+        // dump the bounded ring buffer to stderr. An interrupted run always
+        // finalizes so the buffered statements survive.
+        let failed_or_interrupted = interrupted || result.as_ref().is_some_and(Result::is_err);
+        match (self.dump_repro.is_some(), failed_or_interrupted) {
             (true, _) => {
                 // Explicit `--dump-repro`: flush the streamed writer. Failure
                 // here surfaces as a Result error (we don't want to exit 0
@@ -3169,6 +3339,15 @@ impl ConstraintFuzz {
             (false, false) => {}
         }
 
+        // An interrupted run has no workload tally; finalize the summary and
+        // exit cleanly so a bounded soak is treated as a graceful stop, not a
+        // failure.
+        let Some(result) = result else {
+            stats.log_summary();
+            info!("readyset-dante-oracle interrupted; artifacts finalized");
+            return Ok(());
+        };
+
         let (matched, mismatched, errored) = result?;
 
         assert_sometimes!(
@@ -3184,6 +3363,69 @@ impl ConstraintFuzz {
         );
 
         Ok(())
+    }
+}
+
+/// Outcome of racing the query workload against a shutdown signal.
+enum RunOutcome<T> {
+    /// The workload finished on its own and produced this value.
+    Completed(T),
+    /// A shutdown signal arrived first; the workload future was cancelled.
+    Interrupted,
+}
+
+/// Run `work` until it completes or `shutdown` fires, whichever comes first.
+///
+/// When `shutdown` wins, the `work` future is dropped (cancelled) and
+/// [`RunOutcome::Interrupted`] is returned so the caller can finalize
+/// oracle-owned artifacts (the streamed [`ReproLog`], the [`PatternStats`]
+/// summary) before exiting. Without this, a `timeout`/`kill`-delivered signal
+/// terminates the process before normal teardown, stranding the buffered
+/// reproduction script. The Antithesis SDK itself flushes every assertion
+/// event as it is emitted, so this path is purely a no-op safeguard for SDK
+/// output and a real flush for the oracle's own writers.
+async fn run_until_shutdown<F, S>(work: F, shutdown: S) -> RunOutcome<F::Output>
+where
+    F: Future,
+    S: Future<Output = ()>,
+{
+    tokio::select! {
+        biased;
+        out = work => RunOutcome::Completed(out),
+        () = shutdown => RunOutcome::Interrupted,
+    }
+}
+
+/// Resolve when the process receives SIGINT (Ctrl-C) or SIGTERM. Mirrors the
+/// readyset server's graceful-shutdown trigger so a `kill`/`timeout`-bounded
+/// soak finalizes coverage artifacts instead of dying mid-write.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!(err = %e, "failed to install Ctrl-C handler");
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => {
+                warn!(err = %e, "failed to install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
     }
 }
 
@@ -3251,6 +3493,33 @@ mod tests {
         // All probes exhausted their retry budget on transient errors with no
         // comparison: errored, never a divergence.
         assert_eq!(classify_query(0, 0, true), QueryTally::Errored);
+    }
+
+    #[test]
+    fn classify_destination_reads_query_destination_column() {
+        use crate::value::Value;
+        // EXPLAIN LAST STATEMENT is COLUMNAR: row[0] is the Query_destination
+        // value, not a "Query_destination" KEY. The old parser scanned row[0]
+        // for that key, never matched, and always returned Unknown (so the deep
+        // self-join markers never fired). Lock the columnar parse.
+        let deep = vec![vec![
+            Value::Text("readyset(q_abc)".into()),
+            Value::Text("ok".into()),
+        ]];
+        assert_eq!(classify_destination(&deep), CacheMode::Deep);
+        assert_eq!(
+            classify_destination(&[vec![Value::Text("readyset".into())]]),
+            CacheMode::Deep
+        );
+        assert_eq!(
+            classify_destination(&[vec![Value::Text("readyset_shallow".into())]]),
+            CacheMode::Shallow
+        );
+        assert_eq!(
+            classify_destination(&[vec![Value::Text("upstream".into())]]),
+            CacheMode::Proxy
+        );
+        assert_eq!(classify_destination(&[]), CacheMode::Unknown);
     }
 
     #[test]
@@ -3766,7 +4035,6 @@ mod tests {
     #[test]
     fn constraint_fuzz_mysql_dialect_detection() {
         let fuzz = ConstraintFuzz {
-            num_queries: 50,
             rows_per_table: 50,
             seed: None,
             antithesis_entropy: false,
@@ -3776,9 +4044,12 @@ mod tests {
             dump_repro: None,
             required_tags: vec![],
             excluded_tags: vec![],
+            target_dialect: None,
             single_pattern: false,
             keep_going: false,
             readyset_mode: false,
+            max_queries: 1000,
+            continue_probability: None,
         };
         assert_eq!(fuzz.dialect().expect("valid mysql url"), Dialect::MySQL);
     }
@@ -3786,7 +4057,6 @@ mod tests {
     #[test]
     fn constraint_fuzz_postgres_dialect_detection() {
         let fuzz = ConstraintFuzz {
-            num_queries: 10,
             rows_per_table: 10,
             seed: None,
             antithesis_entropy: false,
@@ -3796,9 +4066,12 @@ mod tests {
             dump_repro: None,
             required_tags: vec![],
             excluded_tags: vec![],
+            target_dialect: None,
             single_pattern: false,
             keep_going: false,
             readyset_mode: false,
+            max_queries: 1000,
+            continue_probability: None,
         };
         assert_eq!(
             fuzz.dialect().expect("valid postgres url"),
@@ -3809,7 +4082,6 @@ mod tests {
     #[test]
     fn constraint_fuzz_seeded_rng() {
         let fuzz = ConstraintFuzz {
-            num_queries: 10,
             rows_per_table: 10,
             seed: Some(42),
             antithesis_entropy: false,
@@ -3819,9 +4091,12 @@ mod tests {
             dump_repro: None,
             required_tags: vec![],
             excluded_tags: vec![],
+            target_dialect: None,
             single_pattern: false,
             keep_going: false,
             readyset_mode: false,
+            max_queries: 1000,
+            continue_probability: None,
         };
         let mut rng1 = fuzz.make_rng();
         let mut rng2 = fuzz.make_rng();
@@ -3831,7 +4106,6 @@ mod tests {
     #[test]
     fn constraint_fuzz_antithesis_entropy_flag() {
         let fuzz = ConstraintFuzz {
-            num_queries: 10,
             rows_per_table: 10,
             seed: None,
             antithesis_entropy: true,
@@ -3841,9 +4115,12 @@ mod tests {
             dump_repro: None,
             required_tags: vec![],
             excluded_tags: vec![],
+            target_dialect: None,
             single_pattern: false,
             keep_going: false,
             readyset_mode: false,
+            max_queries: 1000,
+            continue_probability: None,
         };
         let mut rng = fuzz.make_rng();
         let _ = rng.next_u64();
@@ -3864,7 +4141,9 @@ mod tests {
         // 1038 (sort memory) is the one allowlisted planner limitation.
         assert_eq!(
             classify_error(&mysql_server_anyhow(1038)),
-            ErrorClass::UpstreamKnownLimit { code: Some(1038) }
+            ErrorClass::UpstreamKnownLimit {
+                code: Some("1038".into())
+            }
         );
     }
 
@@ -3875,10 +4154,26 @@ mod tests {
         for code in [1054, 1055, 1060, 1064, 1066, 1140, 1146, 1525] {
             assert_eq!(
                 classify_error(&mysql_server_anyhow(code)),
-                ErrorClass::UpstreamGeneratorBug { code: Some(code) },
+                ErrorClass::UpstreamGeneratorBug {
+                    code: Some(code.to_string())
+                },
                 "MySQL code {code} must classify as a generator bug, not a known limit"
             );
         }
+    }
+
+    // qp:wwtzoakmfzdg -- PG rejections must carry the SQLSTATE so the
+    // "Upstream rejected generated query" assertion details are diagnostic
+    // instead of `code: null`.
+    #[test]
+    fn classify_pg_sqlstate_extracts_sqlstate_code() {
+        use tokio_postgres::error::SqlState;
+        assert_eq!(
+            classify_pg_sqlstate(&SqlState::SYNTAX_ERROR),
+            ErrorClass::UpstreamGeneratorBug {
+                code: Some("42601".into())
+            }
+        );
     }
 
     #[test]
@@ -3926,6 +4221,31 @@ mod tests {
     fn classify_error_upstream_connection_none_is_upstream_transient() {
         let err = anyhow::Error::from(database_utils::DatabaseError::UpstreamConnectionNone);
         assert_eq!(classify_error(&err), ErrorClass::UpstreamTransient);
+    }
+
+    #[test]
+    fn select_error_details_carry_sql_error_and_sqlstate() {
+        // qp:xvjcuglkklww: the "Readyset SELECT errored (keep-going
+        // swallowed)" assertion fired with only {"pattern":"array_agg"} in
+        // its details, and the SQL/error text logged via error! is not
+        // captured by the Antithesis log stream. The assertion details must
+        // carry the failing SQL, the error string, and the SQLSTATE so the
+        // failure is adjudicable from the report alone.
+        let err = mysql_server_anyhow(1064);
+        let details = select_error_details("array_agg", "SELECT ARRAY_AGG(c) FROM t", &err);
+        assert_eq!(details["pattern"], "array_agg");
+        assert_eq!(details["select_sql"], "SELECT ARRAY_AGG(c) FROM t");
+        let error_text = details["error"].as_str().expect("error must be a string");
+        assert!(error_text.contains("x"), "error text missing: {error_text}");
+        assert_eq!(details["sqlstate"], "x");
+    }
+
+    #[test]
+    fn select_error_details_sqlstate_null_for_non_database_errors() {
+        let err = anyhow::anyhow!("connection reset by peer");
+        let details = select_error_details("simple", "SELECT 1", &err);
+        assert_eq!(details["sqlstate"], serde_json::Value::Null);
+        assert_eq!(details["error"], "connection reset by peer");
     }
 
     #[test]
@@ -3987,7 +4307,9 @@ mod tests {
         use tokio_postgres::error::SqlState;
         assert_eq!(
             classify_pg_sqlstate(&SqlState::NUMERIC_VALUE_OUT_OF_RANGE),
-            ErrorClass::UpstreamKnownLimit { code: None }
+            ErrorClass::UpstreamKnownLimit {
+                code: Some("22003".into())
+            }
         );
     }
 
@@ -3996,7 +4318,24 @@ mod tests {
         use tokio_postgres::error::SqlState;
         assert_eq!(
             classify_pg_sqlstate(&SqlState::DIVISION_BY_ZERO),
-            ErrorClass::UpstreamKnownLimit { code: None }
+            ErrorClass::UpstreamKnownLimit {
+                code: Some("22012".into())
+            }
+        );
+    }
+
+    // qp:qxhqgqcafpzz -- A CROSS JOIN cartesian product exceeding the per-op
+    // timeout on upstream PG must be skipped, not treated as a driver failure.
+    // PG fires SQLSTATE 57014 when statement_timeout expires. Without this
+    // classification, the oracle aborts the run instead of skipping.
+    #[test]
+    fn pg_57014_query_canceled_is_upstream_known_limit() {
+        use tokio_postgres::error::SqlState;
+        assert_eq!(
+            classify_pg_sqlstate(&SqlState::QUERY_CANCELED),
+            ErrorClass::UpstreamKnownLimit {
+                code: Some("57014".into())
+            }
         );
     }
 
@@ -4006,7 +4345,9 @@ mod tests {
         use tokio_postgres::error::SqlState;
         assert_eq!(
             classify_pg_sqlstate(&SqlState::from_code("42883")),
-            ErrorClass::UpstreamGeneratorBug { code: None }
+            ErrorClass::UpstreamGeneratorBug {
+                code: Some("42883".into())
+            }
         );
     }
 
@@ -4067,6 +4408,37 @@ mod tests {
         ];
         assert!(matches!(
             compare_results(&upstream, &readyset, false),
+            ComparisonOutcome::Mismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn compare_results_json_text_whitespace_matches_but_value_diff_caught() {
+        use Value::{Integer, Text};
+        // JSON columns arrive as Text; the engines differ only in whitespace and
+        // the rows arrive in different orders. The JSON-aware sort must align
+        // them and value_eq must treat whitespace-equal JSON as a match.
+        let upstream = vec![
+            vec![Integer(1), Text(r#"{"k": 1}"#.into())],
+            vec![Integer(2), Text(r#"{"k": 2}"#.into())],
+        ];
+        let readyset = vec![
+            vec![Integer(2), Text(r#"{"k":2}"#.into())],
+            vec![Integer(1), Text(r#"{"k":1}"#.into())],
+        ];
+        assert!(matches!(
+            compare_results(&upstream, &readyset, false),
+            ComparisonOutcome::Match
+        ));
+
+        // A genuine JSON value divergence in a permuted set must still be
+        // reported, not swallowed by the JSON-aware sort.
+        let readyset_bad = vec![
+            vec![Integer(2), Text(r#"{"k":2}"#.into())],
+            vec![Integer(1), Text(r#"{"k":9}"#.into())],
+        ];
+        assert!(matches!(
+            compare_results(&upstream, &readyset_bad, false),
             ComparisonOutcome::Mismatch { .. }
         ));
     }
@@ -4822,6 +5194,228 @@ mod tests {
         assert!(parsed.keep_going);
     }
 
+    /// Build a minimal `ConstraintFuzz` for run-control tests, overriding only
+    /// the relevant fields via a closure.
+    fn run_fuzz(configure: impl FnOnce(&mut ConstraintFuzz)) -> ConstraintFuzz {
+        let mut fuzz = ConstraintFuzz {
+            rows_per_table: 10,
+            seed: Some(1),
+            antithesis_entropy: false,
+            compare_to: "mysql://root:noria@localhost/test".to_string(),
+            readyset_url: "mysql://root:noria@localhost:3307/test".to_string(),
+            db_op_timeout_secs: 30,
+            dump_repro: None,
+            required_tags: vec![],
+            excluded_tags: vec![],
+            target_dialect: None,
+            single_pattern: false,
+            keep_going: false,
+            readyset_mode: false,
+            max_queries: 1000,
+            continue_probability: None,
+        };
+        configure(&mut fuzz);
+        fuzz
+    }
+
+    #[test]
+    fn selection_filter_honors_user_required_and_excluded() {
+        // User --required-tags flow into the filter's required_tags;
+        // user --excluded-tags are excluded.
+        let fuzz = run_fuzz(|f| {
+            f.required_tags = vec!["expr_eval".to_string()];
+            f.excluded_tags = vec!["window".to_string()];
+        });
+        let filter = fuzz.selection_filter();
+        assert!(filter.required_tags.contains(&"expr_eval"));
+        assert!(filter.excluded_tags.contains(&"window"));
+        assert_eq!(
+            filter.excluded_tags.len(),
+            1,
+            "only user-excluded tags should be excluded"
+        );
+    }
+
+    #[test]
+    fn max_queries_defaults_and_parses() {
+        // The fallback cap defaults high and is not meant to bind.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+        ])
+        .expect("parse with defaults");
+        assert_eq!(parsed.max_queries, 1000);
+
+        // Flag parses and overrides the default.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--max-queries",
+            "50",
+        ])
+        .expect("parse with --max-queries");
+        assert_eq!(parsed.max_queries, 50);
+    }
+
+    #[test]
+    fn target_dialect_rejects_unknown_value() {
+        // `--target-dialect` must reject a bad value at parse time rather than
+        // panicking later at run time (after burning the connection-retry
+        // budget and bypassing repro-log finalization).
+        ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--target-dialect",
+            "mysql",
+        ])
+        .expect_err("unknown --target-dialect value must be rejected at parse time");
+    }
+
+    #[test]
+    fn target_dialect_accepts_known_values() {
+        for v in ["mysql-only", "postgres-only", "both"] {
+            ConstraintFuzz::try_parse_from([
+                "oracle",
+                "--compare-to",
+                "mysql://root:noria@localhost/test",
+                "--readyset-url",
+                "mysql://root:noria@localhost:3307/test",
+                "--target-dialect",
+                v,
+            ])
+            .unwrap_or_else(|e| panic!("--target-dialect {v} must parse: {e}"));
+        }
+    }
+
+    #[test]
+    fn constraint_fuzz_swarm_flag_removed() {
+        // `--swarm` no longer exists: swarm is the default and only path, so
+        // passing it must be rejected as an unknown argument.
+        ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--swarm",
+        ])
+        .expect_err("--swarm must no longer be accepted");
+    }
+
+    #[test]
+    fn feature_prob_flag_removed() {
+        // --feature-prob is gone: swarm feature-omission is removed, so the
+        // per-tag inclusion probability flag is no longer accepted.
+        ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--feature-prob",
+            "0.5",
+        ])
+        .expect_err("--feature-prob must no longer be accepted");
+    }
+
+    #[test]
+    fn min_features_flag_removed() {
+        // --min-features is gone along with --feature-prob.
+        ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--min-features",
+            "3",
+        ])
+        .expect_err("--min-features must no longer be accepted");
+    }
+
+    #[test]
+    fn full_filtered_registry_selected_every_iteration() {
+        // With swarm removed, every iteration selects from the full filtered
+        // registry (no disabled-tag exclusions beyond the user's
+        // --required-tags/--excluded-tags). The selection filter must not
+        // exclude any tags beyond those the user explicitly excluded.
+        let fuzz = run_fuzz(|f| {
+            f.seed = Some(42);
+            f.excluded_tags = vec!["window".to_string()];
+        });
+        // selection_filter no longer takes a swarm config — it always builds
+        // from the user's required/excluded tags directly.
+        let filter = fuzz.selection_filter();
+        assert!(
+            filter.excluded_tags.contains(&"window"),
+            "user-excluded tag must be excluded"
+        );
+        assert_eq!(
+            filter.excluded_tags.len(),
+            1,
+            "only user-excluded tags should be in excluded_tags, no swarm suppression"
+        );
+    }
+
+    #[test]
+    fn constraint_fuzz_num_queries_flag_removed() {
+        // `-n/--num-queries` is gone: run length is bounded by --max-queries
+        // and the per-query coin flip, so the old flag is rejected.
+        ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "-n",
+            "10",
+        ])
+        .expect_err("-n/--num-queries must no longer be accepted");
+    }
+
+    #[test]
+    fn single_pattern_coexists_with_run_control_flags() {
+        // --single-pattern is an orthogonal targeted-repro tool: it parses
+        // alongside the run-control flags and bypasses composition, so the
+        // selection filter is the user's plain required/excluded tags.
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--single-pattern",
+            "--max-queries",
+            "5",
+        ])
+        .expect("--single-pattern coexists with run-control flags");
+        assert!(parsed.single_pattern);
+        assert_eq!(parsed.max_queries, 5);
+
+        // Under --single-pattern the selection filter is the plain user filter:
+        // user-excluded tags are excluded and nothing else is.
+        let fuzz = run_fuzz(|f| {
+            f.single_pattern = true;
+            f.excluded_tags = vec!["window".to_string()];
+        });
+        let filter = fuzz.selection_filter();
+        assert!(filter.excluded_tags.contains(&"window"));
+        assert_eq!(
+            filter.excluded_tags.len(),
+            1,
+            "single-pattern excludes only user tags"
+        );
+    }
+
     #[test]
     fn constraint_fuzz_readyset_mode_defaults_off_and_parses() {
         // Defaults off when the flag is absent: the endpoint is treated as a
@@ -4849,5 +5443,104 @@ mod tests {
         ])
         .expect("parse with --readyset-mode");
         assert!(parsed.readyset_mode);
+    }
+
+    /// A shutdown signal arriving mid-run must not strand the oracle's buffered
+    /// reproduction log. `run_until_shutdown` races the work future against the
+    /// shutdown future; when shutdown wins, the work future is cancelled and the
+    /// caller still finalizes `ReproLog`. Without the signal-aware finalization,
+    /// the `BufWriter`'s contents are lost when a `timeout`/`kill` ends the
+    /// process before normal teardown.
+    #[tokio::test]
+    async fn shutdown_mid_run_flushes_buffered_repro() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("repro.sql");
+        let mut repro = ReproLog::with_writer(path.clone(), Dialect::MySQL, "42".to_string())
+            .expect("open repro writer");
+
+        // Record a statement, then await forever. The statement lands in the
+        // BufWriter but is not flushed to disk on its own.
+        let work = async {
+            repro.record_ddl(0, "CREATE TABLE t (id INT)");
+            std::future::pending::<anyhow::Result<(usize, usize, usize)>>().await
+        };
+
+        // Shutdown fires immediately, cancelling the work future.
+        let shutdown = std::future::ready(());
+
+        let outcome = run_until_shutdown(work, shutdown).await;
+        assert!(
+            matches!(outcome, RunOutcome::Interrupted),
+            "shutdown should win the race and report interruption"
+        );
+
+        // Before finalization the buffered statement is still trapped in the
+        // BufWriter; finalizing flushes it to disk so the artifact survives.
+        repro.finish().expect("finalize repro after interruption");
+        let contents = std::fs::read_to_string(&path).expect("read repro file");
+        assert!(
+            contents.contains("CREATE TABLE t (id INT)"),
+            "buffered statement must reach disk after interrupted finalize, got:\n{contents}"
+        );
+    }
+
+    /// When the work future completes before any shutdown signal, the outcome
+    /// carries the result and no spurious interruption is reported.
+    #[tokio::test]
+    async fn work_completion_wins_over_idle_shutdown() {
+        let work = async { Ok::<_, anyhow::Error>((3usize, 1usize, 0usize)) };
+        let shutdown = std::future::pending::<()>();
+
+        let outcome = run_until_shutdown(work, shutdown).await;
+        match outcome {
+            RunOutcome::Completed(res) => {
+                let (m, mm, e) = res.expect("work result");
+                assert_eq!((m, mm, e), (3, 1, 0));
+            }
+            RunOutcome::Interrupted => panic!("idle shutdown must not interrupt completed work"),
+        }
+    }
+
+    #[test]
+    fn coin_flip_stop_decision() {
+        // No continue probability: the coin never stops the loop.
+        assert!(!coin_flip_stops_run(None, 0.0));
+        assert!(!coin_flip_stops_run(None, 0.99));
+        // With p, a draw below p continues; at or above p stops.
+        assert!(!coin_flip_stops_run(Some(0.9), 0.0));
+        assert!(!coin_flip_stops_run(Some(0.9), 0.89));
+        assert!(coin_flip_stops_run(Some(0.9), 0.9));
+        assert!(coin_flip_stops_run(Some(0.9), 0.95));
+        // p = 0 stops after the first query; p >= 1 never coin-stops.
+        assert!(coin_flip_stops_run(Some(0.0), 0.0));
+        assert!(!coin_flip_stops_run(Some(1.0), 0.999));
+    }
+
+    #[test]
+    fn continue_probability_parses() {
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+            "--continue-probability",
+            "0.9",
+        ])
+        .expect("parse --continue-probability");
+        assert_eq!(parsed.continue_probability, Some(0.9));
+    }
+
+    #[test]
+    fn continue_probability_absent_by_default() {
+        let parsed = ConstraintFuzz::try_parse_from([
+            "oracle",
+            "--compare-to",
+            "mysql://root:noria@localhost/test",
+            "--readyset-url",
+            "mysql://root:noria@localhost:3307/test",
+        ])
+        .expect("parse without flag");
+        assert!(parsed.continue_probability.is_none());
     }
 }

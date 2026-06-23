@@ -40,5 +40,8 @@ readyset-tracing = { path = "../readyset-tracing" }
 readyset-util = { path = "../readyset-util" }
 dante = { path = "../dante" }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
