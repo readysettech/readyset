@@ -1052,6 +1052,13 @@ impl BuiltinFunction {
                     *allow_duplicate_keys,
                 )
             }
+            BuiltinFunction::JsonBuildArray { args, dialect } => {
+                let pairs = args
+                    .iter()
+                    .map(|arg| Ok((arg.eval(record)?, arg.ty().clone())))
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+                crate::eval::json::json_build_array(&pairs, dialect.engine())
+            }
             BuiltinFunction::JsonTypeof(expr) => {
                 let json = non_null!(expr.eval(record)?).to_json()?;
                 Ok(get_json_value_type(&json).into())
@@ -2660,6 +2667,28 @@ mod tests {
             test("'[]'", Some(0));
             test("'[1]'", Some(1));
             test("'[1, 2, 3]'", Some(3));
+        }
+
+        #[test]
+        fn json_build_array() {
+            #[track_caller]
+            fn test(args: &str, expected: &str) {
+                for f in ["json_build_array", "jsonb_build_array"] {
+                    let expr = format!("{f}({args})");
+                    assert_eq!(
+                        eval_expr(&expr, PostgreSQL),
+                        expected.into(),
+                        "incorrect result for `{expr}`"
+                    );
+                }
+            }
+
+            test("", "[]");
+            test("1, 2, 3", "[1,2,3]");
+            // Mixed argument types are each rendered to their JSON form, and NULL
+            // arguments become JSON nulls rather than propagating the NULL.
+            test("'a', 2, null", r#"["a",2,null]"#);
+            test("null", "[null]");
         }
 
         mod json_depth {

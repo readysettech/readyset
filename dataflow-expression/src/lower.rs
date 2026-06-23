@@ -473,6 +473,30 @@ impl BuiltinFunction {
                     DfType::Json,
                 )
             }
+            "json_build_array" => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Built-in function","sub":"json_build_array","tags":["exclude-nightly"]}"#
+                );
+                (
+                    Self::JsonBuildArray {
+                        args: args.by_ref().collect(),
+                        dialect,
+                    },
+                    DfType::Json,
+                )
+            }
+            "jsonb_build_array" => {
+                antithesis_sdk::assert_reachable!(
+                    r#"{"id":"Built-in function","sub":"jsonb_build_array","tags":["exclude-nightly"]}"#
+                );
+                (
+                    Self::JsonBuildArray {
+                        args: args.by_ref().collect(),
+                        dialect,
+                    },
+                    DfType::Jsonb,
+                )
+            }
             "jsonb_object" => {
                 antithesis_sdk::assert_reachable!(
                     r#"{"id":"Built-in function","sub":"jsonb_object","tags":["exclude-nightly"]}"#
@@ -1548,6 +1572,8 @@ impl Expr {
                 | FunctionExpr::JsonbObject(..)
                 | FunctionExpr::JsonBuildObject(..)
                 | FunctionExpr::JsonbBuildObject(..)
+                | FunctionExpr::JsonBuildArray(..)
+                | FunctionExpr::JsonbBuildArray(..)
                 | FunctionExpr::JsonStripNulls(..)
                 | FunctionExpr::JsonbStripNulls(..)
                 | FunctionExpr::JsonExtractPath(..)

@@ -218,6 +218,10 @@ pub enum FunctionExpr {
     JsonBuildObject(Vec<Expr>),
     /// `jsonb_build_object(...)` (allow_duplicate_keys=false)
     JsonbBuildObject(Vec<Expr>),
+    /// `json_build_array(...)` (returns Json array)
+    JsonBuildArray(Vec<Expr>),
+    /// `jsonb_build_array(...)` (returns Jsonb array)
+    JsonbBuildArray(Vec<Expr>),
     /// `json_strip_nulls(expr)` (returns Json)
     JsonStripNulls(Box<Expr>),
     /// `jsonb_strip_nulls(expr)` (returns Jsonb)
@@ -589,6 +593,20 @@ impl FunctionExpr {
                     .collect::<Option<Vec<_>>>()?
                     .join(", ")
             ),
+            FunctionExpr::JsonBuildArray(args) => format!(
+                "json_build_array({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
+            FunctionExpr::JsonbBuildArray(args) => format!(
+                "jsonb_build_array({})",
+                args.iter()
+                    .map(|a| a.alias(dialect))
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            ),
             FunctionExpr::JsonStripNulls(e) => format!("json_strip_nulls({})", e.alias(dialect)?),
             FunctionExpr::JsonbStripNulls(e) => {
                 format!("jsonb_strip_nulls({})", e.alias(dialect)?)
@@ -799,7 +817,9 @@ impl FunctionExpr {
             | FunctionExpr::JsonObject(args)
             | FunctionExpr::JsonbObject(args)
             | FunctionExpr::JsonBuildObject(args)
-            | FunctionExpr::JsonbBuildObject(args) => {
+            | FunctionExpr::JsonbBuildObject(args)
+            | FunctionExpr::JsonBuildArray(args)
+            | FunctionExpr::JsonbBuildArray(args) => {
                 concrete_iter!(args.iter())
             }
             FunctionExpr::CountStar
@@ -913,7 +933,9 @@ impl FunctionExpr {
             | FunctionExpr::JsonObject(args)
             | FunctionExpr::JsonbObject(args)
             | FunctionExpr::JsonBuildObject(args)
-            | FunctionExpr::JsonbBuildObject(args) => args,
+            | FunctionExpr::JsonbBuildObject(args)
+            | FunctionExpr::JsonBuildArray(args)
+            | FunctionExpr::JsonbBuildArray(args) => args,
             FunctionExpr::Substring { string, pos, len } => {
                 let mut v = vec![*string];
                 if let Some(p) = pos {
@@ -1025,6 +1047,8 @@ impl FunctionExpr {
             "jsonb_object" => Self::JsonbObject(it.by_ref().collect()),
             "json_build_object" => Self::JsonBuildObject(it.by_ref().collect()),
             "jsonb_build_object" => Self::JsonbBuildObject(it.by_ref().collect()),
+            "json_build_array" => Self::JsonBuildArray(it.by_ref().collect()),
+            "jsonb_build_array" => Self::JsonbBuildArray(it.by_ref().collect()),
             "json_strip_nulls" if n >= 1 => Self::JsonStripNulls(next_box!()),
             "jsonb_strip_nulls" if n >= 1 => Self::JsonbStripNulls(next_box!()),
             "json_extract_path" if n >= 1 => {
@@ -1113,6 +1137,8 @@ impl FunctionExpr {
             FunctionExpr::JsonbObject(..) => Some("jsonb_object"),
             FunctionExpr::JsonBuildObject(..) => Some("json_build_object"),
             FunctionExpr::JsonbBuildObject(..) => Some("jsonb_build_object"),
+            FunctionExpr::JsonBuildArray(..) => Some("json_build_array"),
+            FunctionExpr::JsonbBuildArray(..) => Some("jsonb_build_array"),
             FunctionExpr::JsonStripNulls(..) => Some("json_strip_nulls"),
             FunctionExpr::JsonbStripNulls(..) => Some("jsonb_strip_nulls"),
             FunctionExpr::JsonExtractPath(..) => Some("json_extract_path"),
@@ -1434,6 +1460,16 @@ impl DialectDisplay for FunctionExpr {
             FunctionExpr::JsonbBuildObject(args) => write!(
                 f,
                 "jsonb_build_object({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonBuildArray(args) => write!(
+                f,
+                "json_build_array({})",
+                args.iter().map(|a| a.display(dialect)).join(", ")
+            ),
+            FunctionExpr::JsonbBuildArray(args) => write!(
+                f,
+                "jsonb_build_array({})",
                 args.iter().map(|a| a.display(dialect)).join(", ")
             ),
             FunctionExpr::JsonStripNulls(e) => {

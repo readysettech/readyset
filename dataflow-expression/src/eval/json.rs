@@ -367,7 +367,25 @@ fn dfvalue_to_json_value(
         return Ok(JsonValue::Bool(bool::try_from(&value)?));
     }
 
+    // `JsonValue::try_from` rejects non-finite floats (serde_json cannot encode
+    // NaN/Infinity), which Postgres also disallows in JSON output.
     value.try_into()
+}
+
+/// Builds a JSON array from a list of (value, type) pairs.
+///
+/// This implements `json_build_array` / `jsonb_build_array` semantics: each
+/// argument is converted to its JSON representation and collected into a JSON
+/// array. NULL arguments become JSON nulls.
+pub(crate) fn json_build_array(
+    values: &[(DfValue, DfType)],
+    engine: SqlEngine,
+) -> ReadySetResult<DfValue> {
+    let elements = values
+        .iter()
+        .map(|(v, ty)| dfvalue_to_json_value(v.clone(), ty, engine))
+        .collect::<ReadySetResult<Vec<_>>>()?;
+    Ok(JsonValue::Array(elements).to_string().into())
 }
 
 /// Returns `true` if `parent` immediately contains all of the values in `child`.
@@ -776,6 +794,53 @@ mod tests {
     use test_utils::tags;
 
     use super::*;
+
+    #[test]
+    fn json_build_array_non_finite_errors() {
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                json_build_array(
+                    &[(DfValue::Double(v), DfType::Double)],
+                    SqlEngine::PostgreSQL
+                )
+                .is_err(),
+                "non-finite double {v} must error, not panic",
+            );
+            assert!(
+                json_build_array(
+                    &[(DfValue::Float(v as f32), DfType::Float)],
+                    SqlEngine::PostgreSQL
+                )
+                .is_err(),
+                "non-finite float {v} must error, not panic",
+            );
+        }
+        // A finite double still renders as a JSON number.
+        assert_eq!(
+            json_build_array(
+                &[(DfValue::Double(1.5), DfType::Double)],
+                SqlEngine::PostgreSQL
+            )
+            .expect("finite double is encodable"),
+            DfValue::from("[1.5]"),
+        );
+    }
+
+    #[test]
+    fn dfvalue_to_json_value_postgres_bool() {
+        // Under PostgreSQL a boolean-typed value renders as JSON true/false,
+        // not as the underlying 1/0 integer.
+        assert_eq!(
+            dfvalue_to_json_value(DfValue::from(true), &DfType::Bool, SqlEngine::PostgreSQL)
+                .expect("bool is encodable"),
+            JsonValue::Bool(true),
+        );
+        assert_eq!(
+            dfvalue_to_json_value(DfValue::from(false), &DfType::Bool, SqlEngine::PostgreSQL)
+                .expect("bool is encodable"),
+            JsonValue::Bool(false),
+        );
+    }
 
     mod json_quote {
         use pretty_assertions::assert_eq;

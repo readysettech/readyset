@@ -69,6 +69,11 @@ pub enum BuiltinFunction {
     },
     /// [`json[b]_array_length`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonArrayLength(Expr),
+    /// [`json[b]_build_array`](https://www.postgresql.org/docs/current/functions-json.html)
+    JsonBuildArray {
+        args: Vec<Expr>,
+        dialect: Dialect,
+    },
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonStripNulls(Expr),
     /// [`json[b]_extract_path[_text]`](https://www.postgresql.org/docs/current/functions-json.html)
@@ -209,6 +214,7 @@ impl BuiltinFunction {
             JsonTypeof { .. } => "json_typeof",
             JsonObject { .. } => "json_object",
             JsonArrayLength { .. } => "json_array_length",
+            JsonBuildArray { .. } => "json_build_array",
             JsonStripNulls { .. } => "json_strip_nulls",
             JsonExtractPath { .. } => "json_extract_path",
             JsonbInsert { .. } => "jsonb_insert",
@@ -370,6 +376,7 @@ impl Display for BuiltinFunction {
                 write!(f, "({expr})")
             }
             JsonBuildObject { args, .. } => write!(f, "({})", args.iter().join(", ")),
+            JsonBuildArray { args, .. } => write!(f, "({})", args.iter().join(", ")),
             SpatialAsText { .. } => write!(f, "st_astext"),
             SpatialAsEWKT { .. } => write!(f, "st_asewkt"),
             Bucket { expr, interval } => {

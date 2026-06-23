@@ -293,7 +293,9 @@ pub fn map_aggregates(
             | FunctionExpr::JsonObject(exprs)
             | FunctionExpr::JsonbObject(exprs)
             | FunctionExpr::JsonBuildObject(exprs)
-            | FunctionExpr::JsonbBuildObject(exprs),
+            | FunctionExpr::JsonbBuildObject(exprs)
+            | FunctionExpr::JsonBuildArray(exprs)
+            | FunctionExpr::JsonbBuildArray(exprs),
         ) => {
             ret.extend(exprs.iter_mut().flat_map(|e| map_aggregates(e, dialect)));
         }

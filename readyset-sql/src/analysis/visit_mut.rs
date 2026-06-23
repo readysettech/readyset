@@ -739,7 +739,9 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         | FunctionExpr::JsonObject(exprs)
         | FunctionExpr::JsonbObject(exprs)
         | FunctionExpr::JsonBuildObject(exprs)
-        | FunctionExpr::JsonbBuildObject(exprs) => {
+        | FunctionExpr::JsonbBuildObject(exprs)
+        | FunctionExpr::JsonBuildArray(exprs)
+        | FunctionExpr::JsonbBuildArray(exprs) => {
             for e in exprs {
                 visitor.visit_expr(e)?;
             }

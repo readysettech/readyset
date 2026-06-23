@@ -168,11 +168,18 @@ impl TryFrom<DfValue> for JsonValue {
     type Error = ReadySetError;
 
     fn try_from(value: DfValue) -> Result<Self, ReadySetError> {
+        // serde_json cannot represent non-finite floats: `Number::from_f64`
+        // returns None for NaN/Infinity. Surface an error so callers don't panic.
+        fn finite_number(f: f64) -> ReadySetResult<JsonValue> {
+            serde_json::Number::from_f64(f)
+                .map(JsonValue::Number)
+                .ok_or_else(|| invalid_query_err!("cannot encode non-finite float as JSON"))
+        }
         Ok(match value {
             // FIXME: serde_json doesn't support f32, this causes precision errors when using
             // floats
-            DfValue::Float(f) => JsonValue::Number(serde_json::Number::from_f64(f as f64).unwrap()),
-            DfValue::Double(f) => JsonValue::Number(serde_json::Number::from_f64(f).unwrap()),
+            DfValue::Float(f) => finite_number(f as f64)?,
+            DfValue::Double(f) => finite_number(f)?,
             DfValue::Int(i) => JsonValue::Number(i.into()),
             DfValue::UnsignedInt(i) => JsonValue::Number(i.into()),
             DfValue::Text(text) => JsonValue::String(text.as_str().to_string()),
@@ -3521,6 +3528,22 @@ mod tests {
             "JSON data malformed during roundtrip"
         );
         Ok(())
+    }
+
+    #[test]
+    fn try_from_dfvalue_for_jsonvalue_rejects_non_finite_floats() {
+        // serde_json::Number::from_f64 returns None for NaN/Infinity. The
+        // conversion surfaces an error rather than unwrap-panicking, so any
+        // caller handing it a non-finite float gets a recoverable error.
+        for f in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            JsonValue::try_from(DfValue::Double(f)).unwrap_err();
+            JsonValue::try_from(DfValue::Float(f as f32)).unwrap_err();
+        }
+        // A finite float still converts to a JSON number.
+        assert_eq!(
+            JsonValue::try_from(DfValue::Double(1.5)).unwrap(),
+            JsonValue::Number(serde_json::Number::from_f64(1.5).unwrap()),
+        );
     }
 
     #[test]

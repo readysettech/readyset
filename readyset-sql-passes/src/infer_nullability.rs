@@ -90,6 +90,8 @@ fn call_null_attributes(func_expr: &FunctionExpr) -> (bool, bool) {
         | FunctionExpr::JsonbObject(..)
         | FunctionExpr::JsonBuildObject(..)
         | FunctionExpr::JsonbBuildObject(..)
+        | FunctionExpr::JsonBuildArray(..)
+        | FunctionExpr::JsonbBuildArray(..)
         | FunctionExpr::JsonStripNulls(..)
         | FunctionExpr::JsonbStripNulls(..)
         | FunctionExpr::JsonExtractPath(..)

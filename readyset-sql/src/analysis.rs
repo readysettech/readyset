@@ -214,7 +214,9 @@ impl<'a> ReferredColumnsIter<'a> {
             | JsonObject(exprs)
             | JsonbObject(exprs)
             | JsonBuildObject(exprs)
-            | JsonbBuildObject(exprs) => exprs.first().and_then(|first_arg| {
+            | JsonbBuildObject(exprs)
+            | JsonBuildArray(exprs)
+            | JsonbBuildArray(exprs) => exprs.first().and_then(|first_arg| {
                 if exprs.len() >= 2 {
                     self.exprs_to_visit.extend(exprs.iter().skip(1));
                 }
@@ -427,7 +429,9 @@ impl<'a> ReferredColumnsMut<'a> {
             | JsonObject(exprs)
             | JsonbObject(exprs)
             | JsonBuildObject(exprs)
-            | JsonbBuildObject(exprs) => exprs.split_first_mut().and_then(|(first_arg, args)| {
+            | JsonbBuildObject(exprs)
+            | JsonBuildArray(exprs)
+            | JsonbBuildArray(exprs) => exprs.split_first_mut().and_then(|(first_arg, args)| {
                 self.exprs_to_visit.extend(args);
                 self.visit_expr(first_arg)
             }),
@@ -618,6 +622,8 @@ pub fn is_aggregate(function: &FunctionExpr) -> bool {
         | FunctionExpr::JsonbObject(..)
         | FunctionExpr::JsonBuildObject(..)
         | FunctionExpr::JsonbBuildObject(..)
+        | FunctionExpr::JsonBuildArray(..)
+        | FunctionExpr::JsonbBuildArray(..)
         | FunctionExpr::JsonStripNulls(..)
         | FunctionExpr::JsonbStripNulls(..)
         | FunctionExpr::JsonExtractPath(..)
