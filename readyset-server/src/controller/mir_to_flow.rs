@@ -470,9 +470,9 @@ fn record_reachable(node: &MirNodeInner) {
         MirNodeInner::Filter { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Filter"}"#)
         }
-        MirNodeInner::Identity => {
-            record_reachable!(r#"{"id":"Create dataflow node","sub":"Identity"}"#)
-        }
+        // Identity has no construction site in the sql-to-mir path and cannot
+        // reach this probe in practice.
+        MirNodeInner::Identity => {}
         MirNodeInner::Join { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Join"}"#)
         }
@@ -482,15 +482,16 @@ fn record_reachable(node: &MirNodeInner) {
         MirNodeInner::LeftJoin { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"LeftJoin"}"#)
         }
-        MirNodeInner::DependentJoin { .. } => {
-            record_reachable!(r#"{"id":"Create dataflow node","sub":"DependentJoin"}"#)
-        }
-        MirNodeInner::DependentLeftJoin { .. } => {
-            record_reachable!(r#"{"id":"Create dataflow node","sub":"DependentLeftJoin"}"#)
-        }
-        MirNodeInner::ViewKey { .. } => {
-            record_reachable!(r#"{"id":"Create dataflow node","sub":"ViewKey"}"#)
-        }
+        // DependentJoin and DependentLeftJoin are always decorrelated to Join/LeftJoin
+        // by eliminate_dependent_joins before lowering; if they somehow arrive here the
+        // lowering match in mir_node_to_flow_parts returns internal!(), so this probe is
+        // unreachable by design.
+        MirNodeInner::DependentJoin { .. } | MirNodeInner::DependentLeftJoin { .. } => {}
+        // ViewKey is always merged into the Leaf node (or returns UnsupportedPlaceholders)
+        // by pull_view_keys_to_leaf before lowering; the lowering match in
+        // mir_node_to_flow_parts returns UnsupportedPlaceholders, so this probe is
+        // unreachable by design.
+        MirNodeInner::ViewKey { .. } => {}
         MirNodeInner::Project { .. } => {
             record_reachable!(r#"{"id":"Create dataflow node","sub":"Project"}"#)
         }
