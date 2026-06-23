@@ -1428,6 +1428,7 @@ dependencies = [
  "rand_regex",
  "readyset-data",
  "readyset-decimal",
+ "readyset-spatial",
  "readyset-sql",
  "test-strategy",
  "test-utils",

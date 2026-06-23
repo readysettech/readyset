@@ -19,6 +19,7 @@ rand_distr = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-data = { path = "../readyset-data" }
 readyset-decimal = { path = "../readyset-decimal" }
+readyset-spatial = { path = "../readyset-spatial" }
 
 [dev-dependencies]
 test-strategy = { workspace = true }

@@ -15,6 +15,7 @@ use rand_distr::Zipf;
 use readyset_data::Array;
 use readyset_data::{encoding::Encoding, DfType, DfValue, Dialect};
 use readyset_decimal::Decimal;
+use readyset_spatial::{make_postgis_point_bytes, make_postgis_polygon_bytes};
 use readyset_sql::ast::SqlType;
 
 mod distribution_annotation;
@@ -569,8 +570,19 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
-        SqlType::PostgisPoint => unimplemented!(),
-        SqlType::PostgisPolygon => unimplemented!(),
+        SqlType::PostgisPoint => {
+            DfValue::ByteArray(Arc::new(make_postgis_point_bytes(1.0, 2.0, None, true)))
+        }
+        SqlType::PostgisPolygon => {
+            // A simple closed triangle, little-endian, no SRID.
+            let ring = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0)];
+            DfValue::ByteArray(Arc::new(make_postgis_polygon_bytes(
+                Some(&ring),
+                None,
+                None,
+                true,
+            )))
+        }
         SqlType::Tsvector => DfValue::None,
     }
 }
@@ -729,8 +741,22 @@ where
         }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
-        SqlType::PostgisPoint => unimplemented!(),
-        SqlType::PostgisPolygon => unimplemented!(),
+        SqlType::PostgisPoint => {
+            let x = rng.random::<f64>() * 360.0 - 180.0;
+            let y = rng.random::<f64>() * 180.0 - 90.0;
+            DfValue::ByteArray(Arc::new(make_postgis_point_bytes(x, y, None, true)))
+        }
+        SqlType::PostgisPolygon => {
+            let x = rng.random::<f64>() * 360.0 - 180.0;
+            let y = rng.random::<f64>() * 180.0 - 90.0;
+            let ring = [(x, y), (x + 1.0, y), (x, y + 1.0), (x, y)];
+            DfValue::ByteArray(Arc::new(make_postgis_polygon_bytes(
+                Some(&ring),
+                None,
+                None,
+                true,
+            )))
+        }
         SqlType::Tsvector => DfValue::None,
     }
 }
@@ -902,8 +928,22 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         }
         SqlType::Other(_) => unimplemented!(),
         SqlType::Point => unimplemented!(),
-        SqlType::PostgisPoint => unimplemented!(),
-        SqlType::PostgisPolygon => unimplemented!(),
+        SqlType::PostgisPoint => {
+            let x = idx as f64;
+            let y = (idx as f64) + 0.5;
+            DfValue::ByteArray(Arc::new(make_postgis_point_bytes(x, y, None, true)))
+        }
+        SqlType::PostgisPolygon => {
+            let x = idx as f64;
+            let y = (idx as f64) + 0.5;
+            let ring = [(x, y), (x + 1.0, y), (x, y + 1.0), (x, y)];
+            DfValue::ByteArray(Arc::new(make_postgis_polygon_bytes(
+                Some(&ring),
+                None,
+                None,
+                true,
+            )))
+        }
         SqlType::Tsvector => DfValue::None,
     }
 }
@@ -981,5 +1021,52 @@ mod tests {
 
             assert_eq!(vals1, vals2, "non-deterministic for spec: {spec:?}");
         }
+    }
+
+    /// Parse generated PostGIS bytes back through the canonical readyset-spatial
+    /// parser, asserting they form a well-formed geometry of the expected kind.
+    #[track_caller]
+    fn assert_postgis_round_trips(val: &DfValue, expected_prefix: &str) {
+        let DfValue::ByteArray(bytes) = val else {
+            panic!("expected ByteArray, got {val:?}");
+        };
+        let text = readyset_spatial::try_get_postgis_spatial_text(bytes, false)
+            .expect("generated PostGIS bytes must parse");
+        assert!(
+            text.starts_with(expected_prefix),
+            "expected {expected_prefix} geometry, got {text}"
+        );
+    }
+
+    #[test]
+    fn value_of_type_postgis_point_round_trips() {
+        assert_postgis_round_trips(&value_of_type(&SqlType::PostgisPoint), "POINT");
+    }
+
+    #[test]
+    fn value_of_type_postgis_polygon_round_trips() {
+        assert_postgis_round_trips(&value_of_type(&SqlType::PostgisPolygon), "POLYGON");
+    }
+
+    #[test]
+    fn random_value_of_type_postgis_round_trips() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        assert_postgis_round_trips(
+            &random_value_of_type(&SqlType::PostgisPoint, &mut rng),
+            "POINT",
+        );
+        assert_postgis_round_trips(
+            &random_value_of_type(&SqlType::PostgisPolygon, &mut rng),
+            "POLYGON",
+        );
+    }
+
+    #[test]
+    fn unique_value_of_type_postgis_polygon_distinct_and_round_trips() {
+        let v0 = unique_value_of_type(&SqlType::PostgisPolygon, 0);
+        let v1 = unique_value_of_type(&SqlType::PostgisPolygon, 1);
+        assert_postgis_round_trips(&v0, "POLYGON");
+        assert_postgis_round_trips(&v1, "POLYGON");
+        assert_ne!(v0, v1, "unique generator must return distinct values");
     }
 }
