@@ -2331,3 +2331,78 @@ async fn coalesce_upstream_query_failure_midflight() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn refresh_resumes_after_upstream_failure() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset.query_drop(format!("USE {test_name}")).await.unwrap();
+
+    let create_table = "CREATE TABLE foo (a INT)";
+    let drop_table = "DROP TABLE foo";
+    let query = "SELECT * FROM foo";
+    let create_cache = format!(
+        "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH 1 SECONDS FROM {query}"
+    );
+
+    // Create and fill the cache, and then let the entry go stale.
+    upstream.query_drop(create_table).await.unwrap();
+    upstream.query_drop("INSERT INTO foo VALUES (1)").await.unwrap();
+    readyset.query_drop(create_cache).await.unwrap();
+    let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
+    assert_eq!(v, 1);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::Upstream
+    );
+    sleep(Duration::from_secs(2)).await;
+
+    // Drop the table so the refresh triggered by this hit fails.
+    upstream.query_drop(drop_table).await.unwrap();
+    let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
+    assert_eq!(v, 1);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow
+    );
+
+    // Wait a little for the refresh to run and fail.
+    sleep(Duration::from_secs(1)).await;
+
+    // Restore the table so the next hit can trigger a refresh (of a new table value).
+    upstream.query_drop(create_table).await.unwrap();
+    upstream.query_drop("INSERT INTO foo VALUES (2)").await.unwrap();
+    let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
+    assert_eq!(v, 1);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow
+    );
+
+    // Wait a little for the refresh to run and succeed.
+    sleep(Duration::from_secs(1)).await;
+
+    // Did the refresh now succeed?
+    let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
+    assert_eq!(v, 2);
+    assert_eq!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow
+    );
+
+    shutdown_tx.shutdown().await;
+}

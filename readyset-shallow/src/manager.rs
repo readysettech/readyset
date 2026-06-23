@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use metrics::counter;
@@ -360,7 +360,11 @@ where
         self.get(relation, query_id).is_some()
     }
 
-    fn make_guard(cache: Arc<Cache<K, V>>, key: K) -> CacheInsertGuard<K, V> {
+    fn make_guard(
+        cache: Arc<Cache<K, V>>,
+        key: K,
+        refreshing: Option<Arc<AtomicBool>>,
+    ) -> CacheInsertGuard<K, V> {
         CacheInsertGuard {
             cache,
             key: Some(key),
@@ -369,6 +373,7 @@ where
             filled: false,
             requested: Instant::now(),
             done: None,
+            refreshing,
         }
     }
 
@@ -385,20 +390,18 @@ where
             return CacheResult::NotCached;
         };
         let (res, key) = cache.get(key).await;
-        let (res, needs_refresh, key) = match res {
-            Some((res, needs_refresh)) if res.values.first().is_none_or(&is_compatible) => {
-                (res, needs_refresh, key)
+        let (res, refreshing, key) = match res {
+            Some((res, refreshing)) if res.values.first().is_none_or(&is_compatible) => {
+                (res, refreshing, key)
             }
             Some(_) | None => match cache.get_on_miss(key.clone()).await {
-                Lookup::Hit(res, needs_refresh)
-                    if res.values.first().is_none_or(&is_compatible) =>
-                {
-                    (res, needs_refresh, key)
+                Lookup::Hit(res, refreshing) if res.values.first().is_none_or(&is_compatible) => {
+                    (res, refreshing, key)
                 }
                 Lookup::Hit(..) => {
                     // An entry was there, but it wasn't compatible.
                     cache.increment_miss();
-                    return CacheResult::Miss(Self::make_guard(cache, key));
+                    return CacheResult::Miss(Self::make_guard(cache, key, None));
                 }
                 Lookup::Miss(guard) => {
                     cache.increment_miss();
@@ -407,8 +410,10 @@ where
             },
         };
         cache.increment_hit();
-        if needs_refresh && !cache.is_scheduled() {
-            CacheResult::HitAndRefresh(res, Self::make_guard(cache, key))
+        if let Some(refreshing) = refreshing
+            && !cache.is_scheduled()
+        {
+            CacheResult::HitAndRefresh(res, Self::make_guard(cache, key, Some(refreshing)))
         } else {
             CacheResult::Hit(res)
         }
@@ -485,7 +490,10 @@ where
     pub(crate) metadata: Option<QueryMetadata>,
     pub(crate) filled: bool,
     pub(crate) requested: Instant,
+    /// If set, dropping the guard will notify any listeners.
     pub(crate) done: Option<Sender<()>>,
+    /// If set, dropping the guard will update the referenced refreshing state to false.
+    pub(crate) refreshing: Option<Arc<AtomicBool>>,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -584,6 +592,9 @@ where
                 cache.insert(key, results, metadata, execution).await;
                 drop(done);
             });
+        } else if let Some(refreshing) = self.refreshing.take() {
+            // An insert was not completed, so mark an existing refreshing state as false.
+            refreshing.store(false, Ordering::Release);
         }
     }
 }

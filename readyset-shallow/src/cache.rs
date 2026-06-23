@@ -66,7 +66,7 @@ pub(crate) struct CacheValues<V> {
     metadata: Option<Arc<QueryMetadata>>,
     pub(crate) accessed_ms: AtomicU64,
     pub(crate) refreshed_ms: u64,
-    refreshing: AtomicBool,
+    refreshing: Arc<AtomicBool>,
     ttl_ms: Option<u64>,
     pub(crate) execution_ms: u64,
 }
@@ -111,7 +111,7 @@ where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    Hit(QueryResult<V>, bool),
+    Hit(QueryResult<V>, Option<Arc<AtomicBool>>),
     Miss(CacheInsertGuard<K, V>),
 }
 
@@ -342,6 +342,7 @@ where
             filled: false,
             requested: Instant::now(),
             done,
+            refreshing: None,
         }
     }
 
@@ -469,7 +470,7 @@ where
             metadata,
             accessed_ms: now.into(),
             refreshed_ms: now,
-            refreshing: false.into(),
+            refreshing: Arc::new(false.into()),
             ttl_ms: self.ttl_ms,
             execution_ms,
         }
@@ -536,7 +537,7 @@ where
         self.insert_entry(k, entry).await;
     }
 
-    fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, bool) {
+    fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, Option<Arc<AtomicBool>>) {
         let now = current_timestamp_ms();
         values.accessed_ms.store(now, Ordering::Relaxed);
         let refresh = if let Some(refresh_ms) = self.refresh_ms
@@ -546,9 +547,9 @@ where
                 .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
                 .is_ok()
         {
-            true
+            Some(Arc::clone(&values.refreshing))
         } else {
-            false
+            None
         };
 
         let metadata = values
@@ -566,7 +567,7 @@ where
         )
     }
 
-    pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, bool)>, K) {
+    pub(crate) async fn get(&self, k: K) -> (Option<(QueryResult<V>, Option<Arc<AtomicBool>>)>, K) {
         let k = (self.id, k);
         let result = if let Some(entry) = self.inner.get(&k).await
             && let CacheEntry::Present(values) = &*entry
@@ -872,7 +873,7 @@ mod tests {
             metadata: Some(Arc::new(QueryMetadata::Test)),
             accessed_ms: now.into(),
             refreshed_ms: now,
-            refreshing: false.into(),
+            refreshing: Arc::new(false.into()),
             ttl_ms: None,
             execution_ms: 0,
         });

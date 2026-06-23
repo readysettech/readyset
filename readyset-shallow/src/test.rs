@@ -596,6 +596,52 @@ async fn test_ttl_refresh_ahead() {
 }
 
 #[test]
+async fn test_refreshing_state_cleared_when_guard_dropped() {
+    let manager = CacheManager::<String, String>::new(None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+
+    create_test_cache(
+        &manager,
+        None,
+        query_id,
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(5),
+        },
+    )
+    .unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["value1".to_string()]).await;
+
+    sleep(Duration::from_secs(3)).await;
+
+    // The first stale access starts a refresh.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    let CacheResult::HitAndRefresh(_, guard) = result else {
+        panic!("stale access should start a refresh");
+    };
+
+    // A subsequent stale access should not start a new refresh.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    assert_matches!(result, CacheResult::Hit(..));
+
+    // The refresh is dropped without inserting.
+    drop(guard);
+
+    // The next access starts a new refresh.
+    let result = manager
+        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+        .await;
+    assert_matches!(result, CacheResult::HitAndRefresh(..));
+}
+
+#[test]
 async fn test_ttl_expiration() {
     let manager = CacheManager::<String, String>::new(None);
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
