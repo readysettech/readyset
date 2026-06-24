@@ -53,6 +53,7 @@ tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-futures = { workspace = true }
 database-utils = { path = "../database-utils" }
 failpoint-macros = { path = "../failpoint-macros" }
+metric = { path = "../metric" }
 mysql-srv = { path = "../mysql-srv" }
 mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }

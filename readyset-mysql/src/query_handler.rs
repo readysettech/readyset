@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use lazy_static::lazy_static;
+use metrics::counter;
 use mysql_srv::AuthKeys;
 use readyset_adapter::backend::noria_connector::QueryResult;
 #[cfg(test)]
@@ -1011,8 +1012,8 @@ impl QueryHandler for MySqlQueryHandler {
                 let encoding = readyset_data::encoding::Encoding::from_mysql_character_set_name(
                     encoding_name.as_str(),
                 );
-                metrics::counter!(
-                    readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+                counter!(
+                    metric::CHARACTER_SET_USAGE,
                     "type" => "names",
                     "charset" => encoding_name,
                 )
@@ -1046,8 +1047,8 @@ fn get_encoding_for_charset(
         .and_then(|s| readyset_data::encoding::Encoding::from_mysql_character_set_name(s.as_str()));
 
     if let Some(encoding_name) = encoding_name {
-        metrics::counter!(
-            readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+        counter!(
+            metric::CHARACTER_SET_USAGE,
             "type" => var_name,
             "charset" => encoding_name,
         )

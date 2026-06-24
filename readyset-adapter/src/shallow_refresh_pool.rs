@@ -3,9 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use database_utils::UpstreamConfig;
-use readyset_client::metrics::recorded::{
-    SHALLOW_REFRESH, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
-};
+use metric::{SHALLOW_REFRESH, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED};
+use metrics::{counter, histogram};
 use readyset_client::query::QueryId;
 use readyset_data::DfValue;
 use readyset_shallow::CacheInsertGuard;
@@ -197,7 +196,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 // Round-robin among all active workers
                 if let Some(_req) = self.try_send_round_robin(&mut inner, req) {
                     // All channels full, drop request
-                    metrics::counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
+                    counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
                     rate_limit(true, ADAPTER_SHALLOW_REFRESH_SEND_REQUEST, || {
                         warn!("All shallow refresh workers busy, dropping request");
                     });
@@ -206,7 +205,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             }
         }
 
-        metrics::counter!(SHALLOW_REFRESH, "query_id" => query_id.to_string()).increment(1);
+        counter!(SHALLOW_REFRESH, "query_id" => query_id.to_string()).increment(1);
     }
 
     /// Spawn a send as a background task (for use from sync contexts like callbacks).
@@ -310,7 +309,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             let result = match result {
                 Ok(result) => {
                     let query_time = query_start.elapsed();
-                    metrics::histogram!(
+                    histogram!(
                         SHALLOW_REFRESH_QUERY_TIME,
                         "query_id" => query_id.to_string()
                     )

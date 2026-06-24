@@ -25,6 +25,7 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
+use metrics::{counter, gauge};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
@@ -42,7 +43,6 @@ use readyset_adapter::{
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{AuthorityControl, AuthorityType};
-use readyset_client::metrics::recorded;
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::ulimit::maybe_increase_nofile_limit;
@@ -1136,8 +1136,8 @@ where
             rs_connect.in_scope(|| info!("PrometheusHandle created"));
         }
 
-        metrics::gauge!(
-            recorded::READYSET_ADAPTER_VERSION,
+        gauge!(
+            metric::READYSET_ADAPTER_VERSION,
             &[
                 ("release_version", READYSET_VERSION.release_version),
                 ("commit_id", READYSET_VERSION.commit_id),
@@ -1149,7 +1149,7 @@ where
             ]
         )
         .set(1.0);
-        metrics::counter!(recorded::READYSET_ADAPTER_STARTUPS).increment(1);
+        counter!(metric::READYSET_ADAPTER_STARTUPS).increment(1);
         let adapter_start_time = SystemTime::now();
 
         // if we're running in standalone mode, server will already

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fallible_iterator::FallibleIterator;
 use futures::{StreamExt, TryStreamExt};
+use metrics::gauge;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_types::Kind;
 use tokio::task::JoinHandle;
@@ -25,7 +26,6 @@ use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
-use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, QueryMetadata};
@@ -370,7 +370,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let version = format!("{version} Readyset");
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| debug!("Established connection to upstream"));
-        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
+        gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
 
         Ok(Self {
             client,
@@ -734,6 +734,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
 impl Drop for PostgreSqlUpstream {
     fn drop(&mut self) {
-        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
+        gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
     }
 }

@@ -18,7 +18,6 @@ use readyset_client::consensus::{
     GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
 };
 use readyset_client::internal::DomainIndex;
-use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::ChangeList;
 use readyset_client::{ControllerConnectionPool, ControllerDescriptor, TableStatus};
@@ -716,7 +715,7 @@ impl Controller {
     async fn handle_authority_update(&mut self, msg: AuthorityUpdate) -> ReadySetResult<()> {
         match msg {
             AuthorityUpdate::LeaderChange(descriptor) => {
-                gauge!(recorded::CONTROLLER_IS_LEADER).set(0f64);
+                gauge!(metric::CONTROLLER_IS_LEADER).set(0f64);
                 self.events_handle.stop();
                 self.controller_http
                     .set(descriptor.controller_uri, CONTROLLER_REQUEST_TIMEOUT)
@@ -727,7 +726,7 @@ impl Controller {
                 cache_ddl,
             }) => {
                 info!("won leader election, creating Leader");
-                gauge!(recorded::CONTROLLER_IS_LEADER).set(1f64);
+                gauge!(metric::CONTROLLER_IS_LEADER).set(1f64);
 
                 // `DfState.channel_coordinator` is `#[serde(skip)]`, so the state we got from
                 // the Authority (or from a freshly-constructed `ControllerState::new`) carries
@@ -2119,13 +2118,13 @@ async fn handle_controller_request(
     };
 
     counter!(
-        recorded::CONTROLLER_RPC_OVERALL_TIME,
+        metric::CONTROLLER_RPC_OVERALL_TIME,
         "path" => path.clone()
     )
     .increment(request_start.elapsed().as_micros() as u64);
 
     histogram!(
-        recorded::CONTROLLER_RPC_REQUEST_TIME,
+        metric::CONTROLLER_RPC_REQUEST_TIME,
         "path" => path.clone()
     )
     .record(request_start.elapsed().as_micros() as f64);

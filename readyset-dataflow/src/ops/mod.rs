@@ -6,7 +6,6 @@ use dataflow_state::PointKey;
 use derive_more::From;
 use metrics::{counter, histogram};
 use readyset_client::KeyComparison;
-use readyset_client::metrics::recorded;
 use readyset_errors::ReadySetResult;
 use serde::{Deserialize, Serialize};
 
@@ -184,11 +183,11 @@ impl Ingredient for NodeOperator {
         );
 
         let elapsed = start.elapsed().as_micros();
-        histogram!(recorded::NODE_ON_INPUT_DURATION,
+        histogram!(metric::NODE_ON_INPUT_DURATION,
             "ntype" => self.to_string()
         )
         .record(elapsed as f64);
-        counter!(recorded::NODE_ON_INPUT_INVOCATIONS, "ntype" => self.to_string()).increment(1);
+        counter!(metric::NODE_ON_INPUT_INVOCATIONS, "ntype" => self.to_string()).increment(1);
 
         result
     }
@@ -215,11 +214,11 @@ impl Ingredient for NodeOperator {
         );
 
         let elapsed = start.elapsed().as_micros();
-        histogram!(recorded::NODE_ON_INPUT_RAW_DURATION,
+        histogram!(metric::NODE_ON_INPUT_RAW_DURATION,
             "ntype" => self.to_string()
         )
         .record(elapsed as f64);
-        counter!(recorded::NODE_ON_INPUT_RAW_INVOCATIONS, "ntype" => self.to_string()).increment(1);
+        counter!(metric::NODE_ON_INPUT_RAW_INVOCATIONS, "ntype" => self.to_string()).increment(1);
 
         result
     }

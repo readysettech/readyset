@@ -14,6 +14,7 @@ mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 tokio-postgres = { workspace = true }
 
+metric = { path = "../metric" }
 mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }
 readyset-client = { path = "../readyset-client" }

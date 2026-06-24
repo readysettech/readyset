@@ -6,7 +6,6 @@ use rocksdb::perf::get_memory_usage_stats;
 use rocksdb::{AsColumnFamilyRef, DB};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
-use crate::persistent_state::recorded;
 use crate::persistent_state::PersistentStateHandle;
 use crate::persistent_state::DEFAULT_CF;
 
@@ -79,25 +78,23 @@ struct MetricsCollector {
 
 impl MetricsReporter {
     pub(crate) fn start(name: String, state_handle: PersistentStateHandle) -> MetricsReporterStop {
-        let mem_table_total = gauge!(recorded::MEM_TABLE_TOTAL, "rocksdb" => name.clone());
-        let mem_table_unflushed = gauge!(recorded::MEM_TABLE_UNFLUSHED, "rocksdb" => name.clone());
-        let readers_total = gauge!(recorded::READERS_TOTAL, "rocksdb" => name.clone());
+        let mem_table_total = gauge!(metric::MEM_TABLE_TOTAL, "rocksdb" => name.clone());
+        let mem_table_unflushed = gauge!(metric::MEM_TABLE_UNFLUSHED, "rocksdb" => name.clone());
+        let readers_total = gauge!(metric::READERS_TOTAL, "rocksdb" => name.clone());
         let index_filters_total =
-            gauge!(recorded::BLOCK_INDEXES_FILTERS_TOTAL, "rocksdb" => name.clone());
-        let compaction_pending = gauge!(recorded::COMPACTION_PENDING, "rocksdb" => name.clone());
+            gauge!(metric::BLOCK_INDEXES_FILTERS_TOTAL, "rocksdb" => name.clone());
+        let compaction_pending = gauge!(metric::COMPACTION_PENDING, "rocksdb" => name.clone());
         let estimate_pending_compaction_bytes =
-            gauge!(recorded::ESTIMATE_PENDING_COMPACTION_BYTES, "rocksdb" => name.clone());
+            gauge!(metric::ESTIMATE_PENDING_COMPACTION_BYTES, "rocksdb" => name.clone());
         let num_running_compactions =
-            gauge!(recorded::NUM_RUNNING_COMPACTIONS, "rocksdb" => name.clone());
-        let num_running_flushes = gauge!(recorded::NUM_RUNNING_FLUSHES, "rocksdb" => name.clone());
-        let total_sst_files_size =
-            gauge!(recorded::TOTAL_SST_FILES_SIZE, "rocksdb" => name.clone());
-        let live_sst_files_size = gauge!(recorded::LIVE_SST_FILES_SIZE, "rocksdb" => name.clone());
-        let block_cache_capacity =
-            gauge!(recorded::BLOCK_CACHE_CAPACITY, "rocksdb" => name.clone());
-        let block_cache_usage = gauge!(recorded::BLOCK_CACHE_USAGE, "rocksdb" => name.clone());
+            gauge!(metric::NUM_RUNNING_COMPACTIONS, "rocksdb" => name.clone());
+        let num_running_flushes = gauge!(metric::NUM_RUNNING_FLUSHES, "rocksdb" => name.clone());
+        let total_sst_files_size = gauge!(metric::TOTAL_SST_FILES_SIZE, "rocksdb" => name.clone());
+        let live_sst_files_size = gauge!(metric::LIVE_SST_FILES_SIZE, "rocksdb" => name.clone());
+        let block_cache_capacity = gauge!(metric::BLOCK_CACHE_CAPACITY, "rocksdb" => name.clone());
+        let block_cache_usage = gauge!(metric::BLOCK_CACHE_USAGE, "rocksdb" => name.clone());
         let block_cache_pinned_usage =
-            gauge!(recorded::BLOCK_CACHE_PINNED_USAGE, "rocksdb" => name.clone());
+            gauge!(metric::BLOCK_CACHE_PINNED_USAGE, "rocksdb" => name.clone());
 
         let (tx, rx) = sync_channel(1);
 

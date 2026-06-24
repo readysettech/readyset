@@ -13,7 +13,6 @@ use metrics::{Counter, counter};
 use readyset_client::query::{MigrationState, Query, QueryId};
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{PlaceholderIdx, ReadySetHandle, ViewCreateRequest};
-use readyset_client_metrics::recorded;
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::ast::CacheType;
@@ -218,8 +217,8 @@ impl MigrationHandler {
 
     pub async fn run(&mut self) -> ReadySetResult<()> {
         let mut interval = tokio::time::interval(self.min_poll_interval);
-        let success_counter = counter!(recorded::MIGRATION_HANDLER_SUCCESSES);
-        let failure_counter = counter!(recorded::MIGRATION_HANDLER_FAILURES);
+        let success_counter = counter!(metric::MIGRATION_HANDLER_SUCCESSES);
+        let failure_counter = counter!(metric::MIGRATION_HANDLER_FAILURES);
 
         loop {
             select! {
@@ -264,7 +263,7 @@ impl MigrationHandler {
         // Check if we can successfully prepare against noria as well.
         match result {
             Ok(_) => {
-                counter!(recorded::MIGRATION_HANDLER_ALLOWED).increment(1);
+                counter!(metric::MIGRATION_HANDLER_ALLOWED).increment(1);
                 self.start_time.remove(view_request);
                 self.query_status_cache.update_query_migration_state(
                     view_request,

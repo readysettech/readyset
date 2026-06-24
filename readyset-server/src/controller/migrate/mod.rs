@@ -39,7 +39,6 @@ use dataflow::prelude::*;
 use dataflow::{node, DomainRequest, ReaderProcessing};
 use dataflow_state::IndexBuildStatus;
 use metrics::{counter, histogram};
-use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
 use readyset_data::{DfType, Dialect};
 use readyset_sql::ast::Relation;
@@ -884,7 +883,7 @@ impl<'df> Migration<'df> {
             "migration planning completed"
         );
 
-        histogram!(recorded::CONTROLLER_MIGRATION_TIME,).record(start.elapsed().as_micros() as f64);
+        histogram!(metric::CONTROLLER_MIGRATION_TIME,).record(start.elapsed().as_micros() as f64);
 
         Ok(())
     }
@@ -1046,7 +1045,7 @@ fn plan_add_nodes(
                     "assigning local index"
                 );
                 counter!(
-                    recorded::NODE_ADDED,
+                    metric::NODE_ADDED,
                     "ntype" => dataflow_state.ingredients[ni].node_type_string(),
                 )
                 .increment(1);

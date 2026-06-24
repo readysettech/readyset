@@ -11,7 +11,6 @@ use metrics::histogram;
 use pgsql::SimpleQueryMessage;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
-use readyset_client::metrics::recorded;
 use readyset_client::{PersistencePoint, ReadySetHandle, TableOperation};
 use readyset_errors::{
     invariant, invariant_eq, set_failpoint_return_err, ReadySetError, ReadySetResult,
@@ -157,9 +156,9 @@ impl GroupCommitState {
     /// Emit group commit metrics before flushing.
     fn emit_metrics(&self) {
         if self.trx_count > 0 {
-            histogram!(recorded::REPLICATOR_GROUP_COMMIT_TXNS).record(self.trx_count as f64);
+            histogram!(metric::REPLICATOR_GROUP_COMMIT_TXNS).record(self.trx_count as f64);
             if let Some(leader) = self.leader {
-                histogram!(recorded::REPLICATOR_GROUP_COMMIT_DURATION)
+                histogram!(metric::REPLICATOR_GROUP_COMMIT_DURATION)
                     .record(leader.elapsed().as_micros() as f64);
             }
         }

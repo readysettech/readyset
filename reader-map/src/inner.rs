@@ -12,9 +12,9 @@ use readyset_client::internal::IndexType;
 use readyset_util::ranges::{Bound, RangeBounds};
 
 use crate::eviction::{EvictionMeta, EvictionStrategy};
-use crate::recorded::{READER_MAP_LIFETIMES, READER_MAP_UPDATES};
 use crate::values::{Metrics, Values};
 use crate::InsertionOrder;
+use metric::{READER_MAP_LIFETIMES, READER_MAP_UPDATES};
 
 /// Represents a miss when looking up a range.
 ///

@@ -243,7 +243,6 @@ mod error;
 mod eviction;
 mod inner;
 mod read;
-mod recorded;
 mod values;
 mod write;
 

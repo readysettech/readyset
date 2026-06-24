@@ -17,8 +17,8 @@ use dataflow::{
 use failpoint_macros::set_failpoint;
 use futures::pin_mut;
 use futures_util::future::TryFutureExt;
+use metrics::{counter, histogram, Counter};
 use pin_project::pin_project;
-use readyset_client::metrics::recorded;
 use readyset_client::results::ResultIterator;
 use readyset_client::{
     KeyComparison, LookupResult, ReadQuery, ReadReply, ReadReplyStats, ReaderAddress, Tagged,
@@ -128,8 +128,8 @@ pub struct ReadRequestHandler {
     global_readers: Readers,
     readers_cache: ReaderMap,
     wait: tokio::sync::mpsc::UnboundedSender<(BlockingRead, oneshot::Sender<Reply>)>,
-    miss_ctr: metrics::Counter,
-    hit_ctr: metrics::Counter,
+    miss_ctr: Counter,
+    hit_ctr: Counter,
     upquery_timeout: Duration,
 }
 
@@ -152,8 +152,8 @@ impl ReadRequestHandler {
             global_readers: readers,
             readers_cache: Default::default(),
             wait,
-            miss_ctr: metrics::counter!(recorded::SERVER_VIEW_QUERY_MISS),
-            hit_ctr: metrics::counter!(recorded::SERVER_VIEW_QUERY_HIT),
+            miss_ctr: counter!(metric::SERVER_VIEW_QUERY_MISS),
+            hit_ctr: counter!(metric::SERVER_VIEW_QUERY_HIT),
             upquery_timeout,
         }
     }
@@ -322,8 +322,8 @@ impl Service<Tagged<ReadQuery>> for ReadRequestHandler {
 /// A spawned task responsible for repeating reads that could not be immediately served from cache,
 /// until they succeed.
 pub async fn retry_misses(mut rx: UnboundedReceiver<(BlockingRead, oneshot::Sender<Reply>)>) {
-    let upquery_hist = metrics::histogram!(recorded::SERVER_VIEW_UPQUERY_DURATION);
-    let upquery_timeout_ctr = metrics::counter!(recorded::SERVER_VIEW_UPQUERY_TIMEOUT);
+    let upquery_hist = histogram!(metric::SERVER_VIEW_UPQUERY_DURATION);
+    let upquery_timeout_ctr = counter!(metric::SERVER_VIEW_UPQUERY_TIMEOUT);
     let mut reader_cache: ReaderMap = Default::default();
 
     while let Some((mut pending, ack)) = rx.recv().await {

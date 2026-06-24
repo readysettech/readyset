@@ -34,7 +34,6 @@ pub trait SchemaChangeHandler: Send + Sync {
 }
 
 mod generation;
-pub mod metrics;
 
 pub use generation::SchemaGeneration;
 

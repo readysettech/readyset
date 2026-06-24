@@ -73,6 +73,7 @@ reqwest = { workspace = true, features = ["json", "stream"] }
 # Local dependencies
 dataflow-expression = { path = "../dataflow-expression" }
 failpoint-macros = { path = "../failpoint-macros" }
+metric = { path = "../metric" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-post-lookup = { path = "../readyset-post-lookup" }

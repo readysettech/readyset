@@ -17,7 +17,6 @@ use metrics::{counter, gauge};
 use parking_lot::RwLock;
 use tracing::warn;
 
-use readyset_client::metrics::recorded;
 use readyset_client::query::*;
 use readyset_client::{ShallowViewRequest, ViewCreateRequest};
 use readyset_data::DfValue;
@@ -148,7 +147,7 @@ impl PersistentStatusCacheHandle {
         match self.statuses.try_write_for(Duration::from_millis(10)) {
             Some(mut status_guard) => {
                 status_guard.put(id, (q, status));
-                gauge!(recorded::QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE)
+                gauge!(metric::QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE)
                     .set(status_guard.len() as f64);
             }
             None => {
@@ -434,7 +433,7 @@ impl QueryStatusCache {
             // duplicate log lines and counter bumps are bounded by thread
             // count, not request rate.
             self.shallow_auto_create_skip.clear();
-            counter!(recorded::SHALLOW_AUTO_CREATE_SKIP_OVERFLOW).increment(1);
+            counter!(metric::SHALLOW_AUTO_CREATE_SKIP_OVERFLOW).increment(1);
             warn!(
                 cap = SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP,
                 "Shallow auto-create skip set exceeded soft cap; bulk-cleared. \
@@ -442,7 +441,7 @@ impl QueryStatusCache {
                  unique queries."
             );
         }
-        gauge!(recorded::SHALLOW_AUTO_CREATE_SKIP_SET_SIZE)
+        gauge!(metric::SHALLOW_AUTO_CREATE_SKIP_SET_SIZE)
             .set(self.shallow_auto_create_skip.len() as f64);
     }
 
@@ -494,7 +493,7 @@ impl QueryStatusCache {
         let id = QueryId::from(&q);
         self.id_to_status.insert(id, status.clone());
         self.persistent_handle.insert_with_status(q, id, status);
-        gauge!(recorded::QUERY_STATUS_CACHE_SIZE).set(self.id_to_status.len() as f64);
+        gauge!(metric::QUERY_STATUS_CACHE_SIZE).set(self.id_to_status.len() as f64);
         id
     }
 

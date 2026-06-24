@@ -63,7 +63,6 @@
 mod handle;
 pub(crate) mod index_build;
 mod metrics;
-mod recorded;
 
 use std::borrow::Cow;
 use std::cmp::Ordering;

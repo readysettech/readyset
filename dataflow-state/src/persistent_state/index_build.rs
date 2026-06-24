@@ -50,7 +50,7 @@ use tracing::{error, info, warn};
 
 pub use super::handle::PersistentStateHandle;
 use super::{
-    build_key, check_if_index_is_unique, recorded, IndexEpoch, IndexParams, PendingBuildMeta,
+    build_key, check_if_index_is_unique, IndexEpoch, IndexParams, PendingBuildMeta,
     PersistentIndex, PersistentMeta, PersistentState, SharedState, META_KEY, PENDING_BUILD_KEY,
     PK_CF,
 };
@@ -340,8 +340,8 @@ impl IndexBuildContext {
         let primary_cf_id = cf_id(primary_db, PK_CF)?;
         let base_label = self.name.to_string();
 
-        let wal_puts_counter = counter!(recorded::OIB_WAL_PUTS, "base" => base_label.clone());
-        let wal_deletes_counter = counter!(recorded::OIB_WAL_DELETES, "base" => base_label);
+        let wal_puts_counter = counter!(metric::OIB_WAL_PUTS, "base" => base_label.clone());
+        let wal_deletes_counter = counter!(metric::OIB_WAL_DELETES, "base" => base_label);
 
         // Flush the WAL so get_updates_since can see buffered entries.
         // false = no fsync; we only need the entries in the OS page cache,

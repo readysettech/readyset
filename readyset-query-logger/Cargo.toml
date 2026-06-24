@@ -10,6 +10,7 @@ metrics = { workspace = true }
 tokio = { workspace = true, features = ["sync", "macros"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 
+metric = { path = "../metric" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-passes = { path = "../readyset-sql-passes" }

@@ -2,7 +2,6 @@ use std::time::SystemTime;
 
 use failpoint_macros::failpoint;
 use metrics::histogram;
-use readyset_client::metrics::recorded;
 use readyset_client::{KeyColumnIdx, ViewPlaceholder};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -128,8 +127,7 @@ impl Reader {
         m.handle_trace(
             |trace| match SystemTime::now().duration_since(trace.start) {
                 Ok(d) => {
-                    histogram!(recorded::PACKET_WRITE_PROPAGATION_TIME)
-                        .record(d.as_micros() as f64);
+                    histogram!(metric::PACKET_WRITE_PROPAGATION_TIME).record(d.as_micros() as f64);
                 }
                 Err(e) => {
                     warn!(error = %e, "Write latency trace failed");

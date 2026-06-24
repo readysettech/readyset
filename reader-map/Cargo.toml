@@ -27,6 +27,7 @@ smallvec = { workspace = true, features = ["union"] }
 thiserror = { workspace = true }
 triomphe = { workspace = true }
 
+metric = { path = "../metric" }
 partial-map = { path = "../partial-map" }
 readyset-client = { path = "../readyset-client" }
 readyset-util = { path = "../readyset-util" }

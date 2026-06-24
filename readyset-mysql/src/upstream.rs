@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
+use metrics::gauge;
 use mysql_async::consts::{Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
@@ -20,7 +21,7 @@ use database_utils::tls::{get_mysql_tls_config, ServerCertVerification};
 use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
-use readyset_client_metrics::{recorded, QueryDestination};
+use readyset_client_metrics::QueryDestination;
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
@@ -389,7 +390,7 @@ impl MySqlUpstream {
         }
 
         span.in_scope(|| debug!("Established connection to upstream"));
-        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
+        gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements))
     }
@@ -671,7 +672,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
 impl Drop for MySqlUpstream {
     fn drop(&mut self) {
-        metrics::gauge!(recorded::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
+        gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
         // Properly close the connection unless this is a test using a single-threaded runtime
         let rt = tokio::runtime::Handle::current();
         if rt.runtime_flavor() != RuntimeFlavor::CurrentThread {

@@ -16,7 +16,6 @@ use tokio::time::{interval, timeout};
 
 use metrics::{Counter, counter};
 use readyset_client::consensus::CacheDDLRequest;
-use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
@@ -299,8 +298,8 @@ where
         };
 
         let label = query_id.to_string();
-        let hit_counter = counter!(recorded::SHALLOW_HIT, "query_id" => label.clone());
-        let miss_counter = counter!(recorded::SHALLOW_MISS, "query_id" => label);
+        let hit_counter = counter!(metric::SHALLOW_HIT, "query_id" => label.clone());
+        let miss_counter = counter!(metric::SHALLOW_MISS, "query_id" => label);
 
         let cache = Arc::new(Self {
             id,

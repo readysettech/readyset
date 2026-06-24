@@ -38,7 +38,6 @@ use petgraph::graph::NodeIndex;
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::debug::info::KeyCount;
 use readyset_client::internal::{self, Index};
-use readyset_client::metrics::recorded;
 use readyset_client::{
     KeyComparison, KeyComparisonRef, PersistencePoint, ReaderAddress, ReplayKeys, TableStatus,
 };
@@ -2266,9 +2265,9 @@ impl Domain {
                 );
 
                 let time = start.elapsed();
-                counter!(recorded::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME)
+                counter!(metric::DOMAIN_TOTAL_CHUNKED_REPLAY_TIME)
                     .increment(time.as_micros() as u64);
-                histogram!(recorded::DOMAIN_CHUNKED_REPLAY_TIME).record(time.as_micros() as f64);
+                histogram!(metric::DOMAIN_CHUNKED_REPLAY_TIME).record(time.as_micros() as f64);
             })?;
         self.handle_replay(link, tag, data, context, cache_name, executor)?;
 

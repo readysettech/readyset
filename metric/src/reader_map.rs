@@ -1,5 +1,4 @@
-//! Documents the set of metrics that are currently being recorded within
-//! instances of a reader-map.
+//! Documents the set of metrics that are currently being recorded within instances of a reader-map.
 
 /// Histogram: The time interval in milliseconds between updates to a given key in the reader-map.
 /// Updates include inserts, updates, and deletions from the key's results set.

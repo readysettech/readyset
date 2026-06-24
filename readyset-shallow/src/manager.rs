@@ -14,7 +14,6 @@ use tokio::sync::watch::Sender;
 use tracing::info;
 
 use readyset_client::consensus::CacheDDLRequest;
-use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy};
@@ -78,7 +77,7 @@ where
             .cost(cost)
             .eviction_listener(|_, _, cause| {
                 if cause == RemovalCause::Size {
-                    counter!(recorded::SHALLOW_EVICT_MEMORY).increment(1);
+                    counter!(metric::SHALLOW_EVICT_MEMORY).increment(1);
                 }
             });
         if let Some(capacity) = max_capacity {

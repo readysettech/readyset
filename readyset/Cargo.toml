@@ -39,6 +39,7 @@ walkdir = { workspace = true }
 database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }
 health-reporter = { path = "../health-reporter" }
+metric = { path = "../metric" }
 mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }

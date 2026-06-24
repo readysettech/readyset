@@ -1,0 +1,9 @@
+[package]
+name = "metric"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[lints]
+workspace = true

@@ -43,7 +43,6 @@ use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::info::{GraphInfo, MaterializationInfo, NodeSize};
 use readyset_client::debug::stats::{DomainStats, GraphStats, NodeStats};
 use readyset_client::internal::MaterializationStatus;
-use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::recipe::{CacheExpr, ExprInfo, ExtendRecipeSpec};
@@ -1158,12 +1157,12 @@ impl DfState {
         F: FnOnce(&mut Migration<'_>) -> ReadySetResult<T>,
     {
         debug!("starting migration");
-        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS).set(1.0);
+        gauge!(metric::CONTROLLER_MIGRATION_IN_PROGRESS).set(1.0);
         let mut m = Migration::new(self, dialect);
         let r = f(&mut m)?;
         m.commit(dry_run).await?;
         debug!("finished migration");
-        gauge!(recorded::CONTROLLER_MIGRATION_IN_PROGRESS).set(0.0);
+        gauge!(metric::CONTROLLER_MIGRATION_IN_PROGRESS).set(0.0);
         Ok(r)
     }
 
@@ -1550,7 +1549,7 @@ impl DfState {
                 used: create_cache.schema_generation_used.map(|g| g.get()),
                 current: self.schema_generation.get(),
             };
-            counter!(recorded::SCHEMA_GENERATION_MISMATCH).increment(1);
+            counter!(metric::SCHEMA_GENERATION_MISMATCH).increment(1);
             warn!(%err, ?create_cache, "Schema generation mismatch");
             return Err(err);
         }
@@ -1571,7 +1570,7 @@ impl DfState {
                 }
                 if !dry_run && should_increment_schema_generation {
                     self.schema_generation = self.schema_generation.next();
-                    counter!(recorded::SCHEMA_CATALOG_GENERATION_INCREMENTED).increment(1);
+                    counter!(metric::SCHEMA_CATALOG_GENERATION_INCREMENTED).increment(1);
                     trace!(
                         schema_generation = %self.schema_generation,
                         "Incremented schema generation after successful migration"
@@ -1955,7 +1954,7 @@ impl DfState {
             self.domain_node_index_pairs.remove(di);
         }
 
-        counter!(recorded::CONTROLLER_RECLAIMED_DOMAINS).increment(orphaned.len() as u64);
+        counter!(metric::CONTROLLER_RECLAIMED_DOMAINS).increment(orphaned.len() as u64);
         info!(
             count = orphaned.len(),
             elapsed_us = start.elapsed().as_micros() as u64,
@@ -2151,8 +2150,7 @@ impl DfStateHandle {
         let start = Instant::now();
         let state_copy = read_guard.state.clone();
         let elapsed = start.elapsed();
-        histogram!(readyset_client::metrics::recorded::DATAFLOW_STATE_CLONE_TIME,)
-            .record(elapsed.as_micros() as f64);
+        histogram!(metric::DATAFLOW_STATE_CLONE_TIME,).record(elapsed.as_micros() as f64);
         DfStateWriter {
             state: state_copy,
             _guard: write_guard,
@@ -2221,10 +2219,10 @@ impl DfStateHandle {
                     .schema_catalog(new_state.schema_generation());
                 match notifier.send_schema_catalog_update(catalog) {
                     Ok(()) => {
-                        counter!(recorded::SCHEMA_CATALOG_UPDATE_SENT).increment(1);
+                        counter!(metric::SCHEMA_CATALOG_UPDATE_SENT).increment(1);
                     }
                     Err(error) => {
-                        counter!(recorded::SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED).increment(1);
+                        counter!(metric::SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED).increment(1);
                         error!(%error, "Failed to serialize schema catalog update");
                     }
                 }

@@ -13,7 +13,6 @@ use std::task::{Context, Poll};
 use futures_util::sink::{Sink, SinkExt};
 use metrics::{Gauge, gauge};
 use readyset_client::internal::DomainIndex;
-use readyset_client::metrics::recorded;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use strum::{EnumCount, IntoEnumIterator};
 use tokio::sync::broadcast;
@@ -83,7 +82,7 @@ pub(crate) fn domain_channel() -> (DomainSender, DomainReceiver) {
     let packets_queued: [Gauge; PacketDiscriminants::COUNT] = PacketDiscriminants::iter()
         .map(|d| {
             let name: &'static str = d.into();
-            gauge!(recorded::DOMAIN_PACKETS_QUEUED, "packet_type" => name)
+            gauge!(metric::DOMAIN_PACKETS_QUEUED, "packet_type" => name)
         })
         .collect::<Vec<Gauge>>()
         .try_into()

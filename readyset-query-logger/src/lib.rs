@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use metrics::{Counter, SharedString, counter, gauge, histogram};
 use readyset_client_metrics::{
-    DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, recorded,
+    DatabaseType, EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
 };
 use readyset_sql::ast::{SqlIdentifier, SqlQuery};
 
@@ -43,18 +43,14 @@ impl QueryLogger {
         schema_catalog_handle: SchemaCatalogHandle,
     ) -> Self {
         QueryLogger {
-            parse_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_PARSE_ERRORS,),
-            set_disallowed_count: counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_SET_DISALLOWED,
-            ),
-            view_not_found_count: counter!(
-                readyset_client_metrics::recorded::QUERY_LOG_VIEW_NOT_FOUND,
-            ),
-            rpc_error_count: counter!(readyset_client_metrics::recorded::QUERY_LOG_RPC_ERRORS,),
+            parse_error_count: counter!(metric::QUERY_LOG_PARSE_ERRORS,),
+            set_disallowed_count: counter!(metric::QUERY_LOG_SET_DISALLOWED,),
+            view_not_found_count: counter!(metric::QUERY_LOG_VIEW_NOT_FOUND,),
+            rpc_error_count: counter!(metric::QUERY_LOG_RPC_ERRORS,),
 
-            query_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "query"),
-            prepare_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
-            execute_count: counter!(recorded::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
+            query_count: counter!(metric::QUERY_LOG_EVENT_TYPE, "type" => "query"),
+            prepare_count: counter!(metric::QUERY_LOG_EVENT_TYPE, "type" => "prepare"),
+            execute_count: counter!(metric::QUERY_LOG_EVENT_TYPE, "type" => "execute"),
 
             log_mode: mode,
             rewrite_params,
@@ -115,10 +111,10 @@ impl QueryLogger {
                 query_string.clone(),
                 query_id.clone(),
             );
-            histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &upstream_labels)
+            histogram!(metric::QUERY_LOG_EXECUTION_TIME, &upstream_labels)
                 .record(duration.as_micros() as f64);
-            counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &upstream_labels).increment(1);
-            gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &upstream_labels).set(now_s);
+            counter!(metric::QUERY_LOG_EXECUTION_COUNT, &upstream_labels).increment(1);
+            gauge!(metric::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &upstream_labels).set(now_s);
         }
 
         let labels = Self::create_labels(DatabaseType::ReadySet, query_string, query_id);
@@ -133,27 +129,27 @@ impl QueryLogger {
                 let cache_name = SharedString::from(cache_name.display_unquoted().to_string());
                 let mut cached_labels = vec![("cache_name", cache_name.clone())];
 
-                counter!(recorded::QUERY_LOG_TOTAL_KEYS_READ, &cached_labels).increment(*num_keys);
-                counter!(recorded::QUERY_LOG_TOTAL_CACHE_MISSES, &cached_labels)
+                counter!(metric::QUERY_LOG_TOTAL_KEYS_READ, &cached_labels).increment(*num_keys);
+                counter!(metric::QUERY_LOG_TOTAL_CACHE_MISSES, &cached_labels)
                     .increment(*cache_misses);
 
                 if *cache_misses != 0 {
-                    counter!(recorded::QUERY_LOG_QUERY_CACHE_MISSED, &cached_labels)
+                    counter!(metric::QUERY_LOG_QUERY_CACHE_MISSED, &cached_labels)
                         .increment(*cache_misses);
                 }
 
                 cached_labels.extend_from_slice(&labels);
 
-                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &cached_labels)
+                histogram!(metric::QUERY_LOG_EXECUTION_TIME, &cached_labels)
                     .record(duration.as_micros() as f64);
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &cached_labels).increment(1);
-                gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &cached_labels).set(now_s);
+                counter!(metric::QUERY_LOG_EXECUTION_COUNT, &cached_labels).increment(1);
+                gauge!(metric::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &cached_labels).set(now_s);
             }
             Some(ReadysetExecutionEvent::Other { duration }) => {
-                histogram!(recorded::QUERY_LOG_EXECUTION_TIME, &labels)
+                histogram!(metric::QUERY_LOG_EXECUTION_TIME, &labels)
                     .record(duration.as_micros() as f64);
-                counter!(recorded::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
-                gauge!(recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &labels).set(now_s);
+                counter!(metric::QUERY_LOG_EXECUTION_COUNT, &labels).increment(1);
+                gauge!(metric::QUERY_LOG_LAST_EXECUTION_EPOCH_S, &labels).set(now_s);
             }
             None => (),
         }
@@ -205,7 +201,7 @@ impl QueryLogger {
             );
             labels.push(("event_type", SharedString::from(event.event)));
             labels.push(("query_type", SharedString::from(event.sql_type)));
-            histogram!(recorded::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
+            histogram!(metric::QUERY_LOG_PARSE_TIME, &labels).record(duration.as_micros() as f64);
         }
 
         self.record_query_metrics(event, query_string, query_id);
@@ -217,8 +213,8 @@ impl QueryLogger {
         mut receiver: UnboundedReceiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
     ) {
-        let backlog_size = gauge!(recorded::QUERY_LOG_BACKLOG_SIZE);
-        let processed_events = counter!(recorded::QUERY_LOG_PROCESSED_EVENTS);
+        let backlog_size = gauge!(metric::QUERY_LOG_BACKLOG_SIZE);
+        let processed_events = counter!(metric::QUERY_LOG_PROCESSED_EVENTS);
         loop {
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
@@ -275,7 +271,6 @@ mod tests {
     use readyset_client::query::QueryId;
     use readyset_client_metrics::{
         EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
-        recorded,
     };
     use readyset_sql::Dialect;
     use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
@@ -308,8 +303,7 @@ mod tests {
             .into_iter()
             .filter_map(|(ck, _unit, _desc, _val)| {
                 let (kind, key) = ck.into_parts();
-                if kind == MetricKind::Counter && key.name() == recorded::QUERY_LOG_EXECUTION_COUNT
-                {
+                if kind == MetricKind::Counter && key.name() == metric::QUERY_LOG_EXECUTION_COUNT {
                     Some(
                         label_map(&key)
                             .into_iter()

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use dataflow_expression::{grouped::accumulator::AccumulatorData, Expr};
+use metrics::histogram;
 use readyset_data::DfValue;
 use readyset_sql::ast::{NullOrder, OrderType};
 use smallvec::SmallVec;
@@ -353,10 +354,8 @@ impl ResultIterator {
                         let projected = &row[..cols.min(row.len())];
                         seen.insert(projected.to_vec())
                     });
-                    metrics::histogram!(
-                        crate::metrics::recorded::POST_LOOKUP_DISTINCT_HASH_SET_SIZE
-                    )
-                    .record(seen.len() as f64);
+                    histogram!(metric::POST_LOOKUP_DISTINCT_HASH_SET_SIZE)
+                        .record(seen.len() as f64);
                 }
 
                 results.sort_by(|a, b| {
@@ -488,10 +487,8 @@ impl ResultIterator {
                     // Not recorded when the consumer stops early (e.g. LIMIT),
                     // but LIMIT bounds the set size so that's not the case we
                     // need to monitor.
-                    metrics::histogram!(
-                        crate::metrics::recorded::POST_LOOKUP_DISTINCT_HASH_SET_SIZE
-                    )
-                    .record(seen.len() as f64);
+                    histogram!(metric::POST_LOOKUP_DISTINCT_HASH_SET_SIZE)
+                        .record(seen.len() as f64);
                 }
             }
             break;

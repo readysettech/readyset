@@ -6,6 +6,7 @@ use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
 
 use itertools::{izip, Itertools};
+use metrics::counter;
 use mysql_async::consts::StatusFlags;
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, MsqlSrvError, MySqlShim, QueryResultWriter,
@@ -840,8 +841,8 @@ where
     }
 
     async fn set_charset(&mut self, charset: u16) -> io::Result<()> {
-        metrics::counter!(
-            readyset_client_metrics::recorded::CHARACTER_SET_USAGE,
+        counter!(
+            metric::CHARACTER_SET_USAGE,
             "type" => "protocol",
             "charset" => charset.to_string(),
         )

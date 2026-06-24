@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use metrics::{gauge, Gauge};
 pub use mysql_connector::{is_gtid_mode_enabled, MYSQL_INTERNAL_DBS};
 pub use noria_adapter::{cleanup, NoriaAdapter};
-use readyset_client::metrics::recorded;
 use readyset_client::{TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::Relation;
@@ -58,7 +57,7 @@ impl TablesSnapshottingGaugeGuard {
     /// Creates a new handle and increments the gauge by 1. The gauge is automatically decremented
     /// when the handle is dropped.
     fn new() -> Self {
-        let gauge = gauge!(recorded::REPLICATOR_TABLES_SNAPSHOTTING);
+        let gauge = gauge!(metric::REPLICATOR_TABLES_SNAPSHOTTING);
         gauge.increment(1.0);
         Self(gauge)
     }

@@ -61,8 +61,8 @@ use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseURL, QueryResults, QueryableConnection,
     UpstreamConfig,
 };
-use readyset_client::metrics::recorded::QUERY_SAMPLER_QUEUE_LEN;
-use readyset_client::metrics::recorded::{
+use metric::QUERY_SAMPLER_QUEUE_LEN;
+use metric::{
     QUERY_SAMPLER_MAX_QPS_HIT, QUERY_SAMPLER_QUERIES_MISMATCHED, QUERY_SAMPLER_QUERIES_SAMPLED,
     QUERY_SAMPLER_RECONNECTS, QUERY_SAMPLER_RETRY_QUEUE_FULL, QUERY_SAMPLER_RETRY_QUEUE_LEN,
 };

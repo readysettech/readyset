@@ -11,12 +11,11 @@ use axum::middleware::{Next, from_fn};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as HealthState};
-use metrics::Gauge;
+use metrics::{Gauge, counter, gauge};
 use readyset_alloc::{
     activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
     print_memory_and_per_thread_stats,
 };
-use readyset_client_metrics::recorded;
 use readyset_metrics::metrics_body;
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::net::TcpListener;
@@ -130,7 +129,7 @@ where
 /// Middleware: count every external request and tag responses with permissive CORS so the adapter
 /// can be probed from a browser.
 async fn record_external_request(req: Request, next: Next) -> Response {
-    metrics::counter!(recorded::ADAPTER_EXTERNAL_REQUESTS).increment(1);
+    counter!(metric::ADAPTER_EXTERNAL_REQUESTS).increment(1);
     let mut res = next.run(req).await;
     res.headers_mut()
         .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
@@ -321,7 +320,7 @@ pub struct HttpRouterMetrics {
 impl Default for HttpRouterMetrics {
     fn default() -> Self {
         Self {
-            metrics_payload_size: metrics::gauge!(recorded::METRICS_PAYLOAD_SIZE_BYTES),
+            metrics_payload_size: gauge!(metric::METRICS_PAYLOAD_SIZE_BYTES),
         }
     }
 }

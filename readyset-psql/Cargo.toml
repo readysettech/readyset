@@ -45,6 +45,7 @@ tracing-futures = { workspace = true }
 uuid = { workspace = true }
 
 database-utils = { path = "../database-utils" }
+metric = { path = "../metric" }
 psql-srv = { path = "../psql-srv" }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }

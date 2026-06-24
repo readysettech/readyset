@@ -18,6 +18,7 @@ tokio-postgres = { workspace = true }
 seize = { workspace = true }
 psql-srv = { path = "../psql-srv" }
 
+metric = { path = "../metric" }
 readyset-client = { path = "../readyset-client" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }

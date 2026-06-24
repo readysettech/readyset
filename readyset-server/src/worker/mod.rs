@@ -33,7 +33,6 @@ use dataflow::{
 };
 use readyset_alloc::StdThreadBuildWrapper;
 use readyset_client::internal::DomainIndex;
-use readyset_client::metrics::recorded;
 use readyset_client::TableStatus;
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_util::shutdown::ShutdownReceiver;
@@ -497,11 +496,11 @@ async fn evict_check(
     let start = Instant::now();
 
     let used = tracker.allocated_bytes()?;
-    gauge!(recorded::EVICTION_WORKER_HEAP_ALLOCATED_BYTES).set(used as f64);
+    gauge!(metric::EVICTION_WORKER_HEAP_ALLOCATED_BYTES).set(used as f64);
     if used < limit {
         return Ok(());
     }
-    counter!(recorded::EVICTION_WORKER_EVICTION_RUNS).increment(1);
+    counter!(metric::EVICTION_WORKER_EVICTION_RUNS).increment(1);
 
     // add current state sizes (could be out of date, as packet sent below is not
     // necessarily received immediately)
@@ -573,7 +572,7 @@ async fn evict_check(
             used, limit, target,
         );
 
-        counter!(recorded::EVICTION_WORKER_EVICTIONS_REQUESTED).increment(1);
+        counter!(metric::EVICTION_WORKER_EVICTIONS_REQUESTED).increment(1);
 
         let tx = match domain_senders.entry(target) {
             Occupied(entry) => entry.into_mut(),
@@ -597,7 +596,7 @@ async fn evict_check(
         }
     }
 
-    histogram!(recorded::EVICTION_WORKER_EVICTION_TIME).record(start.elapsed().as_micros() as f64);
+    histogram!(metric::EVICTION_WORKER_EVICTION_TIME).record(start.elapsed().as_micros() as f64);
 
     barrier.await?;
     Ok(())
@@ -621,12 +620,12 @@ async fn evict_start(
     is_evicting: Arc<AtomicBool>,
     barriers: Arc<BarrierManager>,
 ) -> ReadySetResult<()> {
-    counter!(recorded::EVICTION_WORKER_EVICTION_TICKS).increment(1);
+    counter!(metric::EVICTION_WORKER_EVICTION_TICKS).increment(1);
     if is_evicting.swap(true, Ordering::Relaxed) {
         return Ok(()); // Already evicting, nothing to do
     }
 
-    counter!(recorded::EVICTION_WORKER_EVICTION_CHECKS).increment(1);
+    counter!(metric::EVICTION_WORKER_EVICTION_CHECKS).increment(1);
     let res = evict_check(limit, coord, tracker, state_sizes, barriers)
         .instrument(info_span!("evicting"))
         .await;
@@ -724,7 +723,7 @@ impl BarrierManager {
     }
 
     async fn add(&self, credit: BarrierCredit) {
-        counter!(recorded::BARRIER_CREDITS_RETURNED).increment(1);
+        counter!(metric::BARRIER_CREDITS_RETURNED).increment(1);
         let mut barriers = self.barriers.lock().await;
         let Some(b) = barriers.get_mut(&credit.id) else {
             error!("unknown barrier {:x}", credit.id);

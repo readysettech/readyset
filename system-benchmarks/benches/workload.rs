@@ -33,7 +33,6 @@ use prometheus_parse::Scrape;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
-use readyset_client::metrics::recorded;
 use readyset_data::DfValue;
 use readyset_psql::AuthenticationMethod;
 use readyset_server::FrontierStrategy;
@@ -459,8 +458,8 @@ fn get_cache_hit_ratio() -> anyhow::Result<f64> {
     let lines: Vec<_> = metrics.lines().map(|l| Ok(l.to_string())).collect();
     let parsed = Scrape::parse(lines.into_iter())?;
 
-    let hit = get_metric_value!(parsed, recorded::SERVER_VIEW_QUERY_HIT);
-    let miss = get_metric_value!(parsed, recorded::SERVER_VIEW_QUERY_MISS);
+    let hit = get_metric_value!(parsed, metric::SERVER_VIEW_QUERY_HIT);
+    let miss = get_metric_value!(parsed, metric::SERVER_VIEW_QUERY_MISS);
 
     Ok(hit / (hit + miss))
 }

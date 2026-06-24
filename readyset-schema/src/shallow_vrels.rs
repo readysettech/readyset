@@ -1,6 +1,5 @@
 use std::hash::Hash;
 
-use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_data::DfType;
 use readyset_metrics::metrics_handle;
@@ -55,9 +54,9 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
             .map(|h| {
                 h.counters_by_label(
                     [
-                        recorded::SHALLOW_HIT,
-                        recorded::SHALLOW_MISS,
-                        recorded::SHALLOW_REFRESH,
+                        metric::SHALLOW_HIT,
+                        metric::SHALLOW_MISS,
+                        metric::SHALLOW_REFRESH,
                     ],
                     "query_id",
                     [],

@@ -37,6 +37,7 @@ vec1 = { workspace = true }
 
 # local deps
 common = { path = "../readyset-common", package = "readyset-common" }
+metric = { path = "../metric" }
 partial-map = { path = "../partial-map" }
 mysql-time = { path = "../mysql-time" }
 readyset-alloc = { path = "../readyset-alloc" }

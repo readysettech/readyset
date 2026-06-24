@@ -1,16 +1,13 @@
-//! Documents the set of metrics that are currently being recorded within
-//! a noria-client.
+//! Documents the set of metrics that are currently being recorded within a noria-client.
 
 /// Histogram: The time in microseconds that the database spent executing a query.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
-/// | database_type | The database type being executed. Must be a [`DatabaseType`] |
+/// | database_type | The database type being executed. Must be a `readyset_client_metrics::DatabaseType` |
 /// | query_id | The hashed ID of the query. Emitted whenever the adapter has an ID for the query (both default and verbose query-log modes). |
 /// | query | The query text being executed. Verbose query-log mode only. |
 /// | cache_name | Optional. The cache name if the query is cached. |
-///
-/// [`DatabaseType`]: crate::DatabaseType
 pub const QUERY_LOG_EXECUTION_TIME: &str = "readyset_query_log_execution_time_us";
 
 /// Counter: The number of times the database executed a query.
@@ -23,8 +20,7 @@ pub const QUERY_LOG_EXECUTION_COUNT: &str = "readyset_query_log_execution_count"
 /// See [`QUERY_LOG_EXECUTION_TIME`] for the set of labels.
 pub const QUERY_LOG_LAST_EXECUTION_EPOCH_S: &str = "readyset_query_log_last_execution_epoch_s";
 
-/// Histogram: The time in microseconds that the database spent executing a
-/// query.
+/// Histogram: The time in microseconds that the database spent executing a query.
 ///
 /// | Tag | Description |
 /// | --- | ----------- |
@@ -71,10 +67,9 @@ pub const MIGRATION_HANDLER_SUCCESSES: &str = "readyset_migration_handler_succes
 /// Counter: The number of failed queries (dry runs/real) processed by the migration handler.
 pub const MIGRATION_HANDLER_FAILURES: &str = "readyset_migration_handler_failures";
 
-/// Counter: The number of queries the migration handler has set to allowed.  Incremented on each
-/// loop of the migration handler.
-/// TODO(justin): In the future it would be good to support gauges for the counts of each query
-/// status in the query status cache. Requires optimization of locking.
+/// Counter: The number of queries the migration handler has set to allowed. Incremented on each
+/// loop of the migration handler. TODO(justin): In the future it would be good to support gauges
+/// for the counts of each query status in the query status cache. Requires optimization of locking.
 pub const MIGRATION_HANDLER_ALLOWED: &str = "readyset_migration_handler_allowed";
 
 /// Counter: The number of HTTP requests received at the noria-client.
@@ -89,8 +84,7 @@ pub const CLIENT_CONNECTIONS_OPENED: &str = "readyset_noria_client_conns_opened"
 /// Counter: The number of connections closed by clients
 pub const CLIENT_CONNECTIONS_CLOSED: &str = "readyset_noria_client_conns_closed";
 
-/// Gauge: The number of open connections to the upstream database,
-/// on behalf of client connections.
+/// Gauge: The number of open connections to the upstream database, on behalf of client connections.
 pub const CLIENT_UPSTREAM_CONNECTIONS: &str = "readyset_client_upstream_connections";
 
 /// Counter: The number of `EventType` operations received (query / prepare / execute).

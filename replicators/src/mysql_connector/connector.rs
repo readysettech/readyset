@@ -36,7 +36,6 @@ use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
 
 use database_utils::UpstreamConfig;
-use readyset_client::metrics::recorded;
 use readyset_client::recipe::changelist::{Change, IntoChanges as _};
 use readyset_client::recipe::ChangeList;
 use readyset_client::{Modification, ReadySetHandle, TableOperation};
@@ -1222,7 +1221,7 @@ impl MySqlBinlogConnector {
                     }
                     Err(error) if expect_ddl => {
                         warn!(%error, "Error extending recipe, DDL statement will not be used");
-                        counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
+                        counter!(metric::REPLICATOR_FAILURE).increment(1u64);
                         Err(ReadySetError::SkipEvent)
                     }
                     Err(error) => {
@@ -1461,12 +1460,12 @@ impl MySqlBinlogConnector {
     /// Emit group commit metrics before flushing.
     fn emit_group_commit_metrics(&self) {
         if self.group_commit_trx_count > 0 {
-            histogram!(recorded::REPLICATOR_GROUP_COMMIT_TXNS)
+            histogram!(metric::REPLICATOR_GROUP_COMMIT_TXNS)
                 .record(self.group_commit_trx_count as f64);
             if let Some(deadline) = self.group_commit_deadline {
                 // deadline = start + group_commit_wait, so start = deadline - wait
                 let start = deadline - self.group_commit_wait;
-                histogram!(recorded::REPLICATOR_GROUP_COMMIT_DURATION)
+                histogram!(metric::REPLICATOR_GROUP_COMMIT_DURATION)
                     .record(start.elapsed().as_micros() as f64);
             }
         }

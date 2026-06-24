@@ -10,7 +10,6 @@ use std::convert::TryInto;
 use dataflow_state::PointKey;
 use itertools::Itertools;
 use metrics::counter;
-use readyset_client::metrics::recorded;
 use readyset_client::{KeyComparison, internal};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal, internal_err};
@@ -77,7 +76,7 @@ pub struct TopK {
     buffered: usize,
 
     /// Name of the cache this operator serves, used to label the backfill counter
-    /// ([`recorded::TOPK_BACKFILL_REQUESTS`]) so backfills can be attributed per cache.
+    /// ([`metric::TOPK_BACKFILL_REQUESTS`]) so backfills can be attributed per cache.
     ///
     /// This is the `CREATE CACHE <name>` name (the `name` column in `SHOW CACHES`), set during
     /// MIR lowering via [`TopK::with_cache_name`]. It is carried on the operator because an
@@ -213,7 +212,7 @@ impl TopK {
                 .as_ref()
                 .map(|n| n.display_unquoted().to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            counter!(recorded::TOPK_BACKFILL_REQUESTS, "cache_name" => cache_name).increment(1);
+            counter!(metric::TOPK_BACKFILL_REQUESTS, "cache_name" => cache_name).increment(1);
 
             let IngredientLookupResult::Records(parent_records) = self.lookup(
                 *self.src,

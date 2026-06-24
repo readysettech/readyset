@@ -18,7 +18,7 @@ use {mysql_async as mysql, tokio_postgres as pgsql};
 use database_utils::tls::{get_mysql_tls_config, get_tls_connector, ServerCertVerification};
 use database_utils::{DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
-use readyset_client::metrics::recorded::{self, SnapshotStatusTag};
+use metric::SnapshotStatusTag;
 use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{Modification, ReadySetHandle, Table, TableOperation, TableStatus};
 use readyset_data::{DfValue, Dialect, SqlEngine};
@@ -451,7 +451,7 @@ impl<'a> NoriaAdapter<'a> {
 
                 let snapshot_start = Instant::now();
                 counter!(
-                    recorded::REPLICATOR_SNAPSHOT_STATUS,
+                    metric::REPLICATOR_SNAPSHOT_STATUS,
                     "status" => SnapshotStatusTag::Started.value(),
                 )
                 .increment(1u64);
@@ -475,7 +475,7 @@ impl<'a> NoriaAdapter<'a> {
                 };
 
                 counter!(
-                    recorded::REPLICATOR_SNAPSHOT_STATUS,
+                    metric::REPLICATOR_SNAPSHOT_STATUS,
                     "status" => status
                 )
                 .increment(1u64);
@@ -500,7 +500,7 @@ impl<'a> NoriaAdapter<'a> {
                     .clone();
 
                 span.in_scope(|| info!("Snapshot finished"));
-                histogram!(recorded::REPLICATOR_SNAPSHOT_DURATION)
+                histogram!(metric::REPLICATOR_SNAPSHOT_DURATION)
                     .record(snapshot_start.elapsed().as_micros() as f64);
 
                 // Send snapshot complete and redacted schemas telemetry events
@@ -819,7 +819,7 @@ impl<'a> NoriaAdapter<'a> {
             };
 
             counter!(
-                recorded::REPLICATOR_SNAPSHOT_STATUS,
+                metric::REPLICATOR_SNAPSHOT_STATUS,
                 "status" => status
             )
             .increment(1u64);
@@ -827,7 +827,7 @@ impl<'a> NoriaAdapter<'a> {
             snapshot_result?;
 
             info!("Snapshot finished");
-            histogram!(recorded::REPLICATOR_SNAPSHOT_DURATION)
+            histogram!(metric::REPLICATOR_SNAPSHOT_DURATION)
                 .record(snapshot_start.elapsed().as_micros() as f64);
 
             if replication_slot.slot_name == resnapshot_slot_name {
@@ -1059,7 +1059,7 @@ impl<'a> NoriaAdapter<'a> {
             Err(e @ ReadySetError::RecipeInvariantViolated(_)) => return Err(e),
             Err(error) => {
                 warn!(%error, "Error extending recipe, DDL statement will not be used");
-                counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
+                counter!(metric::REPLICATOR_FAILURE).increment(1u64);
 
                 let changes = mem::take(changelist.changes_mut());
                 // If something went wrong, mark all the tables and views that we just tried to
@@ -1247,9 +1247,9 @@ impl<'a> NoriaAdapter<'a> {
         let start = std::time::Instant::now();
         table_mutator.perform_all(kept).await?;
         let duration = start.elapsed();
-        histogram!(recorded::REPLICATOR_BATCH_SIZE).record(batch_size as f64);
-        counter!(recorded::REPLICATOR_PERFORM_ALL_CALLS).increment(1);
-        histogram!(recorded::REPLICATOR_PERFORM_ALL_DURATION).record(duration.as_micros() as f64);
+        histogram!(metric::REPLICATOR_BATCH_SIZE).record(batch_size as f64);
+        counter!(metric::REPLICATOR_PERFORM_ALL_CALLS).increment(1);
+        histogram!(metric::REPLICATOR_PERFORM_ALL_DURATION).record(duration.as_micros() as f64);
 
         self.replication_offsets
             .tables
@@ -1412,7 +1412,7 @@ impl<'a> NoriaAdapter<'a> {
                                 info!("Change in DDL requires partial resnapshot");
                             } else {
                                 error!(error = %err, "Aborting replication task on error");
-                                counter!(recorded::REPLICATOR_FAILURE).increment(1u64);
+                                counter!(metric::REPLICATOR_FAILURE).increment(1u64);
                             }
                             // In some cases, we may fail to replicate because of unsupported operations, stop
                             // replicating a table if we encounter this type of error.
@@ -1422,7 +1422,7 @@ impl<'a> NoriaAdapter<'a> {
                             }
                             return Err(err);
                         };
-                        counter!(recorded::REPLICATOR_SUCCESS).increment(1u64);
+                        counter!(metric::REPLICATOR_SUCCESS).increment(1u64);
                         // Publish both the stream position and persist frontier now that
                         // the action has been applied. Writing these together after apply
                         // keeps `persisted_offset <= stream_position` visible to the lag

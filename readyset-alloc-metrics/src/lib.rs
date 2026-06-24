@@ -1,17 +1,13 @@
-pub(crate) mod recorded;
-
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     time::Duration,
 };
 
-use metrics::{Counter, Gauge};
+use metrics::{Counter, Gauge, counter, gauge};
 use readyset_alloc::{AllocThreadStats, fetch_all_memory_stats};
 use readyset_util::shutdown::ShutdownReceiver;
 use tokio::select;
 use tracing::info;
-
-use crate::recorded::*;
 
 const REPORTING_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -42,14 +38,14 @@ struct AllocatorMetricsReporter {
 impl AllocatorMetricsReporter {
     fn new() -> Self {
         Self {
-            allocated: metrics::gauge!(ALLOCATED_BYTES),
-            active: metrics::gauge!(ACTIVE_BYTES),
-            metadata: metrics::gauge!(METADATA_BYTES),
-            resident: metrics::gauge!(RESIDENT_BYTES),
-            mapped: metrics::gauge!(MAPPED_BYTES),
-            retained: metrics::gauge!(RETAINED_BYTES),
-            dirty: metrics::gauge!(DIRTY_BYTES),
-            fragmented: metrics::gauge!(FRAGMENTED_BYTES),
+            allocated: gauge!(metric::ALLOCATED_BYTES),
+            active: gauge!(metric::ACTIVE_BYTES),
+            metadata: gauge!(metric::METADATA_BYTES),
+            resident: gauge!(metric::RESIDENT_BYTES),
+            mapped: gauge!(metric::MAPPED_BYTES),
+            retained: gauge!(metric::RETAINED_BYTES),
+            dirty: gauge!(metric::DIRTY_BYTES),
+            fragmented: gauge!(metric::FRAGMENTED_BYTES),
             per_thread_bytes: HashMap::new(),
         }
     }
@@ -93,8 +89,8 @@ impl AllocatorMetricsReporter {
                         Entry::Vacant(entry) => {
                             let labels = [("thread_name", entry.key().clone())];
                             entry.insert((
-                                metrics::counter!(ALLOCATED_BYTES_PER_THREAD, &labels),
-                                metrics::counter!(DEALLOCATED_BYTES_PER_THREAD, &labels),
+                                counter!(metric::ALLOCATED_BYTES_PER_THREAD, &labels),
+                                counter!(metric::DEALLOCATED_BYTES_PER_THREAD, &labels),
                             ))
                         }
                     };

@@ -85,6 +85,7 @@ use database_utils::{DatabaseURL, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures::future::{self, OptionFuture};
 use lru::LruCache;
+use metrics::{counter, gauge};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType};
 use readyset_client::consensus::mcp_tokens::{
@@ -99,7 +100,7 @@ use readyset_client::{CacheMode, ColumnSchema, PlaceholderIdx, ViewCreateRequest
 use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
-    EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType, recorded,
+    EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
 };
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
@@ -580,8 +581,8 @@ impl SessionWriteTracker {
 
 /// Records a skip-cache metric for a query that bypassed a cache.
 fn record_skip_cache(query_id: String, cache_type: &'static str, reason: &'static str) {
-    metrics::counter!(
-        recorded::QUERY_LOG_TOTAL_SKIP_CACHE,
+    counter!(
+        metric::QUERY_LOG_TOTAL_SKIP_CACHE,
         "query_id" => query_id,
         "type" => cache_type,
         "reason" => reason
@@ -678,8 +679,8 @@ impl BackendBuilder {
         shallow: Arc<CacheManager<Vec<DfValue>, DB::CacheEntry>>,
         shallow_refresh_pool: Option<Arc<ShallowRefreshPool<DB>>>,
     ) -> Backend<DB, Handler> {
-        metrics::gauge!(recorded::CONNECTED_CLIENTS).increment(1.0);
-        metrics::counter!(recorded::CLIENT_CONNECTIONS_OPENED).increment(1);
+        gauge!(metric::CONNECTED_CLIENTS).increment(1.0);
+        counter!(metric::CLIENT_CONNECTIONS_OPENED).increment(1);
 
         let proxy_state = if upstream.is_some() {
             ProxyState::Fallback
@@ -1348,17 +1349,17 @@ where
         if let Some(h) = metrics_handle() {
             let [connected_clients, upstream_connections] = h.gauges(
                 [
-                    recorded::CONNECTED_CLIENTS,
-                    recorded::CLIENT_UPSTREAM_CONNECTIONS,
+                    metric::CONNECTED_CLIENTS,
+                    metric::CLIENT_UPSTREAM_CONNECTIONS,
                 ],
                 [],
             );
             let [parse_errors, set_disallowed, view_not_found, rpc_errors] = h.counters(
                 [
-                    recorded::QUERY_LOG_PARSE_ERRORS,
-                    recorded::QUERY_LOG_SET_DISALLOWED,
-                    recorded::QUERY_LOG_VIEW_NOT_FOUND,
-                    recorded::QUERY_LOG_RPC_ERRORS,
+                    metric::QUERY_LOG_PARSE_ERRORS,
+                    metric::QUERY_LOG_SET_DISALLOWED,
+                    metric::QUERY_LOG_VIEW_NOT_FOUND,
+                    metric::QUERY_LOG_RPC_ERRORS,
                 ],
                 [],
             );
@@ -4259,7 +4260,7 @@ where
 
         let exec_counts = metrics_handle().map(|h| {
             let [counts] = h.counters_by_label(
-                [recorded::QUERY_LOG_EXECUTION_COUNT],
+                [metric::QUERY_LOG_EXECUTION_COUNT],
                 "query_id",
                 [("database_type", "upstream")],
             );
@@ -4371,7 +4372,7 @@ where
 
         let exec_counts = metrics_handle().map(|h| {
             let [counts] = h.counters_by_label(
-                [recorded::QUERY_LOG_EXECUTION_COUNT],
+                [metric::QUERY_LOG_EXECUTION_COUNT],
                 "query_id",
                 [("database_type", "readyset")],
             );
@@ -5747,13 +5748,13 @@ where
                         set = %set.display(settings.dialect),
                         "Autocommit disabled; all queries will be proxied upstream"
                     );
-                    metrics::counter!(recorded::SET_AUTOCOMMIT_DISABLED).increment(1);
+                    counter!(metric::SET_AUTOCOMMIT_DISABLED).increment(1);
                 } else if matches!(prev, ProxyState::AutocommitOff) {
                     debug!(
                         set = %set.display(settings.dialect),
                         "Autocommit re-enabled"
                     );
-                    metrics::counter!(recorded::SET_AUTOCOMMIT_ENABLED).increment(1);
+                    counter!(metric::SET_AUTOCOMMIT_ENABLED).increment(1);
                 }
             }
         }
@@ -6315,8 +6316,8 @@ where
                 username.to_string(),
             ));
         }
-        metrics::gauge!(recorded::CONNECTED_CLIENTS).decrement(1.0);
-        metrics::counter!(recorded::CLIENT_CONNECTIONS_CLOSED).increment(1);
+        gauge!(metric::CONNECTED_CLIENTS).decrement(1.0);
+        counter!(metric::CLIENT_CONNECTIONS_CLOSED).increment(1);
     }
 }
 

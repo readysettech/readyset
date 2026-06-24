@@ -13,12 +13,12 @@ use axum::routing::{get, post};
 use axum::Router;
 use futures::TryFutureExt;
 use health_reporter::{HealthReporter, State as HealthState};
+use metrics::counter;
 use readyset_alloc::{
     activate_prof, deactivate_prof, dump_prof_to_string, dump_stats,
     print_memory_and_per_thread_stats,
 };
 use readyset_client::events::ControllerEvent;
-use readyset_client::metrics::recorded;
 use readyset_metrics::metrics_body;
 use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::SchemaCatalogUpdate;
@@ -118,7 +118,7 @@ fn build_app(router: NoriaServerHttpRouter) -> Router {
 
 /// Middleware: count every external request and tag responses with permissive CORS.
 async fn record_external_request(req: Request, next: Next) -> Response {
-    metrics::counter!(recorded::SERVER_EXTERNAL_REQUESTS).increment(1);
+    counter!(metric::SERVER_EXTERNAL_REQUESTS).increment(1);
     let mut res = next.run(req).await;
     res.headers_mut()
         .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
@@ -309,7 +309,7 @@ async fn forward_to_controller(
     State(state): State<NoriaServerHttpRouter>,
     req: Request,
 ) -> Response {
-    metrics::counter!(recorded::SERVER_CONTROLLER_REQUESTS).increment(1);
+    counter!(metric::SERVER_CONTROLLER_REQUESTS).increment(1);
 
     let (parts, body) = req.into_parts();
     let body = match to_bytes(body, usize::MAX).await {

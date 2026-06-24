@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use readyset_client::metrics::recorded;
+use metrics::counter;
 use readyset_errors::{ReadySetResult, internal_err, invariant};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -49,11 +49,11 @@ impl EgressTx {
     }
 
     fn inc_sent(&mut self) {
-        metrics::counter!(recorded::EGRESS_NODE_SENT_PACKETS).increment(1);
+        counter!(metric::EGRESS_NODE_SENT_PACKETS).increment(1);
     }
 
     fn inc_dropped(&mut self) {
-        metrics::counter!(recorded::EGRESS_NODE_DROPPED_PACKETS).increment(1);
+        counter!(metric::EGRESS_NODE_DROPPED_PACKETS).increment(1);
     }
 }
 

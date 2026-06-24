@@ -1,4 +1,3 @@
-use readyset_client_metrics::recorded;
 use readyset_data::DfType;
 use readyset_metrics::metrics_handle;
 use readyset_schema::bind_vrel;
@@ -26,7 +25,7 @@ fn deep_caches_read(ctx: &VrelContext) -> VrelRead {
         let [counts] = metrics_handle()
             .map(|h| {
                 h.counters_by_label(
-                    [recorded::QUERY_LOG_EXECUTION_COUNT],
+                    [metric::QUERY_LOG_EXECUTION_COUNT],
                     "query_id",
                     [("database_type", "readyset")],
                 )

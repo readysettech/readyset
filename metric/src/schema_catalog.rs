@@ -1,5 +1,4 @@
-//! Documents the set of metrics that are currently being recorded within
-//! the schema-catalog crate.
+//! Documents the set of metrics that are currently being recorded within the schema-catalog crate.
 
 /// Counter: Incremented when the schema catalog content changes without the generation advancing.
 pub const SCHEMA_CATALOG_UNEXPECTED_GENERATION: &str =
@@ -33,8 +32,8 @@ pub const SCHEMA_CATALOG_DIFF_DURATION: &str = "readyset_schema_catalog_diff_dur
 pub const SCHEMA_CATALOG_INVALIDATION_DURATION: &str =
     "readyset_schema_catalog_invalidation_duration_seconds";
 
-/// Histogram: Wall-clock time (in seconds) between when a new catalog is sent to the
-/// invalidation sidecar and when invalidation completes. Tracks how long the QSC may
-/// contain stale entries after a schema update is applied to the cache.
+/// Histogram: Wall-clock time (in seconds) between when a new catalog is sent to the invalidation
+/// sidecar and when invalidation completes. Tracks how long the QSC may contain stale entries after
+/// a schema update is applied to the cache.
 pub const SCHEMA_CATALOG_INVALIDATION_STALENESS: &str =
     "readyset_schema_catalog_invalidation_staleness_seconds";

@@ -49,6 +49,7 @@ database-utils = { path = "../database-utils" }
 dataflow-expression = { path = "../dataflow-expression" }
 failpoint-macros = { path = "../failpoint-macros" }
 health-reporter = { path = "../health-reporter" }
+metric = { path = "../metric" }
 readyset-adapter-types = { path = "../readyset-adapter-types" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-client = { path = "../readyset-client" }

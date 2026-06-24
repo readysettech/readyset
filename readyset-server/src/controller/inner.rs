@@ -21,7 +21,6 @@ use http::Method;
 use metrics::gauge;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
-use readyset_client::metrics::recorded;
 use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
@@ -508,7 +507,7 @@ impl Leader {
             }
             (&Method::POST, "/views_info") => {
                 let (queries, dialect): (Vec<ViewCreateRequest>, _) = bincode::deserialize(&body)?;
-                gauge!(recorded::CONTROLLER_RPC_VIEWS_INFO_NUM_QUERIES,).set(queries.len() as f64);
+                gauge!(metric::CONTROLLER_RPC_VIEWS_INFO_NUM_QUERIES,).set(queries.len() as f64);
                 let ds = self.dataflow_state_handle.read().await;
                 return_serialized!(ds.views_info(queries, dialect))
             }

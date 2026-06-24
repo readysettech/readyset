@@ -9,6 +9,7 @@ use async_trait::async_trait;
 #[cfg(feature = "failure_injection")]
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
+use metrics::{counter, gauge, histogram};
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_util::{retry_with_exponential_backoff, shutdown::ShutdownReceiver};
 use tokio::select;
@@ -122,7 +123,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                                 self.apply_update(catalog, catalog_tx.as_ref()).await;
                             }
                             Err(error) => {
-                                metrics::counter!(crate::metrics::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
+                                counter!(metric::SCHEMA_CATALOG_DECODE_FAILED).increment(1);
                                 warn!(%error, "Failed to decode schema catalog update");
                             }
                         },
@@ -138,7 +139,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                             // producer, so immediate reconnection risks a lag-again loop.
                             // Each reconnection fetches a fresh snapshot, so no schema
                             // updates are permanently lost.
-                            metrics::counter!(crate::metrics::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
+                            counter!(metric::SCHEMA_CATALOG_STREAM_RECONNECTED).increment(1);
                             warn!(
                                 delay_ms = reconnect_delay.as_millis() as u64,
                                 "Schema catalog update stream ended; re-subscribing after backoff"
@@ -203,8 +204,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                     })
                 );
                 if !generation_advanced {
-                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_UNEXPECTED_GENERATION)
-                        .increment(1);
+                    counter!(metric::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
                     warn!(
                         generation = %catalog.generation,
                         "Schema catalog content changed without generation advancing"
@@ -212,9 +212,8 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                 }
             }
 
-            metrics::counter!(crate::metrics::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
-            metrics::gauge!(crate::metrics::SCHEMA_CATALOG_CURRENT_GENERATION)
-                .set(catalog.generation.get() as f64);
+            counter!(metric::SCHEMA_CATALOG_UPDATE_APPLIED).increment(1);
+            gauge!(metric::SCHEMA_CATALOG_CURRENT_GENERATION).set(catalog.generation.get() as f64);
             let new_catalog = Arc::new(catalog);
             *cache = Some(Arc::clone(&new_catalog));
 
@@ -273,8 +272,7 @@ async fn run_invalidation_sidecar(
                 None => SchemaChanges::All, // First update
             };
             let elapsed = start.elapsed();
-            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_DIFF_DURATION)
-                .record(elapsed.as_secs_f64());
+            histogram!(metric::SCHEMA_CATALOG_DIFF_DURATION).record(elapsed.as_secs_f64());
             debug!(
                 elapsed_us = elapsed.as_micros() as u64,
                 ?changes,
@@ -284,7 +282,7 @@ async fn run_invalidation_sidecar(
         };
 
         if !matches!(&changes, SchemaChanges::None) {
-            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_STALENESS)
+            histogram!(metric::SCHEMA_CATALOG_INVALIDATION_STALENESS)
                 .record(send_time.elapsed().as_secs_f64());
         }
 
@@ -293,8 +291,7 @@ async fn run_invalidation_sidecar(
             let invalidation_start = std::time::Instant::now();
             match &changes {
                 SchemaChanges::Relations(tables) if !tables.is_empty() => {
-                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_TARGETED)
-                        .increment(1);
+                    counter!(metric::SCHEMA_CATALOG_INVALIDATION_TARGETED).increment(1);
                     info!(
                         count = tables.len(),
                         ?tables,
@@ -309,8 +306,7 @@ async fn run_invalidation_sidecar(
                     );
                 }
                 SchemaChanges::All => {
-                    metrics::counter!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_FULL)
-                        .increment(1);
+                    counter!(metric::SCHEMA_CATALOG_INVALIDATION_FULL).increment(1);
                     info!("Invalidating all cached query state due to schema change");
                     handler.invalidate_all();
                     antithesis_sdk::assert_reachable!(
@@ -321,7 +317,7 @@ async fn run_invalidation_sidecar(
                 SchemaChanges::None | SchemaChanges::Relations(_) => {}
             }
             let invalidation_elapsed = invalidation_start.elapsed();
-            metrics::histogram!(crate::metrics::SCHEMA_CATALOG_INVALIDATION_DURATION)
+            histogram!(metric::SCHEMA_CATALOG_INVALIDATION_DURATION)
                 .record(invalidation_elapsed.as_secs_f64());
             debug!(
                 elapsed_us = invalidation_elapsed.as_micros() as u64,

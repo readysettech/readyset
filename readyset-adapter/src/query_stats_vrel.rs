@@ -1,7 +1,6 @@
 use metrics_exporter_prometheus::Distribution;
 use quanta::Instant;
 
-use readyset_client_metrics::recorded;
 use readyset_data::{DfType, DfValue};
 use readyset_metrics::metrics_handle;
 use readyset_schema::bind_vrel;
@@ -39,17 +38,17 @@ fn query_stats_read(ctx: &VrelContext, database_type: &'static str) -> VrelRead 
         };
         let database_type = [("database_type", database_type)];
         let [counts] = handle.counters_by_label(
-            [recorded::QUERY_LOG_EXECUTION_COUNT],
+            [metric::QUERY_LOG_EXECUTION_COUNT],
             "query_id",
             database_type,
         );
         let [exec_times] = handle.distributions_by_label(
-            [recorded::QUERY_LOG_EXECUTION_TIME],
+            [metric::QUERY_LOG_EXECUTION_TIME],
             "query_id",
             database_type,
         );
         let [last_exec] = handle.gauges_by_label(
-            [recorded::QUERY_LOG_LAST_EXECUTION_EPOCH_S],
+            [metric::QUERY_LOG_LAST_EXECUTION_EPOCH_S],
             "query_id",
             database_type,
         );

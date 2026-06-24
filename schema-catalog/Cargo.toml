@@ -8,6 +8,7 @@ edition = "2024"
 [dependencies]
 antithesis_sdk = { workspace = true }
 async-trait = { workspace = true }
+metric = { path = "../metric" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-data = { path = "../readyset-data" }
 readyset-sql = { path = "../readyset-sql" }

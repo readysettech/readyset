@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
+use metrics::counter;
 use readyset_errors::{internal, internal_err, ReadySetResult};
 use reqwest::{Client, StatusCode};
 use schema_catalog::SchemaCatalogUpdate;
@@ -388,16 +389,14 @@ impl ControllerEventsClient {
                         tracing::debug!("Event stream closed permanently");
                         break;
                     }
-                    metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
-                        .increment(1);
+                    counter!(metric::CONTROLLER_EVENTS_DISCONNECTED).increment(1);
                     tracing::info!("Event stream closed, attempting to reconnect");
                 }
                 Err(e) => {
                     // Clear the cached leader URL on connection failure so we re-resolve
                     // the leader on the next iteration instead of retrying a stale URL.
                     leader_url.clear();
-                    metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_DISCONNECTED)
-                        .increment(1);
+                    counter!(metric::CONTROLLER_EVENTS_DISCONNECTED).increment(1);
                     tracing::info!("Event stream error: {}, retrying", e);
                 }
             }
@@ -451,7 +450,7 @@ impl ControllerEventsClient {
             );
         }
 
-        metrics::counter!(crate::metrics::recorded::CONTROLLER_EVENTS_CONNECTED).increment(1);
+        counter!(metric::CONTROLLER_EVENTS_CONNECTED).increment(1);
         tracing::debug!("Connected to SSE endpoint");
 
         // Process the event stream

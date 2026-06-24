@@ -10,8 +10,6 @@ use readyset_errors::{ReadySetError, internal};
 use readyset_sql::ast::{Relation, SqlQuery};
 use serde::Serialize;
 
-pub mod recorded;
-
 /// Similar to logging levels, this enum allows control over how much data is
 /// recorded about queries for reporting into metrics systems. Each enum value,
 /// starting at `Disabled`, includes all of the preceeding (lower) level's metric

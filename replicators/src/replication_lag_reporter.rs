@@ -14,7 +14,6 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use metrics::{counter, gauge};
-use readyset_client::metrics::recorded;
 use readyset_client::status::ReplicationLagStatus;
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
@@ -370,14 +369,14 @@ async fn lag_reporter_loop(
                     }
                     Ok(Err(e)) => {
                         warn!(error = %e, "Failed to poll replication lag");
-                        counter!(recorded::REPLICATOR_LAG_POLL_FAILURE).increment(1);
+                        counter!(metric::REPLICATOR_LAG_POLL_FAILURE).increment(1);
                     }
                     Err(_) => {
                         warn!(
                             budget_ms = poll_budget.as_millis() as u64,
                             "Replication lag poll timed out"
                         );
-                        counter!(recorded::REPLICATOR_LAG_POLL_FAILURE).increment(1);
+                        counter!(metric::REPLICATOR_LAG_POLL_FAILURE).increment(1);
                     }
                 }
             }
@@ -528,21 +527,21 @@ async fn poll_lag(
 
     // Update Prometheus gauges
     gauge!(
-        recorded::REPLICATOR_REPLICATION_LAG,
+        metric::REPLICATOR_REPLICATION_LAG,
         "mode" => status.mode.clone(),
         "kind" => "consume",
     )
     .set(status.consume_lag as f64);
 
     gauge!(
-        recorded::REPLICATOR_REPLICATION_LAG,
+        metric::REPLICATOR_REPLICATION_LAG,
         "mode" => status.mode.clone(),
         "kind" => "persist",
     )
     .set(status.persist_lag as f64);
 
     if let Some(staleness) = status.staleness_seconds {
-        gauge!(recorded::REPLICATOR_REPLICATION_STALENESS).set(staleness);
+        gauge!(metric::REPLICATOR_REPLICATION_STALENESS).set(staleness);
     }
 
     debug!(

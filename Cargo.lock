@@ -1482,6 +1482,7 @@ dependencies = [
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "lazy_static",
+ "metric",
  "metrics",
  "mysql-time",
  "notify",
@@ -4162,6 +4163,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "metric"
+version = "0.1.0"
+
+[[package]]
 name = "metrics"
 version = "0.24.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5795,6 +5800,7 @@ dependencies = [
  "iter-enum",
  "itertools 0.14.0",
  "left-right",
+ "metric",
  "metrics",
  "partial-map",
  "petgraph 0.6.5",
@@ -5827,6 +5833,7 @@ dependencies = [
  "futures",
  "futures-util",
  "health-reporter",
+ "metric",
  "metrics",
  "metrics-util",
  "mysql-srv",
@@ -5903,6 +5910,7 @@ dependencies = [
  "itertools 0.14.0",
  "linkme",
  "lru 0.18.0",
+ "metric",
  "metrics",
  "metrics-exporter-prometheus",
  "mysql_common",
@@ -5972,6 +5980,7 @@ dependencies = [
 name = "readyset-alloc-metrics"
 version = "0.1.0"
 dependencies = [
+ "metric",
  "metrics",
  "readyset-alloc",
  "readyset-util",
@@ -6003,6 +6012,7 @@ dependencies = [
  "futures",
  "futures-util",
  "itertools 0.14.0",
+ "metric",
  "metrics",
  "metrics-util",
  "parking_lot",
@@ -6218,6 +6228,7 @@ dependencies = [
  "html-escape",
  "itertools 0.14.0",
  "merging-interval-tree",
+ "metric",
  "metrics",
  "partial-map",
  "petgraph 0.6.5",
@@ -6487,6 +6498,7 @@ dependencies = [
  "futures-util",
  "itertools 0.14.0",
  "lazy_static",
+ "metric",
  "metrics",
  "mysql-srv",
  "mysql_async",
@@ -6550,6 +6562,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "lazy_static",
+ "metric",
  "metrics",
  "native-tls",
  "postgres-native-tls",
@@ -6592,6 +6605,7 @@ dependencies = [
 name = "readyset-query-logger"
 version = "0.1.0"
 dependencies = [
+ "metric",
  "metrics",
  "metrics-util",
  "readyset-client",
@@ -6631,6 +6645,7 @@ dependencies = [
  "datafusion",
  "futures",
  "linkme",
+ "metric",
  "mysql-srv",
  "mysql_async",
  "mysql_common",
@@ -6678,6 +6693,7 @@ dependencies = [
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "lazy_static",
+ "metric",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -6742,6 +6758,7 @@ dependencies = [
  "criterion",
  "dashmap",
  "futures",
+ "metric",
  "metrics",
  "moka",
  "mysql_async",
@@ -7067,6 +7084,7 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.14.0",
+ "metric",
  "metrics",
  "mysql-srv",
  "mysql-time",
@@ -7510,6 +7528,7 @@ dependencies = [
  "fail",
  "failpoint-macros",
  "futures-util",
+ "metric",
  "metrics",
  "readyset-data",
  "readyset-errors",
@@ -8251,6 +8270,7 @@ dependencies = [
  "futures",
  "itertools 0.14.0",
  "libc",
+ "metric",
  "mysql-srv",
  "num_cpus",
  "parking_lot",

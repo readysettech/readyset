@@ -23,6 +23,7 @@ members = [
     "failpoint-macros/proc-macros",
     "health-reporter",
     "merging-interval-tree",
+    "metric",
     "mysql-srv",
     "mysql-time",
     "nom-sql",

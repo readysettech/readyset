@@ -12,6 +12,7 @@ tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 
 # Local dependencies
+metric = { path = "../metric" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-util = { path = "../readyset-util" }
 

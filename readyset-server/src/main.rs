@@ -8,8 +8,8 @@ use clap::Parser;
 use common::ulimit::maybe_increase_nofile_limit;
 use dataflow_state::init_parallel_row_pool;
 use futures_util::future::{self, Either};
+use metrics::{counter, gauge};
 use readyset_alloc::ThreadBuildWrapper;
-use readyset_client::metrics::recorded;
 use readyset_metrics::init_global_recorder;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::{resolve_addr, Builder, WorkerOptions};
@@ -195,8 +195,8 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    metrics::gauge!(
-        recorded::READYSET_SERVER_VERSION,
+    gauge!(
+        metric::READYSET_SERVER_VERSION,
         &[
             ("release_version", READYSET_VERSION.release_version),
             ("commit_id", READYSET_VERSION.commit_id),
@@ -207,7 +207,7 @@ fn main() -> anyhow::Result<()> {
         ]
     )
     .set(1.0);
-    metrics::counter!(recorded::READYSET_SERVER_STARTUPS).increment(1);
+    counter!(metric::READYSET_SERVER_STARTUPS).increment(1);
 
     let deployment_dir = opts.worker_options.storage_dir(&opts.deployment);
     let authority = opts.authority.clone();

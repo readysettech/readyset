@@ -242,7 +242,6 @@ pub const CONNECTION_FROM_BASE: u8 = 1;
 
 mod controller;
 pub mod events;
-pub mod metrics;
 pub mod post_processing;
 pub mod query;
 pub mod recipe;
@@ -264,6 +263,7 @@ use std::pin::Pin;
 
 use async_trait::async_trait;
 use clap::ValueEnum;
+use metrics::counter;
 use readyset_data::DfValue;
 use readyset_multiplex::TagStore;
 use readyset_sql::ast::Relation;
@@ -485,10 +485,8 @@ fn schema_catalog_stream_from_broadcast(
                     skipped,
                     "Schema catalog event receiver lagged behind; will reconnect"
                 );
-                ::metrics::counter!(crate::metrics::recorded::SCHEMA_CATALOG_BROADCAST_LAGGED)
-                    .increment(1);
-                ::metrics::counter!(crate::metrics::recorded::SCHEMA_CATALOG_BROADCAST_SKIPPED)
-                    .increment(skipped);
+                counter!(metric::SCHEMA_CATALOG_BROADCAST_LAGGED).increment(1);
+                counter!(metric::SCHEMA_CATALOG_BROADCAST_SKIPPED).increment(skipped);
                 antithesis_sdk::assert_reachable!(
                     "Schema catalog broadcast receiver lagged",
                     &serde_json::json!({"skipped": skipped})

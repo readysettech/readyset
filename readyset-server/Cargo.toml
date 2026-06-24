@@ -84,6 +84,7 @@ dataflow-expression = { path = "../dataflow-expression" }
 dataflow-state = { path = "../dataflow-state" }
 failpoint-macros = { path = "../failpoint-macros" }
 health-reporter = { path = "../health-reporter" }
+metric = { path = "../metric" }
 mir = { path = "../readyset-mir", package = "readyset-mir" }
 readyset-alloc = { path = "../readyset-alloc" }
 readyset-alloc-metrics = { path = "../readyset-alloc-metrics" }
