@@ -37,3 +37,30 @@ pub const SCHEMA_CATALOG_INVALIDATION_DURATION: &str =
 /// a schema update is applied to the cache.
 pub const SCHEMA_CATALOG_INVALIDATION_STALENESS: &str =
     "readyset_schema_catalog_invalidation_staleness_seconds";
+
+/// Counter: Incremented each time schema generation advances after a successful DDL migration.
+pub const SCHEMA_CATALOG_GENERATION_INCREMENTED: &str =
+    "readyset_schema_catalog_generation_incremented";
+
+/// Counter: Incremented each time a schema catalog update is broadcast via SSE.
+pub const SCHEMA_CATALOG_UPDATE_SENT: &str = "readyset_schema_catalog_update_sent";
+
+/// Counter: Incremented when serializing a schema catalog update fails.
+pub const SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED: &str =
+    "readyset_schema_catalog_update_serialization_failed";
+
+/// Counter: Incremented when a CreateCache request has a stale schema generation.
+pub const SCHEMA_GENERATION_MISMATCH: &str = "readyset_schema_generation_mismatch";
+
+/// Counter: Incremented each time the SSE client connects to the controller successfully.
+pub const CONTROLLER_EVENTS_CONNECTED: &str = "readyset_controller_events_connected";
+
+/// Counter: Incremented each time the SSE stream closes or errors.
+pub const CONTROLLER_EVENTS_DISCONNECTED: &str = "readyset_controller_events_disconnected";
+
+/// Counter: Incremented each time the schema catalog broadcast receiver detects lag, causing the
+/// update stream to terminate and the synchronizer to reconnect.
+pub const SCHEMA_CATALOG_BROADCAST_LAGGED: &str = "readyset_schema_catalog_broadcast_lagged";
+
+/// Counter: Incremented by the number of events skipped when broadcast lag is detected.
+pub const SCHEMA_CATALOG_BROADCAST_SKIPPED: &str = "readyset_schema_catalog_broadcast_skipped";

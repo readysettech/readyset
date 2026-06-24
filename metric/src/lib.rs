@@ -1,20 +1,31 @@
 //! Registry of all Readyset metrics.
 //!
 //! Each constant is the string passed to a metrics macro (e.g., counter!, gauge!, histogram!).
-//! Definitions are grouped into modules by the subsystem that emits them, and every module is
-//! re-exported flat, so callers reference a constant as `metric::METRIC_NAME` regardless of which
-//! module defines it.
+//!
+//! Definitions are grouped into modules by category, e.g., subsystem or concept, and every module
+//! is re-exported flat, so callers reference a constant as `metric::METRIC_NAME` regardless of
+//! which module defines it.
 
-mod allocator;
-mod noria;
-mod reader_map;
-mod readyset;
-mod rocksdb;
-mod schema_catalog;
+macro_rules! export_metrics {
+    ($module:ident) => {
+        mod $module;
+        pub use $module::*;
+    };
+}
 
-pub use allocator::*;
-pub use noria::*;
-pub use reader_map::*;
-pub use readyset::*;
-pub use rocksdb::*;
-pub use schema_catalog::*;
+export_metrics!(allocator);
+export_metrics!(connections);
+export_metrics!(controller);
+export_metrics!(dataflow);
+export_metrics!(instance);
+export_metrics!(migration_handler);
+export_metrics!(query_log);
+export_metrics!(query_sampler);
+export_metrics!(query_status_cache);
+export_metrics!(reader_map);
+export_metrics!(replication);
+export_metrics!(rocksdb);
+export_metrics!(schema_catalog);
+export_metrics!(session);
+export_metrics!(shallow);
+export_metrics!(views_synchronizer);

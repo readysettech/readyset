@@ -1,15 +1,3 @@
-//! Data types representing metrics dumped from a running Readyset instance
-//!
-//! Documents the set of metrics that are currently being recorded within a Readyset instance.
-
-/// Counter: The number of times the adapter has started up. In standalone mode, this metric can be
-/// used to count the number of system startups.
-pub const READYSET_ADAPTER_STARTUPS: &str = "readyset_adapter_startups";
-
-/// Counter: The number of times the server has started up. In standalone mode, this metric should
-/// track [`READYSET_ADAPTER_STARTUPS`] exactly.
-pub const READYSET_SERVER_STARTUPS: &str = "readyset_server_startups";
-
 /// Counter: The number of lookup misses that occurred during replay requests. Recorded at the
 /// domain on every lookup miss during a replay request.
 ///
@@ -123,16 +111,6 @@ pub const DOMAIN_TOTAL_FINISH_REPLAY_TIME: &str = "readyset_domain.total_finish_
 /// Histogram: The amount of time spent handling an eviction request.
 pub const EVICTION_TIME: &str = "readyset_eviction_time_us";
 
-/// Histogram: The time in microseconds that the controller spent committing a migration to the
-/// dataflow graph. Recorded at the controller at the end of the `commit` call.
-pub const CONTROLLER_MIGRATION_TIME: &str = "readyset_controller.migration_time_us";
-
-/// Counter: Number of orphaned domains reclaimed by the controller.
-pub const CONTROLLER_RECLAIMED_DOMAINS: &str = "readyset_controller.reclaimed_domains";
-
-/// Gauge: Migration in progress indicator. Set to 1 when a migration is in progress, 0 otherwise.
-pub const CONTROLLER_MIGRATION_IN_PROGRESS: &str = "readyset_controller.migration_in_progress";
-
 /// Counter: The number of times the eviction task has run.
 pub const EVICTION_WORKER_EVICTION_TICKS: &str = "readyset_eviction_worker.eviction_ticks";
 
@@ -173,13 +151,6 @@ pub const READER_STATE_SIZE_BYTES: &str = "readyset_reader_state_size_bytes";
 /// | table_name | The name of the base table. |
 pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "readyset_base_tables_estimated_size_bytes";
 
-/// Counter: The number of HTTP requests received at the readyset-server, for either the controller
-/// or worker.
-pub const SERVER_EXTERNAL_REQUESTS: &str = "readyset_server.external_requests";
-
-/// Counter: The number of controller HTTP requests received by the readyset-server.
-pub const SERVER_CONTROLLER_REQUESTS: &str = "readyset_server.controller_requests";
-
 /// Counter: The number of lookup requests to a base table nodes state.
 ///
 /// | Tag | Description |
@@ -206,21 +177,6 @@ pub const SERVER_VIEW_QUERY_HIT: &str = "readyset_server.view_query_result_hit";
 /// Counter: The number of times a query required at least a partial replay.
 pub const SERVER_VIEW_QUERY_MISS: &str = "readyset_server.view_query_result_miss";
 
-pub const SHALLOW_HIT: &str = "readyset_shallow.shallow_result_hit";
-pub const SHALLOW_MISS: &str = "readyset_shallow.shallow_result_miss";
-pub const SHALLOW_REFRESH: &str = "readyset_shallow.shallow_result_refresh";
-pub const SHALLOW_EVICT_MEMORY: &str = "readyset_shallow.shallow_evict_memory";
-pub const SHALLOW_SKIP_TOO_LARGE: &str = "readyset_shallow.shallow_skip_too_large";
-pub const SHALLOW_REFRESH_QUEUE_EXCEEDED: &str = "readyset_shallow.shallow_refresh_queue_exceeded";
-
-/// Histogram: The amount of time in microseconds spent executing the upstream query during a
-/// shallow cache refresh. Only recorded for successful queries.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | query_id | The query ID for the cached query being refreshed. |
-pub const SHALLOW_REFRESH_QUERY_TIME: &str = "readyset_shallow.shallow_refresh_query_time_us";
-
 /// Histogram: The amount of time in microseconds spent waiting for an upquery during a read
 /// request.
 pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upquery_duration_us";
@@ -229,14 +185,6 @@ pub const SERVER_VIEW_UPQUERY_DURATION: &str = "readyset_server.view_query_upque
 /// complete within the configured budget. Tracks the rate at which the adapter falls through to
 /// upstream because the cache could not satisfy a request in time.
 pub const SERVER_VIEW_UPQUERY_TIMEOUT: &str = "readyset_server.view_query_upquery_timeout";
-
-/// Counter: The number of times a dataflow node type is added to the dataflow graph. Recorded at
-/// the time the new graph is committed.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | ntype | The dataflow node type. |
-pub const NODE_ADDED: &str = "readyset_node_added";
 
 /// Counter: The number of times a dataflow packet has been propagated for each domain.
 ///
@@ -292,109 +240,6 @@ pub const NODE_ON_INPUT_RAW_INVOCATIONS: &str = "readyset_domain.node_on_input_r
 ///   in `SHOW CACHES`); `unknown` if the operator has no recorded cache name. |
 pub const TOPK_BACKFILL_REQUESTS: &str = "readyset_domain.topk_backfill_requests";
 
-/// Histogram: The amount of time in microseconds a snapshot takes to be performed.
-pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
-
-/// How the replicator handled a snapshot.
-pub enum SnapshotStatusTag {
-    /// A snapshot was started by the replicator.
-    Started,
-    /// A snapshot succeeded at the replicator.
-    Successful,
-    /// A snapshot failed at the replicator.
-    Failed,
-}
-impl SnapshotStatusTag {
-    /// Returns the enum tag as a &str for use in metrics labels.
-    pub fn value(&self) -> &str {
-        match self {
-            SnapshotStatusTag::Started => "started",
-            SnapshotStatusTag::Successful => "successful",
-            SnapshotStatusTag::Failed => "failed",
-        }
-    }
-}
-
-/// Counter: Number of snapshots started at this node. Incremented by 1 when a snapshot begins.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | status | SnapshotStatusTag |
-pub const REPLICATOR_SNAPSHOT_STATUS: &str = "readyset_replicator.snapshot_status";
-
-/// Gauge: The number of tables currently snapshotting
-pub const REPLICATOR_TABLES_SNAPSHOTTING: &str = "readyset_replicator.tables_snapshotting";
-
-/// Counter: Number of failures encountered when following the replication log.
-pub const REPLICATOR_FAILURE: &str = "readyset_replicator.update_failure";
-
-/// Counter: Number of tables that failed to replicate and are ignored
-pub const TABLE_FAILED_TO_REPLICATE: &str = "readyset_replicator.table_failed";
-
-/// Counter: Number of replication actions performed successfully.
-pub const REPLICATOR_SUCCESS: &str = "readyset_replicator.update_success";
-
-/// Histogram: Number of table operations per perform_all RPC call.
-pub const REPLICATOR_BATCH_SIZE: &str = "readyset_replicator.batch_size";
-
-/// Counter: Total number of perform_all RPC calls made by the replicator.
-pub const REPLICATOR_PERFORM_ALL_CALLS: &str = "readyset_replicator.perform_all_calls";
-
-/// Histogram: Duration in microseconds of each perform_all RPC call.
-pub const REPLICATOR_PERFORM_ALL_DURATION: &str = "readyset_replicator.perform_all_duration_us";
-
-/// Histogram: Number of committed transactions coalesced per group commit flush. A value of 1 means
-/// no coalescing occurred. Higher values indicate effective group commit batching.
-pub const REPLICATOR_GROUP_COMMIT_TXNS: &str = "readyset_replicator.group_commit_txns";
-
-/// Histogram: Duration in microseconds of the group commit wait window. Measures elapsed time from
-/// the first commit (leader) to the flush.
-pub const REPLICATOR_GROUP_COMMIT_DURATION: &str = "readyset_replicator.group_commit_duration_us";
-
-/// Gauge: Replication lag between upstream and Readyset. Unit depends on mode: bytes for
-/// postgres/mysql_file, transactions for mysql_gtid.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | mode | postgres, mysql_file, or mysql_gtid |
-/// | kind | consume (stream position) or persist (min persisted offset) |
-pub const REPLICATOR_REPLICATION_LAG: &str = "readyset_replicator.replication_lag";
-
-/// Counter: Number of failed replication lag poll attempts.
-pub const REPLICATOR_LAG_POLL_FAILURE: &str = "readyset_replicator.lag_poll_failure";
-
-/// Gauge: Time-based replication staleness in seconds, measured via pt-heartbeat. Only emitted when
-/// `--replication-heartbeat` is enabled.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | mode | postgres, mysql_file, or mysql_gtid |
-pub const REPLICATOR_REPLICATION_STALENESS: &str =
-    "readyset_replicator.replication_staleness_seconds";
-
-/// Gauge: Indicates whether a server is the leader. Set to 1 when the server is leader, 0 for
-/// follower.
-pub const CONTROLLER_IS_LEADER: &str = "readyset_controller.is_leader";
-
-/// Counter: The total amount of time in microseconds spent servicing controller RPCs.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | path | The http path associated with the rpc request. |
-pub const CONTROLLER_RPC_OVERALL_TIME: &str = "readyset_controller.rpc_overall_time_us";
-
-/// Histogram: The distribution of time in microseconds spent servicing controller RPCs for each
-/// request.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | path | The http path associated with the rpc request. |
-pub const CONTROLLER_RPC_REQUEST_TIME: &str = "readyset_controller.rpc_request_time_us";
-
-/// Gauge: The number of queries sent to the `/views_info` controller RPC.
-pub const CONTROLLER_RPC_VIEWS_INFO_NUM_QUERIES: &str =
-    "readyset_controller.rpc_views_info_num_queries";
-
 /// Histgoram: Write propagation time in microseconds from binlog to reader node. For each input
 /// packet, this is recorded for each reader node that the packet propagates to. If the packet does
 /// not reach the reader because it hits a hole, the write propagation time is not recorded.
@@ -407,110 +252,6 @@ pub const DATAFLOW_STATE_CLONE_TIME: &str = "readyset_dataflow_state.clone_time_
 /// the authority. This metric may be recorded even if the state does not get written to the
 /// authority (due to a failure). It is only recorded when the Consul authority is in use
 pub const DATAFLOW_STATE_SERIALIZED: &str = "readyset_dataflow_state.serialized_size";
-
-/// Gauge: A stub gague used to report the version information for the adapter. Labels are used to
-/// convey the version information.
-pub const READYSET_ADAPTER_VERSION: &str = "readyset_adapter_version";
-
-/// Gauge: A stub gague used to report the version information for the server. Labels are used to
-/// convey the version information.
-pub const READYSET_SERVER_VERSION: &str = "readyset_server_version";
-
-/// Gauge: The size of the dash map that holds query status of each query that have been processed
-/// by readyset adapter.
-pub const QUERY_STATUS_CACHE_SIZE: &str = "readyset_query_status_cache.id_to_status.size";
-
-/// Gauge: The size of the LRUCache that holds full query & query status for a fixed number of
-/// queries that have been processed by readyset adapter.
-pub const QUERY_STATUS_CACHE_PERSISTENT_CACHE_SIZE: &str =
-    "readyset_query_status_cache.persistent_cache.statuses.size";
-
-/// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
-/// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
-pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =
-    "readyset_query_status_cache.shallow_auto_create_skip.size";
-
-/// Counter: Number of times the shallow auto-create skip set crossed its soft cap and was
-/// bulk-cleared. A non-zero value indicates either pathological client behaviour (queries with
-/// literal-injected unique values) or that the cap is too low for the workload.
-pub const SHALLOW_AUTO_CREATE_SKIP_OVERFLOW: &str =
-    "readyset_query_status_cache.shallow_auto_create_skip.overflow";
-
-/// Gauge: The number of queries in the query sampler queue.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | queue_len | The number of queries in the queue |
-pub const QUERY_SAMPLER_QUEUE_LEN: &str = "readyset_query_sampler_queue_len";
-
-/// Counter: The number of queries sampled by the query sampler.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | queries_sampled | The number of queries sampled |
-pub const QUERY_SAMPLER_QUERIES_SAMPLED: &str = "readyset_query_sampler_queries_sampled";
-
-/// Counter: The number of queries mismatched by the query sampler.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | queries_mismatched | The number of queries mismatched |
-pub const QUERY_SAMPLER_QUERIES_MISMATCHED: &str = "readyset_query_sampler_queries_mismatched";
-
-/// Gauge: The number of entries in the retry queue.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | retry_queue_len | The number of entries in the retry queue |
-pub const QUERY_SAMPLER_RETRY_QUEUE_LEN: &str = "readyset_query_sampler_retry_queue_len";
-
-/// Counter: The number of times the retry queue is full.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | retry_queue_full | The number of times the retry queue is full |
-pub const QUERY_SAMPLER_RETRY_QUEUE_FULL: &str = "readyset_query_sampler_retry_queue_full";
-
-/// Counter: The number of times the sampler is reconnecting to the upstream database.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | reconnects | The number of times the sampler is reconnecting to the upstream database |
-pub const QUERY_SAMPLER_RECONNECTS: &str = "readyset_query_sampler_reconnects";
-
-/// Counter: The number of times the sampler has hit the max QPS.
-///
-/// | Tag | Description |
-/// | --- | ----------- |
-/// | max_qps | The number of times the sampler has hit the max QPS |
-pub const QUERY_SAMPLER_MAX_QPS_HIT: &str = "readyset_query_sampler_max_qps_hit";
-
-/// Counter: Incremented each time schema generation advances after a successful DDL migration.
-pub const SCHEMA_CATALOG_GENERATION_INCREMENTED: &str =
-    "readyset_schema_catalog_generation_incremented";
-
-/// Counter: Incremented each time a schema catalog update is broadcast via SSE.
-pub const SCHEMA_CATALOG_UPDATE_SENT: &str = "readyset_schema_catalog_update_sent";
-
-/// Counter: Incremented when serializing a schema catalog update fails.
-pub const SCHEMA_CATALOG_UPDATE_SERIALIZATION_FAILED: &str =
-    "readyset_schema_catalog_update_serialization_failed";
-
-/// Counter: Incremented when a CreateCache request has a stale schema generation.
-pub const SCHEMA_GENERATION_MISMATCH: &str = "readyset_schema_generation_mismatch";
-
-/// Counter: Incremented each time the SSE client connects to the controller successfully.
-pub const CONTROLLER_EVENTS_CONNECTED: &str = "readyset_controller_events_connected";
-
-/// Counter: Incremented each time the SSE stream closes or errors.
-pub const CONTROLLER_EVENTS_DISCONNECTED: &str = "readyset_controller_events_disconnected";
-
-/// Counter: Incremented each time the schema catalog broadcast receiver detects lag, causing the
-/// update stream to terminate and the synchronizer to reconnect.
-pub const SCHEMA_CATALOG_BROADCAST_LAGGED: &str = "readyset_schema_catalog_broadcast_lagged";
-
-/// Counter: Incremented by the number of events skipped when broadcast lag is detected.
-pub const SCHEMA_CATALOG_BROADCAST_SKIPPED: &str = "readyset_schema_catalog_broadcast_skipped";
 
 /// Histogram: The number of unique rows stored in the HashSet-based DISTINCT dedup during
 /// post-lookup processing. Recorded once per query that uses `PostLookupDistinct::HashBased`.
