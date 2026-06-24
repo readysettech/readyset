@@ -265,6 +265,7 @@ pgrep -fl 'target/debug/readyset --upstream-db-url postgresql'
 | Argument | Default | Description |
 |---|---|---|
 | `--max-queries` | `1000` | Hard upper bound on queries per run. A fallback so a run can never spin forever; the coin flip is the intended stop, so this rarely binds. |
+| `--continue-probability` | `0.97` | After each query, continue with this probability, otherwise stop. The realized query count is geometric (expected ~33, median ~23), giving variable-length runs. |
 | `--rows-per-table` | `100` | Random-fill rows inserted per new table. Examples add one row each on top. |
 | `--seed` | random | Fixed RNG seed for deterministic replay. Pair with the same `--seed` and unchanged registry for byte-identical repros. |
 | `--antithesis-entropy` | off | Use the Antithesis entropy source instead of a seed or system RNG. Only useful inside the Antithesis sandbox. |

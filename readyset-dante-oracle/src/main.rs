@@ -890,7 +890,7 @@ impl PatternStats {
 async fn run_queries(
     dialect: Dialect,
     num_queries: usize,
-    continue_probability: Option<f64>,
+    continue_probability: f64,
     rows_per_table: usize,
     rng: &mut dyn Rng,
     upstream_url: &DatabaseURL,
@@ -932,7 +932,7 @@ async fn run_queries(
 async fn run_queries_body(
     dialect: Dialect,
     num_queries: usize,
-    continue_probability: Option<f64>,
+    continue_probability: f64,
     rows_per_table: usize,
     rng: &mut dyn Rng,
     upstream_url: &DatabaseURL,
@@ -2380,11 +2380,11 @@ fn classify_query(
 }
 
 /// Whether the per-query coin flip ends the run early. With
-/// `--continue-probability p`, the run continues after a query with probability
-/// `p`; a draw `coin` in [0, 1] at or above `p` stops the loop. Absent the flag
-/// the coin never stops the run (the `--max-queries` fallback bounds it).
-fn coin_flip_stops_run(continue_probability: Option<f64>, coin: f64) -> bool {
-    matches!(continue_probability, Some(p) if coin >= p)
+/// `--continue-probability p` (default 0.97), the run continues after a query
+/// with probability `p`; a draw `coin` in [0, 1] at or above `p` stops the
+/// loop, with `--max-queries` bounding the geometric tail.
+fn coin_flip_stops_run(continue_probability: f64, coin: f64) -> bool {
+    coin >= continue_probability
 }
 
 fn classify_mysql_code(code: u16) -> ErrorClass {
@@ -3126,13 +3126,14 @@ struct ConstraintFuzz {
     readyset_mode: bool,
 
     /// Per-query coin flip: after each query, continue with this probability
-    /// (0.0..=1.0), otherwise stop the run. The realized query count is
-    /// geometric, so a run reaches a different depth each time -- Antithesis
-    /// explores the draw -- bounded by `--max-queries`. Omit to run until the
-    /// max-queries fallback. The draw comes from the query-generation RNG, i.e.
-    /// the entropy stream under `--antithesis-entropy`.
-    #[arg(long)]
-    continue_probability: Option<f64>,
+    /// (0.0..=1.0), otherwise stop the run. This is the primary stop -- the
+    /// realized query count is geometric (expected ~33 at the 0.97 default,
+    /// median ~23), so most runs do a few dozen queries while a small tail runs
+    /// much longer, bounded by `--max-queries`. The draw comes from the
+    /// query-generation RNG, i.e. the entropy stream under
+    /// `--antithesis-entropy`, so a `--seed`-pinned run stops at the same count.
+    #[arg(long, default_value = "0.97")]
+    continue_probability: f64,
 }
 
 impl ConstraintFuzz {
@@ -4049,7 +4050,7 @@ mod tests {
             keep_going: false,
             readyset_mode: false,
             max_queries: 1000,
-            continue_probability: None,
+            continue_probability: 0.97,
         };
         assert_eq!(fuzz.dialect().expect("valid mysql url"), Dialect::MySQL);
     }
@@ -4071,7 +4072,7 @@ mod tests {
             keep_going: false,
             readyset_mode: false,
             max_queries: 1000,
-            continue_probability: None,
+            continue_probability: 0.97,
         };
         assert_eq!(
             fuzz.dialect().expect("valid postgres url"),
@@ -4096,7 +4097,7 @@ mod tests {
             keep_going: false,
             readyset_mode: false,
             max_queries: 1000,
-            continue_probability: None,
+            continue_probability: 0.97,
         };
         let mut rng1 = fuzz.make_rng();
         let mut rng2 = fuzz.make_rng();
@@ -4120,7 +4121,7 @@ mod tests {
             keep_going: false,
             readyset_mode: false,
             max_queries: 1000,
-            continue_probability: None,
+            continue_probability: 0.97,
         };
         let mut rng = fuzz.make_rng();
         let _ = rng.next_u64();
@@ -5212,7 +5213,7 @@ mod tests {
             keep_going: false,
             readyset_mode: false,
             max_queries: 1000,
-            continue_probability: None,
+            continue_probability: 0.97,
         };
         configure(&mut fuzz);
         fuzz
@@ -5503,17 +5504,14 @@ mod tests {
 
     #[test]
     fn coin_flip_stop_decision() {
-        // No continue probability: the coin never stops the loop.
-        assert!(!coin_flip_stops_run(None, 0.0));
-        assert!(!coin_flip_stops_run(None, 0.99));
-        // With p, a draw below p continues; at or above p stops.
-        assert!(!coin_flip_stops_run(Some(0.9), 0.0));
-        assert!(!coin_flip_stops_run(Some(0.9), 0.89));
-        assert!(coin_flip_stops_run(Some(0.9), 0.9));
-        assert!(coin_flip_stops_run(Some(0.9), 0.95));
+        // A draw below p continues; at or above p stops.
+        assert!(!coin_flip_stops_run(0.9, 0.0));
+        assert!(!coin_flip_stops_run(0.9, 0.89));
+        assert!(coin_flip_stops_run(0.9, 0.9));
+        assert!(coin_flip_stops_run(0.9, 0.95));
         // p = 0 stops after the first query; p >= 1 never coin-stops.
-        assert!(coin_flip_stops_run(Some(0.0), 0.0));
-        assert!(!coin_flip_stops_run(Some(1.0), 0.999));
+        assert!(coin_flip_stops_run(0.0, 0.0));
+        assert!(!coin_flip_stops_run(1.0, 0.999));
     }
 
     #[test]
@@ -5528,11 +5526,13 @@ mod tests {
             "0.9",
         ])
         .expect("parse --continue-probability");
-        assert_eq!(parsed.continue_probability, Some(0.9));
+        assert_eq!(parsed.continue_probability, 0.9);
     }
 
     #[test]
-    fn continue_probability_absent_by_default() {
+    fn continue_probability_defaults_to_geometric_stop() {
+        // The geometric coin flip is the primary stop, so a bare invocation
+        // must default to the 0.97 continue probability.
         let parsed = ConstraintFuzz::try_parse_from([
             "oracle",
             "--compare-to",
@@ -5541,6 +5541,40 @@ mod tests {
             "mysql://root:noria@localhost:3307/test",
         ])
         .expect("parse without flag");
-        assert!(parsed.continue_probability.is_none());
+        assert_eq!(parsed.continue_probability, 0.97);
+    }
+
+    #[test]
+    fn geometric_stop_distribution_matches_continue_probability() {
+        // Simulate the per-query coin flip and assert the realized query count
+        // is geometric with the chosen p = 0.97: mean ~ 1/(1-p) = 33.3 and
+        // P(N=1) = 1-p = 0.03. Deterministic over fixed seeds.
+        fn realized_count(seed: u64, p: f64) -> usize {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut n = 1usize;
+            loop {
+                let coin = rng.next_u64() as f64 / u64::MAX as f64;
+                if coin_flip_stops_run(p, coin) {
+                    return n;
+                }
+                n += 1;
+                assert!(n <= 100_000, "geometric stop failed to terminate");
+            }
+        }
+
+        let p = 0.97;
+        let trials = 4000;
+        let counts: Vec<usize> = (0..trials).map(|s| realized_count(s, p)).collect();
+        let mean = counts.iter().sum::<usize>() as f64 / trials as f64;
+        let singletons = counts.iter().filter(|&&n| n == 1).count() as f64 / trials as f64;
+
+        assert!(
+            (28.0..40.0).contains(&mean),
+            "mean query count {mean} should be near 1/(1-p) = 33.3"
+        );
+        assert!(
+            (0.02..0.045).contains(&singletons),
+            "P(N=1) {singletons} should be near 1-p = 0.03"
+        );
     }
 }
