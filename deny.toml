@@ -151,11 +151,19 @@ skip = [
     { name = "hashbrown", version = "0.15.5" },
     # forked mysql_async still uses lru 0.16; adapter uses 0.18
     { name = "lru", version = "0.16.4" },
-    # upstream tokio-postgres 0.7.16 uses newer versions of these crates
+    # upstream tokio-postgres 0.7.18 uses newer versions of these crates
     { name = "phf", version = "0.13.1" },
     { name = "phf_shared", version = "0.13.1" },
     { name = "rand", version = "0.9.2" },
     { name = "cpufeatures", version = "0.2.17" },
+    # tokio-postgres 0.7.18 uses the RustCrypto 0.11/0.13 generation, while the
+    # rest of the workspace stays on the 0.10/0.12 generation
+    { name = "block-buffer", version = "0.12.1" },
+    { name = "const-oid", version = "0.10.2" },
+    { name = "crypto-common", version = "0.2.2" },
+    { name = "digest", version = "0.11.3" },
+    { name = "hmac", version = "0.13.0" },
+    { name = "sha2", version = "0.11.0" },
     # test-discovery uses toml 0.9 (toml_datetime 0.7, winnow 0.7),
     # while trybuild / proc-macro-crate use newer toml 1.0 / toml_edit 0.25
     { name = "toml_datetime", version = "0.7.5" },
