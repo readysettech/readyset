@@ -105,8 +105,8 @@ use itertools::Either;
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
 use readyset_sql::analysis::visit::{Visitor, walk_select_statement};
 use readyset_sql::ast::{
-    Expr, FieldDefinitionExpr, GroupByClause, JoinRightSide, Relation, SelectStatement, TableExpr,
-    TableExprInner,
+    Expr, FieldDefinitionExpr, GroupByClause, JoinRightSide, Relation, SelectStatement,
+    SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use std::collections::HashSet;
@@ -121,9 +121,16 @@ pub trait InlineLeadingDerivedTable: Sized {
     /// inlining-eligibility check, where the canonical (non-LATERAL)
     /// cardinality-preservation arm consults it for the Class B regular-
     /// table-RHS admit.
+    ///
+    /// `opaque_aliases` is the set of derived-table aliases the pipeline has
+    /// asked this pass to leave intact -- currently the wrap outputs produced
+    /// by `normalize_subquery_positions`, which must not be inlined until
+    /// `unnest_subqueries` consumes the moved predicates.  Pass an empty set
+    /// after unnest to recover any inlining that becomes safe.
     fn inline_leading_derived_table<U: UniqueColumnsSchema>(
         &mut self,
         unique_cols_schema: &U,
+        opaque_aliases: &HashSet<SqlIdentifier>,
     ) -> ReadySetResult<&mut Self>;
 }
 
@@ -131,9 +138,14 @@ impl InlineLeadingDerivedTable for SelectStatement {
     fn inline_leading_derived_table<U: UniqueColumnsSchema>(
         &mut self,
         unique_cols_schema: &U,
+        opaque_aliases: &HashSet<SqlIdentifier>,
     ) -> ReadySetResult<&mut Self> {
-        let mut rewritten =
-            hoist_lhsmost_derived_table_rewrite_impl(self, true, unique_cols_schema)?;
+        let mut rewritten = hoist_lhsmost_derived_table_rewrite_impl(
+            self,
+            true,
+            unique_cols_schema,
+            opaque_aliases,
+        )?;
 
         if rewritten {
             // If hoisting happened, try to move the parametrizable filters, that
@@ -324,6 +336,7 @@ fn hoist_lhsmost_derived_table<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     is_top_select: bool,
     unique_cols_schema: &U,
+    opaque_aliases: &HashSet<SqlIdentifier>,
 ) -> ReadySetResult<bool> {
     // Normalize LATERAL at position 0.  The flag's only expressive
     // capability is correlation to preceding FROM siblings — which do not
@@ -358,6 +371,14 @@ fn hoist_lhsmost_derived_table<U: UniqueColumnsSchema>(
     let Some((lhs_stmt, lhs_alias)) = as_sub_query_with_alias(lhs_dt) else {
         return Ok(false);
     };
+
+    // Refuse to inline wraps produced by `normalize_subquery_positions` until
+    // `unnest_subqueries` consumes them.  The adapter pipeline re-invokes this
+    // pass post-unnest with an empty `opaque_aliases` set to recover inlining
+    // that becomes safe once the wraps are consumed.
+    if opaque_aliases.contains(&lhs_alias) {
+        return Ok(false);
+    }
 
     // Build a projection-rebinding map for *analysis* (ORDER BY compatibility, unnesting guards).
     // IMPORTANT: we rebuild the map later (after alias de-duplication) for the actual substitution;
@@ -403,6 +424,7 @@ fn hoist_lhsmost_derived_table_rewrite_impl<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     is_top_select: bool,
     unique_cols_schema: &U,
+    opaque_aliases: &HashSet<SqlIdentifier>,
 ) -> ReadySetResult<bool> {
     let mut rewritten = false;
 
@@ -417,12 +439,17 @@ fn hoist_lhsmost_derived_table_rewrite_impl<U: UniqueColumnsSchema>(
     }) = stmt.tables.first_mut()
     {
         // Normalize the inner left-spine only; do not repeat per-iteration.
-        rewritten |=
-            hoist_lhsmost_derived_table_rewrite_impl(inner_stmt, false, unique_cols_schema)?;
+        rewritten |= hoist_lhsmost_derived_table_rewrite_impl(
+            inner_stmt,
+            false,
+            unique_cols_schema,
+            opaque_aliases,
+        )?;
     }
 
     // Single hoist attempt for this level.
-    rewritten |= hoist_lhsmost_derived_table(stmt, is_top_select, unique_cols_schema)?;
+    rewritten |=
+        hoist_lhsmost_derived_table(stmt, is_top_select, unique_cols_schema, opaque_aliases)?;
 
     Ok(rewritten)
 }
@@ -443,6 +470,7 @@ mod tests {
             &mut stmt,
             true,
             &crate::unnest_subqueries::UnusedUniqueColumnsSchema,
+            &HashSet::new(),
         )?;
         Ok(stmt)
     }

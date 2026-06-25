@@ -7030,24 +7030,25 @@ WHERE s.status NOT IN (
     test_it("test265", original_text, expected_text);
 }
 
-// ── Subqueries in HAVING are rejected with a clean error ──
+// HAVING-subquery shapes outside `is_supported_subquery_predicate` still
+// reach `unnest_all_subqueries` because `normalize_subquery_positions`
+// only wraps supported shapes.  The backstop gate rejects them cleanly.
+// The rewrite harness here bypasses the wrap entirely, so a plain
+// `HAVING count(*) > (SELECT ...)` also lands on this gate.
 
-/// A subquery in HAVING should be rejected with `unsupported!` rather than
-/// silently passing through and hitting the hard guardrail in derived_tables_rewrite.
 #[test]
-fn test266_having_subquery_rejected() {
+fn test266_having_subquery_backstop_rejects() {
     let original_text = r#"
 SELECT s.city, COUNT(*) FROM s
 GROUP BY s.city
 HAVING COUNT(*) > (SELECT AVG(spj.qty) FROM spj);
 "#;
-    // Empty expected text → assert the rewrite errors.
+    // Empty expected text: assert the rewrite errors.
     test_it("test266", original_text, "");
 }
 
-/// Correlated subquery in HAVING should also be rejected.
 #[test]
-fn test267_having_correlated_subquery_rejected() {
+fn test267_having_correlated_subquery_backstop_rejects() {
     let original_text = r#"
 SELECT s.city, COUNT(*) FROM s
 GROUP BY s.city

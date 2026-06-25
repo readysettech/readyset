@@ -1565,7 +1565,9 @@ pub(crate) fn is_supported_subquery_predicate(expr: &Expr) -> bool {
 // cloning the original statement and adding more contextual data.
 // **NOTE**: Any changes regarding what subquery predicates we support, should
 // be reflected in the function above `is_supported_subquery_predicate()`
-fn as_supported_subquery_predicate(expr: &Expr) -> ReadySetResult<SubqueryPredicateDesc> {
+pub(crate) fn as_supported_subquery_predicate(
+    expr: &Expr,
+) -> ReadySetResult<SubqueryPredicateDesc> {
     Ok(match expr {
         Expr::UnaryOp {
             op: UnaryOperator::Not,
@@ -2019,7 +2021,9 @@ pub(crate) fn join_derived_table(
     )
 }
 
-fn collect_subquery_predicates(expr: &Expr) -> ReadySetResult<(Vec<Expr>, Option<Expr>)> {
+pub(crate) fn collect_subquery_predicates(
+    expr: &Expr,
+) -> ReadySetResult<(Vec<Expr>, Option<Expr>)> {
     let mut subquery_predicates = Vec::new();
     let remaining_expr = split_expr_mut(
         expr,
@@ -2556,14 +2560,19 @@ pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
     stmt: &mut SelectStatement,
     ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<RewriteStatus> {
-    // Subqueries in HAVING are not supported (known_core_limitations.md §4.3).
-    // Reject early with a clean user-facing error rather than letting the subquery
-    // pass through unprocessed and trigger the opaque hard guardrail in
-    // derived_tables_rewrite.
+    // Subqueries in HAVING are handled upstream by
+    // `normalize_subquery_positions`, which wraps the SELECT and migrates
+    // supported HAVING subquery predicates into the wrapper's WHERE.
+    // Backstop for shapes outside `is_supported_subquery_predicate` (e.g. a
+    // top-level OR-conjunct predicate the wrap's per-conjunct split does not
+    // touch): a HAVING that still carries a subquery here has no cacheable
+    // decorrelation path, so reject with a clean adapter-fallback error
+    // instead of letting it drift through the pipeline as latent wrong-
+    // results potential.
     if let Some(having) = &stmt.having
         && contains_select(having)
     {
-        unsupported!("Subqueries in HAVING are not supported");
+        unsupported!("Subquery in HAVING outside the supported predicate set");
     }
 
     let status1 = unnest_subqueries_in_where(stmt, ctx)?;

@@ -21,6 +21,7 @@ pub(crate) mod inline_subquery;
 mod key_def_coalescing;
 mod lateral_join;
 mod normalize_right_join;
+mod normalize_subquery_positions;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
 pub mod query_optimization_rewrite;

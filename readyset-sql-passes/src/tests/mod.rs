@@ -5,6 +5,8 @@ mod hoist_parametrizable_filters_tests;
 #[cfg(test)]
 mod infer_nullability_tests;
 #[cfg(test)]
+mod normalize_subquery_positions_tests;
+#[cfg(test)]
 mod rewrite_joins_tests;
 #[cfg(test)]
 mod unnest_subqueries_tests;

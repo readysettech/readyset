@@ -1,0 +1,363 @@
+statement ok
+create table s (sn int, city text, status int);
+
+statement ok
+insert into s values
+(1, 'NYC', 10),
+(2, 'NYC', 20),
+(3, 'LA',  15),
+(4, 'LA',  25),
+(5, 'LA',  30),
+(6, 'SF',  40);
+
+statement ok
+create table j (jn int, city text);
+
+statement ok
+insert into j values
+(1, 'NYC'),
+(2, 'NYC'),
+(3, 'NYC'),
+(4, 'NYC'),
+(5, 'NYC'),
+(6, 'LA');
+
+statement ok
+create table p (pn int, jn int);
+
+statement ok
+insert into p values
+(1, 2),
+(2, 3),
+(3, 99);
+
+# Group counts in s: NYC=2, LA=3, SF=1.  Group counts in j by city: NYC=5, LA=1, SF=0.
+
+# Correlated scalar in HAVING, LHS fully reused (compound `count(*) + 1` matches `bumped_cnt`).
+query TI rowsort
+select s.city, count(*) + 1 as bumped_cnt
+from s
+group by s.city
+having count(*) + 1 > (select count(*) from j where j.city = s.city);
+----
+LA
+4
+SF
+2
+
+# Correlated scalar in HAVING, LHS not projected in outer SELECT (pure Step 2 synthesis).
+query T rowsort
+select s.city
+from s
+group by s.city
+having count(*) > (select count(*) from j where j.city = s.city);
+----
+LA
+SF
+
+# HAVING with mixed alias-ref + raw aggregate; per-conjunct split (non-subquery stays inside, subquery moves out).
+query TI rowsort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having cnt > 1
+   and count(*) > (select count(*) from j where j.city = s.city);
+----
+LA
+3
+
+# Uncorrelated subquery in HAVING (no correlation rebind needed).
+query TI rowsort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (select min(jn) from j);
+----
+LA
+3
+NYC
+2
+
+# NOT IN with HAVING -- exercises 3VL-aware unnester after wrap moves the predicate to WHERE.
+query TI rowsort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having s.city not in (select j.city from j);
+----
+SF
+1
+
+# Body shadows outer alias: outer `s`, body `j AS s` -- body's `s.jn` is body-local, not a correlation.
+# Buggy decorrelation would rebind `s.jn` to outer's `s` (which has no `jn` column) and either
+# fail to compile or return wrong results.  Correct decorrelation keeps `s.jn` referring to `j`.
+query TI rowsort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (select count(*) from j as s where s.jn = 6);
+----
+LA
+3
+NYC
+2
+
+# Nested subquery inside HAVING: outer correlation rebinds, innermost uncorrelated stays put.
+# The inner IN deliberately reads from `p` (NOT `j`) -- using the same base table as the
+# outer subquery body would trip `contains_problematic_self_joins` after the IN gets
+# decorrelated as a semi-join, blocking the entire chain.  Using a distinct table keeps
+# the descent exercise meaningful without bumping into that downstream gate.
+# `SELECT jn FROM p` returns {2, 3, 99}.  Outer body counts j rows per city with jn in
+# that set: NYC=2 (jn=2,3 AND city=NYC), LA=0, SF=0.  Outer s counts: NYC=2, LA=3, SF=1.
+# `count_outer > count_inner`: NYC (2>2 false), LA (3>0 true), SF (1>0 true).
+query T rowsort
+select s.city
+from s
+group by s.city
+having count(*) > (
+    select count(*) from j
+    where j.city = s.city
+      and j.jn in (select p.jn from p where p.pn > 0)
+);
+----
+LA
+SF
+
+# ORDER BY-subquery trigger (NO HAVING) -- the second wrap trigger.  Correlated
+# scalar subquery in ORDER BY; wrap fires.  Per-row j-city count: NYC=5, LA=1, SF=0.
+# Primary key DESC by j-count, secondary `s.sn ASC` breaks within-city ties -> fully
+# deterministic.  Wrap projects ORDER BY items to inner SELECT-list; wrapper ORDER BY
+# references the synthetic aliases with original direction modifiers preserved.
+query I nosort
+select s.sn
+from s
+order by (select count(*) from j where j.city = s.city) desc, s.sn asc;
+----
+1
+2
+3
+4
+5
+6
+
+# ORDER BY-subquery + LIMIT (NO HAVING) -- TOP-K migration without the HAVING
+# trigger.  LIMIT must migrate to wrapper or it would clamp pre-sort.  Top-3
+# rows by per-row j-count DESC, sn ASC tiebreak: NYC sn=1, NYC sn=2, LA sn=3.
+query I nosort
+select s.sn
+from s
+order by (select count(*) from j where j.city = s.city) desc, s.sn asc
+limit 3;
+----
+1
+2
+3
+
+# Uncorrelated subquery in ORDER BY.  Constant key from inner (max j.jn = 6 for
+# every row) -- secondary `s.sn ASC` becomes the effective sort.  Verifies the
+# uncorrelated path: subquery body has no correlation; uniformly projected to
+# inner SELECT-list; wrapper ORDER BY references the projected alias.
+query I nosort
+select s.sn
+from s
+order by (select max(j.jn) from j), s.sn asc;
+----
+1
+2
+3
+4
+5
+6
+
+# Compound expression with correlated subquery in ORDER BY.  Wrap projects
+# the WHOLE expression (`s.sn * 10 + j_count_for_city`) to inner SELECT-list.
+# Per-row keys: NYC(sn=1)=15, NYC(sn=2)=25, LA(sn=3)=31, LA(sn=4)=41, LA(sn=5)=51,
+# SF(sn=6)=60.  ASC -> sn=1,2,3,4,5,6.
+query I nosort
+select s.sn
+from s
+order by s.sn * 10 + (select count(*) from j where j.city = s.city) asc;
+----
+1
+2
+3
+4
+5
+6
+
+# Direction modifier DESC NULLS LAST preserved through the wrap migration.
+# Result identical to the first ORDER BY-subquery test in row set, but the
+# direction modifier on the wrapped item is the `DESC NULLS LAST` form.
+query I nosort
+select s.sn
+from s
+order by (select count(*) from j where j.city = s.city) desc nulls last, s.sn asc;
+----
+1
+2
+3
+4
+5
+6
+
+# Combined: HAVING-subquery + multi-item ORDER BY + LIMIT.  HAVING leaves
+# {LA, SF}.  ORDER BY count(*) DESC, city ASC -> (LA, 3), (SF, 1).  LIMIT 1
+# -> first row.
+query TI nosort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (
+    select count(*) from j where j.city = s.city
+)
+order by count(*) desc, s.city asc
+limit 1;
+----
+LA
+3
+
+# Combined: HAVING-subquery + ORDER BY-subquery + LIMIT.  BOTH triggers fire
+# in the same wrap.  After HAVING, {LA (j-count=1), SF (j-count=0)} remain.
+# ORDER BY j-count ASC -> (SF, 1), (LA, 3).  LIMIT 1 -> (SF, 1).  This shape
+# would lose the soundness invariant if either ORDER BY or LIMIT stayed in
+# the inner -- inner cap would clamp top-N pre-HAVING and produce wrong rows.
+query TI nosort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (
+    select count(*) from j where j.city = s.city
+)
+order by (select count(*) from j where j.city = s.city) asc, s.city asc
+limit 1;
+----
+SF
+1
+
+# Combined: HAVING-subquery + LIMIT + OFFSET (no ORDER BY items with
+# subqueries; OFFSET coverage).  HAVING leaves {LA (3), SF (1)}.  ORDER BY
+# count(*) DESC -> (LA, 3), (SF, 1).  OFFSET 1 LIMIT 1 -> skip the first row,
+# take one -> (SF, 1).  OFFSET migrates to wrapper alongside LIMIT.
+query TI nosort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (
+    select count(*) from j where j.city = s.city
+)
+order by count(*) desc
+limit 1 offset 1;
+----
+SF
+1
+
+# HAVING-subquery + ORDER BY + LIMIT -- exercises the unified TOP-K migration.
+# Counts per s.city: NYC=2, LA=3, SF=1.  j-count per city: NYC=5, LA=1, SF=0.
+# HAVING `count(*) > j_count` leaves: LA (3>1 TRUE), SF (1>0 TRUE).  NYC excluded (2>5 FALSE).
+# ORDER BY count(*) DESC over the filtered set: (LA, 3), (SF, 1).  LIMIT 2: both rows.
+# CRITICAL: without LIMIT migration to wrapper, the inner LIMIT 2 picks top-2 by count
+# BEFORE HAVING applies = (LA, 3) + (NYC, 2); wrapper HAVING drops (NYC, 2); result = 1 row.
+# Soundness invariant verified: result must match upstream PG's HAVING-then-ORDER-then-LIMIT.
+query TI nosort
+select s.city, count(*) as cnt
+from s
+group by s.city
+having count(*) > (
+    select count(*) from j
+    where j.city = s.city
+)
+order by count(*) desc
+limit 2;
+----
+LA
+3
+SF
+1
+
+# Duplicate outer aliases preserved through the wrap.  Both `s.city` and
+# `j.city` default-alias to `city`; the wrap must expose both columns to
+# the client (dup output aliases are legal SQL) while making the
+# `<wrap_alias>.<inner>` refs unambiguous.  Cross-join filtered by city
+# equality gives NYC/NYC (2x5=10 pairs) and LA/LA (3x1=3 pairs).
+# HAVING count(*) > `count(*) FROM p WHERE p.pn > 2` (=1) -> both groups.
+query TTI rowsort
+select s.city, j.city, count(*) as cnt
+from s
+join j on s.city = j.city
+group by s.city, j.city
+having count(*) > (select count(*) from p where p.pn > 2);
+----
+LA
+LA
+3
+NYC
+NYC
+10
+
+# Explicit duplicate outer aliases (`AS foo` on both).  User-authored
+# duplicates are legal SQL and must survive the wrap intact.
+query TTI rowsort
+select s.city as foo, j.city as foo, count(*) as cnt
+from s
+join j on s.city = j.city
+group by s.city, j.city
+having count(*) > (select count(*) from p where p.pn > 2);
+----
+LA
+LA
+3
+NYC
+NYC
+10
+
+# Nested wrap at PREDICATE position: outer WHERE has an IN subquery whose
+# body carries a HAVING-subquery.  Bottom-up visit wraps the inner SELECT;
+# outer stays plain (unnester handles IN separately).
+# `count(*) FROM p` = 3.  Per j.city: NYC=5 (5>3 TRUE), LA=1 (1>3 FALSE).
+# Inner returns {NYC}.  Outer: s.sn where s.city IN {NYC} -> {1, 2}.
+query I rowsort
+select s.sn
+from s
+where s.city in (
+    select j.city from j
+    group by j.city
+    having count(*) > (select count(*) from p)
+);
+----
+1
+2
+
+# Nested wrap at DT (leading FROM) position: the derived table's body
+# carries HAVING + correlated subquery.  Wrap fires on the DT body; the
+# outer projects/filters through the DT.  Same HAVING semantics as the
+# top-level correlated-scalar test above -- LA (3>1 TRUE), SF (1>0 TRUE),
+# NYC (2>5 FALSE) -- exercised through an extra DT layer.
+query TI rowsort
+select sub.city, sub.cnt
+from (
+    select s.city, count(*) as cnt from s
+    group by s.city
+    having count(*) > (select count(*) from j where j.city = s.city)
+) as sub
+where sub.cnt >= 1;
+----
+LA
+3
+SF
+1
+
+# ORDER BY-subquery + LIMIT inside a derived table.  Wrap fires on the DT
+# body and migrates ORDER BY + LIMIT to the wrap.  Outer projects sub.sn.
+# Top-3 rows by per-row j-count DESC, sn ASC tiebreak: NYC(sn=1,j=5),
+# NYC(sn=2,j=5), LA(sn=3,j=1).
+query I nosort
+select sub.sn
+from (
+    select s.sn from s
+    order by (select count(*) from j where j.city = s.city) desc, s.sn asc
+    limit 3
+) as sub;
+----
+1
+2
+3

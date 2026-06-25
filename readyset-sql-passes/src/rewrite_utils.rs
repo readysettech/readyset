@@ -3025,27 +3025,75 @@ pub(crate) fn hoist_parametrizable_join_filters_to_where(
 /// Correctness of this guard relies on `get_from_item_reference_name` and `is_column_of!`
 /// using the same `Relation` identity that the resolver assigned to aliases.
 fn shadows_rhs_alias(stmt: &SelectStatement, rhs_rel: &Relation) -> bool {
+    shadows_rhs_aliases(stmt, &HashSet::from([rhs_rel.clone()]))
+}
+
+/// Returns true if `stmt`'s local FROM items contain a relation matching any
+/// member of `shadow_rels`.  HashSet generalization of [`shadows_rhs_alias`].
+pub(crate) fn shadows_rhs_aliases(stmt: &SelectStatement, shadow_rels: &HashSet<Relation>) -> bool {
     get_local_from_items_iter!(stmt)
-        .any(|t| get_from_item_reference_name(t).is_ok_and(|rel| rel == *rhs_rel))
+        .any(|t| get_from_item_reference_name(t).is_ok_and(|rel| shadow_rels.contains(&rel)))
 }
 
 pub(crate) fn deep_columns_visitor_mut(
     stmt: &mut SelectStatement,
-    shadow_rel: &Relation,
+    outer_rel: &Relation,
+    visitor: &mut impl FnMut(&mut Expr),
+) -> ReadySetResult<()> {
+    deep_columns_visitor_mut_in_set(stmt, &HashSet::from([outer_rel.clone()]), visitor)
+}
+
+/// HashSet generalization of [`deep_columns_visitor_mut`]: visit
+/// `Expr::Column` nodes whose table is a currently-live outer relation, and
+/// invoke `visitor` on them.  "Currently-live" means: an element of
+/// `outer_rels` that has not been shadowed by any enclosing subquery body's
+/// local FROM.
+///
+/// Entry scope: the top-level `stmt` is treated as the same scope where
+/// `outer_rels` was defined -- its own local FROM items do not shadow
+/// `outer_rels`.  This matches how callers use the helper: rebinding
+/// references to a FROM item within the very stmt that owns it, or
+/// rebinding correlation refs to outer relations inside a subquery body
+/// passed as `stmt`.  Nested subqueries below the top level do shadow
+/// on their own local FROM.
+///
+/// The visitor descends into every nested `SelectStatement` reachable from
+/// `stmt` and at each descent level recomputes the still-live outer set as
+/// `parent_live - this_level_body_locals`.  Columns whose table is not in
+/// the current level's live set are skipped -- either because their table
+/// isn't an outer relation of interest, or because it has been shadowed by
+/// an enclosing body's local FROM.  This is load-bearing for multi-outer
+/// scenarios where a nested body shadows some (but not all) of the outer
+/// relations: refs to the non-shadowed outer relations at deeper levels
+/// remain visible and get invoked.
+pub(crate) fn deep_columns_visitor_mut_in_set(
+    stmt: &mut SelectStatement,
+    outer_rels: &HashSet<Relation>,
     visitor: &mut impl FnMut(&mut Expr),
 ) -> ReadySetResult<()> {
     struct ExprVisitor<'a> {
-        shadow_rel: &'a Relation,
-        visitor: &'a mut dyn FnMut(&mut Expr),
+        // Per-level stack of still-live outer relations.  Depth 1 (top-
+        // level entry) uses `outer_rels` unchanged; deeper levels push
+        // `parent_top - this_body_locals`.  Popped on subtree exit.
+        live_stack: Vec<HashSet<Relation>>,
         depth: usize,
+        visitor: &'a mut dyn FnMut(&mut Expr),
     }
 
     impl<'a> VisitorMut<'a> for ExprVisitor<'a> {
         type Error = ReadySetError;
 
         fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
-            if matches!(expr, Expr::Column(_)) {
-                (self.visitor)(expr);
+            if let Expr::Column(col) = expr {
+                let live_here = self.live_stack.last();
+                if col
+                    .table
+                    .as_ref()
+                    .zip(live_here)
+                    .is_some_and(|(t, live)| live.contains(t))
+                {
+                    (self.visitor)(expr);
+                }
                 Ok(())
             } else {
                 walk_expr(self, expr)
@@ -3057,18 +3105,35 @@ pub(crate) fn deep_columns_visitor_mut(
             stmt: &'a mut SelectStatement,
         ) -> Result<(), Self::Error> {
             self.depth += 1;
-            if self.depth == 1 || !shadows_rhs_alias(stmt, self.shadow_rel) {
-                visit_mut::walk_select_statement(self, stmt)?;
+            let this_live = if self.depth == 1 {
+                // Top-level entry: stmt is treated as the scope where
+                // outer_rels lives, so its own local FROM does not shadow.
+                self.live_stack.last().cloned().unwrap_or_default()
+            } else {
+                let body_locals = collect_local_from_items(stmt)?;
+                let parent_live = self.live_stack.last().cloned().unwrap_or_default();
+                parent_live.difference(&body_locals).cloned().collect()
+            };
+
+            if this_live.is_empty() && self.depth > 1 {
+                // Nothing outer is still live at this subquery level;
+                // skip the whole subtree.
+                self.depth -= 1;
+                return Ok(());
             }
+
+            self.live_stack.push(this_live);
+            visit_mut::walk_select_statement(self, stmt)?;
+            self.live_stack.pop();
             self.depth -= 1;
             Ok(())
         }
     }
 
     ExprVisitor {
-        shadow_rel,
-        visitor,
+        live_stack: vec![outer_rels.clone()],
         depth: 0,
+        visitor,
     }
     .visit_select_statement(stmt)
 }
@@ -3202,7 +3267,9 @@ pub(crate) fn get_lhs_rhs_tables_from_eq_constraint(
     }
 }
 
-fn normalize_having_and_group_by_for_statement(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+pub(crate) fn normalize_having_and_group_by_for_statement(
+    stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
     let mut was_rewritten = false;
 
     // Split aliased select items into two categories:
@@ -3335,7 +3402,7 @@ fn build_select_field_alias_to_expr_map(
         .collect::<HashMap<SqlIdentifier, &Expr>>()
 }
 
-fn denormalize_having_and_group_by_for_statement(
+pub(crate) fn denormalize_having_and_group_by_for_statement(
     stmt: &mut SelectStatement,
 ) -> ReadySetResult<bool> {
     let mut was_rewritten = false;

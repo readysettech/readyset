@@ -5,6 +5,7 @@ pub mod post_lookup_decomposition;
 mod shallow_cache_rewrites;
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
@@ -37,6 +38,7 @@ use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
+use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
 use crate::rewrite_utils::contains_question_mark_placeholders;
 use crate::unnest_subqueries::UnnestSubqueries as _;
@@ -344,15 +346,25 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
             Ok(_) => {
                 query.validate_query_semantics(flags.dialect)?;
                 trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
+                let wrap_aliases = query.normalize_subquery_positions()?;
+                trace!(parent: &span, pass="normalize_subquery_positions", query = %query.display(flags.dialect));
                 query.rewrite_array_constructors(&context)?;
                 trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
                 let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
                 query.drop_redundant_join(&unique_cols_schema)?;
                 trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
-                query.inline_leading_derived_table(&unique_cols_schema)?;
+                query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?;
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
                 query.unnest_subqueries(&context, &unique_cols_schema)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
+                // Post-unnest re-invocation of ILDT recovers any inlining
+                // deferred by wrap_aliases; skip when no wrap fired, since
+                // the pre-unnest ILDT already ran with the equivalent
+                // empty-set behavior for this shape.
+                if !wrap_aliases.is_empty() {
+                    query.inline_leading_derived_table(&unique_cols_schema, &HashSet::new())?;
+                    trace!(parent: &span, pass="inline_leading_derived_table_post_unnest", query = %query.display(flags.dialect));
+                }
                 query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
                 trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
                 query.query_optimization_rewrite(
