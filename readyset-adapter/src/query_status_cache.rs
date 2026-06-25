@@ -1003,7 +1003,13 @@ impl QueryStatusCache {
             let statuses = self.persistent_handle.statuses.read();
             statuses
                 .iter()
-                .filter_map(|(query_id, (query, _status))| {
+                .filter_map(|(query_id, (query, status))| {
+                    // Shallow caches are TTL-governed; never invalidate them on
+                    // a table change, whether replicator-driven or a client
+                    // `DROP TABLE` (REA-6692).
+                    if is_shallow_successful(status) {
+                        return None;
+                    }
                     if let Some(referenced_tables) = extract_referenced_tables(query)
                         && referenced_tables.iter().any(|table| {
                             if !dropped_names.contains(&table.name) {
@@ -1046,6 +1052,20 @@ impl QueryStatusCache {
         }
     }
 
+    /// Remove a single query's status by id, unconditionally -- including a
+    /// `Successful(Shallow)` entry that [`Self::invalidate_queries_referencing_tables`]
+    /// deliberately preserves. Used by the RLS catalog poller when a table's RLS
+    /// state makes an existing cache unsafe (e.g. a table turning RLS-active): a
+    /// reliable, security-driven signal that must reset the query so it
+    /// re-migrates instead of routing to the dropped cache. Distinct from the
+    /// schema-catalog path, whose shallow-preservation (REA-6692) assumes an
+    /// unreliable detector.
+    pub fn invalidate_query(&self, query_id: &QueryId) {
+        let mut statuses = self.persistent_handle.statuses.write();
+        statuses.pop(query_id);
+        self.id_to_status.remove(query_id);
+    }
+
     pub fn reportable_metrics(&self) -> ReportableMetrics {
         ReportableMetrics {
             id_to_status_size: self.id_to_status.len() as u64,
@@ -1065,11 +1085,36 @@ impl SchemaChangeHandler for QueryStatusCache {
         // Acquire the statuses write lock before clearing to prevent a concurrent reader from
         // re-inserting between clears. Clear pending_inlined_migrations inside the lock too,
         // so a concurrent inlined_cache_miss can't re-populate it for a query we just removed.
+        //
+        // Shallow caches are excluded: they proxy to upstream and refresh on
+        // their own TTL, so schema-catalog invalidation must leave them intact
+        // (REA-6692). Dropping their status would orphan the cache -- it stays
+        // in the shallow manager but `should_query_shallow` no longer routes to
+        // it -- which breaks recovered caches after a restart.
         let mut statuses = self.persistent_handle.statuses.write();
-        self.id_to_status.clear();
-        statuses.clear();
+        self.id_to_status
+            .retain(|_, status| is_shallow_successful(status));
+        let drop_ids: Vec<QueryId> = statuses
+            .iter()
+            .filter(|(_, (_, status))| !is_shallow_successful(status))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in drop_ids {
+            statuses.pop(&id);
+        }
         self.persistent_handle.pending_inlined_migrations.clear();
     }
+}
+
+/// Whether a query's state is a successful shallow cache. Shallow caches proxy
+/// to upstream and refresh on their own TTL, so they are excluded from all
+/// schema-catalog-driven invalidation; their freshness is governed solely by
+/// TTL/refresh (REA-6692).
+fn is_shallow_successful(status: &QueryStatus) -> bool {
+    matches!(
+        status.migration_state,
+        MigrationState::Successful(CacheType::Shallow)
+    )
 }
 
 /// Bridges `&'static QueryStatusCache` to `Arc<dyn SchemaChangeHandler>`.
@@ -1863,6 +1908,46 @@ mod tests {
         // After invalidation, the query is no longer in the cache; querying it re-inserts with
         // default Pending state.
         assert_eq!(cache.query_migration_state(&q).1, MigrationState::Pending);
+    }
+
+    #[test]
+    fn schema_catalog_invalidation_preserves_shallow_caches() {
+        use schema_catalog::SchemaChangeHandler;
+
+        let cache = QueryStatusCache::new().style(MigrationStyle::Explicit);
+
+        let deep = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let shallow = ViewCreateRequest::new(select_statement("SELECT * FROM t2").unwrap(), vec![]);
+        cache.update_query_migration_state(
+            &deep,
+            MigrationState::Successful(CacheType::Deep),
+            None,
+        );
+        cache.update_query_migration_state(
+            &shallow,
+            MigrationState::Successful(CacheType::Shallow),
+            None,
+        );
+
+        // A full invalidation (SchemaChanges::All) clears deep state but leaves
+        // the shallow cache routable.
+        cache.invalidate_all();
+        assert_eq!(
+            cache.query_migration_state(&deep).1,
+            MigrationState::Pending
+        );
+        assert_eq!(
+            cache.query_migration_state(&shallow).1,
+            MigrationState::Successful(CacheType::Shallow)
+        );
+
+        // A targeted invalidation referencing t2 must also leave the shallow
+        // cache intact -- it is governed by its own TTL, not the schema catalog.
+        cache.invalidate_queries_referencing_tables(&[Relation::from("t2")]);
+        assert_eq!(
+            cache.query_migration_state(&shallow).1,
+            MigrationState::Successful(CacheType::Shallow)
+        );
     }
 
     #[test]
