@@ -99,12 +99,7 @@ pub(crate) trait Connector {
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
     if let DatabaseURL::PostgreSQL(mut options) = config.get_cdc_db_url()? {
-        let repl_slot_name = match &config.replication_server_id {
-            Some(server_id) => {
-                format!("{REPLICATION_SLOT}_{server_id}")
-            }
-            _ => REPLICATION_SLOT.to_string(),
-        };
+        let repl_slot_name = replication_slot_name(&config);
         let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
 
         let dbname = options
@@ -138,6 +133,16 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
 
 pub fn resnapshot_slot_name(repl_slot_name: &String) -> String {
     format!("{RESNAPSHOT_SLOT}_{repl_slot_name}")
+}
+
+/// Name of the primary logical replication slot Readyset creates on the upstream Postgres
+/// database. Incorporates the configured replication server id so that multiple Readyset
+/// deployments replicating from the same upstream cluster do not collide on slot names.
+pub fn replication_slot_name(config: &UpstreamConfig) -> String {
+    match &config.replication_server_id {
+        Some(server_id) => format!("{REPLICATION_SLOT}_{server_id}"),
+        None => REPLICATION_SLOT.to_string(),
+    }
 }
 /// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter<'a> {
@@ -250,12 +255,7 @@ impl<'a> NoriaAdapter<'a> {
                     )
                     .await?;
 
-                    let repl_slot_name = match &config.replication_server_id {
-                        Some(server_id) => {
-                            format!("{REPLICATION_SLOT}_{server_id}")
-                        }
-                        _ => REPLICATION_SLOT.to_string(),
-                    };
+                    let repl_slot_name = replication_slot_name(config);
 
                     // Notify controller that we are about to start a snapshot if we are
                     // restarting to resnapshot.

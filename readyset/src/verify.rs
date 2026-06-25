@@ -15,7 +15,7 @@ use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL, QueryableConnection,
 };
 use readyset_sql::Dialect;
-use replicators::MYSQL_INTERNAL_DBS;
+use replicators::{replication_slot_name, MYSQL_INTERNAL_DBS};
 
 use crate::Options;
 
@@ -273,6 +273,42 @@ async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+/// A Postgres logical replication slot is bound to the database it was created in, but slot names
+/// are unique across the whole cluster. If a slot with the name Readyset would use already exists
+/// for a different database, Readyset cannot use it and the replicator would otherwise crash-loop
+/// on `START_REPLICATION`. Fail fast here with an actionable message instead.
+async fn verify_replication_slot(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
+    match conn.dialect() {
+        Dialect::PostgreSQL => {}
+        Dialect::MySQL => return Ok(()),
+    }
+
+    let slot_name = replication_slot_name(&options.server_worker_options.replicator_config);
+    let row = conn
+        .query(&format!(
+            "SELECT database, current_database() FROM pg_replication_slots \
+             WHERE slot_name = '{slot_name}'"
+        ))
+        .await
+        .map_err(|e| anyhow!("Failed to query replication slots: {e}"))?
+        .into_iter()
+        .next();
+
+    if let Some(row) = row {
+        let owning_db: String = row.get(0)?;
+        let current_db: String = row.get(1)?;
+        ensure!(
+            owning_db == current_db,
+            "Replication slot \"{slot_name}\" already exists for database \"{owning_db}\", but \
+             this instance replicates \"{current_db}\". Use a distinct --replication-server-id per \
+             Readyset deployment connected to the same upstream cluster, or drop the stale slot."
+        );
+    }
+
+    info!("Verified replication slot");
+    Ok(())
+}
+
 async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
     match conn.dialect() {
         Dialect::MySQL => {
@@ -443,6 +479,7 @@ pub async fn verify(options: &Options) -> Result<()> {
         if let Some(mut conn) = conn {
             add_err!(verify_version(&mut conn).await);
             add_err!(verify_replication(&mut conn).await);
+            add_err!(verify_replication_slot(&mut conn, options).await);
             add_err!(verify_permissions(&mut conn, options).await);
             add_err!(verify_disk_space(&mut conn, options).await);
         }

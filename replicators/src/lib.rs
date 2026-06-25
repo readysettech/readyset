@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use metrics::{gauge, Gauge};
 pub use mysql_connector::{is_gtid_mode_enabled, MYSQL_INTERNAL_DBS};
-pub use noria_adapter::{cleanup, NoriaAdapter};
+pub use noria_adapter::{cleanup, replication_slot_name, NoriaAdapter};
 use readyset_client::{TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::Relation;
