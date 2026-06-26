@@ -219,7 +219,7 @@ pub use crate::authentication::{
     AuthCache, AuthContext, AuthKeys, AuthPlugin, CachingSha2Password, MysqlNativePassword,
 };
 use crate::commands::change_user;
-use crate::constants::CONNECT_ATTRS;
+use crate::constants::{CONNECT_ATTRS, INTERACTIVE};
 pub use crate::myc::constants::{ColumnFlags, ColumnType, StatusFlags};
 pub use crate::writers::prepare_column_definitions;
 
@@ -378,6 +378,12 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Called when default character set changes after handshake or client switches user.
     async fn set_charset(&mut self, _: u16) -> io::Result<()>;
 
+    /// Called after handshake to inform whether the client negotiated the
+    /// `CLIENT_INTERACTIVE` capability. Default implementation is a no-op.
+    async fn set_interactive(&mut self, _interactive: bool) -> io::Result<()> {
+        Ok(())
+    }
+
     /// Optional hook invoked once after parsing client handshake to pass MySQL connect attributes
     /// Default implementation is a no-op.
     fn on_connect_attrs(&mut self, _attrs: &HashMap<&str, &str>) {}
@@ -484,7 +490,8 @@ const CAPABILITIES: u32 = PROTOCOL_41
     | RESERVED
     | CLIENT_PLUGIN_AUTH
     | CONNECT_WITH_DB
-    | CONNECT_ATTRS;
+    | CONNECT_ATTRS
+    | INTERACTIVE;
 
 impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlIntermediary<B, S> {
     /// Create a new server over a channel and process client commands until the client
@@ -521,6 +528,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         {
             mi.shim.set_auth_info(&username, plain_password).await?;
             mi.shim.set_charset(charset).await?;
+            mi.shim
+                .set_interactive(
+                    mi.client_capabilities
+                        .contains(CapabilityFlags::CLIENT_INTERACTIVE),
+                )
+                .await?;
             if let Some(database) = database {
                 mi.shim.on_init(&database).await?;
             }

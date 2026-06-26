@@ -256,7 +256,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
 
             if upstream.is_none() || reconnect {
                 reconnect = false;
-                match DB::connect(config.clone(), None, None).await {
+                match DB::connect(config.clone(), None, None, false).await {
                     Ok(conn) => upstream = Some(conn),
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {

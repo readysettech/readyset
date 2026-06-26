@@ -159,6 +159,7 @@ async fn setup_adapter(
                             UpstreamConfig::from_url(url),
                             None,
                             None,
+                            false,
                         )
                         .await
                         .unwrap(),

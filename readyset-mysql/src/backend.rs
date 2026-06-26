@@ -840,6 +840,11 @@ where
         Ok(())
     }
 
+    async fn set_interactive(&mut self, interactive: bool) -> io::Result<()> {
+        self.noria.set_interactive(interactive);
+        Ok(())
+    }
+
     async fn set_charset(&mut self, charset: u16) -> io::Result<()> {
         counter!(
             metric::CHARACTER_SET_USAGE,

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::{Stream, StreamExt};
 use metrics::gauge;
-use mysql_async::consts::{Command, StatusFlags};
+use mysql_async::consts::{CapabilityFlags, Command, StatusFlags};
 use mysql_async::prelude::Queryable;
 use mysql_async::{
     ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, UrlError,
@@ -339,6 +339,7 @@ impl MySqlUpstream {
         upstream_config: UpstreamConfig,
         username: Option<String>,
         password: Option<String>,
+        interactive: bool,
     ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
         let url = upstream_config
             .upstream_db_url
@@ -363,6 +364,11 @@ impl MySqlUpstream {
         }
         if let Some(password) = password {
             builder = builder.pass(Some(password));
+        }
+        // Mirror the client's CLIENT_INTERACTIVE capability so the upstream session honors
+        // interactive_timeout rather than wait_timeout when the client is interactive.
+        if interactive {
+            builder = builder.add_capability(CapabilityFlags::CLIENT_INTERACTIVE);
         }
         let opts: Opts = builder.into();
         let span = info_span!(
@@ -412,9 +418,10 @@ impl UpstreamDatabase for MySqlUpstream {
         upstream_config: UpstreamConfig,
         username: Option<String>,
         password: Option<String>,
+        interactive: bool,
     ) -> Result<Self, Error> {
         let (conn, prepared_statements) =
-            Self::connect_inner(upstream_config, username, password).await?;
+            Self::connect_inner(upstream_config, username, password, interactive).await?;
         Ok(Self {
             conn,
             prepared_statements,

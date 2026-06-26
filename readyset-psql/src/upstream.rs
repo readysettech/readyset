@@ -314,6 +314,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         upstream_config: UpstreamConfig,
         username: Option<String>,
         password: Option<String>,
+        _interactive: bool,
     ) -> Result<Self, Error> {
         let url = upstream_config
             .upstream_db_url

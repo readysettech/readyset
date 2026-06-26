@@ -823,7 +823,7 @@ where
             {
                 match timeout(
                     UPSTREAM_CONNECTION_RETRY_INTERVAL,
-                    U::connect(upstream_config.clone(), None, None),
+                    U::connect(upstream_config.clone(), None, None, false),
                 )
                 .await
                 {

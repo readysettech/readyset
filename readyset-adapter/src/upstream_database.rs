@@ -126,10 +126,16 @@ pub trait UpstreamDatabase: Sized + Send {
         upstream_config: UpstreamConfig,
         username: Option<String>,
         password: Option<String>,
+        interactive: bool,
     ) -> Result<Self, Self::Error>;
 
     /// Set the user for the upstream connection
     async fn set_user(&mut self, user: &str, password: RedactedString) -> Result<(), Self::Error>;
+
+    /// Mark whether the client session this upstream serves is interactive (the MySQL
+    /// `CLIENT_INTERACTIVE` capability). Applied when the upstream connection is established.
+    /// Default implementation is a no-op for upstreams without an interactive concept.
+    fn set_interactive(&mut self, _interactive: bool) {}
 
     /// Test the connection with the upstream database
     async fn is_connected(&mut self) -> Result<bool, Self::Error>;
@@ -276,6 +282,7 @@ pub struct LazyUpstream<U> {
     upstream_config: UpstreamConfig,
     username: Option<String>,
     password: Option<String>,
+    interactive: bool,
 }
 
 impl<U> From<UpstreamConfig> for LazyUpstream<U> {
@@ -285,6 +292,7 @@ impl<U> From<UpstreamConfig> for LazyUpstream<U> {
             upstream_config,
             username: None,
             password: None,
+            interactive: false,
         }
     }
 }
@@ -300,6 +308,7 @@ where
                 self.upstream_config.clone(),
                 self.username.clone(),
                 self.password.clone(),
+                self.interactive,
             )
             .await?,
         );
@@ -338,12 +347,14 @@ where
         upstream_config: UpstreamConfig,
         username: Option<String>,
         password: Option<String>,
+        interactive: bool,
     ) -> Result<Self, Self::Error> {
         Ok(Self {
             upstream: None,
             upstream_config,
             username,
             password,
+            interactive,
         })
     }
 
@@ -351,6 +362,10 @@ where
         self.username = Some(user.to_string());
         self.password = Some(password.to_string());
         Ok(())
+    }
+
+    fn set_interactive(&mut self, interactive: bool) {
+        self.interactive = interactive;
     }
 
     async fn is_connected(&mut self) -> Result<bool, Self::Error> {

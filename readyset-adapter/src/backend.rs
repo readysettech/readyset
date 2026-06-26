@@ -1971,6 +1971,14 @@ where
         Ok(())
     }
 
+    /// Mark whether the client session is interactive, so the upstream connection (if any)
+    /// is established with the matching capability when it is lazily opened.
+    pub fn set_interactive(&mut self, interactive: bool) {
+        if let Some(upstream) = &mut self.connectors.upstream {
+            upstream.set_interactive(interactive);
+        }
+    }
+
     pub async fn change_user(
         &mut self,
         user: &str,
