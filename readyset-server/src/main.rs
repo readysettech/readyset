@@ -5,17 +5,18 @@ use std::time::Duration;
 
 use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
-use common::ulimit::maybe_increase_nofile_limit;
-use dataflow_state::init_parallel_row_pool;
 use futures_util::future::{self, Either};
 use metrics::{counter, gauge};
+use tracing::{error, info, warn};
+
+use common::startup::init_early_common;
+use dataflow_state::init_parallel_row_pool;
 use readyset_alloc::ThreadBuildWrapper;
 use readyset_metrics::init_global_recorder;
 use readyset_server::consensus::AuthorityType;
 use readyset_server::{resolve_addr, Builder, WorkerOptions};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer};
 use readyset_version::*;
-use tracing::{error, info, warn};
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
@@ -165,10 +166,9 @@ fn main() -> anyhow::Result<()> {
         }
     });
     info!(?opts, "Starting Readyset server");
-
     info!(version = %VERSION_STR_ONELINE);
 
-    maybe_increase_nofile_limit(opts.worker_options.replicator_config.ignore_ulimit_check)?;
+    init_early_common(&opts.worker_options.replicator_config)?;
 
     let telemetry_sender = rt.block_on(TelemetryInitializer::init(
         opts.disable_telemetry,

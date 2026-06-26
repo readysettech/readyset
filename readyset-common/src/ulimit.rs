@@ -4,7 +4,7 @@ use tracing::info;
 
 /// Check that file descriptor limit is large enough to support compaction of database
 /// sizes up to approximately 2TB
-pub fn maybe_increase_nofile_limit(ignore_ulimit_check: bool) -> anyhow::Result<()> {
+pub(crate) fn maybe_increase_nofile_limit(ignore_ulimit_check: bool) -> anyhow::Result<()> {
     #[cfg(not(target_os = "macos"))]
     let desired = 1048576;
     #[cfg(target_os = "macos")]

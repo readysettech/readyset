@@ -8,6 +8,7 @@ use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::fs::remove_dir_all;
 use std::future::Future;
+use std::io::Read;
 use std::marker::Send;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
@@ -26,6 +27,14 @@ use futures_util::future::FutureExt;
 use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use metrics::{counter, gauge};
+use tokio::net;
+use tokio::sync::RwLock;
+use tokio::time::{sleep, timeout};
+use tokio_native_tls::{native_tls, TlsAcceptor};
+use tokio_stream::wrappers::TcpListenerStream;
+use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
+use tracing_futures::Instrument;
+
 use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
@@ -45,7 +54,7 @@ use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{AuthorityControl, AuthorityType};
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
-use readyset_common::ulimit::maybe_increase_nofile_limit;
+use readyset_common::startup::init_early_common;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
@@ -68,15 +77,6 @@ use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown;
 use readyset_version::*;
 use schema_catalog::SchemaCatalogSynchronizer;
-use tokio::net;
-use tokio::sync::RwLock;
-use tokio::time::{sleep, timeout};
-use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
-use tracing_futures::Instrument;
-
-use std::io::Read;
-use tokio_native_tls::{native_tls, TlsAcceptor};
 
 // readyset_alloc initializes the global allocator
 extern crate readyset_alloc;
@@ -959,12 +959,7 @@ where
         info!(?options, "Starting Readyset adapter");
 
         if options.deployment_mode.is_standalone() {
-            maybe_increase_nofile_limit(
-                options
-                    .server_worker_options
-                    .replicator_config
-                    .ignore_ulimit_check,
-            )?;
+            init_early_common(&options.server_worker_options.replicator_config)?;
         }
 
         let deployment_dir = options

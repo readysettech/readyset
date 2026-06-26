@@ -4,7 +4,8 @@ mod collections;
 mod local;
 mod metrics;
 mod records;
-pub mod ulimit;
+pub mod startup;
+mod ulimit;
 
 use petgraph::prelude::*;
 pub use readyset_client::internal::{Index, IndexType};

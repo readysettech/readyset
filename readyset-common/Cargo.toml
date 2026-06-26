@@ -22,6 +22,7 @@ bincode = { workspace = true }
 metrics = { workspace = true }
 
 # Local deps
+database-utils = { path = "../database-utils" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
