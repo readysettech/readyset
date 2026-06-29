@@ -63,6 +63,27 @@ where
     Ok(())
 }
 
+/// Write the result-set terminator used when the client negotiated CLIENT_DEPRECATE_EOF: an OK
+/// packet carrying the 0xFE header that replaces the legacy EOF terminator. Its short length
+/// (< 9 bytes) distinguishes it from a genuine OK packet at the start of a response.
+pub(crate) async fn write_ok_eof_packet<S>(
+    conn: &mut PacketConn<S>,
+    s: StatusFlags,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    const OK_EOF_PACKET_LEN: usize = 1 + 1 + 1 + 2 + 2;
+    let mut buf = conn.get_buffer(OK_EOF_PACKET_LEN);
+    buf.write_u8(0xFE)?; // EOF-shaped OK packet header
+    buf.write_lenenc_int(0)?; // affected rows
+    buf.write_lenenc_int(0)?; // last insert id
+    buf.write_u16::<LittleEndian>(s.bits())?;
+    buf.write_all(&[0x00, 0x00])?; // no warnings
+    conn.enqueue_packet(buf);
+    Ok(())
+}
+
 pub async fn write_err<S>(err: ErrorKind, msg: &[u8], conn: &mut PacketConn<S>) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -190,19 +211,27 @@ pub(crate) async fn write_column_definitions<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    // If the client negotiated CLIENT_DEPRECATE_EOF, the column definitions are not followed by
+    // an EOF packet.
+    let trailing_eof = !conn.deprecate_eof();
+
     if columns.is_empty() {
-        return if only_eof_on_nonempty {
+        return if only_eof_on_nonempty || !trailing_eof {
             Ok(())
         } else {
             write_eof_packet(conn, StatusFlags::empty()).await
         };
     }
 
-    // Calculate total buffer size needed for all column definition packets + EOF packet
-    // Each column needs: 4 bytes for packet header + encoded column definition
-    // EOF packet needs: EOF_PACKET_TOTAL_LEN
+    // Calculate total buffer size needed for all column definition packets, plus the trailing EOF
+    // packet when one is emitted. Each column needs 4 header bytes plus its encoded definition.
     let columns_size: usize = columns.iter().map(|c| 4 + col_enc_len(c)).sum();
-    let total_size = columns_size + EOF_PACKET_TOTAL_LEN;
+    let total_size = columns_size
+        + if trailing_eof {
+            EOF_PACKET_TOTAL_LEN
+        } else {
+            0
+        };
 
     // Allocate a single buffer for all packets with their headers
     let mut buf = Vec::with_capacity(total_size);
@@ -215,10 +244,10 @@ where
         write_column_definition(c, &mut buf);
     }
 
-    // Write EOF packet inline into the same buffer
-    write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+    if trailing_eof {
+        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+    }
 
-    // Enqueue the raw buffer containing all packets (column defs + EOF)
     conn.enqueue_plain(buf);
     Ok(())
 }
@@ -245,15 +274,17 @@ pub(crate) async fn column_definitions_cached<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    // Allocate a buffer for just the EOF packet to append after cached data
-    let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
-
-    // Enqueue the cached column definitions first
+    // Enqueue the cached column definitions, then advance past the column-count and column
+    // definition packets whose sequence ids are baked into the cached bytes.
     conn.enqueue_raw(cached);
     conn.seq = conn.seq.wrapping_add((1 + columns.len()) as u8);
 
-    // Write EOF packet inline into our buffer
-    write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
-    conn.enqueue_plain(buf);
+    // If the client negotiated CLIENT_DEPRECATE_EOF, the column definitions are not followed by
+    // an EOF packet.
+    if !conn.deprecate_eof() {
+        let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
+        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+        conn.enqueue_plain(buf);
+    }
     Ok(())
 }

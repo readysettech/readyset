@@ -152,6 +152,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             client_capabilities: CapabilityFlags::empty(),
         }
     }
+
+    /// Whether the client negotiated CLIENT_DEPRECATE_EOF. When set, the column definitions are
+    /// not followed by an EOF packet and the result-set terminator is an OK packet.
+    pub(crate) fn deprecate_eof(&self) -> bool {
+        self.client_capabilities
+            .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
