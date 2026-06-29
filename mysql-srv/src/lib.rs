@@ -200,8 +200,8 @@ use std::io;
 use std::sync::Arc;
 
 use constants::{
-    CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, LONG_PASSWORD, PROTOCOL_41, RESERVED, SECURE_CONNECTION,
-    SSL,
+    CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, DEPRECATE_EOF, LONG_PASSWORD, PROTOCOL_41, RESERVED,
+    SECURE_CONNECTION, SSL,
 };
 use database_utils::TlsMode;
 use error::{other_error, OtherErrorKind};
@@ -489,7 +489,8 @@ const CAPABILITIES: u32 = PROTOCOL_41
     | CLIENT_PLUGIN_AUTH
     | CONNECT_WITH_DB
     | CONNECT_ATTRS
-    | INTERACTIVE;
+    | INTERACTIVE
+    | DEPRECATE_EOF;
 
 impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlIntermediary<B, S> {
     /// Create a new server over a channel and process client commands until the client
@@ -596,7 +597,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         // Status flags: fresh connections always have autocommit on, matching real MySQL behavior.
         init_packet.extend_from_slice(&StatusFlags::SERVER_STATUS_AUTOCOMMIT.bits().to_le_bytes());
-        init_packet.extend_from_slice(&CAPABILITIES.to_le_bytes()[2..]);
+        init_packet.extend_from_slice(&capabilities.to_le_bytes()[2..]);
         // We will add a \0 byte below so we need to account for that when sending the length, since
         // rust strings don't add the null terminator
         init_packet.extend_from_slice(&[(auth_data.len() + 1) as u8]);
