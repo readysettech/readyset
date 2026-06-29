@@ -54,6 +54,7 @@ use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{AuthorityControl, AuthorityType};
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
+use readyset_common::host_info::collect_host_info;
 use readyset_common::startup::init_early_common;
 use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
 use readyset_dataflow::Readers;
@@ -1146,13 +1147,26 @@ where
                 ("platform", READYSET_VERSION.platform),
                 ("rustc_version", READYSET_VERSION.rustc_version),
                 ("profile", READYSET_VERSION.profile),
-                ("profile", READYSET_VERSION.profile),
                 ("opt_level", READYSET_VERSION.opt_level),
             ]
         )
         .set(1.0);
         counter!(metric::READYSET_ADAPTER_STARTUPS).increment(1);
         let adapter_start_time = SystemTime::now();
+
+        let host = collect_host_info(&deployment_dir);
+        gauge!(metric::HOST_CPUS).set(host.cpus as f64);
+        gauge!(metric::HOST_MEMORY_BYTES).set(host.memory_bytes as f64);
+        gauge!(metric::HOST_DISK_BYTES).set(host.disk_bytes as f64);
+        gauge!(metric::HOST_NUMA_NODES).set(host.numa_nodes as f64);
+        gauge!(
+            metric::HOST_INFO,
+            "arch" => host.arch,
+            "os" => host.os,
+            "kernel" => host.kernel,
+            "container" => host.container.to_string(),
+        )
+        .set(1.0);
 
         // if we're running in standalone mode, server will already
         // spawn it's own allocator metrics reporter.

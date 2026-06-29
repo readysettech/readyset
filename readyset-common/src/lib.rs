@@ -1,6 +1,7 @@
 #![deny(macro_use_extern_crate)]
 
 mod collections;
+pub mod host_info;
 mod local;
 mod metrics;
 mod records;

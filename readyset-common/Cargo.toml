@@ -20,6 +20,7 @@ url = { workspace = true }
 reqwest = { workspace = true }
 bincode = { workspace = true }
 metrics = { workspace = true }
+sysinfo = { workspace = true }
 
 # Local deps
 database-utils = { path = "../database-utils" }

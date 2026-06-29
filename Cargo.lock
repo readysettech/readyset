@@ -6190,6 +6190,7 @@ dependencies = [
  "reqwest 0.13.3",
  "rlimit",
  "serde",
+ "sysinfo",
  "test-strategy",
  "tracing",
  "url",

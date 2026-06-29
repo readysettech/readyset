@@ -16,3 +16,18 @@ pub const READYSET_SERVER_VERSION: &str = "readyset_server_version";
 
 /// Gauge: The last seen size in bytes of a /metrics payload.
 pub const METRICS_PAYLOAD_SIZE_BYTES: &str = "readyset_metrics_payload_size_bytes";
+
+/// Gauge: The number of logical CPUs on the host.
+pub const HOST_CPUS: &str = "readyset_host_cpus";
+
+/// Gauge: Total physical memory on the host, in bytes.
+pub const HOST_MEMORY_BYTES: &str = "readyset_host_memory_bytes";
+
+/// Gauge: Total capacity, in bytes, of the disk holding the storage directory.
+pub const HOST_DISK_BYTES: &str = "readyset_host_disk_bytes";
+
+/// Gauge: The number of NUMA nodes on the host.
+pub const HOST_NUMA_NODES: &str = "readyset_host_numa_nodes";
+
+/// Gauge: Static host and OS facts conveyed through labels (arch, OS, kernel); value is always 1.
+pub const HOST_INFO: &str = "readyset_host_info";
