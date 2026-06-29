@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
+use mysql_common::constants::CapabilityFlags;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::MAX_POOL_ROW_CAPACITY;
@@ -34,6 +35,9 @@ pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
     preallocated: Vec<QueuedPacket>,
 
     pub(crate) stream: SwitchableStream<S>,
+
+    /// Capabilities negotiated by the client in the handshake.
+    pub(crate) client_capabilities: CapabilityFlags,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -145,6 +149,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             queue: Vec::new(),
             preallocated: Vec::new(),
             stream: SwitchableStream::new(s),
+            client_capabilities: CapabilityFlags::empty(),
         }
     }
 }

@@ -425,8 +425,6 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
     schema_cache: HashMap<u32, CachedSchema>,
     /// Whether to log statements received from a client
     enable_statement_logging: bool,
-    /// The capabilities of the client
-    client_capabilities: CapabilityFlags,
     /// Auth data sent to client
     auth_data: [u8; 20],
     /// TLS acceptor
@@ -510,7 +508,6 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             conn: packet::PacketConn::new(stream),
             schema_cache: HashMap::new(),
             enable_statement_logging,
-            client_capabilities: CapabilityFlags::empty(),
             auth_data: [0; 20],
             tls_acceptor,
             tls_mode,
@@ -530,7 +527,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             mi.shim.set_charset(charset).await?;
             mi.shim
                 .set_interactive(
-                    mi.client_capabilities
+                    mi.conn
+                        .client_capabilities
                         .contains(CapabilityFlags::CLIENT_INTERACTIVE),
                 )
                 .await?;
@@ -669,7 +667,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
 
         self.conn.set_seq(packet.next_seq());
 
-        self.client_capabilities = handshake.capabilities;
+        self.conn.client_capabilities = handshake.capabilities;
         let charset = handshake.charset;
         let username = handshake.username.to_owned();
         let password = handshake.password.to_vec();
@@ -811,11 +809,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             }
             match cmd {
                 Command::ChangeUser(q) => {
-                    let change_user = change_user(q, self.client_capabilities).map_err(|e| {
-                        other_error(OtherErrorKind::GenericErr {
-                            error: format!("{e:?}"),
-                        })
-                    })?;
+                    let change_user =
+                        change_user(q, self.conn.client_capabilities).map_err(|e| {
+                            other_error(OtherErrorKind::GenericErr {
+                                error: format!("{e:?}"),
+                            })
+                        })?;
                     let username = change_user.username.to_owned();
 
                     let client_plugin = change_user
