@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: docker.io/postgis/postgis:15-3.5
+    image: ${DOCKER_HUB_BASE:-docker.io}/postgis/postgis:15-3.5
     environment:
       - POSTGRES_PASSWORD=noria
       - POSTGRES_DB=noria

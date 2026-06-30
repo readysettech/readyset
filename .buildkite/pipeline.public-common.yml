@@ -242,14 +242,7 @@ steps:
           quiet-pull: true    # don't log all the image pulls
           progress: plain     # more log reduction
           pull-retries: 3
-      - docker-login#${DOCKER_LOGIN_PLUGIN_VERSION}:
-          # Need to log in to avoid rate-limit while pulling postgis image. IMPORTANT: must run this
-          # docker-login plugin *before* the ECR plugin!  Otherwise, pulls from ECR fail.
-          server: "docker.io"
-          username: readysetservices
-          password-env: DOCKER_HUB_TOKEN
       - ecr#${ECR_PLUGIN_VERSION}:
-          login: true
           retries: 3
     agents: { queue: "c6a-4xlarge-nospot" }
     retry: *retry_on_agent_kill
