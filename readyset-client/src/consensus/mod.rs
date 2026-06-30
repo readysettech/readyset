@@ -24,10 +24,12 @@ use serde::{Deserialize, Serialize};
 use tracing::error;
 use url::Url;
 
+pub mod allowed_users;
 mod local;
 pub mod mcp_tokens;
 mod standalone;
 
+pub use self::allowed_users::UserStore;
 pub use self::local::{LocalAuthority, LocalAuthorityStore};
 pub use self::mcp_tokens::{McpToken, McpTokenScope, McpTokenStore};
 pub use self::standalone::StandaloneAuthority;
