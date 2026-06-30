@@ -31,8 +31,11 @@ pub fn extract_columns(result: &ReadysetSchemaResult) -> Vec<Column> {
         .schema()
         .iter()
         .map(|field| Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: field.name().clone(),
+            org_name: String::new(),
             coltype: arrow_to_mysql_type(field.data_type()),
             column_length: 0,
             character_set: 0,

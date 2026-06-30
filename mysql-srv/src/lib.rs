@@ -82,8 +82,11 @@
 //!             return match var {
 //!                 Some("max_allowed_packet") => {
 //!                     let cols = &[Column {
+//!                         schema: String::new(),
 //!                         table: String::new(),
+//!                         org_table: String::new(),
 //!                         column: "@@max_allowed_packet".to_owned(),
+//!                         org_name: String::new(),
 //!                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
 //!                         column_length: 11,
 //!                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
@@ -99,8 +102,11 @@
 //!         } else {
 //!             let cols = [
 //!                 Column {
+//!                     schema: String::new(),
 //!                     table: "foo".to_string(),
+//!                     org_table: String::new(),
 //!                     column: "a".to_string(),
+//!                     org_name: String::new(),
 //!                     coltype: ColumnType::MYSQL_TYPE_LONGLONG,
 //!                     column_length: 11,
 //!                     colflags: ColumnFlags::empty(),
@@ -108,8 +114,11 @@
 //!                     decimals: 0,
 //!                 },
 //!                 Column {
+//!                     schema: String::new(),
 //!                     table: "foo".to_string(),
+//!                     org_table: String::new(),
 //!                     column: "b".to_string(),
+//!                     org_name: String::new(),
 //!                     coltype: ColumnType::MYSQL_TYPE_STRING,
 //!                     column_length: 11,
 //!                     colflags: ColumnFlags::empty(),
@@ -239,14 +248,20 @@ mod writers;
 /// or an output column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Column {
+    /// The database (schema) this column's table belongs to.
+    pub schema: String,
     /// This column's associated table.
     ///
     /// Note that this is *technically* the table's alias.
     pub table: String,
+    /// This column's original table, before any aliasing.
+    pub org_table: String,
     /// This column's name.
     ///
     /// Note that this is *technically* the column's alias.
     pub column: String,
+    /// This column's original name, before any aliasing.
+    pub org_name: String,
     /// This column's type.
     pub coltype: ColumnType,
     /// This column's display length.
@@ -265,8 +280,11 @@ pub struct Column {
 impl From<&mysql_async::Column> for Column {
     fn from(c: &mysql_async::Column) -> Self {
         Column {
+            schema: c.schema_str().to_string(),
             table: c.table_str().to_string(),
+            org_table: c.org_table_str().to_string(),
             column: c.name_str().to_string(),
+            org_name: c.org_name_str().to_string(),
             coltype: c.column_type(),
             column_length: c.column_length(),
             character_set: c.character_set(),

@@ -141,16 +141,19 @@ const fn lenc_int_len(n: u64) -> usize {
 /// Pre-computed constant: length of "def" as a length-encoded string
 const LENC_DEF_LEN: usize = 4; // "def" (3 bytes) + 1 length byte
 
-/// Pre-computed constant: length of empty string as a length-encoded string
-const LENC_EMPTY_LEN: usize = 1; // just the length byte (0)
-
 /// Pre-computed constant: fixed overhead for column definition
-/// This includes: "def" + 3 empty strings (schema, original table, original name) + fixed-size fields
-const COL_FIXED_OVERHEAD: usize = LENC_DEF_LEN + (3 * LENC_EMPTY_LEN) + (1 + 2 + 4 + 1 + 2 + 1 + 2);
+/// This includes: "def" + the lenenc length byte + fixed-size fields. The five variable-length
+/// strings (schema, table, org_table, name, org_name) are added per-column in `col_enc_len`.
+const COL_FIXED_OVERHEAD: usize = LENC_DEF_LEN + (1 + 2 + 4 + 1 + 2 + 1 + 2);
 
 /// Compute the size of the buffer required to encode this column definition
 fn col_enc_len(c: &Column) -> usize {
-    COL_FIXED_OVERHEAD + lenc_str_len(c.table.as_bytes()) + lenc_str_len(c.column.as_bytes())
+    COL_FIXED_OVERHEAD
+        + lenc_str_len(c.schema.as_bytes())
+        + lenc_str_len(c.table.as_bytes())
+        + lenc_str_len(c.org_table.as_bytes())
+        + lenc_str_len(c.column.as_bytes())
+        + lenc_str_len(c.org_name.as_bytes())
 }
 
 // See https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_text_resultset_column_definition.html for documentation
@@ -160,15 +163,15 @@ fn write_column_definition(c: &Column, buf: &mut Vec<u8>) {
     // Catalog (lenenc)
     buf.write_lenenc_str(b"def").unwrap();
     // Schema (lenenc)
-    buf.write_lenenc_str(b"").unwrap();
+    buf.write_lenenc_str(c.schema.as_bytes()).unwrap();
     // Table (lenenc)
     buf.write_lenenc_str(c.table.as_bytes()).unwrap();
     // Original Table (lenenc)
-    buf.write_lenenc_str(b"").unwrap();
+    buf.write_lenenc_str(c.org_table.as_bytes()).unwrap();
     // Name (lenenc)
     buf.write_lenenc_str(c.column.as_bytes()).unwrap();
     // Original Name (lenenc)
-    buf.write_lenenc_str(b"").unwrap();
+    buf.write_lenenc_str(c.org_name.as_bytes()).unwrap();
     // Next Length (lenenc) - always 0x0c
     buf.write_lenenc_int(0x0C).unwrap();
     // Character Set (2 Bytes)

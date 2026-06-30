@@ -363,8 +363,11 @@ mod tests {
             fn $name() {
                 let mut data = Vec::new();
                 let mut col = Column {
+                    schema: String::new(),
                     table: String::new(),
+                    org_table: String::new(),
                     column: String::new(),
+                    org_name: String::new(),
                     coltype: $ct,
                     column_length: 0,
                     colflags: ColumnFlags::empty(),

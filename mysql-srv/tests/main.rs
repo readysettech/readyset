@@ -139,8 +139,11 @@ where
             match var {
                 Some("max_allowed_packet") => {
                     let cols = &[Column {
+                        schema: String::new(),
                         table: String::new(),
+                        org_table: String::new(),
                         column: "@@max_allowed_packet".to_owned(),
+                        org_name: String::new(),
                         coltype: myc::constants::ColumnType::MYSQL_TYPE_LONG,
                         column_length: 11,
                         colflags: myc::constants::ColumnFlags::UNSIGNED_FLAG,
@@ -518,8 +521,11 @@ async fn it_queries_nulls() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
+                schema: String::new(),
                 table: String::new(),
+                org_table: String::new(),
                 column: "a".to_owned(),
+                org_name: String::new(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 column_length: 6,
                 colflags: myc::constants::ColumnFlags::empty(),
@@ -552,8 +558,11 @@ async fn it_queries() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
+                schema: String::new(),
                 table: String::new(),
+                org_table: String::new(),
                 column: "a".to_owned(),
+                org_name: String::new(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 column_length: 6,
                 colflags: myc::constants::ColumnFlags::empty(),
@@ -586,8 +595,11 @@ async fn multi_result() {
     TestingShim::new(
         |_, w| {
             let cols = [Column {
+                schema: String::new(),
                 table: String::new(),
+                org_table: String::new(),
                 column: "a".to_owned(),
+                org_name: String::new(),
                 coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                 column_length: 6,
                 colflags: myc::constants::ColumnFlags::empty(),
@@ -634,8 +646,11 @@ async fn it_queries_many_rows() {
         |_, w| {
             let cols = [
                 Column {
+                    schema: String::new(),
                     table: String::new(),
+                    org_table: String::new(),
                     column: "a".to_owned(),
+                    org_name: String::new(),
                     coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                     column_length: 6,
                     colflags: myc::constants::ColumnFlags::empty(),
@@ -643,8 +658,11 @@ async fn it_queries_many_rows() {
                     decimals: 0,
                 },
                 Column {
+                    schema: String::new(),
                     table: String::new(),
+                    org_table: String::new(),
                     column: "b".to_owned(),
+                    org_name: String::new(),
                     coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
                     column_length: 6,
                     colflags: myc::constants::ColumnFlags::empty(),
@@ -684,8 +702,11 @@ async fn it_queries_many_rows() {
 #[tokio::test]
 async fn it_prepares() {
     let cols = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "a".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -694,8 +715,11 @@ async fn it_prepares() {
     }];
     let cols2 = cols.clone();
     let params = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "c".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -752,8 +776,11 @@ async fn it_prepares() {
 async fn insert_exec() {
     let params = vec![
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "username".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -761,8 +788,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "email".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -770,8 +800,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "pw".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -779,8 +812,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "created".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_DATETIME,
             column_length: 19,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -788,8 +824,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "session".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -797,8 +836,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "rss".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -806,8 +848,11 @@ async fn insert_exec() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "mail".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_VARCHAR,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -923,8 +968,11 @@ async fn insert_exec() {
 #[tokio::test]
 async fn send_long() {
     let cols = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "a".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -933,8 +981,11 @@ async fn send_long() {
     }];
     let cols2 = cols.clone();
     let params = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "c".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_BLOB,
         column_length: 65535,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -991,8 +1042,11 @@ async fn send_long() {
 async fn it_prepares_many() {
     let cols = vec![
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "a".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1000,8 +1054,11 @@ async fn it_prepares_many() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "b".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1057,8 +1114,11 @@ async fn it_prepares_many() {
 #[tokio::test]
 async fn prepared_empty() {
     let cols = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "a".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -1067,8 +1127,11 @@ async fn prepared_empty() {
     }];
     let cols2 = cols;
     let params = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "c".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -1105,8 +1168,11 @@ async fn prepared_empty() {
 #[tokio::test]
 async fn prepared_no_params() {
     let cols = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "a".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),
@@ -1147,8 +1213,11 @@ async fn prepared_no_params() {
 async fn prepared_nulls() {
     let cols = vec![
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "a".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1156,8 +1225,11 @@ async fn prepared_nulls() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "b".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1168,8 +1240,11 @@ async fn prepared_nulls() {
     let cols2 = cols.clone();
     let params = vec![
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "c".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1177,8 +1252,11 @@ async fn prepared_nulls() {
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: String::new(),
+            org_table: String::new(),
             column: "d".to_owned(),
+            org_name: String::new(),
             coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
             column_length: 6,
             colflags: myc::constants::ColumnFlags::empty(),
@@ -1241,8 +1319,11 @@ async fn prepared_nulls() {
 #[tokio::test]
 async fn prepared_no_rows() {
     let cols = vec![Column {
+        schema: String::new(),
         table: String::new(),
+        org_table: String::new(),
         column: "a".to_owned(),
+        org_name: String::new(),
         coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
         column_length: 6,
         colflags: myc::constants::ColumnFlags::empty(),

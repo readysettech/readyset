@@ -209,8 +209,11 @@ async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
     let cols = vars
         .iter()
         .map(|v| Column {
+            schema: String::new(),
             table: "".to_owned(),
+            org_table: String::new(),
             column: v.name.to_string(),
+            org_name: String::new(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
@@ -239,8 +242,11 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
     // [`SHOW STATUS`](https://dev.mysql.com/doc/refman/8.0/en/show-status.html)
     let cols = vec![
         Column {
+            schema: String::new(),
             table: "".to_owned(),
+            org_table: String::new(),
             column: "Variable_name".to_string(),
+            org_name: String::new(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
@@ -248,8 +254,11 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: "".to_owned(),
+            org_table: String::new(),
             column: "Value".to_string(),
+            org_name: String::new(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
@@ -276,8 +285,11 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> io::Result<()> {
     let cols = vec![
         Column {
+            schema: String::new(),
             table: "".to_owned(),
+            org_table: String::new(),
             column: vars[0].name.to_string(),
+            org_name: String::new(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
@@ -285,8 +297,11 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
             decimals: 0,
         },
         Column {
+            schema: String::new(),
             table: "".to_owned(),
+            org_table: String::new(),
             column: vars[0].value.to_string(),
+            org_name: String::new(),
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),

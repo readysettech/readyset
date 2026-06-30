@@ -326,6 +326,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
     }
 
     Ok(mysql_srv::Column {
+        schema: String::new(),
         table: col
             .column
             .table
@@ -336,7 +337,9 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             })
             .display(readyset_sql::Dialect::MySQL)
             .to_string(),
+        org_table: String::new(),
         column: col.column.name.to_string(),
+        org_name: String::new(),
         coltype,
         column_length,
         colflags,

@@ -552,8 +552,11 @@ mod tests {
             let mut conn = PacketConn::new(server);
             conn.client_capabilities = capabilities;
             let cols = [Column {
+                schema: String::new(),
                 table: "t".to_string(),
+                org_table: String::new(),
                 column: "c".to_string(),
+                org_name: String::new(),
                 coltype: ColumnType::MYSQL_TYPE_LONG,
                 column_length: 11,
                 character_set: 33,
