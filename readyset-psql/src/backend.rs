@@ -132,10 +132,9 @@ impl ps::PsqlBackend for Backend {
         self.inner.version()
     }
 
-    fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials<'_>> {
-        self.users()
-            .get(user)
-            .map(|pw| ps::Credentials::CleartextPassword(pw))
+    fn credentials_for_user(&self, user: &str) -> Option<ps::Credentials> {
+        self.password_for_user(user)
+            .map(ps::Credentials::CleartextPassword)
     }
 
     async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>) {

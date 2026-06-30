@@ -254,6 +254,31 @@ impl AuthCache {
         }
     }
 
+    /// Replace the entire cache contents to match `users`. Used when the allowed-users set is
+    /// mutated at runtime (`ALTER READYSET ADD|MODIFY|DROP USER`) so the fast-auth path stays in
+    /// sync with the authoritative map; unlike [`AuthCache::populate`] this also drops digests for
+    /// removed or rotated users.
+    pub fn set_all(&self, users: &HashMap<String, String>) {
+        let entries: Vec<(String, [u8; 32])> = users
+            .iter()
+            .map(|(user, password)| {
+                (
+                    user.clone(),
+                    CachingSha2Password::generate_fast_digest(password.as_bytes()),
+                )
+            })
+            .collect();
+        match self.cache.write() {
+            Ok(mut cache) => {
+                cache.clear();
+                cache.extend(entries);
+            }
+            Err(e) => {
+                error!("Failed to write to auth cache: {}", e);
+            }
+        }
+    }
+
     /// Validate a scramble against the cached digest for `username`.
     ///
     /// The validation algorithm (matching MySQL's `Validate_scramble::validate`):

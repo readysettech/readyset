@@ -33,7 +33,7 @@ impl TryFrom<TestValue> for psql_srv::PsqlValue {
 impl PsqlBackend for TestBackend {
     type Resultset = stream::Iter<vec::IntoIter<Result<PsqlSrvRow, Error>>>;
 
-    fn credentials_for_user(&self, _user: &str) -> Option<Credentials<'_>> {
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
         Some(Credentials::Any)
     }
 

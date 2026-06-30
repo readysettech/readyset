@@ -1,9 +1,10 @@
 use std::assert_matches;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use mysql_async::prelude::*;
 use mysql_async::{ChangeUserOpts, Conn};
-use readyset_adapter::backend::UnsupportedSetMode;
+use readyset_adapter::backend::{AllowedUsers, UnsupportedSetMode};
 use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::QueryDestination;
@@ -1113,7 +1114,7 @@ async fn it_change_user() {
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .await;
     let mut conn = Conn::new(opts).await.unwrap();

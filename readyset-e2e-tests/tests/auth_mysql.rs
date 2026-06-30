@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
+use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
@@ -24,7 +26,7 @@ fn auth_test_builder(auth_plugin: AuthPlugin) -> TestBuilder {
     TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .auth_plugin(auth_plugin)
     .fallback(true)

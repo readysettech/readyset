@@ -731,7 +731,7 @@ impl TestBuilder {
         let shallow_for_schema = Arc::clone(&shallow);
 
         let auth_cache = AuthCache::new();
-        auth_cache.populate(self.backend_builder.get_users());
+        auth_cache.populate(&self.backend_builder.get_users().read());
 
         tokio::spawn(async move {
             // Keep the RLS bootstrap handle alive for the server's lifetime: it

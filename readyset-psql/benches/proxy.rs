@@ -137,7 +137,7 @@ impl PsqlBackend for Backend {
         "14".into()
     }
 
-    fn credentials_for_user(&self, _user: &str) -> Option<Credentials<'_>> {
+    fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
         Some(Credentials::Any)
     }
 

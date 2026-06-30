@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use mysql_async::prelude::Queryable;
 use mysql_async::{ChangeUserOpts, Conn};
+use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
@@ -46,7 +49,7 @@ async fn change_user_updates_schema_search_path() {
     let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(false)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .fallback(true)
     .build::<MySQLAdapter>()

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clap::Parser;
 use database_utils::TlsMode;
 use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
+use readyset_adapter::backend::UsersSync;
 use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
@@ -12,6 +13,17 @@ use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error};
 
 use crate::ConnectionHandler;
+
+/// Wires the [`AuthCache`] up to [`UsersSync`] so it stays in sync with runtime mutations of the
+/// adapter's allowed-users map.
+#[derive(Debug)]
+struct AuthCacheSync(Arc<AuthCache>);
+
+impl UsersSync for AuthCacheSync {
+    fn refresh(&self, users: &HashMap<String, String>) {
+        self.0.set_all(users);
+    }
+}
 
 /// MySQL-specific CLI options.
 #[derive(Clone, Debug, Parser)]
@@ -86,5 +98,9 @@ impl ConnectionHandler for MySqlHandler {
 
     fn warm_up(&mut self, users: &HashMap<String, String>) {
         self.auth_cache.populate(users);
+    }
+
+    fn users_sync(&self) -> Option<Arc<dyn UsersSync>> {
+        Some(Arc::new(AuthCacheSync(Arc::clone(&self.auth_cache))))
     }
 }

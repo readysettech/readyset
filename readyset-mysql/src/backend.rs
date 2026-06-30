@@ -926,7 +926,7 @@ where
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
-        self.users().get(username).cloned().map(String::into_bytes)
+        self.password_for_user(username).map(String::into_bytes)
     }
 
     fn require_authentication(&self) -> bool {

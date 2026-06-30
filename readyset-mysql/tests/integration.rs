@@ -7,7 +7,7 @@ use std::time::Duration;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use mysql_async::prelude::*;
 use mysql_async::{params, Conn, Row, Value};
-use readyset_adapter::backend::{MigrationMode, QueryInfo};
+use readyset_adapter::backend::{AllowedUsers, MigrationMode, QueryInfo};
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_adapter::BackendBuilder;
@@ -35,7 +35,7 @@ where
     let builder = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(false)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     );
 
     set(builder).build::<MySQLAdapter>().await

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tokio::test;
 
+use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client::CacheMode;
 use readyset_client_metrics::QueryDestination;
@@ -51,7 +53,7 @@ async fn user_default_schema_is_used() {
         BackendBuilder::new()
             .require_authentication(true)
             .cache_mode(CacheMode::Shallow)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .fallback(true)
     .replicate_db(&test_name)

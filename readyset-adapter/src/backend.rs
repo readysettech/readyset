@@ -75,7 +75,9 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::mem;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::Arc;
+use std::sync::{
+    Arc, OnceLock, PoisonError, RwLock as StdRwLock, RwLockReadGuard as StdRwLockReadGuard,
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::rls_coordinator::RlsCoordinator;
@@ -94,7 +96,7 @@ use readyset_adapter_types::{DeallocateId, ParsedCommand, PreparedStatementType}
 use readyset_client::consensus::mcp_tokens::{
     McpToken, McpTokenScope as AuthorityMcpTokenScope, McpTokenStore,
 };
-use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest, UserStore};
 use readyset_client::post_processing::Results;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
@@ -113,15 +115,15 @@ use readyset_rls::InvalidationSink;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult, ContentHash};
 use readyset_sql::ast::{
-    self, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
+    self, AddUserStatement, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
     CreateMcpTokenStatement, DeallocateStatement, DiscardObject, DiscardStatement,
-    DropAllCachesStatement, DropMcpTokenStatement, ExplainStatement, FlushCacheStatement,
-    McpTokenExpiresChange, McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions,
-    ReadysetHintDirective, Relation, SelectStatement, SessionAuthorizationValue,
-    SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
-    ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy,
-    UseStatement,
+    DropAllCachesStatement, DropMcpTokenStatement, DropUserStatement, ExplainStatement,
+    FlushCacheStatement, McpTokenExpiresChange, McpTokenScope as ParserMcpTokenScope,
+    ModifyUserStatement, ProxiedQueriesOptions, ReadysetHintDirective, Relation, SelectStatement,
+    SessionAuthorizationValue, SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange,
+    ShallowCacheAllowlistKind, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
+    StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -606,6 +608,101 @@ fn record_skip_cache(query_id: String, cache_type: &'static str, reason: &'stati
     .increment(1);
 }
 
+/// Notified when the adapter's allowed-users map changes at runtime so protocol-level caches
+/// (today: MySQL `caching_sha2_password` fast-auth digests) can be kept in sync.
+pub trait UsersSync: Send + Sync + std::fmt::Debug {
+    /// Replace any cached state with one entry per `(user, password)` in `users`.
+    fn refresh(&self, users: &HashMap<String, String>);
+}
+
+/// Process-wide allowed-users map paired with an optional sync hook that keeps protocol-level
+/// fast-auth caches in step. Mutated by `ALTER READYSET ADD|MODIFY|DROP USER`.
+#[derive(Debug)]
+pub struct AllowedUsers {
+    /// Username to plaintext password for every user allowed to authenticate. Read on each
+    /// authentication attempt and written only by [`AllowedUsers::replace`]; reads are never held
+    /// across an await, so a std read-write lock fits this read-mostly hot path.
+    map: StdRwLock<HashMap<String, String>>,
+    /// Fast-auth refresh hook, invoked by [`AllowedUsers::replace`] under the map's write lock.
+    /// Write-once: production installs it at construction, the test harness right after, and
+    /// every later read is lock-free.
+    sync: OnceLock<Arc<dyn UsersSync>>,
+    /// Serializes runtime mutations so the in-memory map and the Authority never diverge under
+    /// concurrent `ALTER READYSET ... USER` statements. Held across the whole
+    /// snapshot -> persist -> replace sequence, which spans an Authority await, hence a tokio
+    /// Mutex rather than a std lock.
+    mutation_guard: tokio::sync::Mutex<()>,
+}
+
+impl AllowedUsers {
+    pub fn new(initial: HashMap<String, String>, sync: Option<Arc<dyn UsersSync>>) -> Self {
+        let sync_cell = OnceLock::new();
+        if let Some(sync) = sync {
+            let _ = sync_cell.set(sync);
+        }
+        Self {
+            map: StdRwLock::new(initial),
+            sync: sync_cell,
+            mutation_guard: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// Install the [`UsersSync`] hook after construction, for callers that create the fast-auth
+    /// cache only after the allowed-users handle exists (the test harness). A no-op if a hook is
+    /// already set; production wires the hook up front via [`AllowedUsers::new`].
+    pub fn set_users_sync(&self, sync: Arc<dyn UsersSync>) {
+        let _ = self.sync.set(sync);
+    }
+
+    /// Empty users map with no sync hook. Used as the default for [`BackendBuilder`].
+    pub fn empty() -> Arc<Self> {
+        Arc::new(Self::new(HashMap::new(), None))
+    }
+
+    /// Look up `user`'s plaintext password, cloning it out so the read lock isn't held by the
+    /// caller. A poisoned lock is recovered rather than propagated so a single panic elsewhere
+    /// cannot turn into a blanket authentication outage.
+    pub fn password_for(&self, user: &str) -> Option<String> {
+        self.map
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(user)
+            .cloned()
+    }
+
+    /// Read-lock the underlying map. Intended for one-shot startup work (e.g. priming the MySQL
+    /// `AuthCache`). Recovers a poisoned lock rather than panicking.
+    pub fn read(&self) -> StdRwLockReadGuard<'_, HashMap<String, String>> {
+        self.map.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Clone the current map, e.g. to seed an Authority `read_modify_write` or list usernames.
+    /// Recovers a poisoned lock rather than panicking.
+    pub fn snapshot(&self) -> HashMap<String, String> {
+        self.map
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Replace the whole map and notify the sync hook while still under the write lock, so an
+    /// observer never sees the map and the fast-auth cache disagree. Recovers a poisoned lock
+    /// rather than panicking.
+    pub fn replace(&self, new: HashMap<String, String>) {
+        let mut map = self.map.write().unwrap_or_else(PoisonError::into_inner);
+        *map = new;
+        if let Some(sync) = self.sync.get() {
+            sync.refresh(&map);
+        }
+    }
+
+    /// Acquire the mutation guard. Callers hold the returned guard across the whole
+    /// snapshot -> persist -> replace sequence of a single `ALTER READYSET ... USER`.
+    pub async fn lock_mutations(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.mutation_guard.lock().await
+    }
+}
+
 /// Builder for a [`Backend`]
 #[must_use]
 #[derive(Clone)]
@@ -614,7 +711,7 @@ pub struct BackendBuilder {
     slowlog: bool,
     dialect: Dialect,
     parsing_preset: ParsingPreset,
-    users: HashMap<String, String>,
+    users: Arc<AllowedUsers>,
     require_authentication: bool,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_mode: Option<QueryLogMode>,
@@ -665,7 +762,7 @@ impl Default for BackendBuilder {
             slowlog: false,
             dialect: Dialect::MySQL,
             parsing_preset: ParsingPreset::for_prod(),
-            users: Default::default(),
+            users: AllowedUsers::empty(),
             require_authentication: true,
             query_log_sender: None,
             query_log_mode: None,
@@ -831,13 +928,13 @@ impl BackendBuilder {
         self
     }
 
-    pub fn users(mut self, users: HashMap<String, String>) -> Self {
+    pub fn users(mut self, users: Arc<AllowedUsers>) -> Self {
         self.users = users;
         self
     }
 
-    /// Returns the map of users configured on this builder.
-    pub fn get_users(&self) -> &HashMap<String, String> {
+    /// Returns the shared users handle configured on this builder.
+    pub fn get_users(&self) -> &Arc<AllowedUsers> {
         &self.users
     }
 
@@ -1065,7 +1162,7 @@ where
 }
 
 fn parse_query(settings: &BackendSettings, query: &str) -> ReadySetResult<SqlQuery> {
-    trace!(%query, "Parsing query");
+    trace!(query = %Sensitive(&query), "Parsing query");
     readyset_sql_parsing::parse_query_with_config(
         settings.parsing_preset.into_config().log_only_selects(true),
         settings.dialect,
@@ -1297,8 +1394,9 @@ where
     unnamed_prepared_statements: HashMap<String, (Vec<SqlIdentifier>, StatementId, bool)>,
     /// Handle to access the cached schema catalog
     schema_handle: SchemaCatalogHandle,
-    /// Map from username to password for all users allowed to connect to the db
-    users: HashMap<String, String>,
+    /// Process-wide allowed-users handle. Owns the map and (optionally) a sync hook that keeps
+    /// protocol-level fast-auth caches in step. Mutated by `ALTER READYSET ADD|MODIFY|DROP USER`.
+    users: Arc<AllowedUsers>,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_mode: Option<QueryLogMode>,
     /// Provides the ability to send [`TelemetryEvent`]s to Segment
@@ -5041,6 +5139,112 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// Returns whether `user` is the user implied by `--upstream-db-url`. Dropping or rotating
+    /// that user would break MCP loopback auth and upstream-credential login, and the original
+    /// password could not be re-derived, so those mutations are rejected.
+    async fn is_upstream_url_user(state: &BackendState<DB>, user: &str) -> bool {
+        if let Some(cfg) = state.upstream_config.as_ref() {
+            let upstream_url = cfg.read().await.upstream_db_url.clone();
+            if let Some(url) = upstream_url
+                && let Ok(parsed) = url.parse::<DatabaseURL>()
+            {
+                return parsed.user() == Some(user);
+            }
+        }
+        false
+    }
+
+    /// Persist a mutated allowed-users map to the Authority and swap it into the in-memory handle.
+    /// The mutation guard is held across the whole snapshot -> persist -> replace sequence so
+    /// concurrent `ALTER READYSET ... USER` statements cannot leave the map and the Authority (or
+    /// the MySQL `AuthCache`) disagreeing.
+    async fn persist_user_mutation<F, Fut>(
+        state: &mut BackendState<DB>,
+        mutate: F,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>>
+    where
+        F: FnOnce(Arc<Authority>, HashMap<String, String>) -> Fut,
+        Fut: std::future::Future<Output = ReadySetResult<HashMap<String, String>>>,
+    {
+        let _guard = state.users.lock_mutations().await;
+        let seed = state.users.snapshot();
+        let new_map = mutate(Arc::clone(&state.authority), seed).await?;
+        state.users.replace(new_map);
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
+    /// Handle `ALTER READYSET ADD USER '<user>' PASSWORD '<password>'`.
+    async fn add_user(
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        stmt: &AddUserStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        if !settings.require_authentication {
+            unsupported!("ALTER READYSET ADD USER requires authentication to be enabled");
+        }
+        let user = stmt.user.to_string();
+        let password = stmt.password.0.clone();
+        let result = Self::persist_user_mutation(state, |authority, seed| async move {
+            authority
+                .add_allowed_user(seed, user.clone(), password)
+                .await
+        })
+        .await;
+        if result.is_ok() {
+            info!(user = %stmt.user, "ALTER READYSET ADD USER");
+        }
+        result
+    }
+
+    /// Handle `ALTER READYSET MODIFY USER '<user>' SET PASSWORD '<password>'`.
+    async fn modify_user(
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        stmt: &ModifyUserStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        if !settings.require_authentication {
+            unsupported!("ALTER READYSET MODIFY USER requires authentication to be enabled");
+        }
+        let user = stmt.user.to_string();
+        if Self::is_upstream_url_user(state, &user).await {
+            unsupported!("cannot MODIFY the user from --upstream-db-url");
+        }
+        let password = stmt.password.0.clone();
+        let result = Self::persist_user_mutation(state, |authority, seed| async move {
+            authority
+                .modify_allowed_user(seed, user.clone(), password)
+                .await
+        })
+        .await;
+        if result.is_ok() {
+            info!(user = %stmt.user, "ALTER READYSET MODIFY USER");
+        }
+        result
+    }
+
+    /// Handle `ALTER READYSET DROP USER '<user>'`.
+    async fn drop_user(
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        stmt: &DropUserStatement,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        if !settings.require_authentication {
+            unsupported!("ALTER READYSET DROP USER requires authentication to be enabled");
+        }
+        let user = stmt.user.to_string();
+        if Self::is_upstream_url_user(state, &user).await {
+            unsupported!("cannot DROP the user from --upstream-db-url");
+        }
+        let result = Self::persist_user_mutation(state, |authority, seed| async move {
+            authority.drop_allowed_user(seed, user.clone()).await
+        })
+        .await;
+        if result.is_ok() {
+            info!(user = %stmt.user, "ALTER READYSET DROP USER");
+        }
+        result
+    }
+
     /// Handle `SHOW MCP TOKENS`.
     async fn show_mcp_tokens(
         state: &BackendState<DB>,
@@ -5563,6 +5767,15 @@ where
                         "ALTER READYSET SHALLOW CACHE ALLOWED requires cache DDL to be enabled"
                     )
                 }
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::AddUser(stmt)) => {
+                Self::add_user(settings, state, stmt).await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ModifyUser(stmt)) => {
+                Self::modify_user(settings, state, stmt).await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::DropUser(stmt)) => {
+                Self::drop_user(settings, state, stmt).await
             }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
@@ -7003,8 +7216,14 @@ where
         self.settings.require_authentication
     }
 
-    /// Returns the map of users configured for this backend
-    pub fn users(&self) -> &HashMap<String, String> {
+    /// Look up the plaintext password for `user`, if `user` is allowed to authenticate against
+    /// this adapter.
+    pub fn password_for_user(&self, user: &str) -> Option<String> {
+        self.state.users.password_for(user)
+    }
+
+    /// The process-wide allowed-users handle for this backend.
+    pub fn users(&self) -> &Arc<AllowedUsers> {
         &self.state.users
     }
 

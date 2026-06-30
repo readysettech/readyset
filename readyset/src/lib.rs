@@ -36,7 +36,7 @@ use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
 use tracing_futures::Instrument;
 
 use readyset_adapter::backend::noria_connector::NoriaConnector;
-use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
+use readyset_adapter::backend::{AllowedUsers, MigrationMode, UnsupportedSetMode};
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -51,7 +51,7 @@ use readyset_adapter::{
 };
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
-use readyset_client::consensus::{AuthorityControl, AuthorityType};
+use readyset_client::consensus::{AuthorityControl, AuthorityType, UserStore};
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::host_info::collect_host_info;
@@ -109,6 +109,13 @@ pub trait ConnectionHandler {
     /// Warm handler-specific caches from the configured users. Called once
     /// during adapter startup, after the user list has been resolved.
     fn warm_up(&mut self, _users: &HashMap<String, String>) {}
+
+    /// Returns a hook for keeping handler-specific authentication state in sync with the shared
+    /// allowed-users map when it is mutated at runtime (`ALTER READYSET ADD|MODIFY|DROP USER`).
+    /// `None` (the default) means there is no fast-auth cache to refresh.
+    fn users_sync(&self) -> Option<Arc<dyn readyset_adapter::backend::UsersSync>> {
+        None
+    }
 }
 
 /// Parse and normalize the given string as an [`IpAddr`]
@@ -1092,11 +1099,6 @@ where
             info!(?options, "Cleaning up deployment");
             return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
         }
-        let users = Box::leak(Box::new(
-            options.get_allowed_users(options.allow_unauthenticated_connections)?,
-        ));
-        self.connection_handler.warm_up(users);
-
         info!(version = %VERSION_STR_ONELINE);
 
         if matches!(options.unsupported_set_mode, UnsupportedSetMode::Allow) {
@@ -1155,6 +1157,23 @@ where
         let deployment = options.deployment.clone();
         let adapter_authority =
             Arc::new(authority_type.to_authority(&authority_address, &deployment)?);
+
+        // Resolve the allowed-users set now that the Authority exists. The `allowed_users` key is
+        // the source of truth: on first start it is seeded from `--allowed-users` plus the
+        // upstream URL, and from then on it is authoritative (later `--allowed-users` edits are
+        // ignored; user changes go through `ALTER READYSET ... USER`). Unauthenticated mode has no
+        // users to manage, so it keeps the (empty) bootstrap set without persisting it.
+        let resolved_users = if options.allow_unauthenticated_connections {
+            options.get_allowed_users(true)?
+        } else {
+            let bootstrap = options.get_allowed_users(false)?;
+            rt.block_on(adapter_authority.load_or_init_allowed_users(bootstrap))?
+        };
+        let users = Arc::new(AllowedUsers::new(
+            resolved_users,
+            self.connection_handler.users_sync(),
+        ));
+        self.connection_handler.warm_up(&users.read());
 
         let adapter_rewrite_params = AdapterRewriteParams {
             dialect: self.database_type.into(),

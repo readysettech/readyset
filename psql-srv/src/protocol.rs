@@ -438,7 +438,7 @@ impl Protocol {
             .filter(|c| match c {
                 Credentials::Any => true,
                 Credentials::CleartextPassword(expected_password) => {
-                    &password == *expected_password
+                    &password == expected_password.as_str()
                 }
             })
             .ok_or_else(|| Error::AuthenticationFailure {
@@ -1268,7 +1268,7 @@ mod tests {
         last_execute_id: Option<u32>,
         last_execute_params: Option<Vec<PsqlValue>>,
         last_transfer_formats: Option<Vec<TransferFormat>>,
-        needed_credentials: Option<Credentials<'static>>,
+        needed_credentials: Option<Credentials>,
     }
 
     impl Backend {
@@ -1307,8 +1307,8 @@ mod tests {
             }
         }
 
-        fn credentials_for_user(&self, _user: &str) -> Option<Credentials<'_>> {
-            self.needed_credentials
+        fn credentials_for_user(&self, _user: &str) -> Option<Credentials> {
+            self.needed_credentials.clone()
         }
 
         async fn on_query(&mut self, query: &str) -> Result<QueryResponse<Self::Resultset>, Error> {
@@ -1510,7 +1510,9 @@ mod tests {
             application_name: None,
         };
         let mut backend = Backend::new();
-        backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
+        backend.needed_credentials = Some(Credentials::CleartextPassword(
+            expected_password.to_string(),
+        ));
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert!(matches!(
@@ -1564,7 +1566,9 @@ mod tests {
             application_name: None,
         };
         let mut backend = Backend::new();
-        backend.needed_credentials = Some(Credentials::CleartextPassword(expected_password));
+        backend.needed_credentials = Some(Credentials::CleartextPassword(
+            expected_password.to_string(),
+        ));
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
         match block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap() {
             Response::Messages(ms) => assert!(matches!(
