@@ -13,7 +13,7 @@ use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, Repli
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{
-    BackendBuilder, MigrationMode, QueryDestination, QueryInfo, UnsupportedSetMode,
+    BackendBuilder, MigrationMode, QueryDestination, QueryInfo, UnsupportedSetMode, UsersSync,
 };
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
@@ -195,6 +195,14 @@ pub trait Adapter: Send {
         auth_plugin: AuthPlugin,
         auth_cache: Arc<AuthCache>,
     );
+
+    /// Return a [`UsersSync`] hook that keeps a protocol-level fast-auth cache in step with runtime
+    /// `ALTER READYSET ... USER` mutations, mirroring how the adapter binary wires its cache. The
+    /// default has no cache to sync; MySQL overrides it to sync the `caching_sha2_password`
+    /// [`AuthCache`].
+    fn users_sync(_auth_cache: &Arc<AuthCache>) -> Option<Arc<dyn UsersSync>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -732,6 +740,12 @@ impl TestBuilder {
 
         let auth_cache = AuthCache::new();
         auth_cache.populate(&self.backend_builder.get_users().read());
+        // Wire the fast-auth cache to the allowed-users handle so runtime `ALTER READYSET ... USER`
+        // mutations refresh it, mirroring the adapter binary. The handle is shared, so this is the
+        // same map the backend authenticates against and the `readyset.users` vrel reads.
+        if let Some(sync) = A::users_sync(&auth_cache) {
+            self.backend_builder.get_users().set_users_sync(sync);
+        }
         let users_for_schema = Arc::clone(self.backend_builder.get_users());
 
         tokio::spawn(async move {
