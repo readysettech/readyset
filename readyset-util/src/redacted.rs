@@ -44,8 +44,18 @@ where
 
 /// Wraps a given string, replacing its contents with "<redacted>" when debug
 /// printed if the `redact_sensitive` feature is enabled.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RedactedString(pub String);
+
+impl proptest::arbitrary::Arbitrary for RedactedString {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<RedactedString>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<String>().prop_map(RedactedString).boxed()
+    }
+}
 
 impl Deref for RedactedString {
     type Target = String;
