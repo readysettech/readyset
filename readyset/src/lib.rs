@@ -1835,6 +1835,7 @@ where
             &shallow,
             controller,
             query_status_cache,
+            users.clone(),
         )?;
 
         // MCP tool calls dispatch via a loopback SQL connection to the

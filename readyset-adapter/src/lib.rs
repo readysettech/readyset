@@ -18,6 +18,7 @@ pub mod shallow_refresh_pool;
 mod status_reporter;
 pub mod table_extraction_visitor;
 pub mod upstream_database;
+mod users_vrel;
 mod utils;
 pub mod views_synchronizer;
 

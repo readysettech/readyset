@@ -21,7 +21,7 @@ use readyset_errors::{ReadySetResult, readyset_schema_err};
 use readyset_sql::Dialect;
 
 use shallow_vrels::ShallowInfo;
-use virtual_relation::{VrelContext, init_vrels};
+use virtual_relation::{UsersInfo, VrelContext, init_vrels};
 
 pub mod mysql;
 pub mod psql;
@@ -44,6 +44,7 @@ impl ReadysetSchema {
         shallow: &Arc<S>,
         controller: ReadySetHandle,
         query_status_cache: &'static Q,
+        users: Arc<dyn UsersInfo>,
     ) -> ReadySetResult<Arc<Self>>
     where
         S: ShallowInfo + 'static,
@@ -85,6 +86,7 @@ impl ReadysetSchema {
             shallow: Arc::clone(shallow) as Arc<dyn ShallowInfo>,
             controller,
             query_status_cache,
+            users,
         });
         for (name, provider) in init_vrels(&vrel_ctx) {
             schema

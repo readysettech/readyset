@@ -703,6 +703,12 @@ impl AllowedUsers {
     }
 }
 
+impl readyset_schema::virtual_relation::UsersInfo for AllowedUsers {
+    fn usernames(&self) -> Vec<String> {
+        self.snapshot().into_keys().collect()
+    }
+}
+
 /// Builder for a [`Backend`]
 #[must_use]
 #[derive(Clone)]

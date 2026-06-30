@@ -45,6 +45,14 @@ pub struct VrelContext {
     pub shallow: Arc<dyn ShallowInfo>,
     pub controller: ReadySetHandle,
     pub query_status_cache: &'static (dyn std::any::Any + Send + Sync),
+    pub users: Arc<dyn UsersInfo>,
+}
+
+/// Provides the set of usernames allowed to authenticate against the adapter, backing the
+/// `readyset.users` vrel.
+pub trait UsersInfo: Send + Sync {
+    /// Returns the current allowed usernames.
+    fn usernames(&self) -> Vec<String>;
 }
 
 /// A function that produces a new vrel read.
@@ -694,6 +702,13 @@ mod tests {
             }
         }
 
+        struct NoopUsers;
+        impl UsersInfo for NoopUsers {
+            fn usernames(&self) -> Vec<String> {
+                vec![]
+            }
+        }
+
         let shallow = Arc::new(NoopShallow);
         let schema = crate::ReadysetSchema::init(
             "test_db",
@@ -701,6 +716,7 @@ mod tests {
             &shallow,
             stub_controller(),
             &(),
+            Arc::new(NoopUsers),
         )
         .expect("init succeeds");
 

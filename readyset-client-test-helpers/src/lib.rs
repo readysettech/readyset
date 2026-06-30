@@ -732,6 +732,7 @@ impl TestBuilder {
 
         let auth_cache = AuthCache::new();
         auth_cache.populate(&self.backend_builder.get_users().read());
+        let users_for_schema = Arc::clone(self.backend_builder.get_users());
 
         tokio::spawn(async move {
             // Keep the RLS bootstrap handle alive for the server's lifetime: it
@@ -739,9 +740,15 @@ impl TestBuilder {
             // polling. It is released (poller stops) when this task ends.
             let _rls_bootstrap_handle = rls_bootstrap_handle;
             let controller = ReadySetHandle::new(authority.clone()).await;
-            let readyset_schema =
-                ReadysetSchema::init("readyset", A::DIALECT, &shallow_for_schema, controller, &())
-                    .unwrap();
+            let readyset_schema = ReadysetSchema::init(
+                "readyset",
+                A::DIALECT,
+                &shallow_for_schema,
+                controller,
+                &(),
+                users_for_schema,
+            )
+            .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
             let connection_fut = async move {
                 loop {
