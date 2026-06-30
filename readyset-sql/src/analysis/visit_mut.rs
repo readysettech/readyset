@@ -1272,7 +1272,10 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         | AlterReadysetStatement::StopReplication
         | AlterReadysetStatement::StartReplication
         | AlterReadysetStatement::SetReplicationPosition(_)
-        | AlterReadysetStatement::ChangeCdc(_) => Ok(()),
+        | AlterReadysetStatement::ChangeCdc(_)
+        | AlterReadysetStatement::AddUser(_)
+        | AlterReadysetStatement::ModifyUser(_)
+        | AlterReadysetStatement::DropUser(_) => Ok(()),
     }
 }
 

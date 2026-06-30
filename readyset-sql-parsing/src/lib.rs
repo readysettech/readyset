@@ -5,14 +5,14 @@ use std::time::Duration;
 use clap::ValueEnum;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
-    AddTablesStatement, AlterReadysetStatement, AlterTableStatement, AutoparamControl, CacheInner,
-    CacheType, ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions,
-    CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
-    EvictionPolicy, Expr, FlushAllShallowCachesStatement, FlushCacheStatement,
-    ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue,
-    SetEviction, SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
-    ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShallowCacheQuery, SqlQuery, SqlType,
-    TableKey, TrxCachePolicy,
+    AddTablesStatement, AddUserStatement, AlterReadysetStatement, AlterTableStatement,
+    AutoparamControl, CacheInner, CacheType, ChangeCdcStatement, ChangeUpstreamStatement,
+    CreateCacheOptions, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
+    DropCacheStatement, DropUserStatement, EvictionPolicy, Expr, FlushAllShallowCachesStatement,
+    FlushCacheStatement, ModifyUserStatement, ReadysetHintDirective, ResnapshotTableStatement,
+    SelectStatement, SessionAuthorizationValue, SetEviction, SetReplicationPositionStatement,
+    SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
+    ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -529,6 +529,43 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             ],
         ) {
             parse_shallow_cache_allowlist_change(parser, false)
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::ADD),
+                ReadysetKeyword::Standard(Keyword::USER),
+            ],
+        ) {
+            let user = parser.parse_literal_string()?.into();
+            parser.expect_keyword(Keyword::PASSWORD)?;
+            let password = parser.parse_literal_string()?.into();
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::AddUser(
+                AddUserStatement { user, password },
+            )))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::MODIFY),
+                ReadysetKeyword::Standard(Keyword::USER),
+            ],
+        ) {
+            let user = parser.parse_literal_string()?.into();
+            parser.expect_keyword(Keyword::PASSWORD)?;
+            let password = parser.parse_literal_string()?.into();
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::ModifyUser(
+                ModifyUserStatement { user, password },
+            )))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::DROP),
+                ReadysetKeyword::Standard(Keyword::USER),
+            ],
+        ) {
+            let user = parser.parse_literal_string()?.into();
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::DropUser(
+                DropUserStatement { user },
+            )))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(format!(
                 "unexpected token after ALTER READYSET: {}",

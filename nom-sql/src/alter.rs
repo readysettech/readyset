@@ -9,6 +9,7 @@ use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated};
 use nom_locate::LocatedSpan;
 use readyset_sql::{ast::*, Dialect};
+use readyset_util::redacted::RedactedString;
 
 use crate::column::column_specification;
 use crate::common::{
@@ -570,6 +571,74 @@ pub fn change_cdc_statement(
     }
 }
 
+pub fn add_user_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("add")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("user")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, user) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("password")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, password) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::AddUser(AddUserStatement {
+                user: user.into(),
+                password: RedactedString(password),
+            }),
+        ))
+    }
+}
+
+pub fn modify_user_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("modify")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("user")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, user) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("password")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, password) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::ModifyUser(ModifyUserStatement {
+                user: user.into(),
+                password: RedactedString(password),
+            }),
+        ))
+    }
+}
+
+pub fn drop_user_statement(
+    dialect: Dialect,
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("drop")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("user")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, user) = dialect.utf8_string_literal()(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((
+            i,
+            AlterReadysetStatement::DropUser(DropUserStatement { user: user.into() }),
+        ))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -593,6 +662,9 @@ pub fn alter_readyset_statement(
                 start_replication_statement(),
                 set_replication_position_statement(dialect),
                 change_cdc_statement(dialect),
+                add_user_statement(dialect),
+                modify_user_statement(dialect),
+                drop_user_statement(dialect),
             )),
         ))(i)?;
 
@@ -1876,6 +1948,44 @@ mod tests {
                 res,
                 AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                     url: "mysql://host/db".to_string(),
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_add_user() {
+            let qstring = b"ALTER READYSET ADD USER 'alice' PASSWORD 'se''cret';";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::AddUser(AddUserStatement {
+                    user: "alice".into(),
+                    password: RedactedString("se'cret".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_modify_user() {
+            let qstring = b"ALTER READYSET MODIFY USER 'alice' PASSWORD 'newsecret';";
+            let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::ModifyUser(ModifyUserStatement {
+                    user: "alice".into(),
+                    password: RedactedString("newsecret".to_string()),
+                })
+            );
+        }
+
+        #[test]
+        fn alter_readyset_drop_user() {
+            let qstring = b"ALTER READYSET DROP USER 'alice';";
+            let res = test_parse!(alter_readyset_statement(Dialect::MySQL), qstring);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::DropUser(DropUserStatement {
+                    user: "alice".into(),
                 })
             );
         }

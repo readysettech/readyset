@@ -191,6 +191,11 @@ fn alter_readyset() {
     check_parse_both!("ALTER READYSET START REPLICATION;");
     check_parse_both!("ALTER READYSET SET REPLICATION POSITION 'mysql-bin.000003:154';");
     check_parse_both!("ALTER READYSET CHANGE CDC TO 'mysql://host/db';");
+    check_parse_both!("ALTER READYSET ADD USER 'alice' PASSWORD 'secret';");
+    check_parse_both!("ALTER READYSET MODIFY USER 'alice' PASSWORD 'newsecret';");
+    check_parse_both!("ALTER READYSET DROP USER 'alice';");
+    // Embedded single quotes in the password are accepted by both parsers.
+    check_parse_both!("ALTER READYSET ADD USER 'alice' PASSWORD 'se''cret';");
 }
 
 #[test]
