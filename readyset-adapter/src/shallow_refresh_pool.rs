@@ -16,6 +16,7 @@ use tokio::time::timeout;
 use tracing::warn;
 
 use crate::ROUTING_CHECK_INTERVAL;
+use crate::backend::READYSET_SHALLOW_REFRESHER;
 use crate::upstream_database::{Refresh, UpstreamDatabase};
 
 const CHANNEL_CAPACITY: usize = 5;
@@ -256,7 +257,9 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
 
             if upstream.is_none() || reconnect {
                 reconnect = false;
-                match DB::connect(config.clone(), None, None, false).await {
+                let mut connect_config = config.clone();
+                connect_config.program_name = Some(READYSET_SHALLOW_REFRESHER.to_string());
+                match DB::connect(connect_config, None, None, false).await {
                     Ok(conn) => upstream = Some(conn),
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {

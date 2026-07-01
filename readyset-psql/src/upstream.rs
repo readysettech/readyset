@@ -328,6 +328,9 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         if let Some(password) = password {
             pg_config.password(password);
         }
+        if let Some(program_name) = upstream_config.program_name.as_deref() {
+            pg_config.application_name(program_name);
+        }
         let user = pg_config.get_user().map(|s| s.to_owned());
 
         let verification = ServerCertVerification::from(&upstream_config).await?;

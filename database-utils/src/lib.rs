@@ -89,6 +89,14 @@ pub struct UpstreamConfig {
     #[serde(default = "default_replication_enabled")]
     pub replication_enabled: bool,
 
+    /// Program/application name reported to the upstream database when this config opens a
+    /// connection. Set internally for connections that should be identifiable on the upstream
+    /// (e.g. the shallow cache refresher). Maps to the MySQL `_program_name` connect attribute
+    /// and the PostgreSQL `application_name` runtime parameter.
+    #[arg(skip)]
+    #[serde(default)]
+    pub program_name: Option<String>,
+
     /// Server ID to use when registering as a replication follower with the upstream db
     ///
     /// This can be used to differentiate different Readyset deployments connected to the same
@@ -450,6 +458,7 @@ impl Default for UpstreamConfig {
             disable_setup_ddl_replication: false,
             disable_create_publication: false,
             replication_enabled: true,
+            program_name: None,
             replication_server_id: Default::default(),
             replication_server_uuid: Default::default(),
             require_gtid: false,

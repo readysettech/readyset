@@ -365,6 +365,12 @@ impl MySqlUpstream {
         if let Some(password) = password {
             builder = builder.pass(Some(password));
         }
+        if let Some(program_name) = upstream_config.program_name.as_deref() {
+            builder = builder.connect_attributes(HashMap::from([(
+                "_program_name".to_string(),
+                program_name.to_string(),
+            )]));
+        }
         // Mirror the client's CLIENT_INTERACTIVE capability so the upstream session honors
         // interactive_timeout rather than wait_timeout when the client is interactive.
         if interactive {

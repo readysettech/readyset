@@ -154,6 +154,10 @@ use self::noria_connector::{MetaVariable, PreparedSelectTypes};
 /// Reserved program/application name used by ReadySet components to identify internal connections
 pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
 
+/// Reserved program/application name reported by the shallow cache refresher on its upstream
+/// connections so they are identifiable on the upstream database.
+pub const READYSET_SHALLOW_REFRESHER: &str = "READYSET_SHALLOW_REFRESHER";
+
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
 /// Placeholder username for connections that have not yet authenticated
