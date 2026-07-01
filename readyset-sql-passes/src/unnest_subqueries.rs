@@ -2712,17 +2712,52 @@ pub(crate) fn is_correlation_pinned_at_most_one(stmt: &SelectStatement) -> Ready
 /// grouped-with-correlation bodies are different shapes, and conflating
 /// them on the ExactlyOne side would silently corrupt the COALESCE-zero
 /// promotion in `get_join_operator_for_lateral`.
+///
+/// The three hint sets are keyed by alias-as-`Relation` with no scope
+/// discriminator.  When two LATERAL subqueries at different nesting levels
+/// in the input share an alias, a consumer at one scope would silently
+/// inherit the classification recorded from the other scope's LATERAL and
+/// misapply it (`get_join_operator_for_lateral` promoting a JOIN that
+/// doesn't have agg-empty defaults; ILDT/DTR admitting an inlining not
+/// backed by AtMostOne cardinality; the hoister skipping ON-clause
+/// preservation on a non-trivial JOIN).  Skip classification entirely for
+/// aliases that occur on LATERAL FROM items at more than one nesting level
+/// — the absent hint routes consumers through the conservative fallback
+/// path already used when no classification fires.
 pub(crate) fn collect_lateral_hints<U: UniqueColumnsSchema>(
     stmt: &SelectStatement,
     ctx: &mut UnnestContext<U>,
 ) -> ReadySetResult<()> {
+    let mut lateral_counts: HashMap<Relation, usize> = HashMap::new();
+    count_lateral_aliases(stmt, &mut lateral_counts);
+    let collision_aliases: HashSet<Relation> = lateral_counts
+        .into_iter()
+        .filter_map(|(rel, n)| (n > 1).then_some(rel))
+        .collect();
+
+    collect_lateral_hints_impl(stmt, ctx, &collision_aliases)
+}
+
+fn collect_lateral_hints_impl<U: UniqueColumnsSchema>(
+    stmt: &SelectStatement,
+    ctx: &mut UnnestContext<U>,
+    collision_aliases: &HashSet<Relation>,
+) -> ReadySetResult<()> {
     for (tab_expr_idx, tab_expr) in get_local_from_items_iter!(stmt).enumerate() {
         if let Some((inner, alias)) = as_sub_query_with_alias(tab_expr) {
             // Recurse first to collect nested hints
-            collect_lateral_hints(inner, ctx)?;
+            collect_lateral_hints_impl(inner, ctx, collision_aliases)?;
 
             if inner.lateral {
                 let alias_rel: Relation = alias.clone().into();
+
+                // Skip classification for cross-scope alias collisions; the
+                // three hint sets can't distinguish scopes and a consumer at
+                // this scope would inherit a classification recorded from
+                // another.  See the doc comment on `collect_lateral_hints`.
+                if collision_aliases.contains(&alias_rel) {
+                    continue;
+                }
 
                 // Existing ExactlyOne detection (aggregate-only-no-GROUP-BY).
                 if matches!(
@@ -2761,6 +2796,22 @@ pub(crate) fn collect_lateral_hints<U: UniqueColumnsSchema>(
         }
     }
     Ok(())
+}
+
+/// Count LATERAL subquery aliases across every scope reachable from `stmt`
+/// (nested subquery bodies included).  Non-LATERAL subquery aliases are not
+/// counted — only LATERAL FROM items feed `collect_lateral_hints`'s
+/// classification, so a non-LATERAL alias that happens to match a LATERAL
+/// alias elsewhere can't cause a hint-set misapplication.
+fn count_lateral_aliases(stmt: &SelectStatement, out: &mut HashMap<Relation, usize>) {
+    for tab_expr in get_local_from_items_iter!(stmt) {
+        if let Some((inner, alias)) = as_sub_query_with_alias(tab_expr) {
+            if inner.lateral {
+                *out.entry(alias.into()).or_insert(0) += 1;
+            }
+            count_lateral_aliases(inner, out);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2910,6 +2961,148 @@ mod nonnull_schema_impl_tests {
             !schema
                 .not_null_columns_of(&rel)
                 .contains(&mk_col("t", "id"))
+        );
+    }
+}
+
+#[cfg(test)]
+mod collect_lateral_hints_tests {
+    use super::*;
+    use crate::unnest_subqueries_3vl::ProbeRegistry;
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::parse_select;
+
+    struct NoNonNulls;
+    impl NonNullSchema for NoNonNulls {
+        fn not_null_columns_of(&self, _rel: &Relation) -> HashSet<Column> {
+            HashSet::new()
+        }
+    }
+
+    struct PermissiveUniqueSchema;
+    impl UniqueColumnsSchema for PermissiveUniqueSchema {
+        fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
+            Some(HashSet::from([Column {
+                name: "k".into(),
+                table: Some(rel.clone()),
+            }]))
+        }
+    }
+
+    fn empty_ctx<'a>(
+        schema: &'a NoNonNulls,
+        unique: &'a PermissiveUniqueSchema,
+    ) -> UnnestContext<'a, PermissiveUniqueSchema> {
+        UnnestContext {
+            schema,
+            unique_cols_schema: unique,
+            probes: ProbeRegistry::new(),
+            pre_hoist_lateral_exactly_one: HashSet::new(),
+            pre_hoist_lateral_at_most_one: HashSet::new(),
+            lateral_trivial_on: HashSet::new(),
+            ancestor_scope: HashSet::new(),
+            ancestor_scope_ordered: Vec::new(),
+        }
+    }
+
+    /// A LATERAL subquery whose body is agg-only-no-GBY at the outer scope
+    /// gets classified as `ExactlyOne`; a differently-shaped LATERAL with
+    /// the SAME alias at a nested scope must not inherit the classification.
+    /// Skip classification for both — the hint sets are alias-keyed with no
+    /// scope discriminator, so applying either scope's classification to
+    /// the other's LATERAL would silently produce wrong results.
+    #[test]
+    fn cross_scope_alias_collision_skips_classification() {
+        // Outer's LATERAL `sub`: agg-only-no-GBY → would be ExactlyOne.
+        // Inner's LATERAL `sub`: correlated non-agg-non-grouped → neither
+        // ExactlyOne nor AtMostOne, but same alias.
+        let stmt = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT outer_t.k, sub.m, wrap.x
+             FROM outer_t,
+                  LATERAL (SELECT MAX(b.v) AS m FROM b WHERE b.k = outer_t.k) AS sub,
+                  (SELECT inner_t.k, sub.x
+                   FROM inner_t,
+                        LATERAL (SELECT c.v AS x FROM c WHERE c.k = inner_t.k) AS sub) AS wrap",
+        )
+        .expect("parse");
+
+        let schema = NoNonNulls;
+        let unique = PermissiveUniqueSchema;
+        let mut ctx = empty_ctx(&schema, &unique);
+        collect_lateral_hints(&stmt, &mut ctx).expect("collect");
+
+        let sub_rel: Relation = "sub".into();
+        assert!(
+            !ctx.pre_hoist_lateral_exactly_one.contains(&sub_rel),
+            "colliding alias must not be classified as ExactlyOne"
+        );
+        assert!(
+            !ctx.pre_hoist_lateral_at_most_one.contains(&sub_rel),
+            "colliding alias must not be classified as AtMostOne"
+        );
+        assert!(
+            !ctx.lateral_trivial_on.contains(&sub_rel),
+            "colliding alias must not be classified as trivial-ON"
+        );
+    }
+
+    /// A LATERAL alias that appears at exactly one scope should still be
+    /// classified normally — the collision filter only fires on multi-scope
+    /// occurrences.
+    #[test]
+    fn unique_lateral_alias_classifies_normally() {
+        let stmt = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT outer_t.k, sub.m
+             FROM outer_t,
+                  LATERAL (SELECT MAX(b.v) AS m FROM b WHERE b.k = outer_t.k) AS sub",
+        )
+        .expect("parse");
+
+        let schema = NoNonNulls;
+        let unique = PermissiveUniqueSchema;
+        let mut ctx = empty_ctx(&schema, &unique);
+        collect_lateral_hints(&stmt, &mut ctx).expect("collect");
+
+        let sub_rel: Relation = "sub".into();
+        // Non-colliding agg-only-no-GBY body classifies as ExactlyOne.
+        assert!(
+            ctx.pre_hoist_lateral_exactly_one.contains(&sub_rel),
+            "unique-alias agg-only-no-GBY LATERAL should classify as ExactlyOne"
+        );
+        // Comma segment: treated as trivial-ON.
+        assert!(
+            ctx.lateral_trivial_on.contains(&sub_rel),
+            "comma-segment LATERAL should classify as trivial-ON"
+        );
+    }
+
+    /// Non-LATERAL subquery aliases don't participate in classification, so
+    /// they don't count toward the collision check either — a LATERAL and a
+    /// non-LATERAL sharing an alias should leave the LATERAL classified.
+    #[test]
+    fn non_lateral_shadow_does_not_trigger_collision() {
+        let stmt = parse_select(
+            Dialect::PostgreSQL,
+            "SELECT outer_t.k, sub.m
+             FROM outer_t,
+                  LATERAL (SELECT MAX(b.v) AS m FROM b WHERE b.k = outer_t.k) AS sub,
+                  (SELECT inner_t.k, sub.n
+                   FROM inner_t,
+                        (SELECT c.v AS n FROM c) AS sub) AS wrap",
+        )
+        .expect("parse");
+
+        let schema = NoNonNulls;
+        let unique = PermissiveUniqueSchema;
+        let mut ctx = empty_ctx(&schema, &unique);
+        collect_lateral_hints(&stmt, &mut ctx).expect("collect");
+
+        let sub_rel: Relation = "sub".into();
+        assert!(
+            ctx.pre_hoist_lateral_exactly_one.contains(&sub_rel),
+            "outer LATERAL should classify despite a same-alias non-LATERAL elsewhere"
         );
     }
 }
