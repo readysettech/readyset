@@ -32,6 +32,14 @@ ignore = [
     # build pre-populates the auth cache from configured users and never
     # performs RSA decryption. See mysql-srv/src/authentication.rs.
     { id = "RUSTSEC-2023-0071", reason = "rsa crate only used by opt-in caching_sha2_password full-auth feature; default build does not perform RSA decryption" },
+    # quick-xml 0.26 is pulled in transitively via pprof's "flamegraph" feature
+    # (pprof -> inferno ^0.11 -> quick-xml ^0.26), used only as a dev-dependency for
+    # local criterion benchmark profiling. It never parses untrusted XML, and no
+    # upgrade path exists yet: pprof 0.15.0 is the latest release and still requires
+    # inferno ^0.11; inferno's latest release (0.12.6) only relaxes its requirement
+    # to quick-xml ^0.39, short of the >=0.41.0 fix.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml only reachable via pprof's dev-only flamegraph feature; no untrusted XML input; no upgrade path available upstream yet" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml only reachable via pprof's dev-only flamegraph feature; no untrusted XML input; no upgrade path available upstream yet" },
 ]
 #ignore = [
 #    # paste is unmaintained but works fine, lots of crates depend on it, and there doesn't seem to
