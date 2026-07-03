@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use crossbeam_skiplist::SkipSet;
@@ -6,6 +7,7 @@ use readyset_client::ReadySetHandle;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::status::ReadySetControllerStatus;
+use readyset_common::host_info::{HostInfo, collect_host_info};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -23,6 +25,7 @@ pub struct ReadySetStatus {
     pub connection_count: usize,
     pub persistent_stats: Option<PersistentStats>,
     pub enabled_features: Vec<String>,
+    pub host: HostInfo,
 }
 
 impl ReadySetStatus {
@@ -83,6 +86,26 @@ impl ReadySetStatus {
             ));
         }
 
+        let HostInfo {
+            cpus,
+            memory_bytes,
+            disk_bytes,
+            arch,
+            os,
+            kernel,
+            container,
+            numa_nodes,
+        } = self.host;
+        let gb = |bytes: u64| format!("{:.1} GB", bytes as f64 / 1_000_000_000.0);
+        status.push(("Host CPUs".to_string(), cpus.to_string()));
+        status.push(("Host Total Memory".to_string(), gb(memory_bytes)));
+        status.push(("Host Total Disk".to_string(), gb(disk_bytes)));
+        status.push(("Host Arch".to_string(), arch));
+        status.push(("Host OS".to_string(), os));
+        status.push(("Host Kernel".to_string(), kernel));
+        status.push(("Host Container".to_string(), container.to_string()));
+        status.push(("Host NUMA Nodes".to_string(), numa_nodes.to_string()));
+
         QueryResult::MetaVariables(status.into_iter().map(MetaVariable::from).collect())
     }
 }
@@ -121,6 +144,7 @@ where
         connections: Arc<SkipSet<ConnectionInfo>>,
         authority: Arc<Authority>,
         enabled_features: Vec<String>,
+        disk_path: &Path,
     ) -> Self {
         let upstream = upstream_config
             .upstream_db_url
@@ -132,6 +156,7 @@ where
             connections,
             authority,
             enabled_features,
+            host: collect_host_info(disk_path),
         }));
         Self { inner }
     }
@@ -156,6 +181,8 @@ struct ReadySetStatusReporterInner<U> {
     pub(crate) authority: Arc<Authority>,
     /// Enabled features to display in status
     pub(crate) enabled_features: Vec<String>,
+    /// Static host facts (CPU, memory, disk, NUMA, OS), collected once at startup
+    pub(crate) host: HostInfo,
 }
 
 impl<U> ReadySetStatusReporterInner<U>
@@ -175,6 +202,7 @@ where
             connection_count: self.connections.len(),
             persistent_stats,
             enabled_features: self.enabled_features.clone(),
+            host: self.host.clone(),
         }
     }
 

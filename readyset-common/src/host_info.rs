@@ -4,14 +4,15 @@ use std::fmt::{Formatter, Result};
 use std::thread::available_parallelism;
 use std::{fmt::Display, path::Path};
 
+use serde::{Deserialize, Serialize};
 use sysinfo::{Disks, MemoryRefreshKind, RefreshKind, System};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HostInfo {
     pub cpus: usize,
     pub memory_bytes: u64,
     pub disk_bytes: u64,
-    pub arch: &'static str,
+    pub arch: String,
     pub os: String,
     pub kernel: String,
     pub container: Container,
@@ -30,7 +31,7 @@ pub fn collect_host_info(disk_path: &Path) -> HostInfo {
         cpus: available_parallelism().map_or(0, |p| p.get()),
         memory_bytes,
         disk_bytes: disk_total_bytes(disk_path),
-        arch: std::env::consts::ARCH,
+        arch: std::env::consts::ARCH.to_owned(),
         os: System::long_os_version().unwrap_or_else(|| std::env::consts::OS.to_owned()),
         kernel: System::kernel_version().unwrap_or_default(),
         container: Container::detect(),
@@ -71,7 +72,7 @@ fn numa_node_count() -> usize {
 }
 
 /// A container runtime or orchestrator we're running under, or [`Container::None`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Container {
     None,
     Kubernetes,

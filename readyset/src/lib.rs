@@ -1078,6 +1078,7 @@ where
             connections.clone(),
             adapter_authority.clone(),
             options.server_worker_options.enabled_features(),
+            &deployment_dir,
         );
         let ctrlc = tokio::signal::ctrl_c();
         let mut sigterm = {

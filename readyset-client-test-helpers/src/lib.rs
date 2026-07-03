@@ -711,6 +711,7 @@ impl TestBuilder {
                         Default::default(),
                         authority.clone(),
                         Vec::new(),
+                        std::path::Path::new("/"),
                     );
                     let backend = backend_builder
                         .dialect(A::DIALECT)

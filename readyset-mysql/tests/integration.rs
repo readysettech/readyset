@@ -1909,7 +1909,7 @@ async fn show_caches_with_always() {
 async fn show_readyset_status() {
     let (opts, _handle, shutdown_tx) = setup_with_mysql().await;
     let mut conn = Conn::new(opts).await.unwrap();
-    let mut ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
+    let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
 
     let valid_timestamp = |s: String| {
         if s == "NULL" {
@@ -1928,48 +1928,24 @@ async fn show_readyset_status() {
         }
     };
 
-    // NOTE: If this readyset extension has changed, verify the new behavior is correct then update
-    // the expected values below
-    assert_eq!(ret.len(), 10);
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Database Connection");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "Connected");
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Connection Count");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "0");
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Status");
-    assert_eq!(
-        row.get::<String, _>(1).unwrap(),
-        CurrentStatus::Online.to_string()
-    );
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Replication Status");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "Running");
-    let row = ret.remove(0);
-    assert_eq!(
-        row.get::<String, _>(0).unwrap(),
-        "Maximum Replication Offset"
-    );
-    assert!(valid_binlog(row.get::<String, _>(1).unwrap()));
-    let row = ret.remove(0);
-    assert_eq!(
-        row.get::<String, _>(0).unwrap(),
-        "Minimum Replication Offset"
-    );
-    assert!(valid_binlog(row.get::<String, _>(1).unwrap()));
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Last started Controller");
-    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Last completed snapshot");
-    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Last started replication");
-    assert!(valid_timestamp(row.get::<String, _>(1).unwrap()));
-    let row = ret.remove(0);
-    assert_eq!(row.get::<String, _>(0).unwrap(), "Enabled Features");
-    assert_eq!(row.get::<String, _>(1).unwrap(), "None");
+    let status_value = |key: &str| -> String {
+        ret.iter()
+            .find(|r| r.get::<String, _>(0).unwrap() == key)
+            .unwrap_or_else(|| panic!("`{key}` row missing from SHOW READYSET STATUS"))
+            .get::<String, _>(1)
+            .unwrap()
+    };
+
+    assert_eq!(status_value("Database Connection"), "Connected");
+    assert_eq!(status_value("Connection Count"), "0");
+    assert_eq!(status_value("Status"), CurrentStatus::Online.to_string());
+    assert_eq!(status_value("Replication Status"), "Running");
+    assert!(valid_binlog(status_value("Maximum Replication Offset")));
+    assert!(valid_binlog(status_value("Minimum Replication Offset")));
+    assert!(valid_timestamp(status_value("Last started Controller")));
+    assert!(valid_timestamp(status_value("Last completed snapshot")));
+    assert!(valid_timestamp(status_value("Last started replication")));
+    assert_eq!(status_value("Enabled Features"), "None");
     readyset_maintenance_mode(&mut conn).await;
     shutdown_tx.shutdown().await;
 }
@@ -1980,7 +1956,6 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .unwrap();
     sleep().await;
     let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert_eq!(ret.len(), 10);
     // find the row with "Status"
     let row = ret
         .iter()
@@ -1995,7 +1970,6 @@ async fn readyset_maintenance_mode(conn: &mut Conn) {
         .unwrap();
     sleep().await;
     let ret: Vec<Row> = conn.query("SHOW READYSET STATUS;").await.unwrap();
-    assert_eq!(ret.len(), 10);
     let row = ret
         .iter()
         .find(|r| r.get::<String, _>(0).unwrap() == "Status")

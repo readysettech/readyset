@@ -176,6 +176,7 @@ async fn setup_adapter(
                     Default::default(),
                     authority.clone(),
                     Vec::new(),
+                    std::path::Path::new("/"),
                 );
                 let shallow = Arc::new(CacheManager::new(None, None));
                 let shallow_refresh_pool =
