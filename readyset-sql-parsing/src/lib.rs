@@ -10,8 +10,8 @@ use readyset_sql::ast::{
     CreateCacheStatement, CreateTableStatement, CreateViewStatement, DropCacheStatement,
     EvictionPolicy, Expr, FlushAllShallowCachesStatement, FlushCacheStatement,
     ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SetEviction,
-    SetReplicationPositionStatement, ShallowCacheQuery, SqlQuery, SqlType, TableKey,
-    TrxCachePolicy,
+    SetReplicationPositionStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery, SqlQuery,
+    SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -212,6 +212,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
     ADAPTIVE,
+    ALLOWED,
     CACHES,
     CDC,
     DEEP,
@@ -256,6 +257,7 @@ impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
             Self::ADAPTIVE => "ADAPTIVE",
+            Self::ALLOWED => "ALLOWED",
             Self::CACHES => "CACHES",
             Self::CDC => "CDC",
             Self::DEEP => "DEEP",
@@ -506,6 +508,52 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(
                 ChangeCdcStatement { url },
             )))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::ADD),
+                ReadysetKeyword::SHALLOW,
+                ReadysetKeyword::Standard(Keyword::CACHE),
+                ReadysetKeyword::ALLOWED,
+                ReadysetKeyword::Standard(Keyword::FUNCTION),
+            ],
+        ) {
+            let functions = parser
+                .parse_comma_separated(|p| p.parse_identifier())?
+                .into_iter()
+                .map(|id| id.value.into())
+                .collect();
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::ShallowCacheAllowedFunctions(
+                    ShallowCacheAllowedFunctions {
+                        add: true,
+                        functions,
+                    },
+                ),
+            ))
+        } else if parse_readyset_keywords(
+            parser,
+            &[
+                ReadysetKeyword::Standard(Keyword::DROP),
+                ReadysetKeyword::SHALLOW,
+                ReadysetKeyword::Standard(Keyword::CACHE),
+                ReadysetKeyword::ALLOWED,
+                ReadysetKeyword::Standard(Keyword::FUNCTION),
+            ],
+        ) {
+            let functions = parser
+                .parse_comma_separated(|p| p.parse_identifier())?
+                .into_iter()
+                .map(|id| id.value.into())
+                .collect();
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::ShallowCacheAllowedFunctions(
+                    ShallowCacheAllowedFunctions {
+                        add: false,
+                        functions,
+                    },
+                ),
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(format!(
                 "unexpected token after ALTER READYSET: {}",
@@ -1464,6 +1512,18 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         };
         Ok(SqlQuery::Show(
             readyset_sql::ast::ShowStatement::ShallowCacheEntries { query_id, limit },
+        ))
+    } else if parse_readyset_keywords(
+        parser,
+        &[
+            ReadysetKeyword::SHALLOW,
+            ReadysetKeyword::Standard(Keyword::CACHE),
+            ReadysetKeyword::ALLOWED,
+            ReadysetKeyword::Standard(Keyword::FUNCTIONS),
+        ],
+    ) {
+        Ok(SqlQuery::Show(
+            readyset_sql::ast::ShowStatement::ShallowCacheAllowedFunctions,
         ))
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::REPLAY, ReadysetKeyword::PATHS]) {
         Ok(SqlQuery::Show(
