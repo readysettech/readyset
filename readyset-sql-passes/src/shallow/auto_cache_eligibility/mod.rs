@@ -31,7 +31,7 @@
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use readyset_sql::Dialect;
 use readyset_sql::ast::ShallowCacheQuery;
@@ -516,6 +516,88 @@ impl std::fmt::Display for SkipReason {
     }
 }
 
+/// Operator-managed set of function names that are eligible for shallow-cache
+/// auto-creation even when they appear on a built-in deny-list. This is the
+/// fine-grained counterpart to the blanket [`ShallowCacheEligibility`] flags:
+/// with the flags off (the deny-lists active), allowlisting `now` makes
+/// `now()` eligible while every other non-deterministic function stays blocked.
+///
+/// The handle is cheap to clone (an `Arc`) and shared by every connection on
+/// the adapter, so a runtime `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION`
+/// is visible to all of them at once. Names are stored lowercased; lookups
+/// lowercase the candidate.
+///
+/// The set is per-adapter, not deployment-global. An adapter seeds it from the
+/// authority at startup, and a runtime `ALTER` updates both this in-memory set
+/// and the authority; other adapters in the same deployment pick the change up
+/// only when they next re-seed at startup, not immediately. A deployment that
+/// needs every adapter to honor an `ALTER` at once must restart the others.
+///
+/// Only unqualified function names are matched. A schema-qualified call such as
+/// `myschema.now()` is treated as user-defined and stays ineligible even when
+/// `now` is allowlisted, because the allowlist keys on the bare name.
+#[derive(Debug, Clone, Default)]
+pub struct ShallowCacheAllowlist(Arc<AllowlistInner>);
+
+#[derive(Debug, Default)]
+struct AllowlistInner {
+    names: parking_lot::RwLock<HashSet<String>>,
+    /// Serializes runtime `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION`
+    /// updates. The adapter holds it across the authority write and the
+    /// in-memory mutation so a concurrent add and drop cannot interleave and
+    /// leave the persisted set and the shared in-memory set disagreeing.
+    update: tokio::sync::Mutex<()>,
+}
+
+impl ShallowCacheAllowlist {
+    /// Build an allowlist seeded with `names` (lowercased on insert).
+    pub fn new(names: impl IntoIterator<Item = String>) -> Self {
+        Self(Arc::new(AllowlistInner {
+            names: parking_lot::RwLock::new(
+                names.into_iter().map(|n| n.to_ascii_lowercase()).collect(),
+            ),
+            update: tokio::sync::Mutex::new(()),
+        }))
+    }
+
+    fn read(&self) -> parking_lot::RwLockReadGuard<'_, HashSet<String>> {
+        self.0.names.read()
+    }
+
+    fn write(&self) -> parking_lot::RwLockWriteGuard<'_, HashSet<String>> {
+        self.0.names.write()
+    }
+
+    /// Serialize a runtime allowlist update against concurrent ones. Hold the
+    /// returned guard across the authority write and the in-memory mutation so
+    /// the persisted set and the shared set cannot diverge.
+    pub async fn lock_for_update(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.0.update.lock().await
+    }
+
+    /// Whether `name` is allowlisted (case-insensitive).
+    pub fn contains(&self, name: &str) -> bool {
+        self.read().contains(&name.to_ascii_lowercase())
+    }
+
+    /// Add a function name, returning `true` if it was newly inserted.
+    pub fn insert(&self, name: &str) -> bool {
+        self.write().insert(name.to_ascii_lowercase())
+    }
+
+    /// Remove a function name, returning `true` if it was present.
+    pub fn remove(&self, name: &str) -> bool {
+        self.write().remove(&name.to_ascii_lowercase())
+    }
+
+    /// The current set of allowlisted names, sorted, for display.
+    pub fn snapshot(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.read().iter().cloned().collect();
+        names.sort_unstable();
+        names
+    }
+}
+
 /// Return every reason this shallow query should be excluded from
 /// in-request-path auto-creation, grouped by reason class in first-encountered
 /// order, with the offending function names collected under each. An empty
@@ -527,7 +609,13 @@ pub fn auto_cache_skip_reasons(
     query: &ShallowCacheQuery,
     dialect: Dialect,
     eligibility: &ShallowCacheEligibility,
+    allowlist: &ShallowCacheAllowlist,
 ) -> Vec<SkipReason> {
+    // Read-lock the allowlist once for the whole walk and compare names without
+    // allocating. This runs once per previously-unseen query (the verdict is
+    // memoized in the skip set), so it is not a per-row path, but there is still
+    // no reason to lock and allocate a lowercased copy on every function node.
+    let allowed = allowlist.read();
     let mut visitor = AutoCacheVisitor {
         dialect,
         allow_nondeterministic: eligibility.allow_nondeterministic,
@@ -535,6 +623,7 @@ pub fn auto_cache_skip_reasons(
         allow_all_functions: eligibility.allow_all_functions,
         allow_system_schema: eligibility.allow_system_schema,
         allow_session_specific: eligibility.allow_session_specific,
+        allowlist: &allowed,
         system_schemas: match dialect {
             Dialect::MySQL => MYSQL_SYSTEM_SCHEMAS,
             Dialect::PostgreSQL => PG_SYSTEM_SCHEMAS,
@@ -552,25 +641,27 @@ pub fn auto_cache_skip_reason(
     query: &ShallowCacheQuery,
     dialect: Dialect,
     eligibility: &ShallowCacheEligibility,
+    allowlist: &ShallowCacheAllowlist,
 ) -> Option<&'static str> {
-    auto_cache_skip_reasons(query, dialect, eligibility)
+    auto_cache_skip_reasons(query, dialect, eligibility, allowlist)
         .into_iter()
         .next()
         .map(|r| r.reason)
 }
 
-struct AutoCacheVisitor {
+struct AutoCacheVisitor<'a> {
     dialect: Dialect,
     allow_nondeterministic: bool,
     allow_udf: bool,
     allow_all_functions: bool,
     allow_system_schema: bool,
     allow_session_specific: bool,
+    allowlist: &'a HashSet<String>,
     system_schemas: &'static [&'static str],
     reasons: Vec<SkipReason>,
 }
 
-impl Visitor for AutoCacheVisitor {
+impl Visitor for AutoCacheVisitor<'_> {
     type Break = ();
 
     fn pre_visit_relation(&mut self, name: &ObjectName) -> ControlFlow<Self::Break> {
@@ -613,6 +704,7 @@ impl Visitor for AutoCacheVisitor {
             }
             Expr::Identifier(id)
                 if !self.allow_session_specific
+                    && !self.allowlisted(&id.value)
                     && SESSION_SPECIFIC_BARE_IDENTIFIERS
                         .iter()
                         .any(|s| id.value.eq_ignore_ascii_case(s)) =>
@@ -621,6 +713,7 @@ impl Visitor for AutoCacheVisitor {
             }
             Expr::Identifier(id)
                 if !self.allow_nondeterministic
+                    && !self.allowlisted(&id.value)
                     && NON_DETERMINISTIC_BARE_IDENTIFIERS
                         .iter()
                         .any(|s| id.value.eq_ignore_ascii_case(s)) =>
@@ -657,7 +750,7 @@ impl Visitor for AutoCacheVisitor {
     }
 }
 
-impl AutoCacheVisitor {
+impl AutoCacheVisitor<'_> {
     /// Record a skip `reason`, optionally attributing the offending `function`
     /// name to it. Reasons keep first-encountered order; the functions under a
     /// reason are deduplicated and also kept in first-encountered order.
@@ -674,6 +767,15 @@ impl AutoCacheVisitor {
                 functions: function.map(str::to_string).into_iter().collect(),
             });
         }
+    }
+
+    /// Whether `name` is on the operator allowlist (case-insensitive). The set
+    /// is small and already read-locked for the walk, so this scans without
+    /// allocating a lowercased copy of the candidate.
+    fn allowlisted(&self, name: &str) -> bool {
+        self.allowlist
+            .iter()
+            .any(|allowed| name.eq_ignore_ascii_case(allowed))
     }
 
     /// Why a function call makes the query ineligible, or `None` if it is a
@@ -695,6 +797,11 @@ impl AutoCacheVisitor {
             return (!self.allow_udf).then_some(REASON_UDF);
         };
         let name = last.value.as_str();
+        // An operator-allowlisted function is eligible regardless of the
+        // deny-lists below -- this is what makes "block all X except now()" work.
+        if self.allowlisted(name) {
+            return None;
+        }
         let on = |list: &[&str]| list.iter().any(|s| name.eq_ignore_ascii_case(s));
 
         match self.dialect {
@@ -866,6 +973,29 @@ mod tests {
         allow_session_specific: bool,
         allow_all_functions: bool,
     ) -> Option<&'static str> {
+        run_allowlisting(
+            dialect,
+            q,
+            allow_nd,
+            allow_udf,
+            allow_system_schema,
+            allow_session_specific,
+            allow_all_functions,
+            &[],
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_allowlisting(
+        dialect: Dialect,
+        q: &str,
+        allow_nd: bool,
+        allow_udf: bool,
+        allow_system_schema: bool,
+        allow_session_specific: bool,
+        allow_all_functions: bool,
+        allowlist: &[&str],
+    ) -> Option<&'static str> {
         let (parsed, _hint) = parse_shallow_query(dialect, q).expect("shallow parse");
         let eligibility = ShallowCacheEligibility {
             allow_nondeterministic: allow_nd,
@@ -874,7 +1004,18 @@ mod tests {
             allow_system_schema,
             allow_session_specific,
         };
-        auto_cache_skip_reason(&parsed, dialect, &eligibility)
+        let allowlist = ShallowCacheAllowlist::new(allowlist.iter().map(|s| s.to_string()));
+        auto_cache_skip_reason(&parsed, dialect, &eligibility, &allowlist)
+    }
+
+    /// Skip reason with only the given function names allowlisted (all opt-in
+    /// flags off).
+    fn skip_reason_allowlisting(
+        dialect: Dialect,
+        q: &str,
+        allowlist: &[&str],
+    ) -> Option<&'static str> {
+        run_allowlisting(dialect, q, false, false, false, false, false, allowlist)
     }
 
     fn skip_reason(dialect: Dialect, q: &str) -> Option<&'static str> {
@@ -1235,13 +1376,133 @@ mod tests {
         // all of them (deduplicated) so the caller can profile per reason.
         let (parsed, _) =
             parse_shallow_query(Dialect::MySQL, "SELECT RAND() FROM mysql.user").expect("parse");
-        let reasons =
-            auto_cache_skip_reasons(&parsed, Dialect::MySQL, &ShallowCacheEligibility::default());
+        let reasons = auto_cache_skip_reasons(
+            &parsed,
+            Dialect::MySQL,
+            &ShallowCacheEligibility::default(),
+            &ShallowCacheAllowlist::default(),
+        );
         assert!(
             reasons.iter().any(|r| r.reason == REASON_NON_DETERMINISTIC)
                 && reasons.iter().any(|r| r.reason == REASON_SYSTEM_SCHEMA),
             "expected both non-deterministic and system-schema reasons, got {reasons:?}"
         );
+    }
+
+    #[test]
+    fn allowlist_permits_only_listed_nondeterministic_functions() {
+        // The canonical use: "block all non-deterministic functions except now()".
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            // now() is denied by default ...
+            assert_eq!(
+                skip_reason(dialect, "SELECT now()"),
+                Some(REASON_NON_DETERMINISTIC)
+            );
+            // ... and eligible once allowlisted.
+            assert_eq!(
+                skip_reason_allowlisting(dialect, "SELECT now()", &["now"]),
+                None
+            );
+        }
+        // Every other non-deterministic function stays blocked: allowlisting `now`
+        // does not open the whole category.
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::MySQL, "SELECT now(), rand()", &["now"]),
+            Some(REASON_NON_DETERMINISTIC)
+        );
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT now(), random()", &["now"]),
+            Some(REASON_NON_DETERMINISTIC)
+        );
+    }
+
+    #[test]
+    fn allowlist_is_case_insensitive() {
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT NOW()", &["NoW"]),
+            None
+        );
+    }
+
+    #[test]
+    fn allowlist_permits_bare_identifier_specials() {
+        // CURRENT_TIMESTAMP arrives as a bare identifier, not a function call;
+        // allowlisting its name still makes it eligible.
+        assert_eq!(
+            skip_reason(Dialect::PostgreSQL, "SELECT current_timestamp"),
+            Some(REASON_NON_DETERMINISTIC)
+        );
+        assert_eq!(
+            skip_reason_allowlisting(
+                Dialect::PostgreSQL,
+                "SELECT current_timestamp",
+                &["current_timestamp"]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn allowlist_permits_session_specific_bare_identifiers() {
+        // `current_user` arrives as a bare identifier on the session-specific
+        // guard (not a function call); allowlisting its name makes it eligible,
+        // mirroring the non-deterministic bare-identifier case.
+        assert_eq!(
+            skip_reason(Dialect::PostgreSQL, "SELECT current_user"),
+            Some(REASON_SESSION_SPECIFIC)
+        );
+        assert_eq!(
+            skip_reason_allowlisting(
+                Dialect::PostgreSQL,
+                "SELECT current_user",
+                &["current_user"]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn allowlist_overrides_side_effecting_and_udf() {
+        // A side-effecting builtin and a UDF are both denied by default, and
+        // both become eligible when explicitly allowlisted.
+        assert_eq!(
+            skip_reason(Dialect::PostgreSQL, "SELECT nextval('s')"),
+            Some(REASON_SIDE_EFFECT)
+        );
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT nextval('s')", &["nextval"]),
+            None
+        );
+        assert_eq!(
+            skip_reason(Dialect::PostgreSQL, "SELECT my_udf(a) FROM t"),
+            Some(REASON_UDF)
+        );
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT my_udf(a) FROM t", &["my_udf"]),
+            None
+        );
+    }
+
+    #[test]
+    fn allowlist_does_not_override_user_schema_qualified_calls() {
+        // A user-schema-qualified call is a UDF regardless of its bare name, so
+        // allowlisting the bare name must not make `app.now()` eligible.
+        assert_eq!(
+            skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT app.now() FROM t", &["now"]),
+            Some(REASON_UDF)
+        );
+    }
+
+    #[test]
+    fn allowlist_mutation_is_observable() {
+        let allowlist = ShallowCacheAllowlist::default();
+        assert!(!allowlist.contains("now"));
+        assert!(allowlist.insert("NOW"));
+        assert!(allowlist.contains("now"));
+        assert!(!allowlist.insert("now")); // idempotent (case-insensitive)
+        assert_eq!(allowlist.snapshot(), vec!["now".to_string()]);
+        assert!(allowlist.remove("now"));
+        assert!(!allowlist.contains("now"));
     }
 
     #[test]
@@ -1641,10 +1902,15 @@ mod tests {
     /// element of this vector, so its exact contents are what the metric records.
     fn skip_reasons(dialect: Dialect, q: &str) -> Vec<&'static str> {
         let (parsed, _hint) = parse_shallow_query(dialect, q).expect("shallow parse");
-        auto_cache_skip_reasons(&parsed, dialect, &ShallowCacheEligibility::default())
-            .into_iter()
-            .map(|r| r.reason)
-            .collect()
+        auto_cache_skip_reasons(
+            &parsed,
+            dialect,
+            &ShallowCacheEligibility::default(),
+            &ShallowCacheAllowlist::default(),
+        )
+        .into_iter()
+        .map(|r| r.reason)
+        .collect()
     }
 
     #[test]
@@ -1695,8 +1961,12 @@ mod tests {
         // calls made the query ineligible.
         let (parsed, _) =
             parse_shallow_query(Dialect::MySQL, "SELECT RAND(), NOW()").expect("shallow parse");
-        let reasons =
-            auto_cache_skip_reasons(&parsed, Dialect::MySQL, &ShallowCacheEligibility::default());
+        let reasons = auto_cache_skip_reasons(
+            &parsed,
+            Dialect::MySQL,
+            &ShallowCacheEligibility::default(),
+            &ShallowCacheAllowlist::default(),
+        );
         assert_eq!(reasons.len(), 1, "one cause, got {reasons:?}");
         assert_eq!(reasons[0].reason, REASON_NON_DETERMINISTIC);
         let names: std::collections::BTreeSet<_> = reasons[0]

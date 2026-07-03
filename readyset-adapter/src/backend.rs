@@ -123,8 +123,8 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
 };
 use readyset_sql_passes::shallow::{
-    ShallowCacheEligibility, auto_cache_skip_reasons, convert_placeholders_to_question_marks,
-    rewrite_shallow,
+    ShallowCacheAllowlist, ShallowCacheEligibility, auto_cache_skip_reasons,
+    convert_placeholders_to_question_marks, rewrite_shallow,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -635,6 +635,7 @@ pub struct BackendBuilder {
     replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
+    shallow_cache_allowlist: ShallowCacheAllowlist,
 }
 
 impl Default for BackendBuilder {
@@ -666,6 +667,7 @@ impl Default for BackendBuilder {
             replication_enabled: true,
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
+            shallow_cache_allowlist: ShallowCacheAllowlist::default(),
         }
     }
 }
@@ -747,6 +749,7 @@ impl BackendBuilder {
                 adapter_start_time,
                 readyset_schema: self.readyset_schema,
                 readyset_schema_route_all: false,
+                shallow_cache_allowlist: self.shallow_cache_allowlist,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -843,6 +846,15 @@ impl BackendBuilder {
     /// the server-provided [`AdapterRewriteParams`].
     pub fn shallow_cache_eligibility(mut self, eligibility: ShallowCacheEligibility) -> Self {
         self.shallow_cache_eligibility = eligibility;
+        self
+    }
+
+    /// Seed the shallow-cache function allowlist shared with the eligibility
+    /// filter. Cloned into each connection's [`BackendState`]; all clones share
+    /// the same underlying set, so a runtime `ALTER READYSET ... SHALLOW CACHE
+    /// ALLOWED FUNCTION` is visible to every connection at once.
+    pub fn shallow_cache_allowlist(mut self, allowlist: ShallowCacheAllowlist) -> Self {
+        self.shallow_cache_allowlist = allowlist;
         self
     }
 
@@ -1262,6 +1274,10 @@ where
     readyset_schema: Option<Arc<ReadysetSchema>>,
     /// Wether or not to route all queries to the Readyset schema.
     readyset_schema_route_all: bool,
+    /// Operator-managed shallow-cache function allowlist, shared across
+    /// connections. Consulted by the auto-create eligibility filter and mutated
+    /// by `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED FUNCTION`.
+    shallow_cache_allowlist: ShallowCacheAllowlist,
 }
 
 impl<DB> BackendState<DB>
@@ -5211,6 +5227,7 @@ where
                 &shallow.query,
                 settings.dialect,
                 &settings.shallow_cache_eligibility,
+                &state.shallow_cache_allowlist,
             );
             if !skip_reasons.is_empty() {
                 state

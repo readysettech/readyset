@@ -9,7 +9,7 @@ mod auto_cache_eligibility;
 mod rewrites;
 
 pub use auto_cache_eligibility::{
-    ShallowCacheEligibility, auto_cache_skip_reason, auto_cache_skip_reasons,
+    ShallowCacheAllowlist, ShallowCacheEligibility, auto_cache_skip_reason, auto_cache_skip_reasons,
 };
 pub use rewrites::{
     anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_prepared,

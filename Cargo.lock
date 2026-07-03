@@ -6927,6 +6927,7 @@ dependencies = [
  "dataflow-expression",
  "hex",
  "itertools 0.14.0",
+ "parking_lot",
  "pretty_assertions",
  "readyset-data",
  "readyset-decimal",
@@ -6937,6 +6938,7 @@ dependencies = [
  "serde",
  "sqlparser 0.62.0",
  "strum",
+ "tokio",
  "tracing",
  "vec1",
 ]

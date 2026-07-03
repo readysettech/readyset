@@ -8,6 +8,8 @@ edition = "2024"
 [dependencies]
 hex = { workspace = true }
 itertools = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 vec1 = { workspace = true }
