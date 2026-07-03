@@ -30,6 +30,7 @@ mod resolve_schemas;
 mod rewrite_between;
 mod rewrite_joins;
 mod rewrite_utils;
+pub mod shallow;
 mod star_expansion;
 mod strip_literals;
 mod tests;

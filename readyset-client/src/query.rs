@@ -21,8 +21,8 @@ use readyset_sql::ast::{
     CacheType, Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy,
 };
 use readyset_sql::DialectDisplay;
-use readyset_sql_passes::adapter_rewrites::anonymize_shallow_query;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
+use readyset_sql_passes::shallow::anonymize_shallow_query;
 use readyset_util::fmt::fmt_with;
 use readyset_util::hash::hash;
 

@@ -1,8 +1,6 @@
-mod auto_cache_eligibility;
 mod autoparam_exclusions;
 mod autoparameterize;
 pub mod post_lookup_decomposition;
-mod shallow_cache_rewrites;
 
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -10,7 +8,6 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
 
-pub use auto_cache_eligibility::auto_cache_skip_reason;
 pub use autoparam_exclusions::{derive_frozen, wrap_autoparam_exclusions};
 pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools, repeat_n};
@@ -25,10 +22,6 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
-pub use shallow_cache_rewrites::{
-    anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_prepared,
-    literalize_shallow_query, rewrite_shallow,
-};
 use tracing::{trace, trace_span, warn};
 
 use crate::derived_tables_rewrite::DerivedTablesRewrite;
@@ -41,6 +34,7 @@ use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
 use crate::rewrite_utils::contains_question_mark_placeholders;
+use crate::shallow::literalize_shallow_prepared;
 use crate::unnest_subqueries::UnnestSubqueries as _;
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
 use crate::validate_query_semantics::ValidateQuerySemantics as _;
@@ -122,9 +116,10 @@ pub struct InArrayParam {
 pub struct ShallowQueryParameters {
     dialect: Dialect,
     reordered_placeholders: Option<Vec<usize>>,
-    auto_parameters: Vec<(usize, Literal)>,
+    // Read by the shallow rewrite pass in `crate::shallow` and its tests.
+    pub(crate) auto_parameters: Vec<(usize, Literal)>,
     /// IN/NOT IN clauses that become array parameters
-    in_array_params: Vec<InArrayParam>,
+    pub(crate) in_array_params: Vec<InArrayParam>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]

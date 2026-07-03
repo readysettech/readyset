@@ -121,7 +121,9 @@ use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
-    auto_cache_skip_reason, convert_placeholders_to_question_marks,
+};
+use readyset_sql_passes::shallow::{
+    auto_cache_skip_reason, convert_placeholders_to_question_marks, rewrite_shallow,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -1091,9 +1093,7 @@ where
         let Ok(mut shallow) = shallow else {
             return None;
         };
-        let Ok(params) =
-            adapter_rewrites::rewrite_shallow(&mut shallow, self.noria.rewrite_params())
-        else {
+        let Ok(params) = rewrite_shallow(&mut shallow, self.noria.rewrite_params()) else {
             return None;
         };
         let shallow = ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned());
@@ -3917,10 +3917,7 @@ where
                 // Rewrite for shallow.
                 let shallow = match shallow {
                     Ok(mut shallow) => {
-                        adapter_rewrites::rewrite_shallow(
-                            &mut shallow,
-                            connectors.noria.rewrite_params(),
-                        )?;
+                        rewrite_shallow(&mut shallow, connectors.noria.rewrite_params())?;
                         Ok(ShallowViewRequest::new(
                             *shallow,
                             connectors.noria.schema_search_path().to_owned(),
@@ -6696,7 +6693,7 @@ where
         CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 
-    adapter_rewrites::rewrite_shallow(&mut select_stmt, rewrite_params)?;
+    rewrite_shallow(&mut select_stmt, rewrite_params)?;
 
     let query_id = QueryId::from_shallow_query(&select_stmt, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());
