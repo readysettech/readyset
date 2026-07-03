@@ -123,7 +123,8 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
 };
 use readyset_sql_passes::shallow::{
-    auto_cache_skip_reason, convert_placeholders_to_question_marks, rewrite_shallow,
+    ShallowCacheEligibility, auto_cache_skip_reasons, convert_placeholders_to_question_marks,
+    rewrite_shallow,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -633,6 +634,7 @@ pub struct BackendBuilder {
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
     replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
+    shallow_cache_eligibility: ShallowCacheEligibility,
 }
 
 impl Default for BackendBuilder {
@@ -663,6 +665,7 @@ impl Default for BackendBuilder {
             upstream_config: None,
             replication_enabled: true,
             readyset_schema: None,
+            shallow_cache_eligibility: ShallowCacheEligibility::default(),
         }
     }
 }
@@ -760,6 +763,7 @@ impl BackendBuilder {
                 default_coalesce_ms: self.default_coalesce_ms,
                 replication_enabled: self.replication_enabled,
                 allow_cache_ddl: self.allow_cache_ddl,
+                shallow_cache_eligibility: self.shallow_cache_eligibility,
             },
             _query_handler: PhantomData,
         }
@@ -830,6 +834,15 @@ impl BackendBuilder {
     /// their caches.
     pub fn allow_cache_ddl(mut self, allow_cache_ddl: bool) -> Self {
         self.allow_cache_ddl = allow_cache_ddl;
+        self
+    }
+
+    /// Per-category opt-ins for shallow-cache auto-creation eligibility (which
+    /// classes of otherwise-ineligible query the in-request-path filter should
+    /// permit). This is adapter-local config sourced from CLI flags, not from
+    /// the server-provided [`AdapterRewriteParams`].
+    pub fn shallow_cache_eligibility(mut self, eligibility: ShallowCacheEligibility) -> Self {
+        self.shallow_cache_eligibility = eligibility;
         self
     }
 
@@ -1588,6 +1601,9 @@ struct BackendSettings {
     /// received will instead return an error prompting the user to use Readyset cloud to manage
     /// their caches.
     allow_cache_ddl: bool,
+    /// Per-category opt-ins for shallow-cache auto-creation eligibility. Adapter-local config
+    /// (from CLI flags), consulted by the in-request-path auto-create filter.
+    shallow_cache_eligibility: ShallowCacheEligibility,
 }
 
 impl BackendSettings {
@@ -5191,12 +5207,21 @@ where
                 );
                 return None;
             }
-            if let Some(reason) = auto_cache_skip_reason(&shallow.query, settings.dialect) {
+            let skip_reasons = auto_cache_skip_reasons(
+                &shallow.query,
+                settings.dialect,
+                &settings.shallow_cache_eligibility,
+            );
+            if !skip_reasons.is_empty() {
                 state
                     .query_status_cache
                     .record_shallow_auto_create_skip(query_id);
+                for reason in &skip_reasons {
+                    counter!(metric::SHALLOW_AUTO_CREATE_SKIPPED, "reason" => reason.reason)
+                        .increment(1);
+                }
                 debug!(
-                    reason,
+                    ?skip_reasons,
                     "Shallow cache auto-creation skipped: query not eligible"
                 );
                 return None;

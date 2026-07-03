@@ -127,3 +127,13 @@ pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =
 /// literal-injected unique values) or that the cap is too low for the workload.
 pub const SHALLOW_AUTO_CREATE_SKIP_OVERFLOW: &str =
     "readyset_query_status_cache.shallow_auto_create_skip.overflow";
+
+/// Counter: Number of times an in-request-path query was skipped for shallow auto-creation,
+/// tagged by the reason it was ineligible. A query with several reasons increments the counter
+/// once per distinct reason, so the tallies profile *why* auto-caching is skipped.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | reason | The eligibility reason (e.g. `"non-deterministic function"`). |
+pub const SHALLOW_AUTO_CREATE_SKIPPED: &str =
+    "readyset_query_status_cache.shallow_auto_create_skipped";
