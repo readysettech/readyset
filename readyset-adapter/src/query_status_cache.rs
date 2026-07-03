@@ -418,6 +418,18 @@ impl QueryStatusCache {
         self.shallow_auto_create_skip.contains(&id)
     }
 
+    /// Forget all remembered auto-create rejections, so previously-skipped
+    /// queries are re-evaluated on their next execution. Called when the
+    /// shallow-cache function allowlist changes (e.g.
+    /// `ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION ...`): a query that
+    /// was rejected for a now-allowed function must get another chance without
+    /// requiring a restart.
+    pub fn clear_shallow_auto_create_skips(&self) {
+        self.shallow_auto_create_skip.clear();
+        gauge!(metric::SHALLOW_AUTO_CREATE_SKIP_SET_SIZE)
+            .set(self.shallow_auto_create_skip.len() as f64);
+    }
+
     /// Record that the in-request-path filter has rejected this query.  When
     /// the set crosses [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`] it is bulk-
     /// cleared, the overflow counter increments, and a warning is logged.

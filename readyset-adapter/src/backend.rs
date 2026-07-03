@@ -114,8 +114,8 @@ use readyset_sql::ast::{
     CreateMcpTokenStatement, DeallocateStatement, DropAllCachesStatement, DropMcpTokenStatement,
     ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
     McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions, ReadysetHintDirective, Relation,
-    SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
-    StatementIdentifier, TrxCachePolicy, UseStatement,
+    SelectStatement, SetStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery, ShowStatement,
+    SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -4712,6 +4712,85 @@ where
         ))
     }
 
+    /// Handle `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED FUNCTION <name>[, ...]`.
+    ///
+    /// Persists the change to the authority first (so it survives a restart),
+    /// then updates the in-memory allowlist shared by every connection. On
+    /// `ADD` it also clears the auto-create skip set, so a query previously
+    /// rejected for a now-allowed function is re-evaluated on its next
+    /// execution rather than staying skipped until the next restart.
+    async fn alter_shallow_cache_allowed_functions(
+        state: &mut BackendState<DB>,
+        stmt: &ShallowCacheAllowedFunctions,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let names: Vec<String> = stmt
+            .functions
+            .iter()
+            .map(|f| f.to_string().to_ascii_lowercase())
+            .collect();
+        // Serialize concurrent allowlist updates so the authority write and the
+        // in-memory mirror below stay in the same order: without this, a
+        // concurrent add and drop of the same name could apply to the authority
+        // and the shared set in opposite orders, leaving them disagreeing.
+        let _update_guard = state.shallow_cache_allowlist.lock_for_update().await;
+        // Persist every name in one authority round-trip so the change is
+        // atomic (all or nothing on failure), then mirror it into the in-memory
+        // set shared by every connection.
+        state
+            .authority
+            .modify_shallow_cache_allowed_functions(stmt.add, names.clone())
+            .await?;
+        for name in &names {
+            if stmt.add {
+                state.shallow_cache_allowlist.insert(name);
+            } else {
+                state.shallow_cache_allowlist.remove(name);
+            }
+        }
+        if stmt.add {
+            state.query_status_cache.clear_shallow_auto_create_skips();
+        }
+        info!(
+            functions = %names.join(", "),
+            action = if stmt.add { "add" } else { "drop" },
+            "Updated shallow-cache function allowlist"
+        );
+        Ok(noria_connector::QueryResult::Empty)
+    }
+
+    /// Handle `SHOW SHALLOW CACHE ALLOWED FUNCTIONS`.
+    ///
+    /// Returns only the runtime allowlist: the functions added with `ALTER
+    /// READYSET ADD SHALLOW CACHE ALLOWED FUNCTION`. This is not the full set of
+    /// functions eligible for shallow caching. The IMMUTABLE builtins, and any
+    /// category opened by a `--shallow-cache-allow-*` flag, are cacheable without
+    /// appearing here.
+    async fn show_shallow_cache_allowed_functions(
+        state: &BackendState<DB>,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![ColumnSchema {
+                column: ast::Column {
+                    name: "function".into(),
+                    table: None,
+                },
+                column_type: DfType::DEFAULT_TEXT,
+                base: None,
+            }]),
+            columns: Cow::Owned(vec!["function".into()]),
+        };
+        let rows: Vec<Vec<DfValue>> = state
+            .shallow_cache_allowlist
+            .snapshot()
+            .into_iter()
+            .map(|name| vec![DfValue::from(name)])
+            .collect();
+        Ok(noria_connector::QueryResult::from_owned(
+            schema,
+            vec![Results::new(rows)],
+        ))
+    }
+
     async fn query_readyset_extensions<'a>(
         connectors: &'a mut BackendConnectors<DB>,
         settings: &'a BackendSettings,
@@ -5086,6 +5165,19 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                 url,
             })) => connectors.noria.change_cdc_url(url).await,
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowedFunctions(stmt)) => {
+                // Mutating the allowlist steers what auto-caches and persists to
+                // the authority, so it belongs to the cache-DDL family and is
+                // gated the same way (read-only SHOW is not).
+                if settings.allow_cache_ddl {
+                    Self::alter_shallow_cache_allowed_functions(state, stmt).await
+                } else {
+                    unsupported!(
+                        "ALTER READYSET SHALLOW CACHE ALLOWED FUNCTION requires cache DDL \
+                         to be enabled"
+                    )
+                }
+            }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")
             }
@@ -5096,6 +5188,9 @@ where
             SqlQuery::DropMcpToken(stmt) => Self::drop_mcp_token(state, stmt).await,
             SqlQuery::AlterMcpToken(stmt) => Self::alter_mcp_token(state, stmt).await,
             SqlQuery::Show(ShowStatement::McpTokens) => Self::show_mcp_tokens(state).await,
+            SqlQuery::Show(ShowStatement::ShallowCacheAllowedFunctions) => {
+                Self::show_shallow_cache_allowed_functions(state).await
+            }
             _ => Err(internal_err!("Provided query is not a Readyset extension")),
         };
 
