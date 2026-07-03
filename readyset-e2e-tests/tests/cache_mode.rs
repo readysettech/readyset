@@ -12,6 +12,7 @@ use readyset_client_test_helpers::{
     psql_helpers::{self, PostgreSQLAdapter},
 };
 use readyset_server::CacheMode;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::shallow::ShallowCacheEligibility;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
@@ -377,6 +378,228 @@ async fn cache_mode_shallow_auto_create_skips_ineligible_pg() {
             );
         }
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+// A runtime `ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION` makes a
+// previously-ineligible query auto-cacheable without a restart, while every
+// other non-deterministic function stays blocked. This is the front-door proof
+// that the allowlist is a per-function exception, applied dynamically.
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn cache_mode_shallow_allowlist_alter_takes_effect() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream
+        .query_drop("CREATE TABLE foo (a INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO foo VALUES (42)")
+        .await
+        .unwrap();
+
+    let backend = BackendBuilder::default()
+        .require_authentication(false)
+        .cache_mode(CacheMode::Shallow);
+    // `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION` and `SHOW SHALLOW CACHE
+    // ALLOWED FUNCTIONS` parse only under sqlparser, which is the preset shallow
+    // mode selects in production; mirror that here so the extension is recognized
+    // rather than proxied to upstream.
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::new(backend)
+        .migration_mode(MigrationMode::InRequestPath)
+        .recreate_database(false)
+        .fallback(true)
+        .parsing_preset(ParsingPreset::OnlySqlparser)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // now() is non-deterministic, so the query is ineligible and always proxies,
+    // even after being seen (the rejection is memoized in the skip set).
+    for _ in 0..2 {
+        readyset
+            .query_drop("SELECT a, NOW() FROM foo")
+            .await
+            .unwrap();
+        assert_eq!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::Upstream,
+            "now() should be ineligible before it is allowlisted"
+        );
+    }
+
+    // Allowlist now() at runtime. No restart.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION now")
+        .await
+        .unwrap();
+
+    // The query is now eligible: the ADD cleared the skip memo, so a fresh
+    // attempt auto-creates a shallow cache (first execution populates from
+    // upstream, subsequent ones serve from the cache).
+    let mut cached = false;
+    for _ in 0..5 {
+        readyset
+            .query_drop("SELECT a, NOW() FROM foo")
+            .await
+            .unwrap();
+        if last_query_info(&mut readyset).await.destination == QueryDestination::ReadysetShallow {
+            cached = true;
+            break;
+        }
+    }
+    assert!(
+        cached,
+        "now() should become auto-cacheable after ALTER ... ADD, without a restart"
+    );
+
+    // Allowlisting now() does not open the whole category: rand() stays blocked.
+    for _ in 0..3 {
+        readyset
+            .query_drop("SELECT a, RAND() FROM foo")
+            .await
+            .unwrap();
+        assert_eq!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::Upstream,
+            "rand() must stay ineligible: the allowlist is per-function"
+        );
+    }
+
+    // SHOW reflects the single allowlisted function.
+    let funcs: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED FUNCTIONS")
+        .await
+        .unwrap();
+    assert_eq!(funcs, vec![("now".to_string(),)]);
+
+    // DROP removes the exception. SHOW empties, and a now()-calling query that
+    // was never cached is ineligible again: DROP re-blocks eligibility, it does
+    // not merely edit the SHOW output. A distinct query text is used so the
+    // shallow cache created above (which survives the DROP) does not serve it.
+    readyset
+        .query_drop("ALTER READYSET DROP SHALLOW CACHE ALLOWED FUNCTION now")
+        .await
+        .unwrap();
+    let funcs: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED FUNCTIONS")
+        .await
+        .unwrap();
+    assert!(funcs.is_empty(), "SHOW should be empty after DROP: {funcs:?}");
+
+    for _ in 0..3 {
+        readyset
+            .query_drop("SELECT NOW() AS t, a FROM foo")
+            .await
+            .unwrap();
+        assert_eq!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::Upstream,
+            "now() should be ineligible again after ALTER ... DROP"
+        );
+    }
+
+    // The allowlist keys on bare function names: a schema-qualified argument is
+    // rejected rather than silently stored, so it can never match a call.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION mysql.now")
+        .await
+        .unwrap_err();
+    // A malformed statement with no function name is likewise rejected instead
+    // of mutating the allowlist.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION")
+        .await
+        .unwrap_err();
+
+    shutdown_tx.shutdown().await;
+}
+
+// PostgreSQL counterpart of the runtime-allowlist scenario.
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn cache_mode_shallow_allowlist_alter_takes_effect_pg() {
+    init_test_logging();
+
+    let backend = BackendBuilder::default()
+        .require_authentication(false)
+        .cache_mode(CacheMode::Shallow);
+    // The adapter proxies to (and the harness recreates) the `noria` database,
+    // so seed the table there through Readyset rather than side-channelling into
+    // a per-test database the fallback connection never sees.
+    let (rs_opts, _readyset_handle, shutdown_tx) = TestBuilder::new(backend)
+        .migration_mode(MigrationMode::InRequestPath)
+        .fallback_without_replication("noria")
+        .parsing_preset(ParsingPreset::OnlySqlparser)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let rs = psql_helpers::connect(rs_opts).await;
+
+    rs.simple_query("CREATE TABLE foo (a INT)").await.unwrap();
+    rs.simple_query("INSERT INTO foo VALUES (42)").await.unwrap();
+
+    // now() is ineligible until allowlisted.
+    for _ in 0..2 {
+        rs.simple_query("SELECT a, now() FROM foo").await.unwrap();
+        assert_eq!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::Upstream,
+            "now() should be ineligible before it is allowlisted"
+        );
+    }
+
+    rs.simple_query("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION now")
+        .await
+        .unwrap();
+
+    let mut cached = false;
+    for _ in 0..5 {
+        rs.simple_query("SELECT a, now() FROM foo").await.unwrap();
+        if psql_helpers::last_query_info(&rs).await.destination
+            == QueryDestination::ReadysetShallow
+        {
+            cached = true;
+            break;
+        }
+    }
+    assert!(
+        cached,
+        "now() should become auto-cacheable after ALTER ... ADD, without a restart"
+    );
+
+    // random() stays blocked: the allowlist is per-function, not per-category.
+    for _ in 0..3 {
+        rs.simple_query("SELECT a, random() FROM foo").await.unwrap();
+        assert_eq!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::Upstream,
+            "random() must stay ineligible: the allowlist is per-function"
+        );
+    }
+
+    // The allowlist keys on bare function names: a schema-qualified argument is
+    // rejected rather than silently stored, so it can never match a call.
+    rs.simple_query("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION pg_catalog.now")
+        .await
+        .unwrap_err();
+    // A malformed statement with no function name is likewise rejected instead
+    // of mutating the allowlist.
+    rs.simple_query("ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION")
+        .await
+        .unwrap_err();
 
     shutdown_tx.shutdown().await;
 }
