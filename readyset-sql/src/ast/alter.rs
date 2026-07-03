@@ -505,6 +505,20 @@ pub struct ChangeCdcStatement {
     pub url: String,
 }
 
+/// `ALTER READYSET {ADD | DROP} SHALLOW CACHE ALLOWED FUNCTION <name>[, <name>...]`.
+///
+/// Adds or removes function names from the shallow-cache auto-creation
+/// allowlist: a name on the allowlist is treated as eligible for auto-caching
+/// even when it appears on a built-in deny-list.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ShallowCacheAllowedFunctions {
+    /// `true` for `ADD`, `false` for `DROP`.
+    pub add: bool,
+    /// The function names being allowed (`ADD`) or removed from the allowlist (`DROP`).
+    #[strategy(any_with::<Vec<SqlIdentifier>>(size_range(1..8).lift()))]
+    pub functions: Vec<SqlIdentifier>,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
@@ -518,6 +532,7 @@ pub enum AlterReadysetStatement {
     StartReplication,
     SetReplicationPosition(SetReplicationPositionStatement),
     ChangeCdc(ChangeCdcStatement),
+    ShallowCacheAllowedFunctions(ShallowCacheAllowedFunctions),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -566,6 +581,17 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::ChangeCdc(stmt) => {
                 write!(f, "CHANGE CDC TO '{}'", stmt.url)
+            }
+            Self::ShallowCacheAllowedFunctions(stmt) => {
+                write!(
+                    f,
+                    "{} SHALLOW CACHE ALLOWED FUNCTION {}",
+                    if stmt.add { "ADD" } else { "DROP" },
+                    stmt.functions
+                        .iter()
+                        .map(|name| dialect.quote_identifier(name))
+                        .join(", ")
+                )
             }
         })
     }

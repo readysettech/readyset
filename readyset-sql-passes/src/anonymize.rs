@@ -211,6 +211,7 @@ impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
             | ShowStatement::Rls(..)
             | ShowStatement::ReplayPaths
             | ShowStatement::ShallowCacheEntries { .. }
+            | ShowStatement::ShallowCacheAllowedFunctions
             | ShowStatement::ReadySetRsaPublicKey
             | ShowStatement::McpTokens => {}
         }

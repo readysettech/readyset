@@ -32,6 +32,9 @@ pub enum ShowStatement {
         query_id: Option<String>,
         limit: Option<u64>,
     },
+    /// SHOW SHALLOW CACHE ALLOWED FUNCTIONS — list the operator-managed function
+    /// allowlist that bypasses shallow-cache auto-creation eligibility.
+    ShallowCacheAllowedFunctions,
     /// SHOW READYSET RSA PUBLIC KEY
     ReadySetRsaPublicKey,
     /// SHOW MCP TOKENS — list all active MCP authentication tokens.
@@ -102,6 +105,9 @@ impl DialectDisplay for ShowStatement {
                         write!(f, " LIMIT {limit}")?;
                     }
                     Ok(())
+                }
+                Self::ShallowCacheAllowedFunctions => {
+                    write!(f, "SHALLOW CACHE ALLOWED FUNCTIONS")
                 }
                 Self::ReadySetRsaPublicKey => {
                     write!(f, "READYSET RSA PUBLIC KEY")
