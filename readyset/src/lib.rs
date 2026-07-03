@@ -68,7 +68,7 @@ use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
-use readyset_sql_passes::shallow::ShallowCacheEligibility;
+use readyset_sql_passes::shallow::{ShallowCacheAllowlist, ShallowCacheEligibility};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
@@ -1683,6 +1683,17 @@ where
                 error!("Failed to recreate shallow caches: {}", e);
             }
         }
+        // Seed the shallow-cache function allowlist from the authority so any
+        // `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION` persisted by an
+        // earlier run survives this restart. The handle is shared (cloned) into
+        // every connection's backend below.
+        let shallow_cache_allowlist = ShallowCacheAllowlist::new(
+            rt.block_on(adapter_authority.shallow_cache_allowlist())
+                .unwrap_or_else(|e| {
+                    warn!("Failed to load shallow-cache allowlist from authority: {e}");
+                    Vec::new()
+                }),
+        );
         let replication_enabled = upstream_config.replication_enabled;
         let upstream_config = Arc::new(RwLock::new(upstream_config));
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
@@ -1817,6 +1828,7 @@ where
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
+            let shallow_cache_allowlist = shallow_cache_allowlist.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
@@ -1850,7 +1862,8 @@ where
                 .upstream_config(Some(Arc::clone(&upstream_config)))
                 .replication_enabled(replication_enabled)
                 .readyset_schema(Arc::clone(&readyset_schema))
-                .shallow_cache_eligibility(shallow_cache_eligibility);
+                .shallow_cache_eligibility(shallow_cache_eligibility)
+                .shallow_cache_allowlist(shallow_cache_allowlist);
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
