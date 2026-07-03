@@ -660,4 +660,46 @@ mod tests {
             Some(next)
         );
     }
+
+    #[tokio::test]
+    async fn shallow_cache_allowlist_round_trip() {
+        let dir = tempdir().unwrap();
+        let authority = Arc::new(
+            StandaloneAuthority::new(dir.path().to_str().unwrap(), "shallow_cache_allowlist")
+                .unwrap(),
+        );
+
+        assert!(authority
+            .shallow_cache_allowlist()
+            .await
+            .unwrap()
+            .is_empty());
+
+        authority
+            .add_shallow_cache_allowed_function("now".to_string())
+            .await
+            .unwrap();
+        authority
+            .add_shallow_cache_allowed_function("uuid".to_string())
+            .await
+            .unwrap();
+        // Adding an already-present name is a no-op.
+        authority
+            .add_shallow_cache_allowed_function("now".to_string())
+            .await
+            .unwrap();
+
+        let mut names = authority.shallow_cache_allowlist().await.unwrap();
+        names.sort();
+        assert_eq!(names, vec!["now".to_string(), "uuid".to_string()]);
+
+        authority
+            .remove_shallow_cache_allowed_function("now".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            authority.shallow_cache_allowlist().await.unwrap(),
+            vec!["uuid".to_string()]
+        );
+    }
 }

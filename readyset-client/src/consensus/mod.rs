@@ -42,6 +42,7 @@ pub type WorkerId = String;
 
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const SHALLOW_CACHE_DDL_REQUESTS_PATH: &str = "shallow_cache_ddl_requests";
+const SHALLOW_CACHE_ALLOWLIST_PATH: &str = "shallow_cache_allowlist";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
@@ -376,6 +377,62 @@ pub trait AuthorityControl: Send + Sync {
         .await
     }
 
+    /// Returns the operator-managed shallow-cache function allowlist: function
+    /// names that are eligible for shallow-cache auto-creation even though they
+    /// appear on a built-in deny-list.
+    ///
+    /// Stored separately from the controller state, like the cache ddl requests
+    /// above, so it is always available even if the controller state can't be
+    /// deserialized.
+    async fn shallow_cache_allowlist(&self) -> ReadySetResult<Vec<String>> {
+        Ok(self
+            .try_read::<Vec<String>>(SHALLOW_CACHE_ALLOWLIST_PATH)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Add a function name to the shallow-cache allowlist. Idempotent.
+    async fn add_shallow_cache_allowed_function(&self, name: String) -> ReadySetResult<()> {
+        modify_shallow_cache_allowlist(self, move |names| {
+            if !names.contains(&name) {
+                names.push(name.clone());
+            }
+        })
+        .await
+    }
+
+    /// Remove a function name from the shallow-cache allowlist.
+    async fn remove_shallow_cache_allowed_function(&self, name: String) -> ReadySetResult<()> {
+        modify_shallow_cache_allowlist(self, move |names| {
+            names.retain(|n| *n != name);
+        })
+        .await
+    }
+
+    /// Add or remove several function names in a single authority round-trip, so
+    /// a multi-name `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION a, b, c`
+    /// is atomic: it either persists every change or none, rather than leaving a
+    /// prefix applied if a later write fails. `add` chooses the direction; adds
+    /// are idempotent and removes tolerate absent names.
+    async fn modify_shallow_cache_allowed_functions(
+        &self,
+        add: bool,
+        names: Vec<String>,
+    ) -> ReadySetResult<()> {
+        modify_shallow_cache_allowlist(self, move |current| {
+            for name in &names {
+                if add {
+                    if !current.contains(name) {
+                        current.push(name.clone());
+                    }
+                } else {
+                    current.retain(|n| n != name);
+                }
+            }
+        })
+        .await
+    }
+
     /// Returns stats persisted in the authority. Wrapper around `Self::try_read`.
     async fn persistent_stats(&self) -> ReadySetResult<Option<PersistentStats>> {
         self.try_read(PERSISTENT_STATS_PATH).await
@@ -558,6 +615,14 @@ where
     F: FnMut(&mut Vec<String>) + Send,
 {
     modify_ddl_requests(authority, SHALLOW_CACHE_DDL_REQUESTS_PATH, f).await
+}
+
+async fn modify_shallow_cache_allowlist<A, F>(authority: &A, f: F) -> ReadySetResult<()>
+where
+    A: AuthorityControl + ?Sized,
+    F: FnMut(&mut Vec<String>) + Send,
+{
+    modify_ddl_requests(authority, SHALLOW_CACHE_ALLOWLIST_PATH, f).await
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to
