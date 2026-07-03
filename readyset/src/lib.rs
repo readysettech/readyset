@@ -68,6 +68,7 @@ use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+use readyset_sql_passes::shallow::ShallowCacheEligibility;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
@@ -555,6 +556,12 @@ pub struct Options {
     )]
     pub cache_mode: CacheMode,
 
+    /// Allow shallow-caching queries that call non-deterministic functions
+    /// (e.g. `now()`, `rand()`). System-schema and session-variable references
+    /// remain ineligible for shallow caching. Off by default.
+    #[arg(long, env = "SHALLOW_CACHE_ALLOW_NONDETERMINISTIC")]
+    pub shallow_cache_allow_nondeterministic: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -615,6 +622,14 @@ impl Options {
         if self.cache_mode.is_shallow() && self.server_worker_options.parsing_preset.is_none() {
             // We're never going to look at what nom-sql produces in shallow mode.
             self.server_worker_options.parsing_preset = Some(ParsingPreset::OnlySqlparser);
+        }
+    }
+
+    /// Build the shallow-cache eligibility opt-ins from the CLI flags.
+    pub fn shallow_cache_eligibility(&self) -> ShallowCacheEligibility {
+        ShallowCacheEligibility {
+            allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
+            ..Default::default()
         }
     }
 
@@ -1430,6 +1445,10 @@ where
 
         let memory_limit = options.server_worker_options.memory_limit;
 
+        // Built from the CLI flags before `server_worker_options` is moved into
+        // the server builder below.
+        let shallow_cache_eligibility = options.shallow_cache_eligibility();
+
         // Extract upstream-db-url credentials for the MCP loopback connection
         // before `server_worker_options` is moved into the server builder.
         // These are guaranteed to be in the adapter's `allowed_users` (they're
@@ -1761,7 +1780,8 @@ where
                 .sampler_tx(global_sampler_tx.clone())
                 .upstream_config(Some(Arc::clone(&upstream_config)))
                 .replication_enabled(replication_enabled)
-                .readyset_schema(Arc::clone(&readyset_schema));
+                .readyset_schema(Arc::clone(&readyset_schema))
+                .shallow_cache_eligibility(shallow_cache_eligibility);
             let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
