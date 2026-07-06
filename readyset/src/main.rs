@@ -23,6 +23,7 @@ fn main() -> anyhow::Result<()> {
     let mut options = Options::parse();
     options.resolve_auto_cache();
     options.resolve_parsing_preset();
+    options.resolve_shallow_cache_allow_all();
     let rt = init_adapter_runtime()?;
 
     // When cache_mode is shallow, replication and the query sampler are not needed

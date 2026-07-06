@@ -589,6 +589,25 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_ALL_FUNCTIONS")]
     pub shallow_cache_allow_all_functions: bool,
 
+    /// Enable every shallow-cache eligibility opt-in at once: shorthand for
+    /// `--shallow-cache-allow-nondeterministic`, `--shallow-cache-allow-udf`,
+    /// `--shallow-cache-allow-all-functions`, `--shallow-cache-allow-system-schema`,
+    /// and `--shallow-cache-allow-session-specific`. This includes opt-ins that
+    /// are incorrect rather than merely stale (session variables, side effects),
+    /// so enable it only when that is acceptable. Off by default.
+    #[arg(
+        long,
+        env = "SHALLOW_CACHE_ALLOW_ALL",
+        conflicts_with_all = [
+            "shallow_cache_allow_nondeterministic",
+            "shallow_cache_allow_udf",
+            "shallow_cache_allow_all_functions",
+            "shallow_cache_allow_system_schema",
+            "shallow_cache_allow_session_specific",
+        ]
+    )]
+    pub shallow_cache_allow_all: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -652,7 +671,27 @@ impl Options {
         }
     }
 
-    /// Build the shallow-cache eligibility opt-ins from the CLI flags.
+    /// Apply the `--shallow-cache-allow-all` shorthand: when set, enable every
+    /// per-category shallow-cache eligibility opt-in so the rest of the code
+    /// reads only the individual flags.
+    pub fn resolve_shallow_cache_allow_all(&mut self) {
+        if self.shallow_cache_allow_all {
+            warn!(
+                "--shallow-cache-allow-all enables every eligibility opt-in, \
+                 including session/user variables and side-effecting functions; \
+                 caching those queries is incorrect, not merely stale"
+            );
+            self.shallow_cache_allow_nondeterministic = true;
+            self.shallow_cache_allow_udf = true;
+            self.shallow_cache_allow_all_functions = true;
+            self.shallow_cache_allow_system_schema = true;
+            self.shallow_cache_allow_session_specific = true;
+        }
+    }
+
+    /// Build the shallow-cache eligibility opt-ins from the CLI flags. Call
+    /// [`Self::resolve_shallow_cache_allow_all`] first so the `--allow-all`
+    /// shorthand is already folded into the per-category flags.
     pub fn shallow_cache_eligibility(&self) -> ShallowCacheEligibility {
         ShallowCacheEligibility {
             allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
@@ -2061,6 +2100,132 @@ mod tests {
         opts.resolve_auto_cache();
         assert_eq!(opts.cache_mode, CacheMode::Shallow);
         assert!(matches!(opts.query_caching, MigrationStyle::InRequestPath));
+    }
+
+    #[test]
+    fn shallow_cache_allow_all_enables_every_opt_in() {
+        let mut opts = Options::parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--shallow-cache-allow-all",
+        ]);
+        opts.resolve_shallow_cache_allow_all();
+        assert!(opts.shallow_cache_allow_nondeterministic);
+        assert!(opts.shallow_cache_allow_udf);
+        assert!(opts.shallow_cache_allow_system_schema);
+        assert!(opts.shallow_cache_allow_session_specific);
+        assert!(opts.shallow_cache_allow_all_functions);
+    }
+
+    #[test]
+    fn shallow_cache_allow_all_absent_leaves_opt_ins_off() {
+        let mut opts = Options::parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+        ]);
+        opts.resolve_shallow_cache_allow_all();
+        assert!(!opts.shallow_cache_allow_nondeterministic);
+        assert!(!opts.shallow_cache_allow_udf);
+        assert!(!opts.shallow_cache_allow_system_schema);
+        assert!(!opts.shallow_cache_allow_session_specific);
+        assert!(!opts.shallow_cache_allow_all_functions);
+    }
+
+    #[test]
+    fn shallow_cache_allow_all_conflicts_with_individual_opt_ins() {
+        // `--shallow-cache-allow-all` is a shorthand for the per-category flags,
+        // so combining it with one of them is redundant and clap rejects it.
+        let res = Options::try_parse_from(vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--shallow-cache-allow-all",
+            "--shallow-cache-allow-udf",
+        ]);
+        assert!(res.is_err(), "expected clap conflict error, got {res:?}");
+    }
+
+    /// Each individual `--shallow-cache-allow-*` flag must set exactly one
+    /// [`ShallowCacheEligibility`] opt-in and leave the others off. This exercises
+    /// the same `Options::shallow_cache_eligibility` mapping the server startup
+    /// path uses, so a copy-paste swap in that mapping (a flag wired to the wrong
+    /// field) fails here rather than passing the whole suite unnoticed.
+    #[test]
+    fn each_shallow_cache_flag_maps_to_its_own_eligibility_field() {
+        // (flag, [nondeterministic, udf, all_functions, system_schema, session_specific])
+        let cases: [(&str, [bool; 5]); 5] = [
+            (
+                "--shallow-cache-allow-nondeterministic",
+                [true, false, false, false, false],
+            ),
+            (
+                "--shallow-cache-allow-udf",
+                [false, true, false, false, false],
+            ),
+            (
+                "--shallow-cache-allow-all-functions",
+                [false, false, true, false, false],
+            ),
+            (
+                "--shallow-cache-allow-system-schema",
+                [false, false, false, true, false],
+            ),
+            (
+                "--shallow-cache-allow-session-specific",
+                [false, false, false, false, true],
+            ),
+        ];
+        for (flag, expected) in cases {
+            let mut opts = Options::parse_from(vec![
+                "readyset",
+                "--database-type",
+                "mysql",
+                "--deployment",
+                "test",
+                "--address",
+                "0.0.0.0:3306",
+                "--authority-address",
+                ".",
+                "--allow-unauthenticated-connections",
+                flag,
+            ]);
+            opts.resolve_shallow_cache_allow_all();
+            let e = opts.shallow_cache_eligibility();
+            let got = [
+                e.allow_nondeterministic,
+                e.allow_udf,
+                e.allow_all_functions,
+                e.allow_system_schema,
+                e.allow_session_specific,
+            ];
+            assert_eq!(
+                got, expected,
+                "{flag} mapped to the wrong eligibility field(s)"
+            );
+        }
     }
 
     #[test]
