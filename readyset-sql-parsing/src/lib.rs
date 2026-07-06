@@ -211,6 +211,7 @@ fn sqlparser_dialect_from_readyset_dialect(
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy)]
 enum ReadysetKeyword {
+    ADAPTIVE,
     CACHES,
     CDC,
     DEEP,
@@ -254,6 +255,7 @@ enum ReadysetKeyword {
 impl ReadysetKeyword {
     fn as_str(&self) -> &str {
         match self {
+            Self::ADAPTIVE => "ADAPTIVE",
             Self::CACHES => "CACHES",
             Self::CDC => "CDC",
             Self::DEEP => "DEEP",
@@ -580,6 +582,7 @@ enum CacheOptionKind {
     Concurrently,
     Policy(EvictionPolicy),
     Coalesce(Duration),
+    Adaptive,
     /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
     TopkBufferMultiplier(usize),
     /// `AUTOPARAM OFF` or `AUTOPARAM (EXCLUDE_JOINS, EXCLUDE_EXISTS)`. Suppresses
@@ -751,6 +754,8 @@ fn parse_single_cache_option(
         Ok(Some(CacheOptionKind::UntilWrite))
     } else if parser.parse_keyword(Keyword::CONCURRENTLY) {
         Ok(Some(CacheOptionKind::Concurrently))
+    } else if parse_readyset_keyword(parser, ReadysetKeyword::ADAPTIVE) {
+        Ok(Some(CacheOptionKind::Adaptive))
     } else {
         Ok(None)
     }
@@ -808,6 +813,18 @@ fn apply_cache_option(
             if opts.coalesce_ms.replace(duration).is_some() {
                 return Err(ReadysetParsingError::ReadysetParsingError(
                     "COALESCE specified more than once".into(),
+                ));
+            }
+        }
+        CacheOptionKind::Adaptive => {
+            if cache_type == Some(CacheType::Deep) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "ADAPTIVE is not supported for DEEP caches".into(),
+                ));
+            }
+            if std::mem::replace(&mut opts.adaptive, true) {
+                return Err(ReadysetParsingError::ReadysetParsingError(
+                    "ADAPTIVE specified more than once".into(),
                 ));
             }
         }
@@ -906,6 +923,7 @@ fn parse_with_cache_clause(
 fn cache_options_present(opts: &CreateCacheOptions) -> bool {
     opts.policy.is_some()
         || opts.coalesce_ms.is_some()
+        || opts.adaptive
         || opts.concurrently
         || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
         || opts.topk_buffer_multiplier.is_some()
@@ -983,6 +1001,7 @@ fn parse_create_cache(
         cache_type: opts.cache_type,
         policy: opts.policy,
         coalesce_ms: opts.coalesce_ms,
+        adaptive: opts.adaptive,
         inner,
         unparsed_create_cache_statement: Some(input.as_ref().trim().to_string()),
         trx_cache_policy: opts.trx_cache_policy,

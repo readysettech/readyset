@@ -1011,6 +1011,35 @@ fn create_cache_policy_without_cache_type() {
 }
 
 #[test]
+fn create_shallow_cache_adaptive() {
+    check_parse_both!("CREATE SHALLOW CACHE ADAPTIVE FROM SELECT * FROM t WHERE id = $1");
+    check_parse_both!(
+        "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS ADAPTIVE FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE ADAPTIVE COALESCE 250 MS foo FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!("CREATE SHALLOW CACHE WITH (ADAPTIVE) FROM SELECT * FROM t WHERE id = $1");
+    check_parse_both!(
+        "CREATE SHALLOW CACHE foo WITH (POLICY TTL 5 SECONDS REFRESH EVERY 1 SECONDS, ADAPTIVE) \
+         FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE foo WITH (ADAPTIVE, POLICY TTL 5 SECONDS REFRESH EVERY 1 SECONDS) \
+         FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_both!(
+        "CREATE SHALLOW CACHE WITH (COALESCE 250 MS, ADAPTIVE, ALWAYS) \
+         FROM SELECT * FROM t WHERE id = $1"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "CREATE DEEP CACHE WITH (ADAPTIVE) FROM SELECT * FROM t",
+        "ADAPTIVE is not supported for DEEP caches"
+    );
+}
+
+#[test]
 fn create_shallow_cache_seconds_regression() {
     // Existing SECONDS-only syntax must not regress.
     check_parse_both!(

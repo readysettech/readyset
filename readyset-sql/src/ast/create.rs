@@ -1142,6 +1142,8 @@ pub struct CreateCacheOptions {
     pub cache_type: Option<CacheType>,
     pub policy: Option<EvictionPolicy>,
     pub coalesce_ms: Option<Duration>,
+    /// Adaptive refresh; see [`CreateCacheStatement::adaptive`].
+    pub adaptive: bool,
     /// Multiplier applied to the `LIMIT k` value to size the TopK operator's buffer of rows
     /// retained past the top-k window. `buffered = k * multiplier`. `0` disables buffering;
     /// `None` (unset) preserves the legacy default of `buffered = k`. Only settable inside the
@@ -1167,6 +1169,10 @@ pub struct CreateCacheStatement {
     /// The coalesce window for request deduplication (only for shallow caches)
     #[strategy(any::<Option<Duration>>())]
     pub coalesce_ms: Option<Duration>,
+    /// Adaptive refresh: adjust each key's refresh period based on whether its value changed
+    /// (only for shallow caches)
+    #[serde(default)]
+    pub adaptive: bool,
     /// The result of parsing the inner statement or query ID for the `CREATE CACHE` statement.
     ///
     /// If parsing succeeded, then this will contain an Ok result with the definition of the
@@ -1205,6 +1211,7 @@ impl PartialEq for CreateCacheStatement {
             && self.cache_type == other.cache_type
             && self.policy == other.policy
             && self.coalesce_ms == other.coalesce_ms
+            && self.adaptive == other.adaptive
             && self.inner == other.inner
             && self.concurrently == other.concurrently
             && self.topk_buffer_multiplier == other.topk_buffer_multiplier
@@ -1220,6 +1227,7 @@ impl Hash for CreateCacheStatement {
         self.cache_type.hash(state);
         self.policy.hash(state);
         self.coalesce_ms.hash(state);
+        self.adaptive.hash(state);
         self.inner.hash(state);
         self.concurrently.hash(state);
         self.topk_buffer_multiplier.hash(state);
@@ -1244,6 +1252,7 @@ impl DialectDisplay for CreateCacheStatement {
             // options to emit.
             let has_options = self.policy.is_some()
                 || self.coalesce_ms.is_some()
+                || self.adaptive
                 || self.concurrently
                 || !matches!(self.trx_cache_policy, TrxCachePolicy::Never)
                 || self.topk_buffer_multiplier.is_some()
@@ -1265,6 +1274,10 @@ impl DialectDisplay for CreateCacheStatement {
                     sep(f)?;
                     write!(f, "COALESCE ")?;
                     format_duration(f, duration)?;
+                }
+                if self.adaptive {
+                    sep(f)?;
+                    write!(f, "ADAPTIVE")?;
                 }
                 if self.concurrently {
                     sep(f)?;

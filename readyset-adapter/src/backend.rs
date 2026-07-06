@@ -4717,6 +4717,7 @@ where
                     cache_type,
                     policy,
                     coalesce_ms,
+                    adaptive: _,
                     inner,
                     trx_cache_policy,
                     concurrently,

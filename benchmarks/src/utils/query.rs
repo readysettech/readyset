@@ -229,6 +229,7 @@ impl ArbitraryQueryParameters {
             },
             trx_cache_policy: TrxCachePolicy::Never,
             concurrently: false,
+            adaptive: false,
             unparsed_create_cache_statement: None,
             topk_buffer_multiplier: None,
             autoparam: Default::default(),

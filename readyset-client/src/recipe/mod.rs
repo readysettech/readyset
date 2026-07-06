@@ -128,6 +128,7 @@ impl From<CacheExpr> for CreateCacheStatement {
             trx_cache_policy: value.trx_cache_policy,
             // CacheExpr represents a migrated query, and the below fields are not relevant for an
             // already-migrated query
+            adaptive: false,
             concurrently: false,
             unparsed_create_cache_statement: None,
             topk_buffer_multiplier: value.topk_buffer_multiplier,

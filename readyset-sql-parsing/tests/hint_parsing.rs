@@ -549,6 +549,23 @@ fn parse_create_cache_hint_rejects_mixing_bare_and_with_clause() {
 }
 
 #[test]
+fn parse_create_cache_hint_adaptive() {
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE WITH (ADAPTIVE)")
+        .expect("should parse");
+    let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
+        panic!("Expected CreateCache directive");
+    };
+    assert!(opts.adaptive);
+    assert_eq!(opts.cache_type, Some(CacheType::Shallow));
+}
+
+#[test]
+fn parse_create_cache_hint_adaptive_on_deep_rejected() {
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE DEEP CACHE WITH (ADAPTIVE)");
+    assert!(result.is_err());
+}
+
+#[test]
 fn parse_create_cache_hint_topk_buffer_multiplier() {
     let result =
         parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4)")

@@ -919,6 +919,7 @@ enum CacheOptionKind {
     Concurrently,
     Policy(EvictionPolicy),
     Coalesce(Duration),
+    Adaptive,
     /// `TOPK_BUFFER_MULTIPLIER = N`. Only accepted inside the `WITH (...)` umbrella.
     TopkBufferMultiplier(usize),
     /// `AUTOPARAM OFF` or `AUTOPARAM (EXCLUDE_JOINS, ...)`. Only accepted inside the `WITH (...)`
@@ -1050,6 +1051,7 @@ fn cache_option(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], CacheOptionKind> {
             )),
             |(_, _, duration)| CacheOptionKind::Coalesce(duration),
         ),
+        map(tag_no_case("adaptive"), |_| CacheOptionKind::Adaptive),
     ))(i)
 }
 
@@ -1090,6 +1092,14 @@ fn apply_cache_option<'a>(
         }
         CacheOptionKind::Coalesce(duration) => {
             if opts.coalesce_ms.replace(duration).is_some() {
+                return Err(error());
+            }
+            if cache_type == Some(CacheType::Deep) {
+                return Err(error());
+            }
+        }
+        CacheOptionKind::Adaptive => {
+            if std::mem::replace(&mut opts.adaptive, true) {
                 return Err(error());
             }
             if cache_type == Some(CacheType::Deep) {
@@ -1174,6 +1184,7 @@ fn cached_query_bare_options(
 fn cache_options_present(opts: &CreateCacheOptions) -> bool {
     opts.policy.is_some()
         || opts.coalesce_ms.is_some()
+        || opts.adaptive
         || opts.concurrently
         || !matches!(opts.trx_cache_policy, TrxCachePolicy::Never)
         || opts.topk_buffer_multiplier.is_some()
@@ -1261,6 +1272,7 @@ pub fn create_cached_query(
                 cache_type,
                 policy: opts.policy,
                 coalesce_ms: opts.coalesce_ms,
+                adaptive: opts.adaptive,
                 inner,
                 unparsed_create_cache_statement,
                 trx_cache_policy: opts.trx_cache_policy,
@@ -2325,6 +2337,92 @@ mod tests {
                 b"CREATE DEEP CACHE WITH (POLICY TTL 5 SECONDS) FROM SELECT id FROM t",
             ));
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_shallow_cache_adaptive() {
+            let with_form = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE WITH (ADAPTIVE) FROM SELECT id FROM t"
+            );
+            assert!(with_form.adaptive);
+
+            let bare_form = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE ADAPTIVE FROM SELECT id FROM t"
+            );
+            assert!(bare_form.adaptive);
+
+            // Bare options combine in any order.
+            for input in [
+                b"CREATE SHALLOW CACHE POLICY TTL 5 SECONDS ADAPTIVE FROM SELECT id FROM t"
+                    as &[u8],
+                b"CREATE SHALLOW CACHE ADAPTIVE POLICY TTL 5 SECONDS FROM SELECT id FROM t",
+            ] {
+                let bare_combined = test_parse!(create_cached_query(Dialect::MySQL), input);
+                assert!(bare_combined.adaptive);
+                assert_eq!(
+                    bare_combined.policy,
+                    Some(EvictionPolicy::Ttl {
+                        ttl: Duration::from_secs(5),
+                    })
+                );
+            }
+
+            // ADAPTIVE in any position within the option list.
+            for input in [
+                b"CREATE SHALLOW CACHE WITH (POLICY TTL 5 SECONDS REFRESH EVERY 1 SECONDS, \
+                  ADAPTIVE) FROM SELECT id FROM t" as &[u8],
+                b"CREATE SHALLOW CACHE WITH (ADAPTIVE, POLICY TTL 5 SECONDS REFRESH EVERY \
+                  1 SECONDS) FROM SELECT id FROM t",
+                b"CREATE SHALLOW CACHE WITH (ADAPTIVE, POLICY TTL 5 SECONDS REFRESH EVERY \
+                  1 SECONDS, COALESCE 250 MS) FROM SELECT id FROM t",
+            ] {
+                let combined = test_parse!(create_cached_query(Dialect::MySQL), input);
+                assert!(combined.adaptive);
+                assert_eq!(
+                    combined.policy,
+                    Some(EvictionPolicy::TtlAndPeriod {
+                        ttl: Duration::from_secs(5),
+                        refresh: Duration::from_secs(1),
+                        schedule: true,
+                    })
+                );
+            }
+        }
+
+        #[test]
+        fn create_shallow_cache_adaptive_duplicate_rejected() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE SHALLOW CACHE WITH (ADAPTIVE, ADAPTIVE) FROM SELECT id FROM t",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn create_deep_cache_adaptive_rejected() {
+            let result = create_cached_query(Dialect::MySQL)(LocatedSpan::new(
+                b"CREATE DEEP CACHE WITH (ADAPTIVE) FROM SELECT id FROM t",
+            ));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn display_create_shallow_cache_adaptive() {
+            let stmt = test_parse!(
+                create_cached_query(Dialect::MySQL),
+                b"CREATE SHALLOW CACHE foo WITH (POLICY TTL 5 SECONDS, ADAPTIVE) \
+                  FROM SELECT id FROM t"
+            );
+            let res = stmt.display(Dialect::MySQL).to_string();
+            assert_eq!(
+                res,
+                "CREATE SHALLOW CACHE `foo` WITH (POLICY TTL 5 SECONDS, ADAPTIVE) \
+                 FROM SELECT `id` FROM `t`"
+            );
+
+            let reparsed = test_parse!(create_cached_query(Dialect::MySQL), res.as_bytes());
+            assert!(reparsed.adaptive);
         }
 
         #[test]
