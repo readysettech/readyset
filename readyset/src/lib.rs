@@ -567,6 +567,12 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_UDF")]
     pub shallow_cache_allow_udf: bool,
 
+    /// Allow shallow-caching queries that reference system schemas
+    /// (`information_schema`, `pg_catalog`, `pg_*`, `mysql`,
+    /// `performance_schema`, ...). Off by default.
+    #[arg(long, env = "SHALLOW_CACHE_ALLOW_SYSTEM_SCHEMA")]
+    pub shallow_cache_allow_system_schema: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -635,6 +641,7 @@ impl Options {
         ShallowCacheEligibility {
             allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
             allow_udf: self.shallow_cache_allow_udf,
+            allow_system_schema: self.shallow_cache_allow_system_schema,
             ..Default::default()
         }
     }
