@@ -579,6 +579,16 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_SESSION_SPECIFIC")]
     pub shallow_cache_allow_session_specific: bool,
 
+    /// Allow shallow-caching queries that call any function, including
+    /// user-defined, non-deterministic, and side-effecting ones. This is the
+    /// broad escape hatch: side-effecting or blocking functions (`nextval`,
+    /// `set_config`, `pg_notify`, advisory locks, `dblink`, `sleep`, ...) have
+    /// no narrower opt-in because caching one fires the effect once at fill and
+    /// then never again. Non-function guards (system schema, session variables,
+    /// unseeded `TABLESAMPLE`) still apply. Off by default.
+    #[arg(long, env = "SHALLOW_CACHE_ALLOW_ALL_FUNCTIONS")]
+    pub shallow_cache_allow_all_functions: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -647,9 +657,9 @@ impl Options {
         ShallowCacheEligibility {
             allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
             allow_udf: self.shallow_cache_allow_udf,
+            allow_all_functions: self.shallow_cache_allow_all_functions,
             allow_system_schema: self.shallow_cache_allow_system_schema,
             allow_session_specific: self.shallow_cache_allow_session_specific,
-            ..Default::default()
         }
     }
 
