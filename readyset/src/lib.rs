@@ -562,6 +562,11 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_NONDETERMINISTIC")]
     pub shallow_cache_allow_nondeterministic: bool,
 
+    /// Allow shallow-caching queries that call user-defined functions. A UDF may
+    /// have side effects or be non-deterministic, so this is off by default.
+    #[arg(long, env = "SHALLOW_CACHE_ALLOW_UDF")]
+    pub shallow_cache_allow_udf: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -629,6 +634,7 @@ impl Options {
     pub fn shallow_cache_eligibility(&self) -> ShallowCacheEligibility {
         ShallowCacheEligibility {
             allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
+            allow_udf: self.shallow_cache_allow_udf,
             ..Default::default()
         }
     }
