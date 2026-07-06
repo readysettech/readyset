@@ -573,6 +573,12 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_SYSTEM_SCHEMA")]
     pub shallow_cache_allow_system_schema: bool,
 
+    /// Allow shallow-caching queries that reference session or user variables
+    /// (`@var`, `@@var`). A session variable's value differs per connection, so
+    /// caching such a query is incorrect across sessions; off by default.
+    #[arg(long, env = "SHALLOW_CACHE_ALLOW_SESSION_SPECIFIC")]
+    pub shallow_cache_allow_session_specific: bool,
+
     /// Enable Readyset's automatic shallow caching mode.
     ///
     /// Shorthand for `--cache-mode=shallow --query-caching=inrequestpath`: every
@@ -642,6 +648,7 @@ impl Options {
             allow_nondeterministic: self.shallow_cache_allow_nondeterministic,
             allow_udf: self.shallow_cache_allow_udf,
             allow_system_schema: self.shallow_cache_allow_system_schema,
+            allow_session_specific: self.shallow_cache_allow_session_specific,
             ..Default::default()
         }
     }
