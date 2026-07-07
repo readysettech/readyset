@@ -2500,3 +2500,64 @@ async fn adaptive_refresh_period_adapts() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// A `/*rs+ CREATE SHALLOW CACHE WITH (ADAPTIVE) */` hint creates an adaptive cache.
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn hint_creates_adaptive_shallow_cache() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE t (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO t VALUES (1, 100)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop(
+            "SELECT /*rs+ CREATE SHALLOW CACHE WITH (ADAPTIVE) */ id, val FROM t WHERE id = 1",
+        )
+        .await
+        .unwrap();
+
+    let adaptive: Vec<bool> = readyset
+        .query("SELECT adaptive FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    assert_eq!(adaptive, vec![true]);
+
+    // A hint without the option creates a non-adaptive cache.
+    readyset
+        .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    let mut adaptive: Vec<bool> = readyset
+        .query("SELECT adaptive FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    adaptive.sort();
+    assert_eq!(adaptive, vec![false, true]);
+
+    shutdown_tx.shutdown().await;
+}

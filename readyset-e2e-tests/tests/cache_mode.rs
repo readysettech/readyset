@@ -256,6 +256,13 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
         QueryDestination::ReadysetShallow
     );
 
+    // Auto-created caches use adaptive refresh.
+    let adaptive: Vec<bool> = readyset
+        .query("SELECT adaptive FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    assert_eq!(adaptive, vec![true]);
+
     shutdown_tx.shutdown().await;
 }
 

@@ -5213,6 +5213,12 @@ where
             opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
         }
 
+        // Implicit auto-cache creation turns on adaptive refresh; hints configure it
+        // explicitly.
+        if matches!(trigger, AutoCreateTrigger::InRequestPath) {
+            opts.adaptive = true;
+        }
+
         if !settings.allow_cache_ddl {
             warn!(
                 trigger = trigger.as_str(),
@@ -6522,6 +6528,9 @@ fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text
         TrxCachePolicy::UntilWrite => ddl.push_str("UNTIL WRITE "),
         TrxCachePolicy::Never => {}
     }
+    if opts.adaptive {
+        ddl.push_str("ADAPTIVE ");
+    }
     let _ = write!(ddl, "FROM {query_text}");
     ddl
 }
@@ -7162,6 +7171,24 @@ mod tests {
             ddl.contains("UNTIL WRITE"),
             "DDL missing UNTIL WRITE: {ddl}"
         );
+    }
+
+    #[test]
+    fn hint_ddl_adaptive_roundtrip() {
+        let opts = CreateCacheOptions {
+            adaptive: true,
+            trx_cache_policy: TrxCachePolicy::UntilWrite,
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+        assert!(ddl.contains("ADAPTIVE"), "DDL missing ADAPTIVE: {ddl}");
+
+        // Re-parse the generated DDL — this is the path taken on restart.
+        let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+        let SqlQuery::CreateCache(stmt) = parsed else {
+            panic!("Expected CreateCache, got: {parsed:?}");
+        };
+        assert!(stmt.adaptive, "adaptive must survive DDL round-trip: {ddl}");
     }
 
     #[test]
