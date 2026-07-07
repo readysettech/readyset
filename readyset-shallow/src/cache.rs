@@ -34,6 +34,9 @@ const MIN_PERIOD_PERCENT: u64 = 10;
 /// Amount an adaptive refresh period moves per refresh, as a percentage of the cache's
 /// configured period.
 const NUDGE_PERCENT: u64 = 10;
+/// Maximum extra refresh load an adaptive cache may send upstream, as a percentage of the load
+/// required to refresh every current entry at the configured period.
+const MAX_EXTRA_LOAD_PERCENT: u64 = 100;
 
 pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
 type ScheduledRefresh<K, V> = (K, u64, RequestRefresh<K, V>);
@@ -68,6 +71,84 @@ where
 }
 
 type Scheduler<K, V> = Arc<Mutex<RefreshScheduler<K, V>>>;
+
+/// Per-cache refresh-load accounting for the adaptive load cap.
+///
+/// Load is measured as upstream execution time per unit of wall time, in parts-per-million: an
+/// entry whose refresh takes `execution_ms` and runs every `period_ms` contributes
+/// `execution_ms * 1_000_000 / period_ms`. `actual` sums that over the cache's entries at
+/// their current periods; `baseline` sums it at the configured period. The two are equal when
+/// every entry refreshes at the configured period, and their difference is the extra load
+/// adaptive refresh sends upstream.
+///
+/// Entries add their contributions at write-back; the store's eviction listener subtracts
+/// them on removal, including the replacement performed by every refresh overwrite.
+#[derive(Debug)]
+pub(crate) struct AdaptiveState {
+    refresh_ms: u64,
+    actual_ppm: AtomicU64,
+    baseline_ppm: AtomicU64,
+}
+
+impl AdaptiveState {
+    pub(crate) fn new(refresh_ms: u64) -> Self {
+        Self {
+            refresh_ms: refresh_ms.max(1),
+            actual_ppm: AtomicU64::new(0),
+            baseline_ppm: AtomicU64::new(0),
+        }
+    }
+
+    fn contributions<V>(&self, values: &CacheValues<V>) -> (u64, u64) {
+        // Sub-millisecond queries still weigh in, so caches full of fast queries are capped by
+        // refresh count rather than exempted. Rounding up keeps entries with very long periods
+        // from contributing zero, which would collapse the cap to nothing.
+        let exec = values.execution_ms.max(1);
+        let period = values.period_ms.unwrap_or(self.refresh_ms).max(1);
+        (
+            (exec * 1_000_000).div_ceil(period),
+            (exec * 1_000_000).div_ceil(self.refresh_ms),
+        )
+    }
+
+    pub(crate) fn add<V>(&self, values: &CacheValues<V>) {
+        let (actual, baseline) = self.contributions(values);
+        self.actual_ppm.fetch_add(actual, Ordering::Relaxed);
+        self.baseline_ppm.fetch_add(baseline, Ordering::Relaxed);
+    }
+
+    pub(crate) fn remove<V>(&self, values: &CacheValues<V>) {
+        let (actual, baseline) = self.contributions(values);
+        // Saturate rather than wrap; a transient over-subtraction must not poison the sums.
+        self.actual_ppm
+            .update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                v.saturating_sub(actual)
+            });
+        self.baseline_ppm
+            .update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                v.saturating_sub(baseline)
+            });
+    }
+
+    /// Current (actual, baseline) load sums, for tests.
+    #[cfg(test)]
+    pub(crate) fn load_ppm(&self) -> (u64, u64) {
+        (
+            self.actual_ppm.load(Ordering::Relaxed),
+            self.baseline_ppm.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Whether total refresh load is at or over the cap of [`MAX_EXTRA_LOAD_PERCENT`] extra
+    /// load beyond the baseline. A cache with no baseline load, e.g. an empty one, is never
+    /// over the cap.
+    fn over_cap(&self) -> bool {
+        let actual = self.actual_ppm.load(Ordering::Relaxed);
+        let baseline = self.baseline_ppm.load(Ordering::Relaxed);
+        let cap = baseline.saturating_add(baseline.saturating_mul(MAX_EXTRA_LOAD_PERCENT) / 100);
+        baseline > 0 && actual >= cap
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct CacheValues<V> {
@@ -253,7 +334,7 @@ where
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
-    adaptive: bool,
+    adaptive: Option<Arc<AdaptiveState>>,
     max_entry_bytes: Option<usize>,
     entry_sizer: fn(&Vec<V>) -> usize,
     entry_hasher: fn(&[V]) -> u64,
@@ -299,7 +380,7 @@ where
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
-        adaptive: bool,
+        adaptive: Option<Arc<AdaptiveState>>,
         max_entry_bytes: Option<usize>,
     ) -> Arc<Self>
     where
@@ -511,7 +592,7 @@ where
     ) -> CacheValues<V> {
         let now = current_timestamp_ms();
         let execution_ms = execution.as_millis().try_into().unwrap_or_default();
-        let values_hash = self.adaptive.then(|| (self.entry_hasher)(&v));
+        let values_hash = self.adaptive.as_ref().map(|_| (self.entry_hasher)(&v));
         CacheValues {
             values: Arc::new(v),
             metadata,
@@ -525,14 +606,14 @@ where
         }
     }
 
-    /// Compute the refresh period for an entry replacing `old`: shrink when the value changed,
-    /// grow when it did not, clamped to [`MIN_PERIOD_PERCENT`, 100%] of the cache's configured
-    /// period.
-    fn adapted_period(&self, old: &CacheValues<V>, changed: bool) -> Option<u64> {
+    /// Compute the refresh period for an entry replacing `old`. Shrink toward the minimum when
+    /// requested, grow toward the configured period otherwise, clamped to
+    /// [`MIN_PERIOD_PERCENT`, 100%] of the cache's configured period.
+    fn adapted_period(&self, old: &CacheValues<V>, shrink: bool) -> Option<u64> {
         let refresh_ms = self.refresh_ms?;
         let old_period = old.period_ms.unwrap_or(refresh_ms);
         let nudge = (refresh_ms * NUDGE_PERCENT / 100).max(1);
-        let period = if changed {
+        let period = if shrink {
             let min = (refresh_ms * MIN_PERIOD_PERCENT / 100).max(1);
             old_period.saturating_sub(nudge).max(min)
         } else {
@@ -550,15 +631,23 @@ where
                         if let CacheEntry::Present(old) = &**e.value() {
                             let acc = old.accessed_ms.load(Ordering::Relaxed);
                             new.accessed_ms.store(acc, Ordering::Relaxed);
-                            if self.adaptive {
+                            if let Some(state) = &self.adaptive {
                                 let changed = old.values_hash != new.values_hash;
                                 if changed {
                                     self.refresh_changed_counter.increment(1);
                                 } else {
                                     self.refresh_unchanged_counter.increment(1);
                                 }
-                                new.period_ms = self.adapted_period(old, changed);
+                                // At or over the load cap the period only grows, letting the
+                                // aggregate drift back under.
+                                let shrink = changed && !state.over_cap();
+                                new.period_ms = self.adapted_period(old, shrink);
                             }
+                        }
+                        if let Some(state) = &self.adaptive {
+                            // The matching subtraction happens in the store's eviction
+                            // listener, which receives the replaced entry.
+                            state.add(&new);
                         }
                         let new = Arc::new(CacheEntry::Present(new));
                         future::ready(Op::Put(new))
@@ -754,7 +843,7 @@ where
             ddl_req: self.ddl_req.clone(),
             trx_cache_policy: self.trx_cache_policy,
             schedule: self.is_scheduled(),
-            adaptive: self.adaptive,
+            adaptive: self.adaptive.is_some(),
         }
     }
 
@@ -838,7 +927,7 @@ mod tests {
         K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
         V: ContentHash + Send + Sync + SizeOf + 'static,
     {
-        let inner = CacheManager::new_inner(max_capacity);
+        let inner = CacheManager::new_inner(max_capacity, Default::default());
         Cache::new(
             ID,
             inner,
@@ -850,7 +939,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
-            false,
+            None,
             max_entry_bytes,
         )
     }
@@ -949,7 +1038,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_inner_cache() {
-        let inner = CacheManager::new_inner(None);
+        let inner = CacheManager::new_inner(None, Default::default());
         let policy = EvictionPolicy::Ttl {
             ttl: Duration::from_secs(60),
         };
@@ -966,7 +1055,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
-            false,
+            None,
             None,
         );
         let cache_1 = Cache::new(
@@ -980,7 +1069,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
-            false,
+            None,
             None,
         );
 
@@ -1190,7 +1279,7 @@ mod tests {
 
     #[test]
     fn test_cache_debug() {
-        let inner = CacheManager::new_inner(None);
+        let inner = CacheManager::new_inner(None, Default::default());
         let relation = readyset_sql::ast::Relation {
             schema: None,
             name: "test_table".into(),
@@ -1210,7 +1299,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
-            false,
+            None,
             None,
         );
 

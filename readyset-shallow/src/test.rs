@@ -1231,6 +1231,20 @@ fn entry_period(manager: &CacheManager<String, String>, query_id: &QueryId) -> O
     entries[0].refresh_period_ms
 }
 
+fn entry_period_for(
+    manager: &CacheManager<String, String>,
+    query_id: &QueryId,
+    key: &str,
+) -> Option<u64> {
+    let entry_id = hash(&key.to_string());
+    manager
+        .list_entries(Some(*query_id), None)
+        .into_iter()
+        .find(|e| e.entry_id == entry_id)
+        .expect("no entry for key")
+        .refresh_period_ms
+}
+
 fn create_adaptive_cache(
     manager: &CacheManager<String, String>,
     query_id: QueryId,
@@ -1257,20 +1271,28 @@ fn create_adaptive_cache(
         .unwrap();
 }
 
-async fn refresh_insert(
+async fn refresh_insert_with_exec(
     manager: &CacheManager<String, String>,
     query_id: &QueryId,
+    key: &str,
     values: Vec<String>,
+    exec: Duration,
 ) {
     let cache = manager.get(None, Some(query_id)).unwrap();
     cache
-        .insert(
-            "key".to_string(),
-            values,
-            QueryMetadata::Test,
-            Duration::ZERO,
-        )
+        .insert(key.to_string(), values, QueryMetadata::Test, exec)
         .await;
+    // Run the eviction listener for the replaced entry so load accounting settles.
+    manager.run_pending_tasks(query_id).await;
+}
+
+async fn refresh_insert(
+    manager: &CacheManager<String, String>,
+    query_id: &QueryId,
+    key: &str,
+    values: Vec<String>,
+) {
+    refresh_insert_with_exec(manager, query_id, key, values, Duration::ZERO).await;
 }
 
 #[test]
@@ -1286,26 +1308,32 @@ async fn test_adaptive_period_nudging() {
     assert_eq!(entry_period(&manager, &query_id), Some(1000));
 
     // A changed value shrinks the period by 10% of the configured period.
-    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
     assert_eq!(entry_period(&manager, &query_id), Some(900));
 
     // An unchanged value grows it back, clamped at the configured period.
-    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
     assert_eq!(entry_period(&manager, &query_id), Some(1000));
-    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
     assert_eq!(entry_period(&manager, &query_id), Some(1000));
-
-    // Repeated changes clamp at 10% of the configured period.
-    for i in 2..25 {
-        refresh_insert(&manager, &query_id, vec![format!("v{i}")]).await;
-    }
-    assert_eq!(entry_period(&manager, &query_id), Some(100));
 
     // The same rows in a different order do not count as a change.
-    refresh_insert(&manager, &query_id, vec!["a".to_string(), "b".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(100));
-    refresh_insert(&manager, &query_id, vec!["b".to_string(), "a".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(200));
+    refresh_insert(
+        &manager,
+        &query_id,
+        "key",
+        vec!["a".to_string(), "b".to_string()],
+    )
+    .await;
+    assert_eq!(entry_period(&manager, &query_id), Some(900));
+    refresh_insert(
+        &manager,
+        &query_id,
+        "key",
+        vec!["b".to_string(), "a".to_string()],
+    )
+    .await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1000));
 }
 
 #[test]
@@ -1327,7 +1355,7 @@ async fn test_non_adaptive_period_fixed() {
     assert_eq!(entry_period(&manager, &query_id), Some(1000));
 
     for i in 1..5 {
-        refresh_insert(&manager, &query_id, vec![format!("v{i}")]).await;
+        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
         assert_eq!(entry_period(&manager, &query_id), Some(1000));
     }
 }
@@ -1345,7 +1373,7 @@ async fn test_adaptive_stale_check_uses_period() {
 
     // A changed write-back drops the period to 1800ms, so a read at ~1900ms is stale even
     // though the configured period has not yet elapsed.
-    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
     assert_eq!(entry_period(&manager, &query_id), Some(1800));
 
     sleep(Duration::from_millis(1900)).await;
@@ -1399,4 +1427,144 @@ async fn test_adaptive_scheduled_refresh_periods() {
     changing.store(false, Ordering::SeqCst);
     sleep(Duration::from_millis(5000)).await;
     assert_eq!(entry_period(&manager, &query_id), Some(500));
+}
+
+#[test]
+async fn test_adaptive_load_cap_single_key() {
+    // With one entry the cap (100% extra load) binds when the period halves: shrinking stops
+    // at 50% of the configured period, and further changed refreshes oscillate between
+    // growing back under the boundary and shrinking down to it.
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    let mut min_seen = u64::MAX;
+    for i in 1..=12 {
+        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
+        let period = entry_period(&manager, &query_id).unwrap();
+        assert!(period >= 500, "cap breached at iteration {i}: {period}");
+        min_seen = min_seen.min(period);
+    }
+    assert_eq!(min_seen, 500);
+    assert_matches!(entry_period(&manager, &query_id), Some(500 | 600));
+}
+
+#[test]
+async fn test_adaptive_load_cap_small_baseline() {
+    // A cheap query on a long period contributes well under 100 ppm; the cap must scale
+    // proportionally at that magnitude so the entry can still shrink to the minimum period.
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_secs(15), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    let mut min_seen = u64::MAX;
+    for i in 1..=8 {
+        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
+        min_seen = min_seen.min(entry_period(&manager, &query_id).unwrap());
+    }
+    assert_eq!(min_seen, 7500);
+    assert_matches!(entry_period(&manager, &query_id), Some(7500 | 9000));
+}
+
+#[test]
+async fn test_adaptive_load_cap_shares_budget() {
+    // A stable second entry adds budget headroom, letting the churning key shrink below half
+    // of the configured period before the cap binds (at 300ms here).
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    for key in ["stable", "churn"] {
+        let result = manager
+            .get_or_start_insert(&query_id, key.to_string(), |_| true)
+            .await;
+        insert_value(result, vec![format!("{key}_v")]).await;
+        // Force execution time to zero.
+        refresh_insert(&manager, &query_id, key, vec![format!("{key}_v")]).await;
+    }
+
+    for i in 1..=20 {
+        refresh_insert(&manager, &query_id, "churn", vec![format!("v{i}")]).await;
+        let period = entry_period_for(&manager, &query_id, "churn").unwrap();
+        assert!(period >= 300, "cap breached at iteration {i}: {period}");
+    }
+    assert_matches!(
+        entry_period_for(&manager, &query_id, "churn"),
+        Some(300 | 400)
+    );
+    assert_eq!(entry_period_for(&manager, &query_id, "stable"), Some(1000));
+}
+
+#[test]
+async fn test_adaptive_load_cap_weighs_execution_time() {
+    // An expensive stable entry dominates the load budget, so a cheap churning key has room
+    // to reach the minimum period.
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    for key in ["stable", "churn"] {
+        let result = manager
+            .get_or_start_insert(&query_id, key.to_string(), |_| true)
+            .await;
+        insert_value(result, vec![format!("{key}_v")]).await;
+    }
+    refresh_insert_with_exec(
+        &manager,
+        &query_id,
+        "stable",
+        vec!["stable_v".to_string()],
+        Duration::from_millis(100),
+    )
+    .await;
+
+    for i in 1..=15 {
+        refresh_insert(&manager, &query_id, "churn", vec![format!("v{i}")]).await;
+    }
+    assert_eq!(entry_period_for(&manager, &query_id, "churn"), Some(100));
+}
+
+#[test]
+async fn test_adaptive_load_accounting_balances() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+    // Force execution time to zero.
+    refresh_insert(&manager, &query_id, "key", vec!["v0".to_string()]).await;
+    assert_eq!(manager.adaptive_load(&query_id), Some((1000, 1000)));
+
+    // Shrink to the 500ms floor; the entry now contributes twice its baseline.
+    for i in 1..=5 {
+        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
+    }
+    assert_eq!(manager.adaptive_load(&query_id), Some((2000, 1000)));
+
+    // Flushing evicts the entry, which gives its contributions back.
+    manager.flush_cache(None, Some(&query_id)).await.unwrap();
+    assert_eq!(manager.adaptive_load(&query_id), Some((0, 0)));
+
+    // A refilled key starts fresh and may shrink again.
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["w0".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["w0".to_string()]).await;
+    assert_eq!(manager.adaptive_load(&query_id), Some((1000, 1000)));
+    refresh_insert(&manager, &query_id, "key", vec!["w1".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(900));
 }

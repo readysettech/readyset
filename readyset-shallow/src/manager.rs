@@ -20,7 +20,8 @@ use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePoli
 use readyset_util::SizeOf;
 
 use crate::cache::{
-    Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache, Lookup,
+    AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache,
+    Lookup,
 };
 use crate::{ContentHash, EvictionPolicy, QueryMetadata};
 use readyset_util::hash::hash;
@@ -54,6 +55,9 @@ where
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
     inner: InnerCache<K, V>,
+    /// Load accounting for adaptive caches, keyed by cache id. Shared with the store's
+    /// eviction listener, which subtracts removed entries' contributions.
+    adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>>,
     max_entry_bytes: Option<usize>,
     // This lock also synchronizes inserts into the three HashMaps.
     next_id: Mutex<u64>,
@@ -69,16 +73,24 @@ where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
     V: Send + Sync + SizeOf + 'static,
 {
-    pub(crate) fn new_inner(max_capacity: Option<u64>) -> InnerCache<K, V> {
+    pub(crate) fn new_inner(
+        max_capacity: Option<u64>,
+        adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>>,
+    ) -> InnerCache<K, V> {
         let mut builder = MokaCache::builder()
             .support_invalidation_closures()
             .eviction_policy(moka::policy::EvictionPolicy::cost_aware_lfu())
             .expire_after(CacheExpiration)
             .weigher(weight)
             .cost(cost)
-            .eviction_listener(|_, _, cause| {
+            .eviction_listener(move |key: Arc<(u64, K)>, value, cause| {
                 if cause == RemovalCause::Size {
                     counter!(metric::SHALLOW_EVICT_MEMORY).increment(1);
+                }
+                if let CacheEntry::Present(values) = &*value
+                    && let Some(state) = adaptive_states.pin().get(&key.0)
+                {
+                    state.remove(values);
                 }
             });
         if let Some(capacity) = max_capacity {
@@ -88,11 +100,13 @@ where
     }
 
     pub fn new(max_capacity: Option<u64>, max_entry_bytes: Option<usize>) -> Self {
+        let adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>> = Arc::new(new_table());
         Self {
             caches: new_table(),
             names: new_table(),
             query_ids: new_table(),
-            inner: Self::new_inner(max_capacity),
+            inner: Self::new_inner(max_capacity, Arc::clone(&adaptive_states)),
+            adaptive_states,
             max_entry_bytes,
             next_id: Default::default(),
         }
@@ -113,6 +127,13 @@ where
         name.map(|n| n.name.to_string())
             .or_else(|| query_id.map(|q| q.to_string()))
             .unwrap()
+    }
+
+    /// Current (actual, baseline) adaptive load sums for a cache, for tests.
+    #[cfg(test)]
+    pub(crate) fn adaptive_load(&self, query_id: &QueryId) -> Option<(u64, u64)> {
+        let id = self.get_cache_id(None, Some(query_id))?;
+        self.adaptive_states.pin().get(&id).map(|s| s.load_ppm())
     }
 
     fn get_cache_id(&self, name: Option<&Relation>, query_id: Option<&QueryId>) -> Option<u64> {
@@ -162,6 +183,11 @@ where
             return Err(ReadySetError::ViewAlreadyExists(display_name));
         }
 
+        let adaptive_state = adaptive.then(|| Arc::new(AdaptiveState::new(policy.refresh_ms())));
+        if let Some(state) = &adaptive_state {
+            self.adaptive_states.pin().insert(id, Arc::clone(state));
+        }
+
         let inner = Arc::clone(&self.inner);
         let cache = Cache::new(
             id,
@@ -174,7 +200,7 @@ where
             ddl_req,
             trx_cache_policy,
             coalesce_ms,
-            adaptive,
+            adaptive_state,
             self.max_entry_bytes,
         );
 
@@ -215,6 +241,7 @@ where
         self.query_ids.pin().remove(cache.query_id());
 
         guard.remove(&id);
+        self.adaptive_states.pin().remove(&id);
 
         info!("dropped shallow cache {display_name}");
         Ok(())
@@ -233,6 +260,7 @@ where
         caches.clear();
         self.names.pin().clear();
         self.query_ids.pin().clear();
+        self.adaptive_states.pin().clear();
     }
 
     /// Flush a single shallow cache by name or query_id: clears cached entries
