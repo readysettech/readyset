@@ -24,7 +24,16 @@ use readyset_sql::ast::{
 use readyset_util::SizeOf;
 use readyset_util::timestamp::current_timestamp_ms;
 
-use crate::{CacheInsertGuard, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh};
+use crate::{
+    CacheInsertGuard, ContentHash, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh,
+    rows_content_hash,
+};
+
+/// Minimum adaptive refresh period, as a percentage of the cache's configured period.
+const MIN_PERIOD_PERCENT: u64 = 10;
+/// Amount an adaptive refresh period moves per refresh, as a percentage of the cache's
+/// configured period.
+const NUDGE_PERCENT: u64 = 10;
 
 pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
 type ScheduledRefresh<K, V> = (K, u64, RequestRefresh<K, V>);
@@ -69,6 +78,12 @@ pub(crate) struct CacheValues<V> {
     refreshing: Arc<AtomicBool>,
     ttl_ms: Option<u64>,
     pub(crate) execution_ms: u64,
+    /// This key's current refresh period. Fixed at the cache's configured period unless the
+    /// cache is adaptive, in which case it is nudged at each refresh write-back.
+    pub(crate) period_ms: Option<u64>,
+    /// Order-insensitive content hash of `values`, computed only for adaptive caches; see
+    /// [`rows_content_hash`].
+    values_hash: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -164,6 +179,7 @@ pub struct CacheInfo {
     pub ddl_req: CacheDDLRequest,
     pub trx_cache_policy: TrxCachePolicy,
     pub schedule: bool,
+    pub adaptive: bool,
 }
 
 /// Information about a specific cached entry (parameter set) within a shallow cache.
@@ -181,6 +197,9 @@ pub struct CacheEntryInfo {
     pub last_refreshed_ms: u64,
     /// How long the last refresh query took to execute, in milliseconds.
     pub refresh_time_ms: u64,
+    /// The entry's current refresh period in milliseconds; adaptive caches nudge this at each
+    /// refresh.
+    pub refresh_period_ms: Option<u64>,
     /// Size of the entry in bytes.
     pub bytes: usize,
 }
@@ -210,7 +229,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             },
             unparsed_create_cache_statement: None,
             trx_cache_policy: info.trx_cache_policy,
-            adaptive: false,
+            adaptive: info.adaptive,
             concurrently: false,
             topk_buffer_multiplier: None,
             autoparam: Default::default(),
@@ -234,14 +253,18 @@ where
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
+    adaptive: bool,
     max_entry_bytes: Option<usize>,
     entry_sizer: fn(&Vec<V>) -> usize,
+    entry_hasher: fn(&[V]) -> u64,
     ddl_req: CacheDDLRequest,
     trx_cache_policy: TrxCachePolicy,
     scheduler: Option<Scheduler<K, V>>,
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     hit_counter: Counter,
     miss_counter: Counter,
+    refresh_changed_counter: Counter,
+    refresh_unchanged_counter: Counter,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -276,10 +299,11 @@ where
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
+        adaptive: bool,
         max_entry_bytes: Option<usize>,
     ) -> Arc<Self>
     where
-        V: SizeOf,
+        V: ContentHash + SizeOf,
     {
         let (ttl_ms, refresh_ms, schedule) = match policy {
             EvictionPolicy::Ttl { ttl } => {
@@ -306,7 +330,11 @@ where
 
         let label = query_id.to_string();
         let hit_counter = counter!(metric::SHALLOW_HIT, "query_id" => label.clone());
-        let miss_counter = counter!(metric::SHALLOW_MISS, "query_id" => label);
+        let miss_counter = counter!(metric::SHALLOW_MISS, "query_id" => label.clone());
+        let refresh_changed_counter =
+            counter!(metric::SHALLOW_REFRESH_CHANGED, "query_id" => label.clone());
+        let refresh_unchanged_counter =
+            counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label);
 
         let cache = Arc::new(Self {
             id,
@@ -319,14 +347,18 @@ where
             ttl_ms,
             refresh_ms,
             coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
+            adaptive,
             max_entry_bytes,
             entry_sizer: <Vec<V> as SizeOf>::deep_size_of,
+            entry_hasher: rows_content_hash::<V>,
             ddl_req,
             trx_cache_policy,
             scheduler: scheduler.clone(),
             shutdown_tx: std::sync::Mutex::new(shutdown_tx),
             hit_counter,
             miss_counter,
+            refresh_changed_counter,
+            refresh_unchanged_counter,
         });
 
         if let Some(scheduler) = scheduler {
@@ -380,11 +412,16 @@ where
 
         for (key, version, callback) in due {
             match cache.inner.get(&(cache.id, key.clone())).await.as_deref() {
-                Some(CacheEntry::Present(..)) | Some(CacheEntry::Loading(..)) => {
-                    // Capture per-item deadline to spread rescheduled callbacks
+                Some(entry @ (CacheEntry::Present(..) | CacheEntry::Loading(..))) => {
+                    // Reschedule at the entry's own period, which adaptive caches nudge at each
+                    // write-back. Capture per-item deadline to spread rescheduled callbacks
                     // across slightly different instants rather than collapsing
                     // them all to a single point in time.
-                    let deadline = refresh_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+                    let period_ms = match entry {
+                        CacheEntry::Present(values) => values.period_ms,
+                        CacheEntry::Loading(..) => refresh_ms,
+                    };
+                    let deadline = period_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
                     let guard = Self::make_guard(Arc::clone(&cache), key.clone(), None);
                     callback(guard);
                     if let Some(deadline) = deadline {
@@ -474,6 +511,7 @@ where
     ) -> CacheValues<V> {
         let now = current_timestamp_ms();
         let execution_ms = execution.as_millis().try_into().unwrap_or_default();
+        let values_hash = self.adaptive.then(|| (self.entry_hasher)(&v));
         CacheValues {
             values: Arc::new(v),
             metadata,
@@ -482,10 +520,28 @@ where
             refreshing: Arc::new(false.into()),
             ttl_ms: self.ttl_ms,
             execution_ms,
+            period_ms: self.refresh_ms,
+            values_hash,
         }
     }
 
-    async fn insert_entry(&self, k: K, new: CacheValues<V>) {
+    /// Compute the refresh period for an entry replacing `old`: shrink when the value changed,
+    /// grow when it did not, clamped to [`MIN_PERIOD_PERCENT`, 100%] of the cache's configured
+    /// period.
+    fn adapted_period(&self, old: &CacheValues<V>, changed: bool) -> Option<u64> {
+        let refresh_ms = self.refresh_ms?;
+        let old_period = old.period_ms.unwrap_or(refresh_ms);
+        let nudge = (refresh_ms * NUDGE_PERCENT / 100).max(1);
+        let period = if changed {
+            let min = (refresh_ms * MIN_PERIOD_PERCENT / 100).max(1);
+            old_period.saturating_sub(nudge).max(min)
+        } else {
+            old_period.saturating_add(nudge).min(refresh_ms)
+        };
+        Some(period)
+    }
+
+    async fn insert_entry(&self, k: K, mut new: CacheValues<V>) {
         self.inner
             .entry((self.id, k))
             .and_compute_with(|e| {
@@ -494,6 +550,15 @@ where
                         if let CacheEntry::Present(old) = &**e.value() {
                             let acc = old.accessed_ms.load(Ordering::Relaxed);
                             new.accessed_ms.store(acc, Ordering::Relaxed);
+                            if self.adaptive {
+                                let changed = old.values_hash != new.values_hash;
+                                if changed {
+                                    self.refresh_changed_counter.increment(1);
+                                } else {
+                                    self.refresh_unchanged_counter.increment(1);
+                                }
+                                new.period_ms = self.adapted_period(old, changed);
+                            }
                         }
                         let new = Arc::new(CacheEntry::Present(new));
                         future::ready(Op::Put(new))
@@ -573,8 +638,8 @@ where
     fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, Option<Arc<AtomicBool>>) {
         let now = current_timestamp_ms();
         values.accessed_ms.store(now, Ordering::Relaxed);
-        let refresh = if let Some(refresh_ms) = self.refresh_ms
-            && now.saturating_sub(values.refreshed_ms + values.execution_ms) >= refresh_ms
+        let refresh = if let Some(period_ms) = values.period_ms
+            && now.saturating_sub(values.refreshed_ms + values.execution_ms) >= period_ms
             && values
                 .refreshing
                 .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -689,6 +754,7 @@ where
             ddl_req: self.ddl_req.clone(),
             trx_cache_policy: self.trx_cache_policy,
             schedule: self.is_scheduled(),
+            adaptive: self.adaptive,
         }
     }
 
@@ -758,7 +824,7 @@ mod tests {
     fn new<K, V>(max_capacity: Option<u64>, policy: EvictionPolicy) -> Arc<Cache<K, V>>
     where
         K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
-        V: Send + Sync + SizeOf + 'static,
+        V: ContentHash + Send + Sync + SizeOf + 'static,
     {
         new_capped(max_capacity, policy, None)
     }
@@ -770,7 +836,7 @@ mod tests {
     ) -> Arc<Cache<K, V>>
     where
         K: Clone + Eq + Hash + Send + Sync + SizeOf + 'static,
-        V: Send + Sync + SizeOf + 'static,
+        V: ContentHash + Send + Sync + SizeOf + 'static,
     {
         let inner = CacheManager::new_inner(max_capacity);
         Cache::new(
@@ -784,6 +850,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
             max_entry_bytes,
         )
     }
@@ -899,6 +966,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
             None,
         );
         let cache_1 = Cache::new(
@@ -912,6 +980,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
             None,
         );
 
@@ -957,6 +1026,8 @@ mod tests {
             refreshing: Arc::new(false.into()),
             ttl_ms: None,
             execution_ms: 0,
+            period_ms: None,
+            values_hash: None,
         });
         assert!(entry.deep_size_of() > 10 * 0u64.deep_size_of());
     }
@@ -1139,6 +1210,7 @@ mod tests {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
             None,
         );
 

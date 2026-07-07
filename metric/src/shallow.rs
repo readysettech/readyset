@@ -5,6 +5,21 @@ pub const SHALLOW_EVICT_MEMORY: &str = "readyset_shallow.shallow_evict_memory";
 pub const SHALLOW_SKIP_TOO_LARGE: &str = "readyset_shallow.shallow_skip_too_large";
 pub const SHALLOW_REFRESH_QUEUE_EXCEEDED: &str = "readyset_shallow.shallow_refresh_queue_exceeded";
 
+/// Counter: Number of adaptive-refresh write-backs whose result differed from the entry it
+/// replaced.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query being refreshed. |
+pub const SHALLOW_REFRESH_CHANGED: &str = "readyset_shallow.shallow_refresh_changed";
+
+/// Counter: Number of adaptive-refresh write-backs whose result matched the entry it replaced.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query being refreshed. |
+pub const SHALLOW_REFRESH_UNCHANGED: &str = "readyset_shallow.shallow_refresh_unchanged";
+
 /// Histogram: The amount of time in microseconds spent executing the upstream query during a
 /// shallow cache refresh. Only recorded for successful queries.
 ///

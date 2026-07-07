@@ -41,6 +41,7 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("always", DfType::Bool),
     ("until_write", DfType::Bool),
     ("schedule", DfType::Bool),
+    ("adaptive", DfType::Bool),
     ("hits", DfType::UnsignedBigInt),
     ("misses", DfType::UnsignedBigInt),
     ("refreshes", DfType::UnsignedBigInt),
@@ -76,6 +77,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 matches!(cache.trx_cache_policy, TrxCachePolicy::Always).into(),
                 matches!(cache.trx_cache_policy, TrxCachePolicy::UntilWrite).into(),
                 cache.schedule.into(),
+                cache.adaptive.into(),
                 hits.get(&query_id).into(),
                 misses.get(&query_id).into(),
                 refreshes.get(&query_id).into(),
@@ -92,6 +94,7 @@ const SHALLOW_CACHE_ENTRIES_SCHEMA: &[(&str, DfType)] = &[
     ("last_accessed_ms", DfType::UnsignedBigInt),
     ("last_refreshed_ms", DfType::UnsignedBigInt),
     ("refresh_time_ms", DfType::UnsignedBigInt),
+    ("refresh_period_ms", DfType::UnsignedBigInt),
     ("bytes", DfType::UnsignedBigInt),
 ];
 
@@ -105,6 +108,7 @@ fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
                 entry.last_accessed_ms.into(),
                 entry.last_refreshed_ms.into(),
                 entry.refresh_time_ms.into(),
+                entry.refresh_period_ms.into(),
                 (entry.bytes as u64).into(),
             ]
         }));

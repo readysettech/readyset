@@ -22,7 +22,7 @@ use readyset_util::SizeOf;
 use crate::cache::{
     Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache, Lookup,
 };
-use crate::{EvictionPolicy, QueryMetadata};
+use crate::{ContentHash, EvictionPolicy, QueryMetadata};
 use readyset_util::hash::hash;
 
 pub type RequestRefresh<K, V> = Arc<dyn Fn(CacheInsertGuard<K, V>) + Send + Sync>;
@@ -144,7 +144,11 @@ where
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
-    ) -> ReadySetResult<()> {
+        adaptive: bool,
+    ) -> ReadySetResult<()>
+    where
+        V: ContentHash,
+    {
         let display_name = Self::format_name(name.as_ref(), Some(&query_id));
 
         let mut next_id = self
@@ -170,6 +174,7 @@ where
             ddl_req,
             trx_cache_policy,
             coalesce_ms,
+            adaptive,
             self.max_entry_bytes,
         );
 
@@ -334,6 +339,7 @@ where
                         last_accessed_ms: values.accessed_ms.load(Ordering::Relaxed),
                         last_refreshed_ms: values.refreshed_ms,
                         refresh_time_ms: values.execution_ms,
+                        refresh_period_ms: values.period_ms,
                         bytes,
                     })
                 }
@@ -653,6 +659,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -666,6 +673,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -723,6 +731,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -736,6 +745,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -792,6 +802,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -827,6 +838,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 
@@ -879,6 +891,7 @@ mod tests {
                 test_ddl_req(),
                 TrxCachePolicy::Never,
                 None,
+                false,
             )
             .unwrap();
 

@@ -86,6 +86,24 @@ pub trait ContentHash {
     fn content_hash(&self) -> u64;
 }
 
+impl ContentHash for String {
+    fn content_hash(&self) -> u64 {
+        readyset_util::hash::hash(self)
+    }
+}
+
+impl ContentHash for u32 {
+    fn content_hash(&self) -> u64 {
+        readyset_util::hash::hash(self)
+    }
+}
+
+impl ContentHash for Vec<&str> {
+    fn content_hash(&self) -> u64 {
+        readyset_util::hash::hash(self)
+    }
+}
+
 /// Order-insensitive hash of a result set: per-row hashes are combined with a commutative fold,
 /// so two result sets with the same rows in different orders hash equal. Queries without a total
 /// ORDER BY may legitimately return rows in a different order on each refresh; that must not

@@ -107,7 +107,7 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
 use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
-use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult};
+use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult, ContentHash};
 use readyset_sql::ast::{
     self, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
@@ -1494,6 +1494,10 @@ where
                         time_or_null(Some(entry.last_accessed_ms)).into(),
                         time_or_null(Some(entry.last_refreshed_ms)).into(),
                         DfValue::from(entry.refresh_time_ms as i64),
+                        entry
+                            .refresh_period_ms
+                            .map(|ms| DfValue::from(ms as i64))
+                            .unwrap_or(DfValue::None),
                         DfValue::from(entry.bytes as i64),
                     ]
                 })
@@ -1508,6 +1512,7 @@ where
             "last_accessed",
             "last_refreshed",
             "refresh_time_ms",
+            "refresh_period_ms",
             "bytes"
         );
 
@@ -3686,6 +3691,7 @@ where
         ddl_req: Option<CacheDDLRequest>,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
+        adaptive: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let ddl_req =
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
@@ -3722,6 +3728,7 @@ where
             policy,
             trx_cache_policy,
             coalesce_ms,
+            adaptive,
             ddl_req,
             false,
         )
@@ -3753,6 +3760,7 @@ where
         policy: Option<ast::EvictionPolicy>,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
+        adaptive: bool,
         mut ddl_req: CacheDDLRequest,
         quiet: bool,
     ) -> ReadySetResult<()> {
@@ -3771,6 +3779,7 @@ where
             ddl_req.clone(),
             trx_cache_policy,
             resolve_coalesce(coalesce_ms, settings.default_coalesce_ms),
+            adaptive,
         );
 
         match &res {
@@ -4493,6 +4502,7 @@ where
                 coalesce_ms,
                 trx_cache_policy,
                 schedule,
+                adaptive,
                 ..
             } in state.shallow.list_caches(query_id, None)
             {
@@ -4514,6 +4524,7 @@ where
                     }
                     properties.set_trx_cache_policy(trx_cache_policy);
                     properties.set_schedule(schedule);
+                    properties.set_adaptive(adaptive);
                     properties.to_string().into()
                 };
                 let count = exec_counts
@@ -4717,7 +4728,7 @@ where
                     cache_type,
                     policy,
                     coalesce_ms,
-                    adaptive: _,
+                    adaptive,
                     inner,
                     trx_cache_policy,
                     concurrently,
@@ -4785,6 +4796,7 @@ where
                         ddl_req,
                         *trx_cache_policy,
                         *coalesce_ms,
+                        *adaptive,
                     )
                     .await
                 } else {
@@ -4828,6 +4840,7 @@ where
                                 ddl_req,
                                 *trx_cache_policy,
                                 *coalesce_ms,
+                                *adaptive,
                             )
                             .await
                         }
@@ -5232,6 +5245,7 @@ where
             opts.policy,
             opts.trx_cache_policy,
             opts.coalesce_ms,
+            opts.adaptive,
             ddl_req,
             true,
         )
@@ -6584,7 +6598,7 @@ pub async fn recreate_shallow_caches<V>(
     cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
-    V: Debug + Send + Sync + SizeOf + 'static,
+    V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
     for req in ddl_requests {
         if let Err(e) = handle_shallow_cache_statement(
@@ -6617,7 +6631,7 @@ async fn handle_shallow_cache_statement<V>(
     cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
-    V: Debug + Send + Sync + SizeOf + 'static,
+    V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
     let query = readyset_sql_parsing::parse_query_with_config(
         parsing_preset,
@@ -6657,7 +6671,7 @@ async fn recover_shallow_cache_create<V>(
     cache_mode: CacheMode,
 ) -> ReadySetResult<()>
 where
-    V: Debug + Send + Sync + SizeOf + 'static,
+    V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
     if !(matches!(stmt.cache_type, Some(CacheType::Shallow))
         || stmt.cache_type.is_none() && cache_mode.is_shallow())
@@ -6687,6 +6701,7 @@ where
         ddl_req,
         stmt.trx_cache_policy,
         resolve_coalesce(stmt.coalesce_ms, default_coalesce_ms),
+        stmt.adaptive,
     )?;
 
     query_status_cache.update_query_migration_state(

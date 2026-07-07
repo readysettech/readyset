@@ -6,7 +6,9 @@ use std::time::Duration;
 use proptest::prelude::*;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
-use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, MySqlMetadata, QueryMetadata};
+use readyset_shallow::{
+    CacheManager, CacheResult, ContentHash, EvictionPolicy, MySqlMetadata, QueryMetadata,
+};
 use readyset_sql::ast::ShallowCacheQuery;
 use readyset_util::SizeOf;
 
@@ -56,7 +58,7 @@ fn create_test_cache<K, V>(
 ) -> Result<(), readyset_errors::ReadySetError>
 where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
-    V: SizeOf + Send + Sync + 'static,
+    V: ContentHash + SizeOf + Send + Sync + 'static,
 {
     manager.create_cache(
         name,
@@ -67,6 +69,7 @@ where
         test_ddl_req(),
         readyset_sql::ast::TrxCachePolicy::Never,
         None,
+        false,
     )
 }
 

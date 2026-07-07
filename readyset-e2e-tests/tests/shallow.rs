@@ -499,7 +499,7 @@ async fn show_shallow_cache_entries() {
         .unwrap();
 
     // Test SHOW SHALLOW CACHE ENTRIES returns all entries
-    let entries: Vec<(String, String, String, String, String, String)> =
+    let entries: Vec<(String, String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
     let vrel_entries: Vec<(String, String, u64, u64, u64, u64)> = readyset
@@ -515,7 +515,7 @@ async fn show_shallow_cache_entries() {
     let query_id = &entries[0].0;
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...'
-    let filtered: Vec<(String, String, String, String, String, String)> = readyset
+    let filtered: Vec<(String, String, String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}'"
         ))
@@ -536,14 +536,14 @@ async fn show_shallow_cache_entries() {
     assert_eq!(vrel_filtered.len(), 2);
 
     // Test SHOW SHALLOW CACHE ENTRIES LIMIT 1
-    let limited: Vec<(String, String, String, String, String, String)> = readyset
+    let limited: Vec<(String, String, String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES LIMIT 1")
         .await
         .unwrap();
     assert_eq!(limited.len(), 1, "LIMIT 1 should return only 1 entry");
 
     // Test SHOW SHALLOW CACHE ENTRIES WHERE query_id = '...' LIMIT 1
-    let filtered_limited: Vec<(String, String, String, String, String, String)> = readyset
+    let filtered_limited: Vec<(String, String, String, String, String, String, String)> = readyset
         .query(format!(
             "SHOW SHALLOW CACHE ENTRIES WHERE query_id = '{query_id}' LIMIT 1"
         ))
@@ -556,7 +556,7 @@ async fn show_shallow_cache_entries() {
     );
 
     // Test filtering with non-existent query_id returns empty
-    let non_existent: Vec<(String, String, String, String, String, String)> = readyset
+    let non_existent: Vec<(String, String, String, String, String, String, String)> = readyset
         .query("SHOW SHALLOW CACHE ENTRIES WHERE query_id = 'q_12345'")
         .await
         .unwrap();
@@ -598,10 +598,10 @@ async fn shallow_cache_entry_bytes() {
 
     async fn assert_size(readyset: &mut mysql_async::Conn, low: u64, high: u64) {
         // Verify bytes via SHOW SHALLOW CACHE ENTRIES.
-        let entries: Vec<(String, String, String, String, String, String)> =
+        let entries: Vec<(String, String, String, String, String, String, String)> =
             readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
         assert_eq!(entries.len(), 1);
-        let bytes: u64 = entries[0].5.parse().expect("bytes column should be numeric");
+        let bytes: u64 = entries[0].6.parse().expect("bytes column should be numeric");
         assert!((low..high).contains(&bytes), "unexpected size: {bytes}");
 
         // Verify bytes via vrel.
@@ -2403,6 +2403,100 @@ async fn refresh_resumes_after_upstream_failure() {
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow
     );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// An ADAPTIVE scheduled cache shortens a key's refresh period while its value keeps changing
+/// upstream, and stretches it back to the configured period once the value settles.
+#[test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn adaptive_refresh_period_adapts() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+
+    upstream
+        .query_drop("CREATE TABLE counters (id INT, val INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO counters VALUES (1, 0)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop(
+            "CREATE SHALLOW CACHE
+             WITH (POLICY TTL 60 SECONDS REFRESH EVERY 1 SECONDS, ADAPTIVE)
+             FROM SELECT val FROM counters WHERE id = ?",
+        )
+        .await
+        .unwrap();
+
+    // The flag shows up in SHOW SHALLOW CACHES properties and the shallow_caches vrel.
+    let rows: Vec<(String, String, String, String, String)> =
+        readyset.query("SHOW SHALLOW CACHES").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].3.split(",").any(|p| p.trim() == "adaptive"),
+        "missing adaptive property: {}",
+        rows[0].3
+    );
+    let adaptive: Vec<bool> = readyset
+        .query("SELECT adaptive FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    assert_eq!(adaptive, vec![true]);
+
+    // Populate the entry; it starts at the configured refresh period.
+    readyset
+        .query_drop("SELECT val FROM counters WHERE id = 1")
+        .await
+        .unwrap();
+
+    async fn entry_period(readyset: &mut mysql_async::Conn) -> u64 {
+        let periods: Vec<u64> = readyset
+            .query("SELECT refresh_period_ms FROM readyset.shallow_cache_entries")
+            .await
+            .unwrap();
+        assert_eq!(periods.len(), 1);
+        periods[0]
+    }
+
+    assert_eq!(entry_period(&mut readyset).await, 1000);
+
+    // Churn the upstream value for a while; scheduled refreshes observe the changes and
+    // shorten the period.
+    for i in 1..=11 {
+        upstream
+            .query_drop(format!("UPDATE counters SET val = {i} WHERE id = 1"))
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(500)).await;
+    }
+    let churned = entry_period(&mut readyset).await;
+    assert!(churned < 1000, "period should have shrunk, got {churned}");
+
+    // Once the value settles, refreshes stretch the period back out to the configured one.
+    sleep(Duration::from_secs(10)).await;
+    assert_eq!(entry_period(&mut readyset).await, 1000);
 
     shutdown_tx.shutdown().await;
 }

@@ -39,6 +39,7 @@ fn bench_cache_hit(c: &mut Criterion) {
             },
             TrxCachePolicy::Never,
             None,
+            false,
         )
         .expect("failed to create cache");
 
@@ -110,6 +111,7 @@ fn bench_cache_insert(c: &mut Criterion) {
             },
             TrxCachePolicy::Never,
             None,
+            false,
         )
         .expect("failed to create cache");
 

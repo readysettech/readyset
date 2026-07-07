@@ -1,7 +1,7 @@
 use std::assert_matches;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -10,13 +10,13 @@ use readyset_client::query::QueryId;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{Relation, ShallowCacheQuery, TrxCachePolicy};
 use readyset_util::SizeOf;
+use readyset_util::hash::hash;
 use tokio::test;
 use tokio::time::sleep;
 
-use readyset_util::hash::hash;
-
 use crate::{
-    CacheManager, CacheResult, ContentHash, EvictionPolicy, QueryMetadata, rows_content_hash,
+    CacheInsertGuard, CacheManager, CacheResult, ContentHash, EvictionPolicy, QueryMetadata,
+    rows_content_hash,
 };
 
 fn test_relation(name: &str) -> Relation {
@@ -53,7 +53,7 @@ fn create_test_cache<K, V>(
 ) -> Result<(), ReadySetError>
 where
     K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
-    V: SizeOf + Send + Sync + 'static,
+    V: ContentHash + SizeOf + Send + Sync + 'static,
 {
     manager.create_cache(
         name,
@@ -64,6 +64,7 @@ where
         test_ddl_req(),
         TrxCachePolicy::Never,
         None,
+        false,
     )
 }
 
@@ -835,6 +836,7 @@ async fn test_coalesce_concurrent_requests() {
             test_ddl_req(),
             TrxCachePolicy::Never,
             Some(Duration::from_millis(5000)),
+            false,
         )
         .unwrap();
 
@@ -906,6 +908,7 @@ async fn test_coalesce_initial_insert_failure() {
             test_ddl_req(),
             TrxCachePolicy::Never,
             Some(Duration::from_millis(5000)),
+            false,
         )
         .unwrap();
 
@@ -967,6 +970,7 @@ async fn test_periodic_refresh_callback() {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
         )
         .unwrap();
 
@@ -1042,6 +1046,7 @@ async fn test_slow_refresh_serves_stale_data() {
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
+            false,
         )
         .unwrap();
 
@@ -1218,4 +1223,180 @@ async fn rows_content_hash_order_insensitive() {
     // Duplicate rows are distinct from a single occurrence.
     assert_ne!(ab, rows_content_hash(&[Row(1), Row(1), Row(2)]));
     assert_eq!(rows_content_hash::<Row>(&[]), rows_content_hash::<Row>(&[]));
+}
+
+fn entry_period(manager: &CacheManager<String, String>, query_id: &QueryId) -> Option<u64> {
+    let entries = manager.list_entries(Some(*query_id), None);
+    assert_eq!(entries.len(), 1);
+    entries[0].refresh_period_ms
+}
+
+fn create_adaptive_cache(
+    manager: &CacheManager<String, String>,
+    query_id: QueryId,
+    refresh: Duration,
+    schedule: bool,
+    adaptive: bool,
+) {
+    manager
+        .create_cache(
+            None,
+            query_id,
+            test_stmt(),
+            vec![],
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(60),
+                refresh,
+                schedule,
+            },
+            test_ddl_req(),
+            TrxCachePolicy::Never,
+            None,
+            adaptive,
+        )
+        .unwrap();
+}
+
+async fn refresh_insert(
+    manager: &CacheManager<String, String>,
+    query_id: &QueryId,
+    values: Vec<String>,
+) {
+    let cache = manager.get(None, Some(query_id)).unwrap();
+    cache
+        .insert(
+            "key".to_string(),
+            values,
+            QueryMetadata::Test,
+            Duration::ZERO,
+        )
+        .await;
+}
+
+#[test]
+async fn test_adaptive_period_nudging() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+
+    // A changed value shrinks the period by 10% of the configured period.
+    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(900));
+
+    // An unchanged value grows it back, clamped at the configured period.
+    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+
+    // Repeated changes clamp at 10% of the configured period.
+    for i in 2..25 {
+        refresh_insert(&manager, &query_id, vec![format!("v{i}")]).await;
+    }
+    assert_eq!(entry_period(&manager, &query_id), Some(100));
+
+    // The same rows in a different order do not count as a change.
+    refresh_insert(&manager, &query_id, vec!["a".to_string(), "b".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(100));
+    refresh_insert(&manager, &query_id, vec!["b".to_string(), "a".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(200));
+}
+
+#[test]
+async fn test_non_adaptive_period_fixed() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(
+        &manager,
+        query_id,
+        Duration::from_millis(1000),
+        false,
+        false,
+    );
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+
+    for i in 1..5 {
+        refresh_insert(&manager, &query_id, vec![format!("v{i}")]).await;
+        assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    }
+}
+
+#[test]
+async fn test_adaptive_stale_check_uses_period() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(2000), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    // A changed write-back drops the period to 1800ms, so a read at ~1900ms is stale even
+    // though the configured period has not yet elapsed.
+    refresh_insert(&manager, &query_id, vec!["v1".to_string()]).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(1800));
+
+    sleep(Duration::from_millis(1900)).await;
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    assert_matches!(result, CacheResult::HitAndRefresh(..));
+}
+
+#[test]
+async fn test_adaptive_scheduled_refresh_periods() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(500), true, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    let CacheResult::Miss(mut guard) = result else {
+        panic!("expected miss");
+    };
+    guard.push("value_0".to_string());
+    guard.set_metadata(QueryMetadata::Test);
+
+    let counter = Arc::new(AtomicU32::new(0));
+    let changing = Arc::new(AtomicBool::new(true));
+    let refresh_callback = {
+        let counter = Arc::clone(&counter);
+        let changing = Arc::clone(&changing);
+        Arc::new(move |mut guard: CacheInsertGuard<String, String>| {
+            let value = if changing.load(Ordering::SeqCst) {
+                format!("value_{}", counter.fetch_add(1, Ordering::SeqCst) + 1)
+            } else {
+                "steady".to_string()
+            };
+            guard.push(value);
+            guard.set_metadata(QueryMetadata::Test);
+            tokio::spawn(async move {
+                guard.filled().await;
+            });
+        })
+    };
+    guard.schedule_refresh(refresh_callback).await;
+    guard.filled().await;
+
+    // While the value keeps changing, scheduled refreshes shrink the period.
+    sleep(Duration::from_millis(3500)).await;
+    assert!(entry_period(&manager, &query_id).unwrap() <= 400);
+
+    // Once the value stops changing, the period climbs back to the configured one.
+    changing.store(false, Ordering::SeqCst);
+    sleep(Duration::from_millis(5000)).await;
+    assert_eq!(entry_period(&manager, &query_id), Some(500));
 }
