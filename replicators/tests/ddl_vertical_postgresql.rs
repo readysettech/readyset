@@ -24,6 +24,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
+use std::error::Error;
 use std::fmt::{Debug, Display, Formatter, Result};
 use std::iter::once;
 use std::panic::AssertUnwindSafe;
@@ -1132,21 +1133,25 @@ impl ModelState for DDLModelState {
         for relation in self.tables.keys().chain(self.views.keys()) {
             eventually!(token: "results mismatch",
             run_test: {
-                let rs_rows = rs_conn
+                let rs_res = rs_conn
                     .query(&format!("SELECT * FROM \"{relation}\""), &[])
-                    .await
-                    .unwrap();
+                    .await;
                 let pg_rows = pg_conn
                     .query(&format!("SELECT * FROM \"{relation}\""), &[])
                     .await
                     .unwrap();
-                // Previously, we would run all the result handling in the run_test block, but
-                // doing it in the then_assert block lets us work around a tokio-postgres client
-                // crash caused by ENG-2548 by retrying until ReadySet stops sending us bad
-                // packets.
+                // Tolerate expected transient errors.
+                let rs_rows = match rs_res {
+                    Ok(rows) => Some(rows),
+                    Err(e) if is_datarow_field_count_mismatch(&e) => None,
+                    Err(e) => panic!("error querying Readyset for table \"{relation}\": {e}"),
+                };
                 AssertUnwindSafe(move || (rs_rows, pg_rows))
             }, then_assert: |results| {
                 let (rs_rows, pg_rows) = results();
+                // `None` means ReadySet returned the transient REA-2216 error; retry.
+                let rs_rows =
+                    rs_rows.expect("ReadySet not yet consistent after DDL (REA-2216); retrying");
 
                 let mut rs_results = rows_to_dfvalue_vec(rs_rows);
                 let mut pg_results = rows_to_dfvalue_vec(pg_rows);
@@ -1227,9 +1232,22 @@ async fn recreate_oracle_db() {
     client.simple_query(&create_query).await.unwrap();
 }
 
-/// Converts a [`Vec`] of [`Row`] values to a nested [`Vec`] of [`DfValue`] values. Currently just
-/// used as a convenient way to compare two query results, since you can't directly compare
-/// [`Row`]s with each other.
+// XXX JCD A long-standing column mismatch error is recently surfaced by an update to the
+// PostgreSQL driver, which is caused by a race that sees differences in what we return vs. what is
+// prepared upstream (REA-2216, REA-2242, ENG-2548).
+fn is_datarow_field_count_mismatch(err: &tokio_postgres::Error) -> bool {
+    let mut source: Option<&dyn Error> = Some(err);
+    while let Some(e) = source {
+        if e.to_string()
+            .contains("DataRow field count does not match the number of columns")
+        {
+            return true;
+        }
+        source = e.source();
+    }
+    false
+}
+
 fn rows_to_dfvalue_vec(rows: Vec<Row>) -> Vec<Vec<DfValue>> {
     rows.iter()
         .map(|row| {
