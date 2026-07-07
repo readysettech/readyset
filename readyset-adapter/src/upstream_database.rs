@@ -8,7 +8,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
-use readyset_shallow::CacheInsertGuard;
+use readyset_shallow::{CacheInsertGuard, ContentHash};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::SizeOf;
 use readyset_util::redacted::RedactedString;
@@ -103,7 +103,7 @@ pub trait UpstreamDatabase: Sized + Send {
     type ShallowExecMeta: Borrow<Self::ExecMeta> + Debug + Clone + Send + Sync + 'static;
 
     /// The type of data this protocol stores into an entry in a shallow cache.
-    type CacheEntry: Debug + Send + Sync + SizeOf + 'static;
+    type CacheEntry: Debug + Send + Sync + SizeOf + ContentHash + 'static;
 
     /// Errors that can be returned from operations on this database
     ///

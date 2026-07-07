@@ -13,7 +13,11 @@ use readyset_util::SizeOf;
 use tokio::test;
 use tokio::time::sleep;
 
-use crate::{CacheManager, CacheResult, EvictionPolicy, QueryMetadata};
+use readyset_util::hash::hash;
+
+use crate::{
+    CacheManager, CacheResult, ContentHash, EvictionPolicy, QueryMetadata, rows_content_hash,
+};
 
 fn test_relation(name: &str) -> Relation {
     Relation {
@@ -1194,4 +1198,24 @@ async fn test_flush_cache_only_affects_target() {
     check_hit(&manager, &query_id_2, "key2".to_string()).await;
     assert!(manager.exists(Some(&relation_1), None));
     assert!(manager.exists(None, Some(&query_id_2)));
+}
+
+#[test]
+async fn rows_content_hash_order_insensitive() {
+    struct Row(u64);
+    impl ContentHash for Row {
+        fn content_hash(&self) -> u64 {
+            hash(&self.0)
+        }
+    }
+
+    let ab = rows_content_hash(&[Row(1), Row(2)]);
+    let ba = rows_content_hash(&[Row(2), Row(1)]);
+    assert_eq!(ab, ba);
+
+    assert_ne!(ab, rows_content_hash(&[Row(1)]));
+    assert_ne!(ab, rows_content_hash(&[Row(1), Row(3)]));
+    // Duplicate rows are distinct from a single occurrence.
+    assert_ne!(ab, rows_content_hash(&[Row(1), Row(1), Row(2)]));
+    assert_eq!(rows_content_hash::<Row>(&[]), rows_content_hash::<Row>(&[]));
 }

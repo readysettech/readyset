@@ -28,10 +28,11 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
-use readyset_shallow::{CacheInsertGuard, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
 use readyset_sql::Dialect;
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_util::SizeOf;
+use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
 
 use crate::Error;
@@ -130,6 +131,22 @@ impl SizeOf for CacheEntry {
 
     fn size_is_empty(&self) -> bool {
         false
+    }
+}
+
+impl ContentHash for CacheEntry {
+    fn content_hash(&self) -> u64 {
+        match self {
+            // Hash the raw wire bytes of the row; identical values produce identical bodies.
+            CacheEntry::Simple(SimpleQueryMessage::Row(row)) => hash(&(0u8, row.body().buffer())),
+            CacheEntry::Simple(SimpleQueryMessage::CommandComplete(cc)) => {
+                hash(&(1u8, cc.rows, &cc.tag))
+            }
+            // Only Row and CommandComplete are ever stored in the cache; see
+            // copy_simple_query_message.
+            CacheEntry::Simple(_) => unimplemented!("variant is never cached"),
+            CacheEntry::DfValue(values) => hash(&(2u8, values)),
+        }
     }
 }
 
@@ -739,5 +756,38 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 impl Drop for PostgreSqlUpstream {
     fn drop(&mut self) {
         gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio_postgres::CommandCompleteContents;
+
+    #[test]
+    fn cache_entry_content_hash() {
+        let a = CacheEntry::DfValue(vec![DfValue::from(1), DfValue::from("x")]);
+        let b = CacheEntry::DfValue(vec![DfValue::from(1), DfValue::from("x")]);
+        let c = CacheEntry::DfValue(vec![DfValue::from(2), DfValue::from("x")]);
+        assert_eq!(a.content_hash(), b.content_hash());
+        assert_ne!(a.content_hash(), c.content_hash());
+
+        let cc = |rows: u64, tag: &str| {
+            CacheEntry::Simple(SimpleQueryMessage::CommandComplete(
+                CommandCompleteContents {
+                    fields: None,
+                    rows,
+                    tag: tag.as_bytes().to_vec().into(),
+                },
+            ))
+        };
+        assert_eq!(
+            cc(1, "SELECT 1").content_hash(),
+            cc(1, "SELECT 1").content_hash()
+        );
+        assert_ne!(
+            cc(1, "SELECT 1").content_hash(),
+            cc(2, "SELECT 2").content_hash()
+        );
     }
 }

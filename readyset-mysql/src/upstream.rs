@@ -25,9 +25,10 @@ use readyset_client_metrics::QueryDestination;
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
-use readyset_shallow::{CacheInsertGuard, MySqlMetadata, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata};
 use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
 use readyset_sql::Dialect;
+use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
 use readyset_util::SizeOf;
 
@@ -53,6 +54,15 @@ impl SizeOf for CacheEntry {
     fn size_is_empty(&self) -> bool {
         match self {
             Self::Text(values) | Self::Binary(values) => values.is_empty(),
+        }
+    }
+}
+
+impl ContentHash for CacheEntry {
+    fn content_hash(&self) -> u64 {
+        match self {
+            Self::Text(values) => hash(&(0u8, values)),
+            Self::Binary(values) => hash(&(1u8, values)),
         }
     }
 }
@@ -693,5 +703,23 @@ impl Drop for MySqlUpstream {
                 let _ = rt.block_on(self.conn.write_command_data(Command::COM_QUIT, &[]));
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_entry_content_hash() {
+        let a = CacheEntry::Text(vec![DfValue::from(1), DfValue::from("x")]);
+        let b = CacheEntry::Text(vec![DfValue::from(1), DfValue::from("x")]);
+        let c = CacheEntry::Text(vec![DfValue::from(2), DfValue::from("x")]);
+        assert_eq!(a.content_hash(), b.content_hash());
+        assert_ne!(a.content_hash(), c.content_hash());
+
+        let text = CacheEntry::Text(vec![DfValue::from(1)]);
+        let binary = CacheEntry::Binary(vec![DfValue::from(1)]);
+        assert_ne!(text.content_hash(), binary.content_hash());
     }
 }

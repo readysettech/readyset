@@ -80,6 +80,25 @@ pub struct QueryResult<V> {
     pub metadata: Arc<QueryMetadata>,
 }
 
+/// Hash of a cached row's value content, used by adaptive refresh to detect whether a refresh
+/// produced a different result than the one it replaced.
+pub trait ContentHash {
+    fn content_hash(&self) -> u64;
+}
+
+/// Order-insensitive hash of a result set: per-row hashes are combined with a commutative fold,
+/// so two result sets with the same rows in different orders hash equal. Queries without a total
+/// ORDER BY may legitimately return rows in a different order on each refresh; that must not
+/// read as a change.
+pub fn rows_content_hash<V>(rows: &[V]) -> u64
+where
+    V: ContentHash,
+{
+    rows.iter()
+        .map(ContentHash::content_hash)
+        .fold(readyset_util::hash::hash(&rows.len()), u64::wrapping_add)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum EvictionPolicy {
     Ttl {
