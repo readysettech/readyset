@@ -156,18 +156,24 @@ fn validate_no_aggregates_in_where(stmt: &SelectStatement) -> ReadySetResult<()>
 
 /// Nested aggregate calls like `AVG(SUM(x))` are invalid in standard SQL.
 /// Checks all top-level expressions (SELECT, JOIN ON, WHERE, HAVING, GROUP BY,
-/// ORDER BY) — nested aggregates are invalid everywhere.
+/// ORDER BY) — nested aggregates are invalid everywhere, including inside a
+/// window function's OVER clause.
 ///
-/// Aggregates inside window function boundaries are excluded: `SUM(SUM(x)) OVER()`
-/// is valid SQL — the inner SUM is a GROUP BY aggregate, the outer is a window
-/// function.  `for_each_aggregate` with `visit_window_functions: false` handles
-/// this by skipping `Expr::WindowFunction` subtrees.
+/// Valid: `SUM(SUM(x)) OVER()` — the outer SUM is a windowed operation (the
+/// WF's own function), the inner SUM is a group-level aggregate; not "nested"
+/// in the invalid sense.  `for_each_aggregate` skips the WF's own function
+/// but descends into its arguments and OVER expressions, so this shape
+/// yields only one callback fire (on the inner SUM), whose sole argument `x`
+/// is not aggregating — correctly not flagged.
+///
+/// Invalid: `count(*) OVER (ORDER BY AVG(SUM(x)))` — the `AVG(SUM(x))` inside
+/// OVER's ORDER BY is a genuine nested aggregate.  Callback fires on AVG,
+/// whose argument `SUM(x)` is aggregating — correctly flagged.
 fn validate_no_nested_aggregates(stmt: &SelectStatement) -> ReadySetResult<()> {
     /// Returns true if any aggregate's arguments contain another aggregate.
-    /// Uses `visit_window_functions = false` so WF boundaries are not crossed.
     fn has_nested(expr: &Expr) -> bool {
         let mut found = false;
-        let _ = for_each_aggregate(expr, false, &mut |agg| {
+        let _ = for_each_aggregate(expr, &mut |agg| {
             if agg
                 .arguments()
                 .any(|a| is_aggregated_expr(a).unwrap_or(false))

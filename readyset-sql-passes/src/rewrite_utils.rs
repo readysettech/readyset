@@ -1422,14 +1422,27 @@ pub(crate) fn collect_outermost_columns_mut(stmt: &mut SelectStatement) -> Vec<&
         .collect()
 }
 
+/// Walks `expr` and invokes the callback on each *group-level* aggregate call.
+///
+/// Descent behavior at `Expr::WindowFunction { function, partition_by, order_by }`:
+/// - The WF's own `function` field is treated as a windowed operation, NOT as
+///   a group-level aggregate.  The callback does not fire on it.  Descent DOES
+///   continue into its `function.arguments()` — an argument may itself be a
+///   group-level aggregate (as in `sum(sum(x)) OVER()`, where the outer sum is
+///   the WF and the inner sum is group-level).
+/// - Each `partition_by` and `order_by` expression is walked normally; aggregate
+///   calls encountered there are group-level references and DO fire the callback.
+///
+/// Rationale: this matches the semantic distinction between "windowed aggregate
+/// operation" (WF's own function) and "group-level aggregate reference" (bare
+/// aggregate anywhere else, including inside OVER parts).  Callers wanting to
+/// inspect WFs themselves should use `for_each_window_function`.
 pub(crate) fn for_each_aggregate<'a>(
     expr: &'a Expr,
-    visit_window_functions: bool,
     func_visitor: &'a mut impl FnMut(&FunctionExpr),
 ) -> ReadySetResult<()> {
     struct ForEachVisitor<'a> {
         func_visitor: &'a mut dyn FnMut(&FunctionExpr),
-        visit_window_functions: bool,
     }
 
     impl<'ast> Visitor<'ast> for ForEachVisitor<'ast> {
@@ -1446,8 +1459,24 @@ pub(crate) fn for_each_aggregate<'a>(
         }
 
         fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
-            if !self.visit_window_functions && matches!(expr, Expr::WindowFunction { .. }) {
-                // Skip window function
+            if let Expr::WindowFunction {
+                function,
+                partition_by,
+                order_by,
+            } = expr
+            {
+                // Skip the WF's own `function` as a group-level aggregate
+                // candidate, but descend into its arguments (which may be
+                // group-level aggregates), and into every OVER expression.
+                for arg in function.arguments() {
+                    self.visit_expr(arg)?;
+                }
+                for pb in partition_by {
+                    self.visit_expr(pb)?;
+                }
+                for (ob, _, _) in order_by {
+                    self.visit_expr(ob)?;
+                }
                 Ok(())
             } else {
                 visit::walk_expr(self, expr)
@@ -1459,11 +1488,7 @@ pub(crate) fn for_each_aggregate<'a>(
         }
     }
 
-    ForEachVisitor {
-        func_visitor,
-        visit_window_functions,
-    }
-    .visit_expr(expr)
+    ForEachVisitor { func_visitor }.visit_expr(expr)
 }
 
 pub(crate) fn for_each_window_function<'a>(
@@ -1533,7 +1558,7 @@ pub(crate) fn for_each_window_function_mut<'a>(
 
 pub fn is_aggregated_expr(expr: &Expr) -> ReadySetResult<bool> {
     let mut has_aggregates = false;
-    for_each_aggregate(expr, false, &mut |_| has_aggregates = true)?;
+    for_each_aggregate(expr, &mut |_| has_aggregates = true)?;
     Ok(has_aggregates)
 }
 
@@ -4486,5 +4511,135 @@ mod tagged_outermost_expressions_tests {
             .collect();
         // `*` skipped; only WHERE remains.
         assert_eq!(tagged, vec![OuterPosition::PreAgg]);
+    }
+}
+
+#[cfg(test)]
+mod for_each_aggregate_tests {
+    use super::*;
+    use readyset_sql::Dialect;
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    // Window-function syntax is not supported by the nom-sql parser; pin to
+    // sqlparser only, matching the convention used by other WF-aware tests
+    // in this file.
+    const PARSING_CONFIG: ParsingPreset = ParsingPreset::OnlySqlparser;
+
+    fn parse(input: &str) -> SelectStatement {
+        parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, input).unwrap()
+    }
+
+    /// Extract the expression of the first SELECT-list field.
+    fn first_field_expr(stmt: &SelectStatement) -> &Expr {
+        let fe = &stmt.fields[0];
+        let FieldDefinitionExpr::Expr { expr, .. } = fe else {
+            panic!("expected FieldDefinitionExpr::Expr, got {fe:?}");
+        };
+        expr
+    }
+
+    fn count_aggregates(expr: &Expr) -> usize {
+        let mut n = 0;
+        for_each_aggregate(expr, &mut |_| n += 1).expect("walk succeeds");
+        n
+    }
+
+    #[test]
+    fn bare_aggregate_visited_once() {
+        let stmt = parse("SELECT count(*) FROM t");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 1);
+    }
+
+    #[test]
+    fn wf_own_function_skipped() {
+        // `count(*) OVER (PARTITION BY city)` — the WF's own function is
+        // a windowed operation, not a group-level aggregate.  Callback
+        // must NOT fire on it.
+        let stmt = parse("SELECT count(*) OVER (PARTITION BY city) FROM t");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 0);
+    }
+
+    #[test]
+    fn aggregate_in_partition_by_visited() {
+        // `RANK() OVER (PARTITION BY count(*))` — RANK is not an aggregate
+        // and is skipped as WF's own function anyway; the count(*) inside
+        // PARTITION BY is a bare group-level aggregate and must be visited.
+        let stmt = parse("SELECT RANK() OVER (PARTITION BY count(*)) FROM t");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 1);
+    }
+
+    #[test]
+    fn aggregate_in_order_by_visited() {
+        // `RANK() OVER (ORDER BY count(*))` — the count(*) inside ORDER BY
+        // is a bare group-level aggregate reference.
+        let stmt = parse("SELECT RANK() OVER (ORDER BY count(*)) FROM t");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 1);
+    }
+
+    #[test]
+    fn wf_wrapping_group_aggregate_visits_inner_only() {
+        // `sum(sum(x)) OVER ()` — outer sum is the WF's own function
+        // (skipped); inner sum(x) is a group-level aggregate argument
+        // and must be visited.
+        let stmt = parse("SELECT sum(sum(x)) OVER () FROM t GROUP BY y");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 1);
+    }
+
+    #[test]
+    fn no_aggregate_when_wf_has_only_columns() {
+        // `RANK() OVER (PARTITION BY city ORDER BY sn)` — no aggregates
+        // anywhere; callback never fires.
+        let stmt = parse("SELECT RANK() OVER (PARTITION BY city ORDER BY sn) FROM t");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 0);
+    }
+
+    #[test]
+    fn bare_and_wf_over_aggregate_both_visited() {
+        // `count(*) + (rank() OVER (ORDER BY count(*)))` — the bare
+        // count(*) on the LHS AND the count(*) inside OVER's ORDER BY are
+        // both group-level aggregate references.  Two visits expected.
+        let stmt =
+            parse("SELECT count(*) + (RANK() OVER (ORDER BY count(*))) AS r FROM t GROUP BY y");
+        assert_eq!(count_aggregates(first_field_expr(&stmt)), 2);
+    }
+
+    // `is_aggregated_expr` re-tests via the walker.  These pin the
+    // now-correct classification of WF-containing expressions.
+
+    #[test]
+    fn is_aggregated_expr_true_for_bare_aggregate() {
+        let stmt = parse("SELECT count(*) FROM t");
+        assert!(is_aggregated_expr(first_field_expr(&stmt)).unwrap());
+    }
+
+    #[test]
+    fn is_aggregated_expr_false_for_windowed_aggregate_over_columns() {
+        // `count(*) OVER (PARTITION BY city)` — windowed count does its
+        // own grouping over the partition; expression itself does not
+        // require the input rows to be grouped upstream.
+        let stmt = parse("SELECT count(*) OVER (PARTITION BY city) FROM t");
+        assert!(!is_aggregated_expr(first_field_expr(&stmt)).unwrap());
+    }
+
+    #[test]
+    fn is_aggregated_expr_true_for_wf_with_aggregate_in_over() {
+        // `RANK() OVER (ORDER BY count(*))` — the count(*) in OVER is a
+        // group-level aggregate reference; expression is aggregating.
+        let stmt = parse("SELECT RANK() OVER (ORDER BY count(*)) FROM t");
+        assert!(is_aggregated_expr(first_field_expr(&stmt)).unwrap());
+    }
+
+    #[test]
+    fn is_aggregated_expr_true_for_windowed_wrapping_group_aggregate() {
+        // `sum(sum(x)) OVER ()` — inner sum(x) is group-level.
+        let stmt = parse("SELECT sum(sum(x)) OVER () FROM t GROUP BY y");
+        assert!(is_aggregated_expr(first_field_expr(&stmt)).unwrap());
+    }
+
+    #[test]
+    fn is_aggregated_expr_false_for_non_aggregate_wf() {
+        // `RANK() OVER (PARTITION BY city)` — no aggregates anywhere.
+        let stmt = parse("SELECT RANK() OVER (PARTITION BY city) FROM t");
+        assert!(!is_aggregated_expr(first_field_expr(&stmt)).unwrap());
     }
 }

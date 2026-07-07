@@ -13,9 +13,9 @@ use crate::rewrite_utils::{
     expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
     expect_only_subquery_from_with_alias_mut, expect_sub_query_with_alias,
     expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr, extract_correlation_keys,
-    find_group_by_key, find_rhs_join_clause, for_each_aggregate, get_from_item_reference_name,
-    get_unique_alias, has_alias, is_aggregate_only_without_group_by, is_aggregated_expr,
-    is_aggregated_select, is_literal_one, is_literal_positive, is_literal_zero,
+    find_group_by_key, find_rhs_join_clause, for_each_window_function,
+    get_from_item_reference_name, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
+    is_aggregated_expr, is_aggregated_select, is_literal_one, is_literal_positive, is_literal_zero,
     make_first_field_ref_name, move_correlated_constraints_from_join_to_where,
     partition_correlated_predicates, preserve_uncorrelated_top_k, project_statement_columns_if,
     resolve_field_expr_by_alias, rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition,
@@ -351,16 +351,35 @@ fn grouping_key_is_projected(fields: &[FieldDefinitionExpr], fe: &FieldReference
     }
 }
 
-fn contains_other_than_extremum_window_functions(stmt: &SelectStatement) -> ReadySetResult<bool> {
+/// A window function is duplicate-sensitive when its output depends on the exact
+/// row multiplicity fed to the window (as opposed to the set of distinct values).
+/// MIN and MAX are duplicate-insensitive: repeating rows does not change their
+/// output.  Everything else — COUNT, SUM, AVG, and ranking functions like RANK,
+/// ROW_NUMBER, DENSE_RANK, LEAD/LAG, etc. — is duplicate-sensitive.
+///
+/// `wf_expr` must be `Expr::WindowFunction`; anything else is not a WF and the
+/// classifier returns `false`.
+fn wf_is_duplicate_sensitive(wf_expr: &Expr) -> bool {
+    let Expr::WindowFunction { function, .. } = wf_expr else {
+        return false;
+    };
+    !matches!(function, FunctionExpr::Min(_) | FunctionExpr::Max(_))
+}
+
+/// True when any SELECT-list field contains a duplicate-sensitive window function.
+/// Guard used by `make_subquery_distinct` before dropping `stmt.group_by`: if a
+/// duplicate-sensitive WF is present, dropping GROUP BY changes the WF's input
+/// row multiplicity and would produce different output values.
+fn contains_duplicate_sensitive_window_function(stmt: &SelectStatement) -> ReadySetResult<bool> {
     for fe in &stmt.fields {
         let (expr, _) = expect_field_as_expr(fe);
-        let mut contains = false;
-        for_each_aggregate(expr, true, &mut |agg| {
-            if !matches!(agg, FunctionExpr::Min(_) | FunctionExpr::Max(_)) {
-                contains = true;
+        let mut found = false;
+        for_each_window_function(expr, &mut |wf| {
+            if wf_is_duplicate_sensitive(wf) {
+                found = true;
             }
         })?;
-        if contains {
+        if found {
             return Ok(true);
         }
     }
@@ -375,7 +394,7 @@ fn make_subquery_distinct(stmt: &mut SelectStatement) -> ReadySetResult<()> {
             .all(|fe| grouping_key_is_projected(&stmt.fields, fe))
         {
             stmt.distinct = true;
-            if !is_aggregated_select(stmt)? && !contains_other_than_extremum_window_functions(stmt)?
+            if !is_aggregated_select(stmt)? && !contains_duplicate_sensitive_window_function(stmt)?
             {
                 stmt.group_by = None;
             }
