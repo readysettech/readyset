@@ -1568,3 +1568,28 @@ async fn test_adaptive_load_accounting_balances() {
     refresh_insert(&manager, &query_id, "key", vec!["w1".to_string()]).await;
     assert_eq!(entry_period(&manager, &query_id), Some(900));
 }
+
+#[test]
+async fn test_adaptive_load_cap_configurable() {
+    // With a 300% extra-load allowance, a lone churning key may quadruple its baseline load:
+    // shrinking continues past half the configured period and stalls around a quarter of it.
+    let mut manager = CacheManager::<String, String>::new(None, None);
+    manager.set_adaptive_max_extra_load_percent(300);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    let mut min_seen = u64::MAX;
+    for i in 1..=12 {
+        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
+        let period = entry_period(&manager, &query_id).unwrap();
+        assert!(period >= 200, "cap breached at iteration {i}: {period}");
+        min_seen = min_seen.min(period);
+    }
+    assert_eq!(min_seen, 200);
+    assert_matches!(entry_period(&manager, &query_id), Some(200 | 300));
+}

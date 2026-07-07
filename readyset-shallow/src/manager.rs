@@ -20,8 +20,8 @@ use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePoli
 use readyset_util::SizeOf;
 
 use crate::cache::{
-    AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, InnerCache,
-    Lookup,
+    AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo,
+    DEFAULT_MAX_EXTRA_LOAD_PERCENT, InnerCache, Lookup,
 };
 use crate::{ContentHash, EvictionPolicy, QueryMetadata};
 use readyset_util::hash::hash;
@@ -58,6 +58,7 @@ where
     /// Load accounting for adaptive caches, keyed by cache id. Shared with the store's
     /// eviction listener, which subtracts removed entries' contributions.
     adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>>,
+    adaptive_max_extra_load_percent: u64,
     max_entry_bytes: Option<usize>,
     // This lock also synchronizes inserts into the three HashMaps.
     next_id: Mutex<u64>,
@@ -107,9 +108,17 @@ where
             query_ids: new_table(),
             inner: Self::new_inner(max_capacity, Arc::clone(&adaptive_states)),
             adaptive_states,
+            adaptive_max_extra_load_percent: DEFAULT_MAX_EXTRA_LOAD_PERCENT,
             max_entry_bytes,
             next_id: Default::default(),
         }
+    }
+
+    /// Set the maximum extra refresh load adaptive caches may send upstream, as a percentage
+    /// of the load required to refresh every current entry at the configured period. Applies
+    /// to caches created after the call.
+    pub fn set_adaptive_max_extra_load_percent(&mut self, percent: u64) {
+        self.adaptive_max_extra_load_percent = percent;
     }
 
     fn check_identifiers(
@@ -183,7 +192,12 @@ where
             return Err(ReadySetError::ViewAlreadyExists(display_name));
         }
 
-        let adaptive_state = adaptive.then(|| Arc::new(AdaptiveState::new(policy.refresh_ms())));
+        let adaptive_state = adaptive.then(|| {
+            Arc::new(AdaptiveState::new(
+                policy.refresh_ms(),
+                self.adaptive_max_extra_load_percent,
+            ))
+        });
         if let Some(state) = &adaptive_state {
             self.adaptive_states.pin().insert(id, Arc::clone(state));
         }

@@ -34,9 +34,9 @@ const MIN_PERIOD_PERCENT: u64 = 10;
 /// Amount an adaptive refresh period moves per refresh, as a percentage of the cache's
 /// configured period.
 const NUDGE_PERCENT: u64 = 10;
-/// Maximum extra refresh load an adaptive cache may send upstream, as a percentage of the load
-/// required to refresh every current entry at the configured period.
-const MAX_EXTRA_LOAD_PERCENT: u64 = 100;
+/// Default maximum extra refresh load an adaptive cache may send upstream, as a percentage of
+/// the load required to refresh every current entry at the configured period.
+pub(crate) const DEFAULT_MAX_EXTRA_LOAD_PERCENT: u64 = 100;
 
 pub(crate) type InnerCache<K, V> = Arc<MokaCache<(u64, K), Arc<CacheEntry<V>>>>;
 type ScheduledRefresh<K, V> = (K, u64, RequestRefresh<K, V>);
@@ -86,14 +86,16 @@ type Scheduler<K, V> = Arc<Mutex<RefreshScheduler<K, V>>>;
 #[derive(Debug)]
 pub(crate) struct AdaptiveState {
     refresh_ms: u64,
+    max_extra_load_percent: u64,
     actual_ppm: AtomicU64,
     baseline_ppm: AtomicU64,
 }
 
 impl AdaptiveState {
-    pub(crate) fn new(refresh_ms: u64) -> Self {
+    pub(crate) fn new(refresh_ms: u64, max_extra_load_percent: u64) -> Self {
         Self {
             refresh_ms: refresh_ms.max(1),
+            max_extra_load_percent,
             actual_ppm: AtomicU64::new(0),
             baseline_ppm: AtomicU64::new(0),
         }
@@ -139,13 +141,14 @@ impl AdaptiveState {
         )
     }
 
-    /// Whether total refresh load is at or over the cap of [`MAX_EXTRA_LOAD_PERCENT`] extra
-    /// load beyond the baseline. A cache with no baseline load, e.g. an empty one, is never
-    /// over the cap.
+    /// Whether total refresh load is at or over the cap of `max_extra_load_percent` extra load
+    /// beyond the baseline. A cache with no baseline load, e.g. an empty one, is never over
+    /// the cap.
     fn over_cap(&self) -> bool {
         let actual = self.actual_ppm.load(Ordering::Relaxed);
         let baseline = self.baseline_ppm.load(Ordering::Relaxed);
-        let cap = baseline.saturating_add(baseline.saturating_mul(MAX_EXTRA_LOAD_PERCENT) / 100);
+        let cap =
+            baseline.saturating_add(baseline.saturating_mul(self.max_extra_load_percent) / 100);
         baseline > 0 && actual >= cap
     }
 }

@@ -400,6 +400,16 @@ pub struct Options {
     #[arg(long, env = "SHALLOW_REFRESH_WORKERS", default_value = "40")]
     shallow_refresh_workers: usize,
 
+    /// Maximum extra refresh load an adaptive shallow cache may send to the upstream, as a
+    /// percentage of the load required to refresh every current entry at the cache's
+    /// configured refresh period.
+    #[arg(
+        long,
+        env = "SHALLOW_ADAPTIVE_MAX_EXTRA_LOAD_PERCENT",
+        default_value = "100"
+    )]
+    shallow_adaptive_max_extra_load_percent: u64,
+
     #[command(flatten)]
     pub server_worker_options: WorkerOptions,
 
@@ -1558,10 +1568,14 @@ where
         info!("Total Shallow memory: {:?}", shallow_max_capacity);
         let shallow_max_entry_bytes =
             (options.shallow_max_entry_bytes > 0).then_some(options.shallow_max_entry_bytes);
-        let shallow = Arc::new(CacheManager::<
-            _,
-            <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry,
-        >::new(shallow_max_capacity, shallow_max_entry_bytes));
+        let mut shallow =
+            CacheManager::<_, <H::UpstreamDatabase as UpstreamDatabase>::CacheEntry>::new(
+                shallow_max_capacity,
+                shallow_max_entry_bytes,
+            );
+        shallow
+            .set_adaptive_max_extra_load_percent(options.shallow_adaptive_max_extra_load_percent);
+        let shallow = Arc::new(shallow);
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {
