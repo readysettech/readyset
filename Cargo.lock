@@ -6833,6 +6833,7 @@ dependencies = [
 name = "readyset-shallow"
 version = "0.0.1"
 dependencies = [
+ "antithesis_sdk",
  "criterion",
  "dashmap",
  "futures",
@@ -6851,6 +6852,7 @@ dependencies = [
  "readyset-sql",
  "readyset-util",
  "seize",
+ "serde_json",
  "tokio",
  "tokio-postgres",
  "tracing",

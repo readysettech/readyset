@@ -6,7 +6,9 @@ authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
 [dependencies]
+antithesis_sdk = { workspace = true }
 dashmap = { workspace = true }
+serde_json = { workspace = true }
 metrics = { workspace = true }
 moka = { workspace = true }
 papaya = { workspace = true }

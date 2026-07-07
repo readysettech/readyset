@@ -122,14 +122,28 @@ impl AdaptiveState {
     pub(crate) fn remove<V>(&self, values: &CacheValues<V>) {
         let (actual, baseline) = self.contributions(values);
         // Saturate rather than wrap; a transient over-subtraction must not poison the sums.
-        self.actual_ppm
+        let prev_actual = self
+            .actual_ppm
             .update(Ordering::Relaxed, Ordering::Relaxed, |v| {
                 v.saturating_sub(actual)
             });
-        self.baseline_ppm
+        let prev_baseline = self
+            .baseline_ppm
             .update(Ordering::Relaxed, Ordering::Relaxed, |v| {
                 v.saturating_sub(baseline)
             });
+        // Every removed entry's contributions were added at its write-back, so the sums always
+        // cover the subtraction; saturating would mean a double-subtraction leak.
+        antithesis_sdk::assert_always_greater_than_or_equal_to!(
+            prev_actual,
+            actual,
+            "Shallow adaptive actual load subtraction does not underflow"
+        );
+        antithesis_sdk::assert_always_greater_than_or_equal_to!(
+            prev_baseline,
+            baseline,
+            "Shallow adaptive baseline load subtraction does not underflow"
+        );
     }
 
     /// Current (actual, baseline) load sums, for tests.
@@ -644,6 +658,22 @@ where
                                 // At or over the load cap the period only grows, letting the
                                 // aggregate drift back under.
                                 let shrink = changed && !state.over_cap();
+                                // The branches differ only in their Antithesis reachability
+                                // markers, which compile to no-ops in normal builds.
+                                #[allow(clippy::if_same_then_else)]
+                                if shrink {
+                                    antithesis_sdk::assert_reachable!(
+                                        "Shallow adaptive refresh shrank a key's period"
+                                    );
+                                } else if changed {
+                                    antithesis_sdk::assert_reachable!(
+                                        "Shallow adaptive refresh held at the load cap"
+                                    );
+                                } else {
+                                    antithesis_sdk::assert_reachable!(
+                                        "Shallow adaptive refresh grew a key's period"
+                                    );
+                                }
                                 new.period_ms = self.adapted_period(old, shrink);
                             }
                         }
