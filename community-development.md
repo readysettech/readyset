@@ -164,4 +164,4 @@ To generate an `rpm` package run:
 
 To install and use `readyset` from the binary packages, see [the instructions on our main documentation site][binpkgs].
 
-[binpkgs]: https://docs.readyset.io/get-started/install-rs/binaries/install-package
+[binpkgs]: https://readyset.io/docs/cache/install-rs/binaries

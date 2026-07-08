@@ -26,14 +26,14 @@ To get started in five minutes or less, run:
 bash -c "$(curl -sSL https://launch.readyset.io)"
 ```
 
-You can also install via a [Docker image](https://docs.readyset.io/get-started/install-rs/docker) or with a [Linux binary](https://docs.readyset.io/get-started/install-rs/binaries). See our [getting started guide](https://docs.readyset.io/get-started) for more details!
+You can also install via a [Docker image](https://readyset.io/docs/cache/install-rs/docker) or with a [Linux binary](https://readyset.io/docs/cache/install-rs/binaries). See our [getting started guide](https://readyset.io/docs/cache/install-rs) for more details!
 
 Readyset Cloud is a managed service that scales your database with ease. If you're interested in trying out Readyset Cloud, [try it today](https://readyset.cloud/)!
 
 
 ## Useful Links
-* **[Interactive demo](https://docs.readyset.io/demo)**: interactive walk through of Readyset’s features.
-* **[Getting started guide](https://docs.readyset.io/get-started)**: instructions for how to connect Readyset to your database and start caching queries.
+* **[Interactive demo](https://readyset.io/docs/)**: interactive walk through of Readyset’s features.
+* **[Getting started guide](https://readyset.io/docs/cache/install-rs)**: instructions for how to connect Readyset to your database and start caching queries.
 * **[Why Readyset](https://blog.readyset.io/dont-use-kv-stores/)**: explains the motivation behind Readyset and how it compares to traditional database caching.
 * **[Documentation](https://docs.readyset.io)**: more in-depth information about how to use Readyset.
 * **[Blog](https://blog.readyset.io)**: articles from the Readyset universe.

@@ -431,7 +431,7 @@ free_form_connect() {
 
 print_exit_message() {
   echo ""
-  echo -e "${BLUE}See ${NOCOLOR}https://docs.readyset.io/demo${BLUE} for more fun things to try.${NOCOLOR}"
+  echo -e "${BLUE}See ${NOCOLOR}https://readyset.io/docs/${BLUE} for more fun things to try.${NOCOLOR}"
   echo ""
   echo -e "${BLUE}Join us on slack:${NOCOLOR}"
   echo "https://join.slack.com/t/readysetcommunity/shared_invite/zt-2272gtiz4-0024xeRJUPGWlRETQrGkFw"
@@ -518,7 +518,7 @@ wait_for_snapshot() {
       if [ $error_count -ge 5 ]; then
         echo "${RED}Error detected in replication:${NOCOLOR}"
         docker logs readyset-cache-1 | grep "ERROR" | tail -n 1
-        echo "See https://docs.readyset.io/get-started for troubleshooting, or reach out on slack."
+        echo "See https://readyset.io/docs/cache/install-rs for troubleshooting, or reach out on slack."
 
         exit 1
       fi

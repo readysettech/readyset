@@ -275,7 +275,7 @@ check_postgres_compliance() {
         out_of_compliance=true
     fi
     if [[ $out_of_compliance == true ]]; then
-        echo "For more information, please visit https://docs.readyset.io/reference/configure-your-database/postgres"
+        echo "For more information, please visit https://readyset.io/docs/cache/connect/postgres"
         echo ""
         echo "Error: Your PostgreSQL installation is not compliant with Readyset. Please fix the issues above before connecting Readyset to this instance."
         exit 1
