@@ -543,14 +543,8 @@ pub struct WorkerOptions {
     pub enable_packet_filters: bool,
 
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts.
-    #[arg(
-        long,
-        env = "PARSING_PRESET",
-        value_enum,
-        default_value = "both-prefer-sqlparser",
-        hide = true
-    )]
-    pub parsing_preset: ParsingPreset,
+    #[arg(long, env = "PARSING_PRESET", value_enum, hide = true)]
+    pub parsing_preset: Option<ParsingPreset>,
 
     /// Directory in which to store replicated table data. If not specified, defaults to the
     /// current working directory.

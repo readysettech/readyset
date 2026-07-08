@@ -93,7 +93,7 @@ impl Builder {
         builder.set_mixed_comparisons(opts.feature_mixed_comparisons);
         builder.set_straddled_joins(opts.feature_straddled_joins);
         builder.set_post_lookup(opts.feature_post_lookup);
-        builder.set_parsing_preset(opts.parsing_preset);
+        builder.set_parsing_preset(opts.parsing_preset.unwrap_or_else(ParsingPreset::for_prod));
         builder.set_table_request_timeout(Duration::from_secs(opts.table_request_timeout_seconds));
         builder.set_background_recovery_interval(Duration::from_secs(
             opts.background_recovery_interval_seconds,

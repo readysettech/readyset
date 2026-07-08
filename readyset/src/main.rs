@@ -2,15 +2,17 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::process::exit;
 
 use clap::Parser;
-use database_utils::DatabaseType;
 #[cfg(feature = "failure_injection")]
 use fail::FailScenario;
 use mysql_srv::{AuthCache, AuthKeys};
+use tracing::{error, info};
+
+use database_utils::DatabaseType;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
 use readyset::verify::verify;
 use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
-use tracing::{error, info};
+use readyset_client::CacheMode;
 
 fn main() -> anyhow::Result<()> {
     antithesis_sdk::antithesis_init();
@@ -20,11 +22,12 @@ fn main() -> anyhow::Result<()> {
 
     let mut options = Options::parse();
     options.resolve_auto_cache();
+    options.resolve_parsing_preset();
     let rt = init_adapter_runtime()?;
 
     // When cache_mode is shallow, replication and the query sampler are not needed
     // since shallow caches don't use dataflow.
-    if options.cache_mode == readyset_client::CacheMode::Shallow {
+    if options.cache_mode == CacheMode::Shallow {
         options
             .server_worker_options
             .replicator_config

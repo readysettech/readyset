@@ -66,6 +66,7 @@ use readyset_server::worker::readers::{retry_misses, BlockingRead, ReadRequestHa
 use readyset_server::WorkerOptions;
 use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
@@ -597,6 +598,13 @@ impl Options {
         if self.auto_cache {
             self.cache_mode = CacheMode::Shallow;
             self.query_caching = MigrationStyle::InRequestPath;
+        }
+    }
+
+    pub fn resolve_parsing_preset(&mut self) {
+        if self.cache_mode.is_shallow() && self.server_worker_options.parsing_preset.is_none() {
+            // We're never going to look at what nom-sql produces in shallow mode.
+            self.server_worker_options.parsing_preset = Some(ParsingPreset::OnlySqlparser);
         }
     }
 
@@ -1405,7 +1413,10 @@ where
         // from readers on the adapter rather than across a network hop.
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
-        let parsing_preset = options.server_worker_options.parsing_preset;
+        let parsing_preset = options
+            .server_worker_options
+            .parsing_preset
+            .unwrap_or_else(ParsingPreset::for_prod);
 
         let memory_limit = options.server_worker_options.memory_limit;
 
@@ -2023,6 +2034,92 @@ mod tests {
             "--query-caching=inrequestpath",
         ]);
         assert!(res.is_err(), "expected clap conflict error, got {res:?}");
+    }
+
+    /// Base args for exercising `resolve_parsing_preset`; append cache/parsing flags.
+    fn parsing_preset_opts(extra: &[&str]) -> Options {
+        let mut argv = vec![
+            "readyset",
+            "--database-type",
+            "mysql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:3306",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+        ];
+        argv.extend_from_slice(extra);
+        Options::parse_from(argv)
+    }
+
+    #[test]
+    fn shallow_resolves_unset_preset_to_only_sqlparser() {
+        let mut opts = parsing_preset_opts(&["--cache-mode", "shallow"]);
+        assert_eq!(opts.server_worker_options.parsing_preset, None);
+        opts.resolve_parsing_preset();
+        assert_eq!(
+            opts.server_worker_options.parsing_preset,
+            Some(ParsingPreset::OnlySqlparser)
+        );
+    }
+
+    #[test]
+    fn auto_cache_resolves_unset_preset_to_only_sqlparser() {
+        let mut opts = parsing_preset_opts(&["--auto-cache"]);
+        opts.resolve_auto_cache();
+        opts.resolve_parsing_preset();
+        assert_eq!(
+            opts.server_worker_options.parsing_preset,
+            Some(ParsingPreset::OnlySqlparser)
+        );
+    }
+
+    #[test]
+    fn parsing_preset_deep_leaves_preset_unset() {
+        let mut opts = parsing_preset_opts(&["--cache-mode", "deep"]);
+        assert_eq!(opts.cache_mode, CacheMode::Deep);
+        opts.resolve_parsing_preset();
+        assert_eq!(opts.server_worker_options.parsing_preset, None);
+    }
+
+    #[test]
+    fn parsing_preset_deep_then_shallow_leaves_preset_unset() {
+        let mut opts = parsing_preset_opts(&["--cache-mode", "deep-then-shallow"]);
+        assert_eq!(opts.cache_mode, CacheMode::DeepThenShallow);
+        opts.resolve_parsing_preset();
+        assert_eq!(opts.server_worker_options.parsing_preset, None);
+    }
+
+    #[test]
+    fn parsing_preset_respects_explicit_parity_preset() {
+        let mut opts = parsing_preset_opts(&[
+            "--cache-mode",
+            "shallow",
+            "--parsing-preset",
+            "both-panic-on-mismatch",
+        ]);
+        opts.resolve_parsing_preset();
+        assert_eq!(
+            opts.server_worker_options.parsing_preset,
+            Some(ParsingPreset::BothPanicOnMismatch)
+        );
+    }
+
+    #[test]
+    fn parsing_preset_respects_explicit_default_preset() {
+        let mut opts = parsing_preset_opts(&[
+            "--cache-mode",
+            "shallow",
+            "--parsing-preset",
+            "both-prefer-sqlparser",
+        ]);
+        opts.resolve_parsing_preset();
+        assert_eq!(
+            opts.server_worker_options.parsing_preset,
+            Some(ParsingPreset::BothPreferSqlparser)
+        );
     }
 
     #[test]
