@@ -3324,6 +3324,19 @@ pub(crate) fn normalize_having_and_group_by_for_statement(
                 }
                 walk_expr(self, expr)
             }
+
+            fn visit_select_statement(
+                &mut self,
+                _stmt: &'ast mut SelectStatement,
+            ) -> Result<(), Self::Error> {
+                // Alias maps are scoped to the containing SELECT.  Subqueries
+                // have their own scope -- e.g. `HAVING count(*) > (SELECT
+                // count(*) FROM j WHERE ...)` has an outer `count(*)` that
+                // may alias to `cnt`, but the inner `count(*)` is the
+                // subquery's own aggregate over `j` and must not be rewritten
+                // to the outer alias.
+                Ok(())
+            }
         }
 
         let mut having_visitor = HavingVisitor {

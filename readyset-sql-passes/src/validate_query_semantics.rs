@@ -109,6 +109,7 @@ impl<'ast> Visitor<'ast> for SemanticValidator {
         validate_no_subqueries_in_join_on(select_statement)?;
         validate_no_aggregates_in_join_on(select_statement)?;
         validate_group_by_semantics(select_statement, self.dialect)?;
+        validate_having_without_group_by(select_statement)?;
         validate_no_duplicate_derived_table_columns(select_statement, self.dialect)?;
 
         // Walk children — this recurses into subqueries (FROM, WHERE, etc.)
@@ -543,6 +544,96 @@ fn ambiguous_column_err(col: &Column, alias_rel: &Relation, dialect: Dialect) ->
     ))
 }
 
+/// When HAVING is present without GROUP BY, PG treats the query as having a
+/// single implicit group of all FROM rows.  Every SELECT-list expression and
+/// the HAVING expression must be "group-constant" -- aggregate function calls,
+/// literals, or uncorrelated subqueries.
+///
+/// Readyset routes this shape via MIR's scalar-aggregate path, which handles
+/// the restricted case where the SELECT list is aggregate-only (aggregate
+/// function calls combined with literals via boolean/arithmetic operators)
+/// AND HAVING is aggregate-only (no subqueries, no bare column refs).  Other
+/// group-constant shapes -- subqueries in SELECT list, subqueries in HAVING,
+/// and syntactically-invalid bare column refs -- are not routed.  Reject
+/// cleanly here so the adapter can fall back to upstream for correctness.
+fn validate_having_without_group_by(stmt: &SelectStatement) -> ReadySetResult<()> {
+    if stmt.having.is_none() || stmt.group_by.is_some() {
+        return Ok(());
+    }
+    for fe in &stmt.fields {
+        if let FieldDefinitionExpr::Expr { expr, .. } = fe
+            && !is_aggregate_only_expression(expr)
+        {
+            unsupported!(
+                "HAVING without GROUP BY requires aggregate-only SELECT-list items \
+                 (subqueries and bare column refs in the SELECT list are not supported)"
+            );
+        }
+    }
+    if let Some(having_expr) = &stmt.having
+        && !is_aggregate_only_expression(having_expr)
+    {
+        unsupported!(
+            "HAVING without GROUP BY requires an aggregate-only HAVING expression \
+             (subqueries and bare column refs in HAVING are not supported)"
+        );
+    }
+    Ok(())
+}
+
+/// True when `expr` contains no subqueries and every column reference is
+/// inside an aggregate function call.  Literals and constants are allowed.
+/// Nested subqueries (any `SelectStatement` reached from the expression) are
+/// rejected outright -- they're syntactically valid per PG's single-implicit-
+/// group semantics but not routable through Readyset's scalar-aggregate MIR
+/// path.
+fn is_aggregate_only_expression(expr: &Expr) -> bool {
+    struct Vis {
+        agg_depth: usize,
+        rejected: bool,
+    }
+    impl<'a> Visitor<'a> for Vis {
+        type Error = ReadySetError;
+
+        fn visit_function_expr(&mut self, fe: &'a FunctionExpr) -> Result<(), Self::Error> {
+            let is_agg = is_aggregate(fe);
+            if is_agg {
+                self.agg_depth += 1;
+            }
+            walk_function_expr(self, fe)?;
+            if is_agg {
+                self.agg_depth -= 1;
+            }
+            Ok(())
+        }
+
+        fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
+            if self.rejected {
+                return Ok(());
+            }
+            if let Expr::Column(_) = expr
+                && self.agg_depth == 0
+            {
+                self.rejected = true;
+                return Ok(());
+            }
+            walk_expr(self, expr)
+        }
+
+        fn visit_select_statement(&mut self, _: &'a SelectStatement) -> Result<(), Self::Error> {
+            // Any embedded subquery is a rejection.
+            self.rejected = true;
+            Ok(())
+        }
+    }
+    let mut vis = Vis {
+        agg_depth: 0,
+        rejected: false,
+    };
+    let _ = vis.visit_expr(expr);
+    !vis.rejected
+}
+
 fn validate_no_duplicate_derived_table_columns(
     stmt: &SelectStatement,
     dialect: Dialect,
@@ -857,6 +948,66 @@ mod tests {
     fn having_implies_aggregation() {
         // HAVING without GROUP BY — t.x is not grouped
         assert!(validate_postgres("SELECT t.x FROM t HAVING t.x > 10").is_err());
+    }
+
+    // ── HAVING without GROUP BY: aggregate-only shape ──
+
+    #[test]
+    fn having_without_group_by_pure_aggregate_passes() {
+        // Pure aggregate SELECT + pure aggregate HAVING is the shape MIR's
+        // scalar-aggregate path handles.
+        assert!(validate_postgres("SELECT COUNT(*) FROM t HAVING COUNT(*) > 0").is_ok());
+        assert!(validate_postgres("SELECT MIN(t.x) AS m FROM t HAVING COUNT(*) > 0").is_ok());
+        assert!(
+            validate_postgres("SELECT MIN(t.x) FROM t HAVING SUM(t.y) > 0 AND MAX(t.z) < 10")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn having_without_group_by_literal_select_passes() {
+        // Constant-only SELECT items are group-constant under single-implicit-
+        // group semantics -- literals don't need to be inside an aggregate.
+        assert!(validate_postgres("SELECT 5 FROM t HAVING AVG(t.x) > 5 ORDER BY 1").is_ok());
+    }
+
+    #[test]
+    fn having_without_group_by_subquery_in_select_rejected() {
+        // REA-6728 shape: scalar subquery in SELECT list combined with HAVING.
+        // Semantically valid PG (single implicit group) but not routed by MIR.
+        assert!(
+            validate_postgres(
+                "SELECT (SELECT COUNT(*) FROM s) AS T1 FROM t HAVING (SELECT COUNT(*) FROM s) > 0"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn having_without_group_by_subquery_in_having_rejected() {
+        assert!(
+            validate_postgres("SELECT COUNT(*) FROM t HAVING (SELECT COUNT(*) FROM s) > 0")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn having_without_group_by_subquery_in_select_only_rejected() {
+        assert!(
+            validate_postgres("SELECT (SELECT COUNT(*) FROM s) AS T1 FROM t HAVING COUNT(*) > 0")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn having_with_group_by_permits_subquery_in_select() {
+        // With GROUP BY present, this validator does not fire.
+        assert!(
+            validate_postgres(
+                "SELECT (SELECT COUNT(*) FROM s) AS T1, t.x FROM t GROUP BY t.x HAVING COUNT(*) > 0"
+            )
+            .is_ok()
+        );
     }
 
     // ── HAVING with expression GROUP BY keys and correlated columns ──

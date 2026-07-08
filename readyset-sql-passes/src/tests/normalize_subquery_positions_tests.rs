@@ -1,6 +1,6 @@
 //! Tests for `normalize_subquery_positions`.  Stage 1 focuses on HAVING wrap.
 
-use readyset_sql::ast::{SelectStatement, SqlQuery};
+use readyset_sql::ast::{FieldDefinitionExpr, SelectStatement, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
 
@@ -94,6 +94,46 @@ fn having_multi_conjunct_per_conjunct_split() {
     assert!(
         inner_having_present,
         "inner HAVING should retain the non-subquery conjunct"
+    );
+}
+
+#[test]
+fn having_pre_cse_does_not_rewrite_subquery_body_aggregates() {
+    // Regression: HAVING pre-wrap CSE normalizer must not descend into
+    // nested subquery bodies.  The outer alias map has `count(*) -> cnt`
+    // (from the outer's `count(*) AS cnt` SELECT-list item).  Inside the
+    // subquery body, the aggregate `count(*)` is over `j` and must not
+    // be rewritten to the outer alias `cnt`.
+    let stmt = normalize(
+        "SELECT s.city, count(*) AS cnt \
+         FROM s \
+         GROUP BY s.city \
+         HAVING cnt > 1 \
+            AND count(*) > (SELECT count(*) FROM j WHERE j.city = s.city)",
+    );
+
+    // Locate the wrap inner SELECT, then the subquery body reachable
+    // from the outer WHERE.
+    let inner = first_derived_table_inner(&stmt).expect("wrap inner SELECT exists");
+    // Inner HAVING should keep the non-subquery conjunct (rebound to
+    // reference the inner-scope alias `cnt`).
+    assert!(
+        inner.having.is_some(),
+        "inner HAVING must retain the non-subquery conjunct: {}",
+        rendered(&stmt)
+    );
+
+    // The outer WHERE contains the subquery; render and check that
+    // `count(*)` appears in the subquery body -- NOT the outer alias.
+    let s = rendered(&stmt);
+    let lower = s.to_lowercase();
+    // The rendered subquery projection must still be `count(*)`, not
+    // the outer-alias column reference.
+    assert!(
+        lower.contains("select\n            count(*)")
+            || lower.contains("select count(*)")
+            || lower.contains("(select count(*)"),
+        "subquery body's count(*) got wrongly rewritten to an outer alias: {s}"
     );
 }
 
@@ -705,6 +745,352 @@ fn wrap_alias_of(stmt: &SelectStatement) -> Option<String> {
         .and_then(|t| t.alias.as_ref())
         .filter(|a| a.as_str().starts_with("_NSP_W_"))
         .map(|a| a.as_str().to_string())
+}
+
+// WF-preserving wrap tests (Option B for REA-6724)
+
+/// Helper: check whether the WF-preserving path fired by looking for
+/// the WF at wrapper level (not inner).  Returns true when the outer
+/// SELECT-list has any `Expr::WindowFunction`.
+fn outer_has_wf(stmt: &SelectStatement) -> bool {
+    stmt.fields.iter().any(|fe| {
+        let FieldDefinitionExpr::Expr { expr, .. } = fe else {
+            return false;
+        };
+        matches!(expr, readyset_sql::ast::Expr::WindowFunction { .. })
+    })
+}
+
+#[test]
+fn wf_in_outer_select_with_having_subq_moves_wf_to_wrapper() {
+    // Baseline: HAVING has a subquery, outer SELECT has RANK() OVER
+    // (ORDER BY count(*)).  Without WF-preserving, the WF would sit in
+    // the inner where it computes over the unfiltered groupset.  With
+    // WF-preserving, the WF sits at the wrapper (post-WHERE) with its
+    // ORDER-BY-count(*) rebound to reference the inner-projected `cnt`.
+    let stmt = normalize(
+        "SELECT a.x, count(*) AS cnt, RANK() OVER (ORDER BY count(*)) AS r \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING count(*) > (SELECT count(*) FROM ns)",
+    );
+
+    // Wrap must have fired.
+    assert!(wrap_fired_at(&stmt), "wrap should have fired");
+
+    // The wrapper (outer stmt post-wrap) still carries a WindowFunction
+    // expression — the RANK() OVER (...) migrated up.
+    assert!(
+        outer_has_wf(&stmt),
+        "WF must be at wrapper level, not left in inner"
+    );
+
+    // The wrap inner (leading FROM's derived table) must NOT carry a WF.
+    let inner = first_derived_table_inner(&stmt).expect("wrap inner SELECT exists");
+    assert!(
+        !outer_has_wf(inner),
+        "inner must not carry any WF after WF-preserving migration"
+    );
+
+    // The rebound RANK's OVER-ORDER-BY should reference the wrap alias.
+    let wrap_alias = wrap_alias_of(&stmt).expect("wrap alias present");
+    let s = rendered(&stmt);
+    let expected_ref = format!("\"{wrap_alias}\".\"cnt\"");
+    assert!(
+        s.contains(&expected_ref),
+        "RANK's OVER-ORDER-BY should have rebound count(*) to `{wrap_alias}.cnt`: {s}"
+    );
+}
+
+#[test]
+fn wf_in_outer_without_having_subq_stays_in_inner() {
+    // Regression control: outer has WF but HAVING has no subquery
+    // (only an aggregate comparison).  No trigger fires.  Wrap should
+    // NOT fire — WF stays in inner soundly because nothing is migrated.
+    let stmt = normalize(
+        "SELECT a.x, count(*) AS cnt, RANK() OVER (ORDER BY count(*)) AS r \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING count(*) > 5",
+    );
+    assert!(
+        !wrap_fired_at(&stmt),
+        "wrap should not fire when HAVING has no subquery"
+    );
+}
+
+#[test]
+fn wf_partition_by_group_by_key_rebinds_to_wrap_alias() {
+    // The WF partitions by a GB key.  The `city` reference inside the
+    // WF's PARTITION BY should rebind to `<wrap_alias>.city` at the
+    // wrapper level after migration.
+    let stmt = normalize(
+        "SELECT a.city, count(*) AS cnt, ROW_NUMBER() OVER (PARTITION BY a.city) AS rn \
+         FROM t AS a \
+         GROUP BY a.city \
+         HAVING count(*) > (SELECT count(*) FROM ns)",
+    );
+    assert!(wrap_fired_at(&stmt), "wrap should have fired");
+    assert!(outer_has_wf(&stmt), "WF must be at wrapper level");
+
+    let wrap_alias = wrap_alias_of(&stmt).expect("wrap alias present");
+    let s = rendered(&stmt);
+    // PARTITION BY should reference the wrap alias.
+    assert!(
+        s.contains(&format!("\"{wrap_alias}\".\"city\"")),
+        "PARTITION BY should rebind `a.city` to `{wrap_alias}.city`: {s}"
+    );
+}
+
+#[test]
+fn windowed_aggregate_wrapping_group_aggregate_rebinds_inner() {
+    // `sum(sum(qty)) OVER ()` — outer sum is the WF's own function
+    // (windowed); inner sum(qty) is group-level, must be projected into
+    // inner and rebound.  Post-wrap: the outer `sum(...) OVER ()` stays
+    // at wrapper level with its argument now referencing the inner-
+    // projected `sum(qty)` via the wrap alias.
+    let stmt = normalize(
+        "SELECT a.x, sum(a.qty) AS s, sum(sum(a.qty)) OVER () AS grand \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING sum(a.qty) > (SELECT count(*) FROM ns)",
+    );
+    assert!(wrap_fired_at(&stmt), "wrap should have fired");
+    assert!(outer_has_wf(&stmt), "WF must be at wrapper level");
+
+    let inner = first_derived_table_inner(&stmt).expect("wrap inner SELECT exists");
+    assert!(
+        !outer_has_wf(inner),
+        "inner must not carry any WF after WF-preserving migration"
+    );
+
+    let wrap_alias = wrap_alias_of(&stmt).expect("wrap alias present");
+    let s = rendered(&stmt);
+    // The outer sum(...) OVER () at the wrapper should reference the
+    // inner-projected sum(a.qty).  Confirmed by the presence of
+    // `<wrap_alias>.<something>` inside the WF (the inner-projected
+    // alias for sum(a.qty)).
+    assert!(
+        s.contains(&format!("\"{wrap_alias}\".\"s\"")),
+        "windowed sum's argument should reference `{wrap_alias}.s` \
+         (the inner-projected sum(a.qty)): {s}"
+    );
+}
+
+#[test]
+fn multiple_wfs_preserve_ordering_at_wrapper() {
+    // Two WFs interleaved with a non-WF field.  Wrapper's SELECT-list
+    // order must match the user's original ordering: WF, non-WF, WF.
+    let stmt = normalize(
+        "SELECT RANK() OVER (ORDER BY count(*)) AS r, \
+                a.x AS xv, \
+                ROW_NUMBER() OVER (PARTITION BY a.x) AS rn \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING count(*) > (SELECT count(*) FROM ns)",
+    );
+    assert!(wrap_fired_at(&stmt), "wrap should have fired");
+
+    // Wrapper's SELECT-list order and per-position kinds preserved.
+    assert_eq!(
+        stmt.fields.len(),
+        3,
+        "wrapper must have 3 SELECT-list items"
+    );
+    let expr0 = match &stmt.fields[0] {
+        FieldDefinitionExpr::Expr { expr, .. } => expr,
+        _ => panic!("field 0 must be Expr"),
+    };
+    let expr1 = match &stmt.fields[1] {
+        FieldDefinitionExpr::Expr { expr, .. } => expr,
+        _ => panic!("field 1 must be Expr"),
+    };
+    let expr2 = match &stmt.fields[2] {
+        FieldDefinitionExpr::Expr { expr, .. } => expr,
+        _ => panic!("field 2 must be Expr"),
+    };
+    assert!(
+        matches!(expr0, readyset_sql::ast::Expr::WindowFunction { .. }),
+        "field 0 should be RANK WF at wrapper"
+    );
+    assert!(
+        !matches!(expr1, readyset_sql::ast::Expr::WindowFunction { .. }),
+        "field 1 should be non-WF ref"
+    );
+    assert!(
+        matches!(expr2, readyset_sql::ast::Expr::WindowFunction { .. }),
+        "field 2 should be ROW_NUMBER WF at wrapper"
+    );
+}
+
+// Pre-wrap SELECT-list-item CSE short-circuit tests
+
+#[test]
+fn having_raw_subquery_matching_select_list_item_short_circuits() {
+    // HAVING has a raw subquery expression that structurally matches
+    // a SELECT-list item's aliased subquery.  The pre-wrap normalize
+    // step aliases HAVING to reference the SELECT-list item; HAVING
+    // no longer contains a subquery; wrap is skipped.  Downstream,
+    // the SELECT-list scalar subquery is decorrelated by the
+    // pre-existing scalar-subquery path.  GROUP BY makes the outer
+    // genuinely aggregating so the short-circuit is safe.
+    let stmt = normalize(
+        "SELECT a.x, (SELECT max(o.v) FROM outer_t AS o) AS T1 \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING (SELECT max(o.v) FROM outer_t AS o) > 0",
+    );
+    assert!(
+        !wrap_fired_at(&stmt),
+        "wrap should be skipped when HAVING subquery matches a SELECT-list item"
+    );
+    // HAVING should now reference the SELECT-list alias.
+    let s = rendered(&stmt);
+    assert!(
+        s.to_lowercase().contains("having"),
+        "HAVING clause should still be present: {s}"
+    );
+    // Sanity: no `_NSP_W_` wrapper alias.
+    assert!(
+        !s.contains("\"_NSP_W_"),
+        "no wrap alias should appear when short-circuit fires: {s}"
+    );
+}
+
+#[test]
+fn having_alias_ref_without_outer_aggregation_still_wraps() {
+    // HAVING alias ref to a SELECT-list subquery, but outer stmt has
+    // no aggregate / GROUP BY / DISTINCT.  Short-circuit intentionally
+    // does NOT fire here: `inline_subquery::check_group_by_compatibility`
+    // asserts that HAVING without outer aggregation must have been
+    // moved to WHERE by upstream normalization -- letting HAVING
+    // survive would trip the downstream invariant.  Fall through to
+    // the wrap, which does the HAVING-to-WHERE conversion.
+    //
+    // This shape is now rejected upstream by
+    // `validate_having_without_group_by`; the test invokes the wrap
+    // pass directly to lock the fall-through behavior for defense in
+    // depth in case a similar shape reaches this pass via a different
+    // route.
+    let stmt = normalize(
+        "SELECT (SELECT MAX(Test_INT) FROM qa.DataTypes) AS T1 \
+         FROM qa.spj \
+         HAVING (SELECT MAX(Test_INT) FROM qa.DataTypes) > 0",
+    );
+    assert!(
+        wrap_fired_at(&stmt),
+        "wrap must fire for HAVING with no outer aggregation"
+    );
+}
+
+#[test]
+fn rea_6728_corrected_shape_short_circuits() {
+    // The QA-corrected repro for REA-6728: HAVING's scalar subquery
+    // matches a SELECT-list item, outer is aggregating via
+    // `count(*)` + GROUP BY.  CSE dedups HAVING to the SELECT-list
+    // alias; short-circuit fires; no wrapper needed.
+    let stmt = normalize(
+        "SELECT (SELECT MAX(qa.datatypes.test_int) FROM qa.datatypes) AS T1, \
+                count(*), qa.spj.sn \
+         FROM qa.spj \
+         GROUP BY qa.spj.sn \
+         HAVING (SELECT MAX(qa.datatypes.test_int) FROM qa.datatypes) > 0",
+    );
+    assert!(
+        !wrap_fired_at(&stmt),
+        "REA-6728 corrected shape must short-circuit -- no wrapper"
+    );
+    let s = rendered(&stmt);
+    assert!(
+        !s.contains("\"_NSP_W_"),
+        "no wrap alias should appear on REA-6728 corrected shape: {s}"
+    );
+}
+
+#[test]
+fn having_raw_subquery_with_group_by_short_circuits() {
+    // Same CSE opportunity but outer has GROUP BY -- outer_is_aggregating
+    // is true, short-circuit fires.
+    let stmt = normalize(
+        "SELECT a.x, (SELECT max(o.v) FROM outer_t AS o) AS T1 \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING (SELECT max(o.v) FROM outer_t AS o) > 0",
+    );
+    let s = rendered(&stmt);
+    assert!(
+        !wrap_fired_at(&stmt),
+        "short-circuit should fire when outer has GROUP BY: {s}"
+    );
+}
+
+#[test]
+fn order_by_raw_subquery_matching_select_list_item_still_wraps() {
+    // ORDER BY-side CSE short-circuit intentionally omitted: several
+    // downstream passes unconditionally denormalize ORDER BY alias refs
+    // to their raw expressions via `resolve_field_reference` /
+    // `normalize_field_reference`.  A short-circuit that leaves an
+    // ORDER BY alias ref pointing at a SELECT-list subquery risks
+    // exposing the raw subquery downstream.  So ORDER BY-side subquery
+    // triggers the wrap unchanged, matching pre-change behavior.
+    let stmt = normalize(
+        "SELECT (SELECT max(o.v) FROM outer_t AS o) AS T1 \
+         FROM t AS a \
+         ORDER BY (SELECT max(o.v) FROM outer_t AS o)",
+    );
+    assert!(
+        wrap_fired_at(&stmt),
+        "wrap must fire for ORDER BY subquery even when it matches a SELECT-list item"
+    );
+    let s = rendered(&stmt);
+    assert!(
+        s.contains("\"_NSP_W_"),
+        "wrap alias should appear when ORDER BY has a raw subquery: {s}"
+    );
+}
+
+#[test]
+fn mixed_having_matching_and_non_matching_subq_still_wraps() {
+    // HAVING has two conjuncts: one matches a SELECT-list item
+    // (CSE-normalized to alias), the other is a genuine HAVING-only
+    // subquery.  Wrap should still fire for the non-matching
+    // subquery.
+    let stmt = normalize(
+        "SELECT (SELECT max(o.v) FROM outer_t AS o) AS T1, count(*) AS cnt \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING (SELECT max(o.v) FROM outer_t AS o) > 0 \
+            AND count(*) > (SELECT count(*) FROM other_t)",
+    );
+    assert!(
+        wrap_fired_at(&stmt),
+        "wrap should fire for the non-matching HAVING subquery"
+    );
+    let s = rendered(&stmt);
+    assert!(
+        s.contains("\"_NSP_W_"),
+        "wrap alias must appear when at least one HAVING subquery survives CSE: {s}"
+    );
+}
+
+#[test]
+fn having_alias_ref_to_select_list_subq_short_circuits() {
+    // HAVING originally has an alias ref (`T1 > 0`) pointing at a
+    // SELECT-list subquery.  Normalize is a no-op (already an alias
+    // ref), no subquery visible in HAVING, wrap is skipped.  The
+    // outer must be aggregating (GROUP BY here) for the short-circuit
+    // to be safe -- otherwise the downstream `check_group_by_
+    // compatibility` gate trips on HAVING-without-aggregation.
+    let stmt = normalize(
+        "SELECT a.x, (SELECT max(o.v) FROM outer_t AS o) AS T1 \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING T1 > 0",
+    );
+    assert!(
+        !wrap_fired_at(&stmt),
+        "wrap should be skipped when HAVING is an alias ref to a SELECT-list subquery"
+    );
 }
 
 // End-to-end via SqlQuery

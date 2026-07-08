@@ -52,15 +52,18 @@ use crate::rewrite_utils::{
     alias_for_expr, as_sub_query_with_alias, collect_local_from_items, conjoin_all_dedup,
     contains_select, deep_columns_visitor_mut_in_set,
     denormalize_having_and_group_by_for_statement, expect_field_as_expr,
-    expect_only_subquery_from_with_alias_mut, fix_duplicate_aliases,
-    normalize_having_and_group_by_for_statement,
+    expect_only_subquery_from_with_alias_mut, fix_duplicate_aliases, for_each_window_function,
+    is_aggregation_or_grouped, normalize_having_and_group_by_for_statement,
     project_columns_if_not_exist_fix_duplicate_aliases, resolve_field_reference,
 };
 use crate::unnest_subqueries::collect_subquery_predicates;
+use crate::{contains_wf, is_window_function_expr};
 use readyset_errors::{ReadySetError, ReadySetResult, invariant};
 use readyset_sql::analysis::is_aggregate;
 use readyset_sql::analysis::visit::{self, Visitor};
-use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr, walk_select_statement};
+use readyset_sql::analysis::visit_mut::{
+    VisitorMut, walk_expr, walk_function_expr, walk_select_statement,
+};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, FieldReference, OrderBy, OrderClause, Relation,
     SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
@@ -257,6 +260,47 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
         // ORDER-BY-with-subquery but no HAVING subquery.  Cheap -- bounded
         // by the size of those clauses, idempotent net effect.
         if stmt.having.is_some() || order_by_trigger {
+            // HAVING-only pre-wrap CSE short-circuit.  Try normalizing
+            // HAVING against SELECT-list-item aliases first (via
+            // `normalize_having_and_group_by_for_statement`, which
+            // structurally matches sub-expressions against SELECT-list
+            // exprs and rewrites matches to alias refs).  If the CSE
+            // eliminates every subquery from HAVING AND ORDER BY has no
+            // subquery (its original state, `order_by_trigger`), the
+            // wrap is unnecessary: the pre-existing SELECT-list-subquery
+            // decorrelation handles the aliased subqueries and HAVING
+            // ends up as a plain non-subquery expression referencing
+            // the resulting aliases.
+            //
+            // Restricted to HAVING because ORDER BY / GROUP BY alias
+            // refs are unconditionally denormalized (expanded to raw
+            // expressions) by several downstream passes via
+            // `resolve_field_reference` / `normalize_field_reference`
+            // (ILDT's `normalize_group_and_order_by`, DTR's ORDER BY
+            // resolve, `inline_subquery`'s prepared-stmt GROUP BY
+            // resolve, `fix_correlated_columns_in_group_by_and_having`
+            // for GROUP BY).  Leaving an ORDER BY / GROUP BY alias ref
+            // pointing at a SELECT-list subquery risks exposing the raw
+            // subquery when one of those denormalizers runs against an
+            // inner DT that carries it up.  HAVING has no analogous
+            // downstream denormalizer, so the short-circuit is safe
+            // there.  See REA-6724 for the ORDER BY / GROUP BY
+            // extension follow-up.
+            normalize_having_and_group_by_for_statement(stmt)?;
+            let having_has_subq = stmt.having.as_ref().is_some_and(contains_select);
+            // The short-circuit additionally requires that the outer stmt
+            // is genuinely aggregating (DISTINCT / aggregate in SELECT /
+            // GROUP BY).  A HAVING without aggregation is a downstream
+            // pipeline invariant violation (`inline_subquery`'s
+            // `check_group_by_compatibility` explicitly asserts against
+            // it): those queries need the wrap's HAVING-to-WHERE move
+            // to reach a shape downstream can handle.  Falling through
+            // preserves pre-change behavior for that class.
+            let outer_is_aggregating = is_aggregation_or_grouped(stmt)?;
+            if !having_has_subq && !order_by_trigger && outer_is_aggregating {
+                return Ok(());
+            }
+
             denormalize_having_and_group_by_for_statement(stmt)?;
             let wrapped = wrap_post_groupby_positions(stmt, order_by_trigger, self)?;
             if wrapped {
@@ -353,6 +397,45 @@ fn wrap_post_groupby_positions(
         return Ok(false);
     }
 
+    // WF migration -- fires only when HAVING moves at least one
+    // conjunct AND the outer SELECT-list contains a window function.
+    // The moved HAVING would otherwise land in the wrapper's WHERE,
+    // evaluated AFTER the inner's WF materialization -- but standard
+    // SQL logical order puts HAVING BEFORE WF, so leaving WFs in the
+    // inner would compute them over an unfiltered groupset.  When
+    // this path fires we partition WF-carrying SELECT-list items out
+    // of the stmt (they will be spliced back into the wrapper's
+    // SELECT-list at their original positions, with internal refs
+    // rebound to reference inner-projected aliases).  When only the
+    // ORDER BY trigger fires (no HAVING to move), WFs stay in the
+    // inner soundly: ORDER BY / LIMIT / OFFSET all sit after WFs in
+    // the SQL logical order, so moving them to the wrapper doesn't
+    // reorder anything relative to WFs.
+    let migrate_wfs = !subquery_preds.is_empty() && contains_wf!(stmt);
+    let mut wf_slots: Vec<(usize, Expr, SqlIdentifier)> = Vec::new();
+    if migrate_wfs {
+        let all_fields = mem::take(&mut stmt.fields);
+        let mut kept = Vec::with_capacity(all_fields.len());
+        for (pos, fde) in all_fields.into_iter().enumerate() {
+            let (expr_ref, alias_ref) = expect_field_as_expr(&fde);
+            if is_window_function_expr!(expr_ref) {
+                let outer_alias = alias_for_expr(expr_ref, alias_ref);
+                // Consume `fde` to extract the owned `Expr` for later
+                // in-place rebinding.  The `Expr` variant is guaranteed
+                // by the pass-entry `invariant!` on `expand_stars`.
+                match fde {
+                    FieldDefinitionExpr::Expr { expr, .. } => {
+                        wf_slots.push((pos, expr, outer_alias));
+                    }
+                    _ => unreachable!("expand_stars invariant"),
+                }
+            } else {
+                kept.push(fde);
+            }
+        }
+        stmt.fields = kept;
+    }
+
     // Snapshot user-original outer aliases BEFORE deduping the inner.
     // Duplicate aliases in the user's SELECT-list are legal SQL (both
     // implicit -- `SELECT s.city, j.city` -- and explicit -- `SELECT
@@ -360,6 +443,8 @@ fn wrap_post_groupby_positions(
     // duplicates preserved in the response.  The wrapper's outer `AS
     // <alias>` uses these snapshots; the inner alias (post-dedup) is
     // used only to disambiguate the `<wrap_alias>.<inner>` ref.
+    // Post-WF-partition: `stmt.fields` contains only non-WF items;
+    // `outer_aliases` therefore holds one entry per non-WF slot.
     let outer_aliases: Vec<SqlIdentifier> = stmt
         .fields
         .iter()
@@ -413,6 +498,27 @@ fn wrap_post_groupby_positions(
     // had no ORDER BY.
     let wrapper_order = build_wrapper_order(saved_order, stmt, &wrap_alias)?;
 
+    // Rebind each partitioned WF slot's expression against the (now
+    // inner-shape) `stmt`.  `LhsRebindVisitor` walks the WF expression;
+    // at `Expr::WindowFunction` it descends into function args +
+    // partition_by + order_by exprs, applying the standard match /
+    // project-as-whole / descend rebind rules to each sub-slot.  The
+    // WF's own function is left as the windowed operation (a windowed
+    // aggregate stays windowed; a ranking function stays a rank fn).
+    // Group-level aggregates and local-column refs inside the WF get
+    // projected into `stmt.fields` (past the user-original slots) and
+    // rebound to `<wrap_alias>.<projected_alias>` for the wrapper.
+    if migrate_wfs {
+        let mut lhs_rebind = LhsRebindVisitor {
+            stmt,
+            stmt_rels: &stmt_rels,
+            wrap_alias: &wrap_alias,
+        };
+        for (_pos, wf_expr, _outer_alias) in &mut wf_slots {
+            lhs_rebind.visit_expr(wf_expr)?;
+        }
+    }
+
     // Take ownership of the inner (the original body, now stripped of
     // {ORDER BY, LIMIT, OFFSET}, with HAVING-subquery conjuncts split out
     // and synthetic projections appended for HAVING / ORDER BY rebinds).
@@ -439,10 +545,15 @@ fn wrap_post_groupby_positions(
     // qualified ref uses the (post-dedup) inner alias from the first
     // `original_field_count` entries of `inner.fields`; the outer `AS` uses
     // the pre-dedup `outer_aliases` snapshot so user-visible duplicates are
-    // preserved.
+    // preserved.  When WFs migrated, the rebound WF expressions are spliced
+    // back at their original positions (via `wf_slots`) so the wrapper's
+    // SELECT-list preserves the user's field ordering.  When no WFs
+    // migrated, `wf_slots` is empty and `build_wrapper_fields` degenerates
+    // to plain projection refs in order.
     let wrapper_fields = build_wrapper_fields(
         &inner.fields[..original_field_count],
         &outer_aliases,
+        wf_slots,
         &wrap_alias,
     );
     let wrapper_where = conjoin_all_dedup(subquery_preds);
@@ -605,6 +716,17 @@ impl<'a, 'ast> VisitorMut<'ast> for SubqueryBodyRebinder<'a> {
 /// Unified top-down LHS/outer-level rebind visitor (Step 1 of
 /// `rebind_predicate_against_inner`).  At each `Expr` node:
 ///
+/// 0. If the node is an `Expr::WindowFunction`, descend into its function
+///    arguments (via `walk_function_expr`, which walks children through
+///    `visit_expr`) and each `partition_by` / `order_by` expression.  Do
+///    NOT treat the WF itself as a candidate for match-and-rebind or
+///    project-as-whole -- the WF's own function is a windowed operation,
+///    not a group-level aggregate; capturing it as an alias would move
+///    computation into the inner and produce wrong-results semantics
+///    (see REA-6724).  This explicit arm avoids relying on the current
+///    `walk_expr` implementation-detail of dispatching WF's own function
+///    via `visit_function_expr` -- the invariant is documented here at
+///    the use site.
 /// 1. Try a structural match against `stmt.fields` -- if found, replace
 ///    with `<wrap_alias>.<existing_alias>` and stop descending.
 /// 2. Otherwise, if the node is an aggregate or a local-column ref, project
@@ -624,6 +746,24 @@ impl<'a, 'ast> VisitorMut<'ast> for LhsRebindVisitor<'a> {
     type Error = ReadySetError;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
+        // 0. Handle Expr::WindowFunction explicitly -- see the doc-comment
+        //    on `LhsRebindVisitor` for the invariant.
+        if let Expr::WindowFunction {
+            function,
+            partition_by,
+            order_by,
+        } = expr
+        {
+            walk_function_expr(self, function)?;
+            for pb in partition_by {
+                self.visit_expr(pb)?;
+            }
+            for (ob, _, _) in order_by {
+                self.visit_expr(ob)?;
+            }
+            return Ok(());
+        }
+
         // 1. Match against existing stmt.fields.
         if let Some(alias) = match_existing_field(expr, &self.stmt.fields) {
             *expr = wrap_column_ref(alias, self.wrap_alias);
@@ -695,26 +835,61 @@ fn match_existing_field(expr: &Expr, fields: &[FieldDefinitionExpr]) -> Option<S
     None
 }
 
-/// Build the wrapper's SELECT-list: `<wrap_alias>.<inner_alias> AS
-/// <outer_alias>` per original inner field.  The inner alias is read
-/// from `original_fields` (post-dedup, unique per-slot); the outer alias
-/// comes from `outer_aliases`, a snapshot taken before dedup that
-/// preserves user-visible duplicates.
+/// Build the wrapper's SELECT-list by iterating through the outer's
+/// original field positions and emitting one entry per position.
+///
+/// Emission rules per position:
+///
+/// - **Non-WF position**: emit `<wrap_alias>.<inner_alias> AS
+///   <outer_alias>` -- a projection ref into the inner's SELECT-list.
+///   `inner_alias` is read from `non_wf_fields` (post-dedup, unique
+///   per-slot); `outer_alias` comes from `non_wf_outer_aliases`, a
+///   snapshot taken before dedup that preserves user-visible
+///   duplicates.
+/// - **WF position**: emit the rebound WF `Expr` `AS <outer_alias>`
+///   directly.  The WF's internal aggregate and GB-key refs have
+///   already been rewritten by `LhsRebindVisitor` to reference
+///   `<wrap_alias>.<projected_alias>`, so the WF gets computed at
+///   wrapper level -- after the wrapper's WHERE filters, preserving
+///   the SQL logical order `HAVING -> WF -> SELECT`.
+///
+/// Degenerate case (no WFs migrated): `wf_slots` is empty, the loop
+/// simply emits projection refs in order, and behavior collapses to
+/// the pre-WF-preserving wrap semantics.  Callers on that path pass
+/// `vec![]` for `wf_slots`.
+///
+/// `wf_slots` MUST be sorted by original position (ascending) so the
+/// front-peek suffices to detect a WF at each iteration.
 fn build_wrapper_fields(
-    original_fields: &[FieldDefinitionExpr],
-    outer_aliases: &[SqlIdentifier],
+    non_wf_fields: &[FieldDefinitionExpr],
+    non_wf_outer_aliases: &[SqlIdentifier],
+    wf_slots: Vec<(usize, Expr, SqlIdentifier)>,
     wrap_alias: &SqlIdentifier,
 ) -> Vec<FieldDefinitionExpr> {
-    original_fields
-        .iter()
-        .zip(outer_aliases)
-        .map(|(fde, outer_alias)| {
-            let (orig_expr, orig_alias) = expect_field_as_expr(fde);
-            let inner_alias = alias_for_expr(orig_expr, orig_alias);
-            FieldDefinitionExpr::Expr {
+    let total = non_wf_fields.len() + wf_slots.len();
+    let mut out = Vec::with_capacity(total);
+    let mut non_wf_idx: usize = 0;
+    let mut wf_iter = wf_slots.into_iter().peekable();
+    for pos in 0..total {
+        // `wf_slots` is sorted by original position, so a front-peek
+        // tells us whether the current position is occupied by a WF.
+        if wf_iter.peek().is_some_and(|(p, _, _)| *p == pos) {
+            let (_pos, expr, outer_alias) = wf_iter.next().expect("peeked");
+            out.push(FieldDefinitionExpr::Expr {
+                expr,
+                alias: Some(outer_alias),
+            });
+        } else {
+            // Non-WF slot -- emit a projection ref into the inner.
+            let inner_fde = &non_wf_fields[non_wf_idx];
+            let (inner_expr, inner_alias_opt) = expect_field_as_expr(inner_fde);
+            let inner_alias = alias_for_expr(inner_expr, inner_alias_opt);
+            out.push(FieldDefinitionExpr::Expr {
                 expr: wrap_column_ref(inner_alias, wrap_alias),
-                alias: Some(outer_alias.clone()),
-            }
-        })
-        .collect()
+                alias: Some(non_wf_outer_aliases[non_wf_idx].clone()),
+            });
+            non_wf_idx += 1;
+        }
+    }
+    out
 }

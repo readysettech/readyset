@@ -2575,6 +2575,20 @@ pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
         unsupported!("Subquery in HAVING outside the supported predicate set");
     }
 
+    // GROUP BY subquery guardrail.  Standard SQL allows subqueries in
+    // GROUP BY (uncorrelated -> single group; correlated -> per-row-
+    // derived key), but no rewrite pass in this pipeline decorrelates
+    // GROUP BY subqueries.  Reject cleanly here rather than letting the
+    // shape drift to MIR lowering with a worse error.
+    if let Some(group_by) = &stmt.group_by
+        && group_by
+            .fields
+            .iter()
+            .any(|f| matches!(f, FieldReference::Expr(e) if contains_select(e)))
+    {
+        unsupported!("Subquery in GROUP BY is not supported");
+    }
+
     let status1 = unnest_subqueries_in_where(stmt, ctx)?;
     let status2 = unnest_subqueries_in_fields(stmt, ctx)?;
     let status3 = unnest_lateral_subqueries(stmt, ctx)?;
