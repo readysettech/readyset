@@ -6496,7 +6496,11 @@ fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text
         let _ = write!(ddl, "{} ", policy.display(dialect));
     }
     if let Some(coalesce) = &opts.coalesce_ms {
-        let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
+        if coalesce.subsec_millis() == 0 {
+            let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
+        } else {
+            let _ = write!(ddl, "COALESCE {} MILLISECONDS ", coalesce.as_millis());
+        }
     }
     match opts.trx_cache_policy {
         TrxCachePolicy::Always => ddl.push_str("ALWAYS "),
@@ -7108,25 +7112,27 @@ mod tests {
 
     #[test]
     fn hint_ddl_coalesce_roundtrip() {
-        let opts = CreateCacheOptions {
-            policy: Some(EvictionPolicy::Ttl {
-                ttl: Duration::from_secs(271),
-            }),
-            coalesce_ms: Some(Duration::from_secs(17)),
-            ..Default::default()
-        };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        for coalesce in [Duration::from_secs(17), Duration::from_millis(250)] {
+            let opts = CreateCacheOptions {
+                policy: Some(EvictionPolicy::Ttl {
+                    ttl: Duration::from_secs(271),
+                }),
+                coalesce_ms: Some(coalesce),
+                ..Default::default()
+            };
+            let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
 
-        // Re-parse the generated DDL — this is the path taken on restart.
-        let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
-        let SqlQuery::CreateCache(stmt) = parsed else {
-            panic!("Expected CreateCache, got: {parsed:?}");
-        };
-        assert_eq!(
-            stmt.coalesce_ms,
-            Some(Duration::from_secs(17)),
-            "Coalesce must survive DDL round-trip"
-        );
+            // Re-parse the generated DDL — this is the path taken on restart.
+            let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+            let SqlQuery::CreateCache(stmt) = parsed else {
+                panic!("Expected CreateCache, got: {parsed:?}");
+            };
+            assert_eq!(
+                stmt.coalesce_ms,
+                Some(coalesce),
+                "Coalesce must survive DDL round-trip: {ddl}"
+            );
+        }
     }
 
     #[test]
