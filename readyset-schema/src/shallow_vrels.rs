@@ -88,6 +88,35 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
 }
 bind_vrel!(shallow_caches, SHALLOW_CACHES_SCHEMA, shallow_caches_read);
 
+const SHALLOW_CACHE_REFRESH_STATS_SCHEMA: &[(&str, DfType)] = &[
+    ("query_id", DfType::DEFAULT_TEXT),
+    ("load_actual_ppm", DfType::UnsignedBigInt),
+    ("load_baseline_ppm", DfType::UnsignedBigInt),
+    ("over_cap", DfType::Bool),
+    ("scheduler_queue_len", DfType::UnsignedBigInt),
+];
+
+fn shallow_cache_refresh_stats_read(ctx: &VrelContext) -> VrelRead {
+    let caches = ctx.shallow.list_caches(None, None);
+    Box::pin(async move {
+        let rows: VrelRows = Box::new(caches.into_iter().map(move |cache| {
+            vec![
+                cache.query_id.to_string().into(),
+                cache.load_actual_ppm.into(),
+                cache.load_baseline_ppm.into(),
+                cache.over_cap.into(),
+                cache.scheduler_queue_len.into(),
+            ]
+        }));
+        Ok(rows)
+    })
+}
+bind_vrel!(
+    shallow_cache_refresh_stats,
+    SHALLOW_CACHE_REFRESH_STATS_SCHEMA,
+    shallow_cache_refresh_stats_read
+);
+
 const SHALLOW_CACHE_ENTRIES_SCHEMA: &[(&str, DfType)] = &[
     ("query_id", DfType::DEFAULT_TEXT),
     ("entry_id", DfType::DEFAULT_TEXT),

@@ -187,8 +187,7 @@ impl AdaptiveState {
         self.over_cap_gauge.set(0.0);
     }
 
-    /// Current (actual, baseline) load sums, for tests.
-    #[cfg(test)]
+    /// Current (actual, baseline) load sums.
     pub(crate) fn load_ppm(&self) -> (u64, u64) {
         (
             self.actual_ppm.load(Ordering::Relaxed),
@@ -319,6 +318,15 @@ pub struct CacheInfo {
     pub trx_cache_policy: TrxCachePolicy,
     pub schedule: bool,
     pub adaptive: bool,
+    /// Current adaptive load in parts-per-million; `None` unless the cache is adaptive.
+    pub load_actual_ppm: Option<u64>,
+    /// Adaptive load at the configured period in parts-per-million; `None` unless the cache
+    /// is adaptive.
+    pub load_baseline_ppm: Option<u64>,
+    /// Whether adaptive load is at or over its cap; `None` unless the cache is adaptive.
+    pub over_cap: Option<bool>,
+    /// Refresh callbacks queued in the scheduler; `None` unless the cache is scheduled.
+    pub scheduler_queue_len: Option<u64>,
 }
 
 /// Information about a specific cached entry (parameter set) within a shallow cache.
@@ -963,6 +971,7 @@ where
     }
 
     pub fn get_info(&self) -> CacheInfo {
+        let load = self.adaptive.as_ref().map(|state| state.load_ppm());
         CacheInfo {
             name: self.name.clone(),
             query_id: self.query_id,
@@ -975,6 +984,10 @@ where
             trx_cache_policy: self.trx_cache_policy,
             schedule: self.is_scheduled(),
             adaptive: self.adaptive.is_some(),
+            load_actual_ppm: load.map(|(actual, _)| actual),
+            load_baseline_ppm: load.map(|(_, baseline)| baseline),
+            over_cap: self.adaptive.as_ref().map(|state| state.over_cap()),
+            scheduler_queue_len: self.scheduler_queue_len(),
         }
     }
 
@@ -988,6 +1001,11 @@ where
 
     pub(crate) fn is_scheduled(&self) -> bool {
         self.scheduler.is_some()
+    }
+
+    fn scheduler_queue_len(&self) -> Option<u64> {
+        self.is_scheduled()
+            .then(|| self.scheduler_queue_len.load(Ordering::Relaxed))
     }
 
     pub(crate) async fn flush(&self) -> Result<(), moka::PredicateError> {

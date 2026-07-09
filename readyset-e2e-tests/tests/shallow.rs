@@ -381,6 +381,26 @@ async fn show_shallow_caches() {
     assert!(*hits >= 1, "expected at least one shallow hit, got {hits}");
     assert!(*misses >= 1, "expected at least one shallow miss, got {misses}");
 
+    // Check the shallow_cache_refresh_stats vrel: this cache is neither adaptive nor
+    // scheduled, so every stat is NULL.
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(String, Option<u64>, Option<u64>, Option<bool>, Option<u64>)> = readyset
+        .query(
+            "SELECT query_id, load_actual_ppm, load_baseline_ppm, over_cap,
+                    scheduler_queue_len
+             FROM readyset.shallow_cache_refresh_stats",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
+
+    let (query_id, load_actual_ppm, load_baseline_ppm, over_cap, scheduler_queue_len) = &rows[0];
+    assert_eq!(query_id, "q_9de6aaf2d6625055");
+    assert_eq!(*load_actual_ppm, None);
+    assert_eq!(*load_baseline_ppm, None);
+    assert_eq!(*over_cap, None);
+    assert_eq!(*scheduler_queue_len, None);
+
     shutdown_tx.shutdown().await;
 }
 
@@ -2493,6 +2513,27 @@ async fn adaptive_refresh_period_adapts() {
     }
     let churned = entry_period(&mut readyset).await;
     assert!(churned < 1000, "period should have shrunk, got {churned}");
+
+    // Load accounting is visible through the refresh stats vrel: the churned entry refreshes
+    // faster than its baseline, and the scheduled cache reports a queue length.
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(Option<u64>, Option<u64>, Option<bool>, Option<u64>)> = readyset
+        .query(
+            "SELECT load_actual_ppm, load_baseline_ppm, over_cap, scheduler_queue_len
+             FROM readyset.shallow_cache_refresh_stats",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let (actual, baseline, over_cap, queue_len) = rows[0];
+    let actual = actual.expect("adaptive cache reports actual load");
+    let baseline = baseline.expect("adaptive cache reports baseline load");
+    assert!(
+        actual >= baseline && baseline > 0,
+        "expected actual >= baseline > 0, got {actual}/{baseline}"
+    );
+    assert!(over_cap.is_some(), "adaptive cache reports over-cap state");
+    assert!(queue_len.is_some(), "scheduled cache reports queue length");
 
     // Once the value settles, refreshes stretch the period back out to the configured one.
     sleep(Duration::from_secs(10)).await;

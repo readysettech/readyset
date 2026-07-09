@@ -1548,15 +1548,30 @@ async fn test_adaptive_load_accounting_balances() {
     refresh_insert(&manager, &query_id, "key", vec!["v0".to_string()]).await;
     assert_eq!(manager.adaptive_load(&query_id), Some((1000, 1000)));
 
+    // CacheInfo reports the same load accounting; the cap (100% extra) is not yet hit.
+    let info = &manager.list_caches(Some(query_id), None)[0];
+    assert_eq!(info.load_actual_ppm, Some(1000));
+    assert_eq!(info.load_baseline_ppm, Some(1000));
+    assert_eq!(info.over_cap, Some(false));
+    assert_eq!(info.scheduler_queue_len, None);
+
     // Shrink to the 500ms floor; the entry now contributes twice its baseline.
     for i in 1..=5 {
         refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
     }
     assert_eq!(manager.adaptive_load(&query_id), Some((2000, 1000)));
 
-    // Flushing evicts the entry, which gives its contributions back.
+    let info = &manager.list_caches(Some(query_id), None)[0];
+    assert_eq!(info.load_actual_ppm, Some(2000));
+    assert_eq!(info.load_baseline_ppm, Some(1000));
+    assert_eq!(info.over_cap, Some(true));
+
+    // Flushing evicts the entry, which gives its contributions back. An empty cache is not
+    // over the cap.
     manager.flush_cache(None, Some(&query_id)).await.unwrap();
     assert_eq!(manager.adaptive_load(&query_id), Some((0, 0)));
+    let info = &manager.list_caches(Some(query_id), None)[0];
+    assert_eq!(info.over_cap, Some(false));
 
     // A refilled key starts fresh and may shrink again.
     let result = manager
