@@ -57,6 +57,14 @@ pub const SHALLOW_ADAPTIVE_BASELINE_LOAD_PPM: &str =
 /// | query_id | The query ID for the adaptive cached query. |
 pub const SHALLOW_ADAPTIVE_OVER_CAP: &str = "readyset_shallow.shallow_adaptive_over_cap";
 
+/// Gauge: Number of refresh callbacks currently queued in a scheduled shallow cache's refresh
+/// scheduler. Dropped caches leave the series at zero rather than removing it.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the scheduled cached query. |
+pub const SHALLOW_SCHEDULER_QUEUE_DEPTH: &str = "readyset_shallow.shallow_scheduler_queue_depth";
+
 /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
 /// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
 pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =

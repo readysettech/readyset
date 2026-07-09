@@ -399,6 +399,10 @@ where
     ddl_req: CacheDDLRequest,
     trx_cache_policy: TrxCachePolicy,
     scheduler: Option<Scheduler<K, V>>,
+    /// Number of callbacks in the scheduler queue, mirrored to a gauge. Mutated only while
+    /// the scheduler mutex is held, so it stays consistent with the queue contents.
+    scheduler_queue_len: AtomicU64,
+    scheduler_queue_gauge: Option<Gauge>,
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     hit_counter: Counter,
     miss_counter: Counter,
@@ -472,6 +476,8 @@ where
         let miss_counter = counter!(metric::SHALLOW_MISS, "query_id" => label.clone());
         let refresh_changed_counter =
             counter!(metric::SHALLOW_REFRESH_CHANGED, "query_id" => label.clone());
+        let scheduler_queue_gauge = schedule
+            .then(|| gauge!(metric::SHALLOW_SCHEDULER_QUEUE_DEPTH, "query_id" => label.clone()));
         let refresh_unchanged_counter =
             counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label);
 
@@ -493,6 +499,8 @@ where
             ddl_req,
             trx_cache_policy,
             scheduler: scheduler.clone(),
+            scheduler_queue_len: AtomicU64::new(0),
+            scheduler_queue_gauge,
             shutdown_tx: std::sync::Mutex::new(shutdown_tx),
             hit_counter,
             miss_counter,
@@ -503,7 +511,8 @@ where
         if let Some(scheduler) = scheduler {
             let weak = Arc::downgrade(&cache);
             let shutdown_rx = shutdown_rx.unwrap();
-            tokio::spawn(Self::scheduler_loop(weak, scheduler, shutdown_rx));
+            let gauge = cache.scheduler_queue_gauge.clone();
+            tokio::spawn(Self::scheduler_loop(weak, scheduler, shutdown_rx, gauge));
         }
 
         cache
@@ -526,6 +535,22 @@ where
         }
     }
 
+    /// Apply a scheduler queue mutation to the maintained length and mirror it to the
+    /// gauge. Takes the locked scheduler so the length cannot drift from the queue.
+    fn scheduler_queue_changed(
+        &self,
+        _sched: &mut RefreshScheduler<K, V>,
+        added: usize,
+        removed: usize,
+    ) {
+        let len = (self.scheduler_queue_len.load(Ordering::Relaxed) + added as u64)
+            .saturating_sub(removed as u64);
+        self.scheduler_queue_len.store(len, Ordering::Relaxed);
+        if let Some(gauge) = &self.scheduler_queue_gauge {
+            gauge.set(len as f64);
+        }
+    }
+
     async fn process_due_callbacks(cache: Arc<Cache<K, V>>, scheduler: &Scheduler<K, V>) {
         let now = Instant::now();
 
@@ -537,11 +562,13 @@ where
                 .map(|(instant, _)| *instant)
                 .collect();
 
-            times
+            let due = times
                 .into_iter()
                 .filter_map(|instant| sched.queue.remove(&instant))
                 .flatten()
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            cache.scheduler_queue_changed(&mut sched, 0, due.len());
+            due
         };
 
         let mut to_reschedule = Vec::new();
@@ -577,6 +604,7 @@ where
         // reduce contention with the miss-path schedule_refresh calls.
         if !to_reschedule.is_empty() || !to_evict.is_empty() {
             let mut sched = scheduler.lock().await;
+            let mut requeued = 0;
             for (deadline, k, version, refresh) in to_reschedule {
                 if sched.active_keys.get(&k) == Some(&version) {
                     sched
@@ -584,8 +612,10 @@ where
                         .entry(deadline)
                         .or_default()
                         .push((k, version, refresh));
+                    requeued += 1;
                 }
             }
+            cache.scheduler_queue_changed(&mut sched, requeued, 0);
             for (key, version) in to_evict {
                 // Note: the stale entry for this key may still exist in the
                 // queue from a previous schedule_refresh call.  It will be
@@ -602,6 +632,7 @@ where
         cache: Weak<Cache<K, V>>,
         scheduler: Scheduler<K, V>,
         mut shutdown_rx: oneshot::Receiver<()>,
+        queue_gauge: Option<Gauge>,
     ) {
         let mut ticker = interval(Duration::from_millis(10));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -618,6 +649,11 @@ where
             };
 
             Self::process_due_callbacks(cache, &scheduler).await;
+        }
+
+        // The cache is going away; report an empty queue rather than the last value.
+        if let Some(gauge) = queue_gauge {
+            gauge.set(0.0);
         }
     }
 
@@ -760,6 +796,7 @@ where
             .entry(Instant::now() + Duration::from_millis(ms))
             .or_default()
             .push((k, version, refresh));
+        self.scheduler_queue_changed(&mut sched, 1, 0);
     }
 
     pub(crate) async fn insert(
@@ -1244,6 +1281,7 @@ mod tests {
             sched.active_keys.contains_key(&key),
             "key should be in the active set"
         );
+        assert_eq!(cache.scheduler_queue_len.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
@@ -1278,6 +1316,73 @@ mod tests {
             total, 2,
             "expected two callbacks (original + re-registered)"
         );
+        assert_eq!(cache.scheduler_queue_len.load(Ordering::Relaxed), 2);
+    }
+
+    /// Verify that the maintained scheduler queue length matches the queue contents
+    /// across the drain and requeue paths of `process_due_callbacks`: a key still in
+    /// the store is requeued at its entry's period, while an evicted key's callback is
+    /// dropped and unregistered. Paused time keeps the background scheduler loop from
+    /// processing callbacks concurrently.
+    #[tokio::test(start_paused = true)]
+    async fn test_scheduler_queue_len_accounting() {
+        let cache: Arc<Cache<Vec<&str>, Vec<&str>>> = new(
+            None,
+            EvictionPolicy::TtlAndPeriod {
+                ttl: Duration::from_secs(20),
+                refresh: Duration::from_secs(10),
+                schedule: true,
+            },
+        );
+        let callback: RequestRefresh<Vec<&str>, Vec<&str>> = Arc::new(|_guard| {});
+
+        let present = vec!["present"];
+        let absent = vec!["absent"];
+        let lookup = cache.get_on_miss(present.clone()).await;
+        assert_matches!(lookup, Lookup::Miss(_));
+        cache
+            .insert(
+                present.clone(),
+                vec![vec!["v"]],
+                QueryMetadata::Test,
+                ZERO_DURATION,
+            )
+            .await;
+        drop(lookup);
+        cache
+            .schedule_refresh(present.clone(), callback.clone())
+            .await;
+        cache
+            .schedule_refresh(absent.clone(), callback.clone())
+            .await;
+
+        let scheduler = cache.scheduler.as_ref().unwrap();
+        {
+            let sched = scheduler.lock().await;
+            let total: usize = sched.queue.values().map(|v| v.len()).sum();
+            assert_eq!(total, 2);
+        }
+        assert_eq!(cache.scheduler_queue_len.load(Ordering::Relaxed), 2);
+
+        // Move both callbacks into the past so the next processing pass drains them.
+        {
+            let mut sched = scheduler.lock().await;
+            let entries: Vec<_> = std::mem::take(&mut sched.queue)
+                .into_values()
+                .flatten()
+                .collect();
+            sched
+                .queue
+                .insert(Instant::now() - Duration::from_secs(1), entries);
+        }
+        Cache::process_due_callbacks(Arc::clone(&cache), scheduler).await;
+
+        let sched = scheduler.lock().await;
+        let total: usize = sched.queue.values().map(|v| v.len()).sum();
+        assert_eq!(total, 1, "only the present key should be requeued");
+        assert!(sched.active_keys.contains_key(&present));
+        assert!(!sched.active_keys.contains_key(&absent));
+        assert_eq!(cache.scheduler_queue_len.load(Ordering::Relaxed), 1);
     }
 
     /// Verify that `process_due_callbacks` drops a stale callback whose

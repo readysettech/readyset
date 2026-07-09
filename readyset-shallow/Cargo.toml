@@ -36,6 +36,7 @@ proptest = { workspace = true }
 rand = { workspace = true }
 readyset-client = { path = "../readyset-client", features = ["test-util"] }
 readyset-data = { path = "../readyset-data" }
+tokio = { workspace = true, features = ["test-util"] }
 
 [[bench]]
 name = "cache_hit"
