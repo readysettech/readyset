@@ -37,7 +37,7 @@ where
         b.iter(|| black_box(sqlparser::parser::Parser::parse_sql(&dialect, query).unwrap()));
     };
 
-    c.benchmark_group(format!("single_select_statements-sqlparser-{:?}", &dialect))
+    c.benchmark_group(format!("single_select_statements-sqlparser-{dialect:?}"))
         .bench_with_input("plain", "select * from t where id = ?", run_benchmark)
         .bench_with_input(
             "namespaced",

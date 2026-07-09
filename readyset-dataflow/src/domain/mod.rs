@@ -2341,8 +2341,7 @@ impl Domain {
                     let node_name = node.name();
                     let base_name = format!(
                         "{}-{}{}-{}",
-                        &self
-                            .persistence_parameters
+                        self.persistence_parameters
                             .db_filename_prefix
                             .replace('-', "_"),
                         match &node_name.schema {

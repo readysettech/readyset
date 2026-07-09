@@ -147,7 +147,7 @@ impl PacketFilter {
                 // We iterate through the keys that must be evicted, as
                 // instructed by the packet.
                 for k in keys {
-                    for (_, allowlisted_keys) in node_keys.keys.iter_mut() {
+                    for allowlisted_keys in node_keys.keys.values_mut() {
                         allowlisted_keys.remove(k);
                     }
                 }

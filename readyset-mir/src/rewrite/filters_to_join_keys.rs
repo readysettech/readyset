@@ -340,7 +340,7 @@ pub(crate) fn convert_filters_to_join_keys(
                     }
                 }
 
-                for (_, projections) in projections_to_inject.iter() {
+                for projections in projections_to_inject.values() {
                     project.extend(
                         projections
                             .iter()

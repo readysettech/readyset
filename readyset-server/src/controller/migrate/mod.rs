@@ -990,7 +990,7 @@ fn plan_add_nodes(
         // we may also already have swapped the parents of some node *to* `src`. in
         // swapped0. we want to change that mapping as well, since lookups in swapped
         // aren't recursive.
-        for (_, instead0) in swapped0.iter_mut() {
+        for instead0 in swapped0.values_mut() {
             if *instead0 == src {
                 *instead0 = instead;
             }

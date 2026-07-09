@@ -1376,7 +1376,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
         )?;
     }
 
-    for (_, ces) in local_predicates.iter_mut() {
+    for ces in local_predicates.values_mut() {
         *ces = split_conjunctions(ces.iter());
     }
 

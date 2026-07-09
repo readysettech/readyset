@@ -155,7 +155,7 @@ pub fn dump_stats() -> Result<String, Error> {
     memory_stats.push_str("Memory stats by thread:\n");
 
     let thread_memory_map = THREAD_MEMORY_MAP.lock().unwrap();
-    for (_, accessor) in thread_memory_map.iter() {
+    for accessor in thread_memory_map.values() {
         let alloc = accessor.get_allocated();
         let dealloc = accessor.get_deallocated();
         memory_stats.push_str(

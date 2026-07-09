@@ -271,7 +271,7 @@ impl BenchmarkRunner {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut benchmark_cmd_runner = BenchmarkRunner::parse();
-    println!("Benchmark cli options: {:?}", &benchmark_cmd_runner);
+    println!("Benchmark cli options: {benchmark_cmd_runner:?}");
     let _ = benchmark_cmd_runner
         .tracing
         .init("benchmarks", "benchmark-deployment")?;

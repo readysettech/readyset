@@ -154,7 +154,7 @@ where
     U: UpstreamDatabase + Send + Sync + 'static,
 {
     let s = state.health_reporter.health().state;
-    let body = format!("Adapter is in {} state", &s);
+    let body = format!("Adapter is in {s} state");
     let status = match s {
         HealthState::Healthy | HealthState::ShuttingDown => StatusCode::OK,
         _ => StatusCode::INTERNAL_SERVER_ERROR,

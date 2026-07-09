@@ -111,7 +111,7 @@ impl CreateSchema {
     }
 
     fn anonymize_tables(&mut self, anonymizer: &mut Anonymizer) {
-        for (_, table) in self.table_creates.iter_mut() {
+        for table in self.table_creates.values_mut() {
             tracing::trace!("create table: {table:?}");
             if let Dialect::PostgreSQL = self.dialect {
                 // HACK: strip out the backticks from these since they aren't valid in PostgreSQL
@@ -134,7 +134,7 @@ impl CreateSchema {
     }
 
     fn anonymize_views(&mut self, anonymizer: &mut Anonymizer) {
-        for (_, view) in self.view_creates.iter_mut() {
+        for view in self.view_creates.values_mut() {
             tracing::trace!("create view: {view:?}");
             *view = match readyset_sql_parsing::parse_create_view_with_config(
                 self.parsing_preset,

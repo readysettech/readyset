@@ -3048,7 +3048,7 @@ async fn postgresql_toast_update_unkeyed() {
              ALTER TABLE t REPLICA IDENTITY FULL;
              CREATE VIEW v AS SELECT * FROM t;
              INSERT INTO t VALUES (0, '{}');",
-            &toast
+            toast
         ))
         .await
         .unwrap();

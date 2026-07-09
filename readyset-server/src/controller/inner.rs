@@ -439,7 +439,7 @@ impl Leader {
                 let (period, limit) = bincode::deserialize(&body)?;
                 let res: Result<(), ReadySetError> = {
                     let ds = self.dataflow_state_handle.read().await;
-                    for (_, worker) in ds.workers.iter() {
+                    for worker in ds.workers.values() {
                         worker.set_memory_limit(period, limit).await?;
                     }
                     Ok(())

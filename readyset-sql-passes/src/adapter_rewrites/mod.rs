@@ -739,7 +739,7 @@ impl ShallowQueryParameters {
     ) -> ReadySetResult<String> {
         let merged = match self.merge_params(user_params)? {
             Some(m) => m,
-            None => return Ok(format!("{}", &**query)),
+            None => return Ok(format!("{}", **query)),
         };
         self.literalize_from_merged(query, &merged)
     }

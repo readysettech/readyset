@@ -1201,7 +1201,7 @@ where
                 TelemetryEvent::AdapterStart,
                 TelemetryBuilder::new()
                     .adapter_version(option_env!("CARGO_PKG_VERSION").unwrap_or_default())
-                    .db_backend(format!("{:?}", &self.database_type).to_lowercase())
+                    .db_backend(format!("{:?}", self.database_type).to_lowercase())
                     .build(),
             )
             .map_err(|error| warn!(%error, "Failed to initialize telemetry sender"));

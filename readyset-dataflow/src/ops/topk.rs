@@ -821,7 +821,7 @@ mod tests {
         assert!(
             delta.iter().any(|r| r == &(r10.clone(), true).into()),
             "a = {:?} does not contain ({:?}, true)",
-            &delta,
+            delta,
             r10
         );
     }
@@ -860,7 +860,7 @@ mod tests {
         assert!(
             delta.iter().any(|r| r == &(r12.clone(), true).into()),
             "a = {:?} does not contain ({:?}, true)",
-            &delta,
+            delta,
             r12
         );
     }

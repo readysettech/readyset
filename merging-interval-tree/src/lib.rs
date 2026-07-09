@@ -1118,8 +1118,8 @@ mod tests {
 
         assert!(tree.contains_point(b"a".as_slice()));
         assert!(tree.covers_interval::<[u8], _>(&(
-            Bound::Included(&[b'a'][..]),
-            Bound::Excluded(&[b'b'][..])
+            Bound::Included(b"a".as_slice()),
+            Bound::Excluded(b"b".as_slice())
         )));
         assert_invariant(&tree);
     }

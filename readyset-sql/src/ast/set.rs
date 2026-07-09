@@ -498,7 +498,7 @@ pub struct SetNames {
 
 impl fmt::Display for SetNames {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NAMES '{}'", &self.charset)?;
+        write!(f, "NAMES '{}'", self.charset)?;
         if let Some(collation) = self.collation.as_ref() {
             write!(f, " COLLATE '{collation}'")?;
         }

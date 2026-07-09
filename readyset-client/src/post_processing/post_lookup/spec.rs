@@ -331,7 +331,7 @@ impl<Column> PostLookupAggregate<Column> {
                 PostLookupAggregateFunction::Sum => "Σ",
                 PostLookupAggregateFunction::StringAgg { .. } => "StringAgg",
             },
-            &self.column
+            self.column
         )
     }
 }
