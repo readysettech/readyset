@@ -14,7 +14,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tokio::sync::{Mutex, oneshot, watch};
 use tokio::time::{interval, timeout};
 
-use metrics::{Counter, Gauge, counter, gauge};
+use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
@@ -408,6 +408,9 @@ where
     miss_counter: Counter,
     refresh_changed_counter: Counter,
     refresh_unchanged_counter: Counter,
+    coalesce_wait_histogram: Histogram,
+    coalesce_resolved_counter: Counter,
+    coalesce_timeout_counter: Counter,
 }
 
 impl<K, V> Debug for Cache<K, V>
@@ -479,7 +482,13 @@ where
         let scheduler_queue_gauge = schedule
             .then(|| gauge!(metric::SHALLOW_SCHEDULER_QUEUE_DEPTH, "query_id" => label.clone()));
         let refresh_unchanged_counter =
-            counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label);
+            counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label.clone());
+        let coalesce_wait_histogram =
+            histogram!(metric::SHALLOW_COALESCE_WAIT_TIME, "query_id" => label.clone());
+        let coalesce_resolved_counter =
+            counter!(metric::SHALLOW_COALESCE_RESOLVED, "query_id" => label.clone());
+        let coalesce_timeout_counter =
+            counter!(metric::SHALLOW_COALESCE_TIMEOUT, "query_id" => label);
 
         let cache = Arc::new(Self {
             id,
@@ -506,6 +515,9 @@ where
             miss_counter,
             refresh_changed_counter,
             refresh_unchanged_counter,
+            coalesce_wait_histogram,
+            coalesce_resolved_counter,
+            coalesce_timeout_counter,
         });
 
         if let Some(scheduler) = scheduler {
@@ -893,7 +905,15 @@ where
         let CacheEntry::Loading(stub) = &*entry else {
             return;
         };
-        let _ = timeout(wait, stub.done.clone().changed()).await;
+        let start = Instant::now();
+        let result = timeout(wait, stub.done.clone().changed()).await;
+        self.coalesce_wait_histogram
+            .record(start.elapsed().as_micros() as f64);
+        // A dropped producer counts as resolved: the wait ended before the deadline.
+        match result {
+            Ok(_) => self.coalesce_resolved_counter.increment(1),
+            Err(_) => self.coalesce_timeout_counter.increment(1),
+        }
     }
 
     /// Create an insert guard and associated cache stub.

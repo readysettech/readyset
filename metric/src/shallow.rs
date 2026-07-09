@@ -65,6 +65,29 @@ pub const SHALLOW_ADAPTIVE_OVER_CAP: &str = "readyset_shallow.shallow_adaptive_o
 /// | query_id | The query ID for the scheduled cached query. |
 pub const SHALLOW_SCHEDULER_QUEUE_DEPTH: &str = "readyset_shallow.shallow_scheduler_queue_depth";
 
+/// Histogram: The amount of time in microseconds a shallow cache miss spent waiting for an
+/// in-flight fill of the same key. Only recorded when a wait actually occurred.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_WAIT_TIME: &str = "readyset_shallow.shallow_coalesce_wait_time_us";
+
+/// Counter: Number of coalesce waits that ended before the deadline, either because the
+/// in-flight fill completed or because its producer went away.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_RESOLVED: &str = "readyset_shallow.shallow_coalesce_resolved";
+
+/// Counter: Number of coalesce waits that reached the deadline with the fill still in flight.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query. |
+pub const SHALLOW_COALESCE_TIMEOUT: &str = "readyset_shallow.shallow_coalesce_timeout";
+
 /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
 /// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
 pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =
