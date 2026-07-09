@@ -196,6 +196,7 @@ where
             Arc::new(AdaptiveState::new(
                 policy.refresh_ms(),
                 self.adaptive_max_extra_load_percent,
+                query_id,
             ))
         });
         if let Some(state) = &adaptive_state {
@@ -255,7 +256,9 @@ where
         self.query_ids.pin().remove(cache.query_id());
 
         guard.remove(&id);
-        self.adaptive_states.pin().remove(&id);
+        if let Some(state) = self.adaptive_states.pin().remove(&id) {
+            state.zero_gauges();
+        }
 
         info!("dropped shallow cache {display_name}");
         Ok(())
@@ -274,7 +277,11 @@ where
         caches.clear();
         self.names.pin().clear();
         self.query_ids.pin().clear();
-        self.adaptive_states.pin().clear();
+        let states = self.adaptive_states.pin();
+        for state in states.values() {
+            state.zero_gauges();
+        }
+        states.clear();
     }
 
     /// Flush a single shallow cache by name or query_id: clears cached entries

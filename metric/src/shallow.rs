@@ -28,6 +28,35 @@ pub const SHALLOW_REFRESH_UNCHANGED: &str = "readyset_shallow.shallow_refresh_un
 /// | query_id | The query ID for the cached query being refreshed. |
 pub const SHALLOW_REFRESH_QUERY_TIME: &str = "readyset_shallow.shallow_refresh_query_time_us";
 
+/// Gauge: Total refresh load an adaptive cache currently sends upstream, in parts-per-million of
+/// upstream execution time per wall time, summed over the cache's entries at their current
+/// refresh periods. Dropped caches leave the series at zero rather than removing it.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the adaptive cached query. |
+pub const SHALLOW_ADAPTIVE_ACTUAL_LOAD_PPM: &str =
+    "readyset_shallow.shallow_adaptive_actual_load_ppm";
+
+/// Gauge: Refresh load an adaptive cache would send upstream if every entry refreshed at the
+/// configured period, in parts-per-million of upstream execution time per wall time. Dropped
+/// caches leave the series at zero rather than removing it.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the adaptive cached query. |
+pub const SHALLOW_ADAPTIVE_BASELINE_LOAD_PPM: &str =
+    "readyset_shallow.shallow_adaptive_baseline_load_ppm";
+
+/// Gauge: 1 when an adaptive cache's actual refresh load is at or over its cap of allowed extra
+/// load beyond the baseline, 0 otherwise. Dropped caches leave the series at zero rather than
+/// removing it.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the adaptive cached query. |
+pub const SHALLOW_ADAPTIVE_OVER_CAP: &str = "readyset_shallow.shallow_adaptive_over_cap";
+
 /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
 /// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
 pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =

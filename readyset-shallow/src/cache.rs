@@ -14,7 +14,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tokio::sync::{Mutex, oneshot, watch};
 use tokio::time::{interval, timeout};
 
-use metrics::{Counter, counter};
+use metrics::{Counter, Gauge, counter, gauge};
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_sql::ast::{
@@ -83,21 +83,40 @@ type Scheduler<K, V> = Arc<Mutex<RefreshScheduler<K, V>>>;
 ///
 /// Entries add their contributions at write-back; the store's eviction listener subtracts
 /// them on removal, including the replacement performed by every refresh overwrite.
-#[derive(Debug)]
 pub(crate) struct AdaptiveState {
     refresh_ms: u64,
     max_extra_load_percent: u64,
     actual_ppm: AtomicU64,
     baseline_ppm: AtomicU64,
+    actual_gauge: Gauge,
+    baseline_gauge: Gauge,
+    over_cap_gauge: Gauge,
+}
+
+impl Debug for AdaptiveState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdaptiveState")
+            .field("refresh_ms", &self.refresh_ms)
+            .field("max_extra_load_percent", &self.max_extra_load_percent)
+            .field("actual_ppm", &self.actual_ppm)
+            .field("baseline_ppm", &self.baseline_ppm)
+            .finish_non_exhaustive()
+    }
 }
 
 impl AdaptiveState {
-    pub(crate) fn new(refresh_ms: u64, max_extra_load_percent: u64) -> Self {
+    pub(crate) fn new(refresh_ms: u64, max_extra_load_percent: u64, query_id: QueryId) -> Self {
+        let label = query_id.to_string();
         Self {
             refresh_ms: refresh_ms.max(1),
             max_extra_load_percent,
             actual_ppm: AtomicU64::new(0),
             baseline_ppm: AtomicU64::new(0),
+            actual_gauge: gauge!(metric::SHALLOW_ADAPTIVE_ACTUAL_LOAD_PPM,
+                "query_id" => label.clone()),
+            baseline_gauge: gauge!(metric::SHALLOW_ADAPTIVE_BASELINE_LOAD_PPM,
+                "query_id" => label.clone()),
+            over_cap_gauge: gauge!(metric::SHALLOW_ADAPTIVE_OVER_CAP, "query_id" => label),
         }
     }
 
@@ -115,8 +134,12 @@ impl AdaptiveState {
 
     pub(crate) fn add<V>(&self, values: &CacheValues<V>) {
         let (actual, baseline) = self.contributions(values);
-        self.actual_ppm.fetch_add(actual, Ordering::Relaxed);
-        self.baseline_ppm.fetch_add(baseline, Ordering::Relaxed);
+        let prev_actual = self.actual_ppm.fetch_add(actual, Ordering::Relaxed);
+        let prev_baseline = self.baseline_ppm.fetch_add(baseline, Ordering::Relaxed);
+        self.set_gauges(
+            prev_actual.saturating_add(actual),
+            prev_baseline.saturating_add(baseline),
+        );
     }
 
     pub(crate) fn remove<V>(&self, values: &CacheValues<V>) {
@@ -144,6 +167,24 @@ impl AdaptiveState {
             baseline,
             "Shallow adaptive baseline load subtraction does not underflow"
         );
+        self.set_gauges(
+            prev_actual.saturating_sub(actual),
+            prev_baseline.saturating_sub(baseline),
+        );
+    }
+
+    fn set_gauges(&self, actual: u64, baseline: u64) {
+        self.actual_gauge.set(actual as f64);
+        self.baseline_gauge.set(baseline as f64);
+        self.over_cap_gauge.set(self.over_cap() as u64 as f64);
+    }
+
+    /// Reset the exported gauges when the cache is dropped, so a dropped cache's series
+    /// read zero rather than holding their last values.
+    pub(crate) fn zero_gauges(&self) {
+        self.actual_gauge.set(0.0);
+        self.baseline_gauge.set(0.0);
+        self.over_cap_gauge.set(0.0);
     }
 
     /// Current (actual, baseline) load sums, for tests.
