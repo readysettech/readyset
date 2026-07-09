@@ -540,6 +540,26 @@ fn wrap_post_groupby_positions(
     // is semantically equivalent to HAVING-then-DISTINCT in the original.
     let was_distinct = mem::replace(&mut inner.distinct, false);
 
+    // Lift LATERAL from inner to wrapper.  The wrapper takes the pre-wrap
+    // statement's syntactic position; if that position was LATERAL (i.e.,
+    // the pre-wrap statement is a `LATERAL (...)` FROM subquery of an
+    // outer scope), the wrapper inherits LATERAL so the outer's correlation
+    // resolution still works.  The inner, now a plain derived table inside
+    // the wrapper's own FROM, is not at a LATERAL position.
+    let was_lateral = mem::replace(&mut inner.lateral, false);
+
+    // Metadata invariant: nothing in the current pipeline populates
+    // `SelectMetadata` before this pass (`collapse_where_in` and every MIR
+    // -side `CollapsedWhereIn` set run downstream).  Enforcing empty at the
+    // wrap boundary means any future pre-NSP metadata-setter tripped here
+    // MUST explicitly decide wrapper vs. inner placement -- silently
+    // defaulting either way would risk mis-attributing a client-level
+    // annotation to a derived subquery, or vice versa.
+    invariant!(
+        inner.metadata.is_empty(),
+        "normalize_subquery_positions wrap expects empty metadata at entry",
+    );
+
     // Build the wrapper: SELECT <wrap_alias>.<inner_alias> AS <outer_alias>,
     // ... FROM (inner) AS <wrap_alias> WHERE <moved preds AND-folded>.  The
     // qualified ref uses the (post-dedup) inner alias from the first
@@ -558,18 +578,27 @@ fn wrap_post_groupby_positions(
     );
     let wrapper_where = conjoin_all_dedup(subquery_preds);
 
+    // Enumerate every SelectStatement field explicitly.  No `..Default::default()`
+    // -- adding a new field to `SelectStatement` in the future must force a
+    // compile error here so the placement (wrapper vs. inner) is decided
+    // deliberately, not silently defaulted.
     *stmt = SelectStatement {
-        distinct: was_distinct,
+        ctes: vec![],           // invariant: no CTEs survive validate_pipeline_invariants
+        distinct: was_distinct, // lifted from inner (client-visible level)
+        lateral: was_lateral,   // lifted from inner (wrapper takes pre-wrap syntactic position)
         fields: wrapper_fields,
         tables: vec![TableExpr {
             inner: TableExprInner::Subquery(Box::new(inner)),
             alias: Some(wrap_alias),
             column_aliases: vec![],
         }],
-        where_clause: wrapper_where,
-        order: wrapper_order,
+        join: vec![],                // single-DT FROM
+        where_clause: wrapper_where, // moved HAVING subquery predicates
+        group_by: None,              // aggregation happens in inner
+        having: None,                // moved out (or CSE'd) upstream
+        order: wrapper_order,        // migrated ORDER BY, or None
         limit_clause: saved_limit_clause,
-        ..Default::default()
+        metadata: vec![], // invariant-checked empty at entry
     };
 
     Ok(true)

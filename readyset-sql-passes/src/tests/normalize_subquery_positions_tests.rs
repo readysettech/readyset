@@ -1,6 +1,6 @@
 //! Tests for `normalize_subquery_positions`.  Stage 1 focuses on HAVING wrap.
 
-use readyset_sql::ast::{FieldDefinitionExpr, SelectStatement, SqlQuery};
+use readyset_sql::ast::{FieldDefinitionExpr, SelectMetadata, SelectStatement, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
 
@@ -980,6 +980,77 @@ fn having_alias_ref_without_outer_aggregation_still_wraps() {
     assert!(
         wrap_fired_at(&stmt),
         "wrap must fire for HAVING with no outer aggregation"
+    );
+}
+
+#[test]
+fn wrap_lifts_distinct_to_wrapper() {
+    // Regression guard for the wrap boundary: DISTINCT must land on the
+    // wrapper (client-visible outermost post-wrap), not on the inner.
+    // The inner's SELECT-list carries synthetic projections beyond the
+    // user-original fields; running DISTINCT there would dedupe on the
+    // widened tuple, admitting rows the original semantics collapse.
+    let stmt = normalize(
+        "SELECT DISTINCT a.x, (SELECT max(o.v) FROM outer_t AS o) AS T1 \
+         FROM t AS a \
+         GROUP BY a.x \
+         HAVING (SELECT max(o.v) FROM outer_t AS o) > 0 \
+            AND count(*) > (SELECT count(*) FROM other_t)",
+    );
+
+    assert!(
+        wrap_fired_at(&stmt),
+        "wrap should fire for surviving HAVING subquery"
+    );
+    assert!(stmt.distinct, "wrapper must carry the pre-wrap DISTINCT");
+
+    let inner = first_derived_table_inner(&stmt).expect("wrap inner SELECT exists");
+    assert!(!inner.distinct, "inner must not duplicate wrapper DISTINCT");
+}
+
+#[test]
+fn wrap_lifts_lateral_to_wrapper() {
+    // NSP fires bottom-up.  When the statement being wrapped is a LATERAL
+    // FROM subquery of some outer scope, the wrapper takes the pre-wrap
+    // syntactic position and must inherit LATERAL so correlation
+    // resolution in the outer scope still resolves.  The inner, now a
+    // plain nested derived table inside the wrapper's own FROM, must
+    // not be LATERAL.
+    let mut stmt = parse(
+        "SELECT a.x, count(*) AS cnt FROM t AS a \
+         GROUP BY a.x \
+         HAVING count(*) > (SELECT count(*) FROM other_t)",
+    );
+    stmt.lateral = true;
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+
+    assert!(wrap_fired_at(&stmt), "wrap should fire");
+    assert!(stmt.lateral, "wrapper must carry the pre-wrap LATERAL");
+
+    let inner = first_derived_table_inner(&stmt).expect("wrap inner SELECT exists");
+    assert!(!inner.lateral, "inner must not duplicate wrapper LATERAL");
+}
+
+#[test]
+fn wrap_rejects_pre_populated_metadata() {
+    // Pipeline invariant: no pass before `normalize_subquery_positions`
+    // populates `SelectStatement::metadata` (`collapse_where_in` and every
+    // MIR-side `CollapsedWhereIn` set run downstream).  If a future pre-NSP
+    // pass ever sets metadata, the wrap trips so the author must
+    // explicitly decide wrapper vs. inner placement in the wrap.
+    let mut stmt = parse(
+        "SELECT a.x, count(*) AS cnt FROM t AS a \
+         GROUP BY a.x \
+         HAVING count(*) > (SELECT count(*) FROM other_t)",
+    );
+    stmt.metadata = vec![SelectMetadata::CollapsedWhereIn];
+    let err = stmt
+        .normalize_subquery_positions()
+        .expect_err("wrap must reject pre-populated metadata");
+    assert!(
+        err.to_string().contains("expects empty metadata at entry"),
+        "unexpected error: {err}",
     );
 }
 
