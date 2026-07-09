@@ -88,6 +88,19 @@ pub const SHALLOW_COALESCE_RESOLVED: &str = "readyset_shallow.shallow_coalesce_r
 /// | query_id | The query ID for the cached query. |
 pub const SHALLOW_COALESCE_TIMEOUT: &str = "readyset_shallow.shallow_coalesce_timeout";
 
+/// Gauge: Number of live workers in the shallow refresh pool. The pool is shared across all
+/// shallow caches.
+pub const SHALLOW_REFRESH_POOL_WORKERS: &str = "readyset_shallow.shallow_refresh_pool_workers";
+
+/// Gauge: Number of shallow refresh pool workers currently idle. The pool is shared across all
+/// shallow caches.
+pub const SHALLOW_REFRESH_POOL_IDLE_WORKERS: &str =
+    "readyset_shallow.shallow_refresh_pool_idle_workers";
+
+/// Gauge: Number of refresh requests sitting in shallow refresh pool worker channels, updated as
+/// requests are sent and workers finish. The pool is shared across all shallow caches.
+pub const SHALLOW_REFRESH_POOL_QUEUED: &str = "readyset_shallow.shallow_refresh_pool_queued";
+
 /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
 /// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
 pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =

@@ -3,8 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use database_utils::UpstreamConfig;
-use metric::{SHALLOW_REFRESH, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED};
-use metrics::{counter, histogram};
+use metric::{
+    SHALLOW_REFRESH, SHALLOW_REFRESH_POOL_IDLE_WORKERS, SHALLOW_REFRESH_POOL_QUEUED,
+    SHALLOW_REFRESH_POOL_WORKERS, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
+};
+use metrics::{Gauge, counter, gauge, histogram};
 use readyset_client::query::QueryId;
 use readyset_data::DfValue;
 use readyset_shallow::CacheInsertGuard;
@@ -48,6 +51,9 @@ pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
     upstream_config: Arc<RwLock<UpstreamConfig>>,
     rt: tokio::runtime::Handle,
     worker_limit: usize,
+    workers_gauge: Gauge,
+    idle_gauge: Gauge,
+    queued_gauge: Gauge,
 }
 
 type WorkerSender<DB> = Sender<
@@ -82,7 +88,24 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             upstream_config,
             rt: rt.clone(),
             worker_limit,
+            workers_gauge: gauge!(SHALLOW_REFRESH_POOL_WORKERS),
+            idle_gauge: gauge!(SHALLOW_REFRESH_POOL_IDLE_WORKERS),
+            queued_gauge: gauge!(SHALLOW_REFRESH_POOL_QUEUED),
         })
+    }
+
+    /// Refresh the pool gauges from the locked pool state.
+    fn update_gauges(&self, inner: &PoolInner<DB>) {
+        let (live, queued) = inner
+            .workers
+            .iter()
+            .flatten()
+            .fold((0usize, 0usize), |(live, queued), tx| {
+                (live + 1, queued + (tx.max_capacity() - tx.capacity()))
+            });
+        self.workers_gauge.set(live as f64);
+        self.idle_gauge.set(inner.idle_stack.len() as f64);
+        self.queued_gauge.set(queued as f64);
     }
 
     /// Round-robin among all active workers. Returns the request back if all channels are full.
@@ -197,6 +220,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 // Round-robin among all active workers
                 if let Some(_req) = self.try_send_round_robin(&mut inner, req) {
                     // All channels full, drop request
+                    self.update_gauges(&inner);
                     counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
                     rate_limit(true, ADAPTER_SHALLOW_REFRESH_SEND_REQUEST, || {
                         warn!("All shallow refresh workers busy, dropping request");
@@ -205,6 +229,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             }
         }
+        self.update_gauges(&inner);
 
         counter!(SHALLOW_REFRESH, "query_id" => query_id.to_string()).increment(1);
     }
@@ -220,14 +245,26 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         });
     }
 
-    async fn mark_idle(pool: &Arc<Self>, idx: usize) {
-        pool.inner.lock().await.idle_stack.push(idx);
+    async fn mark_idle(
+        pool: &Arc<Self>,
+        rx: &Receiver<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
+        idx: usize,
+    ) {
+        let mut inner = pool.inner.lock().await;
+
+        // The `is_empty` check is racy, so we have to dedupe the ids as well.  This is just a
+        // best effort attempt to keep the stack in sync.
+        if rx.is_empty() && !inner.idle_stack.contains(&idx) {
+            inner.idle_stack.push(idx);
+        }
+        pool.update_gauges(&inner);
     }
 
     async fn remove_worker(pool: &Arc<Self>, idx: usize) {
         let mut inner = pool.inner.lock().await;
         inner.workers[idx] = None;
         inner.idle_stack.retain(|&i| i != idx);
+        pool.update_gauges(&inner);
     }
 
     async fn worker(
@@ -268,14 +305,14 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                                 "Failed to create upstream connection for shallow refresh",
                             )
                         });
-                        Self::mark_idle(&pool, idx).await;
+                        Self::mark_idle(&pool, &rx, idx).await;
                         continue;
                     }
                 }
             }
 
             let Some(ref mut conn) = upstream else {
-                Self::mark_idle(&pool, idx).await;
+                Self::mark_idle(&pool, &rx, idx).await;
                 continue;
             };
 
@@ -298,7 +335,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                         )
                     });
                     reconnect = true;
-                    Self::mark_idle(&pool, idx).await;
+                    Self::mark_idle(&pool, &rx, idx).await;
                     continue;
                 }
             }
@@ -328,7 +365,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                         )
                     });
                     reconnect = true;
-                    Self::mark_idle(&pool, idx).await;
+                    Self::mark_idle(&pool, &rx, idx).await;
                     continue;
                 }
             };
@@ -343,7 +380,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 });
             }
 
-            Self::mark_idle(&pool, idx).await;
+            Self::mark_idle(&pool, &rx, idx).await;
         }
 
         Self::remove_worker(&pool, idx).await;
