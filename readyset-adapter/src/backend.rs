@@ -117,7 +117,7 @@ use readyset_sql::ast::{
     SelectStatement, SetStatement, ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery,
     StatementIdentifier, TrxCachePolicy, UseStatement,
 };
-use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
@@ -1024,6 +1024,24 @@ fn parse_shallow_query(
     }
 }
 
+/// Derives the Readyset AST from a sqlparser AST retained by the shallow parse, avoiding a
+/// second parse of the query text. Callers must gate retaining the AST on
+/// [`BackendSettings::retain_shallow_ast`]. Falls back to [`parse_query`] when no AST was
+/// retained or the conversion fails, since a full parse handles constructs the conversion
+/// does not.
+fn convert_or_parse_query(
+    settings: &BackendSettings,
+    shallow_ast: Option<sqlparser::ast::Query>,
+    query: &str,
+) -> ReadySetResult<SqlQuery> {
+    if let Some(ast) = shallow_ast
+        && let Ok(parsed) = SqlQuery::try_from_dialect(ast, settings.dialect)
+    {
+        return Ok(parsed);
+    }
+    parse_query(settings, query)
+}
+
 pub struct Backend<DB, Handler>
 where
     DB: UpstreamDatabase,
@@ -1565,6 +1583,18 @@ struct BackendSettings {
     /// received will instead return an error prompting the user to use Readyset cloud to manage
     /// their caches.
     allow_cache_ddl: bool,
+}
+
+impl BackendSettings {
+    /// Whether to keep a copy of the sqlparser AST from a successful shallow parse so that when
+    /// the shallow path declines, the Readyset AST can be derived by conversion instead of a
+    /// second text parse. Requires a parsing preset for which the conversion is equivalent to a
+    /// full parse, and a cache mode where deep caching is in play: in shallow-only mode the
+    /// fall-through is already a single sqlparser parse, which doesn't justify taxing the
+    /// shallow hit path with an AST clone.
+    fn retain_shallow_ast(&self) -> bool {
+        self.parsing_preset.prefers_sqlparser_ast() && !self.cache_mode.is_shallow()
+    }
 }
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
@@ -2352,29 +2382,19 @@ where
         query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<(PrepareMeta, bool)> {
-        let (parsed, (shallow_parsed, hint)) = match self.state.parsed_query_cache.get(query) {
-            Some(cached_query) => {
-                let _t = event.start_parse_timer();
-                let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
-                (Ok(cached_query.clone()), (shallow_parsed, hint))
-            }
-            None => {
-                let (parsed, (shallow_parsed, hint)) = {
-                    let _t = event.start_parse_timer();
-                    let parsed = parse_query(&self.settings, query);
-                    let (shallow_parsed, hint) = parse_shallow_query(&self.settings, query);
-                    (parsed, (shallow_parsed, hint))
-                };
-                if let Ok(parsed) = &parsed {
-                    self.state
-                        .parsed_query_cache
-                        .put(query.to_string(), parsed.clone());
-                }
-                (parsed, (shallow_parsed, hint))
-            }
+        let (shallow_parsed, hint) = {
+            let _t = event.start_parse_timer();
+            parse_shallow_query(&self.settings, query)
         };
 
         let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
+
+        // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so the
+        // fall-through below can derive the Readyset AST without a second text parse.
+        let deep_ast = match &shallow_parsed {
+            Ok(q) if self.settings.retain_shallow_ast() => Some((**q).clone()),
+            _ => None,
+        };
 
         if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
             *query_shallow = Some(shallow.clone());
@@ -2398,6 +2418,23 @@ where
                 ));
             }
         }
+
+        // The full parse or AST conversion runs only when the shallow path declines.
+        let parsed = match self.state.parsed_query_cache.get(query) {
+            Some(cached_query) => Ok(cached_query.clone()),
+            None => {
+                let parsed = {
+                    let _t = event.start_parse_timer();
+                    convert_or_parse_query(&self.settings, deep_ast, query)
+                };
+                if let Ok(parsed) = &parsed {
+                    self.state
+                        .parsed_query_cache
+                        .put(query.to_string(), parsed.clone());
+                }
+                parsed
+            }
+        };
 
         let meta = match parsed {
             Ok(SqlQuery::Select(stmt)) if self.settings.cache_mode.is_shallow() => {
@@ -5958,41 +5995,74 @@ where
         query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let (parsed, (shallow_parsed, hint)) = {
+        let (shallow_parsed, hint) = {
             let _t = event.start_parse_timer();
-            let parsed = parse_query(settings, query);
-            let (shallow_parsed, hint) = parse_shallow_query(settings, query);
-            (parsed, (shallow_parsed, hint))
+            parse_shallow_query(settings, query)
+        };
+
+        let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
+
+        // A successful shallow parse is always SELECT-shaped, so the Set/Use handling in
+        // `check_readyset_schema_routing` cannot apply: route and serve the query on the
+        // shallow parse alone, deferring the cost of the full parse to the fall-through path.
+        let mut deep_ast = None;
+        let shallow_parsed: Option<ReadySetResult<ShallowCacheQuery>> = match shallow_parsed {
+            Ok(shallow_query) => {
+                // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so
+                // the fall-through below can derive the Readyset AST without a second text
+                // parse.
+                if settings.retain_shallow_ast() {
+                    deep_ast = Some((*shallow_query).clone());
+                }
+                let shallow_parsed = Ok(shallow_query);
+                if state.should_query_readyset_schema(settings, &shallow_parsed) {
+                    let session = Self::readyset_schema_session(connectors, state)?;
+                    let result = session.query(query).await?;
+                    return Ok(QueryResult::ReadysetSchema(result));
+                }
+
+                if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
+                    if let Some((query_id, _)) =
+                        Self::should_query_shallow(connectors, settings, state, &shallow, hint)
+                            .await
+                    {
+                        let result =
+                            Self::query_shallow(connectors, state, query, query_id, event, params)
+                                .await;
+
+                        event.sql_type = SqlQueryType::Read;
+                        event.query_id = Some(query_id);
+                        if let Err(e) = &result {
+                            event.set_noria_error(&internal_err!("{e}"));
+                        }
+                        *query_shallow = Some(shallow);
+                        return result;
+                    }
+                    *query_shallow = Some(shallow);
+                }
+                None
+            }
+            Err(e) => Some(Err(e)),
+        };
+
+        let parsed = {
+            let _t = event.start_parse_timer();
+            convert_or_parse_query(settings, deep_ast, query)
         };
 
         if let Some(result) = Self::check_readyset_schema_routing(state, &parsed) {
             return Ok(result);
         }
 
-        if state.should_query_readyset_schema(settings, &shallow_parsed) {
+        // Statements that don't parse as a shallow SELECT still route to the readyset schema
+        // when the session's search path points at it (`readyset_schema_route_all`). This must
+        // stay after `check_readyset_schema_routing` so a SET/USE can first switch routing off.
+        if let Some(shallow_parsed) = shallow_parsed
+            && state.should_query_readyset_schema(settings, &shallow_parsed)
+        {
             let session = Self::readyset_schema_session(connectors, state)?;
             let result = session.query(query).await?;
             return Ok(QueryResult::ReadysetSchema(result));
-        }
-
-        let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
-
-        if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
-            if let Some((query_id, _)) =
-                Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
-            {
-                let result =
-                    Self::query_shallow(connectors, state, query, query_id, event, params).await;
-
-                event.sql_type = SqlQueryType::Read;
-                event.query_id = Some(query_id);
-                if let Err(e) = &result {
-                    event.set_noria_error(&internal_err!("{e}"));
-                }
-                *query_shallow = Some(shallow);
-                return result;
-            }
-            *query_shallow = Some(shallow);
         }
 
         // Maintain the session-level `last_write_at` that gates

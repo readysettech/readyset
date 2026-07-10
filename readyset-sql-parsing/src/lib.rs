@@ -138,6 +138,13 @@ impl ParsingPreset {
         Self::BothPreferSqlparser
     }
 
+    /// Whether parsing returns the sqlparser-derived AST whenever the sqlparser parse and AST
+    /// conversion succeed. When this is true, converting an already-parsed sqlparser AST is
+    /// equivalent to a full parse of the query text for such queries.
+    pub fn prefers_sqlparser_ast(self) -> bool {
+        matches!(self, Self::OnlySqlparser | Self::BothPreferSqlparser)
+    }
+
     pub fn into_config(self) -> ParsingConfig {
         match self {
             Self::OnlyNom => ParsingConfig::default().sqlparser(false),
@@ -2060,7 +2067,31 @@ export_parser!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use readyset_sql::Dialect;
+    use readyset_sql::ast::SqlQuery;
+    use readyset_sql::{Dialect, TryFromDialect};
+
+    /// Converting the sqlparser AST from a shallow parse must produce the same Readyset AST as
+    /// a sqlparser-only full parse of the query text; the adapter relies on this to skip the
+    /// second parse when the shallow path declines a query.
+    #[test]
+    fn shallow_ast_conversion_matches_full_parse() {
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            for query in [
+                "SELECT a, count(*) FROM t WHERE b = 1 AND c IN (2, 3) GROUP BY a ORDER BY a LIMIT 10",
+                "SELECT /*rs+ CREATE SHALLOW CACHE */ a FROM t WHERE b = 1",
+                "SELECT a FROM t UNION SELECT b FROM u",
+                "WITH x AS (SELECT a FROM t) SELECT a FROM x",
+            ] {
+                let (shallow, _) =
+                    parse_shallow_query(dialect, query).expect("shallow parse should succeed");
+                let converted = SqlQuery::try_from_dialect((*shallow).clone(), dialect)
+                    .expect("conversion should succeed");
+                let parsed = parse_query_with_config(ParsingPreset::OnlySqlparser, dialect, query)
+                    .expect("full parse should succeed");
+                assert_eq!(converted, parsed, "{dialect} {query}");
+            }
+        }
+    }
 
     #[test]
     fn mysql_invisible_column_parsed() {

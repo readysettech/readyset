@@ -240,7 +240,8 @@ impl QueryExecutionEvent {
 }
 
 /// A handle to updating the durations in a `QueryExecutionEvent`. Once dropped,
-/// updates the relevant timer.
+/// adds the elapsed time to the relevant timer, accumulating across multiple
+/// timed sections within one event.
 pub struct QueryExecutionTimerHandle<'a> {
     duration: &'a mut Option<Duration>,
     start: Instant,
@@ -257,6 +258,7 @@ impl<'a> QueryExecutionTimerHandle<'a> {
 
 impl Drop for QueryExecutionTimerHandle<'_> {
     fn drop(&mut self) {
-        self.duration.replace(self.start.elapsed());
+        let elapsed = self.start.elapsed();
+        *self.duration = Some(self.duration.map_or(elapsed, |d| d + elapsed));
     }
 }
