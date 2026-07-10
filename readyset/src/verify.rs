@@ -1,6 +1,6 @@
 use std::env::current_dir;
 use std::fmt::{Display, Formatter};
-use std::path::Path;
+use std::fs::read_dir;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
@@ -8,7 +8,6 @@ use futures::future::join_all;
 use regex::{Captures, Regex};
 use sysinfo::Disks;
 use tracing::info;
-use walkdir::WalkDir;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
@@ -352,15 +351,6 @@ async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) ->
     Ok(())
 }
 
-fn dir_size(dir: &Path) -> u64 {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
-        .sum()
-}
-
 async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
     let config = &options.server_worker_options.replicator_config;
     if config.replication_tables.is_some() || config.replication_tables_ignore.is_some() {
@@ -371,6 +361,11 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
     let deployment_dir = options
         .server_worker_options
         .storage_dir(&options.deployment);
+    if read_dir(&deployment_dir).is_ok_and(|mut files| files.next().is_some()) {
+        info!("Verified disk space for snapshot (files already exist)");
+        return Ok(());
+    }
+
     let display = deployment_dir.display().to_string();
     let mut dir = deployment_dir.clone();
     // Remove deployment directory from path, as it likely doesn't exist for new deployments.
@@ -400,14 +395,6 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
             anyhow!("Could not find mountpoint containing storage directory {display}")
         })?;
 
-    let free_bytes = disk.available_space();
-    let used_bytes = if deployment_dir.exists() {
-        // A preexisting deployment exists, get its size to discount it from the estimate.
-        dir_size(&deployment_dir)
-    } else {
-        0
-    };
-
     let query = match conn.dialect() {
         Dialect::MySQL => &format!(
             "SELECT COALESCE(SUM(data_length), 0) FROM information_schema.tables \
@@ -420,15 +407,14 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
         ),
         Dialect::PostgreSQL => "SELECT pg_database_size(current_database())",
     };
-    let estimated_total_bytes: i64 = query_one_value(conn, query)
+    let estimated_bytes: i64 = query_one_value(conn, query)
         .await
         .map_err(|e| anyhow!("Failed to query estimated snapshot size: {e}"))?;
-    let estimated_total_bytes = estimated_total_bytes as u64 * DISK_SPACE_REQUIREMENT_FACTOR;
-    let estimated_required_bytes = estimated_total_bytes.saturating_sub(used_bytes);
-
+    let estimated_bytes = estimated_bytes as u64 * DISK_SPACE_REQUIREMENT_FACTOR;
+    let free_bytes = disk.available_space();
     ensure!(
-        free_bytes > estimated_required_bytes,
-        "Estimated space required for snapshot is {estimated_required_bytes} bytes, but only have \
+        free_bytes > estimated_bytes,
+        "Estimated space required for snapshot is {estimated_bytes} bytes, but only have \
          {free_bytes} free bytes in storage directory {display}"
     );
 
