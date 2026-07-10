@@ -347,11 +347,15 @@ async fn mysql_shallow_aggregate_matches_upstream_bytes() {
         )
         .await
         .unwrap();
+    upstream
+        .query_drop("ANALYZE TABLE shallow_wire_agg")
+        .await
+        .unwrap();
 
     let mut rs = Conn::new(rs_opts).await.unwrap();
 
     let query = "SELECT grp, AVG(val), SUM(val), COUNT(*) \
-                 FROM shallow_wire_agg WHERE grp = ? GROUP BY grp";
+                 FROM shallow_wire_agg FORCE INDEX (grp) WHERE grp = ? GROUP BY grp";
 
     send_binary(&mut upstream, query, 1).await;
     let upstream1 = read_rs_response(&mut upstream).await;
