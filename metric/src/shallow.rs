@@ -88,6 +88,13 @@ pub const SHALLOW_COALESCE_RESOLVED: &str = "readyset_shallow.shallow_coalesce_r
 /// | query_id | The query ID for the cached query. |
 pub const SHALLOW_COALESCE_TIMEOUT: &str = "readyset_shallow.shallow_coalesce_timeout";
 
+/// Gauge: Total size in bytes of resident entries (keys plus values) in the entry store shared
+/// by all shallow caches, as tracked by the store's own size accounting.
+pub const SHALLOW_MEMORY_BYTES: &str = "readyset_shallow.shallow_memory_bytes";
+
+/// Gauge: Number of resident entries in the entry store shared by all shallow caches.
+pub const SHALLOW_ENTRIES: &str = "readyset_shallow.shallow_entries";
+
 /// Gauge: Number of live workers in the shallow refresh pool. The pool is shared across all
 /// shallow caches.
 pub const SHALLOW_REFRESH_POOL_WORKERS: &str = "readyset_shallow.shallow_refresh_pool_workers";

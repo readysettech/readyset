@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use metrics::counter;
+use metrics::{counter, gauge};
 use moka::future::Cache as MokaCache;
 use moka::notification::RemovalCause;
 use papaya::HashMap;
@@ -18,6 +18,7 @@ use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy};
 use readyset_util::SizeOf;
+use readyset_util::shutdown::ShutdownReceiver;
 
 use crate::cache::{
     AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo,
@@ -119,6 +120,28 @@ where
     /// to caches created after the call.
     pub fn set_adaptive_max_extra_load_percent(&mut self, percent: u64) {
         self.adaptive_max_extra_load_percent = percent;
+    }
+
+    /// Periodically flush the entry store's pending maintenance and report gauges for its total
+    /// size and entry count. The flush processes evictions, whose listener updates the adaptive
+    /// refresh statistics, so this must run even when metrics are unused. Runs until shutdown is
+    /// signaled.
+    pub async fn report_metrics(self: Arc<Self>, mut shutdown_rx: ShutdownReceiver) {
+        const REPORT_INTERVAL: Duration = Duration::from_secs(1);
+        let bytes = gauge!(metric::SHALLOW_MEMORY_BYTES);
+        let entries = gauge!(metric::SHALLOW_ENTRIES);
+        let mut interval = tokio::time::interval(REPORT_INTERVAL);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    // Flush pending maintenance so size accounting stays current when idle.
+                    self.inner.run_pending_tasks().await;
+                    bytes.set(self.inner.weighted_size() as f64);
+                    entries.set(self.inner.entry_count() as f64);
+                }
+                _ = shutdown_rx.recv() => break,
+            }
+        }
     }
 
     fn check_identifiers(

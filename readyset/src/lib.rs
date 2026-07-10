@@ -1576,6 +1576,8 @@ where
         shallow
             .set_adaptive_max_extra_load_percent(options.shallow_adaptive_max_extra_load_percent);
         let shallow = Arc::new(shallow);
+        rt.handle()
+            .spawn(Arc::clone(&shallow).report_metrics(shutdown_rx.clone()));
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
         {
