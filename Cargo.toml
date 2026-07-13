@@ -270,7 +270,7 @@ streaming-iterator = "0.1"
 stringprep = "0.1.4"
 strum = { version = "0.28", features = ["derive"] }
 syn = { version = "2.0.87", default-features = false }
-sysinfo = "0.38"
+sysinfo = "0.39"
 temp-dir = "0.2"
 tempfile = "3.10.1"
 test-strategy = "0.4.3"
