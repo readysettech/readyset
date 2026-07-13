@@ -1,11 +1,8 @@
-use opentelemetry_sdk::trace::TraceError;
 use pyroscope::PyroscopeError;
 use tracing_subscriber::{filter::ParseError, reload};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("trace error: {0}")]
-    Trace(#[from] TraceError),
     #[error("failed to parse filter: {0}")]
     Parse(#[from] ParseError),
     #[error("invalid rotation cadence: {0}")]
