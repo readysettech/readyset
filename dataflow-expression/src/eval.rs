@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
 
-use cached::proc_macro::cached;
+use cached::cached;
 use readyset_data::{Array, ArrayD, DfValue, IxDyn, TimestampTz};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
@@ -23,7 +23,7 @@ macro_rules! non_null {
 pub(crate) mod builtins;
 pub mod json;
 
-#[cached(size = 1000)]
+#[cached(max_size = 1000)]
 fn like_pattern(pattern: String, case_sensitivity: CaseSensitivityMode) -> Arc<LikePattern> {
     Arc::new(LikePattern::new(&pattern, case_sensitivity))
 }
