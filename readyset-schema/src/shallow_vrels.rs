@@ -45,19 +45,21 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("hits", DfType::UnsignedBigInt),
     ("misses", DfType::UnsignedBigInt),
     ("refreshes", DfType::UnsignedBigInt),
+    ("wasted_refreshes", DfType::UnsignedBigInt),
 ];
 
 fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
     let dialect = ctx.dialect;
     let caches = ctx.shallow.list_caches(None, None);
     Box::pin(async move {
-        let [hits, misses, refreshes] = metrics_handle()
+        let [hits, misses, refreshes, wasted] = metrics_handle()
             .map(|h| {
                 h.counters_by_label(
                     [
                         metric::SHALLOW_HIT,
                         metric::SHALLOW_MISS,
                         metric::SHALLOW_REFRESH,
+                        metric::SHALLOW_REFRESH_WASTED,
                     ],
                     "query_id",
                     [],
@@ -81,6 +83,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 hits.get(&query_id).into(),
                 misses.get(&query_id).into(),
                 refreshes.get(&query_id).into(),
+                wasted.get(&query_id).into(),
             ]
         }));
         Ok(rows)
@@ -125,6 +128,7 @@ const SHALLOW_CACHE_ENTRIES_SCHEMA: &[(&str, DfType)] = &[
     ("refresh_time_ms", DfType::UnsignedBigInt),
     ("refresh_period_ms", DfType::UnsignedBigInt),
     ("bytes", DfType::UnsignedBigInt),
+    ("served", DfType::Bool),
 ];
 
 fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
@@ -139,6 +143,7 @@ fn shallow_cache_entries_read(ctx: &VrelContext) -> VrelRead {
                 entry.refresh_time_ms.into(),
                 entry.refresh_period_ms.into(),
                 (entry.bytes as u64).into(),
+                entry.served.into(),
             ]
         }));
         Ok(rows)

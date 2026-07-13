@@ -1280,7 +1280,7 @@ async fn refresh_insert_with_exec(
 ) {
     let cache = manager.get(None, Some(query_id)).unwrap();
     cache
-        .insert(key.to_string(), values, QueryMetadata::Test, exec)
+        .insert(key.to_string(), values, QueryMetadata::Test, exec, true)
         .await;
     // Run the eviction listener for the replaced entry so load accounting settles.
     manager.run_pending_tasks(query_id).await;
@@ -1607,4 +1607,153 @@ async fn test_adaptive_load_cap_configurable() {
     }
     assert_eq!(min_seen, 200);
     assert_matches!(entry_period(&manager, &query_id), Some(200 | 300));
+}
+
+#[test]
+async fn test_wasted_refresh_replaced_unserved() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    // The first refresh replaces the miss fill, whose data was served as the miss response.
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+
+    // The second refresh replaces the first, whose data was never served.
+    refresh_insert(&manager, &query_id, "key", vec!["v2".to_string()]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+}
+
+#[test]
+async fn test_served_refresh_not_wasted() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+    check_hit(&manager, &query_id, "key".to_string()).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v2".to_string()]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+
+    refresh_insert(&manager, &query_id, "key", vec!["v3".to_string()]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+}
+
+#[test]
+async fn test_wasted_refresh_ttl_expiration() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(
+        &manager,
+        None,
+        query_id,
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(1),
+        },
+    )
+    .unwrap();
+
+    for key in ["refreshed", "fill_only"] {
+        let result = manager
+            .get_or_start_insert(&query_id, key.to_string(), |_| true)
+            .await;
+        insert_value(result, vec!["v0".to_string()]).await;
+    }
+    refresh_insert(&manager, &query_id, "refreshed", vec!["v1".to_string()]).await;
+
+    sleep(Duration::from_secs(2)).await;
+    manager.run_pending_tasks(&query_id).await;
+
+    // Only the unserved refresh counts; the expired miss fill was served as its miss response.
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+}
+
+#[test]
+async fn test_wasted_refresh_late_after_eviction() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(
+        &manager,
+        None,
+        query_id,
+        EvictionPolicy::Ttl {
+            ttl: Duration::from_secs(1),
+        },
+    )
+    .unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    sleep(Duration::from_secs(2)).await;
+    manager.run_pending_tasks(&query_id).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+
+    // A refresh that completes only after its entry was evicted is wasted.
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+}
+
+#[test]
+async fn test_flush_not_counted_as_wasted() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+
+    manager.flush_cache(None, Some(&query_id)).await.unwrap();
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+}
+
+#[test]
+async fn test_wasted_refresh_size_eviction() {
+    let manager = CacheManager::<String, String>::new(Some(1024), None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+
+    // Refresh with a value larger than the store's capacity: the replacement is evicted for
+    // size before it can ever be served.
+    refresh_insert(&manager, &query_id, "key", vec!["x".repeat(2000)]).await;
+    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+}
+
+#[test]
+async fn test_list_entries_served_flag() {
+    let manager = CacheManager::<String, String>::new(None, None);
+    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+
+    let result = manager
+        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
+        .await;
+    insert_value(result, vec!["v0".to_string()]).await;
+    assert!(manager.list_entries(Some(query_id), None)[0].served);
+
+    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+    assert!(!manager.list_entries(Some(query_id), None)[0].served);
+
+    check_hit(&manager, &query_id, "key".to_string()).await;
+    assert!(manager.list_entries(Some(query_id), None)[0].served);
 }

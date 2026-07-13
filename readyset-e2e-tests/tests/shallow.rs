@@ -347,11 +347,11 @@ async fn show_shallow_caches() {
 
     // Check the shallow_caches vrel.
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool, u64, u64)> =
+    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool, u64, u64, u64)> =
         readyset
             .query(
                 "SELECT query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule,
-                        hits, misses
+                        hits, misses, wasted_refreshes
                  FROM readyset.shallow_caches",
             )
             .await
@@ -369,6 +369,7 @@ async fn show_shallow_caches() {
         schedule,
         hits,
         misses,
+        wasted_refreshes,
     ) = &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
@@ -380,6 +381,7 @@ async fn show_shallow_caches() {
     assert_eq!(*schedule, false);
     assert!(*hits >= 1, "expected at least one shallow hit, got {hits}");
     assert!(*misses >= 1, "expected at least one shallow miss, got {misses}");
+    assert_eq!(*wasted_refreshes, 0);
 
     // Check the shallow_cache_refresh_stats vrel: this cache is neither adaptive nor
     // scheduled, so every stat is NULL.
@@ -522,14 +524,17 @@ async fn show_shallow_cache_entries() {
     let entries: Vec<(String, String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
     assert_eq!(entries.len(), 2, "Should have 2 cache entries");
-    let vrel_entries: Vec<(String, String, u64, u64, u64, u64)> = readyset
+    let vrel_entries: Vec<(String, String, u64, u64, u64, u64, bool)> = readyset
         .query(
-            "SELECT query_id, entry_id, last_accessed_ms, last_refreshed_ms, refresh_time_ms, bytes
+            "SELECT query_id, entry_id, last_accessed_ms, last_refreshed_ms, refresh_time_ms,
+                    bytes, served
              FROM readyset.shallow_cache_entries",
         )
         .await
         .unwrap();
     assert_eq!(vrel_entries.len(), 2);
+    // Both entries were just miss-filled, whose data was served as the miss response.
+    assert!(vrel_entries.iter().all(|e| e.6));
 
     // Get the query_id from one of the entries
     let query_id = &entries[0].0;

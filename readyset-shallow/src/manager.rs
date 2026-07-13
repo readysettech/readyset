@@ -21,8 +21,8 @@ use readyset_util::SizeOf;
 use readyset_util::shutdown::ShutdownReceiver;
 
 use crate::cache::{
-    AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo,
-    DEFAULT_MAX_EXTRA_LOAD_PERCENT, InnerCache, Lookup,
+    AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, CacheState,
+    DEFAULT_MAX_EXTRA_LOAD_PERCENT, InnerCache, Lookup, WastedRefreshes,
 };
 use crate::{ContentHash, EvictionPolicy, QueryMetadata};
 use readyset_util::hash::hash;
@@ -56,9 +56,8 @@ where
     names: HashMap<Relation, u64>,
     query_ids: HashMap<QueryId, u64>,
     inner: InnerCache<K, V>,
-    /// Load accounting for adaptive caches, keyed by cache id. Shared with the store's
-    /// eviction listener, which subtracts removed entries' contributions.
-    adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>>,
+    /// Per-cache state keyed by cache id, shared with the store's eviction listener.
+    cache_states: Arc<HashMap<u64, Arc<CacheState>>>,
     adaptive_max_extra_load_percent: u64,
     max_entry_bytes: Option<usize>,
     // This lock also synchronizes inserts into the three HashMaps.
@@ -77,7 +76,7 @@ where
 {
     pub(crate) fn new_inner(
         max_capacity: Option<u64>,
-        adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>>,
+        cache_states: Arc<HashMap<u64, Arc<CacheState>>>,
     ) -> InnerCache<K, V> {
         let mut builder = MokaCache::builder()
             .support_invalidation_closures()
@@ -90,9 +89,14 @@ where
                     counter!(metric::SHALLOW_EVICT_MEMORY).increment(1);
                 }
                 if let CacheEntry::Present(values) = &*value
-                    && let Some(state) = adaptive_states.pin().get(&key.0)
+                    && let Some(state) = cache_states.pin().get(&key.0)
                 {
-                    state.remove(values);
+                    if let Some(adaptive) = &state.adaptive {
+                        adaptive.remove(values);
+                    }
+                    if cause != RemovalCause::Explicit && !values.served.load(Ordering::Relaxed) {
+                        state.wasted_refreshes.increment();
+                    }
                 }
             });
         if let Some(capacity) = max_capacity {
@@ -102,13 +106,13 @@ where
     }
 
     pub fn new(max_capacity: Option<u64>, max_entry_bytes: Option<usize>) -> Self {
-        let adaptive_states: Arc<HashMap<u64, Arc<AdaptiveState>>> = Arc::new(new_table());
+        let cache_states: Arc<HashMap<u64, Arc<CacheState>>> = Arc::new(new_table());
         Self {
             caches: new_table(),
             names: new_table(),
             query_ids: new_table(),
-            inner: Self::new_inner(max_capacity, Arc::clone(&adaptive_states)),
-            adaptive_states,
+            inner: Self::new_inner(max_capacity, Arc::clone(&cache_states)),
+            cache_states,
             adaptive_max_extra_load_percent: DEFAULT_MAX_EXTRA_LOAD_PERCENT,
             max_entry_bytes,
             next_id: Default::default(),
@@ -165,7 +169,16 @@ where
     #[cfg(test)]
     pub(crate) fn adaptive_load(&self, query_id: &QueryId) -> Option<(u64, u64)> {
         let id = self.get_cache_id(None, Some(query_id))?;
-        self.adaptive_states.pin().get(&id).map(|s| s.load_ppm())
+        let guard = self.cache_states.pin();
+        guard.get(&id)?.adaptive.as_ref().map(|s| s.load_ppm())
+    }
+
+    /// Number of wasted refreshes recorded for a cache, for tests.
+    #[cfg(test)]
+    pub(crate) fn wasted_refresh_count(&self, query_id: &QueryId) -> Option<u64> {
+        let id = self.get_cache_id(None, Some(query_id))?;
+        let guard = self.cache_states.pin();
+        guard.get(&id).map(|s| s.wasted_refreshes.count())
     }
 
     fn get_cache_id(&self, name: Option<&Relation>, query_id: Option<&QueryId>) -> Option<u64> {
@@ -222,9 +235,11 @@ where
                 query_id,
             ))
         });
-        if let Some(state) = &adaptive_state {
-            self.adaptive_states.pin().insert(id, Arc::clone(state));
-        }
+        let state = Arc::new(CacheState {
+            adaptive: adaptive_state,
+            wasted_refreshes: WastedRefreshes::new(query_id),
+        });
+        self.cache_states.pin().insert(id, Arc::clone(&state));
 
         let inner = Arc::clone(&self.inner);
         let cache = Cache::new(
@@ -238,7 +253,7 @@ where
             ddl_req,
             trx_cache_policy,
             coalesce_ms,
-            adaptive_state,
+            state,
             self.max_entry_bytes,
         );
 
@@ -279,8 +294,10 @@ where
         self.query_ids.pin().remove(cache.query_id());
 
         guard.remove(&id);
-        if let Some(state) = self.adaptive_states.pin().remove(&id) {
-            state.zero_gauges();
+        if let Some(state) = self.cache_states.pin().remove(&id)
+            && let Some(adaptive) = &state.adaptive
+        {
+            adaptive.zero_gauges();
         }
 
         info!("dropped shallow cache {display_name}");
@@ -300,9 +317,11 @@ where
         caches.clear();
         self.names.pin().clear();
         self.query_ids.pin().clear();
-        let states = self.adaptive_states.pin();
+        let states = self.cache_states.pin();
         for state in states.values() {
-            state.zero_gauges();
+            if let Some(adaptive) = &state.adaptive {
+                adaptive.zero_gauges();
+            }
         }
         states.clear();
     }
@@ -413,6 +432,7 @@ where
                         refresh_time_ms: values.execution_ms,
                         refresh_period_ms: values.period_ms,
                         bytes,
+                        served: values.served.load(Ordering::Relaxed),
                     })
                 }
                 CacheEntry::Loading(_) => None,
@@ -454,6 +474,7 @@ where
             filled: false,
             requested: Instant::now(),
             done: None,
+            refresh: refreshing.is_some(),
             refreshing,
         }
     }
@@ -575,6 +596,8 @@ where
     pub(crate) done: Option<Sender<()>>,
     /// If set, dropping the guard will update the referenced refreshing state to false.
     pub(crate) refreshing: Option<Arc<AtomicBool>>,
+    /// Whether this guard writes back a refresh rather than an initial load.
+    pub(crate) refresh: bool,
 }
 
 impl<K, V> Debug for CacheInsertGuard<K, V>
@@ -627,7 +650,9 @@ where
         async {
             if self.filled {
                 let (metadata, cache, key, results, execution, done) = self.take();
-                cache.insert(key, results, metadata, execution).await;
+                cache
+                    .insert(key, results, metadata, execution, self.refresh)
+                    .await;
                 drop(done);
             }
         }
@@ -669,8 +694,11 @@ where
     fn drop(&mut self) {
         if self.filled {
             let (metadata, cache, key, results, execution, done) = self.take();
+            let refresh = self.refresh;
             tokio::spawn(async move {
-                cache.insert(key, results, metadata, execution).await;
+                cache
+                    .insert(key, results, metadata, execution, refresh)
+                    .await;
                 drop(done);
             });
         } else if let Some(refreshing) = self.refreshing.take() {
@@ -761,6 +789,7 @@ mod tests {
                 vec![vec!["value1"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 
@@ -772,6 +801,7 @@ mod tests {
                 vec![vec!["value2"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 
@@ -832,6 +862,7 @@ mod tests {
                 vec![vec!["value1"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 
@@ -842,6 +873,7 @@ mod tests {
                 vec![vec!["value2"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 
@@ -886,6 +918,7 @@ mod tests {
                 vec![vec!["value"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 
@@ -926,6 +959,7 @@ mod tests {
                     vec!["value".to_string()],
                     crate::QueryMetadata::Test,
                     Duration::ZERO,
+                    false,
                 )
                 .await;
         }
@@ -984,6 +1018,7 @@ mod tests {
                 vec![vec!["value"]],
                 crate::QueryMetadata::Test,
                 Duration::ZERO,
+                false,
             )
             .await;
 

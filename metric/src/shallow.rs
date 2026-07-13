@@ -20,6 +20,15 @@ pub const SHALLOW_REFRESH_CHANGED: &str = "readyset_shallow.shallow_refresh_chan
 /// | query_id | The query ID for the cached query being refreshed. |
 pub const SHALLOW_REFRESH_UNCHANGED: &str = "readyset_shallow.shallow_refresh_unchanged";
 
+/// Counter: Number of refresh write-backs whose data was never returned by a cache hit,
+/// because the entry was replaced, the entry was evicted, or the refresh completed after
+/// its entry was already gone. Explicit removals (flush, drop) of a live entry are not counted.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query being refreshed. |
+pub const SHALLOW_REFRESH_WASTED: &str = "readyset_shallow.shallow_refresh_wasted";
+
 /// Histogram: The amount of time in microseconds spent executing the upstream query during a
 /// shallow cache refresh. Only recorded for successful queries.
 ///
