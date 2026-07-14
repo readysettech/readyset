@@ -1179,6 +1179,7 @@ mod tests {
             "datetime",
             "distinct",
             "drop_redundant_join",
+            "exclude-nightly",
             "expr_eval",
             "filter",
             "float",

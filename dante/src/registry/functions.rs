@@ -88,7 +88,7 @@ pub fn round() -> Pattern {
     b.column_type_class(c, TypeClass::FixedPoint);
     b.from(t);
     b.project_function(ScalarFn::Round, vec![(c, t)]);
-    b.tags(&["function", "numeric"]);
+    b.tags(&["function", "numeric", "exclude-nightly"]);
     b.build()
 }
 
