@@ -15,15 +15,18 @@ test-discovery = { path = "../test-discovery" }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 database-utils = { path = "../database-utils" }
 dataflow-state = { path = "../dataflow-state" }
+fallible-iterator = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 mysql-srv = { path = "../mysql-srv" }
 paste = { workspace = true }
+postgres-protocol = { workspace = true }
 postgres-types = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }

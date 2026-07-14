@@ -1281,7 +1281,13 @@ where
     /// "reusing" that prepared statement, so we only have the query string to identify
     /// any metadata we've previously prepared and cached. Thus this map is a link from the query
     /// to the index of the prepared statement in `prepared_statements`.
-    unnamed_prepared_statements: HashMap<String, StatementId>,
+    ///
+    /// The query text alone does not identify a plan: an unqualified name resolves against the
+    /// session `search_path`, so the same text under a different path is a different query. We
+    /// store the path captured at prepare time alongside the id and only reuse the entry when the
+    /// current path still matches; a mismatch re-plans and overwrites, mirroring how Postgres
+    /// re-plans the unnamed statement on every Parse.
+    unnamed_prepared_statements: HashMap<String, (Vec<SqlIdentifier>, StatementId)>,
     /// Handle to access the cached schema catalog
     schema_handle: SchemaCatalogHandle,
     /// Map from username to password for all users allowed to connect to the db
@@ -2803,9 +2809,10 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<StatementId, DB::Error> {
         if matches!(statement_type, PreparedStatementType::Unnamed)
-            && self.state.unnamed_prepared_statements.contains_key(query)
+            && let Some((path, id)) = self.state.unnamed_prepared_statements.get(query)
+            && path.as_slice() == self.connectors.noria.schema_search_path()
         {
-            return Ok(self.state.unnamed_prepared_statements[query]);
+            return Ok(*id);
         }
 
         let (meta, is_skip_cache) = self.plan_prepare(query, query_shallow, event).await?;
@@ -2834,10 +2841,12 @@ where
         assert_eq!(next_id, statement_id);
 
         if matches!(statement_type, PreparedStatementType::Unnamed) {
-            // For unnamed prepared statements, store the query string mapping
+            // Key the memoized statement on the query text plus the search_path it was resolved
+            // against, so a later Parse under a different path re-plans instead of reusing it.
+            let path = self.connectors.noria.schema_search_path().to_vec();
             self.state
                 .unnamed_prepared_statements
-                .insert(query.to_string(), statement_id);
+                .insert(query.to_string(), (path, statement_id));
         }
 
         Ok(statement_id)
@@ -3636,6 +3645,7 @@ where
             DeallocateId::All => {
                 self.state.prepared_statements.clear();
                 self.state.session_mutations.clear();
+                self.state.unnamed_prepared_statements.clear();
             }
             DeallocateId::Named(_) => {}
         }
