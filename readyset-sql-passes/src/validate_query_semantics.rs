@@ -213,17 +213,28 @@ fn validate_no_nested_aggregates(stmt: &SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
-// ─── No subqueries in JOIN ON ──────────────────────────────────────────────
+// ─── No subqueries in non-INNER JOIN ON ────────────────────────────────────
 
-/// Subqueries in JOIN ON position are not supported by the rewrite pipeline.
-/// `unnest_subqueries` only handles subqueries in WHERE, SELECT, and LATERAL
-/// FROM — not in ON clauses.  See `known_core_limitations.md` §4.1 and §13.
+/// Subqueries in LEFT / RIGHT / FULL OUTER JOIN ON position are not
+/// supported: moving the predicate to WHERE (the standard mechanism for
+/// unnesting) would change null-extension semantics — rows on the preserved
+/// side that don't match the ON predicate get NULL-extended in the join
+/// phase, then WHERE filters them out, silently converting OUTER JOIN into
+/// INNER JOIN.  See §12 of the extended-subquery-decorrelation design memo
+/// for the LOJ case-matrix analysis.
+///
+/// **INNER JOIN ON subqueries are supported** as of Stage 3 of the extended
+/// subquery decorrelation project: they are moved to WHERE by
+/// `move_subquery_predicates_from_inner_join_on_to_where` (invoked from
+/// `normalize_subquery_positions`), and `unnest_subqueries` decorrelates
+/// them via its WHERE-position machinery.
 fn validate_no_subqueries_in_join_on(stmt: &SelectStatement) -> ReadySetResult<()> {
     for jc in &stmt.join {
         if let JoinConstraint::On(on_expr) = &jc.constraint
+            && !jc.operator.is_inner_join()
             && contains_select(on_expr)
         {
-            unsupported!("subqueries in JOIN ON are not supported");
+            unsupported!("subqueries in non-INNER JOIN ON are not supported");
         }
     }
     Ok(())
@@ -851,18 +862,40 @@ mod tests {
     // ── Subqueries in JOIN ON ──
 
     #[test]
-    fn subquery_in_join_on_fails() {
+    fn scalar_subquery_in_inner_join_on_passes() {
+        // Stage 3 (INNER JOIN ON subquery move): validator admits the
+        // subquery; `normalize_subquery_positions` moves it to WHERE.
         assert!(
-            validate_postgres("SELECT t.x FROM t JOIN s ON t.x = (SELECT MAX(u.x) FROM u)")
+            validate_postgres("SELECT t.x FROM t JOIN s ON t.x = (SELECT MAX(u.x) FROM u)").is_ok()
+        );
+    }
+
+    #[test]
+    fn exists_in_inner_join_on_passes() {
+        // Same as above; correlated EXISTS is admitted at validation.
+        assert!(
+            validate_postgres(
+                "SELECT t.x FROM t JOIN s ON EXISTS (SELECT 1 FROM u WHERE u.x = t.x)"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn subquery_in_left_join_on_fails() {
+        // Non-INNER JOIN ON subquery continues to be rejected: moving the
+        // predicate to WHERE would change null-extension semantics.
+        assert!(
+            validate_postgres("SELECT t.x FROM t LEFT JOIN s ON t.x = (SELECT MAX(u.x) FROM u)")
                 .is_err()
         );
     }
 
     #[test]
-    fn exists_in_join_on_fails() {
+    fn exists_in_left_join_on_fails() {
         assert!(
             validate_postgres(
-                "SELECT t.x FROM t JOIN s ON EXISTS (SELECT 1 FROM u WHERE u.x = t.x)"
+                "SELECT t.x FROM t LEFT JOIN s ON EXISTS (SELECT 1 FROM u WHERE u.x = t.x)"
             )
             .is_err()
         );

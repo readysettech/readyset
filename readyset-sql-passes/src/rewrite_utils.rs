@@ -1,4 +1,5 @@
 use crate::expr::constant_fold::constant_fold_expr;
+use crate::rewrite_joins::try_normalize_joins_conditions;
 use itertools::Either;
 use readyset_data::dialect;
 use readyset_errors::{
@@ -2144,6 +2145,39 @@ pub(crate) fn move_correlated_constraints_from_join_to_where(
     }
 
     Ok(())
+}
+
+/// Move subquery-bearing predicates from INNER JOIN ON to WHERE.
+///
+/// Thin wrapper over `try_normalize_joins_conditions` (in
+/// `rewrite_joins.rs`), which for each INNER JOIN's ON splits atoms via
+/// `classify_on_atom`: `OnAtom::Other` (which includes subqueries per
+/// `OnAtom`'s doc-comment at line 174) moves to WHERE; `CrossEq` and
+/// `SingleRelFilter` atoms touching the chosen LHS+RHS stay in ON.
+/// Non-INNER joins are untouched — moving a subquery-bearing predicate
+/// out of a LEFT / RIGHT / FULL OUTER JOIN ON would change null-extension
+/// semantics.  `validate_no_subqueries_in_join_on` in
+/// `validate_query_semantics.rs` continues to reject subqueries in
+/// non-INNER JOIN ON positions.
+///
+/// The delegation is broader than "just subqueries" — `try_normalize_
+/// joins_conditions` also moves top-level `OR`, `NOT`, opaque function
+/// calls, and >2-relation ON conjuncts to WHERE (its primary purpose is
+/// enforcing the ≤2-relation ON invariant per engine limitation §2.1).
+/// This preemptive NSP-time call overlaps with DTR's later invocation
+/// (in `derived_tables_rewrite`); the overlap is bounded and doesn't
+/// affect correctness — downstream passes don't depend on `Other` atoms
+/// being in ON.
+///
+/// Correlation-agnostic: correlated and uncorrelated subqueries move
+/// uniformly.  Downstream `unnest_subqueries` picks up the moved
+/// predicates via its WHERE-position machinery.
+///
+/// Returns `true` if the underlying call rewrote anything.
+pub(crate) fn move_subquery_predicates_from_inner_join_on_to_where(
+    stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
+    try_normalize_joins_conditions(stmt)
 }
 
 /// Extracts `col = col` cross-table equality pairs from a correlated expression.

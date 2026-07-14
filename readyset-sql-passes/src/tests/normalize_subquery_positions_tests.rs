@@ -1164,6 +1164,163 @@ fn having_alias_ref_to_select_list_subq_short_circuits() {
     );
 }
 
+// Stage 3 — INNER JOIN ON subquery move
+
+/// Extract each JOIN clause's ON expression as a rendered string.  Callers
+/// use this to assert what stayed in ON vs. what moved to WHERE.
+fn on_expressions(stmt: &SelectStatement) -> Vec<String> {
+    stmt.join
+        .iter()
+        .filter_map(|jc| match &jc.constraint {
+            readyset_sql::ast::JoinConstraint::On(e) => {
+                Some(e.display(Dialect::PostgreSQL).to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn inner_join_on_correlated_subquery_moves_to_where() {
+    // EXISTS in INNER JOIN ON correlates on `a`.  Post-NSP: equi-join
+    // stays in ON; EXISTS moves to WHERE where unnest can decorrelate it.
+    let stmt = normalize(
+        "SELECT a.x FROM a INNER JOIN b ON a.k = b.k \
+         AND EXISTS (SELECT 1 FROM c WHERE c.x = a.y)",
+    );
+    let on_exprs = on_expressions(&stmt);
+    let where_render = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| w.display(Dialect::PostgreSQL).to_string())
+        .unwrap_or_default();
+
+    assert_eq!(on_exprs.len(), 1, "expected one INNER JOIN ON");
+    assert!(
+        on_exprs[0].contains("\"a\".\"k\" = \"b\".\"k\""),
+        "equi-join must remain in ON: {}",
+        on_exprs[0],
+    );
+    assert!(
+        !on_exprs[0].to_lowercase().contains("exists"),
+        "EXISTS must NOT remain in ON: {}",
+        on_exprs[0],
+    );
+    assert!(
+        where_render.to_lowercase().contains("exists"),
+        "EXISTS must land in WHERE: {where_render}",
+    );
+}
+
+#[test]
+fn inner_join_on_uncorrelated_subquery_moves_to_where() {
+    // Uncorrelated IN-subquery on INNER JOIN ON.  Same move semantics
+    // as the correlated case.
+    let stmt = normalize(
+        "SELECT a.x FROM a INNER JOIN b ON a.k = b.k \
+         AND b.z IN (SELECT n FROM n_set)",
+    );
+    let on_exprs = on_expressions(&stmt);
+    let where_render = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| w.display(Dialect::PostgreSQL).to_string())
+        .unwrap_or_default();
+
+    assert!(
+        on_exprs
+            .iter()
+            .any(|s| s.contains("\"a\".\"k\" = \"b\".\"k\"")),
+        "equi-join must remain in ON: {on_exprs:?}",
+    );
+    assert!(
+        !on_exprs.iter().any(|s| s.to_lowercase().contains("select")),
+        "no subquery may remain in ON: {on_exprs:?}",
+    );
+    assert!(
+        where_render.to_lowercase().contains("select"),
+        "IN-subquery must land in WHERE: {where_render}",
+    );
+}
+
+#[test]
+fn inner_join_on_only_subquery_becomes_empty_on() {
+    // ON contains only the subquery predicate.  Post-NSP: ON becomes
+    // empty; the subquery moves to WHERE.  The JOIN is now effectively
+    // a CROSS JOIN filtered by WHERE — MIR's predicate_pushup will not
+    // push the subquery-derived filter past INNER joins that lack an
+    // equi-join, but the query is still cacheable.
+    let stmt =
+        normalize("SELECT a.x FROM a INNER JOIN b ON EXISTS (SELECT 1 FROM c WHERE c.x = a.y)");
+    // ON is now Empty (all conjuncts were subquery-bearing).
+    assert!(matches!(
+        stmt.join[0].constraint,
+        readyset_sql::ast::JoinConstraint::Empty
+    ));
+    let where_render = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| w.display(Dialect::PostgreSQL).to_string())
+        .expect("WHERE must exist");
+    assert!(
+        where_render.to_lowercase().contains("exists"),
+        "EXISTS must land in WHERE: {where_render}",
+    );
+}
+
+#[test]
+fn left_outer_join_on_subquery_untouched_by_nsp() {
+    // Non-INNER JOIN ON is NOT touched by NSP's move.  Validator
+    // `validate_no_subqueries_in_join_on` rejects this shape upstream,
+    // so in practice this AST doesn't reach NSP via the full pipeline.
+    // This test invokes NSP directly on the shape to lock the pass's
+    // defensive behavior in isolation.
+    let mut stmt = parse(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND EXISTS (SELECT 1 FROM c WHERE c.x = a.y)",
+    );
+    let before = rendered(&stmt);
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+    assert_eq!(before, rendered(&stmt), "LEFT JOIN ON must be untouched");
+}
+
+#[test]
+fn inner_join_on_multiple_joins_each_move_independently() {
+    // Two INNER JOINs, each with subquery in ON.  Both subqueries move;
+    // both equi-joins stay.
+    let stmt = normalize(
+        "SELECT a.x FROM a \
+         INNER JOIN b ON a.k = b.k AND EXISTS (SELECT 1 FROM c WHERE c.x = a.y) \
+         INNER JOIN d ON b.k = d.k AND d.z IN (SELECT n FROM n_set)",
+    );
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(
+        on_exprs.len(),
+        2,
+        "expected two ON expressions: {on_exprs:?}"
+    );
+    assert!(
+        on_exprs
+            .iter()
+            .any(|s| s.contains("\"a\".\"k\" = \"b\".\"k\""))
+    );
+    assert!(
+        on_exprs
+            .iter()
+            .any(|s| s.contains("\"b\".\"k\" = \"d\".\"k\""))
+    );
+    let where_render = stmt
+        .where_clause
+        .as_ref()
+        .map(|w| w.display(Dialect::PostgreSQL).to_string())
+        .expect("WHERE must exist");
+    // Both subqueries landed in WHERE.
+    assert!(where_render.to_lowercase().contains("exists"));
+    // The IN-subquery renders differently; check for the RHS relation name.
+    assert!(where_render.to_lowercase().contains("n_set"));
+}
+
 // End-to-end via SqlQuery
 
 #[test]

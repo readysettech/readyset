@@ -53,7 +53,8 @@ use crate::rewrite_utils::{
     contains_select, deep_columns_visitor_mut_in_set,
     denormalize_having_and_group_by_for_statement, expect_field_as_expr,
     expect_only_subquery_from_with_alias_mut, fix_duplicate_aliases, for_each_window_function,
-    is_aggregation_or_grouped, normalize_having_and_group_by_for_statement,
+    is_aggregation_or_grouped, move_subquery_predicates_from_inner_join_on_to_where,
+    normalize_having_and_group_by_for_statement,
     project_columns_if_not_exist_fix_duplicate_aliases, resolve_field_reference,
 };
 use crate::unnest_subqueries::collect_subquery_predicates;
@@ -211,6 +212,18 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
     ) -> Result<(), Self::Error> {
         // Bottom-up: descend first.
         walk_select_statement(self, stmt)?;
+
+        // Move subquery-bearing predicates from INNER JOIN ON positions to
+        // WHERE, so `unnest_subqueries` picks them up via its WHERE-position
+        // machinery.  Non-INNER JOINs untouched (would change null-extension
+        // semantics; validator continues to reject subqueries there).  See
+        // `move_subquery_predicates_from_inner_join_on_to_where` for the
+        // move mechanics and §12 of the design memo for the LOJ case matrix.
+        //
+        // Runs before the HAVING/ORDER BY wrap block: the two mechanisms
+        // are orthogonal.  Any WHERE additions from the JOIN ON move do
+        // not affect the wrap's HAVING/ORDER BY analysis.
+        move_subquery_predicates_from_inner_join_on_to_where(stmt)?;
 
         // Per-statement alias hygiene: denormalize HAVING + GROUP BY + ORDER
         // BY on `stmt`, attempt wrap, renormalize.

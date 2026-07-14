@@ -1,0 +1,181 @@
+statement ok
+create table s (sn int, city text, status int);
+
+statement ok
+insert into s values
+(1, 'NYC', 10),
+(2, 'NYC', 20),
+(3, 'LA',  15),
+(4, 'LA',  25),
+(5, 'LA',  30),
+(6, 'SF',  40);
+
+statement ok
+create table j (jn int, city text);
+
+statement ok
+insert into j values
+(1, 'NYC'),
+(2, 'NYC'),
+(3, 'NYC'),
+(4, 'LA');
+
+statement ok
+create table cfg (k text, threshold int);
+
+statement ok
+insert into cfg values
+('active', 20),
+('legacy', 5);
+
+# Rows in s per city: NYC=2, LA=3, SF=1.  Rows in j per city: NYC=3, LA=1.
+
+# Correlated EXISTS in INNER JOIN ON.  Move to WHERE, decorrelate via
+# existing WHERE-position machinery.  Only s rows whose city has at least
+# one matching j row are kept; equi-join on city aligns the rest.
+query IT rowsort
+select s.sn, s.city
+from s
+inner join j on s.city = j.city
+             and exists (select 1 from j as j2 where j2.city = s.city);
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
+
+# Uncorrelated IN-subquery in INNER JOIN ON.  Subquery is a query-level
+# constant.  The move-to-WHERE + standard IN decorrelation must produce
+# results consistent with upstream.
+query IT rowsort
+select s.sn, s.city
+from s
+inner join j on s.city = j.city
+             and j.city in (select city from j as j3 where j3.jn <= 3);
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+
+# Scalar-subquery comparison in INNER JOIN ON.  Compare a joined column
+# to a per-query scalar (max threshold from cfg = 20).  Only s rows
+# with status < 20 qualify: sn=1 (status=10), sn=3 (status=15).
+query IT rowsort
+select s.sn, s.city
+from s
+inner join j on s.city = j.city
+             and s.status < (select max(threshold) from cfg);
+----
+1
+NYC
+1
+NYC
+1
+NYC
+3
+LA
+
+# Subquery predicate is the ONLY ON conjunct — ON becomes empty
+# post-move.  Joins as a CROSS JOIN filtered by WHERE.  Small tables:
+# 6 s rows x 4 j rows = 24 combos, filtered by EXISTS.  All s rows
+# qualify since every city has a matching j row (NYC or LA — SF has
+# no j match so excluded).
+query IT rowsort
+select s.sn, j.city
+from s
+inner join j on exists (select 1 from j as j2 where j2.city = s.city);
+----
+1
+LA
+1
+NYC
+1
+NYC
+1
+NYC
+2
+LA
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+3
+NYC
+3
+NYC
+3
+NYC
+4
+LA
+4
+NYC
+4
+NYC
+4
+NYC
+5
+LA
+5
+NYC
+5
+NYC
+5
+NYC
+
+# Multiple INNER JOINs, each with a subquery in ON.  Both move to WHERE
+# independently; both equi-joins stay in their respective ONs.
+# min(threshold from cfg) = min(20, 5) = 5.  All s rows qualify since
+# their status values are all >= 5.
+query IT rowsort
+select s.sn, s.city
+from s
+inner join j on s.city = j.city
+             and exists (select 1 from j as j2 where j2.city = s.city)
+inner join cfg on cfg.k = 'active'
+              and s.status >= (select min(threshold) from cfg as cfg2);
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
