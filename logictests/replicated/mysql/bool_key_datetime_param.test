@@ -1,0 +1,18 @@
+# Coercing a DATETIME parameter for lookup against a BOOL-typed key column
+# used to panic the adapter connection task (TimestampTz -> Bool coercion in
+# reader key remapping). The BOOL column keeps DfType::Bool because DDL
+# reaches readyset as raw statement text via binlog replication.
+
+statement ok
+CREATE TABLE bool_key (id INT PRIMARY KEY, b BOOL)
+
+statement ok
+INSERT INTO bool_key (id, b) VALUES (1, 0), (2, NULL)
+
+# MySQL compares tinyint(1) against a DATETIME constant numerically
+# (20220209131415 vs 0/1), so no rows match. Fixed readyset coerces the
+# timestamp key to true and finds no b=1 rows: also empty.
+query I nosort
+SELECT id FROM bool_key WHERE b = ?
+? = 2022-02-09 13:14:15
+----

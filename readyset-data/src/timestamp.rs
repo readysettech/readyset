@@ -618,14 +618,8 @@ impl TimestampTz {
                 self.datetime_as_int().into(),
             ))),
 
-            DfType::Bool => Ok(DfValue::from(
-                // TODO(mvzink): This will never work as chrono does not support zero dates.
-                self.to_chrono().naive_local()
-                    != NaiveDate::from_ymd_opt(0, 0, 0)
-                        .unwrap()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap(),
-            )),
+            // A timestamp is truthy unless it is the zero timestamp, matching DfValue::is_truthy.
+            DfType::Bool => Ok(DfValue::from(!self.is_zero())),
 
             DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
                 &self.to_string(),
@@ -887,6 +881,26 @@ mod tests {
                 .unwrap()
             ),
             "\"2022-02-09 13:14:15.169000\""
+        );
+    }
+
+    #[test]
+    fn timestamp_coerce_to_bool() {
+        let ts = DfValue::from(
+            chrono::NaiveDate::from_ymd_opt(2022, 2, 9)
+                .unwrap()
+                .and_hms_milli_opt(13, 14, 15, 169)
+                .unwrap(),
+        );
+        assert_eq!(
+            ts.coerce_to(&DfType::Bool, &DfType::Unknown).unwrap(),
+            DfValue::from(true)
+        );
+        assert_eq!(
+            DfValue::TimestampTz(TimestampTz::zero())
+                .coerce_to(&DfType::Bool, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from(false)
         );
     }
 
