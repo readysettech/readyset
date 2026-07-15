@@ -5831,6 +5831,118 @@ async fn aggregate_after_filter_non_equality() {
     shutdown_tx.shutdown().await;
 }
 
+/// A row committed between the full-replay snapshot pin and the replay barrier must reach the
+/// aggregate exactly once: buffered as a forward delta, absent from the snapshot.
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+async fn group_concat_write_during_migration_counted_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use readyset_util::failpoints::FULL_REPLAY_POST_SNAPSHOT;
+
+    static SNAPSHOT_REACHED: AtomicBool = AtomicBool::new(false);
+    static RELEASE: AtomicBool = AtomicBool::new(false);
+
+    // Release the chunker and disarm the failpoint even on panic.
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            RELEASE.store(true, Ordering::SeqCst);
+            let _ = fail::cfg(FULL_REPLAY_POST_SNAPSHOT, "off");
+        }
+    }
+
+    SNAPSHOT_REACHED.store(false, Ordering::SeqCst);
+    RELEASE.store(false, Ordering::SeqCst);
+    register_metric_recorder();
+    let _guard = Guard;
+
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("group_concat_write_during_migration_counted_once").await;
+
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE TABLE t0 (c0 int, c1 int);"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+
+    let mut t0 = g.table("t0").await.unwrap();
+    t0.insert_many((0..10i32).map(|i| vec![DfValue::from(i), DfValue::from((i + 1) * 10)]))
+        .await
+        .unwrap();
+    // Let the seed settle into the base materialization so it lands in the replay snapshot.
+    sleep().await;
+
+    fail::cfg_callback(FULL_REPLAY_POST_SNAPSHOT, || {
+        SNAPSHOT_REACHED.store(true, Ordering::SeqCst);
+        // Bounded so a panic before release degrades to a proceeding replay, not a hung thread.
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while !RELEASE.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    })
+    .unwrap();
+
+    // The gauge confirms the racing row buffered behind the barrier before release.
+    let writer = tokio::spawn(async move {
+        eventually!(attempts: 6000, sleep: Duration::from_millis(5), {
+            SNAPSHOT_REACHED.load(Ordering::SeqCst)
+        });
+        t0.insert(vec![DfValue::from(10), DfValue::from(110)])
+            .await
+            .unwrap();
+        let handle = readyset_metrics::metrics_handle().expect("recorder installed");
+        eventually!(attempts: 6000, sleep: Duration::from_millis(5), {
+            let [buffered] = handle.gauges([metric::DOMAIN_REPLAY_BUFFERED_WRITES], []);
+            buffered.get() >= 1.0
+        });
+        RELEASE.store(true, Ordering::SeqCst);
+    });
+
+    // The fully-materialized aggregate fills via full replay, blocking at the held chunker.
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec!["CREATE CACHE gc_race FROM SELECT GROUP_CONCAT(c1) AS gc FROM t0;"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    writer.await.unwrap();
+
+    let mut q = g
+        .view("gc_race")
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let expected: Vec<i32> = (1..=11).map(|n| n * 10).collect();
+    eventually!(attempts: 200, sleep: Duration::from_millis(25), {
+        let rows = q
+            .lookup(&[0i32.into()], Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
+        let mut values: Vec<i32> = rows
+            .first()
+            .and_then(|row| <&str>::try_from(row.first().unwrap()).ok())
+            .map(|s| s.split(',').map(|v| v.trim().parse().unwrap()).collect())
+            .unwrap_or_default();
+        values.sort();
+        values == expected
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn join_simple_cte() {
     let (mut g, shutdown_tx) = start_simple_unsharded("join_simple_cte").await;
