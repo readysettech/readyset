@@ -1,0 +1,20 @@
+statement ok
+CREATE TABLE t_js (id INT PRIMARY KEY, data JSONB);
+
+statement ok
+INSERT INTO t_js VALUES (1, '{"k": 0}');
+
+query J nosort
+SELECT jsonb_set(data, '{k}', '"updated"')::json FROM t_js;
+----
+{"k": "updated"}
+
+query J nosort
+SELECT jsonb_insert(data, '{x}', '7')::json FROM t_js;
+----
+{"k": 0, "x": 7}
+
+query J nosort
+SELECT jsonb_set_lax(data, '{k}', '"updated"')::json FROM t_js;
+----
+{"k": "updated"}

@@ -158,6 +158,9 @@ fn example_exprs_eval_same_as_postgres() {
         "3.6::INTEGER",
         "-2.6::INTEGER",
         "-3.6::INTEGER",
+        r#"jsonb_set('{"k": 0}', '{k}', '42')"#,
+        r#"jsonb_set('{"a": {"b": 1}}', '{a,b}', '"x"')"#,
+        "jsonb_insert('{}', '{k}', '42')",
     ] {
         compare_eval(expr, &mut client);
     }

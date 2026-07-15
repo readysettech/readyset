@@ -55,6 +55,20 @@ fn text_with_collation(s: &str, ty: &DfType) -> ReadySetResult<DfValue> {
     Ok(DfValue::from_str_and_collation(s, collation))
 }
 
+/// Coerces a text-literal path like `'{k}'` to `text[]`, as Postgres does implicitly.
+pub(crate) fn coerce_json_path_to_array(key_path: &DfValue) -> ReadySetResult<DfValue> {
+    if matches!(key_path, DfValue::Array(_)) {
+        return Ok(key_path.clone());
+    }
+    antithesis_sdk::assert_sometimes!(
+        true,
+        "JSON key path coerced from a non-array literal to text[]",
+        &serde_json::json!({})
+    );
+    let text_array = DfType::Array(Box::new(DfType::DEFAULT_TEXT));
+    key_path.coerce_to(&text_array, &key_path.infer_dataflow_type())
+}
+
 /// Returns the type of data stored in a JSON value as a string.
 fn get_json_value_type(json: &serde_json::Value) -> &'static str {
     match json {
@@ -1090,6 +1104,7 @@ impl BuiltinFunction {
                 let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
 
                 let key_path = non_null!(key_path.eval(record)?);
+                let key_path = coerce_json_path_to_array(&key_path)?;
                 let key_path = key_path.as_array()?.values();
 
                 let inserted_json = non_null!(inserted_json.eval(record)?).to_json()?;
@@ -1121,6 +1136,7 @@ impl BuiltinFunction {
                 let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
 
                 let key_path = non_null!(key_path.eval(record)?);
+                let key_path = coerce_json_path_to_array(&key_path)?;
                 let key_path = key_path.as_array()?.values();
 
                 let new_json = new_json.eval(record)?;
@@ -3308,6 +3324,11 @@ mod tests {
                 test_non_null(object, &keys, "42", false, expected);
                 test_non_null(object, &keys, "42", true, expected);
             }
+
+            #[test]
+            fn text_literal_path() {
+                test_nullable("'{}'", "'{k}'", "'42'", Some(false), Some(r#"{"k": 42}"#));
+            }
         }
 
         mod jsonb_set {
@@ -3492,6 +3513,17 @@ mod tests {
 
                 test_non_null(object, &keys, "42", false, expected);
                 test_non_null(object, &keys, "42", true, expected);
+            }
+
+            #[test]
+            fn text_literal_path() {
+                test_nullable(
+                    r#"'{"k": 0}'"#,
+                    "'{k}'",
+                    "'42'",
+                    Some(true),
+                    Some(r#"{"k": 42}"#),
+                );
             }
         }
 
