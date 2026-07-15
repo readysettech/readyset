@@ -7023,6 +7023,7 @@ dependencies = [
 name = "readyset-sql-passes"
 version = "0.0.1"
 dependencies = [
+ "antithesis_sdk",
  "criterion",
  "dataflow-expression",
  "hex",

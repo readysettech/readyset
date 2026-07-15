@@ -92,7 +92,7 @@ use readyset_sql::ast::{
     IndexKeyPart, ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, JoinRightSide,
     LimitClause, LimitValue, Literal, NullOrder, OrderBy, OrderClause, OrderType, Relation,
     SelectStatement, SqlIdentifier, SqlType, SqlTypeArbitraryOptions, TableExpr, TableExprInner,
-    TableKey,
+    TableKey, UnaryOperator,
 };
 use readyset_sql::{Dialect as ParseDialect, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::outermost_table_exprs;
@@ -1395,31 +1395,48 @@ fn filter_op(ty: &SqlType) -> impl Strategy<Value = BinaryOperator> {
 }
 
 /// An individual filter operation
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize, Arbitrary)]
-#[arbitrary(args = FilterRhsArgs)]
+#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FilterOp {
     /// Compare a column with either another column, or a value
-    Comparison {
-        #[strategy(filter_op(&args.column_type))]
-        op: BinaryOperator,
-
-        #[strategy(any_with::<FilterRHS>((*args).clone()))]
-        rhs: FilterRHS,
-    },
+    Comparison { op: BinaryOperator, rhs: FilterRHS },
 
     /// A BETWEEN comparison on a column and two values
     Between {
         negated: bool,
-
-        #[strategy(any_with::<FilterRHS>((*args).clone()))]
         min: FilterRHS,
-
-        #[strategy(any_with::<FilterRHS>((*args).clone()))]
         max: FilterRHS,
     },
 
     /// An IS NULL comparison on a column
     IsNull { negated: bool },
+
+    /// The column used directly (or negated) as a boolean predicate. A bare column has no
+    /// inverse form, so `readyset_sql_passes::expr::normalize_negation` has to wrap it in an
+    /// explicit `NOT`; combined with [`Filter::negate`] this reaches shapes like
+    /// `NOT ((NOT a) AND b)`.
+    BooleanColumn { negated: bool },
+}
+
+impl Arbitrary for FilterOp {
+    type Parameters = FilterRhsArgs;
+
+    type Strategy = BoxedStrategy<FilterOp>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let rhs = || any_with::<FilterRHS>(args.clone());
+        // A bare column is only a valid predicate in Postgres if it's boolean.
+        let boolean_column_weight = u32::from(args.column_type == SqlType::Bool);
+        proptest::prop_oneof![
+            1 => (filter_op(&args.column_type), rhs())
+                .prop_map(|(op, rhs)| FilterOp::Comparison { op, rhs }),
+            1 => (any::<bool>(), rhs(), rhs())
+                .prop_map(|(negated, min, max)| FilterOp::Between { negated, min, max }),
+            1 => any::<bool>().prop_map(|negated| FilterOp::IsNull { negated }),
+            boolean_column_weight => any::<bool>()
+                .prop_map(|negated| FilterOp::BooleanColumn { negated }),
+        ]
+        .boxed()
+    }
 }
 
 /// A full representation of a filter to be added to a query
@@ -1433,6 +1450,10 @@ pub struct Filter {
 
     /// The type of the column that's being filtered on
     pub column_type: SqlType,
+
+    /// Whether to wrap the WHERE clause in an explicit `NOT` after adding this filter, which
+    /// is how the generator emits negated conjunctions and disjunctions
+    pub negate: bool,
 }
 
 impl Arbitrary for Filter {
@@ -1452,8 +1473,9 @@ impl Arbitrary for Filter {
                 dialect: dialect.0,
             }),
             any::<LogicalOp>(),
+            any::<bool>(),
         )
-            .prop_flat_map(|(column_type, extend_where_with)| {
+            .prop_flat_map(|(column_type, extend_where_with, negate)| {
                 any_with::<FilterOp>(FilterRhsArgs {
                     column_type: column_type.clone(),
                 })
@@ -1461,6 +1483,7 @@ impl Arbitrary for Filter {
                     column_type: column_type.clone(),
                     operation,
                     extend_where_with,
+                    negate,
                 })
             })
             .boxed()
@@ -1477,6 +1500,7 @@ impl Filter {
                 operation: FilterOp::Comparison { op: operator, rhs },
                 extend_where_with,
                 column_type: SqlType::Int(None),
+                negate: false,
             })
     }
 }
@@ -1917,24 +1941,33 @@ lazy_static! {
                 extend_where_with,
                 operation,
                 column_type: SqlType::Int(None),
+                negate: false,
             })
             .collect()
     };
 }
 
-fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expr) {
-    query.where_clause = Some(match query.where_clause.take() {
+fn extend_where(query: &mut SelectStatement, op: LogicalOp, cond: Expr, negate: bool) {
+    let combined = match query.where_clause.take() {
         Some(existing_cond) => Expr::BinaryOp {
             op: op.into(),
             lhs: Box::new(existing_cond),
             rhs: Box::new(cond),
         },
         None => cond,
-    })
+    };
+    query.where_clause = Some(if negate {
+        Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            rhs: Box::new(combined),
+        }
+    } else {
+        combined
+    });
 }
 
 fn and_where(query: &mut SelectStatement, cond: Expr) {
-    extend_where(query, LogicalOp::And, cond)
+    extend_where(query, LogicalOp::And, cond, false)
 }
 
 fn query_has_aggregate(query: &SelectStatement) -> bool {
@@ -2200,9 +2233,19 @@ impl QueryOperation {
                             rhs: Box::new(Expr::Literal(Literal::Null)),
                         }
                     }
+                    FilterOp::BooleanColumn { negated } => {
+                        if *negated {
+                            Expr::UnaryOp {
+                                op: UnaryOperator::Not,
+                                rhs: Box::new(col_expr),
+                            }
+                        } else {
+                            col_expr
+                        }
+                    }
                 };
 
-                extend_where(query, filter.extend_where_with, cond);
+                extend_where(query, filter.extend_where_with, cond, filter.negate);
             }
 
             QueryOperation::Distinct => {
@@ -2841,6 +2884,7 @@ impl FromStr for Operations {
                     operation,
 
                     column_type: SqlType::Int(None),
+                    negate: false,
                 })
                 .map(Filter)
                 .collect()),
@@ -2853,6 +2897,7 @@ impl FromStr for Operations {
                     extend_where_with,
                     operation,
                     column_type: SqlType::Int(None),
+                    negate: false,
                 })
                 .map(Filter)
                 .collect()),
@@ -3733,6 +3778,45 @@ mod tests {
         query
             .detect_problematic_self_joins()
             .expect("subquery join should not produce a problematic self-join");
+    }
+
+    /// The generator must reach `NOT ((NOT a) AND b)`, the shape that used to panic
+    /// `normalize_negation` because `a` is a bare column with no inverse operator.
+    #[test]
+    fn boolean_column_filters_emit_negated_conjunction() {
+        let dialect = ParseDialect::MySQL;
+        let query = generate_query(
+            dialect,
+            vec![
+                QueryOperation::Filter(Filter {
+                    extend_where_with: LogicalOp::And,
+                    operation: FilterOp::BooleanColumn { negated: true },
+                    column_type: SqlType::Bool,
+                    negate: false,
+                }),
+                QueryOperation::Filter(Filter {
+                    extend_where_with: LogicalOp::And,
+                    operation: FilterOp::BooleanColumn { negated: false },
+                    column_type: SqlType::Bool,
+                    negate: true,
+                }),
+            ],
+        );
+
+        let mut where_clause = query
+            .where_clause
+            .clone()
+            .expect("filters should add a WHERE clause");
+        assert!(
+            matches!(
+                &where_clause,
+                Expr::UnaryOp { op: UnaryOperator::Not, rhs }
+                    if matches!(rhs.as_ref(), Expr::BinaryOp { op: BinaryOperator::And, .. })
+            ),
+            "expected NOT(<conjunction>), got {}",
+            where_clause.display(dialect)
+        );
+        readyset_sql_passes::expr::scalar_optimize_expr(&mut where_clause, Dialect::DEFAULT_MYSQL);
     }
 
     #[test]

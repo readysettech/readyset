@@ -2,8 +2,8 @@ use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{BinaryOperator, Expr, UnaryOperator};
 
 /// Attempt to replace `expr` with the equivalent expression negated. Returns `true` if that was
-/// doable, or `false` if it was impossible. If this function returns `false`, `expr` was not
-/// mutated
+/// doable, or `false` if it was impossible. On `false`, `expr` is left semantically equivalent to
+/// its original value, though its structure may differ (e.g. a double negation may collapse).
 fn negate_expr(expr: &mut Expr) -> bool {
     match expr {
         Expr::BinaryOp { op, lhs, rhs } => {
@@ -12,9 +12,16 @@ fn negate_expr(expr: &mut Expr) -> bool {
                     return false;
                 }
                 if !negate_expr(rhs) {
-                    // If we can't negate the rhs, re-negate the lhs to revert it to its original
-                    // state.
-                    assert!(negate_expr(lhs), "negate_expr must be involutive!");
+                    // Revert the lhs; negating `NOT x` yields a bare `x` that can't be re-negated.
+                    if !negate_expr(lhs) {
+                        antithesis_sdk::assert_reachable!(
+                            "normalize_negation reverts a non-re-negatable lhs"
+                        );
+                        **lhs = Expr::UnaryOp {
+                            op: UnaryOperator::Not,
+                            rhs: Box::new(lhs.take()),
+                        };
+                    }
                     return false;
                 }
             }
@@ -189,6 +196,14 @@ mod tests {
         // The ? Operator is Postgres-specific
         let mut expr = parse_expr(Dialect::PostgreSQL, "NOT (j ? 'key' AND NOT b)").unwrap();
         let expected = parse_expr(Dialect::PostgreSQL, "NOT j ? 'key' OR b").unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn revert_non_involutive_lhs() {
+        let mut expr = parse_expr(Dialect::MySQL, "NOT ((NOT a) AND b)").unwrap();
+        let expected = expr.clone();
         normalize_negation(&mut expr);
         assert_eq!(expr, expected);
     }
