@@ -262,6 +262,12 @@ impl ReadRequestHandler {
             reader.upquery(keys_to_replay.into_iter().map(|k| k.into_owned()));
         }
 
+        // A zero upquery timeout means a miss falls through immediately; the backfill triggered
+        // above still warms the cache in the background.
+        if self.upquery_timeout.is_zero() {
+            reply_with_error!(ReadySetError::UpqueryTimeout);
+        }
+
         let read = BlockingRead {
             tag,
             target,
