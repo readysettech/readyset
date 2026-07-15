@@ -1,0 +1,272 @@
+# Stage 4 feasibility exploration.
+#
+# The eventual rewrite pass will transform LEFT OUTER JOIN ON subqueries
+# into shapes below (see design memo §12).  This file uses HAND-CRAFTED
+# post-rewrite SQL to verify each target shape lowers end-to-end through
+# the pipeline before we write the rewrite pass.
+#
+# Three sound cases per the case matrix:
+#   Case 1: uncorrelated subquery in LOJ ON.
+#   Case 2: subquery correlated on the preserved side (A).
+#   Case 3: subquery correlated on the non-preserved side (B).
+#
+# For each, the rewrite wraps the correlation-owning side with a DT that
+# projects the subquery result as a computed column, then references the
+# projected column in the LOJ ON.
+
+statement ok
+create table s (sn int, city text, status int);
+
+statement ok
+insert into s values
+(1, 'NYC', 10),
+(2, 'NYC', 20),
+(3, 'LA',  15),
+(4, 'LA',  25),
+(5, 'LA',  30),
+(6, 'SF',  40);
+
+statement ok
+create table j (jn int, city text);
+
+statement ok
+insert into j values
+(1, 'NYC'),
+(2, 'NYC'),
+(3, 'NYC'),
+(4, 'LA');
+
+statement ok
+create table cfg (k text, threshold int);
+
+statement ok
+insert into cfg values
+('active', 20),
+('legacy', 5);
+
+# ── Case 1: uncorrelated subquery in LOJ ON — wrap on A (preserved side) ──
+#
+# Original (not supported today):
+#   SELECT s.sn, j.city FROM s LEFT JOIN j ON s.city = j.city
+#     AND (SELECT COUNT(*) FROM cfg WHERE k = 'active') > 0
+#
+# Post-rewrite target:
+#   Wrap A with a DT that projects the uncorrelated subquery's value.
+#   COUNT is 1 for k='active' — active_count > 0 always TRUE — ON simplifies
+#   to s.city = j.city — s(6,SF) has no match, NULL-extended.
+query IT rowsort
+select sub.sn, j.city
+from (select s.sn, s.city, (select count(*) from cfg where k = 'active') as active_count from s) sub
+left join j on sub.city = j.city and sub.active_count > 0
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
+6
+NULL
+
+# ── Case 2: subquery correlated on A (preserved side) — wrap A ──
+#
+# Original (not supported today):
+#   SELECT s.sn, j.city FROM s LEFT JOIN j ON s.city = j.city
+#     AND (SELECT COUNT(*) FROM j j2 WHERE j2.city = s.city) > 0
+#
+# Post-rewrite target:
+#   Wrap A with a DT projecting the correlated scalar subquery result.
+#   j_count is 3 for NYC, 1 for LA, 0 for SF — j_count > 0 excludes SF —
+#   s(6,SF) gets ON=false — NULL-extended.
+query IT rowsort
+select sub.sn, j.city
+from (select s.sn, s.city, (select count(*) from j j2 where j2.city = s.city) as j_count from s) sub
+left join j on sub.city = j.city and sub.j_count > 0
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
+6
+NULL
+
+# ── Case 3: subquery correlated on B (non-preserved side) — wrap B ──
+#
+# Original (not supported today):
+#   SELECT s.sn, j.city FROM s LEFT JOIN j ON s.city = j.city
+#     AND (SELECT COUNT(*) FROM s s2 WHERE s2.city = j.city) > 1
+#
+# Post-rewrite target:
+#   Wrap B with a DT projecting the correlated scalar subquery result.
+#   s_count: 2 for NYC (2 s rows), 3 for LA, 0 for SF (but SF not in j).
+#   All s_count > 1 in this data, so ON reduces to s.city = j.city.
+#   s(6,SF) still has no j match — NULL-extended.
+query IT rowsort
+select s.sn, sub.city
+from s left join (select j.jn, j.city, (select count(*) from s s2 where s2.city = j.city) as s_count from j) sub
+on s.city = sub.city and sub.s_count > 1
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
+6
+NULL
+
+# --- Case E1: uncorrelated EXISTS via CASE-to-int, `= 1` in LOJ ON ---
+#
+# Original (not supported today):
+#   SELECT s.sn, j.city FROM s LEFT JOIN j ON s.city = j.city
+#     AND EXISTS (SELECT 1 FROM cfg WHERE cfg.k = 'active')
+#
+# Post-rewrite target (Option B canonicalization; see design memo §12):
+#   Wrap A with a DT projecting CASE WHEN EXISTS(subq) THEN 1 ELSE 0 END.
+#   ON becomes `sub.has_active = 1`.  EXISTS is TRUE (cfg has 'active') so
+#   the CASE is 1 for every s row and ON simplifies to s.city = j.city.
+#   s(6,SF) has no match, NULL-extended.
+query IT rowsort
+select sub.sn, j.city
+from (select s.sn, s.city, case when exists (select 1 from cfg where cfg.k = 'active') then 1 else 0 end as has_active from s) sub
+left join j on sub.city = j.city and sub.has_active = 1
+----
+1
+NYC
+1
+NYC
+1
+NYC
+2
+NYC
+2
+NYC
+2
+NYC
+3
+LA
+4
+LA
+5
+LA
+6
+NULL
+
+# --- Case E2: uncorrelated NOT EXISTS via CASE-to-int (branches swapped) ---
+#
+# Original (not supported today):
+#   SELECT s.sn, j.city FROM s LEFT JOIN j ON s.city = j.city
+#     AND NOT EXISTS (SELECT 1 FROM cfg WHERE cfg.k = 'active')
+#
+# Post-rewrite target (Option B canonicalization):
+#   Wrap A with a DT projecting CASE WHEN EXISTS(subq) THEN 0 ELSE 1 END.
+#   ON becomes `sub.no_active = 1`.  EXISTS is TRUE so CASE is 0 for every
+#   s row and ON is always FALSE.  Every s row NULL-extends.
+query IT rowsort
+select sub.sn, j.city
+from (select s.sn, s.city, case when exists (select 1 from cfg where cfg.k = 'active') then 0 else 1 end as no_active from s) sub
+left join j on sub.city = j.city and sub.no_active = 1
+----
+1
+NULL
+2
+NULL
+3
+NULL
+4
+NULL
+5
+NULL
+6
+NULL
+
+# --- Case E3: uncorrelated EXISTS false-branch via CASE-to-int ---
+#
+# Verifies the false-EXISTS case emits the correct NULL-extended output.
+# EXISTS (SELECT 1 FROM cfg WHERE k = 'archived') is FALSE (no such row).
+# Post-rewrite CASE is 0 for every row; ON always FALSE; all NULL-extend.
+query IT rowsort
+select sub.sn, j.city
+from (select s.sn, s.city, case when exists (select 1 from cfg where cfg.k = 'archived') then 1 else 0 end as has_archived from s) sub
+left join j on sub.city = j.city and sub.has_archived = 1
+----
+1
+NULL
+2
+NULL
+3
+NULL
+4
+NULL
+5
+NULL
+6
+NULL
+
+# ── Case 3 negative variant: threshold that excludes some sub rows ──
+#
+# Same shape as Case 3, but with a stricter threshold so some sub rows fail.
+# s_count > 2 excludes NYC (count=2) and includes LA (count=3).
+# So sub effectively contains only LA rows.
+# LOJ s × LA-only-sub:
+#   s(1,NYC): no LA match → NULL-extended.
+#   s(2,NYC): no LA match → NULL-extended.
+#   s(3,LA): matches sub(4,LA) → (3,LA).
+#   s(4,LA): (4,LA).
+#   s(5,LA): (5,LA).
+#   s(6,SF): NULL-extended.
+query IT rowsort
+select s.sn, sub.city
+from s left join (select j.jn, j.city, (select count(*) from s s2 where s2.city = j.city) as s_count from j) sub
+on s.city = sub.city and sub.s_count > 2
+----
+1
+NULL
+2
+NULL
+3
+LA
+4
+LA
+5
+LA
+6
+NULL
