@@ -1,0 +1,39 @@
+# FLOAT <op> DOUBLE arithmetic must widen the FLOAT operand to double
+# precision, matching MySQL, for both operand orders.
+#
+# Row 1 uses 2^25: at that magnitude f32 rounding collapses 33554433 and
+# 33554431 to 33554432, so any single-precision evaluation is visible in
+# the result. Row 3's double is 1 + 2^-25, which narrows to exactly 1.0
+# in f32.
+
+statement ok
+CREATE TABLE fd (id INT PRIMARY KEY, f FLOAT, d DOUBLE);
+
+statement ok
+INSERT INTO fd VALUES (1, 33554432, 1), (2, 1, 3), (3, 33554432, 1.0000000298023224);
+
+query R nosort
+SELECT f + d FROM fd WHERE id = 1;
+----
+33554433
+
+query R nosort
+SELECT f - d FROM fd WHERE id = 1;
+----
+33554431
+
+# Control: the DOUBLE-on-the-left order widens in both operand arms.
+query R nosort
+SELECT d + f FROM fd WHERE id = 1;
+----
+33554433
+
+query R nosort
+SELECT f / d FROM fd WHERE id = 2;
+----
+0.3333333333333333
+
+query R nosort
+SELECT f * d FROM fd WHERE id = 3;
+----
+33554433

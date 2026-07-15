@@ -2202,7 +2202,6 @@ macro_rules! arithmetic_operation (
             (first @ &DfValue::Float(..), second @ &DfValue::Int(..)) |
             (first @ &DfValue::Float(..), second @ &DfValue::UnsignedInt(..)) |
             (first @ &DfValue::Float(..), second @ &DfValue::Float(..)) |
-            (first @ &DfValue::Float(..), second @ &DfValue::Double(..)) |
             (first @ &DfValue::Float(..), second @ &DfValue::Numeric(..)) => {
                 let a: f32 = f32::try_from(first)?;
                 let b: f32 = f32::try_from(second)?;
@@ -2215,6 +2214,7 @@ macro_rules! arithmetic_operation (
             (first @ &DfValue::Double(..), second @ &DfValue::UnsignedInt(..)) |
             (first @ &DfValue::Double(..), second @ &DfValue::Double(..)) |
             (first @ &DfValue::Double(..), second @ &DfValue::Float(..)) |
+            (first @ &DfValue::Float(..), second @ &DfValue::Double(..)) |
             (first @ &DfValue::Double(..), second @ &DfValue::Numeric(..)) => {
                 let a: f64 = f64::try_from(first)?;
                 let b: f64 = f64::try_from(second)?;
@@ -3006,6 +3006,15 @@ mod tests {
         assert_eq!((&DfValue::Int(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::from(1) + &DfValue::Int(2)).unwrap(), 3.into());
         assert_eq!((&DfValue::Int(2) + &DfValue::from(1)).unwrap(), 3.into());
+    }
+
+    #[test]
+    fn float_double_arithmetic_yields_double() {
+        // DfValue equality compares Float and Double numerically, so assert on the variant.
+        let float = DfValue::try_from(1.5_f32).unwrap();
+        let double = DfValue::try_from(2.5_f64).unwrap();
+        assert!(matches!((&float + &double).unwrap(), DfValue::Double(_)));
+        assert!(matches!((&double + &float).unwrap(), DfValue::Double(_)));
     }
 
     #[test]
