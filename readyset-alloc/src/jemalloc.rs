@@ -250,9 +250,10 @@ extern "C" fn write_cb(printer: *mut c_void, msg: *const c_char) {
     let buf = unsafe { &mut *(printer as *mut Vec<u8>) };
     // SAFETY: We are trusting [`malloc_stats_print`] to provide a valid null-terminated C string.
     let len = unsafe { libc::strlen(msg) };
-    // SAFETY: We know it's a valid null-terminated C string and we know it's length, so we can make
-    // a slice from it.
-    let bytes = unsafe { slice::from_raw_parts(msg as *const u8, len) };
+    // SAFETY: We know it's a valid null-terminated C string of known length, so we can make a
+    // slice from it. `cast` rather than `as` since `c_char`'s signedness varies by platform,
+    // making `as *const u8` a same-type cast that clippy rejects on some targets.
+    let bytes = unsafe { slice::from_raw_parts(msg.cast::<u8>(), len) };
     buf.extend_from_slice(bytes);
 }
 
