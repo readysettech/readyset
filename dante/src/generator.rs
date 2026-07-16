@@ -5,6 +5,7 @@
 
 use readyset_sql::Dialect;
 
+use crate::bias::{self, TagBias};
 use crate::compat::{
     CompatibilityRule, SelectionFilter, check_rules, default_rules, readyset_compat_rules,
 };
@@ -273,18 +274,19 @@ impl ConstraintRegistry {
         filter: &SelectionFilter,
         dialect: Dialect,
     ) -> Option<&'a Pattern> {
-        self.pick_random_excluding(entropy, filter, dialect, &[])
+        self.pick_random_excluding(entropy, filter, &TagBias::default(), dialect, &[])
             .map(|(_, p)| p)
     }
 
-    /// Pick a random pattern matching the filter and dialect, excluding
-    /// patterns at the given registry indices. Returns the chosen pattern's
-    /// registry index and a reference to the pattern, or `None` if no
-    /// candidates remain or if all matching patterns have weight 0.
+    /// Pick a random pattern matching the filter and dialect, excluding patterns at the given
+    /// registry indices and scaling each candidate's static weight by `bias` (see
+    /// [`TagBias::weight_for_tags`]). Returns the chosen pattern's registry index and a
+    /// reference to it, or `None` if no candidate has positive effective weight.
     pub fn pick_random_excluding<'a>(
         &'a self,
         entropy: &mut Entropy<'_>,
         filter: &SelectionFilter,
+        bias: &TagBias,
         dialect: Dialect,
         excluded_indices: &[usize],
     ) -> Option<(usize, &'a Pattern)> {
@@ -293,10 +295,6 @@ impl ConstraintRegistry {
         // × excluded) inner check compounds badly under heavy composition.
         let excluded: std::collections::HashSet<usize> = excluded_indices.iter().copied().collect();
 
-        // Single linear scan: build the candidate list, sum weights, then
-        // sample. Avoids the redundant second Vec the original allocated for
-        // `(i, weight)` tuples, and threads `Pattern::weight: u32` directly
-        // (no `as u32` narrowing).
         let candidates: Vec<(usize, &Pattern)> = self
             .patterns
             .iter()
@@ -312,23 +310,11 @@ impl ConstraintRegistry {
             })
             .collect();
 
-        if candidates.is_empty() {
-            return None;
-        }
-
-        let total: u32 = candidates.iter().map(|(_, p)| p.weight).sum();
-        if total == 0 {
-            return None;
-        }
-
-        let mut pick = entropy.range(0..total);
-        for (i, p) in &candidates {
-            if pick < p.weight {
-                return Some((*i, *p));
-            }
-            pick -= p.weight;
-        }
-        candidates.last().copied()
+        let weights: Vec<f64> = candidates
+            .iter()
+            .map(|(_, p)| f64::from(p.weight) * bias.weight_for_tags(&p.tags))
+            .collect();
+        bias::choose_weighted_f64(entropy, &candidates, &weights).copied()
     }
 
     /// Create a registry with all default patterns and rules.
@@ -740,6 +726,22 @@ impl Generator {
         entropy: &mut Entropy<'_>,
         filter: &SelectionFilter,
     ) -> Result<QueryOutput, GenerateError> {
+        self.generate_with_ddl_biased(entropy, filter, &TagBias::default())
+    }
+
+    /// Mode 1 with a filter and a tag bias: generate a query matching the
+    /// filter, drawing the primary pattern in proportion to `bias`.
+    ///
+    /// The bias weights the primary pick only; composition partners follow
+    /// the filter's hard exclusions, so a zero-weighted tag can still appear
+    /// composed onto a differently-tagged primary. Hard exclusion belongs to
+    /// the filter.
+    pub fn generate_with_ddl_biased(
+        &mut self,
+        entropy: &mut Entropy<'_>,
+        filter: &SelectionFilter,
+        bias: &TagBias,
+    ) -> Result<QueryOutput, GenerateError> {
         if self.registry.is_empty() {
             return Err(GenerateError::NoCompatiblePattern { attempted: vec![] });
         }
@@ -752,7 +754,11 @@ impl Generator {
         for _ in 0..MAX_RETRIES {
             // Pick a pattern
             let dialect = self.state.dialect();
-            let pattern = match self.registry.pick_random(entropy, &filter, dialect) {
+            let pattern = match self
+                .registry
+                .pick_random_excluding(entropy, &filter, bias, dialect, &[])
+                .map(|(_, p)| p)
+            {
                 Some(p) => p,
                 None => {
                     return Err(GenerateError::NoCompatiblePattern { attempted });
@@ -1044,9 +1050,13 @@ impl Generator {
                 excluded_tags: excluded_tags.to_vec(),
                 ..Default::default()
             };
-            let candidate =
-                self.registry
-                    .pick_random_excluding(entropy, &filter, dialect, &tried_indices);
+            let candidate = self.registry.pick_random_excluding(
+                entropy,
+                &filter,
+                &TagBias::default(),
+                dialect,
+                &tried_indices,
+            );
 
             let Some((idx, partner)) = candidate else {
                 // No more candidates available
@@ -1504,6 +1514,127 @@ mod tests {
                 "should not contain subquery tag"
             );
         }
+    }
+
+    #[test]
+    fn pick_random_excluding_respects_bias_weight() {
+        let reg = ConstraintRegistry::default_registry();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        // A zero-weighted tag must exclude every pattern that carries it, over
+        // many draws; unweighted patterns stay selectable.
+        let zero_weighted = TagBias {
+            weights: std::collections::BTreeMap::from([("aggregate".to_string(), 0.0)]),
+            ..TagBias::default()
+        };
+        for _ in 0..200 {
+            let p = reg
+                .pick_random_excluding(
+                    &mut entropy,
+                    &SelectionFilter::default(),
+                    &zero_weighted,
+                    Dialect::MySQL,
+                    &[],
+                )
+                .map(|(_, p)| p)
+                .expect("non-aggregate patterns stay selectable");
+            assert!(
+                !p.tags.contains(&"aggregate"),
+                "zero-weighted tag must exclude pattern {:?}",
+                p.name
+            );
+        }
+
+        // A 0.0 default_weight restricts the draw to explicitly weighted tags
+        // (the TagBias::default_weight contract): the weighted equivalent of
+        // required_tags.
+        let only_weighted = TagBias {
+            default_weight: 0.0,
+            weights: std::collections::BTreeMap::from([("aggregate".to_string(), 2.0)]),
+        };
+        for _ in 0..50 {
+            let p = reg
+                .pick_random_excluding(
+                    &mut entropy,
+                    &SelectionFilter::default(),
+                    &only_weighted,
+                    Dialect::MySQL,
+                    &[],
+                )
+                .map(|(_, p)| p)
+                .expect("aggregate patterns are selectable");
+            assert!(
+                p.tags.contains(&"aggregate"),
+                "only the weighted tag may be picked, got {:?}",
+                p.name
+            );
+        }
+
+        // Nothing selectable when default_weight is 0 and no tag carries a weight.
+        let nothing_selectable = TagBias {
+            default_weight: 0.0,
+            weights: std::collections::BTreeMap::new(),
+        };
+        assert!(
+            reg.pick_random_excluding(
+                &mut entropy,
+                &SelectionFilter::default(),
+                &nothing_selectable,
+                Dialect::MySQL,
+                &[],
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn generate_with_ddl_biased_surfaces_unselectable_bias() {
+        let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let bias = TagBias {
+            default_weight: 0.0,
+            weights: std::collections::BTreeMap::new(),
+        };
+        let result =
+            generator.generate_with_ddl_biased(&mut entropy, &SelectionFilter::default(), &bias);
+        assert!(
+            matches!(result, Err(GenerateError::NoCompatiblePattern { .. })),
+            "a bias selecting nothing must surface as NoCompatiblePattern"
+        );
+    }
+
+    #[test]
+    fn generate_with_ddl_biased_steers_primary_pattern() {
+        let mut generator = Generator::new(Dialect::MySQL, GeneratorConfig::default());
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let bias = TagBias {
+            default_weight: 0.0,
+            weights: std::collections::BTreeMap::from([("aggregate".to_string(), 1.0)]),
+        };
+        let reg = ConstraintRegistry::default_registry();
+        let mut generated = 0;
+        for _ in 0..20 {
+            if let Ok(out) =
+                generator.generate_with_ddl_biased(&mut entropy, &SelectionFilter::default(), &bias)
+            {
+                generated += 1;
+                let primary = out.pattern_name.split('+').next().expect("primary name");
+                let tags = &reg
+                    .patterns
+                    .iter()
+                    .find(|p| p.name == primary)
+                    .unwrap_or_else(|| panic!("unknown primary pattern {primary}"))
+                    .tags;
+                assert!(
+                    tags.contains(&"aggregate"),
+                    "bias must steer the primary pick; got {primary} with tags {tags:?}"
+                );
+            }
+        }
+        assert!(generated > 0, "biased generation must produce queries");
     }
 
     #[test]

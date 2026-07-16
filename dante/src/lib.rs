@@ -4,6 +4,7 @@
 //! and resolving them against a mutable schema state. The main entry point
 //! is [`generator::Generator`].
 
+pub mod bias;
 pub mod compat;
 pub mod constraint;
 pub mod entropy;
@@ -15,6 +16,7 @@ pub mod state;
 pub(crate) mod var;
 
 // Re-export primary API types for convenience.
+pub use bias::TagBias;
 pub use generator::{
     ConstraintRegistry, DdlOutput, GenerateError, Generator, PatternRegistrationError, QueryOutput,
 };
