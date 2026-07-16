@@ -40,6 +40,14 @@ pub enum TypeClass {
     /// Types PostgreSQL accepts for MIN/MAX and ordering: numeric, string,
     /// and date/time. Excludes boolean, which has no min/max aggregate in PG.
     Orderable,
+    /// Types whose values round-trip as a bind parameter compared against a
+    /// column: the numeric, string, boolean, and temporal families. Geometry
+    /// is the one family excluded, because a geometry parameter has no bind
+    /// representation -- the harness rejects it client-side, before the wire.
+    /// The resolver applies this class by default to every column a parameter
+    /// is compared against, so a pattern states a class only when it wants a
+    /// narrower one.
+    ParamComparable,
     /// PostGIS geometry types (GEOMETRY(POINT), GEOMETRY(POLYGON)).
     /// Used by spatial function patterns like st_astext, st_asewkt.
     Geometry,
@@ -97,6 +105,12 @@ impl TypeClass {
                     || TypeClass::String.matches(sql_type)
                     || TypeClass::DateTime.matches(sql_type)
             }
+            TypeClass::ParamComparable => {
+                TypeClass::Numeric.matches(sql_type)
+                    || TypeClass::String.matches(sql_type)
+                    || TypeClass::DateTime.matches(sql_type)
+                    || matches!(sql_type, SqlType::Bool)
+            }
             TypeClass::Geometry => {
                 matches!(sql_type, SqlType::PostgisPoint | SqlType::PostgisPolygon)
             }
@@ -119,8 +133,9 @@ impl TypeClass {
             }
             TypeClass::Exact(ty) if TypeClass::Integer.matches(ty) => s.parse::<i64>().is_ok(),
             TypeClass::Exact(ty) if TypeClass::Numeric.matches(ty) => s.parse::<f64>().is_ok(),
-            // String, DateTime, Any, Orderable, and non-numeric Exact types
-            // are not statically checkable here; the oracle parses them as text.
+            // String, DateTime, Any, Orderable, ParamComparable, and non-numeric
+            // Exact types are not statically checkable here; the oracle parses
+            // them as text.
             _ => true,
         }
     }

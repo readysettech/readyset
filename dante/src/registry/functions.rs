@@ -257,7 +257,7 @@ scalar_fn_patterns! {
     jsonb_set => (ScalarFn::JsonbSet, TypeClass::String, 1, DialectSupport::PostgresOnly, ["function", "json"]),
     /// SELECT jsonb_set_lax(jsonb_build_object('k', t.c0), '{k}', '"new"') FROM t (PostgreSQL only)
     jsonb_set_lax => (ScalarFn::JsonbSetLax, TypeClass::String, 1, DialectSupport::PostgresOnly, ["function", "json"]),
-    /// SELECT jsonb_insert(jsonb_build_object('k', t.c0), '{k}', '"added"') FROM t (PostgreSQL only)
+    /// SELECT jsonb_insert(jsonb_build_object('k', t.c0), '{other}', '"added"') FROM t (PostgreSQL only)
     jsonb_insert => (ScalarFn::JsonbInsert, TypeClass::String, 1, DialectSupport::PostgresOnly, ["function", "json"]),
     /// SELECT json_array_length(json_build_array(t.c0)) FROM t (PostgreSQL only)
     json_array_length => (ScalarFn::JsonArrayLength, TypeClass::String, 1, DialectSupport::PostgresOnly, ["function", "json"]),
@@ -780,6 +780,15 @@ mod tests {
         assert!(
             sql.contains("JSONB_BUILD_OBJECT("),
             "expected JSONB_BUILD_OBJECT( wrapper in sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn jsonb_insert_path_is_not_the_built_objects_key() {
+        let sql = resolve_pattern(&jsonb_insert(), Dialect::PostgreSQL);
+        assert!(
+            !sql.contains("'{k}'"),
+            "jsonb_insert path must not target the pre-existing key 'k': {sql}"
         );
     }
 

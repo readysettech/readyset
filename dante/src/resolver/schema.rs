@@ -477,7 +477,30 @@ enum ColumnRole {
     General,
 }
 
-/// Determine a column's role by inspecting all constraints.
+/// True when a bind parameter is compared against `col` anywhere in `constraints`. The
+/// parameter's value is minted from this column's resolved type, so the type governs whether
+/// the upstream accepts the comparison. `WhereOr` nests its conditions, so the scan recurses.
+///
+/// `WhereLike` is deliberately absent: a LIKE column needs `TypeClass::String` for the operator
+/// itself to be defined, which is narrower than any class this predicate could supply, so the
+/// pattern states it.
+fn is_parameter_compared(col: VarId, constraints: &[Constraint]) -> bool {
+    constraints.iter().any(|c| match c {
+        Constraint::WhereParam { col: wc, .. }
+        | Constraint::WhereInParam { col: wc, .. }
+        | Constraint::WhereRangeParam { col: wc, .. }
+        | Constraint::WhereBetweenParam { col: wc, .. }
+        | Constraint::HavingKeyFilter { col: wc, .. }
+        | Constraint::Having { col: wc, .. } => *wc == col,
+        Constraint::WhereOr { conditions } => is_parameter_compared(col, conditions),
+        _ => false,
+    })
+}
+
+/// Determine a column's role by inspecting all constraints. The role picks a data-generation
+/// spec, so a filter key here is any column a lookup narrows on: it includes the parameterless
+/// `WhereIsNull` and `WhereLookupBinaryOp`, and excludes `Having`, whose comparison is against
+/// an aggregate result rather than the column itself.
 fn column_role(col: VarId, constraints: &[Constraint]) -> ColumnRole {
     for c in constraints {
         match c {
@@ -568,23 +591,6 @@ fn resolve_column_exists(
         _ => return Err(ResolveError::Unbound(table)),
     };
 
-    // Find any type class constraint for this column
-    let type_class = type_constraints.iter().find_map(|c| {
-        if let Constraint::ColumnTypeClass {
-            col: tc_col,
-            type_class,
-        } = c
-        {
-            if *tc_col == col {
-                Some(type_class.clone())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    });
-
     // Compatibility anchors: bound types of TypeCompatible partners of `col`.
     // Choosing a compatible type here (rather than only verifying later)
     // enforces TypeCompatible even across scope/binding-order boundaries,
@@ -605,6 +611,33 @@ fn resolve_column_exists(
             _ => None,
         })
         .collect();
+
+    // Find any type class constraint for this column
+    let explicit_type_class = type_constraints.iter().find_map(|c| {
+        if let Constraint::ColumnTypeClass {
+            col: tc_col,
+            type_class,
+        } = c
+        {
+            if *tc_col == col {
+                Some(type_class.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    // A column a parameter is compared against defaults to `ParamComparable` so its minted
+    // value is one the upstream accepts on both sides of the comparison. A class the pattern
+    // states explicitly wins, so a narrower class -- or a deliberate temporal lookup key --
+    // stays expressible. The default also yields to a compatibility anchor, which the
+    // synthesis branch below would otherwise abandon, leaving `TypeCompatible` unsatisfiable.
+    let type_class = explicit_type_class.or_else(|| {
+        (anchors.is_empty() && is_parameter_compared(col, all_constraints))
+            .then_some(TypeClass::ParamComparable)
+    });
 
     let reuse = state.config().reuse_preference;
     let table_schema = state.table(&table_name);
@@ -959,6 +992,9 @@ fn pick_type_for_class(tc: &TypeClass, entropy: &mut Entropy<'_>, dialect: Diale
                 .expect("orderable class slice is non-empty");
             pick_type_for_class(&class, entropy, dialect)
         }
+        // The unconstrained-column universe, which holds no geometry type -- the one family a
+        // bind parameter cannot encode -- so a parameter target stays as wide as it can be.
+        TypeClass::ParamComparable => pick_random_type(entropy, dialect),
         // Always synthesize PostgisPoint; data-generator produces valid EWKB bytes for it.
         TypeClass::Geometry => SqlType::PostgisPoint,
         TypeClass::Exact(t) => t.clone(),
@@ -1581,6 +1617,157 @@ mod tests {
         assert_eq!(column_role(lookup, &constraints), ColumnRole::FilterKey);
         assert_eq!(column_role(c1, &constraints), ColumnRole::General);
         assert_eq!(column_role(c2, &constraints), ColumnRole::General);
+    }
+
+    /// The reuse path is the half a mint-side fix cannot reach: an existing geometry column
+    /// is a candidate for any untyped column, so a parameter compared against it would be
+    /// minted as a geometry. The `ParamComparable` default filters it out of the candidate
+    /// set and the resolver synthesizes a fresh column instead.
+    #[test]
+    fn parameter_compared_column_reuse_skips_geometry_columns() {
+        let config = GeneratorConfig {
+            reuse_preference: 1.0, // always reuse when a candidate exists
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::MySQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+
+        let mut ts = TableSchema::new(SqlIdentifier::from("t0"));
+        ts.add_column(
+            SqlIdentifier::from("location"),
+            ColumnMeta {
+                sql_type: SqlType::PostgisPoint,
+                gen_spec: ColumnGenerationSpec::Random,
+            },
+        );
+        state.add_table(ts);
+
+        let mut entropy = Entropy::new(&mut rng);
+
+        let t = VarId(0);
+        let c = VarId(1);
+        let p = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::WhereParam {
+                col: c,
+                table: t,
+                op: readyset_sql::ast::BinaryOperator::Equal,
+                param: p,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Param { col: c },
+        ];
+
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve");
+
+        let Some(Binding::Column { sql_type, .. }) = env.get(c) else {
+            panic!("expected Column binding");
+        };
+        assert!(
+            !type_matches(sql_type, &TypeClass::Geometry),
+            "a parameter-compared column must not reuse a geometry column, got {sql_type:?}"
+        );
+    }
+
+    /// The default yields: a pattern that wants a specific lookup-key type states
+    /// `TypeClass::DateTime` and still gets one.
+    #[test]
+    fn explicit_type_class_on_a_parameter_column_wins() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let t = VarId(0);
+        let c = VarId(1);
+        let p = VarId(2);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists { col: c, table: t },
+            Constraint::ColumnTypeClass {
+                col: c,
+                type_class: TypeClass::DateTime,
+            },
+            Constraint::WhereParam {
+                col: c,
+                table: t,
+                op: readyset_sql::ast::BinaryOperator::Equal,
+                param: p,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Param { col: c },
+        ];
+
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve");
+
+        let Some(Binding::Column { sql_type, .. }) = env.get(c) else {
+            panic!("expected Column binding");
+        };
+        assert!(
+            type_matches(sql_type, &TypeClass::DateTime),
+            "an explicit DateTime class must outrank the parameter default, got {sql_type:?}"
+        );
+    }
+
+    /// The default also yields to a `TypeCompatible` partner. Synthesis abandons the anchor
+    /// whenever a type class rejects it, and the phase-2d verify then rejects the residual
+    /// clash -- so an unconditional default would turn this pattern into a `ResolveError`.
+    #[test]
+    fn type_compatible_anchor_outranks_the_parameter_default() {
+        let (mut state, mut rng) = test_env(Dialect::MySQL);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let t = VarId(0);
+        let c_anchor = VarId(1);
+        let c_param = VarId(2);
+        let p = VarId(3);
+        let constraints = vec![
+            Constraint::BaseTable(t),
+            Constraint::ColumnExists {
+                col: c_anchor,
+                table: t,
+            },
+            Constraint::ColumnTypeClass {
+                col: c_anchor,
+                type_class: TypeClass::DateTime,
+            },
+            Constraint::ColumnExists {
+                col: c_param,
+                table: t,
+            },
+            Constraint::TypeCompatible(c_param, c_anchor),
+            Constraint::WhereParam {
+                col: c_param,
+                table: t,
+                op: readyset_sql::ast::BinaryOperator::Equal,
+                param: p,
+            },
+        ];
+        let var_kinds = vec![
+            VarKind::Relation,
+            VarKind::Column { table: t },
+            VarKind::Column { table: t },
+            VarKind::Param { col: c_param },
+        ];
+
+        let (env, _) = resolve_schema(&constraints, &var_kinds, &mut state, &mut entropy)
+            .expect("should resolve");
+
+        let Some(Binding::Column { sql_type, .. }) = env.get(c_param) else {
+            panic!("expected Column binding");
+        };
+        assert!(
+            type_matches(sql_type, &TypeClass::DateTime),
+            "the parameter column must adopt its TypeCompatible anchor, got {sql_type:?}"
+        );
     }
 
     #[test]

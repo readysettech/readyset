@@ -334,12 +334,15 @@ pub fn json_object_agg_in_list() -> Pattern {
 /// source row, so the order of values within each `STRING_AGG` string is
 /// trivially fixed. ORDER BY on the same PK fixes the outer row order.
 /// The MIR planner emits `MirNodeInner::Accumulator` for `STRING_AGG`,
-/// so the `Accumulation::StringAgg` Antithesis assertion fires.
+/// so the `Accumulation::StringAgg` Antithesis assertion fires. The
+/// aggregated column is constrained to a string type: PG's `string_agg`
+/// has no `string_agg(integer, ...)` overload and rejects it with 42883.
 pub fn string_agg_grouped() -> Pattern {
     let mut b = PatternBuilder::new("string_agg_grouped");
     let t = b.table();
     let c_group = b.column(t);
     let c_agg = b.column(t);
+    b.column_type_class(c_agg, TypeClass::String);
     b.from(t);
     b.project_column(c_group, t);
     b.project_aggregate(AggregateFn::StringAgg, c_agg, t);
@@ -358,12 +361,15 @@ pub fn string_agg_grouped() -> Pattern {
 /// unique key (`column_unique_not_null`) and the single `IN` value matches at
 /// most one row, so `STRING_AGG` sees at most one element. Without that bound
 /// the concatenation order is implementation-defined and diverges between
-/// Readyset and the upstream DB, producing spurious oracle mismatches.
+/// Readyset and the upstream DB, producing spurious oracle mismatches. The
+/// aggregated column is pinned to a string type for the same reason as
+/// [`string_agg_grouped`].
 pub fn string_agg_in_list() -> Pattern {
     let mut b = PatternBuilder::new("string_agg_in_list");
     let t = b.table();
     let c_agg = b.column(t);
     let c_filter = b.column(t);
+    b.column_type_class(c_agg, TypeClass::String);
     b.column_unique_not_null(c_filter);
     b.from(t);
     b.project_aggregate(AggregateFn::StringAgg, c_agg, t);

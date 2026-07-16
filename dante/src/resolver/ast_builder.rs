@@ -2056,11 +2056,16 @@ fn make_scalar_fn_expr(
         ScalarFn::JsonbSet | ScalarFn::JsonbSetLax | ScalarFn::JsonbInsert => {
             // jsonb_set(jsonb_build_object('k', col), '{k}', '"new"')
             // jsonb_set_lax(jsonb_build_object('k', col), '{k}', '"new"')
-            // jsonb_insert(jsonb_build_object('k', col), '{k}', '"added"')
+            // jsonb_insert(jsonb_build_object('k', col), '{other}', '"added"')
             //
-            // The second argument is a text-array path: the string '{k}' is
+            // The second argument is a text-array path: a string like '{k}' is
             // accepted by PG as a text[] literal. The third argument is a
             // jsonb scalar literal (a JSON-encoded string value).
+            //
+            // jsonb_insert() raises 22023 ("cannot replace existing key") when
+            // the path names an object key that already exists, unlike
+            // jsonb_set/jsonb_set_lax, which upsert. Its path must therefore
+            // target a key distinct from the built object's only key ('k').
             let jsonb_arg = Expr::Call(FunctionExpr::Udf {
                 schema: None,
                 name: SqlIdentifier::from("jsonb_build_object"),
@@ -2071,10 +2076,10 @@ fn make_scalar_fn_expr(
                         .unwrap_or(Expr::Literal(Literal::Null)),
                 ],
             });
-            let path_arg = Expr::Literal(Literal::String("{k}".to_string()));
-            let (fn_name, new_val) = match function {
+            let (fn_name, path_arg, new_val) = match function {
                 ScalarFn::JsonbInsert => (
                     "jsonb_insert",
+                    Expr::Literal(Literal::String("{other}".to_string())),
                     Expr::Literal(Literal::String("\"added\"".to_string())),
                 ),
                 _ => (
@@ -2083,6 +2088,7 @@ fn make_scalar_fn_expr(
                     } else {
                         "jsonb_set"
                     },
+                    Expr::Literal(Literal::String("{k}".to_string())),
                     Expr::Literal(Literal::String("\"new\"".to_string())),
                 ),
             };

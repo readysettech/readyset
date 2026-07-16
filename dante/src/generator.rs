@@ -1085,6 +1085,7 @@ mod tests {
     use readyset_sql::{Dialect, DialectDisplay};
 
     use super::*;
+    use crate::constraint::{Constraint, TypeClass};
 
     // --- ConstraintRegistry tests ---
 
@@ -1156,6 +1157,134 @@ mod tests {
                 dt
             );
         }
+    }
+
+    /// True when `constraints` (or a nested subquery, compound branch, or OR group) carries a
+    /// constraint that mints a bind parameter.
+    fn mints_a_parameter(constraints: &[Constraint]) -> bool {
+        constraints.iter().any(|c| match c {
+            Constraint::WhereParam { .. }
+            | Constraint::WhereInParam { .. }
+            | Constraint::WhereRangeParam { .. }
+            | Constraint::WhereLike { .. }
+            | Constraint::WhereBetweenParam { .. }
+            | Constraint::HavingKeyFilter { .. }
+            | Constraint::Having { .. } => true,
+            Constraint::WhereOr { conditions } => mints_a_parameter(conditions),
+            Constraint::SubqueryExpr { constraints, .. }
+            | Constraint::SubqueryRelation { constraints, .. } => mints_a_parameter(constraints),
+            Constraint::CompoundSelect { branches, .. } => {
+                branches.iter().any(|b| mints_a_parameter(b))
+            }
+            _ => false,
+        })
+    }
+
+    /// A lookup key is where comparison, indexing, and range semantics get exercised end to
+    /// end, so every type family the resolver can synthesize has to be reachable as one. The
+    /// temporal family is the one a parameter-target default is most likely to filter out by
+    /// accident, and its loss is invisible without this test.
+    #[test]
+    fn generated_parameters_reach_temporal_types() {
+        let reg = ConstraintRegistry::default_registry();
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut temporal = 0usize;
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            for pattern in reg
+                .patterns
+                .iter()
+                .filter(|p| p.dialect_support.supports(dialect))
+                .filter(|p| mints_a_parameter(&p.constraints))
+            {
+                for seed in 0..64u64 {
+                    let mut state = GenerationState::new(dialect, config.clone());
+                    let mut rng = SmallRng::seed_from_u64(seed);
+                    let mut entropy = Entropy::new(&mut rng);
+                    let Ok(out) = resolver::resolve_named(
+                        &pattern.constraints,
+                        &pattern.vars,
+                        &mut state,
+                        &mut entropy,
+                        pattern.name,
+                    ) else {
+                        continue;
+                    };
+                    temporal += out
+                        .params
+                        .iter()
+                        .filter(|p| TypeClass::DateTime.matches(&p.sql_type))
+                        .count();
+                }
+            }
+        }
+        assert!(temporal > 0, "no generated parameter drew a temporal type");
+    }
+
+    /// A bind parameter's value is minted from the resolved type of the column it is compared
+    /// against (`ParamMeta::sql_type`), so that type must be one the upstream can encode on the
+    /// wire. A geometry parameter has no bind representation at all.
+    ///
+    /// Every parameter-bearing pattern must also keep resolving: the resolver-applied
+    /// `TypeClass::ParamComparable` default must never turn a satisfiable pattern into a
+    /// `ResolveError`, so resolution failures are tallied rather than skipped. Column reuse
+    /// is switched off so that tally stays exact -- a reused schema lets two `NotEq` columns
+    /// collapse onto one physical column, which fails resolution for reasons of its own. The
+    /// reuse half of the type default has its own test in `resolver::schema`.
+    #[test]
+    fn no_generated_parameter_draws_a_geometry_type() {
+        let reg = ConstraintRegistry::default_registry();
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut failures: Vec<String> = Vec::new();
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            for pattern in reg
+                .patterns
+                .iter()
+                .filter(|p| p.dialect_support.supports(dialect))
+                .filter(|p| mints_a_parameter(&p.constraints))
+            {
+                for seed in 0..64u64 {
+                    let mut state = GenerationState::new(dialect, config.clone());
+                    let mut rng = SmallRng::seed_from_u64(seed);
+                    let mut entropy = Entropy::new(&mut rng);
+                    let out = match resolver::resolve_named(
+                        &pattern.constraints,
+                        &pattern.vars,
+                        &mut state,
+                        &mut entropy,
+                        pattern.name,
+                    ) {
+                        Ok(out) => out,
+                        Err(e) => {
+                            failures.push(format!(
+                                "{} ({dialect:?}) seed {seed}: resolve failed: {e:?}",
+                                pattern.name
+                            ));
+                            continue;
+                        }
+                    };
+                    for p in &out.params {
+                        if TypeClass::Geometry.matches(&p.sql_type) {
+                            failures.push(format!(
+                                "{} ({dialect:?}) seed {seed}: parameter typed {:?}",
+                                pattern.name, p.sql_type
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "{} parameter/resolution failures; first 20: {:#?}",
+            failures.len(),
+            &failures[..failures.len().min(20)]
+        );
     }
 
     // Pin the tag universe. If this test fails, update the expected set below
