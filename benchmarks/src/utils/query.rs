@@ -381,20 +381,33 @@ impl PreparedStatement {
     }
 
     /// Returns just the parameters to execute our prepared statement
+    ///
+    /// # Panics
+    ///
+    /// If a `Unique` parameter generator runs out of values.
     pub fn generate_parameters(&mut self) -> Vec<DfValue> {
         self.params
             .iter_mut()
-            .map(|t| t.generator.gen(&mut rand::rng()))
+            .map(|t| t.generator.gen(&mut rand::rng()).expect(EXHAUSTED))
             .collect()
     }
 }
 
 pub struct GeneratorSet(Vec<ColumnGenerator>);
 
+const EXHAUSTED: &str = "parameter generator ran out of distinct values";
+
 impl GeneratorSet {
     /// Generate a value from each generator into a vector
+    ///
+    /// # Panics
+    ///
+    /// If a `Unique` parameter generator runs out of values.
     pub fn generate(&mut self) -> Vec<DfValue> {
-        self.0.iter_mut().map(|g| g.gen(&mut rand::rng())).collect()
+        self.0
+            .iter_mut()
+            .map(|g| g.gen(&mut rand::rng()).expect(EXHAUSTED))
+            .collect()
     }
 
     /// Generate a value from each generator into a vector but scaling the output
@@ -402,14 +415,14 @@ impl GeneratorSet {
     ///
     /// # Panics
     ///
-    /// If scale > 1.0 or scale <= 0.0
+    /// If scale > 1.0 or scale <= 0.0, or if a `Unique` parameter generator runs out of values.
     pub fn generate_scaled(&mut self, scale: f64) -> Vec<DfValue> {
         // Can only scale down, scaling integers up doesn't make much sense
         assert!(scale <= 1.0 && scale > 0.0);
         self.0
             .iter_mut()
             .map(|g| {
-                let v = g.gen(&mut rand::rng());
+                let v = g.gen(&mut rand::rng()).expect(EXHAUSTED);
                 if matches!(g, ColumnGenerator::Uniform(_) | ColumnGenerator::Zipfian(_)) {
                     match v {
                         DfValue::Int(i) => DfValue::Int((i as f64 * scale) as i64),

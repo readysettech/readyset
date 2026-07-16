@@ -1,10 +1,9 @@
-use std::cmp::min;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use bit_vec::BitVec;
-use chrono::{Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use chrono::{Days, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use eui48::{MacAddress, MacAddressFormat};
 use rand::distr::uniform::SampleRange as _;
 use rand::distr::{StandardUniform, Uniform};
@@ -143,15 +142,17 @@ pub enum ColumnGenerator {
 }
 
 impl ColumnGenerator {
-    pub fn gen<R: Rng>(&mut self, rng: &mut R) -> DfValue {
+    /// `None` once a [`ColumnGenerator::Unique`] or [`ColumnGenerator::NonRepeating`] has run
+    /// out of values.
+    pub fn gen<R: Rng>(&mut self, rng: &mut R) -> Option<DfValue> {
         match self {
-            ColumnGenerator::Constant(g) => g.gen(),
+            ColumnGenerator::Constant(g) => Some(g.gen()),
             ColumnGenerator::Unique(g) => g.gen(),
-            ColumnGenerator::Uniform(g) => g.gen(rng),
-            ColumnGenerator::Random(g) => g.gen(rng),
-            ColumnGenerator::RandomString(g) => g.gen(rng),
-            ColumnGenerator::RandomChars(g) => g.gen(rng),
-            ColumnGenerator::Zipfian(g) => g.gen(rng),
+            ColumnGenerator::Uniform(g) => Some(g.gen(rng)),
+            ColumnGenerator::Random(g) => Some(g.gen(rng)),
+            ColumnGenerator::RandomString(g) => Some(g.gen(rng)),
+            ColumnGenerator::RandomChars(g) => Some(g.gen(rng)),
+            ColumnGenerator::Zipfian(g) => Some(g.gen(rng)),
             ColumnGenerator::NonRepeating(g) => g.gen(rng),
         }
     }
@@ -262,13 +263,14 @@ impl From<SqlType> for UniqueGenerator {
 }
 
 impl UniqueGenerator {
-    pub fn gen(&mut self) -> DfValue {
-        let val = unique_value_of_type(&self.sql_type, self.index);
+    /// `None` once this generator has walked its type's value space.
+    pub fn gen(&mut self) -> Option<DfValue> {
+        let val = nth_value_of_type(&self.sql_type, self.index)?;
         self.generated += 1;
         if self.generated.is_multiple_of(self.batch_size) {
             self.index += 1;
         }
-        val
+        Some(val)
     }
 }
 
@@ -419,9 +421,13 @@ impl PartialEq for NonRepeatingGenerator {
 }
 
 impl NonRepeatingGenerator {
-    pub fn gen<R: Rng>(&mut self, rng: &mut R) -> DfValue {
-        let mut reps = 0;
-        loop {
+    /// `None` once repeated draws stop turning up an unseen value, which a value space narrower
+    /// than the number of rows asked for does after a few of them.
+    pub fn gen<R: Rng>(&mut self, rng: &mut R) -> Option<DfValue> {
+        // A collision is chance rather than exhaustion often enough to be worth a wide margin.
+        const MAX_DRAWS: u32 = 1_000;
+
+        for _ in 0..MAX_DRAWS {
             let d = match &mut *self.generator {
                 ColumnGenerator::Uniform(u) => u.gen(rng),
                 ColumnGenerator::Zipfian(z) => z.gen(rng),
@@ -434,17 +440,10 @@ impl NonRepeatingGenerator {
             };
 
             if self.generated.insert(d.clone()) {
-                return d;
-            }
-
-            reps += 1;
-            if reps == 100 {
-                println!(
-                    "Having a hard time generating a unique value, try a wider range {:?}",
-                    self.generator
-                )
+                return Some(d);
             }
         }
+        None
     }
 }
 
@@ -556,7 +555,8 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Time => NaiveTime::from_hms_opt(12, 30, 45).into(),
         SqlType::Date => NaiveDate::from_ymd_opt(2020, 1, 1).into(),
         SqlType::Bool => 1i32.into(),
-        SqlType::Enum(_) => unimplemented!(),
+        // Postgres allows an enum with no variants.
+        SqlType::Enum(variants) => variants.first().map_or(DfValue::None, |v| v.clone().into()),
         SqlType::Json | SqlType::Jsonb => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
         SqlType::Inet => "::beef".into(),
@@ -689,7 +689,8 @@ where
             NaiveDate::from_ymd_opt(2020, rng.random_range(1..12), rng.random_range(1..28)).into()
         }
         SqlType::Bool => DfValue::from(rng.random_bool(0.5)),
-        SqlType::Enum(_) => unimplemented!(),
+        SqlType::Enum(variants) if variants.is_empty() => DfValue::None,
+        SqlType::Enum(variants) => variants[rng.random_range(0..variants.len())].clone().into(),
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!(
             "{{\"k\":\"{}\"}}",
             "a".repeat(rng.random_range(1..255))
@@ -774,19 +775,24 @@ fn uniform_random_value<R: Rng>(min: &DfValue, max: &DfValue, rng: &mut R) -> Df
     }
 }
 
-/// Generate a unique value with the given [`SqlType`] from a monotonically increasing counter,
-/// `idx`.
-///
-/// This is a bijective function (from `(idx, typ)` to the resultant [`DfValue`]).
-pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
-    let clamp_digits = |prec: u32| {
-        10u64
-            .checked_pow(prec)
-            .map(|digits| ((idx + 1) as u64 % digits) as i64)
-            .unwrap_or(i64::MAX)
-    };
+/// The `idx`th decimal with `prec` significant digits: mantissa `idx`, exhausted once `idx`
+/// needs more digits than `prec`.
+fn nth_decimal(idx: u32, prec: u32, scale: u32) -> Option<Decimal> {
+    if 10u64
+        .checked_pow(prec)
+        .is_some_and(|space| u64::from(idx) >= space)
+    {
+        return None;
+    }
+    Some(Decimal::new(idx as _, scale as _))
+}
 
-    match typ {
+/// The `idx`th value of `typ`'s value space, or `None` once `idx` walks off its end.
+///
+/// Injective: distinct `idx` give distinct values. Each arm whose value space is narrower than
+/// `u32` enforces its own bound.
+pub fn nth_value_of_type(typ: &SqlType, idx: u32) -> Option<DfValue> {
+    Some(match typ {
         // FIXME: Take into account length parameters.
         SqlType::VarChar(None)
         | SqlType::Blob
@@ -799,18 +805,33 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         | SqlType::Text
         | SqlType::Citext
         | SqlType::ByteArray => idx.to_string().into(),
-        SqlType::Binary(None) => idx.to_string().as_bytes()[..1].to_vec().into(),
+        SqlType::Binary(None) => {
+            if idx >= 10 {
+                return None;
+            }
+            idx.to_string().into_bytes().into()
+        }
         SqlType::Binary(Some(len)) | SqlType::VarBinary(len) => {
             let s = idx.to_string();
-            let b = s.as_bytes();
-            b[..min(b.len(), *len as usize)].to_vec().into()
+            if s.len() > *len as usize {
+                return None;
+            }
+            s.into_bytes().into()
         }
         SqlType::VarChar(Some(len)) | SqlType::Char(Some(len)) => {
             let s = idx.to_string();
-            (&s[..min(s.len(), *len as usize)]).into()
+            if s.len() > *len as usize {
+                return None;
+            }
+            s.into()
         }
-        SqlType::Char(None) => (idx % 10).to_string().into(),
-        SqlType::QuotedChar => (idx as i8).into(),
+        SqlType::Char(None) => {
+            if idx >= 10 {
+                return None;
+            }
+            idx.to_string().into()
+        }
+        SqlType::QuotedChar => (u8::try_from(idx).ok()? as i8).into(),
         SqlType::Int(_) | SqlType::Int4 => (idx as i32).into(),
         SqlType::BigInt(_) | SqlType::Int8 | SqlType::Signed | SqlType::SignedInteger => {
             (idx as i64).into()
@@ -819,42 +840,42 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
         SqlType::BigIntUnsigned(_) | SqlType::Unsigned | SqlType::UnsignedInteger => {
             (idx as u64).into()
         }
-        SqlType::TinyInt(_) => {
-            assert!(idx <= i8::MAX as u32, "generated too many TinyInts");
-            (idx as i8).into()
-        }
-        SqlType::TinyIntUnsigned(_) => {
-            assert!(idx <= u8::MAX as u32, "generated too many TinyIntUnsigneds");
-            (idx as u8).into()
-        }
-        SqlType::SmallInt(_) | SqlType::Int2 => {
-            assert!(idx <= i16::MAX as u32, "generated too many SmallInts");
-            (idx as i16).into()
-        }
-        SqlType::SmallIntUnsigned(_) => {
-            assert!(
-                idx <= u16::MAX as u32,
-                "generated too many SmallIntUnsigneds"
-            );
-            (idx as u16).into()
-        }
+        SqlType::TinyInt(_) => i8::try_from(idx).ok()?.into(),
+        SqlType::TinyIntUnsigned(_) => u8::try_from(idx).ok()?.into(),
+        SqlType::SmallInt(_) | SqlType::Int2 => i16::try_from(idx).ok()?.into(),
+        SqlType::SmallIntUnsigned(_) => u16::try_from(idx).ok()?.into(),
         SqlType::MediumInt(_) => {
-            assert!(idx < (1u32 << 23), "generated too many MediumInts");
+            if idx >= 1 << 23 {
+                return None;
+            }
             (idx as i32).into()
         }
         SqlType::MediumIntUnsigned(_) => {
-            assert!(idx < (1u32 << 24), "generated too many MediumIntUnsigneds");
+            if idx >= 1 << 24 {
+                return None;
+            }
             idx.into()
         }
-        SqlType::Float | SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
-        SqlType::Real => (1.5 + idx as f32).try_into().unwrap(),
-        SqlType::Decimal(prec, scale) => {
-            Decimal::new(clamp_digits(*prec as _) as _, *scale as _).into()
+        SqlType::Double => (1.5 + idx as f64).try_into().unwrap(),
+        // `f32` stops representing `1.5 + idx` exactly once `2 * idx + 3` needs 25 bits; FLOAT
+        // is 4 bytes server-side on MySQL, so bound it the same way.
+        SqlType::Float => {
+            if idx >= 1 << 23 {
+                return None;
+            }
+            (1.5 + idx as f64).try_into().unwrap()
         }
+        SqlType::Real => {
+            if idx >= 1 << 23 {
+                return None;
+            }
+            (1.5 + idx as f32).try_into().unwrap()
+        }
+        SqlType::Decimal(prec, scale) => nth_decimal(idx, *prec as _, *scale as _)?.into(),
         SqlType::Numeric(prec_scale) => match prec_scale {
-            Some((prec, None)) => Decimal::new(clamp_digits(*prec as _) as _, 1),
-            Some((prec, Some(scale))) => Decimal::new(clamp_digits(*prec as _) as _, *scale as _),
-            None => Decimal::new((15 + idx) as _, 2),
+            Some((prec, None)) => nth_decimal(idx, *prec as _, 1)?,
+            Some((prec, Some(scale))) => nth_decimal(idx, *prec as _, *scale as _)?,
+            None => Decimal::new(15 + i128::from(idx), 2),
         }
         .into(),
         SqlType::DateTime(_) | SqlType::Timestamp => (NaiveDate::from_ymd_opt(2020, 1, 1)
@@ -871,12 +892,21 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
                 .expect("should have a value")
                 + Duration::minutes(idx as _),
         ),
-        SqlType::Date => {
-            DfValue::from(NaiveDate::from_ymd_opt(1000, 1, 1).unwrap() + Duration::days(idx.into()))
-        }
-        SqlType::Enum(_) => unimplemented!(),
-        SqlType::Bool => unimplemented!(),
+        SqlType::Date => DfValue::from(
+            NaiveDate::from_ymd_opt(1000, 1, 1)
+                .unwrap()
+                .checked_add_days(Days::new(idx.into()))?,
+        ),
+        SqlType::Enum(variants) => variants.get(idx as usize)?.clone().into(),
+        SqlType::Bool => match idx {
+            0 => false.into(),
+            1 => true.into(),
+            _ => return None,
+        },
         SqlType::Time => {
+            if idx >= 24 * 60 * 60 {
+                return None;
+            }
             (NaiveTime::from_hms_opt(0, 0, 0).unwrap() + Duration::seconds(idx as _)).into()
         }
         SqlType::Json | SqlType::Jsonb => DfValue::from(format!("{{\"k\": {idx}}}")),
@@ -921,11 +951,13 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
             bytes[3] = (idx & 0xff) as u8;
             DfValue::from(BitVec::from_bytes(&bytes[..]))
         }
-        SqlType::Serial => ((idx + 1) as i32).into(),
-        SqlType::BigSerial => ((idx + 1) as i64).into(),
+        SqlType::Serial => ((idx as i64 + 1) as i32).into(),
+        SqlType::BigSerial => (idx as i64 + 1).into(),
         SqlType::Interval { .. } => unimplemented!(),
         SqlType::Array(t) => {
-            let arr: Vec<_> = (0..4).map(|_| unique_value_of_type(t, idx)).collect();
+            let arr: Vec<_> = (0..4)
+                .map(|_| nth_value_of_type(t, idx))
+                .collect::<Option<_>>()?;
             DfValue::Array(Arc::new(Array::from(arr)))
         }
         SqlType::Other(_) => unimplemented!(),
@@ -946,8 +978,13 @@ pub fn unique_value_of_type(typ: &SqlType, idx: u32) -> DfValue {
                 true,
             )))
         }
-        SqlType::Tsvector => DfValue::None,
-    }
+        SqlType::Tsvector => {
+            if idx > 0 {
+                return None;
+            }
+            DfValue::None
+        }
+    })
 }
 
 #[cfg(test)]
@@ -955,9 +992,17 @@ mod tests {
     use rand::rngs::SmallRng;
     use rand::SeedableRng;
     use readyset_data::DfValue;
-    use readyset_sql::ast::SqlType;
+    use readyset_sql::ast::{EnumVariants, SqlType};
 
     use super::*;
+
+    fn sample_enum_variants() -> EnumVariants {
+        EnumVariants::from(vec![
+            "red".to_string(),
+            "green".to_string(),
+            "blue".to_string(),
+        ])
+    }
 
     #[test]
     fn zipfian_generator_handles_min_equals_max() {
@@ -1064,11 +1109,101 @@ mod tests {
     }
 
     #[test]
-    fn unique_value_of_type_postgis_polygon_distinct_and_round_trips() {
-        let v0 = unique_value_of_type(&SqlType::PostgisPolygon, 0);
-        let v1 = unique_value_of_type(&SqlType::PostgisPolygon, 1);
+    fn nth_value_of_type_postgis_polygon_distinct_and_round_trips() {
+        let v0 = nth_value_of_type(&SqlType::PostgisPolygon, 0).unwrap();
+        let v1 = nth_value_of_type(&SqlType::PostgisPolygon, 1).unwrap();
         assert_postgis_round_trips(&v0, "POLYGON");
         assert_postgis_round_trips(&v1, "POLYGON");
         assert_ne!(v0, v1, "unique generator must return distinct values");
+    }
+
+    #[test]
+    fn every_generator_produces_an_enum_variant() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let variants = sample_enum_variants();
+        let typ = SqlType::Enum(variants.clone());
+        for v in [
+            value_of_type(&typ),
+            random_value_of_type(&typ, &mut rng),
+            nth_value_of_type(&typ, 0).unwrap(),
+        ] {
+            assert!(variants.iter().any(|variant| *variant == v.to_string()));
+        }
+    }
+
+    #[test]
+    fn an_enum_with_no_variants_has_no_values() {
+        let typ = SqlType::Enum(EnumVariants::from(Vec::<String>::new()));
+        let mut rng = SmallRng::seed_from_u64(42);
+        assert_eq!(value_of_type(&typ), DfValue::None);
+        assert_eq!(random_value_of_type(&typ, &mut rng), DfValue::None);
+        assert_eq!(nth_value_of_type(&typ, 0), None);
+    }
+
+    /// For every bounded type, the last value of the space exists and the next index is `None`.
+    #[test]
+    fn nth_value_of_type_runs_out_at_the_end_of_the_value_space() {
+        let last = |typ: &SqlType, idx: u32| {
+            assert!(nth_value_of_type(typ, idx).is_some(), "{typ:?} at {idx}");
+            assert_eq!(nth_value_of_type(typ, idx + 1), None, "{typ:?} past {idx}");
+        };
+
+        last(&SqlType::Bool, 1);
+        last(&SqlType::Enum(sample_enum_variants()), 2);
+        last(&SqlType::TinyInt(None), 127);
+        last(&SqlType::TinyIntUnsigned(None), 255);
+        last(&SqlType::SmallInt(None), 32_767);
+        last(&SqlType::SmallIntUnsigned(None), 65_535);
+        last(&SqlType::MediumInt(None), (1 << 23) - 1);
+        last(&SqlType::MediumIntUnsigned(None), (1 << 24) - 1);
+        last(&SqlType::QuotedChar, 255);
+        last(&SqlType::Char(None), 9);
+        last(&SqlType::Char(Some(2)), 99);
+        last(&SqlType::Binary(None), 9);
+        last(&SqlType::Binary(Some(1)), 9);
+        last(&SqlType::VarBinary(3), 999);
+        last(&SqlType::Float, (1 << 23) - 1);
+        last(&SqlType::Real, (1 << 23) - 1);
+        last(&SqlType::Decimal(1, 0), 9);
+        last(&SqlType::Numeric(Some((2, None))), 99);
+        last(&SqlType::Time, 24 * 60 * 60 - 1);
+        last(&SqlType::Tsvector, 0);
+        last(&SqlType::Array(Box::new(SqlType::Bool)), 1);
+
+        let date_days = u32::try_from(
+            (NaiveDate::MAX - NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()).num_days(),
+        )
+        .unwrap();
+        last(&SqlType::Date, date_days);
+    }
+
+    #[test]
+    fn non_repeating_generator_runs_out_on_a_narrow_type() {
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut gen = ColumnGenerationSpec::Random
+            .generator_for_col(SqlType::Bool, &mut rng)
+            .into_unique();
+        assert!(gen.gen(&mut rng).is_some());
+        assert!(gen.gen(&mut rng).is_some());
+        assert_eq!(gen.gen(&mut rng), None, "a Bool column has only two values");
+    }
+
+    #[test]
+    fn unique_generator_walks_a_narrow_type_then_runs_out() {
+        let mut gen = UniqueGenerator::new(SqlType::Bool, 0, 1);
+        assert_eq!(gen.gen(), Some(false.into()));
+        assert_eq!(gen.gen(), Some(true.into()));
+        assert_eq!(gen.gen(), None, "a Bool column admits only two rows");
+        assert_eq!(gen.gen(), None, "exhaustion is permanent");
+    }
+
+    #[test]
+    fn unique_generator_repeats_each_value_batch_size_times() {
+        let mut gen = UniqueGenerator::new(SqlType::Bool, 0, 2);
+        let drawn: Vec<_> = std::iter::from_fn(|| gen.gen()).collect();
+        assert_eq!(
+            drawn,
+            vec![false.into(), false.into(), true.into(), true.into()]
+        );
     }
 }

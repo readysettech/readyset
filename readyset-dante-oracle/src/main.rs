@@ -400,19 +400,21 @@ fn parse_literal(s: &str, sql_type: &readyset_sql::ast::SqlType) -> DfValue {
 ///
 /// If all 32 draws collide the last value is returned anyway — this is a
 /// best-effort avoidance for uniqueness columns, not a hard guarantee.
+///
+/// `None` once the generator has run out of values.
 fn sample_avoiding<R: Rng>(
     generator: &mut ColumnGenerator,
     exclude: &HashSet<DfValue>,
     rng: &mut R,
-) -> DfValue {
-    let mut last = generator.r#gen(rng);
+) -> Option<DfValue> {
+    let mut last = generator.r#gen(rng)?;
     for _ in 0..32 {
         if !exclude.contains(&last) {
-            return last;
+            return Some(last);
         }
-        last = generator.r#gen(rng);
+        last = generator.r#gen(rng)?;
     }
-    last
+    Some(last)
 }
 
 /// Generate rows of data for a table.
@@ -495,7 +497,7 @@ fn generate_rows<R: Rng>(
     let mut seen_pks: HashSet<DfValue> = HashSet::new();
 
     // Emit one row per example.
-    for (ex_idx, ex) in examples.iter().enumerate() {
+    'examples: for (ex_idx, ex) in examples.iter().enumerate() {
         let mut row = Vec::with_capacity(col_count);
         for (idx, (col_name, col_meta)) in schema.columns.iter().enumerate() {
             let override_for_col = ex
@@ -509,7 +511,16 @@ fn generate_rows<R: Rng>(
                 }
                 None => {
                     let (ref mut col_gen, ref mut sub_rng) = generators[idx];
-                    let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
+                    let Some(v) = sample_avoiding(col_gen, &excludes[idx], sub_rng) else {
+                        warn!(
+                            table = %schema.name,
+                            column = %col_name,
+                            note = ex.note,
+                            "skipping example row: column type exhausted"
+                        );
+                        dropped_example_indices.push(ex_idx);
+                        continue 'examples;
+                    };
                     row.push(v);
                 }
             }
@@ -531,11 +542,14 @@ fn generate_rows<R: Rng>(
     }
 
     // Random fill.
-    for _ in 0..random_fill {
+    'fill: for _ in 0..random_fill {
         let mut row = Vec::with_capacity(col_count);
         for (idx, _) in schema.columns.iter().enumerate() {
             let (ref mut col_gen, ref mut sub_rng) = generators[idx];
-            let v = sample_avoiding(col_gen, &excludes[idx], sub_rng);
+            // A narrow column type caps how many rows this table holds. Emit what fits.
+            let Some(v) = sample_avoiding(col_gen, &excludes[idx], sub_rng) else {
+                break 'fill;
+            };
             row.push(v);
         }
         if let Some(pk_i) = pk_idx {
@@ -635,7 +649,7 @@ fn materialize_params_with_overrides<R: Rng>(
                     let ExampleValue::Literal(s) = &o.value;
                     parse_literal(s, &meta.sql_type)
                 }
-                None => generator.r#gen(rng),
+                None => generator.r#gen(rng).unwrap_or(DfValue::None),
             };
             out.push(v);
             placeholder_idx += 1;
@@ -1130,8 +1144,10 @@ async fn run_queries_body(
                     let mut generator = meta
                         .gen_spec
                         .generator_for_col(meta.sql_type.clone(), &mut entropy);
-                    let value = generator.r#gen(&mut entropy);
-                    let lit: Literal = value.try_into().unwrap_or(Literal::Null);
+                    let lit = generator
+                        .r#gen(&mut entropy)
+                        .and_then(|v| Literal::try_from(v).ok())
+                        .unwrap_or(Literal::Null);
                     // Bool columns get `Literal::Integer(0|1)` from the
                     // data-generator (DfValue::Int -> Literal::Integer);
                     // Postgres rejects `bool_col = 1` with no implicit

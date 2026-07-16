@@ -73,7 +73,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use clap::Parser;
 use data_generator::{
-    random_value_of_type, unique_value_of_type, ColumnGenerationSpec, ColumnGenerator,
+    nth_value_of_type, random_value_of_type, ColumnGenerationSpec, ColumnGenerator,
     DistributionAnnotation,
 };
 use dataflow_expression::BuiltinFunctionDiscriminants as DfBuiltinFunction;
@@ -417,6 +417,11 @@ impl From<TableSpec> for CreateTableStatement {
     }
 }
 
+/// Key sizes are fixed before the key column is known, so exhaustion here has no recovery.
+fn nth_key_value(typ: &SqlType, idx: u32) -> DfValue {
+    nth_value_of_type(typ, idx).expect("key column ran out of distinct values")
+}
+
 impl TableSpec {
     pub fn new(name: TableName) -> Self {
         Self {
@@ -574,7 +579,9 @@ impl TableSpec {
                     let value = match generator {
                         // Allow using the `index` for key columns which are specified
                         // as Unique.
-                        ColumnGenerator::Unique(u) => u.gen(),
+                        ColumnGenerator::Unique(u) => {
+                            u.gen().expect("key column ran out of distinct values")
+                        }
                         _ if index.is_multiple_of(2) && !expected_values.is_empty() => {
                             expected_values
                                 .iter()
@@ -589,7 +596,9 @@ impl TableSpec {
                         ColumnGenerator::RandomString(r) => r.gen(&mut rand::rng()),
                         ColumnGenerator::RandomChars(r) => r.gen(&mut rand::rng()),
                         ColumnGenerator::Zipfian(z) => z.gen(&mut rand::rng()),
-                        ColumnGenerator::NonRepeating(r) => r.gen(&mut rand::rng()),
+                        ColumnGenerator::NonRepeating(r) => r
+                            .gen(&mut rand::rng())
+                            .expect("column ran out of distinct values"),
                     };
 
                     (col_name.clone(), value)
@@ -970,7 +979,7 @@ impl<'a> QueryState<'a> {
     ) {
         let table = self.gen.table_mut(&table_name).unwrap();
         let sql_type = table.columns[&column_name].sql_type.clone();
-        let val = unique_value_of_type(&sql_type, index);
+        let val = nth_key_value(&sql_type, index);
         table.expect_value(column_name.clone(), val);
 
         self.parameters.push(QueryParameter {
@@ -992,7 +1001,7 @@ impl<'a> QueryState<'a> {
             ..
         } in self.parameters.iter()
         {
-            let val = unique_value_of_type(
+            let val = nth_key_value(
                 &self.gen.tables[table_name].columns[column_name].sql_type,
                 self.value_counter as u32,
             );
@@ -1019,8 +1028,11 @@ impl<'a> QueryState<'a> {
                  }| {
                     let sql_type = &self.gen.tables[table_name].columns[column_name].sql_type;
                     match index {
-                        Some(idx) => unique_value_of_type(sql_type, *idx),
-                        None => generator.lock().gen(&mut rand::rng()),
+                        Some(idx) => nth_key_value(sql_type, *idx),
+                        None => generator
+                            .lock()
+                            .gen(&mut rand::rng())
+                            .expect("key column ran out of distinct values"),
                     }
                 },
             )

@@ -1,6 +1,6 @@
 use std::env;
 
-use data_generator::{random_value_of_type, unique_value_of_type, value_of_type};
+use data_generator::{nth_value_of_type, random_value_of_type, value_of_type};
 use mysql_async::prelude::Queryable;
 use mysql_async::Value;
 use proptest::prop_assume;
@@ -64,14 +64,14 @@ fn value_of_type_always_valid(
 #[tags(serial, slow, no_retry)]
 #[upstream(mysql)]
 #[proptest]
-fn unique_value_of_type_always_valid(
+fn nth_value_of_type_always_valid(
     #[any(generate_arrays = false, dialect = Dialect::MySQL)] ty: SqlType,
     #[strategy(0..=255u32)] idx: u32,
 ) {
-    prop_assume!(!matches!(ty, SqlType::Bool));
-    prop_assume!(!(matches!(ty, SqlType::TinyInt(_)) && idx > i8::MAX as u32));
-
-    let val = unique_value_of_type(&ty, idx);
+    // `None` means `idx` is past this type's cardinality; nothing to round-trip.
+    let val = nth_value_of_type(&ty, idx);
+    prop_assume!(val.is_some());
+    let val = val.unwrap();
     eprintln!("value: {val:?}");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
