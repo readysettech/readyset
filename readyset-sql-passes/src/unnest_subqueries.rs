@@ -83,10 +83,10 @@ pub(crate) enum SubqueryContext {
 
 #[derive(Default)]
 pub(crate) struct SubqueryPredicateDesc {
-    ctx: SubqueryContext,
-    negated: bool,
-    lhs_and_op: Option<(Expr, BinaryOperator)>,
-    stmt: SelectStatement,
+    pub(crate) ctx: SubqueryContext,
+    pub(crate) negated: bool,
+    pub(crate) lhs_and_op: Option<(Expr, BinaryOperator)>,
+    pub(crate) stmt: SelectStatement,
 }
 
 pub(crate) enum DeriveTableJoinKind {

@@ -1,5 +1,9 @@
 use crate::expr::constant_fold::constant_fold_expr;
 use crate::rewrite_joins::try_normalize_joins_conditions;
+use crate::unnest_subqueries::{
+    SubqueryContext, SubqueryPredicateDesc, as_supported_subquery_predicate,
+    is_supported_subquery_predicate,
+};
 use itertools::Either;
 use readyset_data::dialect;
 use readyset_errors::{
@@ -10,9 +14,9 @@ use readyset_sql::analysis::visit::{Visitor, walk_function_expr, walk_select_sta
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::analysis::{ReferredColumns, is_aggregate, visit, visit_mut};
 use readyset_sql::ast::{
-    ArrayArguments, BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, GroupByClause, InValue, ItemPlaceholder, JoinConstraint, JoinOperator,
-    JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation,
+    ArrayArguments, BinaryOperator, CaseWhenBranch, Column, Expr, FieldDefinitionExpr,
+    FieldReference, FunctionExpr, GroupByClause, InValue, ItemPlaceholder, JoinConstraint,
+    JoinOperator, JoinRightSide, LimitClause, Literal, OrderBy, OrderClause, OrderType, Relation,
     SelectStatement, SqlIdentifier, TableExpr, TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
@@ -2178,6 +2182,378 @@ pub(crate) fn move_subquery_predicates_from_inner_join_on_to_where(
     stmt: &mut SelectStatement,
 ) -> ReadySetResult<bool> {
     try_normalize_joins_conditions(stmt)
+}
+
+fn literal_one() -> Expr {
+    Expr::Literal(Literal::UnsignedInteger(1))
+}
+
+fn literal_zero() -> Expr {
+    Expr::Literal(Literal::UnsignedInteger(0))
+}
+
+/// Whether a `SubqueryPredicateDesc` (from `as_supported_subquery_predicate`)
+/// is a shape this wrap can project.  Admits only:
+///
+/// - `Scalar` with a non-subquery LHS (`lhs_and_op` present) and a
+///   single-column subquery — a bare `NestedSelect` boolean predicate is
+///   excluded because it isn't a scalar comparison the wrap can rewrite into
+///   `<target>.<alias> op v`.
+/// - `Exists` (negated and non-negated).
+///
+/// Every other shape (including `In`) is declined; it stays in the ON and is
+/// handled downstream.
+fn is_admitted_loj_wrap_shape(desc: &SubqueryPredicateDesc) -> bool {
+    match desc.ctx {
+        SubqueryContext::Scalar => desc.lhs_and_op.is_some() && desc.stmt.fields.len() == 1,
+        SubqueryContext::Exists => true,
+        SubqueryContext::In => false,
+    }
+}
+
+/// Build the projected expression that goes into the wrap DT's SELECT list,
+/// plus the ON-side reference that replaces the original conjunct.
+///
+/// Encodes the Option-B canonicalization for EXISTS / NOT EXISTS: both use
+/// the same `EXISTS(subq)` condition inside the CASE, and only the branch
+/// constants differ.  The ON-side reference is uniformly `<preserved>.
+/// <alias> = 1`.  For Scalar, the projected expression is the raw subquery;
+/// the ON reads `lhs op <preserved>.<alias>`, with `lhs` and `op` already
+/// normalized by `as_supported_subquery_predicate` (subquery always on the
+/// RHS, ordering ops flipped when the source had it on the LHS).
+fn build_loj_wrap_projection_and_reference(
+    desc: SubqueryPredicateDesc,
+    preserved_alias: &SqlIdentifier,
+    projected_alias: SqlIdentifier,
+) -> ReadySetResult<(Expr, Expr)> {
+    let projected_col_ref = Expr::Column(Column {
+        name: projected_alias,
+        table: Some(preserved_alias.clone().into()),
+    });
+    let SubqueryPredicateDesc {
+        ctx,
+        negated,
+        lhs_and_op,
+        stmt,
+    } = desc;
+    match ctx {
+        SubqueryContext::Scalar => {
+            let (lhs, op) = lhs_and_op.ok_or_else(|| {
+                internal_err!("Scalar subquery predicate without lhs_and_op reached LOJ wrap")
+            })?;
+            let projected = Expr::NestedSelect(Box::new(stmt));
+            let reference = Expr::BinaryOp {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(projected_col_ref),
+            };
+            Ok((projected, reference))
+        }
+        SubqueryContext::Exists => {
+            let (then_lit, else_lit) = if negated {
+                (literal_zero(), literal_one())
+            } else {
+                (literal_one(), literal_zero())
+            };
+            let projected = Expr::CaseWhen {
+                branches: vec![CaseWhenBranch {
+                    condition: Expr::Exists(Box::new(stmt)),
+                    body: then_lit,
+                }],
+                else_expr: Some(Box::new(else_lit)),
+            };
+            let reference = Expr::BinaryOp {
+                lhs: Box::new(projected_col_ref),
+                op: BinaryOperator::Equal,
+                rhs: Box::new(literal_one()),
+            };
+            Ok((projected, reference))
+        }
+        SubqueryContext::In => internal!("IN filtered upstream by is_admitted_loj_wrap_shape"),
+    }
+}
+
+/// Wrap `te` in a projecting derived table.  Forwards each column named in
+/// `passthrough_cols` as `<inner_ref>.<col> AS <col>` and appends each
+/// `(alias, expr)` in `projections` as an additional SELECT-list item.
+///
+/// The wrap preserves `te`'s outer-visible alias, so any `<alias>.<col>`
+/// references in the outer stmt continue to resolve through the new DT.
+///
+/// Only base-table `TableExprInner::Table` or aliased subquery
+/// `TableExprInner::Subquery` targets are supported; unaliased subqueries
+/// and `Values` return an internal error.
+///
+/// Target-agnostic: works whether `te` is a LOJ's RHS, its LHS neighbor, or
+/// any other FROM-position TableExpr.  Callers pick the target based on
+/// where the projected computed columns need to be evaluated in scope.
+fn wrap_table_expr_with_projections(
+    te: &mut TableExpr,
+    passthrough_cols: Vec<SqlIdentifier>,
+    projections: Vec<(SqlIdentifier, Expr)>,
+) -> ReadySetResult<()> {
+    let (inner_ref, outer_alias): (SqlIdentifier, SqlIdentifier) = match (&te.inner, &te.alias) {
+        (_, Some(a)) => (a.clone(), a.clone()),
+        (TableExprInner::Table(rel), None) => (rel.name.clone(), rel.name.clone()),
+        _ => internal!("unsupported TableExpr shape for wrap_table_expr_with_projections"),
+    };
+
+    let mut fields: Vec<FieldDefinitionExpr> =
+        Vec::with_capacity(passthrough_cols.len() + projections.len());
+    for col_name in passthrough_cols {
+        fields.push(FieldDefinitionExpr::Expr {
+            expr: Expr::Column(Column {
+                name: col_name.clone(),
+                table: Some(Relation {
+                    schema: None,
+                    name: inner_ref.clone(),
+                }),
+            }),
+            alias: Some(col_name),
+        });
+    }
+    for (alias, expr) in projections {
+        fields.push(FieldDefinitionExpr::Expr {
+            expr,
+            alias: Some(alias),
+        });
+    }
+
+    // Move the original `te` into the wrap's inner FROM (bypassing a
+    // clone) via `mem::replace` with a throwaway placeholder that is
+    // overwritten by the enclosing `*te = ...` in the very next statement.
+    let placeholder = TableExpr {
+        inner: TableExprInner::Table(Relation {
+            schema: None,
+            name: SqlIdentifier::from(""),
+        }),
+        alias: None,
+        column_aliases: vec![],
+    };
+    let mut moved = mem::replace(te, placeholder);
+    if moved.alias.is_none() {
+        // Alias the moved table with the schema-less inner reference so the
+        // passthrough `<inner_ref>.<col>` projections resolve unambiguously
+        // inside the derived table: the enumerated columns are schema-less,
+        // but the moved base table may still be schema-qualified.
+        moved.alias = Some(inner_ref.clone());
+    }
+    *te = TableExpr {
+        inner: TableExprInner::Subquery(Box::new(SelectStatement {
+            fields,
+            tables: vec![moved],
+            ..Default::default()
+        })),
+        alias: Some(outer_alias),
+        column_aliases: vec![],
+    };
+
+    Ok(())
+}
+
+/// Wrap the immediate LHS neighbor of each supported LEFT JOIN with a derived
+/// table projecting uncorrelated subquery predicates from the ON clause, and
+/// rewrite the ON to reference the projected columns instead of the subquery.
+///
+/// The LHS neighbor of the LOJ at `stmt.join[i]` is either the last item
+/// of the leading FROM chain (`i == 0`) or the RHS of the preceding join
+/// (`i > 0`).  For uncorrelated projections this position is a valid host
+/// because the projected value is a query-level constant, so its scope
+/// only needs to be visible from the LOJ's ON.  Extending the target
+/// selection to walk correlation refs (correlation-owning LHS item, or the
+/// LOJ's RHS) is future work sharing `wrap_table_expr_with_projections`.
+///
+/// Supported ON-conjunct shapes:
+/// - `<expr> op (<scalar_subq>)` with `op` one of `=, <>, <, <=, >, >=` and
+///   `<scalar_subq>` uncorrelated.  Projects the raw subquery; the ON reads
+///   `<expr> op <target_alias>.<projected_alias>`.
+/// - `EXISTS (<subq>)` or `NOT EXISTS (<subq>)` with `<subq>` uncorrelated.
+///   Projects `CASE WHEN EXISTS(<subq>) THEN X ELSE Y END` where `(X, Y)` is
+///   `(1, 0)` for EXISTS and `(0, 1)` for NOT EXISTS; the ON becomes
+///   `<target_alias>.<projected_alias> = 1` in both cases.
+///
+/// Correlated subqueries (any reference to outer-scope tables) and shapes this
+/// pass doesn't project (IN / NOT IN, and anything not a supported subquery
+/// predicate) stay in the ON unchanged and reach `unnest_subqueries`, which
+/// fails with a shape-specific error.
+///
+/// Non-LEFT JOINs are untouched — INNER moves are handled separately, and FULL
+/// OUTER JOIN ON subqueries stay rejected by the validator.  LOJs whose
+/// LHS neighbor isn't a single-table TableExpr (multi-table comma-list
+/// preceding-join RHS, or an unaliased subquery / Values source) are
+/// skipped.
+///
+/// Returns `true` if any wrap fired.
+pub(crate) fn wrap_loj_on_uncorrelated_subquery_predicates(
+    stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
+    let mut changed = false;
+    let mut projected_alias_counter: usize = 0;
+
+    for join_idx in 0..stmt.join.len() {
+        let is_left = matches!(
+            stmt.join[join_idx].operator,
+            JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+        );
+        if !is_left {
+            continue;
+        }
+        let JoinConstraint::On(on_expr) = &stmt.join[join_idx].constraint else {
+            continue;
+        };
+
+        // The wrap target is the LOJ's immediate LHS neighbor.  For an
+        // uncorrelated projection this is a valid host — the projected value
+        // is a query-level constant, so its scope only needs to be visible
+        // from the LOJ's ON.  The schema-less wrap alias is the neighbor's
+        // relation name; extending the target selection to walk correlation
+        // refs (correlation-owning LHS item, or the LOJ's RHS) is future work
+        // sharing the same `wrap_table_expr_with_projections`.
+        let Some(wrapped_rel) = loj_left_neighbor_relation(stmt, join_idx) else {
+            continue;
+        };
+        let target_alias = wrapped_rel.name.clone();
+
+        let mut flat: Vec<Expr> = Vec::new();
+        // `|_| true` matches every non-AND leaf, so the whole ON flattens into
+        // `flat`; fold any remainder back in defensively rather than relying on
+        // the flatten being exhaustive.
+        if let Some(remainder) = split_expr(on_expr, &|_| true, &mut flat) {
+            flat.push(remainder);
+        }
+
+        let mut projections: Vec<(SqlIdentifier, Expr)> = Vec::new();
+        let mut projected_aliases: HashSet<SqlIdentifier> = HashSet::new();
+        for atom in flat.iter_mut() {
+            if !is_supported_subquery_predicate(atom) {
+                continue;
+            }
+            let desc = as_supported_subquery_predicate(atom)?;
+            if !is_admitted_loj_wrap_shape(&desc) {
+                continue;
+            }
+            if crate::util::is_correlated(&desc.stmt) {
+                continue;
+            }
+            let projected_alias = SqlIdentifier::from(format!("__loj_c_{projected_alias_counter}"));
+            projected_alias_counter += 1;
+            let (projected_expr, reference_expr) = build_loj_wrap_projection_and_reference(
+                desc,
+                &target_alias,
+                projected_alias.clone(),
+            )?;
+            projected_aliases.insert(projected_alias.clone());
+            projections.push((projected_alias, projected_expr));
+            *atom = reference_expr;
+        }
+
+        if projections.is_empty() {
+            continue;
+        }
+
+        // Install the rewritten ON so the passthrough-column walk below
+        // sees the projected-column references introduced by the rewrite.
+        let new_on = conjoin_all_dedup(flat)
+            .ok_or_else(|| internal_err!("LOJ ON collapsed to empty after wrap"))?;
+        stmt.join[join_idx].constraint = JoinConstraint::On(new_on);
+
+        // Walk every reference to the wrapped relation anywhere in the outer
+        // stmt (the just-rewritten JOIN ON, other JOINs, the SELECT list,
+        // WHERE, GROUP BY, HAVING, ORDER BY, and non-shadowing nested
+        // subqueries) once, doing two things per reference:
+        //
+        //  1. Collect its column name as a passthrough the wrap must forward,
+        //     excluding the projected `__loj_c_N` aliases already covered by
+        //     `projections` (relevant only when the neighbor is referenced
+        //     schema-lessly, where those refs match `wrapped_rel` too).
+        //  2. Retarget it onto the schema-less wrap alias.  `expand_implied_tables`
+        //     runs before this pass and qualifies base-table columns to
+        //     `<schema>.<table>.*`, but the wrap's derived table is aliased
+        //     schema-lessly; leaving siblings as `<schema>.<table>.*` makes the
+        //     LOJ ON span three relations (wrapped table, RHS, wrap alias) and
+        //     trips the REA-6129 join guardrail, whose `is_supported_join_condition`
+        //     requires exactly two.  For an already-schema-less neighbor this is
+        //     an identity rewrite.
+        //
+        // Shadow-aware: nested subqueries that re-declare the relation in their
+        // own FROM are skipped by the visitor.
+        let wrap_alias_rel = Relation {
+            schema: None,
+            name: target_alias.clone(),
+        };
+        let mut passthrough_set: HashSet<SqlIdentifier> = HashSet::new();
+        deep_columns_visitor_mut(stmt, &wrapped_rel, &mut |expr| {
+            let column = as_column!(expr);
+            if is_column_of!(column, wrapped_rel) {
+                if !projected_aliases.contains(&column.name) {
+                    passthrough_set.insert(column.name.clone());
+                }
+                column.table = Some(wrap_alias_rel.clone());
+            }
+        })?;
+        let mut passthrough_cols: Vec<SqlIdentifier> = passthrough_set.into_iter().collect();
+        passthrough_cols.sort();
+
+        let target_te = loj_left_neighbor_mut(stmt, join_idx)
+            .ok_or_else(|| internal_err!("LOJ left-neighbor disappeared between resolve steps"))?;
+        wrap_table_expr_with_projections(target_te, passthrough_cols, projections)?;
+        changed = true;
+    }
+
+    Ok(changed)
+}
+
+/// The outer-visible relation identity of the LOJ's immediate LHS neighbor:
+/// its alias (schema-less) when it has one, otherwise the possibly-schema-
+/// qualified table it names.  This is the relation that outer column references
+/// to the neighbor carry, and the source identity the wrap retargets onto the
+/// schema-less wrap alias (the returned relation's `name`).
+///
+/// `None` when the neighbor is a shape this pass doesn't support (multi-table
+/// comma-list RHS on the preceding join, or a Values / unaliased subquery
+/// TableExpr).  See `loj_left_neighbor_mut` for the full definition of "left
+/// neighbor".
+fn loj_left_neighbor_relation(stmt: &SelectStatement, join_idx: usize) -> Option<Relation> {
+    let te = loj_left_neighbor(stmt, join_idx)?;
+    match (&te.inner, &te.alias) {
+        (_, Some(a)) => Some(Relation {
+            schema: None,
+            name: a.clone(),
+        }),
+        (TableExprInner::Table(rel), None) => Some(rel.clone()),
+        _ => None,
+    }
+}
+
+/// Immutable variant of `loj_left_neighbor_mut`.
+fn loj_left_neighbor(stmt: &SelectStatement, join_idx: usize) -> Option<&TableExpr> {
+    if join_idx == 0 {
+        return stmt.tables.last();
+    }
+    match &stmt.join[join_idx - 1].right {
+        JoinRightSide::Table(te) => Some(te),
+        JoinRightSide::Tables(_) => None,
+    }
+}
+
+/// Return the mutable `TableExpr` immediately to the left of the LOJ at
+/// `stmt.join[join_idx]`:
+///
+/// - `join_idx == 0`: the last entry of the leading FROM chain
+///   `stmt.tables`.
+/// - `join_idx > 0`: the RHS of the preceding join (`stmt.join[join_idx-1]
+///   .right`), when that is a single `JoinRightSide::Table`.
+///
+/// Returns `None` when the preceding join's RHS is a multi-table comma
+/// list, which this pass doesn't support.
+fn loj_left_neighbor_mut(stmt: &mut SelectStatement, join_idx: usize) -> Option<&mut TableExpr> {
+    if join_idx == 0 {
+        return stmt.tables.last_mut();
+    }
+    match &mut stmt.join[join_idx - 1].right {
+        JoinRightSide::Table(te) => Some(te),
+        JoinRightSide::Tables(_) => None,
+    }
 }
 
 /// Extracts `col = col` cross-table equality pairs from a correlated expression.

@@ -1683,6 +1683,16 @@ where
 // WHERE NOT IN; correlated; 3-VL probes (NP/EP) present; RHS deduplicated (DISTINCT).
 #[test]
 fn test56() {
+    // Restore the nullability state this test's expected shape assumes:
+    // both `s.sn` and `rsdatatypesnull.rs_string` must be nullable so the
+    // full 3VL rewrite (NP + EP probes) is emitted.  Other tests in this
+    // file mutate the shared `GLOBAL_SCHEMA` guard; without this reset the
+    // outcome depends on test-execution order under multi-threaded
+    // `cargo test`.
+    let mut schema_guard = get_schema_guard();
+    make_col_nullable("s", "sn", &mut schema_guard);
+    make_col_nullable("rsdatatypesnull", "rs_string", &mut schema_guard);
+
     let original_text = r#"
 select
    t.rownum
@@ -1702,7 +1712,11 @@ where
         ON ("t"."rownum" = "EP_3VL"."status")
         WHERE (("GNL"."sn" IS NULL) AND ((("t"."rs_string" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL))
         OR ("EP_3VL"."present_" IS NULL)))"#;
-    test_it("test56", original_text, expected_text);
+    let rewritten_stmt = rewrite_statement(original_text, schema_guard).expect("test56 rewrite ok");
+    let expected_stmt =
+        parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, expected_text)
+            .expect("test56 expected parses");
+    assert_eq!(rewritten_stmt, expected_stmt);
 }
 
 // WHERE IN; correlated; with GROUP BY; NP/EP omitted when null-safe.

@@ -213,28 +213,39 @@ fn validate_no_nested_aggregates(stmt: &SelectStatement) -> ReadySetResult<()> {
     Ok(())
 }
 
-// ─── No subqueries in non-INNER JOIN ON ────────────────────────────────────
+// ─── No subqueries in non-INNER / non-LEFT JOIN ON ─────────────────────────
 
-/// Subqueries in LEFT / RIGHT / FULL OUTER JOIN ON position are not
-/// supported: moving the predicate to WHERE (the standard mechanism for
-/// unnesting) would change null-extension semantics — rows on the preserved
-/// side that don't match the ON predicate get NULL-extended in the join
-/// phase, then WHERE filters them out, silently converting OUTER JOIN into
-/// INNER JOIN.  See §12 of the extended-subquery-decorrelation design memo
-/// for the LOJ case-matrix analysis.
+/// Subqueries in FULL OUTER JOIN ON are unsupported.  RIGHT JOIN is
+/// canonicalized to LEFT JOIN by `normalize_right_join` earlier in the
+/// pipeline, so the RIGHT case never reaches this validator.
 ///
-/// **INNER JOIN ON subqueries are supported** as of Stage 3 of the extended
+/// INNER JOIN ON subqueries are supported as of Stage 3 of the extended
 /// subquery decorrelation project: they are moved to WHERE by
 /// `move_subquery_predicates_from_inner_join_on_to_where` (invoked from
 /// `normalize_subquery_positions`), and `unnest_subqueries` decorrelates
 /// them via its WHERE-position machinery.
+///
+/// LEFT JOIN ON subqueries are supported as of Stage 4b Commit 1 for
+/// uncorrelated Scalar / EXISTS / NOT EXISTS shapes: the non-preserved
+/// side is wrapped by `wrap_loj_on_uncorrelated_subquery_predicates` (also
+/// invoked from `normalize_subquery_positions`) with a derived table
+/// projecting the subquery result, and the ON references the projected
+/// column via a scalar-op comparison.  Shapes NSP can't rewrite (correlated,
+/// IN/NOT IN, ANY/ALL/SOME) survive into `unnest_subqueries` where they
+/// fail with a shape-specific error.  See §12 of the extended-subquery-
+/// decorrelation design memo for the LOJ case-matrix analysis.
 fn validate_no_subqueries_in_join_on(stmt: &SelectStatement) -> ReadySetResult<()> {
     for jc in &stmt.join {
+        let is_supported_position = jc.operator.is_inner_join()
+            || matches!(
+                jc.operator,
+                JoinOperator::LeftJoin | JoinOperator::LeftOuterJoin
+            );
         if let JoinConstraint::On(on_expr) = &jc.constraint
-            && !jc.operator.is_inner_join()
+            && !is_supported_position
             && contains_select(on_expr)
         {
-            unsupported!("subqueries in non-INNER JOIN ON are not supported");
+            unsupported!("subqueries in FULL OUTER JOIN ON are not supported");
         }
     }
     Ok(())
@@ -882,22 +893,24 @@ mod tests {
     }
 
     #[test]
-    fn subquery_in_left_join_on_fails() {
-        // Non-INNER JOIN ON subquery continues to be rejected: moving the
-        // predicate to WHERE would change null-extension semantics.
+    fn scalar_subquery_in_left_join_on_passes_validator() {
+        // Stage 4b Commit 1 relaxed the gate to permit LEFT JOIN ON
+        // subqueries; `wrap_loj_on_uncorrelated_subquery_predicates` in NSP
+        // rewrites the supported (uncorrelated Scalar / EXISTS) shapes, and
+        // unsupported ones fail downstream in `unnest_subqueries`.
         assert!(
             validate_postgres("SELECT t.x FROM t LEFT JOIN s ON t.x = (SELECT MAX(u.x) FROM u)")
-                .is_err()
+                .is_ok()
         );
     }
 
     #[test]
-    fn exists_in_left_join_on_fails() {
+    fn exists_in_left_join_on_passes_validator() {
         assert!(
             validate_postgres(
                 "SELECT t.x FROM t LEFT JOIN s ON EXISTS (SELECT 1 FROM u WHERE u.x = t.x)"
             )
-            .is_err()
+            .is_ok()
         );
     }
 

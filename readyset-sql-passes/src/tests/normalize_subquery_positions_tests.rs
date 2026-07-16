@@ -1269,12 +1269,10 @@ fn inner_join_on_only_subquery_becomes_empty_on() {
 }
 
 #[test]
-fn left_outer_join_on_subquery_untouched_by_nsp() {
-    // Non-INNER JOIN ON is NOT touched by NSP's move.  Validator
-    // `validate_no_subqueries_in_join_on` rejects this shape upstream,
-    // so in practice this AST doesn't reach NSP via the full pipeline.
-    // This test invokes NSP directly on the shape to lock the pass's
-    // defensive behavior in isolation.
+fn left_outer_join_on_correlated_subquery_untouched_by_nsp() {
+    // The INNER-JOIN-ON move skips non-INNER JOINs; the LOJ wrap handles only
+    // uncorrelated subquery predicates.  A correlated subquery in LEFT JOIN ON
+    // stays untouched here and fails downstream in `unnest_subqueries`.
     let mut stmt = parse(
         "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
          AND EXISTS (SELECT 1 FROM c WHERE c.x = a.y)",
@@ -1282,7 +1280,11 @@ fn left_outer_join_on_subquery_untouched_by_nsp() {
     let before = rendered(&stmt);
     stmt.normalize_subquery_positions()
         .expect("normalize_subquery_positions succeeds");
-    assert_eq!(before, rendered(&stmt), "LEFT JOIN ON must be untouched");
+    assert_eq!(
+        before,
+        rendered(&stmt),
+        "correlated LOJ ON must be untouched"
+    );
 }
 
 #[test]
@@ -1340,4 +1342,326 @@ fn sql_query_dispatch_select() {
         s.contains("\"_NSP_W_"),
         "wrapper absent in SqlQuery dispatch: {s}"
     );
+}
+
+// LEFT JOIN ON uncorrelated subquery wrap.  The wrap target is the LOJ's
+// immediate LHS neighbor (last of leading FROM for the first join; RHS of the
+// preceding join for later ones).
+
+#[test]
+fn loj_uncorrelated_scalar_op_subquery_wraps_lhs_neighbor() {
+    // Exercises the wrap firing on a scalar-op predicate.  The comparison LHS
+    // here is on the RHS relation `b`; this asserts the wrap mechanics only.
+    // For a shape that also lowers end-to-end (LHS on the wrap target so the
+    // post-wrap ON stays two-relation), see the sibling test below and the
+    // logictest.
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND b.threshold > (SELECT count(*) FROM cfg WHERE cfg.k = 'active')",
+    );
+    let s = rendered(&stmt);
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1, "one LOJ ON expected");
+    let lower_on = on_exprs[0].to_lowercase();
+    assert!(
+        !lower_on.contains("select"),
+        "ON must not contain a subquery post-wrap: {}",
+        on_exprs[0]
+    );
+    assert!(
+        on_exprs[0].contains("__loj_c_"),
+        "ON must reference the projected column: {}",
+        on_exprs[0]
+    );
+    assert!(
+        s.to_lowercase().contains("count(*)"),
+        "raw scalar subquery must be projected inside the wrap: {s}"
+    );
+}
+
+#[test]
+fn loj_uncorrelated_scalar_op_lhs_on_wrap_target() {
+    // Comparison LHS is on the wrap target `a` (the LHS neighbor).  Post-wrap
+    // the conjunct `a.threshold > a.__loj_c_0` references only `a`, so the ON
+    // stays two-relation and lowers — the shape the logictest and QA validate.
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND a.threshold > (SELECT count(*) FROM cfg WHERE cfg.k = 'active')",
+    );
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    assert!(
+        on_exprs[0].contains(r#""a"."__loj_c_"#),
+        "ON must reference a.__loj_c_N: {}",
+        on_exprs[0]
+    );
+    assert!(
+        !on_exprs[0].to_lowercase().contains("select"),
+        "ON must not contain a subquery post-wrap: {}",
+        on_exprs[0]
+    );
+}
+
+#[test]
+fn loj_correlated_on_rhs_scalar_subquery_untouched() {
+    // Subquery correlates on the RHS `b` (not the wrap target).  Like any
+    // correlated LOJ ON subquery it is left untouched and reaches
+    // `unnest_subqueries`; the wrap handles only uncorrelated predicates.
+    let mut stmt = parse(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND a.v > (SELECT count(*) FROM cfg WHERE cfg.k = b.tag)",
+    );
+    let before = rendered(&stmt);
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+    assert_eq!(
+        before,
+        rendered(&stmt),
+        "RHS-correlated LOJ ON subquery must be untouched"
+    );
+}
+
+#[test]
+fn loj_uncorrelated_exists_wraps_with_case_when_exists_then_1_else_0() {
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND EXISTS (SELECT 1 FROM cfg WHERE cfg.k = 'active')",
+    );
+    let s = rendered(&stmt);
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    let lower_on = on_exprs[0].to_lowercase();
+    assert!(
+        !lower_on.contains("exists"),
+        "ON must not contain EXISTS post-wrap: {}",
+        on_exprs[0]
+    );
+    assert!(
+        on_exprs[0].contains("__loj_c_"),
+        "ON must reference projected column: {}",
+        on_exprs[0]
+    );
+    assert!(
+        on_exprs[0].contains("= 1"),
+        "ON must reference projected column with = 1: {}",
+        on_exprs[0]
+    );
+    let lower_s = s.to_lowercase();
+    assert!(
+        lower_s.contains("case when exists"),
+        "projected CASE WHEN EXISTS shape absent: {s}"
+    );
+    assert!(lower_s.contains("then 1"), "EXISTS branch projects 1: {s}");
+    assert!(lower_s.contains("else 0"), "ELSE branch projects 0: {s}");
+}
+
+#[test]
+fn loj_uncorrelated_not_exists_wraps_option_b_swapped_branches() {
+    // Option B: NOT EXISTS canonicalizes to the same EXISTS(subq) condition
+    // inside CASE, with branches swapped (THEN 0 ELSE 1).  ON stays `= 1`.
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND NOT EXISTS (SELECT 1 FROM cfg WHERE cfg.k = 'active')",
+    );
+    let s = rendered(&stmt);
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    let lower_on = on_exprs[0].to_lowercase();
+    assert!(!lower_on.contains("exists"));
+    assert!(on_exprs[0].contains("= 1"));
+    let lower_s = s.to_lowercase();
+    assert!(
+        lower_s.contains("case when exists"),
+        "CASE condition must be EXISTS (Option B canonicalization): {s}"
+    );
+    assert!(
+        !lower_s.contains("case when not exists"),
+        "CASE condition must NOT be NOT EXISTS after Option B canonicalization: {s}"
+    );
+    assert!(
+        lower_s.contains("then 0"),
+        "EXISTS branch projects 0 for NOT EXISTS: {s}"
+    );
+    assert!(
+        lower_s.contains("else 1"),
+        "ELSE branch projects 1 for NOT EXISTS: {s}"
+    );
+}
+
+#[test]
+fn loj_uncorrelated_wrap_fires_on_left_outer_join_keyword_variant() {
+    // `LEFT OUTER JOIN` is a distinct JoinOperator variant from `LEFT JOIN`
+    // — both must be handled.
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT OUTER JOIN b ON a.k = b.k \
+         AND EXISTS (SELECT 1 FROM cfg WHERE cfg.k = 'active')",
+    );
+    let s = rendered(&stmt);
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    assert!(
+        on_exprs[0].contains("__loj_c_"),
+        "LEFT OUTER JOIN must also get wrapped: {}",
+        on_exprs[0]
+    );
+    assert!(s.to_lowercase().contains("case when exists"));
+}
+
+#[test]
+fn loj_correlated_scalar_op_subquery_untouched() {
+    // Subquery correlates on `a` — the wrap skips correlated shapes.
+    let mut stmt = parse(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND b.threshold > (SELECT count(*) FROM cfg WHERE cfg.k = a.tag)",
+    );
+    let before = rendered(&stmt);
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+    assert_eq!(
+        before,
+        rendered(&stmt),
+        "correlated LOJ ON must be untouched"
+    );
+}
+
+#[test]
+fn loj_in_subquery_untouched_by_commit_1() {
+    // IN-subquery is not one of the shapes the wrap handles.
+    let mut stmt = parse(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND b.tag IN (SELECT tag FROM tags)",
+    );
+    let before = rendered(&stmt);
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+    assert_eq!(
+        before,
+        rendered(&stmt),
+        "IN-subquery in LOJ ON must be untouched by the wrap"
+    );
+}
+
+#[test]
+fn loj_uncorrelated_wrap_retargets_schema_qualified_lhs_references() {
+    // `expand_implied_tables` runs before NSP in the real pipeline, so base-
+    // table columns arrive schema-qualified (`qa.s.*`).  The wrap aliases the
+    // LHS neighbor's derived table schema-lessly (`s`), so every reference to
+    // the wrapped relation must be retargeted from `qa.s.*` to `s.*`.  If a
+    // sibling ON conjunct keeps a `qa.s.*` reference, the LOJ ON spans three
+    // relations (qa.s, qa.p, s) and later fails the REA-6129 join guardrail
+    // (`is_supported_join_condition` requires exactly two relations).
+    let stmt = normalize(
+        "SELECT qa.s.sn FROM qa.s LEFT JOIN qa.p ON qa.s.pn = qa.p.pn \
+         AND qa.s.status > (SELECT count(*) FROM qa.cfg)",
+    );
+    let s = rendered(&stmt);
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    assert!(
+        !on_exprs[0].contains(r#""qa"."s"."#),
+        "sibling ON refs to the wrapped table must be retargeted to the \
+         schema-less wrap alias, not left as qa.s.*: {}",
+        on_exprs[0]
+    );
+    assert!(
+        on_exprs[0].contains("__loj_c_"),
+        "ON must reference the projected column: {}",
+        on_exprs[0]
+    );
+    // The wrapped-side columns referenced downstream (SELECT `sn`, ON `pn`,
+    // `status`) must be forwarded through the wrap DT.
+    assert!(
+        s.contains(r#""sn" AS "sn""#)
+            && s.contains(r#""pn" AS "pn""#)
+            && s.contains(r#""status" AS "status""#),
+        "wrapped-table columns must be passed through the wrap DT: {s}"
+    );
+}
+
+#[test]
+fn loj_multiple_uncorrelated_subquery_predicates_share_one_wrap() {
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND b.threshold > (SELECT count(*) FROM cfg WHERE cfg.k = 'active') \
+         AND EXISTS (SELECT 1 FROM ready)",
+    );
+    let s = rendered(&stmt);
+    assert!(
+        s.contains("__loj_c_0"),
+        "first projected alias missing: {s}"
+    );
+    assert!(
+        s.contains("__loj_c_1"),
+        "second projected alias missing: {s}"
+    );
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    let lower_on = on_exprs[0].to_lowercase();
+    assert!(
+        !lower_on.contains("select") && !lower_on.contains("exists"),
+        "ON must not reference either original subquery: {}",
+        on_exprs[0]
+    );
+}
+
+#[test]
+fn loj_mixed_correlated_and_uncorrelated_wraps_only_uncorrelated() {
+    // First conjunct is uncorrelated (wraps).  Second is correlated (stays).
+    // The overall LOJ ON keeps the correlated conjunct verbatim and gains a
+    // projected-column reference for the uncorrelated one.
+    let stmt = normalize(
+        "SELECT a.x FROM a LEFT JOIN b ON a.k = b.k \
+         AND b.threshold > (SELECT count(*) FROM cfg WHERE cfg.k = 'active') \
+         AND EXISTS (SELECT 1 FROM c WHERE c.x = a.y)",
+    );
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 1);
+    let on = &on_exprs[0];
+    assert!(
+        on.contains("__loj_c_"),
+        "uncorrelated conjunct must be rewritten to projected ref: {on}"
+    );
+    assert!(
+        on.to_lowercase().contains("exists"),
+        "correlated EXISTS must remain in ON: {on}"
+    );
+}
+
+#[test]
+fn loj_wrap_target_is_lhs_neighbor_not_leading_from() {
+    // Two LOJs, each with its own uncorrelated subquery.  The second LOJ's
+    // LHS neighbor is the first LOJ's RHS (`b`), not the leading FROM (`a`).
+    // Each LOJ must wrap its OWN left neighbor: LOJ-1 wraps `a`, LOJ-2
+    // wraps `b`.  Both projected columns must be qualified accordingly in
+    // their respective ONs.
+    let stmt = normalize(
+        "SELECT a.x FROM a \
+         LEFT JOIN b ON a.k = b.k \
+            AND EXISTS (SELECT 1 FROM cfg1 WHERE cfg1.k = 'active') \
+         LEFT JOIN c ON b.k = c.k \
+            AND EXISTS (SELECT 1 FROM cfg2 WHERE cfg2.k = 'active')",
+    );
+    let on_exprs = on_expressions(&stmt);
+    assert_eq!(on_exprs.len(), 2, "two LOJ ONs expected: {on_exprs:?}");
+
+    // LOJ-1's ON references `a.__loj_c_N` (LOJ-1's LHS neighbor is `a`).
+    assert!(
+        on_exprs[0].contains(r#""a"."__loj_c_"#),
+        "LOJ-1 must reference a.__loj_c_N (LHS neighbor `a`): {}",
+        on_exprs[0]
+    );
+    // LOJ-2's ON references `b.__loj_c_N` (LOJ-2's LHS neighbor is `b`,
+    // the RHS of LOJ-1).
+    assert!(
+        on_exprs[1].contains(r#""b"."__loj_c_"#),
+        "LOJ-2 must reference b.__loj_c_N (LHS neighbor `b`): {}",
+        on_exprs[1]
+    );
+    // Neither ON should still contain a subquery.
+    for on in &on_exprs {
+        assert!(
+            !on.to_lowercase().contains("select"),
+            "ON must not contain a subquery post-wrap: {on}"
+        );
+    }
 }
