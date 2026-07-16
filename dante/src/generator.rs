@@ -541,6 +541,8 @@ impl ConstraintRegistry {
             .expect("pattern is malformed");
         reg.register(functions::ifnull())
             .expect("pattern is malformed");
+        reg.register(functions::ifnull_datetime())
+            .expect("pattern is malformed");
         reg.register(functions::concat())
             .expect("pattern is malformed");
         reg.register(functions::substring())

@@ -161,6 +161,19 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
                     rw.write_col(ts.to_chrono().naive_utc().date())
                 }
             }
+            // e.g. IFNULL(datetime_col, text_literal): text-family coltype, timestamp value. A
+            // binary fallback types the result binary and lands here too, but stays on
+            // `conv_error` below until its MySQL wire encoding is verified.
+            mysql_srv::ColumnType::MYSQL_TYPE_BLOB
+            | mysql_srv::ColumnType::MYSQL_TYPE_TINY_BLOB
+            | mysql_srv::ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+            | mysql_srv::ColumnType::MYSQL_TYPE_LONG_BLOB
+            | mysql_srv::ColumnType::MYSQL_TYPE_VAR_STRING
+            | mysql_srv::ColumnType::MYSQL_TYPE_STRING
+                if !ty.is_binary() =>
+            {
+                rw.write_col(&*encoding.encode(&ts.to_string())?)
+            }
             _ => return Err(conv_error())?,
         },
         DfValue::Time(ref t) => rw.write_col(t),

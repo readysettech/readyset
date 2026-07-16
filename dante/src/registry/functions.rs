@@ -32,6 +32,22 @@ pub fn ifnull() -> Pattern {
     b.build()
 }
 
+/// SELECT IFNULL(t.c1, '2000-01-01 00:00:00') FROM t (MySQL only)
+///
+/// The DateTime type class forces a text fallback literal, so every resolution
+/// pairs a text-family wire coltype with a TimestampTz row value.
+pub fn ifnull_datetime() -> Pattern {
+    let mut b = PatternBuilder::new("ifnull_datetime");
+    let t = b.table();
+    let c = b.column(t);
+    b.column_type_class(c, TypeClass::DateTime);
+    b.from(t);
+    b.project_function(ScalarFn::IfNull, vec![(c, t)]);
+    b.set_dialect_support(DialectSupport::MySqlOnly);
+    b.tags(&["function", "datetime"]);
+    b.build()
+}
+
 /// SELECT CONCAT(t.c1, t.c2) FROM t
 pub fn concat() -> Pattern {
     let mut b = PatternBuilder::new("concat");
@@ -325,6 +341,19 @@ mod tests {
         assert!(
             sql.to_uppercase().contains("IFNULL("),
             "expected IFNULL in sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn ifnull_datetime_resolves() {
+        let sql = resolve_pattern(&ifnull_datetime(), Dialect::MySQL);
+        assert!(
+            sql.to_uppercase().contains("IFNULL("),
+            "expected IFNULL in sql: {sql}"
+        );
+        assert!(
+            sql.contains("2000-01-01 00:00:00"),
+            "expected datetime fallback literal in sql: {sql}"
         );
     }
 

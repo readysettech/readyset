@@ -171,6 +171,42 @@ async fn two_columns_with_same_name() {
     shutdown_tx.shutdown().await;
 }
 
+// REA-6600: IFNULL(datetime_col, text_literal) negotiates a text-family wire coltype but the
+// value can be a TimestampTz; write_column must render it as text, preserving precision. Both
+// row writers reach that pairing: the text-protocol query and the prepared statement.
+#[tokio::test(flavor = "multi_thread")]
+async fn ifnull_datetime_writes_as_text() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts).await.unwrap();
+
+    conn.query_drop("CREATE TABLE ifnull_datetime (id int PRIMARY KEY, c DATETIME(3))")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO ifnull_datetime VALUES (1, '2021-03-04 05:06:07.891')")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let ad_hoc: String = conn
+        .query_first("SELECT IFNULL(c, '2000-01-01 00:00:00') FROM ifnull_datetime WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ad_hoc, "2021-03-04 05:06:07.891");
+
+    let exec: String = conn
+        .exec_first(
+            "SELECT IFNULL(c, '2000-01-01 00:00:00') FROM ifnull_datetime WHERE id = ?",
+            (1,),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exec, "2021-03-04 05:06:07.891");
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_basic() {
     let (opts, _handle, shutdown_tx) = setup().await;
