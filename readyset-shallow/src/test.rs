@@ -1,7 +1,8 @@
 use std::assert_matches;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::FutureExt;
@@ -15,9 +16,13 @@ use tokio::test;
 use tokio::time::sleep;
 
 use crate::{
-    CacheInsertGuard, CacheManager, CacheResult, ContentHash, EvictionPolicy, QueryMetadata,
-    rows_content_hash,
+    CacheEntryInfo, CacheInfo, CacheInsertGuard, CacheManager, CacheResult, ContentHash,
+    EvictionPolicy, QueryMetadata, rows_content_hash,
 };
+
+fn test_manager() -> CacheManager<String, String> {
+    CacheManager::new(None, None)
+}
 
 fn test_relation(name: &str) -> Relation {
     Relation {
@@ -68,99 +73,289 @@ where
     )
 }
 
-async fn insert_value<K, V>(result: CacheResult<K, V>, values: Vec<V>)
-where
-    K: Clone + Hash + Eq + Send + Sync + 'static,
-    V: Send + Sync + 'static,
-{
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
-    values.into_iter().for_each(|v| guard.push(v));
-    guard.set_metadata(QueryMetadata::Test);
-    guard.filled().await;
-}
-
 fn keys_iter(count: usize) -> impl Iterator<Item = String> {
     (0..count).map(|i| format!("key_{i}"))
 }
 
-async fn check_miss<K, V>(manager: &CacheManager<K, V>, query_id: &QueryId, key: K)
+/// One shallow cache on a manager, with helpers for the common data-path operations. Cloning
+/// shares the underlying manager, so clones can be moved into spawned tasks.
+#[derive(Clone)]
+struct TestCache<V = String>
 where
-    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
-    V: Send + Sync + SizeOf + 'static,
+    V: Send + Sync + 'static,
 {
-    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
-    assert_matches!(result, CacheResult::Miss(_));
+    manager: Arc<CacheManager<String, V>>,
+    query_id: QueryId,
 }
 
-async fn check_hit<K, V>(manager: &CacheManager<K, V>, query_id: &QueryId, key: K)
-where
-    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
-    V: Send + Sync + SizeOf + 'static,
-{
-    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
-    assert_matches!(
-        result,
-        CacheResult::Hit(..) | CacheResult::HitAndRefresh(..)
-    );
+struct TestCacheBuilder {
+    capacity: Option<u64>,
+    name: Option<Relation>,
+    policy: EvictionPolicy,
+    coalesce: Option<Duration>,
+    adaptive: bool,
+    max_extra_load_percent: Option<u64>,
 }
 
-async fn check_hit_value<K, V>(
-    manager: &CacheManager<K, V>,
-    query_id: &QueryId,
-    key: K,
-    expected: Vec<V>,
-) where
-    K: Clone + Hash + Eq + Send + Sync + SizeOf + 'static,
-    V: Send + Sync + SizeOf + PartialEq + std::fmt::Debug + 'static,
-{
-    let result = manager.get_or_start_insert(query_id, key, |_| true).await;
-    match result {
-        CacheResult::Hit(results) | CacheResult::HitAndRefresh(results, _) => {
-            assert_eq!(results.values, expected.into());
+impl TestCache {
+    fn new() -> Self {
+        Self::builder().build()
+    }
+
+    fn builder() -> TestCacheBuilder {
+        TestCacheBuilder {
+            capacity: None,
+            name: None,
+            policy: test_policy(),
+            coalesce: None,
+            adaptive: false,
+            max_extra_load_percent: None,
         }
-        _ => panic!("expected Hit or HitAndRefresh"),
+    }
+}
+
+impl TestCacheBuilder {
+    fn capacity(mut self, capacity: u64) -> Self {
+        self.capacity = Some(capacity);
+        self
+    }
+
+    fn name(mut self, name: Relation) -> Self {
+        self.name = Some(name);
+        self
+    }
+
+    fn policy(mut self, policy: EvictionPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    fn ttl(self, ttl: Duration) -> Self {
+        self.policy(EvictionPolicy::Ttl { ttl })
+    }
+
+    /// TtlAndPeriod with a long TTL, refreshing on stale reads.
+    fn period(self, refresh: Duration) -> Self {
+        self.policy(EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(60),
+            refresh,
+            schedule: false,
+        })
+    }
+
+    /// TtlAndPeriod with a long TTL, refreshing on a schedule.
+    fn scheduled_period(self, refresh: Duration) -> Self {
+        self.policy(EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(60),
+            refresh,
+            schedule: true,
+        })
+    }
+
+    fn coalesce(mut self, window: Duration) -> Self {
+        self.coalesce = Some(window);
+        self
+    }
+
+    fn adaptive(mut self) -> Self {
+        self.adaptive = true;
+        self
+    }
+
+    fn max_extra_load_percent(mut self, percent: u64) -> Self {
+        self.max_extra_load_percent = Some(percent);
+        self
+    }
+
+    fn build(self) -> TestCache {
+        self.build_typed()
+    }
+
+    fn build_typed<V>(self) -> TestCache<V>
+    where
+        V: ContentHash + SizeOf + Send + Sync + 'static,
+    {
+        let mut manager = CacheManager::new(self.capacity, None);
+        if let Some(percent) = self.max_extra_load_percent {
+            manager.set_adaptive_max_extra_load_percent(percent);
+        }
+        let query_id = QueryId::random();
+        manager
+            .create_cache(
+                self.name,
+                query_id,
+                test_stmt(),
+                vec![],
+                self.policy,
+                test_ddl_req(),
+                TrxCachePolicy::Never,
+                self.coalesce,
+                self.adaptive,
+            )
+            .unwrap();
+        TestCache {
+            manager: Arc::new(manager),
+            query_id,
+        }
     }
 }
 
-async fn count_hits<K, V>(
-    manager: &CacheManager<K, V>,
-    query_id: &QueryId,
-    keys: impl Iterator<Item = K>,
-) -> usize
+impl<V> TestCache<V>
 where
-    K: Hash + Eq + Send + Sync + Clone + SizeOf + 'static,
-    V: Send + Sync + SizeOf + 'static,
+    V: ContentHash + SizeOf + Send + Sync + 'static,
 {
-    let mut hits = 0;
-    for key in keys {
-        let result = manager.get_or_start_insert(query_id, key, |_| true).await;
-        if result.is_hit() {
-            hits += 1;
+    /// A second cache with default settings on the same manager.
+    fn sibling(&self) -> Self {
+        let query_id = QueryId::random();
+        create_test_cache(&*self.manager, None, query_id, test_policy()).unwrap();
+        Self {
+            manager: Arc::clone(&self.manager),
+            query_id,
         }
     }
-    hits
+
+    async fn get(&self, key: &str) -> CacheResult<String, V> {
+        self.manager
+            .get_or_start_insert(&self.query_id, key.to_string(), |_| true)
+            .await
+    }
+
+    async fn expect_miss(&self, key: &str) -> CacheInsertGuard<String, V> {
+        let CacheResult::Miss(guard) = self.get(key).await else {
+            panic!("expected miss");
+        };
+        guard
+    }
+
+    async fn populate(&self, key: &str, values: impl IntoIterator<Item = impl Into<V>>) {
+        let mut guard = self.expect_miss(key).await;
+        values.into_iter().for_each(|v| guard.push(v.into()));
+        guard.set_metadata(QueryMetadata::Test);
+        guard.filled().await;
+    }
+
+    async fn check_miss(&self, key: &str) {
+        assert_matches!(self.get(key).await, CacheResult::Miss(_));
+    }
+
+    async fn check_hit(&self, key: &str) {
+        assert_matches!(
+            self.get(key).await,
+            CacheResult::Hit(..) | CacheResult::HitAndRefresh(..)
+        );
+    }
+
+    async fn check_hit_value(&self, key: &str, expected: impl IntoIterator<Item = impl Into<V>>)
+    where
+        V: PartialEq + Debug,
+    {
+        match self.get(key).await {
+            CacheResult::Hit(results) | CacheResult::HitAndRefresh(results, _) => {
+                let expected: Vec<V> = expected.into_iter().map(Into::into).collect();
+                assert_eq!(results.values, expected.into());
+            }
+            _ => panic!("expected Hit or HitAndRefresh"),
+        }
+    }
+
+    async fn count_hits(&self, keys: impl Iterator<Item = String>) -> usize {
+        let mut hits = 0;
+        for key in keys {
+            if self.get(&key).await.is_hit() {
+                hits += 1;
+            }
+        }
+        hits
+    }
+
+    /// Insert values directly, as a completed refresh would.
+    async fn refresh_insert_with_exec(
+        &self,
+        key: &str,
+        values: impl IntoIterator<Item = impl Into<V>>,
+        exec: Duration,
+    ) {
+        let cache = self.manager.get(None, Some(&self.query_id)).unwrap();
+        let values = values.into_iter().map(Into::into).collect();
+        cache
+            .insert(key.to_string(), values, QueryMetadata::Test, exec, true)
+            .await;
+        // Run the eviction listener for the replaced entry so load accounting settles.
+        self.run_pending_tasks().await;
+    }
+
+    async fn refresh_insert(&self, key: &str, values: impl IntoIterator<Item = impl Into<V>>) {
+        self.refresh_insert_with_exec(key, values, Duration::ZERO)
+            .await;
+    }
+
+    async fn run_pending_tasks(&self) {
+        self.manager.run_pending_tasks(&self.query_id).await;
+    }
+
+    async fn flush(&self) {
+        self.manager
+            .flush_cache(None, Some(&self.query_id))
+            .await
+            .unwrap();
+    }
+
+    fn wasted_refresh_count(&self) -> Option<u64> {
+        self.manager.wasted_refresh_count(&self.query_id)
+    }
+
+    fn adaptive_load(&self) -> Option<(u64, u64)> {
+        self.manager.adaptive_load(&self.query_id)
+    }
+
+    fn cache_info(&self) -> CacheInfo {
+        self.manager
+            .list_caches(Some(self.query_id), None)
+            .into_iter()
+            .next()
+            .expect("no cache info")
+    }
+
+    /// The cache's sole entry.
+    fn sole_entry(&self) -> CacheEntryInfo {
+        let mut entries = self.manager.list_entries(Some(self.query_id), None);
+        assert_eq!(entries.len(), 1);
+        entries.remove(0)
+    }
+
+    fn entry_period(&self) -> Option<u64> {
+        self.sole_entry().refresh_period_ms
+    }
+
+    fn entry_period_for(&self, key: &str) -> Option<u64> {
+        let entry_id = hash(&key.to_string());
+        self.manager
+            .list_entries(Some(self.query_id), None)
+            .into_iter()
+            .find(|e| e.entry_id == entry_id)
+            .expect("no entry for key")
+            .refresh_period_ms
+    }
 }
 
 #[test]
 async fn test_create_cache_with_relation() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let relation = test_relation("test_table");
 
-    let result = create_test_cache(
+    create_test_cache(
         &manager,
         Some(relation.clone()),
         QueryId::random(),
         test_policy(),
-    );
-    assert!(result.is_ok());
+    )
+    .unwrap();
     assert!(manager.exists(Some(&relation), None));
 }
 
 #[test]
 async fn test_list_caches_and_drop_all() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
 
     let relation1 = test_relation("table1");
     let relation2 = test_relation("table2");
@@ -204,22 +399,20 @@ async fn test_list_caches_and_drop_all() {
 
 #[test]
 async fn test_create_cache_with_query_id() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    let result = create_test_cache(&manager, None, query_id, test_policy());
-    assert!(result.is_ok());
+    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
     assert!(manager.exists(None, Some(&query_id)));
 }
 
 #[test]
 async fn test_create_cache_with_both_identifiers() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let relation = test_relation("test_table");
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
-    let result = create_test_cache(&manager, Some(relation.clone()), query_id, test_policy());
-    assert!(result.is_ok());
+    create_test_cache(&manager, Some(relation.clone()), query_id, test_policy()).unwrap();
 
     assert!(manager.exists(Some(&relation), None));
     assert!(manager.exists(None, Some(&query_id)));
@@ -228,7 +421,7 @@ async fn test_create_cache_with_both_identifiers() {
 
 #[test]
 async fn test_duplicate_cache_creation() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let relation = test_relation("test_table");
 
     create_test_cache(
@@ -250,7 +443,7 @@ async fn test_duplicate_cache_creation() {
 
 #[test]
 async fn test_drop_cache_by_relation() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let relation = test_relation("test_table");
 
     create_test_cache(
@@ -262,27 +455,25 @@ async fn test_drop_cache_by_relation() {
     .unwrap();
     assert!(manager.exists(Some(&relation), None));
 
-    let result = manager.drop_cache(Some(&relation), None);
-    assert!(result.is_ok());
+    manager.drop_cache(Some(&relation), None).unwrap();
     assert!(!manager.exists(Some(&relation), None));
 }
 
 #[test]
 async fn test_drop_cache_by_query_id() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     create_test_cache(&manager, None, query_id, test_policy()).unwrap();
     assert!(manager.exists(None, Some(&query_id)));
 
-    let result = manager.drop_cache(None, Some(&query_id));
-    assert!(result.is_ok());
+    manager.drop_cache(None, Some(&query_id)).unwrap();
     assert!(!manager.exists(None, Some(&query_id)));
 }
 
 #[test]
 async fn test_drop_nonexistent_cache() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let relation = test_relation("nonexistent");
 
     let result = manager.drop_cache(Some(&relation), None);
@@ -291,7 +482,7 @@ async fn test_drop_nonexistent_cache() {
 
 #[test]
 async fn test_drop_cache_without_identifiers() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
 
     let result = manager.drop_cache(None, None);
     assert_matches!(result, Err(ReadySetError::Internal(_)));
@@ -299,7 +490,7 @@ async fn test_drop_cache_without_identifiers() {
 
 #[test]
 async fn test_get_or_start_insert_not_cached() {
-    let manager = CacheManager::<String, String>::new(None, None);
+    let manager = test_manager();
     let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
 
     let result = manager
@@ -310,112 +501,70 @@ async fn test_get_or_start_insert_not_cached() {
 
 #[test]
 async fn test_get_or_start_insert_miss() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    check_miss(&manager, &query_id, "key1".to_string()).await;
+    let t = TestCache::new();
+    t.check_miss("key1").await;
 }
 
 #[test]
 async fn test_get_or_start_insert_hit() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
-
-    check_hit_value(
-        &manager,
-        &query_id,
-        "key1".to_string(),
-        vec!["value1".to_string()],
-    )
-    .await;
+    let t = TestCache::new();
+    t.populate("key1", ["value1"]).await;
+    t.check_hit_value("key1", ["value1"]).await;
 }
 
 #[test]
 async fn test_cache_insert_guard_not_filled() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::new();
 
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("Expected Miss");
-    };
+    let mut guard = t.expect_miss("key1").await;
     guard.push("value1".to_string());
     guard.set_metadata(QueryMetadata::Test);
     drop(guard);
 
-    check_miss(&manager, &query_id, "key1".to_string()).await;
+    t.check_miss("key1").await;
 }
 
 #[test]
 #[should_panic(expected = "no metadata for result set")]
 async fn test_cache_insert_guard_filled_without_metadata() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::new();
 
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
+    let mut guard = t.expect_miss("key1").await;
     guard.push("value1".to_string());
     drop(guard.filled());
 }
 
 #[test]
 async fn test_cache_isolation() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
-    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
+    let t1 = TestCache::new();
+    let t2 = t1.sibling();
 
-    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
-    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
+    t1.populate("key1", ["value1"]).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
-
-    check_miss(&manager, &query_id_2, "key1".to_string()).await;
-    check_hit(&manager, &query_id_1, "key1".to_string()).await;
+    t2.check_miss("key1").await;
+    t1.check_hit("key1").await;
 }
 
 #[test]
 async fn test_concurrent_cache_creation() {
     const COUNT: usize = 10;
 
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let mut handles = Vec::new();
+    let manager = Arc::new(test_manager());
 
-    for i in 0..COUNT {
-        let manager_clone = Arc::clone(&manager);
-        let handle = tokio::spawn(async move {
-            let relation = test_relation(&format!("table_{}", i));
+    let handles = (0..COUNT).map(|i| {
+        let manager = Arc::clone(&manager);
+        tokio::spawn(async move {
+            let relation = test_relation(&format!("table_{i}"));
             let query_id = QueryId::from_unparsed_select(format!("SELECT {i}"));
-            create_test_cache(&manager_clone, Some(relation), query_id, test_policy())
-        });
-        handles.push(handle);
-    }
+            create_test_cache(&manager, Some(relation), query_id, test_policy())
+        })
+    });
 
-    let results: Vec<_> = futures::future::join_all(handles).await;
-    let successes = results
-        .iter()
-        .filter(|r| r.as_ref().unwrap().is_ok())
+    let successes = futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .filter(|r| r.is_ok())
         .count();
     assert_eq!(successes, COUNT);
 }
@@ -424,37 +573,26 @@ async fn test_concurrent_cache_creation() {
 async fn test_concurrent_cache_creation_same_name() {
     const COUNT: usize = 10;
 
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
+    let manager = Arc::new(test_manager());
     let relation = test_relation("test_table");
-    let mut handles = Vec::new();
 
-    for _ in 0..COUNT {
-        let manager_clone = Arc::clone(&manager);
-        let relation_clone = relation.clone();
-        let handle = tokio::spawn(async move {
-            create_test_cache(
-                &manager_clone,
-                Some(relation_clone),
-                QueryId::random(),
-                test_policy(),
-            )
-        });
-        handles.push(handle);
-    }
+    let handles = (0..COUNT).map(|_| {
+        let manager = Arc::clone(&manager);
+        let relation = relation.clone();
+        tokio::spawn(async move {
+            create_test_cache(&manager, Some(relation), QueryId::random(), test_policy())
+        })
+    });
 
-    let results: Vec<_> = futures::future::join_all(handles).await;
-    let successes = results
-        .iter()
-        .filter(|r| r.as_ref().unwrap().is_ok())
-        .count();
+    let results: Vec<_> = futures::future::join_all(handles)
+        .await
+        .into_iter()
+        .map(|r| r.unwrap())
+        .collect();
+    let successes = results.iter().filter(|r| r.is_ok()).count();
     let errors = results
         .iter()
-        .filter(|r| {
-            matches!(
-                r.as_ref().unwrap(),
-                Err(ReadySetError::ViewAlreadyExists(_))
-            )
-        })
+        .filter(|r| matches!(r, Err(ReadySetError::ViewAlreadyExists(_))))
         .count();
 
     assert_eq!(successes, 1);
@@ -465,29 +603,19 @@ async fn test_concurrent_cache_creation_same_name() {
 async fn test_concurrent_inserts_different_keys() {
     const COUNT: usize = 20;
 
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::new();
 
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let mut handles = Vec::new();
-
-    for (i, key) in keys_iter(COUNT).enumerate() {
-        let manager_clone = Arc::clone(&manager);
-        let query_id_clone = query_id;
-        let handle = tokio::spawn(async move {
-            let result = manager_clone
-                .get_or_start_insert(&query_id_clone, key, |_| true)
-                .await;
-            insert_value(result, vec![format!("value_{}", i)]).await;
-        });
-        handles.push(handle);
-    }
+    let handles = keys_iter(COUNT).enumerate().map(|(i, key)| {
+        let t = t.clone();
+        tokio::spawn(async move {
+            t.populate(&key, [format!("value_{i}")]).await;
+        })
+    });
 
     futures::future::join_all(handles).await;
 
     for (i, key) in keys_iter(COUNT).enumerate() {
-        check_hit_value(&manager, &query_id, key, vec![format!("value_{i}")]).await;
+        t.check_hit_value(&key, [format!("value_{i}")]).await;
     }
 }
 
@@ -496,47 +624,34 @@ async fn test_concurrent_reads_and_writes() {
     const PRE_POPULATE: usize = 5;
     const TOTAL_KEYS: usize = 10;
 
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::new();
 
     for (i, key) in keys_iter(PRE_POPULATE).enumerate() {
-        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
-        insert_value(result, vec![format!("value_{}", i)]).await;
+        t.populate(&key, [format!("value_{i}")]).await;
     }
 
     let mut handles = Vec::new();
 
     for _ in 0..TOTAL_KEYS {
-        let manager_clone = Arc::clone(&manager);
-        let query_id_clone = query_id;
-        let handle = tokio::spawn(async move {
+        let t = t.clone();
+        handles.push(tokio::spawn(async move {
             for key in keys_iter(PRE_POPULATE) {
-                let _result = manager_clone
-                    .get_or_start_insert(&query_id_clone, key, |_| true)
-                    .await;
+                let _result = t.get(&key).await;
             }
-        });
-        handles.push(handle);
+        }));
     }
 
     for (i, key) in keys_iter(TOTAL_KEYS).enumerate().skip(PRE_POPULATE) {
-        let manager_clone = Arc::clone(&manager);
-        let query_id_clone = query_id;
-        let handle = tokio::spawn(async move {
-            let result = manager_clone
-                .get_or_start_insert(&query_id_clone, key, |_| true)
-                .await;
-            insert_value(result, vec![format!("value_{}", i)]).await;
-        });
-        handles.push(handle);
+        let t = t.clone();
+        handles.push(tokio::spawn(async move {
+            t.populate(&key, [format!("value_{i}")]).await;
+        }));
     }
 
     futures::future::join_all(handles).await;
 
     for key in keys_iter(TOTAL_KEYS) {
-        check_hit(&manager, &query_id, key).await;
+        t.check_hit(&key).await;
     }
 }
 
@@ -544,155 +659,89 @@ async fn test_concurrent_reads_and_writes() {
 async fn test_concurrent_create_and_drop() {
     const COUNT: usize = 10;
 
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let mut handles = Vec::new();
+    let manager = Arc::new(test_manager());
 
-    for i in 0..COUNT {
+    let handles = (0..COUNT).map(|i| {
         let manager = Arc::clone(&manager);
-        let handle = tokio::spawn(async move {
-            let relation = test_relation(&format!("table_{}", i));
+        tokio::spawn(async move {
+            let relation = test_relation(&format!("table_{i}"));
             let query_id = QueryId::from_unparsed_select(format!("SELECT {i}"));
             create_test_cache(&manager, Some(relation.clone()), query_id, test_policy()).unwrap();
 
             sleep(Duration::from_millis(10)).await;
             manager.drop_cache(Some(&relation), None).unwrap();
-        });
-        handles.push(handle);
-    }
+        })
+    });
 
     futures::future::join_all(handles).await;
 
     for i in 0..COUNT {
-        let relation = test_relation(&format!("table_{}", i));
+        let relation = test_relation(&format!("table_{i}"));
         assert!(!manager.exists(Some(&relation), None));
     }
 }
 
 #[test]
 async fn test_ttl_refresh_ahead() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::builder().ttl(Duration::from_secs(5)).build();
 
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::Ttl {
-            ttl: Duration::from_secs(5),
-        },
-    )
-    .unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::Hit(..));
+    t.populate("key1", ["value1"]).await;
+    assert_matches!(t.get("key1").await, CacheResult::Hit(..));
 
     sleep(Duration::from_secs(3)).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::HitAndRefresh(..));
+    assert_matches!(t.get("key1").await, CacheResult::HitAndRefresh(..));
 }
 
 #[test]
 async fn test_refreshing_state_cleared_when_guard_dropped() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::builder().ttl(Duration::from_secs(5)).build();
 
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::Ttl {
-            ttl: Duration::from_secs(5),
-        },
-    )
-    .unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
+    t.populate("key1", ["value1"]).await;
 
     sleep(Duration::from_secs(3)).await;
 
     // The first stale access starts a refresh.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::HitAndRefresh(_, guard) = result else {
+    let CacheResult::HitAndRefresh(_, guard) = t.get("key1").await else {
         panic!("stale access should start a refresh");
     };
 
     // A subsequent stale access should not start a new refresh.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::Hit(..));
+    assert_matches!(t.get("key1").await, CacheResult::Hit(..));
 
     // The refresh is dropped without inserting.
     drop(guard);
 
     // The next access starts a new refresh.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::HitAndRefresh(..));
+    assert_matches!(t.get("key1").await, CacheResult::HitAndRefresh(..));
 }
 
 #[test]
 async fn test_ttl_expiration() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::builder().ttl(Duration::from_secs(5)).build();
 
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::Ttl {
-            ttl: Duration::from_secs(5),
-        },
-    )
-    .unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
-
-    check_hit(&manager, &query_id, "key1".to_string()).await;
+    t.populate("key1", ["value1"]).await;
+    t.check_hit("key1").await;
 
     sleep(Duration::from_secs(6)).await;
 
-    check_miss(&manager, &query_id, "key1".to_string()).await;
+    t.check_miss("key1").await;
 }
 
 #[test]
 async fn test_max_capacity_enforcement() {
     const COUNT: usize = 15;
 
-    let manager = CacheManager::<String, String>::new(Some(1024), None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::builder().capacity(1024).build();
 
     for key in keys_iter(COUNT) {
-        let value = "x".repeat(100);
-        let result = manager.get_or_start_insert(&query_id, key, |_| true).await;
-        insert_value(result, vec![value]).await;
+        t.populate(&key, ["x".repeat(100)]).await;
     }
 
-    let count = manager.count(&query_id).await.unwrap();
+    let count = t.manager.count(&t.query_id).await.unwrap();
     assert!(count < COUNT, "expected {count} < {COUNT}");
 
-    let hits = count_hits(&manager, &query_id, keys_iter(COUNT)).await;
+    let hits = t.count_hits(keys_iter(COUNT)).await;
     assert!(hits < COUNT, "expected {hits} < {COUNT}");
 }
 
@@ -700,32 +749,20 @@ async fn test_max_capacity_enforcement() {
 async fn test_multi_cache_capacity_sharing() {
     const COUNT: usize = 10;
 
-    let manager = CacheManager::<String, String>::new(Some(2048), None);
-    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
-    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
-
-    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
-    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
+    let t1 = TestCache::builder().capacity(2048).build();
+    let t2 = t1.sibling();
 
     for key in keys_iter(COUNT) {
         let large_value = "x".repeat(100);
-
-        let result = manager
-            .get_or_start_insert(&query_id_1, key.clone(), |_| true)
-            .await;
-        insert_value(result, vec![large_value.clone()]).await;
-
-        let result = manager
-            .get_or_start_insert(&query_id_2, key, |_| true)
-            .await;
-        insert_value(result, vec![large_value]).await;
+        t1.populate(&key, [large_value.clone()]).await;
+        t2.populate(&key, [large_value]).await;
     }
 
-    manager.run_pending_tasks(&query_id_1).await;
-    manager.run_pending_tasks(&query_id_2).await;
+    t1.run_pending_tasks().await;
+    t2.run_pending_tasks().await;
 
-    let hits_1 = count_hits(&manager, &query_id_1, keys_iter(COUNT)).await;
-    let hits_2 = count_hits(&manager, &query_id_2, keys_iter(COUNT)).await;
+    let hits_1 = t1.count_hits(keys_iter(COUNT)).await;
+    let hits_2 = t2.count_hits(keys_iter(COUNT)).await;
     let total_hits = hits_1 + hits_2;
 
     assert!(
@@ -736,51 +773,40 @@ async fn test_multi_cache_capacity_sharing() {
 
 #[test]
 async fn test_cache_result_debug() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::new();
 
-    let not_cached = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+    let not_cached = t
+        .manager
+        .get_or_start_insert(&QueryId::random(), "key1".to_string(), |_| true)
         .await;
-    let debug_str = format!("{:?}", not_cached);
+    let debug_str = format!("{not_cached:?}");
     assert!(debug_str.contains("NotCached"));
 
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let miss = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let debug_str = format!("{:?}", miss);
+    let miss = t.get("key1").await;
+    let debug_str = format!("{miss:?}");
     assert!(debug_str.contains("Miss"));
 
-    insert_value(miss, vec!["value1".to_string()]).await;
+    let CacheResult::Miss(mut guard) = miss else {
+        panic!("expected miss");
+    };
+    guard.push("value1".to_string());
+    guard.set_metadata(QueryMetadata::Test);
+    guard.filled().await;
 
-    let hit = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let debug_str = format!("{:?}", hit);
+    let hit = t.get("key1").await;
+    let debug_str = format!("{hit:?}");
     assert!(debug_str.contains("Hit"));
 }
 
 #[test]
 async fn test_cache_insert_guard_debug() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::new();
 
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
-
+    let mut guard = t.expect_miss("key1").await;
     guard.push("value1".to_string());
     guard.push("value2".to_string());
 
-    let debug_str = format!("{:?}", guard);
+    let debug_str = format!("{guard:?}");
     assert!(debug_str.contains("CacheInsertGuard"));
     assert!(debug_str.contains("results"));
     assert!(debug_str.contains("filled"));
@@ -788,102 +814,59 @@ async fn test_cache_insert_guard_debug() {
 
 #[test]
 async fn test_ttl_and_period_refresh() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::TtlAndPeriod {
+    let t = TestCache::builder()
+        .policy(EvictionPolicy::TtlAndPeriod {
             ttl: Duration::from_secs(10),
             refresh: Duration::from_secs(2),
             schedule: false,
-        },
-    )
-    .unwrap();
+        })
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
-
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::Hit(..));
+    t.populate("key1", ["value1"]).await;
+    assert_matches!(t.get("key1").await, CacheResult::Hit(..));
 
     sleep(Duration::from_millis(2100)).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::HitAndRefresh(..));
+    assert_matches!(t.get("key1").await, CacheResult::HitAndRefresh(..));
 }
 
 #[test]
 async fn test_coalesce_concurrent_requests() {
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::builder()
+        .coalesce(Duration::from_millis(5000))
+        .build();
 
-    manager
-        .create_cache(
-            None,
-            query_id,
-            test_stmt(),
-            vec![],
-            test_policy(),
-            test_ddl_req(),
-            TrxCachePolicy::Never,
-            Some(Duration::from_millis(5000)),
-            false,
-        )
-        .unwrap();
+    let handle_1 = {
+        let t = t.clone();
+        tokio::spawn(async move {
+            let start = Instant::now();
 
-    let end_time_1 = Arc::new(AtomicU64::new(0));
-    let end_time_2 = Arc::new(AtomicU64::new(0));
+            let mut guard = t.expect_miss("key1").await;
+            guard.push("value1".to_string());
+            guard.set_metadata(QueryMetadata::Test);
+            sleep(Duration::from_millis(2000)).await;
+            guard.filled().await;
 
-    let m = Arc::clone(&manager);
-    let end = Arc::clone(&end_time_1);
-    let handle_1 = tokio::spawn(async move {
-        let start = Instant::now();
+            start.elapsed().as_millis() as u64
+        })
+    };
 
-        let result = m
-            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-            .await;
-        let CacheResult::Miss(mut guard) = result else {
-            panic!("should miss");
-        };
+    let handle_2 = {
+        let t = t.clone();
+        tokio::spawn(async move {
+            let start = Instant::now();
 
-        guard.push("value1".to_string());
-        guard.set_metadata(QueryMetadata::Test);
-        sleep(Duration::from_millis(2000)).await;
-        guard.filled().await;
+            sleep(Duration::from_millis(1000)).await;
+            let CacheResult::Hit(..) = t.get("key1").await else {
+                panic!("should hit");
+            };
 
-        end.store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
-    });
+            start.elapsed().as_millis() as u64
+        })
+    };
 
-    let m = Arc::clone(&manager);
-    let end = Arc::clone(&end_time_2);
-    let handle_2 = tokio::spawn(async move {
-        let start = Instant::now();
-
-        sleep(Duration::from_millis(1000)).await;
-        let result = m
-            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-            .await;
-
-        let CacheResult::Hit(..) = result else {
-            panic!("should hit");
-        };
-
-        end.store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
-    });
-
-    let _ = tokio::join!(handle_1, handle_2);
-
-    let end_1_ms = end_time_1.load(Ordering::SeqCst);
-    let end_2_ms = end_time_2.load(Ordering::SeqCst);
+    let (end_1_ms, end_2_ms) = tokio::join!(handle_1, handle_2);
+    let (end_1_ms, end_2_ms) = (end_1_ms.unwrap(), end_2_ms.unwrap());
     let (end_1_ms, end_2_ms) = (end_1_ms.min(end_2_ms), end_1_ms.max(end_2_ms));
     let diff = end_2_ms - end_1_ms;
 
@@ -895,36 +878,16 @@ async fn test_coalesce_concurrent_requests() {
 
 #[test]
 async fn test_coalesce_initial_insert_failure() {
-    let manager = Arc::new(CacheManager::<String, String>::new(None, None));
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    manager
-        .create_cache(
-            None,
-            query_id,
-            test_stmt(),
-            vec![],
-            test_policy(),
-            test_ddl_req(),
-            TrxCachePolicy::Never,
-            Some(Duration::from_millis(5000)),
-            false,
-        )
-        .unwrap();
+    let t = TestCache::builder()
+        .coalesce(Duration::from_millis(5000))
+        .build();
 
     // First get misses and creates the loading stub.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(guard) = result else {
-        panic!("first get should miss");
-    };
+    let guard = t.expect_miss("key1").await;
 
     // While the first insert guard is still held, a subsequent get must block for coalescing.
     assert_matches!(
-        manager
-            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-            .now_or_never(),
+        t.get("key1").now_or_never(),
         None,
         "coalescing get should block while the stub is still loading",
     );
@@ -933,8 +896,8 @@ async fn test_coalesce_initial_insert_failure() {
     drop(guard);
 
     // A subsequent get must not block on coalescing after the failed insert.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
+    let result = t
+        .get("key1")
         .now_or_never()
         .expect("coalescing get should not block after the initial insert failed");
     let CacheResult::Miss(mut guard) = result else {
@@ -945,51 +908,29 @@ async fn test_coalesce_initial_insert_failure() {
     guard.filled().await;
 
     // Should now hit.
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::Hit(..));
+    assert_matches!(t.get("key1").await, CacheResult::Hit(..));
 }
 
 #[test]
 async fn test_periodic_refresh_callback() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    manager
-        .create_cache(
-            None,
-            query_id,
-            test_stmt(),
-            vec![],
-            EvictionPolicy::TtlAndPeriod {
-                ttl: Duration::from_secs(5),
-                refresh: Duration::from_secs(1),
-                schedule: true,
-            },
-            test_ddl_req(),
-            TrxCachePolicy::Never,
-            None,
-            false,
-        )
-        .unwrap();
+    let t = TestCache::builder()
+        .policy(EvictionPolicy::TtlAndPeriod {
+            ttl: Duration::from_secs(5),
+            refresh: Duration::from_secs(1),
+            schedule: true,
+        })
+        .build();
 
     let refresh_count = Arc::new(AtomicU32::new(0));
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
-
+    let mut guard = t.expect_miss("key1").await;
     guard.push("value_0".to_string());
     guard.set_metadata(QueryMetadata::Test);
 
     let count = Arc::clone(&refresh_count);
-    let refresh_callback = Arc::new(move |mut guard: crate::CacheInsertGuard<String, String>| {
+    let refresh_callback = Arc::new(move |mut guard: CacheInsertGuard<String, String>| {
         let current = count.fetch_add(1, Ordering::SeqCst) + 1;
-        guard.push(format!("value_{}", current));
+        guard.push(format!("value_{current}"));
         guard.set_metadata(QueryMetadata::Test);
         tokio::spawn(async move {
             guard.filled().await;
@@ -998,13 +939,7 @@ async fn test_periodic_refresh_callback() {
 
     guard.schedule_refresh(refresh_callback).await;
     guard.filled().await;
-    check_hit_value(
-        &manager,
-        &query_id,
-        "key1".to_string(),
-        vec!["value_0".to_string()],
-    )
-    .await;
+    t.check_hit_value("key1", ["value_0"]).await;
 
     // get a little out of phase
     sleep(Duration::from_millis(200)).await;
@@ -1012,43 +947,20 @@ async fn test_periodic_refresh_callback() {
     for i in 1..=3 {
         sleep(Duration::from_millis(1000)).await;
 
-        check_hit_value(
-            &manager,
-            &query_id,
-            "key1".to_string(),
-            vec![format!("value_{}", i)],
-        )
-        .await;
+        t.check_hit_value("key1", [format!("value_{i}")]).await;
     }
 
     assert_eq!(refresh_count.load(Ordering::SeqCst), 3);
 
     sleep(Duration::from_secs(10)).await;
-    check_miss(&manager, &query_id, "key1".to_string()).await;
+    t.check_miss("key1").await;
 }
 
 #[test(flavor = "multi_thread")]
 async fn test_slow_refresh_serves_stale_data() {
-    let manager = CacheManager::<String, u32>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-
-    manager
-        .create_cache(
-            None,
-            query_id,
-            test_stmt(),
-            vec![],
-            EvictionPolicy::TtlAndPeriod {
-                ttl: Duration::from_secs(60),
-                refresh: Duration::from_secs(1),
-                schedule: true,
-            },
-            test_ddl_req(),
-            TrxCachePolicy::Never,
-            None,
-            false,
-        )
-        .unwrap();
+    let t = TestCache::builder()
+        .scheduled_period(Duration::from_secs(1))
+        .build_typed::<u32>();
 
     let current = Arc::new(AtomicU32::new(0));
 
@@ -1062,12 +974,7 @@ async fn test_slow_refresh_serves_stale_data() {
         })
     };
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
+    let mut guard = t.expect_miss("key1").await;
 
     sleep(Duration::from_millis(200)).await;
 
@@ -1077,7 +984,7 @@ async fn test_slow_refresh_serves_stale_data() {
 
     let refresh = {
         let current = Arc::clone(&current);
-        Arc::new(move |mut guard: crate::CacheInsertGuard<String, u32>| {
+        Arc::new(move |mut guard: CacheInsertGuard<String, u32>| {
             let value = current.load(Ordering::SeqCst);
             tokio::spawn(async move {
                 sleep(Duration::from_secs(2)).await;
@@ -1097,10 +1004,7 @@ async fn test_slow_refresh_serves_stale_data() {
     for _ in 0..10 {
         sleep(Duration::from_secs(1)).await;
 
-        let result = manager
-            .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-            .await;
-        let CacheResult::Hit(result) = result else {
+        let CacheResult::Hit(result) = t.get("key1").await else {
             panic!("expected hit");
         };
 
@@ -1110,9 +1014,7 @@ async fn test_slow_refresh_serves_stale_data() {
 
         assert!(
             value == current.saturating_sub(2),
-            "cached value {} should be <= current value {}",
-            value,
-            current
+            "cached value {value} should be <= current value {current}"
         );
     }
 
@@ -1121,88 +1023,57 @@ async fn test_slow_refresh_serves_stale_data() {
 
 #[test]
 async fn test_flush_all_caches_clears_entries_preserves_definitions() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
-    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
+    let t1 = TestCache::new();
+    let t2 = t1.sibling();
 
-    create_test_cache(&manager, None, query_id_1, test_policy()).unwrap();
-    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
+    t1.populate("key1", ["value1"]).await;
+    t2.populate("key2", ["value2"]).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
+    assert_eq!(t1.manager.list_entries(None, None).len(), 2);
 
-    let result = manager
-        .get_or_start_insert(&query_id_2, "key2".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value2".to_string()]).await;
+    t1.manager.flush_all_caches().await;
 
-    assert_eq!(manager.list_entries(None, None).len(), 2);
-
-    manager.flush_all_caches().await;
-
-    assert!(manager.list_entries(None, None).is_empty());
-    assert_eq!(manager.list_caches(None, None).len(), 2);
-    check_miss(&manager, &query_id_1, "key1".to_string()).await;
-    check_miss(&manager, &query_id_2, "key2".to_string()).await;
+    assert!(t1.manager.list_entries(None, None).is_empty());
+    assert_eq!(t1.manager.list_caches(None, None).len(), 2);
+    t1.check_miss("key1").await;
+    t2.check_miss("key2").await;
 }
 
 #[test]
 async fn test_flush_cache_clears_entries_preserves_definition() {
-    let manager = CacheManager::<String, String>::new(None, None);
     let relation = test_relation("my_cache");
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
+    let t = TestCache::builder().name(relation.clone()).build();
 
-    create_test_cache(&manager, Some(relation.clone()), query_id, test_policy()).unwrap();
+    t.populate("key1", ["value1"]).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
+    t.check_hit("key1").await;
+    assert_eq!(t.manager.list_entries(None, None).len(), 1);
 
-    check_hit(&manager, &query_id, "key1".to_string()).await;
-    assert_eq!(manager.list_entries(None, None).len(), 1);
+    t.manager.flush_cache(Some(&relation), None).await.unwrap();
 
-    manager.flush_cache(Some(&relation), None).await.unwrap();
-
-    assert!(manager.list_entries(None, None).is_empty());
-    assert!(manager.exists(Some(&relation), None));
-    check_miss(&manager, &query_id, "key1".to_string()).await;
+    assert!(t.manager.list_entries(None, None).is_empty());
+    assert!(t.manager.exists(Some(&relation), None));
+    t.check_miss("key1").await;
 }
 
 #[test]
 async fn test_flush_cache_only_affects_target() {
-    let manager = CacheManager::<String, String>::new(None, None);
     let relation_1 = test_relation("cache_1");
-    let query_id_1 = QueryId::from_unparsed_select("SELECT * FROM table1");
-    let query_id_2 = QueryId::from_unparsed_select("SELECT * FROM table2");
+    let t1 = TestCache::builder().name(relation_1.clone()).build();
+    let t2 = t1.sibling();
 
-    create_test_cache(
-        &manager,
-        Some(relation_1.clone()),
-        query_id_1,
-        test_policy(),
-    )
-    .unwrap();
-    create_test_cache(&manager, None, query_id_2, test_policy()).unwrap();
+    t1.populate("key1", ["value1"]).await;
+    t2.populate("key2", ["value2"]).await;
 
-    let result = manager
-        .get_or_start_insert(&query_id_1, "key1".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value1".to_string()]).await;
+    t1.manager
+        .flush_cache(Some(&relation_1), None)
+        .await
+        .unwrap();
 
-    let result = manager
-        .get_or_start_insert(&query_id_2, "key2".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["value2".to_string()]).await;
-
-    manager.flush_cache(Some(&relation_1), None).await.unwrap();
-
-    check_miss(&manager, &query_id_1, "key1".to_string()).await;
-    check_hit(&manager, &query_id_2, "key2".to_string()).await;
-    assert!(manager.exists(Some(&relation_1), None));
-    assert!(manager.exists(None, Some(&query_id_2)));
+    t1.check_miss("key1").await;
+    t2.check_hit("key2").await;
+    assert!(t1.manager.exists(Some(&relation_1), None));
+    assert!(t2.manager.exists(None, Some(&t2.query_id)));
 }
 
 #[test]
@@ -1225,176 +1096,74 @@ async fn rows_content_hash_order_insensitive() {
     assert_eq!(rows_content_hash::<Row>(&[]), rows_content_hash::<Row>(&[]));
 }
 
-fn entry_period(manager: &CacheManager<String, String>, query_id: &QueryId) -> Option<u64> {
-    let entries = manager.list_entries(Some(*query_id), None);
-    assert_eq!(entries.len(), 1);
-    entries[0].refresh_period_ms
-}
-
-fn entry_period_for(
-    manager: &CacheManager<String, String>,
-    query_id: &QueryId,
-    key: &str,
-) -> Option<u64> {
-    let entry_id = hash(&key.to_string());
-    manager
-        .list_entries(Some(*query_id), None)
-        .into_iter()
-        .find(|e| e.entry_id == entry_id)
-        .expect("no entry for key")
-        .refresh_period_ms
-}
-
-fn create_adaptive_cache(
-    manager: &CacheManager<String, String>,
-    query_id: QueryId,
-    refresh: Duration,
-    schedule: bool,
-    adaptive: bool,
-) {
-    manager
-        .create_cache(
-            None,
-            query_id,
-            test_stmt(),
-            vec![],
-            EvictionPolicy::TtlAndPeriod {
-                ttl: Duration::from_secs(60),
-                refresh,
-                schedule,
-            },
-            test_ddl_req(),
-            TrxCachePolicy::Never,
-            None,
-            adaptive,
-        )
-        .unwrap();
-}
-
-async fn refresh_insert_with_exec(
-    manager: &CacheManager<String, String>,
-    query_id: &QueryId,
-    key: &str,
-    values: Vec<String>,
-    exec: Duration,
-) {
-    let cache = manager.get(None, Some(query_id)).unwrap();
-    cache
-        .insert(key.to_string(), values, QueryMetadata::Test, exec, true)
-        .await;
-    // Run the eviction listener for the replaced entry so load accounting settles.
-    manager.run_pending_tasks(query_id).await;
-}
-
-async fn refresh_insert(
-    manager: &CacheManager<String, String>,
-    query_id: &QueryId,
-    key: &str,
-    values: Vec<String>,
-) {
-    refresh_insert_with_exec(manager, query_id, key, values, Duration::ZERO).await;
-}
-
 #[test]
 async fn test_adaptive_period_nudging() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    t.populate("key", ["v0"]).await;
+    assert_eq!(t.entry_period(), Some(1000));
 
     // A changed value shrinks the period by 10% of the configured period.
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(900));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.entry_period(), Some(900));
 
     // An unchanged value grows it back, clamped at the configured period.
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1000));
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.entry_period(), Some(1000));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.entry_period(), Some(1000));
 
     // The same rows in a different order do not count as a change.
-    refresh_insert(
-        &manager,
-        &query_id,
-        "key",
-        vec!["a".to_string(), "b".to_string()],
-    )
-    .await;
-    assert_eq!(entry_period(&manager, &query_id), Some(900));
-    refresh_insert(
-        &manager,
-        &query_id,
-        "key",
-        vec!["b".to_string(), "a".to_string()],
-    )
-    .await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    t.refresh_insert("key", ["a", "b"]).await;
+    assert_eq!(t.entry_period(), Some(900));
+    t.refresh_insert("key", ["b", "a"]).await;
+    assert_eq!(t.entry_period(), Some(1000));
 }
 
 #[test]
 async fn test_non_adaptive_period_fixed() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(
-        &manager,
-        query_id,
-        Duration::from_millis(1000),
-        false,
-        false,
-    );
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1000));
+    t.populate("key", ["v0"]).await;
+    assert_eq!(t.entry_period(), Some(1000));
 
     for i in 1..5 {
-        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
-        assert_eq!(entry_period(&manager, &query_id), Some(1000));
+        t.refresh_insert("key", [format!("v{i}")]).await;
+        assert_eq!(t.entry_period(), Some(1000));
     }
 }
 
 #[test]
 async fn test_adaptive_stale_check_uses_period() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(2000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(2000))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     // A changed write-back drops the period to 1800ms, so a read at ~1900ms is stale even
     // though the configured period has not yet elapsed.
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(1800));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.entry_period(), Some(1800));
 
     sleep(Duration::from_millis(1900)).await;
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    assert_matches!(result, CacheResult::HitAndRefresh(..));
+    assert_matches!(t.get("key").await, CacheResult::HitAndRefresh(..));
 }
 
 #[test]
 async fn test_adaptive_scheduled_refresh_periods() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(500), true, true);
+    let t = TestCache::builder()
+        .scheduled_period(Duration::from_millis(500))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    let CacheResult::Miss(mut guard) = result else {
-        panic!("expected miss");
-    };
+    let mut guard = t.expect_miss("key").await;
     guard.push("value_0".to_string());
     guard.set_metadata(QueryMetadata::Test);
 
@@ -1421,12 +1190,12 @@ async fn test_adaptive_scheduled_refresh_periods() {
 
     // While the value keeps changing, scheduled refreshes shrink the period.
     sleep(Duration::from_millis(3500)).await;
-    assert!(entry_period(&manager, &query_id).unwrap() <= 400);
+    assert!(t.entry_period().unwrap() <= 400);
 
     // Once the value stops changing, the period climbs back to the configured one.
     changing.store(false, Ordering::SeqCst);
     sleep(Duration::from_millis(5000)).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(500));
+    assert_eq!(t.entry_period(), Some(500));
 }
 
 #[test]
@@ -1434,122 +1203,103 @@ async fn test_adaptive_load_cap_single_key() {
     // With one entry the cap (100% extra load) binds when the period halves: shrinking stops
     // at 50% of the configured period, and further changed refreshes oscillate between
     // growing back under the boundary and shrinking down to it.
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     let mut min_seen = u64::MAX;
     for i in 1..=12 {
-        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
-        let period = entry_period(&manager, &query_id).unwrap();
+        t.refresh_insert("key", [format!("v{i}")]).await;
+        let period = t.entry_period().unwrap();
         assert!(period >= 500, "cap breached at iteration {i}: {period}");
         min_seen = min_seen.min(period);
     }
     assert_eq!(min_seen, 500);
-    assert_matches!(entry_period(&manager, &query_id), Some(500 | 600));
+    assert_matches!(t.entry_period(), Some(500 | 600));
 }
 
 #[test]
 async fn test_adaptive_load_cap_small_baseline() {
     // A cheap query on a long period contributes well under 100 ppm; the cap must scale
     // proportionally at that magnitude so the entry can still shrink to the minimum period.
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_secs(15), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_secs(15))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     let mut min_seen = u64::MAX;
     for i in 1..=8 {
-        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
-        min_seen = min_seen.min(entry_period(&manager, &query_id).unwrap());
+        t.refresh_insert("key", [format!("v{i}")]).await;
+        min_seen = min_seen.min(t.entry_period().unwrap());
     }
     assert_eq!(min_seen, 7500);
-    assert_matches!(entry_period(&manager, &query_id), Some(7500 | 9000));
+    assert_matches!(t.entry_period(), Some(7500 | 9000));
 }
 
 #[test]
 async fn test_adaptive_load_cap_shares_budget() {
     // A stable second entry adds budget headroom, letting the churning key shrink below half
     // of the configured period before the cap binds (at 300ms here).
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
     for key in ["stable", "churn"] {
-        let result = manager
-            .get_or_start_insert(&query_id, key.to_string(), |_| true)
-            .await;
-        insert_value(result, vec![format!("{key}_v")]).await;
+        t.populate(key, [format!("{key}_v")]).await;
         // Force execution time to zero.
-        refresh_insert(&manager, &query_id, key, vec![format!("{key}_v")]).await;
+        t.refresh_insert(key, [format!("{key}_v")]).await;
     }
 
     for i in 1..=20 {
-        refresh_insert(&manager, &query_id, "churn", vec![format!("v{i}")]).await;
-        let period = entry_period_for(&manager, &query_id, "churn").unwrap();
+        t.refresh_insert("churn", [format!("v{i}")]).await;
+        let period = t.entry_period_for("churn").unwrap();
         assert!(period >= 300, "cap breached at iteration {i}: {period}");
     }
-    assert_matches!(
-        entry_period_for(&manager, &query_id, "churn"),
-        Some(300 | 400)
-    );
-    assert_eq!(entry_period_for(&manager, &query_id, "stable"), Some(1000));
+    assert_matches!(t.entry_period_for("churn"), Some(300 | 400));
+    assert_eq!(t.entry_period_for("stable"), Some(1000));
 }
 
 #[test]
 async fn test_adaptive_load_cap_weighs_execution_time() {
     // An expensive stable entry dominates the load budget, so a cheap churning key has room
     // to reach the minimum period.
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
     for key in ["stable", "churn"] {
-        let result = manager
-            .get_or_start_insert(&query_id, key.to_string(), |_| true)
-            .await;
-        insert_value(result, vec![format!("{key}_v")]).await;
+        t.populate(key, [format!("{key}_v")]).await;
     }
-    refresh_insert_with_exec(
-        &manager,
-        &query_id,
-        "stable",
-        vec!["stable_v".to_string()],
-        Duration::from_millis(100),
-    )
-    .await;
+    t.refresh_insert_with_exec("stable", ["stable_v"], Duration::from_millis(100))
+        .await;
 
     for i in 1..=15 {
-        refresh_insert(&manager, &query_id, "churn", vec![format!("v{i}")]).await;
+        t.refresh_insert("churn", [format!("v{i}")]).await;
     }
-    assert_eq!(entry_period_for(&manager, &query_id, "churn"), Some(100));
+    assert_eq!(t.entry_period_for("churn"), Some(100));
 }
 
 #[test]
 async fn test_adaptive_load_accounting_balances() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
     // Force execution time to zero.
-    refresh_insert(&manager, &query_id, "key", vec!["v0".to_string()]).await;
-    assert_eq!(manager.adaptive_load(&query_id), Some((1000, 1000)));
+    t.refresh_insert("key", ["v0"]).await;
+    assert_eq!(t.adaptive_load(), Some((1000, 1000)));
 
     // CacheInfo reports the same load accounting; the cap (100% extra) is not yet hit.
-    let info = &manager.list_caches(Some(query_id), None)[0];
+    let info = t.cache_info();
     assert_eq!(info.load_actual_ppm, Some(1000));
     assert_eq!(info.load_baseline_ppm, Some(1000));
     assert_eq!(info.over_cap, Some(false));
@@ -1557,203 +1307,146 @@ async fn test_adaptive_load_accounting_balances() {
 
     // Shrink to the 500ms floor; the entry now contributes twice its baseline.
     for i in 1..=5 {
-        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
+        t.refresh_insert("key", [format!("v{i}")]).await;
     }
-    assert_eq!(manager.adaptive_load(&query_id), Some((2000, 1000)));
+    assert_eq!(t.adaptive_load(), Some((2000, 1000)));
 
-    let info = &manager.list_caches(Some(query_id), None)[0];
+    let info = t.cache_info();
     assert_eq!(info.load_actual_ppm, Some(2000));
     assert_eq!(info.load_baseline_ppm, Some(1000));
     assert_eq!(info.over_cap, Some(true));
 
     // Flushing evicts the entry, which gives its contributions back. An empty cache is not
     // over the cap.
-    manager.flush_cache(None, Some(&query_id)).await.unwrap();
-    assert_eq!(manager.adaptive_load(&query_id), Some((0, 0)));
-    let info = &manager.list_caches(Some(query_id), None)[0];
-    assert_eq!(info.over_cap, Some(false));
+    t.flush().await;
+    assert_eq!(t.adaptive_load(), Some((0, 0)));
+    assert_eq!(t.cache_info().over_cap, Some(false));
 
     // A refilled key starts fresh and may shrink again.
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["w0".to_string()]).await;
-    refresh_insert(&manager, &query_id, "key", vec!["w0".to_string()]).await;
-    assert_eq!(manager.adaptive_load(&query_id), Some((1000, 1000)));
-    refresh_insert(&manager, &query_id, "key", vec!["w1".to_string()]).await;
-    assert_eq!(entry_period(&manager, &query_id), Some(900));
+    t.populate("key", ["w0"]).await;
+    t.refresh_insert("key", ["w0"]).await;
+    assert_eq!(t.adaptive_load(), Some((1000, 1000)));
+    t.refresh_insert("key", ["w1"]).await;
+    assert_eq!(t.entry_period(), Some(900));
 }
 
 #[test]
 async fn test_adaptive_load_cap_configurable() {
     // With a 300% extra-load allowance, a lone churning key may quadruple its baseline load:
     // shrinking continues past half the configured period and stalls around a quarter of it.
-    let mut manager = CacheManager::<String, String>::new(None, None);
-    manager.set_adaptive_max_extra_load_percent(300);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_adaptive_cache(&manager, query_id, Duration::from_millis(1000), false, true);
+    let t = TestCache::builder()
+        .max_extra_load_percent(300)
+        .period(Duration::from_millis(1000))
+        .adaptive()
+        .build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     let mut min_seen = u64::MAX;
     for i in 1..=12 {
-        refresh_insert(&manager, &query_id, "key", vec![format!("v{i}")]).await;
-        let period = entry_period(&manager, &query_id).unwrap();
+        t.refresh_insert("key", [format!("v{i}")]).await;
+        let period = t.entry_period().unwrap();
         assert!(period >= 200, "cap breached at iteration {i}: {period}");
         min_seen = min_seen.min(period);
     }
     assert_eq!(min_seen, 200);
-    assert_matches!(entry_period(&manager, &query_id), Some(200 | 300));
+    assert_matches!(t.entry_period(), Some(200 | 300));
 }
 
 #[test]
 async fn test_wasted_refresh_replaced_unserved() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::new();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     // The first refresh replaces the miss fill, whose data was served as the miss response.
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(0));
 
     // The second refresh replaces the first, whose data was never served.
-    refresh_insert(&manager, &query_id, "key", vec!["v2".to_string()]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+    t.refresh_insert("key", ["v2"]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(1));
 }
 
 #[test]
 async fn test_served_refresh_not_wasted() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::new();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    check_hit(&manager, &query_id, "key".to_string()).await;
-    refresh_insert(&manager, &query_id, "key", vec!["v2".to_string()]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+    t.refresh_insert("key", ["v1"]).await;
+    t.check_hit("key").await;
+    t.refresh_insert("key", ["v2"]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(0));
 
-    refresh_insert(&manager, &query_id, "key", vec!["v3".to_string()]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+    t.refresh_insert("key", ["v3"]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(1));
 }
 
 #[test]
 async fn test_wasted_refresh_ttl_expiration() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::Ttl {
-            ttl: Duration::from_secs(1),
-        },
-    )
-    .unwrap();
+    let t = TestCache::builder().ttl(Duration::from_secs(1)).build();
 
     for key in ["refreshed", "fill_only"] {
-        let result = manager
-            .get_or_start_insert(&query_id, key.to_string(), |_| true)
-            .await;
-        insert_value(result, vec!["v0".to_string()]).await;
+        t.populate(key, ["v0"]).await;
     }
-    refresh_insert(&manager, &query_id, "refreshed", vec!["v1".to_string()]).await;
+    t.refresh_insert("refreshed", ["v1"]).await;
 
     sleep(Duration::from_secs(2)).await;
-    manager.run_pending_tasks(&query_id).await;
+    t.run_pending_tasks().await;
 
     // Only the unserved refresh counts; the expired miss fill was served as its miss response.
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+    assert_eq!(t.wasted_refresh_count(), Some(1));
 }
 
 #[test]
 async fn test_wasted_refresh_late_after_eviction() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(
-        &manager,
-        None,
-        query_id,
-        EvictionPolicy::Ttl {
-            ttl: Duration::from_secs(1),
-        },
-    )
-    .unwrap();
+    let t = TestCache::builder().ttl(Duration::from_secs(1)).build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     sleep(Duration::from_secs(2)).await;
-    manager.run_pending_tasks(&query_id).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+    t.run_pending_tasks().await;
+    assert_eq!(t.wasted_refresh_count(), Some(0));
 
     // A refresh that completes only after its entry was evicted is wasted.
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+    t.refresh_insert("key", ["v1"]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(1));
 }
 
 #[test]
 async fn test_flush_not_counted_as_wasted() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::new();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
+    t.populate("key", ["v0"]).await;
+    t.refresh_insert("key", ["v1"]).await;
 
-    manager.flush_cache(None, Some(&query_id)).await.unwrap();
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(0));
+    t.flush().await;
+    assert_eq!(t.wasted_refresh_count(), Some(0));
 }
 
 #[test]
 async fn test_wasted_refresh_size_eviction() {
-    let manager = CacheManager::<String, String>::new(Some(1024), None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::builder().capacity(1024).build();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
+    t.populate("key", ["v0"]).await;
 
     // Refresh with a value larger than the store's capacity: the replacement is evicted for
     // size before it can ever be served.
-    refresh_insert(&manager, &query_id, "key", vec!["x".repeat(2000)]).await;
-    assert_eq!(manager.wasted_refresh_count(&query_id), Some(1));
+    t.refresh_insert("key", ["x".repeat(2000)]).await;
+    assert_eq!(t.wasted_refresh_count(), Some(1));
 }
 
 #[test]
 async fn test_list_entries_served_flag() {
-    let manager = CacheManager::<String, String>::new(None, None);
-    let query_id = QueryId::from_unparsed_select("SELECT * FROM test");
-    create_test_cache(&manager, None, query_id, test_policy()).unwrap();
+    let t = TestCache::new();
 
-    let result = manager
-        .get_or_start_insert(&query_id, "key".to_string(), |_| true)
-        .await;
-    insert_value(result, vec!["v0".to_string()]).await;
-    assert!(manager.list_entries(Some(query_id), None)[0].served);
+    t.populate("key", ["v0"]).await;
+    assert!(t.sole_entry().served);
 
-    refresh_insert(&manager, &query_id, "key", vec!["v1".to_string()]).await;
-    assert!(!manager.list_entries(Some(query_id), None)[0].served);
+    t.refresh_insert("key", ["v1"]).await;
+    assert!(!t.sole_entry().served);
 
-    check_hit(&manager, &query_id, "key".to_string()).await;
-    assert!(manager.list_entries(Some(query_id), None)[0].served);
+    t.check_hit("key").await;
+    assert!(t.sole_entry().served);
 }
