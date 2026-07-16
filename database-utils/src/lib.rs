@@ -29,7 +29,7 @@ pub mod tls;
 
 pub use connection::{
     DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,
-    QueryableConnection, SimpleQueryResults, Transaction,
+    QueryableConnection, SimpleQueryResults, SimpleQueryResultsRow, Transaction,
 };
 pub use error::DatabaseError;
 
