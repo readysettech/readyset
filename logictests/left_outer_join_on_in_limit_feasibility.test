@@ -1,0 +1,45 @@
+# Standalone lowering guard for the CASE-of-IN LOJ ON rewrite: the wrap keeps
+# an `x IN (SELECT y ...)` node verbatim and projects it as a CASE-to-int column
+# onto the wrapped operand, leaving the ON as `<col> = 1`.  Keeping the IN intact
+# preserves the subquery's own ORDER BY / LIMIT (the earlier destructuring
+# `IN`->`EXISTS` rewrite dropped them and returned wrong rows).
+#
+# This file HAND-WRITES the post-rewrite shape (as in
+# left_outer_join_on_subquery_feasibility.test) to guard that it lowers
+# end-to-end.  Its original pre-implementation-probe purpose has passed; the
+# real-pipeline cases in left_outer_join_on_subquery.test now exercise the same
+# shapes, and this remains as a direct lowering guard for the target shape.
+
+statement ok
+create table s (sn int, pn int);
+
+statement ok
+insert into s values (1, 10), (2, 20), (3, 30);
+
+statement ok
+create table p (pn int, weight int);
+
+statement ok
+insert into p values (10, 60), (20, 40);
+
+# The IN subquery keeps ORDER BY + LIMIT verbatim inside a CASE-to-int
+# projection.  `(SELECT pn FROM p ORDER BY pn LIMIT 1)` = {10}.
+#   s1 pn10 in {10}     -> 1 -> sub.pn = p.pn -> p10 -> (1, 10)
+#   s2 pn20 not in {10} -> 0 -> null-extend           -> (2, NULL)
+#   s3 pn30 not in {10} -> 0 -> null-extend           -> (3, NULL)
+query II rowsort
+select sub.sn, p.pn
+from (
+  select s.sn, s.pn,
+         case when s.pn in (select p2.pn from p p2 order by p2.pn limit 1)
+              then 1 else 0 end as in_flag
+  from s
+) sub
+left join p on sub.pn = p.pn and sub.in_flag = 1
+----
+1
+10
+2
+NULL
+3
+NULL

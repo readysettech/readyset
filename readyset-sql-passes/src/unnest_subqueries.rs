@@ -161,21 +161,20 @@ pub(crate) struct UnnestContext<'a, U: UniqueColumnsSchema> {
 }
 
 pub trait UnnestSubqueries: Sized {
-    fn unnest_subqueries<C: BaseSchemasContext, U: UniqueColumnsSchema>(
+    fn unnest_subqueries<U: UniqueColumnsSchema>(
         &mut self,
-        ctx: C,
+        schema: &dyn NonNullSchema,
         unique_cols_schema: &U,
     ) -> ReadySetResult<&mut Self>;
 }
 
 impl UnnestSubqueries for SelectStatement {
-    fn unnest_subqueries<C: BaseSchemasContext, U: UniqueColumnsSchema>(
+    fn unnest_subqueries<U: UniqueColumnsSchema>(
         &mut self,
-        ctx: C,
+        schema: &dyn NonNullSchema,
         unique_cols_schema: &U,
     ) -> ReadySetResult<&mut Self> {
-        let schema = NonNullSchemaImpl::from(ctx);
-        if unnest_subqueries_main(self, &schema, unique_cols_schema)?.has_rewrites() {
+        if unnest_subqueries_main(self, schema, unique_cols_schema)?.has_rewrites() {
             trace!(target: "unnest_subqueries",
                 statement = %self.display(Dialect::PostgreSQL),
                 ">Decorrelated statement"
@@ -248,7 +247,7 @@ pub(crate) fn unnest_subqueries_main<U: UniqueColumnsSchema>(
     Ok(rewrite_status.combine(rewrite_status_1))
 }
 
-struct NonNullSchemaImpl {
+pub(crate) struct NonNullSchemaImpl {
     nonnull_schema: HashMap<Relation, HashSet<Column>>,
 }
 

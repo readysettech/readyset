@@ -56,7 +56,7 @@ use crate::rewrite_utils::{
     is_aggregation_or_grouped, move_subquery_predicates_from_inner_join_on_to_where,
     normalize_having_and_group_by_for_statement,
     project_columns_if_not_exist_fix_duplicate_aliases, resolve_field_reference,
-    wrap_loj_on_uncorrelated_subquery_predicates,
+    wrap_loj_on_subquery_predicates,
 };
 use crate::unnest_subqueries::collect_subquery_predicates;
 use crate::{contains_wf, is_window_function_expr};
@@ -226,19 +226,14 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
         // not affect the wrap's HAVING/ORDER BY analysis.
         move_subquery_predicates_from_inner_join_on_to_where(stmt)?;
 
-        // Wrap the LHS neighbor of LEFT JOINs whose ON carries an uncorrelated
-        // subquery predicate, moving the subquery into a derived-table
-        // projection and rewriting the ON to reference the projected column.
-        // See §12 of the design memo.
-        //
-        // Correlated variants and unsupported shapes (IN / NOT IN, quantified
-        // comparisons) stay in the ON; they pass the validator (which now only
-        // rejects FULL OUTER JOIN ON subqueries) and fail downstream in
-        // `unnest_subqueries` with a shape-specific error.
-        //
-        // Runs after the INNER-JOIN-ON move and before the HAVING/ORDER BY
-        // wrap block; orthogonal to both.
-        wrap_loj_on_uncorrelated_subquery_predicates(stmt)?;
+        // Wrap the correlation-owning operand of LEFT JOINs whose ON carries a
+        // subquery predicate: the LHS neighbor for uncorrelated / A-correlated,
+        // the RHS for B-correlated.  Moves the subquery into a derived-table
+        // projection and rewrites the ON to reference the projected column.
+        // Both-side-correlated, non-operand-correlated, IN / NOT IN, and
+        // quantified shapes stay in the ON and fail downstream in
+        // `unnest_subqueries`.  See §12 of the design memo.
+        wrap_loj_on_subquery_predicates(stmt)?;
 
         // Per-statement alias hygiene: denormalize HAVING + GROUP BY + ORDER
         // BY on `stmt`, attempt wrap, renormalize.
@@ -561,11 +556,20 @@ fn wrap_post_groupby_positions(
     // widened tuple would admit rows the original semantics collapse.  The
     // wrapper projects only the user-original fields (via `build_wrapper_
     // fields`), so DISTINCT at the wrapper level dedupes on the same tuple
-    // the original query does.  Rows sharing user-original values come from
-    // the same grouping key and therefore have identical synthetic values,
-    // so the wrapper's WHERE (which references synthetic projections) makes
-    // the same admit/reject decision for all such rows -- WHERE-then-DISTINCT
-    // is semantically equivalent to HAVING-then-DISTINCT in the original.
+    // the original query does.
+    //
+    // Soundness splits on whether the wrapper has a WHERE.  A wrapper WHERE
+    // exists only for moved HAVING-subquery predicates, and HAVING implies
+    // aggregation: rows sharing user-original values come from the same
+    // grouping key, so they carry identical synthetic values and the WHERE
+    // makes the same admit/reject decision for all of them -- WHERE-then-
+    // DISTINCT is equivalent to HAVING-then-DISTINCT in the original.  For a
+    // pure ORDER BY-subquery wrap the inner may be non-aggregated, but then
+    // there is no wrapper WHERE: the synthetic projection feeds only the
+    // wrapper ORDER BY, so the wrapper reproduces the original
+    // `SELECT DISTINCT <user> ... ORDER BY <expr>` shape exactly -- same
+    // deterministic row set, same (dialect-defined) ordering of a value not
+    // in the DISTINCT list.
     let was_distinct = mem::replace(&mut inner.distinct, false);
 
     // Lift LATERAL from inner to wrapper.  The wrapper takes the pre-wrap

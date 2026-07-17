@@ -1,5 +1,5 @@
-# End-to-end coverage for the uncorrelated LEFT JOIN ON subquery wrap
-# (`wrap_loj_on_uncorrelated_subquery_predicates`), run through the actual
+# End-to-end coverage for the LEFT JOIN ON subquery wrap
+# (`wrap_loj_on_subquery_predicates`), run through the actual
 # rewrite pipeline (contrast with left_outer_join_on_subquery_feasibility.test,
 # which lowers hand-written post-rewrite shapes).
 #
@@ -32,6 +32,24 @@ create table q.cfg (k text, v int)
 
 statement ok
 insert into q.cfg values ('active', 1)
+
+statement ok
+create table q.j (sn int, jn int)
+
+statement ok
+insert into q.j values (1, 1000), (2, 2000)
+
+statement ok
+create table q.nn (id int not null, cat int not null)
+
+statement ok
+insert into q.nn values (10, 100), (20, 200), (30, 100)
+
+statement ok
+create table q.mm (mid int not null, mcat int not null)
+
+statement ok
+insert into q.mm values (20, 200), (99, 999)
 
 # Scalar-op: avg(weight) over q.p = 50.  Each s row survives (LEFT JOIN); p
 # joins only where s.pn = p.pn AND s.status > 50, else p null-extends.
@@ -86,6 +104,295 @@ query II rowsort
 select s.sn, p.pn
 from q.s left join q.p on s.pn = p.pn
      and s.status > (select avg(weight) from q.p where weight > 1000)
+----
+1
+NULL
+2
+NULL
+3
+NULL
+
+# A-correlated scalar: subquery correlates on the preserved side q.s via the
+# equality `p2.pn = s.pn` -> wrap q.s.  The local (non-correlated) filter
+# `p2.weight > 50` makes the correlated count discriminate: it is 0 for s2 even
+# though s2.pn=20 matches p20, so s2 null-extends.  Counts of q.p with pn=s.pn
+# AND weight>50: s1(pn10,w60)->1, s2(pn20,w40)->0, s3(pn30)->0.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and (select count(*) from q.p p2 where p2.pn = s.pn and p2.weight > 50) > 0
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# A-correlated EXISTS: same equi-correlation + local filter on q.s -> wrap q.s.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and exists (select 1 from q.p p2 where p2.pn = s.pn and p2.weight > 50)
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# B-correlated scalar: subquery correlates on the non-preserved side q.p via the
+# equality `s2.pn = p.pn` -> wrap q.p.  Local filter `s2.status > 50`: p10(pn10)
+# has s1(status 100) -> count 1; p20(pn20) has s2(status 5) -> count 0, so the
+# s2 row null-extends despite its pn=20 match.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and (select count(*) from q.s s2 where s2.pn = p.pn and s2.status > 50) > 0
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# B-correlated EXISTS: same equi-correlation + local filter on q.p -> wrap q.p.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and exists (select 1 from q.s s2 where s2.pn = p.pn and s2.status > 50)
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# Partner-not-last: the LEFT JOIN's LHS operand is INFERRED from the ON's
+# cross-equality (`s.sn = j.sn` -> partner q.s), not the syntactically adjacent
+# table (q.p, the RHS of the preceding INNER join).  The correlated subquery
+# correlates to that inferred partner q.s, so the wrap must target q.s even
+# though q.s is not the join immediately to the LEFT.  Regression-guards
+# `infer_loj_lhs_partner`: the old positional left-neighbor heuristic would pick
+# q.p and, since the correlation is to q.s, either decline or wrap the wrong
+# operand.  Wrapping q.s also retargets its reference in the surviving INNER ON
+# (`s.pn = p.pn`) onto the wrap alias, keeping both ONs two-relation (REA-6129).
+#
+# INNER s JOIN p ON s.pn=p.pn keeps s1(pn10->p10) and s2(pn20->p20); s3 drops.
+# LEFT JOIN q.j ON s.sn=j.sn AND <corr to s>, correlated count of q.p with
+# pn=s.pn AND weight>50:
+#   s1 pn10 w60>50 -> TRUE  -> j1 -> (1, 1000)
+#   s2 pn20 w40>50 -> FALSE -> null-extend -> (2, NULL)
+query II rowsort
+select s.sn, j.jn
+from q.s
+  join q.p on s.pn = p.pn
+  left join q.j on s.sn = j.sn
+     and exists (select 1 from q.p p2 where p2.pn = s.pn and p2.weight > 50)
+----
+1
+1000
+2
+NULL
+
+# Partner-not-last, scalar-op predicate: same partner inference (q.s), different
+# admitted shape.  ON becomes `<alias>.sn = j.sn AND <alias>.__loj_c > 0`.
+query II rowsort
+select s.sn, j.jn
+from q.s
+  join q.p on s.pn = p.pn
+  left join q.j on s.sn = j.sn
+     and (select count(*) from q.p p2 where p2.pn = s.pn and p2.weight > 50) > 0
+----
+1
+1000
+2
+NULL
+
+
+# IN / NOT IN in a LEFT JOIN ON, projected verbatim as a boolean CASE-of-IN by
+# the wrap: `CASE WHEN x [NOT] IN S THEN 1 ELSE 0` onto x's operand, ON reads
+# `<operand>.__loj_c = 1`.
+
+# IN-subquery projected onto x's operand.  `s.pn IN (SELECT pn FROM q.p WHERE
+# weight > 50)` has x = s.pn, so `s` is wrapped.
+#   heavy pns (weight > 50) = {10}.  s.pn IN {10}: s1 -> p10; s2, s3 null-extend.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and s.pn in (select pn from q.p p2 where p2.weight > 50)
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# IN-subquery whose row set is narrowed by ORDER BY + LIMIT.  Keeping the IN
+# node verbatim inside the CASE preserves the LIMIT, so only the single limited
+# row is matched (the earlier destructuring rewrite dropped it, returning wrong
+# rows -- this case regression-guards that).
+#   q.p pns = {10, 20}; ORDER BY pn LIMIT 1 = {10}.  s.pn IN {10}:
+#     s1 pn10 -> p.pn = 10 -> p10  -> (1, 10)
+#     s2 pn20 -> not in {10} -> null-extend -> (2, NULL)
+#     s3 pn30 -> not in {10} -> null-extend -> (3, NULL)
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and s.pn in (select pn from q.p p2 order by pn limit 1)
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# NOT IN projected as `CASE WHEN n.cat NOT IN S THEN 1 ELSE 0`.  The negation
+# stays inside the IN, so the pipeline's 3VL reproduces NOT IN exactly -- no
+# non-NULL proof needed.  (Distinct base tables for the outer and the subquery
+# avoid the engine's same-base-table correlation limitation.)
+#   {mcat : mid = 20} = {200}.  n.cat NOT IN {200}:
+#     n(10,100) true  -> join p.pn = 10 -> p10  -> (10, 10)
+#     n(20,200) false -> null-extend           -> (20, NULL)
+#     n(30,100) true  -> join p.pn = 30 -> none -> (30, NULL)
+query II rowsort
+select n.id, p.pn
+from q.nn n left join q.p p on n.id = p.pn
+     and n.cat not in (select m.mcat from q.mm m where m.mid = 20)
+----
+10
+10
+20
+NULL
+30
+NULL
+
+
+# Scalar `=` vs a bare column with NO pre-existing cross-eq.  The ON's only
+# predicate is a scalar-subquery equality against a bare column, so no cross-eq
+# pins the LHS partner; wrapping the operand OPPOSITE the bare column synthesizes
+# the cross-eq key.  These exercise row correctness end-to-end (the unit tests
+# only assert rendered ON shapes).
+
+# Uncorrelated, bare col on the RHS `j.sn` -> wrap the LHS `s`.  The scalar
+# `(select count(*) from q.cfg)` = 1 projects onto `s`, ON becomes `s.__loj_c = j.sn`.
+# The ON is independent of `s`, so every s row joins the single j row (sn=1).
+query II rowsort
+select s.sn, j.jn
+from q.s left join q.j on (select count(*) from q.cfg) = j.sn
+----
+1
+1000
+2
+1000
+3
+1000
+
+# Uncorrelated, bare col on the LHS `s.sn` -> wrap the RHS `j`.  ON becomes
+# `s.sn = j.__loj_c` = `s.sn = 1`: s1 matches all j rows, s2/s3 null-extend.
+query II rowsort
+select s.sn, j.jn
+from q.s left join q.j on s.sn = (select count(*) from q.cfg)
+----
+1
+1000
+1
+2000
+2
+NULL
+3
+NULL
+
+# Correlated to the LHS `s` (owner), bare col on the RHS `j.sn` -> wrap `s`.
+# count of q.p matching s.pn: s1(pn10)=1, s2(pn20)=1, s3(pn30)=0; ON `<cnt> = j.sn`.
+query II rowsort
+select s.sn, j.jn
+from q.s left join q.j
+     on (select count(*) from q.p where q.p.pn = s.pn) = j.sn
+----
+1
+1000
+2
+1000
+3
+NULL
+
+# Correlated to the RHS `j` (owner), bare col on the LHS `s.sn` -> wrap `j`.
+# count of q.cfg matching j.sn: j.sn=1 -> 1, j.sn=2 -> 0; ON `s.sn = <cnt>`.
+query II rowsort
+select s.sn, j.jn
+from q.s left join q.j
+     on s.sn = (select count(*) from q.cfg where q.cfg.v = j.sn)
+----
+1
+1000
+2
+NULL
+3
+NULL
+
+# Chain: an intermediate LEFT JOIN null-extends `j` for s3, then the second LOJ
+# wraps the scalar onto the NON-nullable leading `s` (not the null-extendable
+# `j`).  `(select min(id) from q.nn)` = 10 = p.pn, so every row joins p10 --
+# including s3, whose `j` is null-extended.  Anchoring on `j` instead would make
+# `j.__loj_c` NULL for s3 and wrongly null-extend it on `p`.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.j on s.sn = j.sn
+     left join q.p on (select min(id) from q.nn) = p.pn
+----
+1
+10
+2
+10
+3
+10
+
+# GROUP BY IN-subquery: kept verbatim, so grouping / HAVING semantics survive.
+#   {pn : sum(weight) > 50} over q.p = {10}.  s.pn IN {10}:
+#     s1 pn10 -> p10 -> (1, 10);  s2, s3 null-extend.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and s.pn in (select p2.pn from q.p p2 group by p2.pn having sum(p2.weight) > 50)
+----
+1
+10
+2
+NULL
+3
+NULL
+
+# Aggregate IN-subquery (uncorrelated scalar set): kept verbatim.
+#   (select max(pn) from q.p) = {20}.  s.pn IN {20}:
+#     s2 pn20 -> p20 -> (2, 20);  s1, s3 null-extend.
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and s.pn in (select max(p2.pn) from q.p p2)
+----
+1
+NULL
+2
+20
+3
+NULL
+
+# NOT IN whose subquery set can contain NULL: exercises 3VL without the old
+# non-null gate.  q.cfg.v gains a NULL row; `s.pn NOT IN {set with NULL}` is
+# never TRUE, so every s row null-extends on p.
+statement ok
+insert into q.cfg values ('nullrow', NULL)
+
+query II rowsort
+select s.sn, p.pn
+from q.s left join q.p on s.pn = p.pn
+     and s.pn not in (select c.v from q.cfg c)
 ----
 1
 NULL

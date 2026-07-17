@@ -1,0 +1,57 @@
+# Standalone lowering guard for a CORRELATED CASE-of-IN projection: the LOJ ON
+# IN rewrite projects `CASE WHEN x IN S THEN 1 ELSE 0` onto x's operand, and here
+# S references an operand (A-correlated on the preserved side, B-correlated on the
+# non-preserved side).  Its original pre-implementation-probe purpose has passed;
+# the real-pipeline cases in left_outer_join_on_subquery.test now cover these
+# shapes.  Uncorrelated lowering is guarded in
+# left_outer_join_on_in_limit_feasibility.test.
+
+statement ok
+create table s (sn int, pn int, city text);
+
+statement ok
+insert into s values (1, 10, 'NYC'), (2, 20, 'LA'), (3, 30, 'NYC');
+
+statement ok
+create table j (jn int, pn int, city text);
+
+statement ok
+insert into j values (100, 10, 'NYC'), (200, 20, 'LA');
+
+statement ok
+create table t (v int, city text);
+
+statement ok
+insert into t values (10, 'NYC'), (99, 'LA');
+
+# A-correlated: IN subquery references the preserved side s (s.city).  Wrap s.
+#   s1 city NYC: {t.v : NYC} = {10}; s1.pn=10 in {10} -> 1 -> join j.pn=10 -> (1, 100)
+#   s2 city LA:  {t.v : LA}  = {99}; s2.pn=20 in {99} -> 0 -> null-extend -> (2, NULL)
+#   s3 city NYC: {10}; s3.pn=30 in {10} -> 0 -> null-extend -> (3, NULL)
+query II rowsort
+select s.sn, j.jn
+from s left join j on s.pn = j.pn
+     and s.pn in (select t.v from t where t.city = s.city)
+----
+1
+100
+2
+NULL
+3
+NULL
+
+# B-correlated: IN subquery references the non-preserved side j (j.city).  Wrap j.
+#   j1 pn10 city NYC: {10}; 10 in {10} -> 1 -> matches s.pn=10 -> s1 -> (1, 100)
+#   j2 pn20 city LA:  {99}; 20 in {99} -> 0 -> no match
+#   s2 (pn20) no surviving j -> null-extend; s3 (pn30) no j.pn=30 -> null-extend
+query II rowsort
+select s.sn, j.jn
+from s left join j on s.pn = j.pn
+     and j.pn in (select t.v from t where t.city = j.city)
+----
+1
+100
+2
+NULL
+3
+NULL

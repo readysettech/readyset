@@ -35,7 +35,7 @@ use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
 use crate::rewrite_utils::contains_question_mark_placeholders;
 use crate::shallow::literalize_shallow_prepared;
-use crate::unnest_subqueries::UnnestSubqueries as _;
+use crate::unnest_subqueries::{NonNullSchemaImpl, UnnestSubqueries as _};
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
 use crate::validate_query_semantics::ValidateQuerySemantics as _;
 use crate::{
@@ -319,6 +319,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
             Ok(_) => {
                 query.validate_query_semantics(flags.dialect)?;
                 trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
+                let nonnull_schema = NonNullSchemaImpl::from(&context);
                 let wrap_aliases = query.normalize_subquery_positions()?;
                 trace!(parent: &span, pass="normalize_subquery_positions", query = %query.display(flags.dialect));
                 query.rewrite_array_constructors(&context)?;
@@ -328,12 +329,14 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
                 query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?;
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
-                query.unnest_subqueries(&context, &unique_cols_schema)?;
+                query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
-                // Post-unnest re-invocation of ILDT recovers any inlining
-                // deferred by wrap_aliases; skip when no wrap fired, since
-                // the pre-unnest ILDT already ran with the equivalent
-                // empty-set behavior for this shape.
+                // Post-unnest re-invocation of ILDT inlines the wrapper
+                // derived table before derived_tables_rewrite, which skips
+                // inlining while any subquery predicate remains.  Gated on a
+                // wrap having fired: without one, derived_tables_rewrite
+                // inlines the leading derived table itself, so the extra pass
+                // would be redundant here.
                 if !wrap_aliases.is_empty() {
                     query.inline_leading_derived_table(&unique_cols_schema, &HashSet::new())?;
                     trace!(parent: &span, pass="inline_leading_derived_table_post_unnest", query = %query.display(flags.dialect));
