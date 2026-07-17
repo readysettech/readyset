@@ -6383,6 +6383,7 @@ dependencies = [
  "postgres-types",
  "pretty_assertions",
  "proptest",
+ "rand 0.10.1",
  "readyset-adapter",
  "readyset-client",
  "readyset-client-metrics",

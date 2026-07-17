@@ -245,6 +245,7 @@ pub struct TestBuilder {
     upstream_only_db: Option<String>,
     rls: bool,
     rls_poll_interval: Option<Duration>,
+    shallow_adaptive_max_extra_load_percent: Option<u64>,
 }
 
 impl Default for TestBuilder {
@@ -283,6 +284,7 @@ impl TestBuilder {
             upstream_only_db: None,
             rls: false,
             rls_poll_interval: None,
+            shallow_adaptive_max_extra_load_percent: None,
         }
     }
 
@@ -455,6 +457,14 @@ impl TestBuilder {
         self
     }
 
+    /// Set the maximum extra upstream load adaptive shallow caches may add, as a
+    /// percentage of their baseline refresh load. Mirrors the server's
+    /// `--shallow-adaptive-max-extra-load-percent` flag.
+    pub fn shallow_adaptive_max_extra_load_percent(mut self, percent: u64) -> Self {
+        self.shallow_adaptive_max_extra_load_percent = Some(percent);
+        self
+    }
+
     pub async fn build<A>(mut self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
@@ -623,7 +633,11 @@ impl TestBuilder {
             UpstreamConfig::default()
         };
         cdc_upstream_config.replication_heartbeat = self.replication_heartbeat;
-        let shallow = Arc::new(CacheManager::new(None, None));
+        let mut shallow = CacheManager::new(None, None);
+        if let Some(percent) = self.shallow_adaptive_max_extra_load_percent {
+            shallow.set_adaptive_max_extra_load_percent(percent);
+        }
+        let shallow = Arc::new(shallow);
 
         // Replay any persisted shallow caches, mirroring the production adapter startup.
         let mut rh = ReadySetHandle::new(authority.clone()).await;
