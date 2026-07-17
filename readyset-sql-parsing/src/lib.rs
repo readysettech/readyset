@@ -1042,11 +1042,15 @@ fn cache_options_present(opts: &CreateCacheOptions) -> bool {
 /// cache_options:
 ///     | ALWAYS
 ///     | CONCURRENTLY
-fn parse_create_cache(
+/// Parse the shared head of a `CREATE [DEEP|SHALLOW] CACHE` construct: the cache-type keywords,
+/// the legacy bare options, the optional `[<name>]`, and the optional `WITH (...)` umbrella. The
+/// `FROM <query>` tail is statement-only and parsed by the caller; hint directives have no `FROM`.
+/// Keeping this in one place means new option or name syntax only has to be added once, rather
+/// than duplicated between the DDL and hint parsers.
+fn parse_cache_options(
     parser: &mut Parser,
     dialect: Dialect,
-    input: impl AsRef<str>,
-) -> Result<SqlQuery, ReadysetParsingError> {
+) -> Result<CreateCacheOptions, ReadysetParsingError> {
     let cache_type = parse_create_cache_keywords(parser)?;
     // Legacy bare options come before the name; the `WITH (...)` umbrella comes after it.
     let mut opts = parse_bare_cache_options(parser, cache_type)?;
@@ -1054,7 +1058,7 @@ fn parse_create_cache(
 
     // Optional cache name: absent when the next token is FROM (no name) or WITH (the umbrella,
     // which follows the name slot).
-    let name = if parser.peek_keyword(Keyword::FROM) || parser.peek_keyword(Keyword::WITH) {
+    opts.name = if parser.peek_keyword(Keyword::FROM) || parser.peek_keyword(Keyword::WITH) {
         None
     } else {
         parser
@@ -1070,6 +1074,15 @@ fn parse_create_cache(
         ));
     }
     normalize_cache_options(&mut opts);
+    Ok(opts)
+}
+
+fn parse_create_cache(
+    parser: &mut Parser,
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    let opts = parse_cache_options(parser, dialect)?;
     parser.expect_keyword(Keyword::FROM)?;
 
     // FIXME(sqlparser): Remove this once we deprecate nom-sql and switch to sqlparser
@@ -1090,7 +1103,7 @@ fn parse_create_cache(
 
     let inner = parse_query_for_create_cache(parser, dialect, remaining_query);
     Ok(SqlQuery::CreateCache(CreateCacheStatement {
-        name,
+        name: opts.name,
         cache_type: opts.cache_type,
         policy: opts.policy,
         coalesce_ms: opts.coalesce_ms,
@@ -1129,17 +1142,15 @@ pub fn parse_hint_directive(
     let directive = if parser.parse_keywords(&[Keyword::SKIP, Keyword::CACHE]) {
         Some(ReadysetHintDirective::SkipCache)
     } else if parser.peek_keyword(Keyword::CREATE) {
-        // A hint has no cache name or FROM, so the bare options and the optional WITH umbrella
-        // sit back to back; they remain mutually exclusive.
-        let cache_type = parse_create_cache_keywords(&mut parser)?;
-        let mut opts = parse_bare_cache_options(&mut parser, cache_type)?;
-        let bare_present = cache_options_present(&opts);
-        if parse_with_cache_clause(&mut parser, cache_type, &mut opts)? && bare_present {
+        // A hint has no FROM (the query is the statement the hint annotates), so we parse the same
+        // head as `CREATE CACHE` DDL and stop; anything left over trips the trailing-token check
+        // below. Hints create shallow caches only.
+        let opts = parse_cache_options(&mut parser, dialect)?;
+        if opts.cache_type == Some(CacheType::Deep) {
             return Err(ReadysetParsingError::ReadysetParsingError(
-                "CREATE CACHE cannot combine bare options with a WITH (...) clause".into(),
+                "DEEP caches are not supported in a hint; hints create shallow caches only".into(),
             ));
         }
-        normalize_cache_options(&mut opts);
         Some(ReadysetHintDirective::CreateCache(opts))
     } else {
         None

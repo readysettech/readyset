@@ -7402,28 +7402,15 @@ fn resolve_eviction_policy(
 /// Emits the trx-cache-policy keyword so the policy survives a restart: caches reload by
 /// re-parsing this persisted DDL via `recreate_shallow_caches`.
 fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text: &str) -> String {
-    use std::fmt::Write;
-    let mut ddl = String::from("CREATE SHALLOW CACHE ");
-    if let Some(policy) = &opts.policy {
-        let _ = write!(ddl, "{} ", policy.display(dialect));
-    }
-    if let Some(coalesce) = &opts.coalesce_ms {
-        if coalesce.subsec_millis() == 0 {
-            let _ = write!(ddl, "COALESCE {} SECONDS ", coalesce.as_secs());
-        } else {
-            let _ = write!(ddl, "COALESCE {} MILLISECONDS ", coalesce.as_millis());
-        }
-    }
-    match opts.trx_cache_policy {
-        TrxCachePolicy::Always => ddl.push_str("ALWAYS "),
-        TrxCachePolicy::UntilWrite => ddl.push_str("UNTIL WRITE "),
-        TrxCachePolicy::Never => {}
-    }
-    if opts.adaptive {
-        ddl.push_str("ADAPTIVE ");
-    }
-    let _ = write!(ddl, "FROM {query_text}");
-    ddl
+    // Hints create shallow caches only, so force the type: a bare `CREATE CACHE` hint still
+    // materializes as shallow. The `CREATE [type] CACHE [name] WITH (...)` head renders through the
+    // same `CreateCacheOptions` display as `CREATE CACHE` DDL, so every option carries through here
+    // without per-option wiring; we only append the hint-specific `FROM <query>` tail.
+    let opts = CreateCacheOptions {
+        cache_type: Some(CacheType::Shallow),
+        ..opts.clone()
+    };
+    format!("{} FROM {query_text}", opts.display(dialect))
 }
 
 fn resolve_coalesce(coalesce: Option<Duration>, default_coalesce_ms: u64) -> Option<Duration> {
@@ -8252,7 +8239,7 @@ mod tests {
         let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
         assert_eq!(
             ddl,
-            "CREATE SHALLOW CACHE COALESCE 17 SECONDS FROM SELECT RAND()"
+            "CREATE SHALLOW CACHE WITH (COALESCE 17 SECONDS) FROM SELECT RAND()"
         );
     }
 
@@ -8299,6 +8286,46 @@ mod tests {
                 "Coalesce must survive DDL round-trip: {ddl}"
             );
         }
+    }
+
+    #[test]
+    fn hint_ddl_name_roundtrip() {
+        let opts = CreateCacheOptions {
+            name: Some("mycache".into()),
+            trx_cache_policy: TrxCachePolicy::Always,
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+
+        let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+        let SqlQuery::CreateCache(stmt) = parsed else {
+            panic!("Expected CreateCache, got: {parsed:?}");
+        };
+        assert_eq!(
+            stmt.name,
+            Some("mycache".into()),
+            "cache name must survive DDL round-trip: {ddl}"
+        );
+    }
+
+    #[test]
+    fn hint_ddl_concurrently_roundtrip() {
+        // CONCURRENTLY is valid for shallow caches but was dropped by the old hand-rolled hint
+        // serializer. Rendering through the shared header carries it through the round-trip.
+        let opts = CreateCacheOptions {
+            concurrently: true,
+            ..Default::default()
+        };
+        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+
+        let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
+        let SqlQuery::CreateCache(stmt) = parsed else {
+            panic!("Expected CreateCache, got: {parsed:?}");
+        };
+        assert!(
+            stmt.concurrently,
+            "CONCURRENTLY must survive DDL round-trip: {ddl}"
+        );
     }
 
     #[test]

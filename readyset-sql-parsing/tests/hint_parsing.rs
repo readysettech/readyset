@@ -360,6 +360,31 @@ fn parse_create_cache_hint_basic() {
 }
 
 #[test]
+fn parse_create_cache_hint_with_name() {
+    for text in [
+        "CREATE SHALLOW CACHE mycache",
+        "CREATE SHALLOW CACHE ALWAYS mycache",
+    ] {
+        let Some(ReadysetHintDirective::CreateCache(opts)) =
+            parse_hint_directive(Dialect::MySQL, text).expect("should parse")
+        else {
+            panic!("Expected CreateCache directive for {text:?}");
+        };
+        assert_eq!(opts.name, Some("mycache".into()), "for {text:?}");
+    }
+}
+
+#[test]
+fn parse_create_cache_hint_rejects_deep() {
+    let err = parse_hint_directive(Dialect::MySQL, "CREATE DEEP CACHE mycache")
+        .expect_err("DEEP hint should be rejected");
+    assert!(
+        err.to_string().contains("shallow caches only"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn parse_create_cache_hint_ttl() {
     let result =
         parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS")

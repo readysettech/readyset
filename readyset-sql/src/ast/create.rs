@@ -1137,6 +1137,9 @@ impl AutoparamControl {
 /// Optional `CREATE CACHE` arguments. This struct is only used for parsing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateCacheOptions {
+    /// The name of the cache. `None` when no name was given, in which case one is generated from
+    /// the statement.
+    pub name: Option<Relation>,
     pub trx_cache_policy: TrxCachePolicy,
     pub concurrently: bool,
     pub cache_type: Option<CacheType>,
@@ -1235,17 +1238,20 @@ impl Hash for CreateCacheStatement {
     }
 }
 
-impl DialectDisplay for CreateCacheStatement {
+impl DialectDisplay for CreateCacheOptions {
+    /// Render `CREATE [type] CACHE [name] [WITH (...)]` — the head shared by the `CREATE CACHE`
+    /// DDL statement and the `/*rs+ ... */` hint directive. The `FROM <query>` tail is
+    /// statement-specific and appended by the caller. Because every option renders here, a new
+    /// option becomes visible in both surfaces at once.
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "CREATE ")?;
-            match &self.cache_type {
-                None => {}
-                Some(cache_type) => write!(f, "{} ", cache_type.display(dialect))?,
+            if let Some(cache_type) = &self.cache_type {
+                write!(f, "{} ", cache_type.display(dialect))?;
             }
-            write!(f, "CACHE ")?;
+            write!(f, "CACHE")?;
             if let Some(name) = &self.name {
-                write!(f, "{} ", name.display(dialect))?;
+                write!(f, " {}", name.display(dialect))?;
             }
             // Render options through the `WITH (...)` umbrella so the canonical text matches the
             // grammar. The clause follows the name and is omitted entirely when there are no
@@ -1258,7 +1264,7 @@ impl DialectDisplay for CreateCacheStatement {
                 || self.topk_buffer_multiplier.is_some()
                 || !self.autoparam.is_default();
             if has_options {
-                write!(f, "WITH (")?;
+                write!(f, " WITH (")?;
                 let mut first = true;
                 let mut sep = |f: &mut fmt::Formatter<'_>| -> fmt::Result {
                     if !std::mem::take(&mut first) {
@@ -1328,10 +1334,40 @@ impl DialectDisplay for CreateCacheStatement {
                     }
                     write!(f, ")")?;
                 }
-                write!(f, ") ")?;
+                write!(f, ")")?;
             }
-            write!(f, "FROM ")?;
-            write!(f, "{}", self.inner.display(dialect))
+            Ok(())
+        })
+    }
+}
+
+impl CreateCacheStatement {
+    /// The parsing-time option bag for this statement, used to render the shared `CREATE CACHE`
+    /// head via [`CreateCacheOptions`]'s `DialectDisplay`.
+    fn options(&self) -> CreateCacheOptions {
+        CreateCacheOptions {
+            name: self.name.clone(),
+            cache_type: self.cache_type,
+            policy: self.policy,
+            coalesce_ms: self.coalesce_ms,
+            adaptive: self.adaptive,
+            concurrently: self.concurrently,
+            trx_cache_policy: self.trx_cache_policy,
+            topk_buffer_multiplier: self.topk_buffer_multiplier,
+            autoparam: self.autoparam,
+        }
+    }
+}
+
+impl DialectDisplay for CreateCacheStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "{} FROM {}",
+                self.options().display(dialect),
+                self.inner.display(dialect)
+            )
         })
     }
 }
@@ -1342,7 +1378,9 @@ impl DialectDisplay for CreateCacheStatement {
 /// the same `parse_cache_options()` infrastructure as `CREATE CACHE` DDL parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReadysetHintDirective {
-    /// `/*rs+ CREATE SHALLOW CACHE [TTL n] [REFRESH n] [ALWAYS] */`
+    /// `/*rs+ CREATE SHALLOW CACHE [TTL n] [REFRESH n] [ALWAYS] [<name>] */`. Hints create shallow
+    /// caches only; an explicit `DEEP` is rejected. The cache name, when present, rides in
+    /// [`CreateCacheOptions::name`].
     CreateCache(CreateCacheOptions),
     /// `/*rs+ SKIP CACHE */` — bypass the cache and route directly to upstream.
     SkipCache,
