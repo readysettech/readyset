@@ -8130,12 +8130,12 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.62.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential#e27b8e7170f4669d0d2cb8ffa32ae0c840406199"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=20260717-order-by-for-rs#06efd2f591a0457d00fe4d28fdfc149d9418e88f"
 dependencies = [
  "log",
  "recursive",
  "serde",
- "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential)",
+ "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=20260717-order-by-for-rs)",
 ]
 
 [[package]]
@@ -8152,7 +8152,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=parse-function-args-exponential#e27b8e7170f4669d0d2cb8ffa32ae0c840406199"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?branch=20260717-order-by-for-rs#06efd2f591a0457d00fe4d28fdfc149d9418e88f"
 dependencies = [
  "proc-macro2",
  "quote",
