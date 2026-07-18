@@ -2844,9 +2844,20 @@ where
             // Key the memoized statement on the query text plus the search_path it was resolved
             // against, so a later Parse under a different path re-plans instead of reusing it.
             let path = self.connectors.noria.schema_search_path().to_vec();
-            self.state
+            if let Some((_, superseded)) = self
+                .state
                 .unnamed_prepared_statements
-                .insert(query.to_string(), (path, statement_id));
+                .insert(query.to_string(), (path, statement_id))
+            {
+                // The unnamed slot holds one statement per query text; drop everything this Parse
+                // supersedes -- both the slab slot and any session-mutation template keyed by that
+                // id -- mirroring `remove_statement`, so re-Parsing under changing search_paths
+                // neither leaks slab slots nor misapplies a stale template to a later reused id.
+                self.state.session_mutations.remove(&superseded);
+                self.state
+                    .prepared_statements
+                    .try_remove(superseded as usize);
+            }
         }
 
         Ok(statement_id)
