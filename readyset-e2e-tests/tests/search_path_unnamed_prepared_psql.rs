@@ -1,9 +1,16 @@
-//! Regression test for REA-6740: an unnamed prepared statement is memoized by
-//! literal query text with no `search_path` dimension, so re-Parsing the same
-//! text after `SET search_path` returns the previous schema's rows.
+//! Regression tests for unnamed prepared statement memoization in the Postgres
+//! extended protocol. Readyset memoizes the unnamed slot as an optimization,
+//! which Postgres never does (it re-plans on every Parse), so the memo must not
+//! reuse a plan whose routing was decided under context that has since changed:
+//!
+//! - REA-6740: re-Parsing the same text after `SET search_path` must resolve
+//!   against the new path, not return the previous schema's memoized rows.
+//! - REA-6746: an unnamed slot first Parsed inside a transaction memoizes an
+//!   upstream-only plan; after COMMIT/ROLLBACK, re-Parsing must recover caching
+//!   rather than stay pinned to the transaction-bypassed plan.
 //!
 //! `tokio_postgres` always names its prepared statements, which take a different
-//! code path, so this reproduces the extended-protocol unnamed slot with a raw
+//! code path, so these reproduce the extended-protocol unnamed slot with a raw
 //! pgwire client that sends Parse/Bind/Execute with an empty statement name.
 
 use bytes::BytesMut;
@@ -13,7 +20,9 @@ use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_client_test_helpers::{
     Adapter, TestBuilder, derive_test_name, psql_helpers::PostgreSQLAdapter,
 };
+use readyset_server::Handle;
 use readyset_tracing::init_test_logging;
+use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -176,36 +185,27 @@ fn error_text(err: &backend::ErrorResponseBody) -> String {
     "<no message>".to_string()
 }
 
-#[test]
-#[tags(serial, slow)]
-#[upstream(postgres)]
-async fn unnamed_prepared_reresolves_after_set_search_path() {
-    init_test_logging();
-
-    let test_name = derive_test_name();
-    PostgreSQLAdapter::recreate_database(&test_name).await;
-
+/// Recreate `test_name` upstream and apply the seed statements against it.
+async fn seed_upstream(test_name: &str, stmts: &[&str]) {
+    PostgreSQLAdapter::recreate_database(test_name).await;
     let mut cfg = readyset_client_test_helpers::psql_helpers::upstream_config();
-    cfg.dbname(&test_name);
+    cfg.dbname(test_name);
     let upstream = readyset_client_test_helpers::psql_helpers::connect(cfg).await;
-    for stmt in [
-        "CREATE SCHEMA schema_a",
-        "CREATE SCHEMA schema_b",
-        "CREATE TABLE schema_a.items (id bigserial PRIMARY KEY, label text NOT NULL)",
-        "CREATE TABLE schema_b.items (id bigserial PRIMARY KEY, label text NOT NULL)",
-        "INSERT INTO schema_a.items (label) VALUES ('a-one'), ('a-two')",
-        "INSERT INTO schema_b.items (label) VALUES ('b-one'), ('b-two'), ('b-three')",
-    ] {
+    for stmt in stmts {
         upstream.simple_query(stmt).await.expect("seed upstream");
     }
+}
 
+/// Build a Readyset PostgreSQL backend replicating `test_name` and connect a raw
+/// pgwire client to it. The returned handles keep the server alive for the test.
+async fn connect_backend(test_name: &str) -> (RawPgConn, Handle, ShutdownSender) {
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
         .replication_enabled(false);
 
-    let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
+    let (rs_opts, handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
-        .replicate_db(&test_name)
+        .replicate_db(test_name)
         .fallback(true)
         .migration_mode(MigrationMode::OutOfBand)
         .build::<PostgreSQLAdapter>()
@@ -218,7 +218,31 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
     let port = rs_opts.get_ports()[0];
     let user = rs_opts.get_user().unwrap_or("postgres").to_string();
 
-    let mut conn = RawPgConn::connect(&host, port, &user, &test_name).await;
+    let conn = RawPgConn::connect(&host, port, &user, test_name).await;
+    (conn, handle, shutdown_tx)
+}
+
+#[test]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn unnamed_prepared_reresolves_after_set_search_path() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    seed_upstream(
+        &test_name,
+        &[
+            "CREATE SCHEMA schema_a",
+            "CREATE SCHEMA schema_b",
+            "CREATE TABLE schema_a.items (id bigserial PRIMARY KEY, label text NOT NULL)",
+            "CREATE TABLE schema_b.items (id bigserial PRIMARY KEY, label text NOT NULL)",
+            "INSERT INTO schema_a.items (label) VALUES ('a-one'), ('a-two')",
+            "INSERT INTO schema_b.items (label) VALUES ('b-one'), ('b-two'), ('b-three')",
+        ],
+    )
+    .await;
+
+    let (mut conn, _handle, shutdown_tx) = connect_backend(&test_name).await;
 
     let query = "SELECT label FROM items WHERE 1 = $1 ORDER BY id";
 
@@ -248,6 +272,63 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
         "re-Parsing the same unnamed text after SET search_path must resolve \
          against schema_b, not return schema_a's memoized rows",
     );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// REA-6746: an unnamed statement first Parsed inside a transaction memoizes an
+/// upstream-only plan, because the shallow cache is bypassed while a transaction
+/// is open (the default `Never` policy). After COMMIT the connection is no longer
+/// in a transaction, so re-Parsing the identical text must re-plan and recover
+/// shallow caching rather than reuse the transaction-bypassed plan indefinitely.
+#[test]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn unnamed_prepared_recovers_cache_after_transaction() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    seed_upstream(
+        &test_name,
+        &[
+            "CREATE TABLE ticker (id integer PRIMARY KEY, version bigint NOT NULL)",
+            "INSERT INTO ticker (id, version) VALUES (1, 0)",
+        ],
+    )
+    .await;
+
+    let (mut conn, _handle, shutdown_tx) = connect_backend(&test_name).await;
+
+    let query = "SELECT version FROM ticker WHERE id = $1";
+    conn.simple_query(
+        "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS \
+         FROM SELECT version FROM ticker WHERE id = $1",
+    )
+    .await;
+
+    // The first Parse happens inside a transaction, so the cache is bypassed and
+    // the unnamed slot memoizes an upstream-only plan.
+    conn.simple_query("BEGIN").await;
+    let rows = conn.unnamed_query(query, "1").await;
+    assert_eq!(rows, vec!["0"], "in-transaction rows");
+    assert_eq!(conn.last_query_destination().await, "upstream");
+    conn.simple_query("COMMIT").await;
+
+    // After COMMIT the connection is transaction-free. The first read re-plans and
+    // fills the shallow cache (upstream); every read after that must serve from the
+    // shallow cache instead of staying pinned to the transaction-bypassed plan.
+    let rows = conn.unnamed_query(query, "1").await;
+    assert_eq!(rows, vec!["0"], "post-commit fill rows");
+    assert_eq!(conn.last_query_destination().await, "upstream");
+    for read in 0..3 {
+        let rows = conn.unnamed_query(query, "1").await;
+        assert_eq!(rows, vec!["0"], "post-commit cached rows (read {read})");
+        assert_eq!(
+            conn.last_query_destination().await,
+            "readyset_shallow",
+            "re-Parsing after COMMIT must recover shallow caching (read {read})",
+        );
+    }
 
     shutdown_tx.shutdown().await;
 }

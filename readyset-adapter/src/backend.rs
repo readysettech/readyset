@@ -1283,11 +1283,16 @@ where
     /// to the index of the prepared statement in `prepared_statements`.
     ///
     /// The query text alone does not identify a plan: an unqualified name resolves against the
-    /// session `search_path`, so the same text under a different path is a different query. We
-    /// store the path captured at prepare time alongside the id and only reuse the entry when the
-    /// current path still matches; a mismatch re-plans and overwrites, mirroring how Postgres
-    /// re-plans the unnamed statement on every Parse.
-    unnamed_prepared_statements: HashMap<String, (Vec<SqlIdentifier>, StatementId)>,
+    /// session `search_path`, so the same text under a different path is a different query. Each
+    /// entry stores `(search_path, statement_id, reusable)`: the path captured at prepare time,
+    /// the memoized slot, and whether that slot is safe to reuse regardless of the connection's
+    /// current transaction state. We take the reuse fast path only for a `reusable` entry whose
+    /// path still matches; otherwise we re-plan and overwrite, mirroring how Postgres re-plans the
+    /// unnamed statement on every Parse. A plan that resolved to upstream-only may have been forced
+    /// there by a transient cache bypass (an open transaction, opportunistic read-your-writes), so
+    /// it is marked non-reusable and re-planned on the next Parse; cache-backed plans re-evaluate
+    /// the bypass at execute time and stay correct in any state.
+    unnamed_prepared_statements: HashMap<String, (Vec<SqlIdentifier>, StatementId, bool)>,
     /// Handle to access the cached schema catalog
     schema_handle: SchemaCatalogHandle,
     /// Map from username to password for all users allowed to connect to the db
@@ -2809,7 +2814,8 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<StatementId, DB::Error> {
         if matches!(statement_type, PreparedStatementType::Unnamed)
-            && let Some((path, id)) = self.state.unnamed_prepared_statements.get(query)
+            && let Some((path, id, reusable)) = self.state.unnamed_prepared_statements.get(query)
+            && *reusable
             && path.as_slice() == self.connectors.noria.schema_search_path()
         {
             return Ok(*id);
@@ -2819,6 +2825,12 @@ where
         let prep = self
             .do_prepare(&meta, query, data, statement_type, event)
             .await?;
+        // An upstream-only plan may have been forced there by a transient cache bypass; keep it out
+        // of the reuse fast path so a later Parse re-plans once the bypass clears. Cache-backed
+        // plans re-evaluate the bypass at execute time, so they stay reusable in any state.
+        // Permanently-upstream shapes (unsupported/proxied) re-plan every Parse too, matching
+        // Postgres.
+        let reusable = !matches!(prep, PrepareResultInner::Upstream(_));
 
         let next_id = self
             .state
@@ -2842,17 +2854,18 @@ where
 
         if matches!(statement_type, PreparedStatementType::Unnamed) {
             // Key the memoized statement on the query text plus the search_path it was resolved
-            // against, so a later Parse under a different path re-plans instead of reusing it.
+            // against, and record whether the plan is reusable across transaction-state changes.
             let path = self.connectors.noria.schema_search_path().to_vec();
-            if let Some((_, superseded)) = self
+            if let Some((_, superseded, _)) = self
                 .state
                 .unnamed_prepared_statements
-                .insert(query.to_string(), (path, statement_id))
+                .insert(query.to_string(), (path, statement_id, reusable))
             {
                 // The unnamed slot holds one statement per query text; drop everything this Parse
-                // supersedes -- both the slab slot and any session-mutation template keyed by that
-                // id -- mirroring `remove_statement`, so re-Parsing under changing search_paths
-                // neither leaks slab slots nor misapplies a stale template to a later reused id.
+                // supersedes (a changed search_path, or a re-planned non-reusable slot) -- both the
+                // slab slot and any session-mutation template keyed by that id, mirroring
+                // `remove_statement` -- so we neither leak slab slots nor misapply a stale template
+                // to a later reused id.
                 self.state.session_mutations.remove(&superseded);
                 self.state
                     .prepared_statements
