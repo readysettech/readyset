@@ -9,7 +9,7 @@ use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash};
-use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql::ast::SqlIdentifier;
 use readyset_util::SizeOf;
 use readyset_util::redacted::RedactedString;
 use tracing::debug;
@@ -235,9 +235,12 @@ pub trait UpstreamDatabase: Sized + Send {
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle starting a transaction with the upstream database.
+    ///
+    /// Takes the client's original query text rather than a reconstructed statement so that
+    /// modifiers the AST does not model (isolation level, read-only, deferrable) reach upstream.
     async fn start_tx<'a>(
         &'a mut self,
-        stmt: &StartTransactionStatement,
+        query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle committing a transaction to the upstream database.
@@ -475,9 +478,9 @@ where
 
     async fn start_tx<'a>(
         &'a mut self,
-        stmt: &StartTransactionStatement,
+        query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Self::Error> {
-        self.upstream().await?.start_tx(stmt).await
+        self.upstream().await?.start_tx(query).await
     }
 
     async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error> {

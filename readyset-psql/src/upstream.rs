@@ -30,7 +30,7 @@ use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
 use readyset_sql::Dialect;
-use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql::ast::SqlIdentifier;
 use readyset_util::SizeOf;
 use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
@@ -673,12 +673,9 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     /// Handle starting a transaction with the upstream database.
-    async fn start_tx<'a>(
-        &'a mut self,
-        stmt: &StartTransactionStatement,
-    ) -> Result<Self::QueryResult<'a>, Error> {
+    async fn start_tx<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         Ok(QueryResult::SimpleQuery(
-            self.client.simple_query(&stmt.to_string()).await?,
+            self.client.simple_query(query).await?,
         ))
     }
 

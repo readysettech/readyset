@@ -26,7 +26,7 @@ use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata};
-use readyset_sql::ast::{SqlIdentifier, StartTransactionStatement};
+use readyset_sql::ast::SqlIdentifier;
 use readyset_sql::Dialect;
 use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
@@ -607,11 +607,8 @@ impl UpstreamDatabase for MySqlUpstream {
         unsupported!("MySQL does not have a simple_query protocol");
     }
 
-    async fn start_tx<'a>(
-        &'a mut self,
-        stmt: &StartTransactionStatement,
-    ) -> Result<Self::QueryResult<'a>, Error> {
-        self.conn.query_drop(stmt.to_string()).await?;
+    async fn start_tx<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
+        self.conn.query_drop(query).await?;
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),

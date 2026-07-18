@@ -3699,8 +3699,10 @@ where
         })?;
 
         match query {
-            SqlQuery::StartTransaction(inner) => {
-                let result = QueryResult::Upstream(upstream.start_tx(inner).await?, None, None);
+            SqlQuery::StartTransaction(_) => {
+                // Forward the client's original text so modifiers the AST does not model
+                // (isolation level, read-only, deferrable) are not silently dropped upstream.
+                let result = QueryResult::Upstream(upstream.start_tx(raw_query).await?, None, None);
                 proxy_state.start_transaction();
                 write_tracker.on_start_transaction();
                 Ok(result)
