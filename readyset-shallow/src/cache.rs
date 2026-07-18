@@ -24,6 +24,7 @@ use readyset_sql::ast::{
 use readyset_util::SizeOf;
 use readyset_util::timestamp::current_timestamp_ms;
 
+use crate::manager::FillState;
 use crate::{
     CacheInsertGuard, ContentHash, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh,
     rows_content_hash,
@@ -462,8 +463,10 @@ where
     shutdown_tx: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     hit_counter: Counter,
     miss_counter: Counter,
+    refresh_counter: Counter,
     refresh_changed_counter: Counter,
     refresh_unchanged_counter: Counter,
+    refresh_dropped_counter: Counter,
     coalesce_counter: Counter,
     coalesce_timeout_counter: Counter,
     coalesce_abort_counter: Counter,
@@ -536,12 +539,15 @@ where
         let label = query_id.to_string();
         let hit_counter = counter!(metric::SHALLOW_HIT, "query_id" => label.clone());
         let miss_counter = counter!(metric::SHALLOW_MISS, "query_id" => label.clone());
+        let refresh_counter = counter!(metric::SHALLOW_REFRESH, "query_id" => label.clone());
         let refresh_changed_counter =
             counter!(metric::SHALLOW_REFRESH_CHANGED, "query_id" => label.clone());
         let scheduler_queue_gauge = schedule
             .then(|| gauge!(metric::SHALLOW_SCHEDULER_QUEUE_DEPTH, "query_id" => label.clone()));
         let refresh_unchanged_counter =
             counter!(metric::SHALLOW_REFRESH_UNCHANGED, "query_id" => label.clone());
+        let refresh_dropped_counter =
+            counter!(metric::SHALLOW_REFRESH_DROPPED, "query_id" => label.clone());
         let coalesce_counter =
             counter!(metric::SHALLOW_COALESCE_SUCCESS, "query_id" => label.clone());
         let coalesce_timeout_counter =
@@ -578,8 +584,10 @@ where
             shutdown_tx: std::sync::Mutex::new(shutdown_tx),
             hit_counter,
             miss_counter,
+            refresh_counter,
             refresh_changed_counter,
             refresh_unchanged_counter,
+            refresh_dropped_counter,
             coalesce_counter,
             coalesce_timeout_counter,
             coalesce_abort_counter,
@@ -609,7 +617,7 @@ where
             key: Some(key),
             results: Some(Vec::new()),
             metadata: None,
-            filled: false,
+            filled: FillState::Pending,
             requested: Instant::now(),
             done,
             refreshing: None,
@@ -810,6 +818,9 @@ where
             .and_compute_with(|e| {
                 match e {
                     Some(e) => {
+                        if refresh {
+                            self.increment_refresh();
+                        }
                         if let CacheEntry::Present(old) = &**e.value() {
                             let acc = old.accessed_ms.load(Ordering::Relaxed);
                             new.accessed_ms.store(acc, Ordering::Relaxed);
@@ -1126,6 +1137,14 @@ where
 
     pub(crate) fn increment_hit(&self) {
         self.hit_counter.increment(1);
+    }
+
+    pub(crate) fn increment_refresh(&self) {
+        self.refresh_counter.increment(1);
+    }
+
+    pub(crate) fn increment_refresh_dropped(&self) {
+        self.refresh_dropped_counter.increment(1);
     }
 
     pub(crate) fn increment_miss(&self) {

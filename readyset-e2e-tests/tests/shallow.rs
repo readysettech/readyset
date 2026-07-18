@@ -347,30 +347,18 @@ async fn show_shallow_caches() {
 
     // Check the shallow_caches vrel.
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool, u64, u64, u64)> =
-        readyset
-            .query(
-                "SELECT query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule,
-                        hits, misses, wasted_refreshes
-                 FROM readyset.shallow_caches",
-            )
-            .await
-            .unwrap();
+    let rows: Vec<(String, String, String, u64, u64, u64, bool, bool, u64, u64)> = readyset
+        .query(
+            "SELECT query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule,
+                    hits, misses
+             FROM readyset.shallow_caches",
+        )
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
 
-    let (
-        query_id,
-        name,
-        query,
-        ttl_ms,
-        refresh_ms,
-        coalesce_ms,
-        always,
-        schedule,
-        hits,
-        misses,
-        wasted_refreshes,
-    ) = &rows[0];
+    let (query_id, name, query, ttl_ms, refresh_ms, coalesce_ms, always, schedule, hits, misses) =
+        &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
@@ -381,23 +369,33 @@ async fn show_shallow_caches() {
     assert_eq!(*schedule, false);
     assert!(*hits >= 1, "expected at least one shallow hit, got {hits}");
     assert!(*misses >= 1, "expected at least one shallow miss, got {misses}");
-    assert_eq!(*wasted_refreshes, 0);
 
-    // Check the shallow_cache_refresh_stats vrel: this cache is neither adaptive nor
-    // scheduled, so every stat is NULL.
+    // Check the shallow_cache_refresh_stats vrel: this cache is neither adaptive nor scheduled, so
+    // the load and scheduler stats are NULL; wasted_refreshes and dropped_refreshes are counters, so
+    // they read 0.
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, Option<u64>, Option<u64>, Option<bool>, Option<u64>)> = readyset
+    let rows: Vec<(String, u64, u64, Option<u64>, Option<u64>, Option<bool>, Option<u64>)> = readyset
         .query(
-            "SELECT query_id, load_actual_ppm, load_baseline_ppm, over_cap,
-                    scheduler_queue_len
+            "SELECT query_id, wasted_refreshes, dropped_refreshes, load_actual_ppm,
+                    load_baseline_ppm, over_cap, scheduler_queue_len
              FROM readyset.shallow_cache_refresh_stats",
         )
         .await
         .unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
 
-    let (query_id, load_actual_ppm, load_baseline_ppm, over_cap, scheduler_queue_len) = &rows[0];
+    let (
+        query_id,
+        wasted_refreshes,
+        dropped_refreshes,
+        load_actual_ppm,
+        load_baseline_ppm,
+        over_cap,
+        scheduler_queue_len,
+    ) = &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
+    assert_eq!(*wasted_refreshes, 0);
+    assert_eq!(*dropped_refreshes, 0);
     assert_eq!(*load_actual_ppm, None);
     assert_eq!(*load_baseline_ppm, None);
     assert_eq!(*over_cap, None);
@@ -2866,6 +2864,20 @@ async fn refresh_resumes_after_upstream_failure() {
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow
     );
+
+    // The refresh against the dropped table was counted as dropped; the later one that repopulated
+    // the entry was counted as a successful refresh.
+    let rows: Vec<(u64,)> = readyset
+        .query("SELECT dropped_refreshes FROM readyset.shallow_cache_refresh_stats")
+        .await
+        .unwrap();
+    assert!(rows[0].0 >= 1, "expected a dropped refresh, got {}", rows[0].0);
+
+    let rows: Vec<(u64,)> = readyset
+        .query("SELECT refreshes FROM readyset.shallow_caches")
+        .await
+        .unwrap();
+    assert!(rows[0].0 >= 1, "expected a successful refresh, got {}", rows[0].0);
 
     shutdown_tx.shutdown().await;
 }

@@ -46,7 +46,6 @@ const SHALLOW_CACHES_SCHEMA: &[(&str, DfType)] = &[
     ("hits", DfType::UnsignedBigInt),
     ("misses", DfType::UnsignedBigInt),
     ("refreshes", DfType::UnsignedBigInt),
-    ("wasted_refreshes", DfType::UnsignedBigInt),
     ("coalesces", DfType::UnsignedBigInt),
 ];
 
@@ -54,14 +53,13 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
     let dialect = ctx.dialect;
     let caches = ctx.shallow.list_caches(None, None);
     Box::pin(async move {
-        let [hits, misses, refreshes, wasted, coalesces] = metrics_handle()
+        let [hits, misses, refreshes, coalesces] = metrics_handle()
             .map(|h| {
                 h.counters_by_label(
                     [
                         metric::SHALLOW_HIT,
                         metric::SHALLOW_MISS,
                         metric::SHALLOW_REFRESH,
-                        metric::SHALLOW_REFRESH_WASTED,
                         metric::SHALLOW_COALESCE_SUCCESS,
                     ],
                     "query_id",
@@ -86,7 +84,6 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
                 hits.get(&query_id).into(),
                 misses.get(&query_id).into(),
                 refreshes.get(&query_id).into(),
-                wasted.get(&query_id).into(),
                 coalesces.get(&query_id).into(),
             ]
         }));
@@ -97,6 +94,8 @@ bind_vrel!(shallow_caches, SHALLOW_CACHES_SCHEMA, shallow_caches_read);
 
 const SHALLOW_CACHE_REFRESH_STATS_SCHEMA: &[(&str, DfType)] = &[
     ("query_id", DfType::DEFAULT_TEXT),
+    ("wasted_refreshes", DfType::UnsignedBigInt),
+    ("dropped_refreshes", DfType::UnsignedBigInt),
     ("load_actual_ppm", DfType::UnsignedBigInt),
     ("load_baseline_ppm", DfType::UnsignedBigInt),
     ("over_cap", DfType::Bool),
@@ -106,9 +105,25 @@ const SHALLOW_CACHE_REFRESH_STATS_SCHEMA: &[(&str, DfType)] = &[
 fn shallow_cache_refresh_stats_read(ctx: &VrelContext) -> VrelRead {
     let caches = ctx.shallow.list_caches(None, None);
     Box::pin(async move {
+        let [wasted, dropped] = metrics_handle()
+            .map(|h| {
+                h.counters_by_label(
+                    [
+                        metric::SHALLOW_REFRESH_WASTED,
+                        metric::SHALLOW_REFRESH_DROPPED,
+                    ],
+                    "query_id",
+                    [],
+                )
+            })
+            .unwrap_or_default();
+
         let rows: VrelRows = Box::new(caches.into_iter().map(move |cache| {
+            let query_id = cache.query_id.to_string();
             vec![
-                cache.query_id.to_string().into(),
+                query_id.clone().into(),
+                wasted.get(&query_id).into(),
+                dropped.get(&query_id).into(),
                 cache.load_actual_ppm.into(),
                 cache.load_baseline_ppm.into(),
                 cache.over_cap.into(),

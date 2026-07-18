@@ -471,7 +471,7 @@ where
             key: Some(key),
             results: Some(Vec::new()),
             metadata: None,
-            filled: false,
+            filled: FillState::Pending,
             requested: Instant::now(),
             done: None,
             refresh: refreshing.is_some(),
@@ -581,6 +581,13 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FillState {
+    Pending,
+    Filled,
+    Consumed,
+}
+
 pub struct CacheInsertGuard<K, V>
 where
     K: Clone + Hash + Eq + Send + Sync + 'static,
@@ -590,7 +597,7 @@ where
     pub(crate) key: Option<K>,
     pub(crate) results: Option<Vec<V>>,
     pub(crate) metadata: Option<QueryMetadata>,
-    pub(crate) filled: bool,
+    pub(crate) filled: FillState,
     pub(crate) requested: Instant,
     /// If set, dropping the guard will notify any listeners.
     pub(crate) done: Option<Sender<()>>,
@@ -646,9 +653,9 @@ where
     /// inserted and become immediately visible.  Otherwise, when the guard is dropped, the
     /// insertion will be scheduled to happen asynchronously.
     pub fn filled(&mut self) -> impl Future<Output = ()> {
-        self.filled = true;
+        self.filled = FillState::Filled;
         async {
-            if self.filled {
+            if self.filled == FillState::Filled {
                 let (metadata, cache, key, results, execution, done) = self.take();
                 cache
                     .insert(key, results, metadata, execution, self.refresh)
@@ -674,7 +681,7 @@ where
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
         let done = self.done.take();
-        self.filled = false;
+        self.filled = FillState::Consumed;
         (
             metadata,
             cache,
@@ -692,17 +699,26 @@ where
     V: Send + Sync + 'static,
 {
     fn drop(&mut self) {
-        if self.filled {
-            let (metadata, cache, key, results, execution, done) = self.take();
-            let refresh = self.refresh;
-            tokio::spawn(async move {
-                cache
-                    .insert(key, results, metadata, execution, refresh)
-                    .await;
-                drop(done);
-            });
-        } else if let Some(refreshing) = self.refreshing.take() {
-            // An insert was not completed, so mark an existing refreshing state as false.
+        match self.filled {
+            FillState::Filled => {
+                let (metadata, cache, key, results, execution, done) = self.take();
+                let refresh = self.refresh;
+                tokio::spawn(async move {
+                    cache
+                        .insert(key, results, metadata, execution, refresh)
+                        .await;
+                    drop(done);
+                });
+                return;
+            }
+            FillState::Pending => {
+                if self.refresh {
+                    self.cache.increment_refresh_dropped();
+                }
+            }
+            FillState::Consumed => {}
+        }
+        if let Some(refreshing) = self.refreshing.take() {
             refreshing.store(false, Ordering::Release);
         }
     }

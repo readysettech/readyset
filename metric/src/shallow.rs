@@ -29,6 +29,14 @@ pub const SHALLOW_REFRESH_UNCHANGED: &str = "readyset_shallow.shallow_refresh_un
 /// | query_id | The query ID for the cached query being refreshed. |
 pub const SHALLOW_REFRESH_WASTED: &str = "readyset_shallow.shallow_refresh_wasted";
 
+/// Counter: Number of refreshes that never produced a result: the request was dropped with the
+/// pool saturated, or the upstream connection or query failed.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | query_id | The query ID for the cached query being refreshed. |
+pub const SHALLOW_REFRESH_DROPPED: &str = "readyset_shallow.shallow_refresh_dropped";
+
 /// Histogram: The amount of time in microseconds spent executing the upstream query during a
 /// shallow cache refresh. Only recorded for successful queries.
 ///

@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use database_utils::UpstreamConfig;
 use metric::{
-    SHALLOW_REFRESH, SHALLOW_REFRESH_POOL_IDLE_WORKERS, SHALLOW_REFRESH_POOL_QUEUED,
-    SHALLOW_REFRESH_POOL_WORKERS, SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
+    SHALLOW_REFRESH_POOL_IDLE_WORKERS, SHALLOW_REFRESH_POOL_QUEUED, SHALLOW_REFRESH_POOL_WORKERS,
+    SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
 };
 use metrics::{Gauge, counter, gauge, histogram};
 use readyset_client::query::QueryId;
@@ -209,7 +209,6 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         self: &Arc<Self>,
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
-        let query_id = req.query_id;
         let mut inner = self.inner.lock().await;
 
         // Try idle stack (LIFO, recently used connections first)
@@ -229,8 +228,6 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             }
         }
         self.update_gauges(&inner);
-
-        counter!(SHALLOW_REFRESH, "query_id" => query_id.to_string()).increment(1);
     }
 
     /// Spawn a send as a background task (for use from sync contexts like callbacks).
