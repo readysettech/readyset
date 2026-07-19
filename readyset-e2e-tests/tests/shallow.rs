@@ -2044,6 +2044,87 @@ async fn pg_hint_creates_shallow_cache() {
     shutdown_tx.shutdown().await;
 }
 
+/// Verify that `SHOW SHALLOW CACHE ENTRIES` succeeds on the PostgreSQL
+/// adapter. Before the fix, converting this command's integer columns
+/// (`refresh_time_ms`, `refresh_period_ms`, `bytes`) to the Postgres wire
+/// type failed server-side because they were declared as text; this
+/// regressed on every non-empty result.
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_show_shallow_cache_entries() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+
+    let mut cfg = psql_helpers::upstream_config();
+    cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(cfg).await;
+    upstream
+        .simple_query("CREATE TABLE t (id INT, val INT)")
+        .await
+        .expect("create table");
+    upstream
+        .simple_query("INSERT INTO t VALUES (1, 100), (2, 200)")
+        .await
+        .expect("insert");
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(&test_name)
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let mut rs_cfg = rs_opts.clone();
+    rs_cfg.dbname(&test_name);
+    let rs = psql_helpers::connect(rs_cfg).await;
+
+    // Create a shallow cache with a scheduled refresh (so refresh_period_ms is
+    // populated rather than NULL) and populate two entries.
+    rs.simple_query(
+        "SELECT /*rs+ CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH EVERY 30 SECONDS */ \
+         id, val FROM t WHERE id = 1",
+    )
+    .await
+    .expect("create cache via hint");
+    rs.simple_query(
+        "SELECT /*rs+ CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH EVERY 30 SECONDS */ \
+         id, val FROM t WHERE id = 2",
+    )
+    .await
+    .expect("populate second entry");
+
+    let rows = rs
+        .simple_query("SHOW SHALLOW CACHE ENTRIES")
+        .await
+        .expect("SHOW SHALLOW CACHE ENTRIES should succeed");
+    let entry_rows = rows
+        .iter()
+        .filter(|m| matches!(m, SimpleQueryMessage::Row(_)))
+        .count();
+    assert_eq!(entry_rows, 2, "should have 2 cache entries");
+
+    // The simple query protocol always returns values as text on the wire, so parsing
+    // these columns as integers doesn't confirm the exact declared wire type; it does
+    // confirm the fix, since converting these DfValues to Postgres's wire type is what
+    // failed server-side (SQLSTATE 0A000) before the columns were declared as integers.
+    let refresh_time_ms: i64 = first_row_col(&rows, 4)
+        .parse()
+        .expect("refresh_time_ms should be numeric");
+    assert!(refresh_time_ms < 60_000, "refresh should be well under the 60s TTL");
+    let refresh_period_ms: i64 = first_row_col(&rows, 5)
+        .parse()
+        .expect("refresh_period_ms should be numeric, not NULL, given REFRESH EVERY 30 SECONDS");
+    assert_eq!(refresh_period_ms, 30_000);
+    let bytes: i64 = first_row_col(&rows, 6)
+        .parse()
+        .expect("bytes should be numeric");
+    assert!(bytes > 0);
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Verify that a hinted prepared statement creates a shallow cache on the
 /// PostgreSQL adapter via the extended protocol (prepare + execute path).
 #[test]

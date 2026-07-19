@@ -1601,12 +1601,12 @@ where
                         DfValue::from(format!("{:016x}", entry.entry_id)),
                         time_or_null(Some(entry.last_accessed_ms)).into(),
                         time_or_null(Some(entry.last_refreshed_ms)).into(),
-                        DfValue::from(entry.refresh_time_ms as i64),
+                        entry.refresh_time_ms.into(),
                         entry
                             .refresh_period_ms
-                            .map(|ms| DfValue::from(ms as i64))
+                            .map(DfValue::from)
                             .unwrap_or(DfValue::None),
-                        DfValue::from(entry.bytes as i64),
+                        entry.bytes.into(),
                     ]
                 })
                 .collect()
@@ -1614,15 +1614,21 @@ where
         .await
         .map_err(|e| internal_err!("spawn_blocking failed: {}", e))?;
 
-        let select_schema = create_dummy_schema!(
-            "query_id",
-            "entry_id",
-            "last_accessed",
-            "last_refreshed",
-            "refresh_time_ms",
-            "refresh_period_ms",
-            "bytes"
-        );
+        let mut select_schema =
+            create_dummy_schema!("query_id", "entry_id", "last_accessed", "last_refreshed");
+        // refresh_time_ms/refresh_period_ms/bytes carry integer DfValues; the dummy-schema
+        // macro only emits text, so declare them with the matching integer type.
+        for name in ["refresh_time_ms", "refresh_period_ms", "bytes"] {
+            select_schema.schema.to_mut().push(ColumnSchema {
+                column: ast::Column {
+                    name: name.into(),
+                    table: None,
+                },
+                column_type: DfType::UnsignedBigInt,
+                base: None,
+            });
+            select_schema.columns.to_mut().push(name.into());
+        }
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
