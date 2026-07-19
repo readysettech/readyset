@@ -52,7 +52,9 @@ use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
-use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
+use crate::mysql_connector::utils::{
+    mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
+};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
 
@@ -2478,9 +2480,11 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
                     match json {
-                        Ok(val) => Ok(DfValue::from(&val)),
+                        Ok(val) => Ok(DfValue::from(mysql_json_print(&val))),
                         Err(JsonbToJsonError::Opaque) => {
-                            Ok(DfValue::from(&binlog_to_serde_jsonb_value(val)?))
+                            Ok(DfValue::from(mysql_json_print(
+                                &binlog_to_serde_jsonb_value(val)?,
+                            )))
                         }
                         Err(JsonbToJsonError::InvalidUtf8(e)) => Err(e.into()),
                         Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
