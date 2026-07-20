@@ -53,6 +53,9 @@ const REASON_SYSTEM_SCHEMA: &str = "system schema reference";
 const REASON_SESSION_SPECIFIC: &str = "session-specific function";
 const REASON_USER_VARIABLE: &str = "user or session variable";
 const REASON_UDF: &str = "user-defined function";
+// Default-deny catch-all: a recognized builtin not proven cacheable and not on
+// any relaxable list. Distinct from the specific hazard reasons above.
+const REASON_BUILTIN_NOT_ALLOWED: &str = "builtin not allowed for caching";
 const REASON_UNSEEDED_TABLESAMPLE: &str = "unseeded TABLESAMPLE";
 
 /// MySQL system databases.  Mirrors `replicators::MYSQL_INTERNAL_DBS`; kept
@@ -291,10 +294,15 @@ const MYSQL_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
     "internal_update_time",
 ];
 
-/// MySQL builtins whose result depends on session/connection state (identity,
-/// current database/role, connection, or per-session statement state). Caching
-/// one would serve another session's value.
-/// `--shallow-cache-allow-session-specific` opts into caching these.
+/// MySQL builtins whose result depends on session identity (current user, role,
+/// database, schema) or privileges. Caching one would serve another session's
+/// value; `--shallow-cache-allow-session-specific` opts into caching these.
+///
+/// Connection- and statement-state reads (`last_insert_id`, `connection_id`,
+/// `found_rows`, `row_count`, the `ps_*` thread ids) are deliberately absent: a
+/// cached value is always some other connection's, so they are left to the
+/// builtin default-deny that no per-category flag relaxes. Only
+/// `--shallow-cache-allow-all-functions` or the runtime allowlist caches one.
 const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "user",
     "current_user",
@@ -303,12 +311,6 @@ const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "current_role",
     "database",
     "schema",
-    "connection_id",
-    "last_insert_id",
-    "found_rows",
-    "row_count",
-    "ps_current_thread_id",
-    "ps_thread_id",
     "can_access_database",
     "can_access_column",
     "can_access_table",
@@ -319,9 +321,9 @@ const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
 /// MySQL side-effecting or blocking builtins. Under default-deny these are
 /// already denied (absent from [`MYSQL_IMMUTABLE_FUNCTIONS`]); this list is not
 /// a guard but a reason refinement -- it reports the accurate
-/// [`REASON_SIDE_EFFECT`] instead of the generic non-deterministic reason for
-/// functions that are side-effecting rather than non-deterministic (a blocking
-/// `sleep`, a lock acquisition). Reachable only via
+/// [`REASON_SIDE_EFFECT`] instead of the generic default-deny reason for
+/// functions that are side-effecting (a blocking `sleep`, a lock acquisition).
+/// Reachable only via
 /// `--shallow-cache-allow-all-functions` or the runtime allowlist; there is no
 /// dedicated side-effect opt-in. Not exhaustive; a missing entry only yields the
 /// generic reason, never a caching hole.
@@ -356,6 +358,12 @@ const MYSQL_SIDE_EFFECTING_FUNCTIONS: &[&str] = &[
 /// them to `--shallow-cache-allow-session-specific` rather than the broader
 /// `--shallow-cache-allow-nondeterministic`. The bare-identifier session
 /// specials (`current_user`, ...) are handled by [`SESSION_SPECIFIC_BARE_IDENTIFIERS`].
+///
+/// Connection-identity reads (`pg_backend_pid`, `inet_client_addr`,
+/// `inet_client_port`) are deliberately absent: a cached value is always some
+/// other connection's, so they fall to the builtin default-deny that no
+/// per-category flag relaxes. `inet_server_*` stay -- the server address is the
+/// same for every session.
 const PG_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     // Identity/context specials, which sqlparser may surface as a function call
     // (`current_user`) as well as a bare identifier (see
@@ -370,9 +378,6 @@ const PG_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     // Function-only session reads.
     "current_setting",
     "current_query",
-    "pg_backend_pid",
-    "inet_client_addr",
-    "inet_client_port",
     "inet_server_addr",
     "inet_server_port",
 ];
@@ -399,7 +404,7 @@ const PG_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
 /// default-deny these are already denied (non-IMMUTABLE, absent from the
 /// generated `IMMUTABLE_BUILTINS`); this list is a reason refinement, not a
 /// guard -- it reports the accurate [`REASON_SIDE_EFFECT`] rather than the
-/// generic non-deterministic reason. Side-effecting is orthogonal to
+/// generic default-deny reason. Side-effecting is orthogonal to
 /// non-determinism: `setval('s', 42)` returns 42 deterministically yet mutates
 /// the sequence, and `pg_sleep(1)` always returns void yet blocks. Reachable
 /// only via `--shallow-cache-allow-all-functions` or the runtime allowlist;
@@ -916,7 +921,7 @@ impl AutoCacheVisitor<'_> {
                 } else if on(PG_NONDETERMINISTIC_FUNCTIONS) || is_nondeterministic_special(name) {
                     (!self.allow_nondeterministic).then_some(REASON_NON_DETERMINISTIC)
                 } else if is_builtin(name, self.dialect) {
-                    Some(REASON_NON_DETERMINISTIC)
+                    Some(REASON_BUILTIN_NOT_ALLOWED)
                 } else {
                     (!self.allow_udf).then_some(REASON_UDF)
                 }
@@ -939,7 +944,7 @@ impl AutoCacheVisitor<'_> {
                 } else if on(MYSQL_NONDETERMINISTIC_FUNCTIONS) {
                     (!self.allow_nondeterministic).then_some(REASON_NON_DETERMINISTIC)
                 } else if is_builtin(name, self.dialect) {
-                    Some(REASON_NON_DETERMINISTIC)
+                    Some(REASON_BUILTIN_NOT_ALLOWED)
                 } else {
                     (!self.allow_udf).then_some(REASON_UDF)
                 }
@@ -1331,6 +1336,13 @@ mod tests {
             "SELECT random_normal()",
             "SELECT gen_random_uuid()",
             "SELECT clock_timestamp()",
+        ] {
+            assert_rejected(Dialect::PostgreSQL, q, REASON_NON_DETERMINISTIC);
+        }
+        // Recognized builtins absent from the curated non-deterministic list are
+        // still denied, but by the generic builtin default-deny -- the pass does
+        // not claim they are non-deterministic, only that they were not allowed.
+        for q in [
             "SELECT txid_status(1)",
             "SELECT lastval()",
             "SELECT currval('s')",
@@ -1345,7 +1357,7 @@ mod tests {
             "SELECT pg_replication_origin_progress('o', true)",
             "SELECT pg_replication_origin_session_is_setup()",
         ] {
-            assert_rejected(Dialect::PostgreSQL, q, REASON_NON_DETERMINISTIC);
+            assert_rejected(Dialect::PostgreSQL, q, REASON_BUILTIN_NOT_ALLOWED);
         }
         // pgcrypto lives outside pg_catalog, so under default-deny its functions
         // are user-defined (still blocked, just via the UDF path).
@@ -1362,7 +1374,7 @@ mod tests {
         // functions have a mix of immutable and non-immutable overloads (e.g.
         // date_trunc is immutable for (text, timestamp) but stable for
         // (text, timestamptz)), so the name must NOT count as immutable. They
-        // are still recognized builtins, denied as non-deterministic by default
+        // are still recognized builtins, denied by the builtin default-deny
         // rather than wrongly cached.
         for q in [
             "SELECT date_trunc('day', c) FROM t",
@@ -1372,7 +1384,7 @@ mod tests {
             "SELECT ts_rewrite(c, 'a', 'b') FROM t",
             "SELECT generate_series(1, 10)",
         ] {
-            assert_rejected(Dialect::PostgreSQL, q, REASON_NON_DETERMINISTIC);
+            assert_rejected(Dialect::PostgreSQL, q, REASON_BUILTIN_NOT_ALLOWED);
         }
     }
 
@@ -1792,10 +1804,11 @@ mod tests {
 
     #[test]
     fn non_deterministic_function_in_group_by_is_blocked() {
-        assert_rejected(
-            Dialect::MySQL,
-            "SELECT count(*) FROM users GROUP BY RAND()",
-            REASON_NON_DETERMINISTIC,
+        // The visitor must descend into GROUP BY: RAND() there contributes the
+        // non-deterministic reason (alongside the aggregate's own default-deny).
+        assert!(
+            skip_reasons(Dialect::MySQL, "SELECT count(*) FROM users GROUP BY RAND()")
+                .contains(&REASON_NON_DETERMINISTIC)
         );
     }
 
@@ -1810,10 +1823,15 @@ mod tests {
 
     #[test]
     fn non_deterministic_function_in_window_spec_is_blocked() {
-        assert_rejected(
-            Dialect::MySQL,
-            "SELECT ROW_NUMBER() OVER (ORDER BY RAND()) FROM users",
-            REASON_NON_DETERMINISTIC,
+        // The visitor must descend into the window ORDER BY: RAND() there
+        // contributes the non-deterministic reason (alongside the window
+        // function's own default-deny).
+        assert!(
+            skip_reasons(
+                Dialect::MySQL,
+                "SELECT ROW_NUMBER() OVER (ORDER BY RAND()) FROM users"
+            )
+            .contains(&REASON_NON_DETERMINISTIC)
         );
     }
 
@@ -1980,18 +1998,12 @@ mod tests {
     fn session_specific_functions_are_blocked() {
         // Session-dependent functions are denied by default and routed to
         // allow-session-specific, not the broader allow-nondeterministic.
-        for q in [
-            "SELECT current_user()",
-            "SELECT DATABASE()",
-            "SELECT connection_id()",
-            "SELECT last_insert_id()",
-        ] {
+        for q in ["SELECT current_user()", "SELECT DATABASE()"] {
             assert_rejected(Dialect::MySQL, q, REASON_SESSION_SPECIFIC);
         }
         for q in [
             "SELECT current_setting('search_path')",
             "SELECT current_database()",
-            "SELECT pg_backend_pid()",
         ] {
             assert_rejected(Dialect::PostgreSQL, q, REASON_SESSION_SPECIFIC);
         }
@@ -2006,6 +2018,78 @@ mod tests {
             "SELECT session_user",
             REASON_SESSION_SPECIFIC,
         );
+    }
+
+    #[test]
+    fn connection_and_statement_state_functions_deny_by_default() {
+        // last_insert_id / connection_id / found_rows / row_count (MySQL) and
+        // pg_backend_pid / inet_client_* (PG) report values meaningful only to the
+        // calling connection, so a cached value is always some other connection's.
+        // They are hardcoded in no relaxable list: denied by the builtin
+        // default-deny, which no per-category flag opens.
+        for q in [
+            "SELECT last_insert_id()",
+            "SELECT connection_id()",
+            "SELECT found_rows()",
+            "SELECT row_count()",
+        ] {
+            // Denied by default...
+            assert_eq!(
+                skip_reason(Dialect::MySQL, q),
+                Some(REASON_BUILTIN_NOT_ALLOWED),
+                "{q}"
+            );
+            // ...not relaxed by allow-session-specific (they left that class)...
+            assert_eq!(
+                run(Dialect::MySQL, q, false, false, false, true, false),
+                Some(REASON_BUILTIN_NOT_ALLOWED),
+                "{q} under allow-session-specific"
+            );
+            // ...nor by allow-nondeterministic (the builtin fallthrough is ungated)...
+            assert_eq!(
+                run(Dialect::MySQL, q, true, false, false, false, false),
+                Some(REASON_BUILTIN_NOT_ALLOWED),
+                "{q} under allow-nondeterministic"
+            );
+            // ...but allow-all-functions DOES cache them: not being hardcoded in
+            // any deny list, the broad escape hatch reaches them.
+            assert_eq!(
+                run(Dialect::MySQL, q, false, false, false, false, true),
+                None,
+                "{q} under allow-all-functions"
+            );
+        }
+        // The runtime function allowlist reaches them too.
+        assert_eq!(
+            skip_reason_allowlisting(
+                Dialect::MySQL,
+                "SELECT last_insert_id()",
+                &["last_insert_id"]
+            ),
+            None
+        );
+        // Same for the PostgreSQL connection-identity reads.
+        for q in [
+            "SELECT pg_backend_pid()",
+            "SELECT inet_client_addr()",
+            "SELECT inet_client_port()",
+        ] {
+            assert_eq!(
+                skip_reason(Dialect::PostgreSQL, q),
+                Some(REASON_BUILTIN_NOT_ALLOWED),
+                "{q}"
+            );
+            assert_eq!(
+                run(Dialect::PostgreSQL, q, false, false, false, true, false),
+                Some(REASON_BUILTIN_NOT_ALLOWED),
+                "{q} under allow-session-specific"
+            );
+            assert_eq!(
+                run(Dialect::PostgreSQL, q, false, false, false, false, true),
+                None,
+                "{q} under allow-all-functions"
+            );
+        }
     }
 
     #[test]
@@ -2028,9 +2112,6 @@ mod tests {
             .is_none()
         );
         assert!(skip_reason_allow_session_specific(Dialect::MySQL, "SELECT DATABASE()").is_none());
-        assert!(
-            skip_reason_allow_session_specific(Dialect::MySQL, "SELECT connection_id()").is_none()
-        );
         assert!(
             skip_reason_allow_session_specific(Dialect::PostgreSQL, "SELECT current_user")
                 .is_none()
@@ -2133,7 +2214,7 @@ mod tests {
             "SELECT date_format(d, '%W') FROM foo", // lc_time_names
             "SELECT week(d) FROM foo",          // default_week_format
         ] {
-            assert_rejected(Dialect::MySQL, q, REASON_NON_DETERMINISTIC);
+            assert_rejected(Dialect::MySQL, q, REASON_BUILTIN_NOT_ALLOWED);
         }
     }
 
