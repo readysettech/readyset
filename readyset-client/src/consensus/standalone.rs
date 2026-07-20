@@ -663,43 +663,79 @@ mod tests {
 
     #[tokio::test]
     async fn shallow_cache_allowlist_round_trip() {
+        use readyset_sql::ast::ShallowCacheAllowlistKind;
+
         let dir = tempdir().unwrap();
         let authority = Arc::new(
             StandaloneAuthority::new(dir.path().to_str().unwrap(), "shallow_cache_allowlist")
                 .unwrap(),
         );
 
-        assert!(authority
-            .shallow_cache_allowlist()
-            .await
-            .unwrap()
-            .is_empty());
+        // Every kind starts empty and round-trips add/dedup/remove independently.
+        for kind in [
+            ShallowCacheAllowlistKind::Function,
+            ShallowCacheAllowlistKind::Variable,
+            ShallowCacheAllowlistKind::Schema,
+        ] {
+            assert!(authority
+                .shallow_cache_allowlist(kind)
+                .await
+                .unwrap()
+                .is_empty());
 
-        authority
-            .add_shallow_cache_allowed_function("now".to_string())
-            .await
-            .unwrap();
-        authority
-            .add_shallow_cache_allowed_function("uuid".to_string())
-            .await
-            .unwrap();
-        // Adding an already-present name is a no-op.
-        authority
-            .add_shallow_cache_allowed_function("now".to_string())
-            .await
-            .unwrap();
+            authority
+                .add_shallow_cache_allowed(kind, "now".to_string())
+                .await
+                .unwrap();
+            authority
+                .add_shallow_cache_allowed(kind, "uuid".to_string())
+                .await
+                .unwrap();
+            // Adding an already-present name is a no-op.
+            authority
+                .add_shallow_cache_allowed(kind, "now".to_string())
+                .await
+                .unwrap();
 
-        let mut names = authority.shallow_cache_allowlist().await.unwrap();
-        names.sort();
-        assert_eq!(names, vec!["now".to_string(), "uuid".to_string()]);
+            let mut names = authority.shallow_cache_allowlist(kind).await.unwrap();
+            names.sort();
+            assert_eq!(names, vec!["now".to_string(), "uuid".to_string()]);
 
+            authority
+                .remove_shallow_cache_allowed(kind, "now".to_string())
+                .await
+                .unwrap();
+            assert_eq!(
+                authority.shallow_cache_allowlist(kind).await.unwrap(),
+                vec!["uuid".to_string()]
+            );
+        }
+
+        // The three kinds are stored under distinct keys, so a batch ALTER of
+        // one leaves the others untouched.
         authority
-            .remove_shallow_cache_allowed_function("now".to_string())
+            .modify_shallow_cache_allowlist(
+                ShallowCacheAllowlistKind::Variable,
+                true,
+                vec!["version_comment".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(
-            authority.shallow_cache_allowlist().await.unwrap(),
+            authority
+                .shallow_cache_allowlist(ShallowCacheAllowlistKind::Function)
+                .await
+                .unwrap(),
             vec!["uuid".to_string()]
+        );
+        let mut vars = authority
+            .shallow_cache_allowlist(ShallowCacheAllowlistKind::Variable)
+            .await
+            .unwrap();
+        vars.sort();
+        assert_eq!(
+            vars,
+            vec!["uuid".to_string(), "version_comment".to_string()]
         );
     }
 }

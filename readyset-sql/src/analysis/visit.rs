@@ -1274,8 +1274,8 @@ pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
             .tables
             .iter()
             .try_for_each(|table| visitor.visit_table(table)),
-        AlterReadysetStatement::ShallowCacheAllowedFunctions(stmt) => stmt
-            .functions
+        AlterReadysetStatement::ShallowCacheAllowlistChange(stmt) => stmt
+            .names
             .iter()
             .try_for_each(|name| visitor.visit_sql_identifier(name)),
         AlterReadysetStatement::EnterMaintenanceMode

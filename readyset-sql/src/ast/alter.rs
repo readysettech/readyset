@@ -505,18 +505,53 @@ pub struct ChangeCdcStatement {
     pub url: String,
 }
 
-/// `ALTER READYSET {ADD | DROP} SHALLOW CACHE ALLOWED FUNCTION <name>[, <name>...]`.
+/// Which shallow-cache auto-creation allowlist an `ALTER`/`SHOW READYSET`
+/// statement targets. Each kind is a dedicated, independently persisted set:
+/// [`Function`](Self::Function) names bypass the builtin function deny-lists,
+/// [`Variable`](Self::Variable) names bypass the session/user-variable guard,
+/// and [`Schema`](Self::Schema) names bypass the system-schema guard.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum ShallowCacheAllowlistKind {
+    Function,
+    Variable,
+    Schema,
+}
+
+impl ShallowCacheAllowlistKind {
+    /// The singular keyword used in `ALTER READYSET ... SHALLOW CACHE ALLOWED <KW>`.
+    pub fn singular_keyword(self) -> &'static str {
+        match self {
+            Self::Function => "FUNCTION",
+            Self::Variable => "VARIABLE",
+            Self::Schema => "SCHEMA",
+        }
+    }
+
+    /// The plural keyword used in `SHOW SHALLOW CACHE ALLOWED <KW>`.
+    pub fn plural_keyword(self) -> &'static str {
+        match self {
+            Self::Function => "FUNCTIONS",
+            Self::Variable => "VARIABLES",
+            Self::Schema => "SCHEMAS",
+        }
+    }
+}
+
+/// `ALTER READYSET {ADD | DROP} SHALLOW CACHE ALLOWED {FUNCTION | VARIABLE | SCHEMA} <name>[, <name>...]`.
 ///
-/// Adds or removes function names from the shallow-cache auto-creation
-/// allowlist: a name on the allowlist is treated as eligible for auto-caching
-/// even when it appears on a built-in deny-list.
+/// Adds or removes names from one of the shallow-cache auto-creation allowlists
+/// (selected by [`kind`](Self::kind)): a name on an allowlist is treated as
+/// eligible for auto-caching even when it would otherwise be denied (a builtin
+/// on a deny-list, a session/user variable, or a system schema).
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct ShallowCacheAllowedFunctions {
+pub struct ShallowCacheAllowlistChange {
+    /// Which allowlist this change targets.
+    pub kind: ShallowCacheAllowlistKind,
     /// `true` for `ADD`, `false` for `DROP`.
     pub add: bool,
-    /// The function names being allowed (`ADD`) or removed from the allowlist (`DROP`).
+    /// The names being allowed (`ADD`) or removed from the allowlist (`DROP`).
     #[strategy(any_with::<Vec<SqlIdentifier>>(size_range(1..8).lift()))]
-    pub functions: Vec<SqlIdentifier>,
+    pub names: Vec<SqlIdentifier>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -532,7 +567,7 @@ pub enum AlterReadysetStatement {
     StartReplication,
     SetReplicationPosition(SetReplicationPositionStatement),
     ChangeCdc(ChangeCdcStatement),
-    ShallowCacheAllowedFunctions(ShallowCacheAllowedFunctions),
+    ShallowCacheAllowlistChange(ShallowCacheAllowlistChange),
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -582,12 +617,13 @@ impl DialectDisplay for AlterReadysetStatement {
             Self::ChangeCdc(stmt) => {
                 write!(f, "CHANGE CDC TO '{}'", stmt.url)
             }
-            Self::ShallowCacheAllowedFunctions(stmt) => {
+            Self::ShallowCacheAllowlistChange(stmt) => {
                 write!(
                     f,
-                    "{} SHALLOW CACHE ALLOWED FUNCTION {}",
+                    "{} SHALLOW CACHE ALLOWED {} {}",
                     if stmt.add { "ADD" } else { "DROP" },
-                    stmt.functions
+                    stmt.kind.singular_keyword(),
+                    stmt.names
                         .iter()
                         .map(|name| dialect.quote_identifier(name))
                         .join(", ")

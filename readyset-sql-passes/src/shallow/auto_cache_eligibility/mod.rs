@@ -34,7 +34,7 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, OnceLock};
 
 use readyset_sql::Dialect;
-use readyset_sql::ast::ShallowCacheQuery;
+use readyset_sql::ast::{ShallowCacheAllowlistKind, ShallowCacheQuery};
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
     Expr, Function, ObjectName, Query, SetExpr, TableFactor, TableSampleKind, Value, ValueWithSpan,
@@ -600,6 +600,48 @@ impl ShallowCacheAllowlist {
     }
 }
 
+/// The three dedicated shallow-cache auto-creation allowlists, one per
+/// [`ShallowCacheAllowlistKind`]: `functions` bypasses the builtin function
+/// deny-lists, `variables` bypasses the session/user-variable guard, and
+/// `schemas` bypasses the system-schema guard. Each is an independent
+/// [`ShallowCacheAllowlist`] handle (a cheap `Arc` clone) shared across every
+/// connection on the adapter, so a runtime `ALTER READYSET ... SHALLOW CACHE
+/// ALLOWED ...` is visible to all of them at once.
+#[derive(Debug, Clone, Default)]
+pub struct ShallowCacheAllowlists {
+    pub functions: ShallowCacheAllowlist,
+    pub variables: ShallowCacheAllowlist,
+    pub schemas: ShallowCacheAllowlist,
+}
+
+impl ShallowCacheAllowlists {
+    /// The allowlist for `kind`.
+    pub fn for_kind(&self, kind: ShallowCacheAllowlistKind) -> &ShallowCacheAllowlist {
+        match kind {
+            ShallowCacheAllowlistKind::Function => &self.functions,
+            ShallowCacheAllowlistKind::Variable => &self.variables,
+            ShallowCacheAllowlistKind::Schema => &self.schemas,
+        }
+    }
+}
+
+/// The bare name of a `@`/`@@`-prefixed variable reference, as matched against
+/// the variables allowlist: leading `@` sigils and any `session.`/`global.`
+/// scope qualifier are stripped, so `@@version_comment`,
+/// `@@session.version_comment`, and a plain `version_comment` allowlist entry
+/// all refer to the same variable. Matched case-insensitively by the caller.
+fn variable_name(raw: &str) -> &str {
+    let stripped = raw.trim_start_matches('@');
+    stripped.rsplit('.').next().unwrap_or(stripped)
+}
+
+/// Case-insensitive membership test against an allowlist set. The sets are
+/// small and already read-locked for the walk, so this scans without
+/// allocating a lowercased copy of the candidate.
+fn contains_ci(set: &HashSet<String>, name: &str) -> bool {
+    set.iter().any(|allowed| name.eq_ignore_ascii_case(allowed))
+}
+
 /// Return every reason this shallow query should be excluded from
 /// in-request-path auto-creation, grouped by reason class in first-encountered
 /// order, with the offending function names collected under each. An empty
@@ -611,13 +653,15 @@ pub fn auto_cache_skip_reasons(
     query: &ShallowCacheQuery,
     dialect: Dialect,
     eligibility: &ShallowCacheEligibility,
-    allowlist: &ShallowCacheAllowlist,
+    allowlists: &ShallowCacheAllowlists,
 ) -> Vec<SkipReason> {
-    // Read-lock the allowlist once for the whole walk and compare names without
+    // Read-lock each allowlist once for the whole walk and compare names without
     // allocating. This runs once per previously-unseen query (the verdict is
     // memoized in the skip set), so it is not a per-row path, but there is still
-    // no reason to lock and allocate a lowercased copy on every function node.
-    let allowed = allowlist.read();
+    // no reason to lock and allocate a lowercased copy on every node.
+    let functions = allowlists.functions.read();
+    let variables = allowlists.variables.read();
+    let schemas = allowlists.schemas.read();
     let mut visitor = AutoCacheVisitor {
         dialect,
         allow_nondeterministic: eligibility.allow_nondeterministic,
@@ -625,7 +669,9 @@ pub fn auto_cache_skip_reasons(
         allow_all_functions: eligibility.allow_all_functions,
         allow_system_schema: eligibility.allow_system_schema,
         allow_session_specific: eligibility.allow_session_specific,
-        allowlist: &allowed,
+        fn_allowlist: &functions,
+        var_allowlist: &variables,
+        schema_allowlist: &schemas,
         system_schemas: match dialect {
             Dialect::MySQL => MYSQL_SYSTEM_SCHEMAS,
             Dialect::PostgreSQL => PG_SYSTEM_SCHEMAS,
@@ -643,9 +689,9 @@ pub fn auto_cache_skip_reason(
     query: &ShallowCacheQuery,
     dialect: Dialect,
     eligibility: &ShallowCacheEligibility,
-    allowlist: &ShallowCacheAllowlist,
+    allowlists: &ShallowCacheAllowlists,
 ) -> Option<&'static str> {
-    auto_cache_skip_reasons(query, dialect, eligibility, allowlist)
+    auto_cache_skip_reasons(query, dialect, eligibility, allowlists)
         .into_iter()
         .next()
         .map(|r| r.reason)
@@ -658,7 +704,9 @@ struct AutoCacheVisitor<'a> {
     allow_all_functions: bool,
     allow_system_schema: bool,
     allow_session_specific: bool,
-    allowlist: &'a HashSet<String>,
+    fn_allowlist: &'a HashSet<String>,
+    var_allowlist: &'a HashSet<String>,
+    schema_allowlist: &'a HashSet<String>,
     system_schemas: &'static [&'static str],
     reasons: Vec<SkipReason>,
 }
@@ -688,6 +736,7 @@ impl Visitor for AutoCacheVisitor<'_> {
         for part in &name.0 {
             if let Some(ident) = part.as_ident()
                 && is_system_schema(&ident.value, self.dialect, self.system_schemas)
+                && !self.schema_allowlisted(&ident.value)
             {
                 self.add_reason(REASON_SYSTEM_SCHEMA, None);
                 break;
@@ -716,7 +765,11 @@ impl Visitor for AutoCacheVisitor<'_> {
 
     fn pre_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
         let (reason, function): (&'static str, Option<&str>) = match expr {
-            Expr::Identifier(id) if !self.allow_session_specific && id.value.starts_with('@') => {
+            Expr::Identifier(id)
+                if !self.allow_session_specific
+                    && id.value.starts_with('@')
+                    && !self.variable_allowlisted(&id.value) =>
+            {
                 (REASON_USER_VARIABLE, None)
             }
             Expr::Identifier(id)
@@ -739,14 +792,20 @@ impl Visitor for AutoCacheVisitor<'_> {
             }
             Expr::CompoundIdentifier(parts)
                 if !self.allow_session_specific
-                    && parts.first().is_some_and(|p| p.value.starts_with('@')) =>
+                    && parts.first().is_some_and(|p| p.value.starts_with('@'))
+                    && !parts
+                        .last()
+                        .is_some_and(|p| self.variable_allowlisted(&p.value)) =>
             {
                 (REASON_USER_VARIABLE, None)
             }
             Expr::Value(ValueWithSpan {
                 value: Value::Placeholder(s),
                 ..
-            }) if !self.allow_session_specific && s.starts_with('@') => {
+            }) if !self.allow_session_specific
+                && s.starts_with('@')
+                && !self.variable_allowlisted(s) =>
+            {
                 (REASON_USER_VARIABLE, None)
             }
             Expr::Function(func) => match self.function_reason(func) {
@@ -786,13 +845,30 @@ impl AutoCacheVisitor<'_> {
         }
     }
 
-    /// Whether `name` is on the operator allowlist (case-insensitive). The set
-    /// is small and already read-locked for the walk, so this scans without
-    /// allocating a lowercased copy of the candidate.
+    /// Whether `name` is on the operator function allowlist (case-insensitive).
     fn allowlisted(&self, name: &str) -> bool {
-        self.allowlist
-            .iter()
-            .any(|allowed| name.eq_ignore_ascii_case(allowed))
+        contains_ci(self.fn_allowlist, name)
+    }
+
+    /// Whether the variable referenced by `raw` (a `@`/`@@`-prefixed token) is
+    /// on the operator variable allowlist. Matches on the bare variable name
+    /// (see [`variable_name`]), so an allowlist entry `version_comment` covers
+    /// `@@version_comment` and `@@session.version_comment` alike.
+    fn variable_allowlisted(&self, raw: &str) -> bool {
+        contains_ci(self.var_allowlist, variable_name(raw))
+    }
+
+    /// Whether the system schema `name` is on the operator schema allowlist.
+    /// Allowlisting `pg_catalog` additionally covers any `pg_`-prefixed catalog
+    /// reference, which PostgreSQL treats as a system reference wholesale.
+    fn schema_allowlisted(&self, name: &str) -> bool {
+        contains_ci(self.schema_allowlist, name)
+            || (matches!(self.dialect, Dialect::PostgreSQL)
+                && name
+                    .as_bytes()
+                    .get(..3)
+                    .is_some_and(|p| p.eq_ignore_ascii_case(b"pg_"))
+                && contains_ci(self.schema_allowlist, "pg_catalog"))
     }
 
     /// Why a function call makes the query ineligible, or `None` if it is a
@@ -1021,8 +1097,11 @@ mod tests {
             allow_system_schema,
             allow_session_specific,
         };
-        let allowlist = ShallowCacheAllowlist::new(allowlist.iter().map(|s| s.to_string()));
-        auto_cache_skip_reason(&parsed, dialect, &eligibility, &allowlist)
+        let allowlists = ShallowCacheAllowlists {
+            functions: ShallowCacheAllowlist::new(allowlist.iter().map(|s| s.to_string())),
+            ..Default::default()
+        };
+        auto_cache_skip_reason(&parsed, dialect, &eligibility, &allowlists)
     }
 
     /// Skip reason with only the given function names allowlisted (all opt-in
@@ -1037,6 +1116,29 @@ mod tests {
 
     fn skip_reason(dialect: Dialect, q: &str) -> Option<&'static str> {
         run(dialect, q, false, false, false, false, false)
+    }
+
+    /// Skip reason with the given per-kind allowlists populated and every opt-in
+    /// flag off, exercising the variables and schemas allowlists.
+    fn skip_reason_with_allowlists(
+        dialect: Dialect,
+        q: &str,
+        functions: &[&str],
+        variables: &[&str],
+        schemas: &[&str],
+    ) -> Option<&'static str> {
+        let (parsed, _hint) = parse_shallow_query(dialect, q).expect("shallow parse");
+        let allowlists = ShallowCacheAllowlists {
+            functions: ShallowCacheAllowlist::new(functions.iter().map(|s| s.to_string())),
+            variables: ShallowCacheAllowlist::new(variables.iter().map(|s| s.to_string())),
+            schemas: ShallowCacheAllowlist::new(schemas.iter().map(|s| s.to_string())),
+        };
+        auto_cache_skip_reason(
+            &parsed,
+            dialect,
+            &ShallowCacheEligibility::default(),
+            &allowlists,
+        )
     }
 
     fn skip_reason_with(
@@ -1427,7 +1529,7 @@ mod tests {
             &parsed,
             Dialect::MySQL,
             &ShallowCacheEligibility::default(),
-            &ShallowCacheAllowlist::default(),
+            &ShallowCacheAllowlists::default(),
         );
         assert!(
             reasons.iter().any(|r| r.reason == REASON_NON_DETERMINISTIC)
@@ -1537,6 +1639,122 @@ mod tests {
         assert_eq!(
             skip_reason_allowlisting(Dialect::PostgreSQL, "SELECT app.now() FROM t", &["now"]),
             Some(REASON_UDF)
+        );
+    }
+
+    #[test]
+    fn variables_allowlist_overrides_user_variable() {
+        // A `@@`-system-variable read is denied by default (session-specific).
+        assert_eq!(
+            skip_reason(Dialect::MySQL, "SELECT @@version_comment"),
+            Some(REASON_USER_VARIABLE)
+        );
+        // Allowlisting the bare variable name makes that one variable eligible,
+        // by name or with the `@@` sigil, while others stay blocked.
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT @@version_comment",
+                &[],
+                &["version_comment"],
+                &[]
+            ),
+            None
+        );
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT @@sql_mode",
+                &[],
+                &["version_comment"],
+                &[]
+            ),
+            Some(REASON_USER_VARIABLE)
+        );
+        // The variables allowlist is keyed on the bare name, so a `session.`
+        // scope qualifier is transparent.
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT @@session.version_comment",
+                &[],
+                &["version_comment"],
+                &[]
+            ),
+            None
+        );
+        // The functions allowlist must not stand in for the variables one.
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT @@version_comment",
+                &["version_comment"],
+                &[],
+                &[]
+            ),
+            Some(REASON_USER_VARIABLE)
+        );
+    }
+
+    #[test]
+    fn schemas_allowlist_overrides_system_schema() {
+        // A system-schema reference is denied by default.
+        assert_eq!(
+            skip_reason(Dialect::MySQL, "SELECT * FROM information_schema.tables"),
+            Some(REASON_SYSTEM_SCHEMA)
+        );
+        // Allowlisting that schema makes it eligible; other system schemas stay
+        // blocked.
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT * FROM information_schema.tables",
+                &[],
+                &[],
+                &["information_schema"]
+            ),
+            None
+        );
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::MySQL,
+                "SELECT * FROM mysql.user",
+                &[],
+                &[],
+                &["information_schema"]
+            ),
+            Some(REASON_SYSTEM_SCHEMA)
+        );
+    }
+
+    #[test]
+    fn schemas_allowlist_pg_catalog_covers_pg_prefix() {
+        // PostgreSQL treats any `pg_`-prefixed reference as a system reference;
+        // allowlisting `pg_catalog` covers the whole family, including an
+        // unqualified catalog table.
+        assert_eq!(
+            skip_reason(Dialect::PostgreSQL, "SELECT * FROM pg_class"),
+            Some(REASON_SYSTEM_SCHEMA)
+        );
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::PostgreSQL,
+                "SELECT * FROM pg_catalog.pg_class",
+                &[],
+                &[],
+                &["pg_catalog"]
+            ),
+            None
+        );
+        assert_eq!(
+            skip_reason_with_allowlists(
+                Dialect::PostgreSQL,
+                "SELECT * FROM pg_class",
+                &[],
+                &[],
+                &["pg_catalog"]
+            ),
+            None
         );
     }
 
@@ -1953,7 +2171,7 @@ mod tests {
             &parsed,
             dialect,
             &ShallowCacheEligibility::default(),
-            &ShallowCacheAllowlist::default(),
+            &ShallowCacheAllowlists::default(),
         )
         .into_iter()
         .map(|r| r.reason)
@@ -2012,7 +2230,7 @@ mod tests {
             &parsed,
             Dialect::MySQL,
             &ShallowCacheEligibility::default(),
-            &ShallowCacheAllowlist::default(),
+            &ShallowCacheAllowlists::default(),
         );
         assert_eq!(reasons.len(), 1, "one cause, got {reasons:?}");
         assert_eq!(reasons[0].reason, REASON_NON_DETERMINISTIC);

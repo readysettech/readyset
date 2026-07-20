@@ -15,7 +15,9 @@ use clap::ValueEnum;
 use enum_dispatch::enum_dispatch;
 use readyset_data::{DfType, Dialect};
 use readyset_errors::{ReadySetError, ReadySetResult};
-use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
+use readyset_sql::ast::{
+    NonReplicatedRelation, Relation, ShallowCacheAllowlistKind, SqlIdentifier,
+};
 use replication_offset::ReplicationOffset;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -43,6 +45,8 @@ pub type WorkerId = String;
 const CACHE_DDL_REQUESTS_PATH: &str = "cache_ddl_requests";
 const SHALLOW_CACHE_DDL_REQUESTS_PATH: &str = "shallow_cache_ddl_requests";
 const SHALLOW_CACHE_ALLOWLIST_PATH: &str = "shallow_cache_allowlist";
+const SHALLOW_CACHE_VARIABLES_ALLOWLIST_PATH: &str = "shallow_cache_variables_allowlist";
+const SHALLOW_CACHE_SCHEMAS_ALLOWLIST_PATH: &str = "shallow_cache_schemas_allowlist";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
@@ -377,23 +381,31 @@ pub trait AuthorityControl: Send + Sync {
         .await
     }
 
-    /// Returns the operator-managed shallow-cache function allowlist: function
-    /// names that are eligible for shallow-cache auto-creation even though they
-    /// appear on a built-in deny-list.
+    /// Returns one of the operator-managed shallow-cache allowlists (selected by
+    /// `kind`): names that are eligible for shallow-cache auto-creation even
+    /// though they would otherwise be denied (a builtin on a deny-list, a
+    /// session/user variable, or a system schema).
     ///
     /// Stored separately from the controller state, like the cache ddl requests
     /// above, so it is always available even if the controller state can't be
     /// deserialized.
-    async fn shallow_cache_allowlist(&self) -> ReadySetResult<Vec<String>> {
+    async fn shallow_cache_allowlist(
+        &self,
+        kind: ShallowCacheAllowlistKind,
+    ) -> ReadySetResult<Vec<String>> {
         Ok(self
-            .try_read::<Vec<String>>(SHALLOW_CACHE_ALLOWLIST_PATH)
+            .try_read::<Vec<String>>(shallow_cache_allowlist_path(kind))
             .await?
             .unwrap_or_default())
     }
 
-    /// Add a function name to the shallow-cache allowlist. Idempotent.
-    async fn add_shallow_cache_allowed_function(&self, name: String) -> ReadySetResult<()> {
-        modify_shallow_cache_allowlist(self, move |names| {
+    /// Add a name to the given shallow-cache allowlist. Idempotent.
+    async fn add_shallow_cache_allowed(
+        &self,
+        kind: ShallowCacheAllowlistKind,
+        name: String,
+    ) -> ReadySetResult<()> {
+        modify_ddl_requests(self, shallow_cache_allowlist_path(kind), move |names| {
             if !names.contains(&name) {
                 names.push(name.clone());
             }
@@ -401,25 +413,30 @@ pub trait AuthorityControl: Send + Sync {
         .await
     }
 
-    /// Remove a function name from the shallow-cache allowlist.
-    async fn remove_shallow_cache_allowed_function(&self, name: String) -> ReadySetResult<()> {
-        modify_shallow_cache_allowlist(self, move |names| {
+    /// Remove a name from the given shallow-cache allowlist.
+    async fn remove_shallow_cache_allowed(
+        &self,
+        kind: ShallowCacheAllowlistKind,
+        name: String,
+    ) -> ReadySetResult<()> {
+        modify_ddl_requests(self, shallow_cache_allowlist_path(kind), move |names| {
             names.retain(|n| *n != name);
         })
         .await
     }
 
-    /// Add or remove several function names in a single authority round-trip, so
-    /// a multi-name `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION a, b, c`
-    /// is atomic: it either persists every change or none, rather than leaving a
+    /// Add or remove several names in a single authority round-trip, so a
+    /// multi-name `ALTER READYSET ... SHALLOW CACHE ALLOWED <kind> a, b, c` is
+    /// atomic: it either persists every change or none, rather than leaving a
     /// prefix applied if a later write fails. `add` chooses the direction; adds
     /// are idempotent and removes tolerate absent names.
-    async fn modify_shallow_cache_allowed_functions(
+    async fn modify_shallow_cache_allowlist(
         &self,
+        kind: ShallowCacheAllowlistKind,
         add: bool,
         names: Vec<String>,
     ) -> ReadySetResult<()> {
-        modify_shallow_cache_allowlist(self, move |current| {
+        modify_ddl_requests(self, shallow_cache_allowlist_path(kind), move |current| {
             for name in &names {
                 if add {
                     if !current.contains(name) {
@@ -617,12 +634,14 @@ where
     modify_ddl_requests(authority, SHALLOW_CACHE_DDL_REQUESTS_PATH, f).await
 }
 
-async fn modify_shallow_cache_allowlist<A, F>(authority: &A, f: F) -> ReadySetResult<()>
-where
-    A: AuthorityControl + ?Sized,
-    F: FnMut(&mut Vec<String>) + Send,
-{
-    modify_ddl_requests(authority, SHALLOW_CACHE_ALLOWLIST_PATH, f).await
+/// The authority key backing the shallow-cache allowlist for `kind`. Each kind
+/// is stored under its own key so their `ALTER`s stay independent and atomic.
+const fn shallow_cache_allowlist_path(kind: ShallowCacheAllowlistKind) -> &'static str {
+    match kind {
+        ShallowCacheAllowlistKind::Function => SHALLOW_CACHE_ALLOWLIST_PATH,
+        ShallowCacheAllowlistKind::Variable => SHALLOW_CACHE_VARIABLES_ALLOWLIST_PATH,
+        ShallowCacheAllowlistKind::Schema => SHALLOW_CACHE_SCHEMAS_ALLOWLIST_PATH,
+    }
 }
 
 /// Enum that dispatches calls to the `AuthorityControl` trait to

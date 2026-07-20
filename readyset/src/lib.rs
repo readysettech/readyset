@@ -65,10 +65,12 @@ use readyset_schema::ReadysetSchema;
 use readyset_server::worker::readers::{retry_misses, BlockingRead, ReadRequestHandler, Reply};
 use readyset_server::WorkerOptions;
 use readyset_shallow::CacheManager;
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, ShallowCacheAllowlistKind};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
-use readyset_sql_passes::shallow::{ShallowCacheAllowlist, ShallowCacheEligibility};
+use readyset_sql_passes::shallow::{
+    ShallowCacheAllowlist, ShallowCacheAllowlists, ShallowCacheEligibility,
+};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetryInitializer};
 use readyset_tracing::TracingGuard;
 #[cfg(feature = "failure_injection")]
@@ -1778,17 +1780,27 @@ where
                 error!("Failed to recreate shallow caches: {}", e);
             }
         }
-        // Seed the shallow-cache function allowlist from the authority so any
-        // `ALTER READYSET ... SHALLOW CACHE ALLOWED FUNCTION` persisted by an
-        // earlier run survives this restart. The handle is shared (cloned) into
-        // every connection's backend below.
-        let shallow_cache_allowlist = ShallowCacheAllowlist::new(
-            rt.block_on(adapter_authority.shallow_cache_allowlist())
-                .unwrap_or_else(|e| {
-                    warn!("Failed to load shallow-cache allowlist from authority: {e}");
-                    Vec::new()
-                }),
-        );
+        // Seed the three shallow-cache allowlists (function, variable, schema)
+        // from the authority so any `ALTER READYSET ... SHALLOW CACHE ALLOWED
+        // ...` persisted by an earlier run survives this restart. The handles are
+        // shared (cloned) into every connection's backend below.
+        let seed_allowlist = |kind: ShallowCacheAllowlistKind| {
+            ShallowCacheAllowlist::new(
+                rt.block_on(adapter_authority.shallow_cache_allowlist(kind))
+                    .unwrap_or_else(|e| {
+                        warn!(
+                            "Failed to load shallow-cache {} allowlist from authority: {e}",
+                            kind.singular_keyword()
+                        );
+                        Vec::new()
+                    }),
+            )
+        };
+        let shallow_cache_allowlists = ShallowCacheAllowlists {
+            functions: seed_allowlist(ShallowCacheAllowlistKind::Function),
+            variables: seed_allowlist(ShallowCacheAllowlistKind::Variable),
+            schemas: seed_allowlist(ShallowCacheAllowlistKind::Schema),
+        };
         let replication_enabled = upstream_config.replication_enabled;
         let upstream_config = Arc::new(RwLock::new(upstream_config));
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
@@ -1923,7 +1935,7 @@ where
             let view_cache = view_cache.clone();
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
-            let shallow_cache_allowlist = shallow_cache_allowlist.clone();
+            let shallow_cache_allowlists = shallow_cache_allowlists.clone();
             let rls_coordinator = rls_coordinator.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
@@ -1959,7 +1971,7 @@ where
                 .replication_enabled(replication_enabled)
                 .readyset_schema(Arc::clone(&readyset_schema))
                 .shallow_cache_eligibility(shallow_cache_eligibility)
-                .shallow_cache_allowlist(shallow_cache_allowlist);
+                .shallow_cache_allowlists(shallow_cache_allowlists);
             let backend_builder = match &rls_registry {
                 Some(registry) => backend_builder.policy_registry(registry.clone()),
                 None => backend_builder,

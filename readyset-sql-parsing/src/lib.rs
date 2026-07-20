@@ -11,7 +11,8 @@ use readyset_sql::ast::{
     EvictionPolicy, Expr, FlushAllShallowCachesStatement, FlushCacheStatement,
     ReadysetHintDirective, ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue,
     SetEviction, SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
-    ShallowCacheAllowedFunctions, ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShallowCacheQuery, SqlQuery, SqlType,
+    TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -515,22 +516,9 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 ReadysetKeyword::SHALLOW,
                 ReadysetKeyword::Standard(Keyword::CACHE),
                 ReadysetKeyword::ALLOWED,
-                ReadysetKeyword::Standard(Keyword::FUNCTION),
             ],
         ) {
-            let functions = parser
-                .parse_comma_separated(|p| p.parse_identifier())?
-                .into_iter()
-                .map(|id| id.value.into())
-                .collect();
-            Ok(SqlQuery::AlterReadySet(
-                AlterReadysetStatement::ShallowCacheAllowedFunctions(
-                    ShallowCacheAllowedFunctions {
-                        add: true,
-                        functions,
-                    },
-                ),
-            ))
+            parse_shallow_cache_allowlist_change(parser, true)
         } else if parse_readyset_keywords(
             parser,
             &[
@@ -538,22 +526,9 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 ReadysetKeyword::SHALLOW,
                 ReadysetKeyword::Standard(Keyword::CACHE),
                 ReadysetKeyword::ALLOWED,
-                ReadysetKeyword::Standard(Keyword::FUNCTION),
             ],
         ) {
-            let functions = parser
-                .parse_comma_separated(|p| p.parse_identifier())?
-                .into_iter()
-                .map(|id| id.value.into())
-                .collect();
-            Ok(SqlQuery::AlterReadySet(
-                AlterReadysetStatement::ShallowCacheAllowedFunctions(
-                    ShallowCacheAllowedFunctions {
-                        add: false,
-                        functions,
-                    },
-                ),
-            ))
+            parse_shallow_cache_allowlist_change(parser, false)
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(format!(
                 "unexpected token after ALTER READYSET: {}",
@@ -565,6 +540,39 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
     } else {
         Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
     }
+}
+
+/// Parse the tail of `ALTER READYSET {ADD | DROP} SHALLOW CACHE ALLOWED ...`:
+/// the target-kind keyword (`FUNCTION`, `VARIABLE`, or `SCHEMA`) followed by a
+/// comma-separated list of names. `add` is `true` for `ADD`, `false` for `DROP`.
+fn parse_shallow_cache_allowlist_change(
+    parser: &mut Parser,
+    add: bool,
+) -> Result<SqlQuery, ReadysetParsingError> {
+    let kind = if parser.parse_keyword(Keyword::FUNCTION) {
+        ShallowCacheAllowlistKind::Function
+    } else if parser.parse_keyword(Keyword::VARIABLE) {
+        ShallowCacheAllowlistKind::Variable
+    } else if parser.parse_keyword(Keyword::SCHEMA) {
+        ShallowCacheAllowlistKind::Schema
+    } else {
+        return Err(ReadysetParsingError::ReadysetParsingError(format!(
+            "expected FUNCTION, VARIABLE, or SCHEMA after SHALLOW CACHE ALLOWED, got: {}",
+            parser.peek_token()
+        )));
+    };
+    let names = parser
+        .parse_comma_separated(|p| p.parse_identifier())?
+        .into_iter()
+        .map(|id| id.value.into())
+        .collect();
+    Ok(SqlQuery::AlterReadySet(
+        AlterReadysetStatement::ShallowCacheAllowlistChange(ShallowCacheAllowlistChange {
+            kind,
+            add,
+            names,
+        }),
+    ))
 }
 
 /// Consume a duration unit keyword (`SECONDS`, `MILLISECONDS`, or `MS`) and turn `value` into a
@@ -1519,11 +1527,22 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
             ReadysetKeyword::SHALLOW,
             ReadysetKeyword::Standard(Keyword::CACHE),
             ReadysetKeyword::ALLOWED,
-            ReadysetKeyword::Standard(Keyword::FUNCTIONS),
         ],
     ) {
+        let kind = if parser.parse_keyword(Keyword::FUNCTIONS) {
+            ShallowCacheAllowlistKind::Function
+        } else if parser.parse_keyword(Keyword::VARIABLES) {
+            ShallowCacheAllowlistKind::Variable
+        } else if parser.parse_keyword(Keyword::SCHEMAS) {
+            ShallowCacheAllowlistKind::Schema
+        } else {
+            return Err(ReadysetParsingError::ReadysetParsingError(format!(
+                "expected FUNCTIONS, VARIABLES, or SCHEMAS after SHOW SHALLOW CACHE ALLOWED, got: {}",
+                parser.peek_token()
+            )));
+        };
         Ok(SqlQuery::Show(
-            readyset_sql::ast::ShowStatement::ShallowCacheAllowedFunctions,
+            readyset_sql::ast::ShowStatement::ShallowCacheAllowlist(kind),
         ))
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::REPLAY, ReadysetKeyword::PATHS]) {
         Ok(SqlQuery::Show(

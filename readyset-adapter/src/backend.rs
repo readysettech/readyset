@@ -119,8 +119,9 @@ use readyset_sql::ast::{
     DropAllCachesStatement, DropMcpTokenStatement, ExplainStatement, FlushCacheStatement,
     McpTokenExpiresChange, McpTokenScope as ParserMcpTokenScope, ProxiedQueriesOptions,
     ReadysetHintDirective, Relation, SelectStatement, SessionAuthorizationValue,
-    SetSessionAuthorization, SetStatement, ShallowCacheAllowedFunctions, ShallowCacheQuery,
-    ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
+    SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
+    ShallowCacheQuery, ShowStatement, SqlIdentifier, SqlQuery, StatementIdentifier, TrxCachePolicy,
+    UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -128,7 +129,7 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
 };
 use readyset_sql_passes::shallow::{
-    ShallowCacheAllowlist, ShallowCacheEligibility, auto_cache_skip_reasons,
+    ShallowCacheAllowlists, ShallowCacheEligibility, auto_cache_skip_reasons,
     convert_placeholders_to_question_marks, rewrite_shallow,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
@@ -643,7 +644,7 @@ pub struct BackendBuilder {
     replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
-    shallow_cache_allowlist: ShallowCacheAllowlist,
+    shallow_cache_allowlists: ShallowCacheAllowlists,
     /// Process-shared RLS policy registry. The adapter binary
     /// constructs one at startup, hands it to the catalog poller, and
     /// passes it through here so every per-connection Backend
@@ -686,7 +687,7 @@ impl Default for BackendBuilder {
             replication_enabled: true,
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
-            shallow_cache_allowlist: ShallowCacheAllowlist::default(),
+            shallow_cache_allowlists: ShallowCacheAllowlists::default(),
             policy_registry: None,
         }
     }
@@ -774,7 +775,7 @@ impl BackendBuilder {
                 adapter_start_time,
                 readyset_schema: self.readyset_schema,
                 readyset_schema_route_all: false,
-                shallow_cache_allowlist: self.shallow_cache_allowlist,
+                shallow_cache_allowlists: self.shallow_cache_allowlists,
             },
             settings: BackendSettings {
                 slowlog: self.slowlog,
@@ -874,12 +875,13 @@ impl BackendBuilder {
         self
     }
 
-    /// Seed the shallow-cache function allowlist shared with the eligibility
-    /// filter. Cloned into each connection's [`BackendState`]; all clones share
-    /// the same underlying set, so a runtime `ALTER READYSET ... SHALLOW CACHE
-    /// ALLOWED FUNCTION` is visible to every connection at once.
-    pub fn shallow_cache_allowlist(mut self, allowlist: ShallowCacheAllowlist) -> Self {
-        self.shallow_cache_allowlist = allowlist;
+    /// Seed the three shallow-cache allowlists (function, variable, schema)
+    /// shared with the eligibility filter. Cloned into each connection's
+    /// [`BackendState`]; all clones share the same underlying sets, so a runtime
+    /// `ALTER READYSET ... SHALLOW CACHE ALLOWED ...` is visible to every
+    /// connection at once.
+    pub fn shallow_cache_allowlists(mut self, allowlists: ShallowCacheAllowlists) -> Self {
+        self.shallow_cache_allowlists = allowlists;
         self
     }
 
@@ -1346,10 +1348,11 @@ where
     readyset_schema: Option<Arc<ReadysetSchema>>,
     /// Wether or not to route all queries to the Readyset schema.
     readyset_schema_route_all: bool,
-    /// Operator-managed shallow-cache function allowlist, shared across
-    /// connections. Consulted by the auto-create eligibility filter and mutated
-    /// by `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED FUNCTION`.
-    shallow_cache_allowlist: ShallowCacheAllowlist,
+    /// Operator-managed shallow-cache allowlists (function, variable, schema),
+    /// shared across connections. Consulted by the auto-create eligibility
+    /// filter and mutated by `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED
+    /// {FUNCTION|VARIABLE|SCHEMA}`.
+    shallow_cache_allowlists: ShallowCacheAllowlists,
 }
 
 impl<DB> BackendState<DB>
@@ -5087,75 +5090,84 @@ where
         ))
     }
 
-    /// Handle `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED FUNCTION <name>[, ...]`.
+    /// Handle `ALTER READYSET {ADD|DROP} SHALLOW CACHE ALLOWED
+    /// {FUNCTION|VARIABLE|SCHEMA} <name>[, ...]`.
     ///
     /// Persists the change to the authority first (so it survives a restart),
     /// then updates the in-memory allowlist shared by every connection. On
     /// `ADD` it also clears the auto-create skip set, so a query previously
-    /// rejected for a now-allowed function is re-evaluated on its next
-    /// execution rather than staying skipped until the next restart.
-    async fn alter_shallow_cache_allowed_functions(
+    /// rejected for a now-allowed name is re-evaluated on its next execution
+    /// rather than staying skipped until the next restart.
+    async fn alter_shallow_cache_allowlist(
         state: &mut BackendState<DB>,
-        stmt: &ShallowCacheAllowedFunctions,
+        stmt: &ShallowCacheAllowlistChange,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let names: Vec<String> = stmt
-            .functions
+            .names
             .iter()
             .map(|f| f.to_string().to_ascii_lowercase())
             .collect();
+        // The targeted allowlist mutates a shared set through interior mutability
+        // (insert/remove/lock all take &self), so a borrow suffices and the
+        // mutations below are visible to every connection.
+        let allowlist = state.shallow_cache_allowlists.for_kind(stmt.kind);
         // Serialize concurrent allowlist updates so the authority write and the
         // in-memory mirror below stay in the same order: without this, a
         // concurrent add and drop of the same name could apply to the authority
         // and the shared set in opposite orders, leaving them disagreeing.
-        let _update_guard = state.shallow_cache_allowlist.lock_for_update().await;
+        let _update_guard = allowlist.lock_for_update().await;
         // Persist every name in one authority round-trip so the change is
         // atomic (all or nothing on failure), then mirror it into the in-memory
         // set shared by every connection.
         state
             .authority
-            .modify_shallow_cache_allowed_functions(stmt.add, names.clone())
+            .modify_shallow_cache_allowlist(stmt.kind, stmt.add, names.clone())
             .await?;
         for name in &names {
             if stmt.add {
-                state.shallow_cache_allowlist.insert(name);
+                allowlist.insert(name);
             } else {
-                state.shallow_cache_allowlist.remove(name);
+                allowlist.remove(name);
             }
         }
         if stmt.add {
             state.query_status_cache.clear_shallow_auto_create_skips();
         }
         info!(
-            functions = %names.join(", "),
+            kind = stmt.kind.singular_keyword(),
+            names = %names.join(", "),
             action = if stmt.add { "add" } else { "drop" },
-            "Updated shallow-cache function allowlist"
+            "Updated shallow-cache allowlist"
         );
         Ok(noria_connector::QueryResult::Empty)
     }
 
-    /// Handle `SHOW SHALLOW CACHE ALLOWED FUNCTIONS`.
+    /// Handle `SHOW SHALLOW CACHE ALLOWED {FUNCTIONS|VARIABLES|SCHEMAS}`.
     ///
-    /// Returns only the runtime allowlist: the functions added with `ALTER
-    /// READYSET ADD SHALLOW CACHE ALLOWED FUNCTION`. This is not the full set of
-    /// functions eligible for shallow caching. The IMMUTABLE builtins, and any
+    /// Returns only the runtime allowlist for `kind`: the names added with
+    /// `ALTER READYSET ADD SHALLOW CACHE ALLOWED ...`. This is not the full set
+    /// of names eligible for shallow caching. The IMMUTABLE builtins, and any
     /// category opened by a `--shallow-cache-allow-*` flag, are cacheable without
     /// appearing here.
-    async fn show_shallow_cache_allowed_functions(
+    async fn show_shallow_cache_allowlist(
         state: &BackendState<DB>,
+        kind: ShallowCacheAllowlistKind,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        let column = kind.singular_keyword().to_ascii_lowercase();
         let schema = SelectSchema {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: ast::Column {
-                    name: "function".into(),
+                    name: column.clone().into(),
                     table: None,
                 },
                 column_type: DfType::DEFAULT_TEXT,
                 base: None,
             }]),
-            columns: Cow::Owned(vec!["function".into()]),
+            columns: Cow::Owned(vec![column.into()]),
         };
         let rows: Vec<Vec<DfValue>> = state
-            .shallow_cache_allowlist
+            .shallow_cache_allowlists
+            .for_kind(kind)
             .snapshot()
             .into_iter()
             .map(|name| vec![DfValue::from(name)])
@@ -5540,16 +5552,15 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                 url,
             })) => connectors.noria.change_cdc_url(url).await,
-            SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowedFunctions(stmt)) => {
-                // Mutating the allowlist steers what auto-caches and persists to
+            SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowlistChange(stmt)) => {
+                // Mutating an allowlist steers what auto-caches and persists to
                 // the authority, so it belongs to the cache-DDL family and is
                 // gated the same way (read-only SHOW is not).
                 if settings.allow_cache_ddl {
-                    Self::alter_shallow_cache_allowed_functions(state, stmt).await
+                    Self::alter_shallow_cache_allowlist(state, stmt).await
                 } else {
                     unsupported!(
-                        "ALTER READYSET SHALLOW CACHE ALLOWED FUNCTION requires cache DDL \
-                         to be enabled"
+                        "ALTER READYSET SHALLOW CACHE ALLOWED requires cache DDL to be enabled"
                     )
                 }
             }
@@ -5563,8 +5574,8 @@ where
             SqlQuery::DropMcpToken(stmt) => Self::drop_mcp_token(state, stmt).await,
             SqlQuery::AlterMcpToken(stmt) => Self::alter_mcp_token(state, stmt).await,
             SqlQuery::Show(ShowStatement::McpTokens) => Self::show_mcp_tokens(state).await,
-            SqlQuery::Show(ShowStatement::ShallowCacheAllowedFunctions) => {
-                Self::show_shallow_cache_allowed_functions(state).await
+            SqlQuery::Show(ShowStatement::ShallowCacheAllowlist(kind)) => {
+                Self::show_shallow_cache_allowlist(state, *kind).await
             }
             _ => Err(internal_err!("Provided query is not a Readyset extension")),
         };
@@ -5697,7 +5708,7 @@ where
                 &shallow.query,
                 settings.dialect,
                 &settings.shallow_cache_eligibility,
-                &state.shallow_cache_allowlist,
+                &state.shallow_cache_allowlists,
             );
             if !skip_reasons.is_empty() {
                 state

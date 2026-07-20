@@ -524,6 +524,95 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect() {
         .await
         .unwrap_err();
 
+    // The VARIABLE and SCHEMA kinds share this statement family. A system-schema
+    // query is ineligible by default and always proxies, even after being seen
+    // (the rejection is memoized in the skip set).
+    let schema_query =
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'mysql'";
+    for _ in 0..2 {
+        readyset.query_drop(schema_query).await.unwrap();
+        assert_eq!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::Upstream,
+            "a system-schema query is ineligible before its schema is allowlisted"
+        );
+    }
+
+    // Allowlisting the schema at runtime clears the skip memo, so a fresh
+    // attempt auto-creates a shallow cache.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED SCHEMA information_schema")
+        .await
+        .unwrap();
+    let mut cached = false;
+    for _ in 0..5 {
+        readyset.query_drop(schema_query).await.unwrap();
+        if last_query_info(&mut readyset).await.destination == QueryDestination::ReadysetShallow {
+            cached = true;
+            break;
+        }
+    }
+    assert!(
+        cached,
+        "a system-schema query becomes auto-cacheable after ALTER ... ADD SCHEMA"
+    );
+
+    // The VARIABLE kind persists through its own path, and each kind keeps an
+    // independent list: the variable and schema report only under their own
+    // SHOW, and the function added earlier was already dropped.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED VARIABLE version_comment")
+        .await
+        .unwrap();
+    let schemas: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED SCHEMAS")
+        .await
+        .unwrap();
+    assert_eq!(schemas, vec![("information_schema".to_string(),)]);
+    let vars: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED VARIABLES")
+        .await
+        .unwrap();
+    assert_eq!(vars, vec![("version_comment".to_string(),)]);
+    let funcs: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED FUNCTIONS")
+        .await
+        .unwrap();
+    assert!(funcs.is_empty(), "the function list stays empty: {funcs:?}");
+
+    // DROP removes an entry from its own list without touching the others.
+    readyset
+        .query_drop("ALTER READYSET DROP SHALLOW CACHE ALLOWED VARIABLE version_comment")
+        .await
+        .unwrap();
+    let vars: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED VARIABLES")
+        .await
+        .unwrap();
+    assert!(
+        vars.is_empty(),
+        "SHOW VARIABLES should be empty after DROP: {vars:?}"
+    );
+    let schemas: Vec<(String,)> = readyset
+        .query("SHOW SHALLOW CACHE ALLOWED SCHEMAS")
+        .await
+        .unwrap();
+    assert_eq!(
+        schemas,
+        vec![("information_schema".to_string(),)],
+        "dropping the variable must not touch the schema list"
+    );
+
+    // A statement with no name is rejected for the new kinds too.
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED VARIABLE")
+        .await
+        .unwrap_err();
+    readyset
+        .query_drop("ALTER READYSET ADD SHALLOW CACHE ALLOWED SCHEMA")
+        .await
+        .unwrap_err();
+
     shutdown_tx.shutdown().await;
 }
 

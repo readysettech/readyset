@@ -460,7 +460,7 @@ impl SqlQuery {
                 | ShowStatement::Rls(_)
                 | ShowStatement::ReplayPaths
                 | ShowStatement::ShallowCacheEntries { .. }
-                | ShowStatement::ShallowCacheAllowedFunctions
+                | ShowStatement::ShallowCacheAllowlist(_)
                 | ShowStatement::McpTokens => true,
                 // Handled by the MySQL query handler via the
                 // requires_fallback + return_default_response path.
