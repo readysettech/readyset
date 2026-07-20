@@ -81,7 +81,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::rls_coordinator::RlsCoordinator;
-use crate::session_context::{SessionContext, SetSessionEffect};
+use crate::session_context::SessionContext;
 use crate::shallow_key::{SessionInputValues, ShallowKey};
 use anyhow::bail;
 use clap::ValueEnum;
@@ -3712,6 +3712,16 @@ where
             Self::mirror_session_authorization(session, self.state.policy_registry.as_ref(), auth);
         }
 
+        // Mirror a prepared `SET [LOCAL] ROLE` once upstream has applied it, matching the simple
+        // path. Role membership is an authorization boundary, so a `SET ROLE` upstream rejects must
+        // not advance the mirror; gating on `result.is_ok()` (the execute outcome) enforces that.
+        if result.is_ok()
+            && let Some(session) = self.connectors.session.as_ref()
+            && let Some(SqlQuery::Set(set)) = cached_statement.parsed_query.as_deref()
+        {
+            Self::mirror_set_role(session, self.state.policy_registry.as_ref(), set);
+        }
+
         if let Some(q) = &cached_statement.parsed_query {
             Self::update_transaction_boundaries(
                 &mut self.state.proxy_state,
@@ -6624,29 +6634,32 @@ where
             connectors.noria.set_timezone(tz);
         }
 
-        // Mirror the SET into the per-connection SessionContext so the
-        // RLS shallow cache can hash by the relevant subset of session
-        // state. `SET ROLE` resolves `bypass_rls` against the policy
-        // registry: a role known to carry `rolsuper` or `rolbypassrls`
-        // collapses onto the shared bypass partition.
+        // Mirror the SET into the per-connection SessionContext so the RLS shallow cache can hash
+        // by the relevant subset of session state. GUC sets and `RESET ROLE` are applied now; they
+        // cannot be rejected as an authorization decision. `SET ROLE` (the `RoleSet` effect) is
+        // deliberately not applied here -- role membership is an authorization boundary, so it is
+        // mirrored only after upstream accepts it (`mirror_set_role`), matching
+        // `SET SESSION AUTHORIZATION`. `apply_set_statement` does not mutate for `RoleSet`, so
+        // discarding its result leaves the effective role untouched.
         if let Some(session) = connectors.session.as_ref() {
-            match session.apply_set_statement(set) {
-                SetSessionEffect::None | SetSessionEffect::RoleReset => {}
-                SetSessionEffect::RoleSet { role, scope } => {
-                    let bypass = state
-                        .policy_registry
-                        .as_ref()
-                        .is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
-                    let local = matches!(
-                        scope,
-                        Some(readyset_sql::ast::PostgresParameterScope::Local)
-                    );
-                    session.set_effective_role_scoped(role, bypass, local);
-                }
-            }
+            let _ = session.apply_set_statement(set);
         }
 
         Ok(())
+    }
+
+    /// Mirror `SET [LOCAL] ROLE <role>` into the session context, called only after upstream
+    /// accepted the statement. Resolves `bypass_rls` against the policy registry. Non-`SET ROLE`
+    /// statements (and `RESET ROLE`, already applied by `handle_set`) are ignored.
+    fn mirror_set_role(
+        session: &SessionContext,
+        policy_registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
+        set: &SetStatement,
+    ) {
+        if let Some((role, local)) = SessionContext::pending_set_role(set) {
+            let bypass = policy_registry.is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
+            session.set_effective_role_scoped(role, bypass, local);
+        }
     }
 
     /// Mirror a `SET [LOCAL] SESSION AUTHORIZATION` into the session context,
@@ -6738,18 +6751,26 @@ where
                     SqlQuery::Set(set) => {
                         event.sql_type = SqlQueryType::Other;
                         let result = upstream.query(raw_query).await?;
-                        // Mirror a session-authorization identity change only
-                        // now that upstream has accepted it: a rejected
-                        // statement must not leave the session mirror pointing
-                        // at an identity upstream never adopted.
-                        if let SetStatement::SessionAuthorization(auth) = &set
-                            && let Some(session) = connectors.session.as_ref()
-                        {
-                            Self::mirror_session_authorization(
-                                session,
-                                state.policy_registry.as_ref(),
-                                auth,
-                            );
+                        // Mirror an identity change only now that upstream has accepted it: a
+                        // rejected statement must not leave the session mirror pointing at an
+                        // identity upstream never adopted. `SET ROLE` is an authorization boundary
+                        // (role membership), so mirroring it before the forward would let a client
+                        // assume a role upstream refused it.
+                        if let Some(session) = connectors.session.as_ref() {
+                            match &set {
+                                SetStatement::SessionAuthorization(auth) => {
+                                    Self::mirror_session_authorization(
+                                        session,
+                                        state.policy_registry.as_ref(),
+                                        auth,
+                                    );
+                                }
+                                _ => Self::mirror_set_role(
+                                    session,
+                                    state.policy_registry.as_ref(),
+                                    &set,
+                                ),
+                            }
                         }
                         Ok(QueryResult::Upstream(result, None, None))
                     }
