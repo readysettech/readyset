@@ -162,14 +162,13 @@ async fn test_topk_dual_lookup() {
         .unwrap();
 }
 
-/// Tests plain LIMIT functionality (without ORDER BY) with literal LIMIT values.
-/// This test verifies that:
-/// 1. A literal LIMIT cache strips the LIMIT and acts as a catch-all for any LIMIT value
-/// 2. All queries with different LIMIT values hit the same cache
+/// A literal LIMIT with no ORDER BY is kept on the query and lowered to a TopK node (feature-topk
+/// on), so the nested-loop-limit collapse can detect it. It is no longer stripped to act as a
+/// catch-all, so each distinct LIMIT value is its own cached query.
 #[tokio::test]
 #[tags(serial)]
 #[upstream(mysql)]
-async fn test_topk_limit_catch_all() {
+async fn test_topk_literal_limit_per_value() {
     readyset_tracing::init_test_logging();
     let db_name = "plain_literal_limit_test";
     mysql_helpers::recreate_database(db_name).await;
@@ -196,10 +195,10 @@ async fn test_topk_limit_catch_all() {
 
     sleep().await;
 
-    // LIMIT should be stripped and applied by the adapter in post-processing
-    // doesn't matter if it's a literal or parameterized
+    // A literal LIMIT is kept on the query (lowered to a TopK), so the cache is specific to that
+    // LIMIT value rather than a catch-all that strips the cap.
     rs_conn
-        .query_drop("CREATE CACHE strip FROM SELECT * FROM test LIMIT 1")
+        .query_drop("CREATE CACHE lim1 FROM SELECT * FROM test LIMIT 1")
         .await
         .unwrap();
 
@@ -208,29 +207,20 @@ async fn test_topk_limit_catch_all() {
     let result: Vec<(i32, i32)> = rs_conn.query("SELECT * FROM test LIMIT 1").await.unwrap();
     assert_eq!(result.len(), 1);
 
-    assert_last_target_was(
-        &mut rs_conn,
-        QueryDestination::Readyset(Some("strip".into())),
-    )
-    .await;
+    assert_last_target_was(&mut rs_conn, QueryDestination::Readyset(Some("lim1".into()))).await;
+
+    // A different LIMIT value is a distinct query with its own TopK cache.
+    rs_conn
+        .query_drop("CREATE CACHE lim2 FROM SELECT * FROM test LIMIT 2")
+        .await
+        .unwrap();
+
+    sleep().await;
 
     let result: Vec<(i32, i32)> = rs_conn.query("SELECT * FROM test LIMIT 2").await.unwrap();
     assert_eq!(result.len(), 2);
 
-    assert_last_target_was(
-        &mut rs_conn,
-        QueryDestination::Readyset(Some("strip".into())),
-    )
-    .await;
-
-    let result: Vec<(i32, i32)> = rs_conn.query("SELECT * FROM test").await.unwrap();
-    assert_eq!(result.len(), 5);
-
-    assert_last_target_was(
-        &mut rs_conn,
-        QueryDestination::Readyset(Some("strip".into())),
-    )
-    .await;
+    assert_last_target_was(&mut rs_conn, QueryDestination::Readyset(Some("lim2".into()))).await;
 
     shutdown_tx.shutdown().await;
 

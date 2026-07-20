@@ -17,8 +17,8 @@ use readyset_errors::{
 };
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, OrderClause,
-    SelectMetadata, SelectStatement, ShallowCacheQuery,
+    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectMetadata,
+    SelectStatement, ShallowCacheQuery,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
@@ -136,14 +136,14 @@ fn use_fallback_pagination(
     server_supports_pagination: bool,
     server_supports_topk: bool,
     limit_clause: &LimitClause,
-    order: &Option<OrderClause>,
 ) -> bool {
-    // Check that the query contains a topk and that topk is enabled.
-    // If topk is enabled, and the limit is a placeholder, then we need to fallback to the
-    // adapter because topk doesn't support LIMIT placeholders (aka k can't be parameterized)
-    // else, topk will handle the LIMIT and the ORDER as expected, and no fallback is needed.
-    if server_supports_topk && order.is_some() && limit_clause.is_topk() {
-        return matches!(limit_clause.limit(), Some(Literal::Placeholder(_)));
+    // A literal LIMIT with no OFFSET lowers to a TopK node -- ordered or order-less alike -- when
+    // feature-topk is on, which the nested-loop-limit pass can then collapse for a base-table spine.
+    // With topk off the server can't build one, and a placeholder k can't parameterize one, so both
+    // fall back to adapter post-processing.
+    if limit_clause.is_topk() {
+        return !server_supports_topk
+            || matches!(limit_clause.limit(), Some(Literal::Placeholder(_)));
     }
 
     if server_supports_pagination &&
@@ -431,11 +431,15 @@ pub fn rewrite_for_readyset(
     } = prev;
     assert_eq!(dialect, flags.dialect);
 
+    // A literal `OFFSET 0` skips no rows, so normalize it away up front. Otherwise `is_topk()`
+    // sees the offset, `use_fallback_pagination` strips the LIMIT into adapter post-processing,
+    // and the server never builds the TopK the nested-loop-limit pass collapses.
+    query.limit_clause.strip_zero_offset();
+
     let force_paginate_in_adapter = use_fallback_pagination(
         flags.server_supports_pagination,
         flags.server_supports_topk,
         &query.limit_clause,
-        &query.order,
     );
     let limit_clause = if force_paginate_in_adapter {
         mem::take(&mut query.limit_clause)
@@ -2923,6 +2927,9 @@ mod tests {
                 ),
                 (Some(2), None)
             );
+            // With feature-topk off (the harness default) a literal offset-less LIMIT falls back to
+            // adapter pagination. (With topk on it is kept server-side to lower to a TopK -- see
+            // is_topk_limit_kept_only_with_feature_topk.)
             assert_eq!(
                 get_lim_off_postgres(
                     "SELECT * FROM t WHERE x = $1 LIMIT 10.5",
@@ -2931,6 +2938,7 @@ mod tests {
                 (Some(11), None)
             );
 
+            // A placeholder LIMIT cannot be a TopK, so it still falls back to adapter pagination.
             assert_eq!(
                 get_lim_off_mysql("SELECT * FROM t WHERE x = ? LIMIT ?", &[1.into(), 2.into()],),
                 (Some(2), None)
@@ -2938,6 +2946,50 @@ mod tests {
 
             try_parse_select_statement("SELECT * FROM t WHERE x = ? LIMIT 1.5", Dialect::MySQL)
                 .unwrap_err();
+        }
+
+        /// A literal LIMIT (no OFFSET) is kept server-side to lower to a TopK node only when
+        /// feature-topk is on; with topk off it falls back to adapter post-processing (keeping it
+        /// server-side made the server fail to lower an ordered LIMIT). Ordered and order-less
+        /// LIMITs behave the same -- the gate is feature-topk, not the ORDER BY.
+        #[test]
+        fn is_topk_limit_kept_only_with_feature_topk() {
+            // topk off (harness default): every literal is_topk LIMIT falls back to the adapter,
+            // ordered or not (including the ordered-aggregate shape that regressed post_lookup.test).
+            assert_eq!(
+                get_lim_off_mysql("SELECT a FROM t ORDER BY a LIMIT 10", &[]),
+                (Some(10), None)
+            );
+            assert_eq!(
+                get_lim_off_mysql(
+                    "SELECT sum(b) FROM t GROUP BY a ORDER BY sum(b) DESC LIMIT 1",
+                    &[],
+                ),
+                (Some(1), None)
+            );
+            assert_eq!(
+                get_lim_off_mysql("SELECT a FROM t LIMIT 10", &[]),
+                (Some(10), None)
+            );
+
+            // topk on: a literal is_topk LIMIT is kept server-side (adapter applies nothing), so it
+            // can lower to a TopK the nested-loop-limit pass may collapse.
+            let lim_off_topk = |query: &str| -> (Option<usize>, Option<usize>) {
+                let mut params = rewrite_params(Dialect::MySQL);
+                params.server_supports_topk = true;
+                let proc = rewrite_query(
+                    &mut parse_select_statement(query, Dialect::MySQL),
+                    params,
+                    rewrite_context(Dialect::MySQL),
+                )
+                .unwrap();
+                proc.limit_offset_params(&[]).unwrap()
+            };
+            assert_eq!(
+                lim_off_topk("SELECT a FROM t ORDER BY a LIMIT 10"),
+                (None, None)
+            );
+            assert_eq!(lim_off_topk("SELECT a FROM t LIMIT 10"), (None, None));
         }
 
         #[test]

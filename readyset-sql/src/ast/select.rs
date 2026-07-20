@@ -408,6 +408,29 @@ impl LimitClause {
     pub fn is_topk(&self) -> bool {
         self.limit().is_some() && self.offset().is_none()
     }
+
+    /// Drops a literal `OFFSET 0`, which skips no rows and is therefore a no-op, normalizing the
+    /// clause to a bare `LIMIT`. This lets `LIMIT k OFFSET 0` be treated identically to `LIMIT k`
+    /// (e.g. by [`is_topk`](Self::is_topk)); the server already discards a literal zero offset in
+    /// `extract_limit_offset`.
+    pub fn strip_zero_offset(&mut self) {
+        let is_zero =
+            |lit: &Literal| matches!(lit, Literal::Integer(0) | Literal::UnsignedInteger(0));
+        match self {
+            LimitClause::LimitOffset { offset, .. } => {
+                if offset.as_ref().is_some_and(is_zero) {
+                    *offset = None;
+                }
+            }
+            LimitClause::OffsetCommaLimit { offset, limit } if is_zero(offset) => {
+                *self = LimitClause::LimitOffset {
+                    limit: Some(limit.clone()),
+                    offset: None,
+                };
+            }
+            LimitClause::OffsetCommaLimit { .. } => {}
+        }
+    }
 }
 
 impl Default for LimitClause {
@@ -757,5 +780,50 @@ impl DialectDisplay for SelectStatement {
 
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_zero_offset_makes_limit_topk() {
+        let mut lc = LimitClause::LimitOffset {
+            limit: Some(LimitValue::Literal(Literal::Integer(1000))),
+            offset: Some(Literal::Integer(0)),
+        };
+        assert!(
+            !lc.is_topk(),
+            "LIMIT k OFFSET 0 is not is_topk before normalization"
+        );
+        lc.strip_zero_offset();
+        assert!(
+            lc.is_topk(),
+            "LIMIT k OFFSET 0 is is_topk after stripping the zero offset"
+        );
+        assert_eq!(lc.offset(), None);
+    }
+
+    #[test]
+    fn strip_zero_offset_preserves_nonzero_offset() {
+        let mut lc = LimitClause::LimitOffset {
+            limit: Some(LimitValue::Literal(Literal::Integer(10))),
+            offset: Some(Literal::Integer(5)),
+        };
+        lc.strip_zero_offset();
+        assert_eq!(lc.offset(), Some(&Literal::Integer(5)));
+    }
+
+    #[test]
+    fn strip_zero_offset_normalizes_offset_comma_limit() {
+        let mut lc = LimitClause::OffsetCommaLimit {
+            offset: Literal::Integer(0),
+            limit: LimitValue::Literal(Literal::Integer(20)),
+        };
+        lc.strip_zero_offset();
+        assert!(lc.is_topk());
+        assert_eq!(lc.limit(), Some(&Literal::Integer(20)));
+        assert_eq!(lc.offset(), None);
     }
 }
