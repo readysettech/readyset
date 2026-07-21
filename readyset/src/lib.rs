@@ -38,6 +38,8 @@ use tracing_futures::Instrument;
 
 use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{AllowedUsers, MigrationMode, UnsupportedSetMode};
+use readyset_adapter::cache_acl::{AclHandle, AclMatrix, ACL_QUEUE_CAPACITY};
+use readyset_adapter::cache_acl_worker::AclWorker;
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -412,6 +414,12 @@ pub struct Options {
     /// the upstream.
     #[arg(long, env = "SHALLOW_REFRESH_WORKERS", default_value = "40")]
     shallow_refresh_workers: usize,
+
+    /// How often, in seconds, the cache-ACL freshness worker re-checks each user's grant
+    /// fingerprint against the upstream. The interval bounds how long a user revoked upstream
+    /// can keep being served cache hits. Applies only when authentication is enabled.
+    #[arg(long, env = "CACHE_ACL_REFRESH_INTERVAL_SECS", default_value = "300")]
+    cache_acl_refresh_interval_secs: u64,
 
     /// Maximum extra refresh load an adaptive shallow cache may send to the upstream, as a
     /// percentage of the load required to refresh every current entry at the cache's
@@ -1795,6 +1803,29 @@ where
             options.shallow_refresh_workers,
         );
 
+        // The cache ACL applies only with authentication on: without user identities the
+        // enforcement seams are inert and no worker runs.
+        let cache_acl = if options.allow_unauthenticated_connections {
+            AclHandle::disabled()
+        } else {
+            let matrix = Arc::new(AclMatrix::default());
+            let (lifecycle_tx, lifecycle_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (demand_tx, demand_rx) = tokio::sync::mpsc::channel(ACL_QUEUE_CAPACITY);
+            rt.handle().spawn(
+                AclWorker::<H::UpstreamDatabase>::new(
+                    Arc::clone(&matrix),
+                    lifecycle_rx,
+                    demand_rx,
+                    users.clone(),
+                    Arc::clone(&upstream_config),
+                    Arc::clone(&shallow),
+                    Duration::from_secs(options.cache_acl_refresh_interval_secs),
+                )
+                .run(),
+            );
+            AclHandle::new(matrix, lifecycle_tx, demand_tx)
+        };
+
         let controller = rh.clone();
         let readyset_schema = ReadysetSchema::init(
             &options.readyset_schema,
@@ -1925,6 +1956,7 @@ where
             let shallow_cache_allowlists = shallow_cache_allowlists.clone();
             let rls_coordinator = rls_coordinator.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
+            let cache_acl = cache_acl.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
             let allow_cache_ddl = options
@@ -1936,6 +1968,7 @@ where
                 .client_addr(client_addr)
                 .slowlog(options.log_slow)
                 .users(users.clone())
+                .cache_acl(cache_acl.clone())
                 .allow_cache_ddl(allow_cache_ddl)
                 .require_authentication(!options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)

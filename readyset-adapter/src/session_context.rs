@@ -196,6 +196,17 @@ impl SessionContext {
         inner.trx_untrusted || inner.session_untrusted
     }
 
+    /// The identity the cache ACL judges this session by: the effective role (the login user, or
+    /// the role assumed via `SET ROLE`), read together with the trust flags under one guard.
+    /// `None` when a trust gap is set -- the caller must fail closed and route off-cache.
+    pub fn acl_identity(&self) -> Option<SqlIdentifier> {
+        let inner = self.inner.read();
+        if inner.trx_untrusted || inner.session_untrusted {
+            return None;
+        }
+        Some(inner.effective_role.clone())
+    }
+
     /// Set a session-scope GUC.
     pub fn set_session_guc(&self, name: impl Into<String>, value: impl Into<String>) {
         let name = name.into();

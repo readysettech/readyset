@@ -32,6 +32,7 @@ use readyset_client_test_helpers::{
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
+use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
@@ -118,6 +119,25 @@ async fn try_set_role(
         Protocol::Simple => client.simple_query(&sql).await.map(|_| ()),
         Protocol::Extended => client.execute(&sql, &[]).await.map(|_| ()),
     }
+}
+
+/// Read until the shallow cache serves the read, returning the rows it served.
+/// The cache ACL resolves the session's effective identity -- here the role it
+/// assumed -- on the freshness worker, so reads proxy until that probe lands.
+async fn eventually_shallow(client: &Client, proto: Protocol, ctx: &str) -> Vec<String> {
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: format!("{ctx}: read was never served from the shallow cache"),
+        {
+            read_todos(client, proto).await;
+            matches!(
+                psql_helpers::last_query_info(client).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        }
+    );
+    read_todos(client, proto).await
 }
 
 /// Assert the routing of the most recently executed query.
@@ -245,9 +265,10 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .expect("create cache");
     let all = vec!["alice", "alice", "bob"];
     assert_eq!(read_todos(&admin, proto).await, all, "bypass role sees all rows");
-    assert_dest(&admin, QueryDestination::ReadysetThenUpstream(None), "bypass partition fills").await;
-    assert_eq!(read_todos(&admin, proto).await, all);
-    assert_dest(&admin, QueryDestination::ReadysetShallow(None), "bypass partition resident").await;
+    assert_eq!(
+        eventually_shallow(&admin, proto, "bypass partition resident").await,
+        all,
+    );
 
     // The victim (member of `authenticated` only) establishes its own scoped
     // partition and confirms it hits.
@@ -256,9 +277,10 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .expect("victim may assume authenticated");
     set_sub_claim(&victim, proto, "bob").await;
     assert_eq!(read_todos(&victim, proto).await, vec!["bob"], "victim scoped to bob");
-    assert_dest(&victim, QueryDestination::ReadysetThenUpstream(None), "victim partition fills").await;
-    assert_eq!(read_todos(&victim, proto).await, vec!["bob"]);
-    assert_dest(&victim, QueryDestination::ReadysetShallow(None), "victim partition hits").await;
+    assert_eq!(
+        eventually_shallow(&victim, proto, "victim partition hits").await,
+        vec!["bob"],
+    );
 
     // The attack: the victim asks to assume the BYPASSRLS role. Its own upstream
     // connection is a non-member, so upstream must reject the statement.

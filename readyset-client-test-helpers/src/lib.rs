@@ -15,6 +15,8 @@ use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{
     BackendBuilder, MigrationMode, QueryDestination, QueryInfo, UnsupportedSetMode, UsersSync,
 };
+use readyset_adapter::cache_acl::{AclHandle, AclMatrix, ACL_QUEUE_CAPACITY};
+use readyset_adapter::cache_acl_worker::AclWorker;
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
@@ -254,6 +256,7 @@ pub struct TestBuilder {
     rls: bool,
     rls_poll_interval: Option<Duration>,
     shallow_adaptive_max_extra_load_percent: Option<u64>,
+    cache_acl_refresh_interval: Option<Duration>,
 }
 
 impl Default for TestBuilder {
@@ -293,6 +296,7 @@ impl TestBuilder {
             rls: false,
             rls_poll_interval: None,
             shallow_adaptive_max_extra_load_percent: None,
+            cache_acl_refresh_interval: None,
         }
     }
 
@@ -470,6 +474,13 @@ impl TestBuilder {
     /// `--shallow-adaptive-max-extra-load-percent` flag.
     pub fn shallow_adaptive_max_extra_load_percent(mut self, percent: u64) -> Self {
         self.shallow_adaptive_max_extra_load_percent = Some(percent);
+        self
+    }
+
+    /// Set the cache-ACL freshness interval. Mirrors the adapter's
+    /// `--cache-acl-refresh-interval-secs` flag; convergence tests set it short.
+    pub fn cache_acl_refresh_interval(mut self, interval: Duration) -> Self {
+        self.cache_acl_refresh_interval = Some(interval);
         self
     }
 
@@ -748,6 +759,32 @@ impl TestBuilder {
         }
         let users_for_schema = Arc::clone(self.backend_builder.get_users());
 
+        // Mirror the adapter binary's cache-ACL wiring: with authentication on and an
+        // upstream to probe, spawn the freshness worker beside the refresh pool.
+        let cache_acl = if self.backend_builder.get_require_authentication()
+            && (cdc_url.is_some() || upstream_only_url.is_some())
+        {
+            let matrix = Arc::new(AclMatrix::default());
+            let (lifecycle_tx, lifecycle_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (demand_tx, demand_rx) = tokio::sync::mpsc::channel(ACL_QUEUE_CAPACITY);
+            tokio::spawn(
+                AclWorker::<A::Upstream>::new(
+                    Arc::clone(&matrix),
+                    lifecycle_rx,
+                    demand_rx,
+                    Arc::clone(self.backend_builder.get_users()),
+                    Arc::clone(&shared_upstream_config),
+                    Arc::clone(&shallow),
+                    self.cache_acl_refresh_interval
+                        .unwrap_or(Duration::from_secs(300)),
+                )
+                .run(),
+            );
+            AclHandle::new(matrix, lifecycle_tx, demand_tx)
+        } else {
+            AclHandle::disabled()
+        };
+
         tokio::spawn(async move {
             // Keep the RLS bootstrap handle alive for the server's lifetime: it
             // owns the poller's shutdown sender, so dropping it would stop catalog
@@ -851,6 +888,7 @@ impl TestBuilder {
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
                         .parsing_preset(self.parsing_preset)
+                        .cache_acl(cache_acl.clone())
                         .readyset_schema(Arc::clone(&readyset_schema))
                         .build(
                             noria,

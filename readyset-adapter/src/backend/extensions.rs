@@ -51,8 +51,9 @@ use vec1::Vec1;
 use super::noria_connector::{self, MetaVariable};
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, UNSUPPORTED_CACHE_DDL_MSG,
-    readyset_version, resolve_coalesce, resolve_eviction_policy,
+    acl_creator, readyset_version, resolve_coalesce, resolve_eviction_policy,
 };
+use crate::cache_acl::{AclMessage, CacheCreator, PassTrigger};
 use crate::query_status_cache::ManualCacheEntry;
 use crate::utils::create_dummy_column;
 use crate::{QueryHandler, UpstreamDatabase, create_dummy_schema};
@@ -307,6 +308,7 @@ where
             adaptive,
             ddl_req,
             false,
+            acl_creator(connectors.session.as_ref(), state.client_identity.as_ref()),
         )
         .await
         {
@@ -339,6 +341,7 @@ where
         adaptive: bool,
         mut ddl_req: CacheDDLRequest,
         quiet: bool,
+        creator: Option<CacheCreator>,
     ) -> ReadySetResult<()> {
         ddl_req.cache_name = Some(name.clone());
 
@@ -471,6 +474,16 @@ where
                 state
                     .query_status_cache
                     .set_trx_cache_policy(shallow, trx_cache_policy);
+
+                // Hand the column to the freshness worker, which probes the creator first so
+                // the identity most likely to read the new cache resolves before the rest.
+                // Creating a cache authorizes nobody: creation validates the statement with a
+                // prepare, which upstream answers without checking table privileges, so the
+                // creator is served only once their own probe comes back Allowed.
+                state.acl.send_lifecycle(AclMessage::CacheCreated {
+                    cache: query_id,
+                    creator,
+                });
             }
             Err(_) => {
                 remove_ddl_on_error(
@@ -923,6 +936,7 @@ where
             if let Some(coordinator) = &state.rls_coordinator {
                 coordinator.clear();
             }
+            state.acl.matrix().clear();
         }
         state.query_status_cache.clear(cache_type);
         state.prepared.invalidate_all(cache_type);
@@ -1365,6 +1379,9 @@ where
         .await;
         if result.is_ok() {
             info!(user = %stmt.user, "ALTER READYSET ADD USER");
+            state.acl.send_lifecycle(AclMessage::UserAltered {
+                user: stmt.user.clone(),
+            });
         }
         result
     }
@@ -1391,6 +1408,9 @@ where
         .await;
         if result.is_ok() {
             info!(user = %stmt.user, "ALTER READYSET MODIFY USER");
+            state.acl.send_lifecycle(AclMessage::UserAltered {
+                user: stmt.user.clone(),
+            });
         }
         result
     }
@@ -1414,6 +1434,9 @@ where
         .await;
         if result.is_ok() {
             info!(user = %stmt.user, "ALTER READYSET DROP USER");
+            state.acl.send_lifecycle(AclMessage::UserDropped {
+                user: stmt.user.clone(),
+            });
         }
         result
     }
@@ -1949,6 +1972,14 @@ where
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::DropUser(stmt)) => {
                 Self::drop_user(settings, state, stmt).await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::FlushPrivileges) => {
+                // Any authenticated user may request re-validation: deny-means-proxy caps the
+                // blast radius at one pass of probe load, never a wrong answer.
+                state.acl.send_lifecycle(AclMessage::FullPass {
+                    trigger: PassTrigger::FlushPrivileges,
+                });
+                Ok(noria_connector::QueryResult::Empty)
             }
             SqlQuery::CreateRls(_create_rls) => {
                 unsupported!("CREATE RLS statement is not yet supported")

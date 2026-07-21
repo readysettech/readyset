@@ -1,8 +1,9 @@
-use std::assert_matches;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::test;
+use tokio_postgres::Client;
 
 use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
@@ -11,7 +12,28 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_tracing::init_test_logging;
+use readyset_util::eventually;
 use test_utils::{tags, upstream};
+
+/// Read `query` until Readyset serves it from the shallow cache, returning the
+/// value that serve produced. With authentication on, the cache ACL resolves
+/// each (identity, cache) pair on the freshness worker, so a user's own reads
+/// proxy until their probe lands.
+async fn eventually_shallow(conn: &Client, query: &str) -> String {
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "query was never served from the shallow cache",
+        {
+            conn.query_one(query, &[]).await.unwrap();
+            matches!(
+                last_query_info(conn).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        }
+    );
+    conn.query_one(query, &[]).await.unwrap().get(0)
+}
 
 #[test]
 #[tags(serial)]
@@ -71,26 +93,19 @@ async fn user_default_schema_is_used() {
         .await
         .unwrap();
 
+    // Only the converged serve asserts a destination: a first read proxies either
+    // because the cache ACL has yet to resolve this user or because the cache is
+    // still empty, and which one it is depends on when the probe lands.
     let name: String = alice
         .query_one("SELECT name FROM foo", &[])
         .await
         .unwrap()
         .get(0);
     assert_eq!(name, "alice");
-    assert_matches!(
-        last_query_info(&alice).await.destination,
-        QueryDestination::ReadysetThenUpstream(_),
-    );
 
-    let name: String = alice
-        .query_one("SELECT name FROM foo", &[])
-        .await
-        .unwrap()
-        .get(0);
-    assert_eq!(name, "alice");
-    assert_matches!(
-        last_query_info(&alice).await.destination,
-        QueryDestination::ReadysetShallow(_),
+    assert_eq!(
+        eventually_shallow(&alice, "SELECT name FROM foo").await,
+        "alice"
     );
 
     let mut bob_cfg = rs_opts.clone();
@@ -107,20 +122,10 @@ async fn user_default_schema_is_used() {
         .unwrap()
         .get(0);
     assert_eq!(name, "bob");
-    assert_matches!(
-        last_query_info(&bob).await.destination,
-        QueryDestination::ReadysetThenUpstream(_),
-    );
 
-    let name: String = bob
-        .query_one("SELECT name FROM foo", &[])
-        .await
-        .unwrap()
-        .get(0);
-    assert_eq!(name, "bob");
-    assert_matches!(
-        last_query_info(&bob).await.destination,
-        QueryDestination::ReadysetShallow(_),
+    assert_eq!(
+        eventually_shallow(&bob, "SELECT name FROM foo").await,
+        "bob"
     );
 
     shutdown_tx.shutdown().await;

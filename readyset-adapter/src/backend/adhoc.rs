@@ -514,6 +514,7 @@ where
                         connectors, settings, state, &shallow, query, hint,
                     )
                     .await
+                        && !Self::acl_declines_serve(connectors, settings, state, query_id)
                     {
                         let result =
                             Self::query_shallow(connectors, state, query, query_id, event, params)

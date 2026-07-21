@@ -115,6 +115,11 @@ impl AclMatrix {
         self.cells.retain(|(_, c), _| *c != cache);
     }
 
+    /// Discard every cell, e.g. on `DROP ALL CACHES`.
+    pub fn clear(&self) {
+        self.cells.clear();
+    }
+
     /// Snapshot the stored cells for observability consumers.
     pub fn snapshot(&self) -> Vec<(SqlIdentifier, QueryId, MatrixEntry)> {
         self.cells

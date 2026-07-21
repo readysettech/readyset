@@ -78,6 +78,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::cache_acl::{AclHandle, AclMessage, CacheCreator, Verdict};
 use crate::rls_coordinator::RlsCoordinator;
 use crate::session_context::SessionContext;
 use crate::shallow_key::ShallowKey;
@@ -118,12 +119,13 @@ use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
+use readyset_util::logging::{ADAPTER_ACL_DECLINED, rate_limit};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::query_status_cache::QueryStatusCache;
 use crate::status_reporter::ReadySetStatusReporter;
@@ -203,6 +205,83 @@ pub enum UnsupportedSetMode {
     Proxy,
     /// Allow all unsupported set statements
     Allow,
+}
+
+/// The identity the cache ACL judges this session by: the effective role from the session
+/// mirror where one exists (Postgres), the authenticated username otherwise (MySQL). `None`
+/// means the identity cannot be established -- an untrusted mirror or a pre-auth connection
+/// -- and the caller must fail closed.
+fn acl_identity(
+    session: Option<&Arc<SessionContext>>,
+    client_identity: Option<&SqlIdentifier>,
+) -> Option<SqlIdentifier> {
+    match session {
+        Some(session) => session.acl_identity(),
+        None => client_identity.cloned(),
+    }
+}
+
+/// The creator to attribute a new cache to: the identity the ACL judges the creating session
+/// by, plus the login user it was assumed from, which is the connection the worker probes an
+/// assumed role through.
+fn acl_creator(
+    session: Option<&Arc<SessionContext>>,
+    client_identity: Option<&SqlIdentifier>,
+) -> Option<CacheCreator> {
+    Some(CacheCreator {
+        identity: acl_identity(session, client_identity)?,
+        via: session.map(|session| session.startup_user.clone()),
+    })
+}
+
+/// The cache-ACL gate (deny-means-proxy): whether this session may be served from the
+/// shallow cache identified by `query_id`. Anything but an `Allowed` verdict for the
+/// session's effective identity declines, and the query falls through to upstream, which
+/// re-authorizes it. Runs before RLS scoping and independent of `TrxCachePolicy`: the
+/// verdict overrides even an `ALWAYS` pin, since a pin to the cache cannot pin a user who
+/// lost access. Inert when authentication is off (no user identities to authorize).
+fn acl_allows(
+    acl: &AclHandle,
+    session: Option<&Arc<SessionContext>>,
+    client_identity: Option<&SqlIdentifier>,
+    require_authentication: bool,
+    query_id: QueryId,
+) -> bool {
+    if !require_authentication {
+        return true;
+    }
+    let Some(identity) = acl_identity(session, client_identity) else {
+        record_acl_decline(query_id, "untrusted");
+        return false;
+    };
+    match acl.matrix().verdict_for(&identity, query_id) {
+        Verdict::Allowed => true,
+        verdict => {
+            if verdict == Verdict::Unknown {
+                // Ask the worker to resolve the identity (a role assumed via SET ROLE has
+                // no row until first sight), carrying the login user whose accepted SET
+                // ROLE proved membership. Non-blocking, and deduplicated worker-side.
+                let via = session.map(|session| session.startup_user.clone());
+                acl.send_demand(AclMessage::ResolveIdentity { identity, via });
+            }
+            record_acl_decline(query_id, verdict.as_str());
+            false
+        }
+    }
+}
+
+/// Count and (rate-limited) log a shallow serve declined by the cache ACL, so an individual
+/// user's off-cache routing is traceable without letting a denied hot user flood the log.
+fn record_acl_decline(query_id: QueryId, verdict: &'static str) {
+    counter!(
+        metric::CACHE_ACL_DECLINED,
+        "query_id" => query_id.to_string(),
+        "verdict" => verdict
+    )
+    .increment(1);
+    rate_limit(true, ADAPTER_ACL_DECLINED, || {
+        debug!(%query_id, verdict, "Cache ACL declined shallow serve");
+    });
 }
 
 /// Notified when the adapter's allowed-users map changes at runtime so protocol-level caches
@@ -315,6 +394,7 @@ pub struct BackendBuilder {
     dialect: Dialect,
     parsing_preset: ParsingPreset,
     users: Arc<AllowedUsers>,
+    cache_acl: AclHandle,
     require_authentication: bool,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_mode: Option<QueryLogMode>,
@@ -366,6 +446,7 @@ impl Default for BackendBuilder {
             dialect: Dialect::MySQL,
             parsing_preset: ParsingPreset::for_prod(),
             users: AllowedUsers::empty(),
+            cache_acl: AclHandle::disabled(),
             require_authentication: true,
             query_log_sender: None,
             query_log_mode: None,
@@ -452,11 +533,13 @@ impl BackendBuilder {
                 query_status_cache,
                 schema_handle,
                 users: self.users,
+                acl: self.cache_acl,
                 query_log_sender: self.query_log_sender,
                 query_log_mode: self.query_log_mode,
                 telemetry_sender: self.telemetry_sender,
                 connections: self.connections,
                 client_username: None,
+                client_identity: None,
                 status_reporter,
                 sampler_tx: self.sampler_tx,
                 is_internal_connection: false,
@@ -534,6 +617,11 @@ impl BackendBuilder {
         self
     }
 
+    pub fn cache_acl(mut self, cache_acl: AclHandle) -> Self {
+        self.cache_acl = cache_acl;
+        self
+    }
+
     /// Returns the shared users handle configured on this builder.
     pub fn get_users(&self) -> &Arc<AllowedUsers> {
         &self.users
@@ -554,6 +642,10 @@ impl BackendBuilder {
     pub fn require_authentication(mut self, require_authentication: bool) -> Self {
         self.require_authentication = require_authentication;
         self
+    }
+
+    pub fn get_require_authentication(&self) -> bool {
+        self.require_authentication
     }
 
     /// Whether or not to allow cache ddl statements to be executed. If false, cache ddl statements
@@ -889,6 +981,10 @@ where
     /// Process-wide allowed-users handle. Owns the map and (optionally) a sync hook that keeps
     /// protocol-level fast-auth caches in step. Mutated by `ALTER READYSET ADD|MODIFY|DROP USER`.
     users: Arc<AllowedUsers>,
+    /// Process-wide cache-ACL handle: the verdict matrix consulted before every shallow serve,
+    /// plus the freshness worker's queue. Disabled (always Unknown, sends dropped) when
+    /// authentication is off, where the enforcement seams never consult it.
+    acl: AclHandle,
     query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
     query_log_mode: Option<QueryLogMode>,
     /// Provides the ability to send [`TelemetryEvent`]s to Segment
@@ -897,6 +993,9 @@ where
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     /// The authenticated username for this connection
     client_username: Option<String>,
+    /// The authenticated username as an identifier, cached so the per-query ACL lookup on
+    /// upstreams without a session mirror (MySQL) never converts or allocates.
+    client_identity: Option<SqlIdentifier>,
     status_reporter: ReadySetStatusReporter<DB>,
     /// Optional sender to enqueue original queries for background sampling/verification
     sampler_tx:
@@ -1012,11 +1111,13 @@ where
 
         self.shallow.drop_cache(name, query_id.as_ref())?;
 
-        if let Some(coordinator) = &self.rls_coordinator {
-            let dropped_id = query_id.or_else(|| info.as_ref().map(|i| i.query_id));
-            if let Some(dropped_id) = dropped_id {
+        let dropped_id = query_id.or_else(|| info.as_ref().map(|i| i.query_id));
+        if let Some(dropped_id) = dropped_id {
+            if let Some(coordinator) = &self.rls_coordinator {
                 coordinator.unregister(&dropped_id);
             }
+            self.acl
+                .send_lifecycle(AclMessage::CacheDropped { cache: dropped_id });
         }
 
         // The cache held the exact `CREATE CACHE` request that was persisted; remove that entry.
@@ -1698,6 +1799,7 @@ where
         }
 
         self.state.client_username = Some(new_username.to_string());
+        self.state.client_identity = Some(SqlIdentifier::from(new_username));
     }
 
     /// Change the user for the upstream connection, if it exists
@@ -2561,6 +2663,78 @@ mod tests {
     use readyset_sql_parsing::parse_query;
 
     use super::*;
+
+    fn acl_with(verdict: Option<Verdict>, identity: &str, cache: QueryId) -> AclHandle {
+        let handle = AclHandle::disabled();
+        if let Some(verdict) = verdict {
+            handle.matrix().record(identity.into(), cache, verdict);
+        }
+        handle
+    }
+
+    #[test]
+    fn acl_gate_inert_without_authentication() {
+        let cache = QueryId::from_unparsed_select("select 1");
+        let acl = acl_with(None, "alice", cache);
+        // No identity at all, verdict Unknown: still allowed, the gate does not apply.
+        assert!(acl_allows(&acl, None, None, false, cache));
+    }
+
+    #[test]
+    fn acl_gate_by_verdict() {
+        let cache = QueryId::from_unparsed_select("select 1");
+        let identity: SqlIdentifier = "alice".into();
+        for (verdict, expected) in [
+            (Some(Verdict::Allowed), true),
+            (Some(Verdict::Denied), false),
+            (Some(Verdict::Unknown), false),
+            (None, false),
+        ] {
+            let acl = acl_with(verdict, "alice", cache);
+            assert_eq!(
+                acl_allows(&acl, None, Some(&identity), true, cache),
+                expected,
+                "verdict {verdict:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn acl_gate_fails_closed_without_identity() {
+        let cache = QueryId::from_unparsed_select("select 1");
+        let acl = acl_with(Some(Verdict::Allowed), "alice", cache);
+        // Authenticated mode but no established identity: deny.
+        assert!(!acl_allows(&acl, None, None, true, cache));
+    }
+
+    #[test]
+    fn acl_gate_keys_on_effective_identity() {
+        let cache = QueryId::from_unparsed_select("select 1");
+        let acl = acl_with(Some(Verdict::Allowed), "alice", cache);
+        let session = SessionContext::new("alice".into());
+        assert!(acl_allows(&acl, Some(&session), None, true, cache));
+
+        // A role switch is judged by the assumed role's (absent) row.
+        session.set_effective_role_scoped("limited".into(), false, false);
+        assert!(!acl_allows(&acl, Some(&session), None, true, cache));
+
+        // An untrusted mirror fails closed even with an Allowed cell.
+        let session = SessionContext::new("alice".into());
+        session.mark_session_untrusted();
+        assert!(!acl_allows(&acl, Some(&session), None, true, cache));
+    }
+
+    /// The verdict is the ACL's alone: the gate takes no transaction policy and no proxy
+    /// state, so an `ALWAYS` pin has nothing to override a non-Allowed verdict with.
+    #[test]
+    fn acl_gate_independent_of_trx_policy() {
+        let cache = QueryId::from_unparsed_select("select 1");
+        let identity: SqlIdentifier = "alice".into();
+        let denied = acl_with(Some(Verdict::Denied), "alice", cache);
+        assert!(!acl_allows(&denied, None, Some(&identity), true, cache));
+        let allowed = acl_with(Some(Verdict::Allowed), "alice", cache);
+        assert!(acl_allows(&allowed, None, Some(&identity), true, cache));
+    }
 
     #[test]
     fn hint_ddl_string_includes_coalesce() {

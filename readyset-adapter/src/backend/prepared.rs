@@ -36,7 +36,7 @@ use super::noria_connector::{self, ExecuteSelectContext, NoriaConnector, Prepare
 use super::routing::{ProxyState, SelectRouter, record_skip_cache};
 use super::{
     Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
-    convert_or_parse_query, log_query, parse_query, parse_shallow_query,
+    acl_allows, convert_or_parse_query, log_query, parse_query, parse_shallow_query,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::ManualCacheEntry;
@@ -1324,7 +1324,21 @@ where
 
         let should_fallback = {
             let policy = cached_statement.trx_cache_policy;
-            if matches!(policy, TrxCachePolicy::Always) {
+            // Per-execute ACL gate: a statement prepared before a revocation sees the new
+            // verdict here. Checked ahead of the ALWAYS pin, which it overrides.
+            let acl_denied = matches!(&cached_statement.prep.inner, PrepareResultInner::Shallow(_))
+                && cached_statement.query_id.is_some_and(|query_id| {
+                    !acl_allows(
+                        &self.state.acl,
+                        self.connectors.session.as_ref(),
+                        self.state.client_identity.as_ref(),
+                        self.settings.require_authentication,
+                        query_id,
+                    )
+                });
+            if acl_denied {
+                true
+            } else if matches!(policy, TrxCachePolicy::Always) {
                 false
             } else {
                 let is_recovering = cached_statement.in_fallback_recovery(

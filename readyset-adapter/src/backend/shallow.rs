@@ -31,7 +31,7 @@ use tracing::{debug, warn};
 use super::routing::{SelectRouter, record_skip_cache};
 use super::{
     AutoCreateTrigger, Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode,
-    QueryResult, build_hint_ddl_string,
+    QueryResult, acl_allows, acl_creator, build_hint_ddl_string,
 };
 use crate::rls_coordinator::RlsCoordinator;
 use crate::session_context::SessionContext;
@@ -107,6 +107,30 @@ where
             return None;
         }
         Some((query_id, trx_cache_policy))
+    }
+
+    /// The cache-ACL gate at the simple/text serve seam (A8). Gating after auto-creation is
+    /// deliberate: a denied user's traffic still creates the cache (entries are
+    /// user-independent and benefit everyone else); the user just is not served from it.
+    ///
+    /// The gate lives here rather than in [`Self::should_query_shallow`] because that
+    /// decision is shared with prepare, which must stay purely about whether the query has a
+    /// shallow cache. A verdict is not a property of the statement and can flip back to
+    /// `Allowed`, so letting it decide the prepare result would latch a handle off-cache for
+    /// its whole life; the extended protocol gates per execute instead.
+    pub(super) fn acl_declines_serve(
+        connectors: &BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &BackendState<DB>,
+        query_id: QueryId,
+    ) -> bool {
+        !acl_allows(
+            &state.acl,
+            connectors.session.as_ref(),
+            state.client_identity.as_ref(),
+            settings.require_authentication,
+            query_id,
+        )
     }
 
     /// Attempt to auto-create a shallow cache via [`create_shallow_cache_core`]
@@ -245,6 +269,7 @@ where
             opts.adaptive,
             ddl_req,
             true,
+            acl_creator(connectors.session.as_ref(), state.client_identity.as_ref()),
         )
         .await
         {
