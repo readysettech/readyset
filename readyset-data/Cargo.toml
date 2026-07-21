@@ -45,7 +45,6 @@ vec1 = { workspace = true }
 log-once = { workspace = true }
 
 # Local dependencies
-nom-sql = { path = "../nom-sql" }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }

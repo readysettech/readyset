@@ -6494,7 +6494,6 @@ dependencies = [
  "mysql_common",
  "ndarray",
  "nom 7.1.3",
- "nom-sql",
  "nom_locate",
  "once_cell",
  "pg_interval",

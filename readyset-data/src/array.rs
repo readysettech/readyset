@@ -6,7 +6,6 @@ use std::fmt::{self, Display};
 use fallible_iterator::FallibleIterator;
 use ndarray::{ArrayBase, ArrayD, ArrayViewD, Data, IxDyn, RawData};
 use nom_locate::LocatedSpan;
-use nom_sql::NomSqlError;
 use postgres_protocol::types::ArrayDimension;
 use proptest::arbitrary::Arbitrary;
 use readyset_errors::{invalid_query_err, ReadySetError, ReadySetResult};
@@ -460,9 +459,9 @@ impl Array {
         let (rem, mut res) = parse::array(LocatedSpan::new(s.as_bytes())).map_err(|e| {
             mk_err(match e {
                 nom::Err::Incomplete(n) => format!("Incomplete input; needed {n:?}"),
-                nom::Err::Error(NomSqlError { input, kind })
-                | nom::Err::Failure(NomSqlError { input, kind }) => {
-                    format!("{:?}: at {}", kind, String::from_utf8_lossy(&input))
+                nom::Err::Error(nom::error::Error { input, code })
+                | nom::Err::Failure(nom::error::Error { input, code }) => {
+                    format!("{:?}: at {}", code, String::from_utf8_lossy(&input))
                 }
             })
         })?;
@@ -645,20 +644,21 @@ mod parse {
 
     use ndarray::{ArrayD, IxDyn};
     use nom::branch::alt;
-    use nom::bytes::complete::{is_not, tag, tag_no_case};
+    use nom::bytes::complete::{is_not, tag, tag_no_case, take};
     use nom::character::complete::{digit1, multispace0};
     use nom::combinator::{map, map_parser, not, opt, peek};
     use nom::error::ErrorKind;
-    use nom::multi::{many1, separated_list1};
+    use nom::multi::{fold_many0, many1, separated_list1};
     use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-    use nom::AsBytes;
+    use nom::{AsBytes, IResult};
     use nom_locate::LocatedSpan;
-    use nom_sql::{raw_string_literal, NomSqlError, NomSqlResult, QuotingStyle};
-    use readyset_sql::Dialect;
 
     use crate::{Collation, DfValue};
 
     use super::Array;
+
+    /// Result type for the array-text parsers, over nom's built-in error type.
+    type ParseResult<I, O> = IResult<LocatedSpan<I>, O, nom::error::Error<LocatedSpan<I>>>;
 
     enum ArrayOrNested {
         Array(Vec<DfValue>),
@@ -709,13 +709,8 @@ mod parse {
         }
     }
 
-    pub(super) fn array(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Array> {
-        let fail = || {
-            nom::Err::Error(NomSqlError {
-                input: i,
-                kind: ErrorKind::Fail,
-            })
-        };
+    pub(super) fn array(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], Array> {
+        let fail = || nom::Err::Error(nom::error::Error::new(i, ErrorKind::Fail));
 
         let (i, _) = multispace0(i)?;
         let (i, bounds) = opt(terminated(
@@ -759,14 +754,14 @@ mod parse {
         ))
     }
 
-    fn bounds(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Bounds> {
+    fn bounds(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], Bounds> {
         map(
             many1(delimited(multispace0, single_dimension_bounds, multispace0)),
             Bounds,
         )(i)
     }
 
-    fn single_dimension_bounds(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], (i32, i32)> {
+    fn single_dimension_bounds(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], (i32, i32)> {
         // intentionally no spaces here, as postgresql doesn't allow spaces within bounds
         let (i, _) = tag("[")(i)?;
         let (i, lower) = bound_value(i)?;
@@ -776,13 +771,13 @@ mod parse {
         Ok((i, (lower, upper)))
     }
 
-    fn bound_value(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], i32> {
+    fn bound_value(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], i32> {
         let (i, sign) = opt(tag("-"))(i)?;
         let (i, num) = map_parser(digit1, nom::character::complete::i32)(i)?;
         Ok((i, if sign.is_some() { -num } else { num }))
     }
 
-    fn array_or_nested(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ArrayOrNested> {
+    fn array_or_nested(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], ArrayOrNested> {
         let (i, _) = multispace0(i)?;
         let (i, _) = tag("{")(i)?;
         let (i, _) = multispace0(i)?;
@@ -805,13 +800,13 @@ mod parse {
         Ok((i, res))
     }
 
-    fn literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], DfValue> {
+    fn literal(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], DfValue> {
         alt((
             map(tag_no_case("null"), |_| DfValue::None),
             map(
                 alt((
                     terminated(
-                        raw_string_literal(Dialect::PostgreSQL, QuotingStyle::Double),
+                        double_quoted_string_literal,
                         peek(pair(multispace0, alt((tag(","), tag("}"))))),
                     ),
                     unquoted_string_literal,
@@ -826,10 +821,46 @@ mod parse {
         ))(i)
     }
 
-    fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], Vec<u8>> {
+    fn unquoted_string_literal(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], Vec<u8>> {
         let (i, _) = not(peek(tag("\"")))(i)?;
         let (i, v) = is_not("{},\"\\")(i)?;
         Ok((i, v.to_vec()))
+    }
+
+    /// Parse a double-quoted array element, unescaping it the same way PostgreSQL unescapes quoted
+    /// array text: `""` yields a literal `"`, the common backslash escapes (`\\`, `\n`, `\t`, ...)
+    /// are interpreted, and any other `\<char>` yields that character with the backslash dropped.
+    fn double_quoted_string_literal(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], Vec<u8>> {
+        delimited(
+            tag("\""),
+            fold_many0(
+                alt((
+                    map(is_not("\\\""), |i: LocatedSpan<&[u8]>| *i),
+                    map(pair(tag("\""), tag("\"")), |_| &b"\""[..]),
+                    escape,
+                    preceded(tag("\\"), map(take(1usize), |i: LocatedSpan<&[u8]>| *i)),
+                )),
+                Vec::new,
+                |mut acc: Vec<u8>, bytes: &[u8]| {
+                    acc.extend(bytes);
+                    acc
+                },
+            ),
+            tag("\""),
+        )(i)
+    }
+
+    /// The backslash escape sequences interpreted inside quoted array elements.
+    fn escape(i: LocatedSpan<&[u8]>) -> ParseResult<&[u8], &[u8]> {
+        alt((
+            map(tag("\\\\"), |_| &b"\\"[..]),
+            map(tag("\\b"), |_| &b"\x08"[..]),
+            map(tag("\\r"), |_| &b"\r"[..]),
+            map(tag("\\n"), |_| &b"\n"[..]),
+            map(tag("\\t"), |_| &b"\t"[..]),
+            map(tag("\\0"), |_| &b"\0"[..]),
+            map(tag("\\Z"), |_| &b"\x1A"[..]),
+        ))(i)
     }
 }
 
@@ -1121,6 +1152,25 @@ mod tests {
         assert_eq!(
             Array::parse_as("{2a, 3b}", &DfType::DEFAULT_TEXT).unwrap(),
             Array::from(vec![DfValue::from("2a"), DfValue::from("3b"),])
+        );
+    }
+
+    #[test]
+    fn parse_quoted_string_array_with_escapes() {
+        let arr = Array::parse_as(
+            r#"{"hello\\world","say \"hello\"","path\\to\\\"file\"","","NULL"}"#,
+            &DfType::DEFAULT_TEXT,
+        )
+        .unwrap();
+        assert_eq!(
+            arr,
+            Array::from(vec![
+                DfValue::from(r"hello\world"),
+                DfValue::from(r#"say "hello""#),
+                DfValue::from(r#"path\to\"file""#),
+                DfValue::from(""),
+                DfValue::from("NULL"),
+            ])
         );
     }
 
