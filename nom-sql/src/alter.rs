@@ -639,6 +639,18 @@ pub fn drop_user_statement(
     }
 }
 
+pub fn flush_privileges_statement(
+) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
+    move |i| {
+        let (i, _) = tag_no_case("flush")(i)?;
+        let (i, _) = whitespace1(i)?;
+        let (i, _) = tag_no_case("privileges")(i)?;
+        let (i, _) = statement_terminator(i)?;
+
+        Ok((i, AlterReadysetStatement::FlushPrivileges))
+    }
+}
+
 pub fn alter_readyset_statement(
     dialect: Dialect,
 ) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], AlterReadysetStatement> {
@@ -665,6 +677,7 @@ pub fn alter_readyset_statement(
                 add_user_statement(dialect),
                 modify_user_statement(dialect),
                 drop_user_statement(dialect),
+                flush_privileges_statement(),
             )),
         ))(i)?;
 
@@ -1988,6 +2001,23 @@ mod tests {
                     user: "alice".into(),
                 })
             );
+        }
+
+        #[test]
+        fn alter_readyset_flush_privileges() {
+            for qstring in [
+                &b"ALTER READYSET FLUSH PRIVILEGES;"[..],
+                &b"alter readyset flush privileges"[..],
+            ] {
+                let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
+                assert_eq!(res, AlterReadysetStatement::FlushPrivileges);
+            }
+            let res = test_parse!(
+                alter_readyset_statement(Dialect::MySQL),
+                b"ALTER READYSET FLUSH PRIVILEGES"
+            );
+            assert_eq!(res, AlterReadysetStatement::FlushPrivileges);
+            assert_eq!(res.display(Dialect::MySQL).to_string(), "FLUSH PRIVILEGES");
         }
     }
 }

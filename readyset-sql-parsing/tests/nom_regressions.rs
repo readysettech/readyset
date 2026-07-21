@@ -196,6 +196,7 @@ fn alter_readyset() {
     check_parse_both!("ALTER READYSET DROP USER 'alice';");
     // Embedded single quotes in the password are accepted by both parsers.
     check_parse_both!("ALTER READYSET ADD USER 'alice' PASSWORD 'se''cret';");
+    check_parse_both!("ALTER READYSET FLUSH PRIVILEGES;");
 }
 
 #[test]

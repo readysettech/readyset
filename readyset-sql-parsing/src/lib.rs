@@ -566,6 +566,10 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::DropUser(
                 DropUserStatement { user },
             )))
+        } else if parser.parse_keywords(&[Keyword::FLUSH, Keyword::PRIVILEGES]) {
+            Ok(SqlQuery::AlterReadySet(
+                AlterReadysetStatement::FlushPrivileges,
+            ))
         } else {
             Err(ReadysetParsingError::ReadysetParsingError(format!(
                 "unexpected token after ALTER READYSET: {}",

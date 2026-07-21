@@ -594,6 +594,7 @@ pub enum AlterReadysetStatement {
     AddUser(AddUserStatement),
     ModifyUser(ModifyUserStatement),
     DropUser(DropUserStatement),
+    FlushPrivileges,
 }
 
 impl DialectDisplay for AlterReadysetStatement {
@@ -673,6 +674,9 @@ impl DialectDisplay for AlterReadysetStatement {
             Self::DropUser(stmt) => {
                 let user = stmt.user.as_str().replace('\'', "''");
                 write!(f, "DROP USER '{}'", user)
+            }
+            Self::FlushPrivileges => {
+                write!(f, "FLUSH PRIVILEGES")
             }
         })
     }

@@ -1275,7 +1275,8 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         | AlterReadysetStatement::ChangeCdc(_)
         | AlterReadysetStatement::AddUser(_)
         | AlterReadysetStatement::ModifyUser(_)
-        | AlterReadysetStatement::DropUser(_) => Ok(()),
+        | AlterReadysetStatement::DropUser(_)
+        | AlterReadysetStatement::FlushPrivileges => Ok(()),
     }
 }
 
