@@ -10,7 +10,7 @@ use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash};
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 use readyset_util::redacted::RedactedString;
 use tracing::debug;
@@ -59,6 +59,25 @@ impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
 
 pub trait IsFatalError {
     fn is_fatal(&self) -> bool;
+}
+
+/// The engine's answer to an authorization probe ([`UpstreamDatabase::acl_probe`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AclProbeOutcome {
+    Authorized,
+    Denied,
+}
+
+/// Order-insensitive hash of engine-reported privilege rows, used as a grant
+/// fingerprint: a changed value means the identity's effective grants changed
+/// and its cache-ACL verdicts must be re-probed. An invalidation signal only,
+/// never an authorization decision.
+pub fn fingerprint_rows(mut rows: Vec<String>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    rows.sort_unstable();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    rows.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub trait UpstreamDestination {
@@ -172,6 +191,32 @@ pub trait UpstreamDatabase: Sized + Send {
     async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>
     where
         S: AsRef<str> + Send + Sync;
+
+    /// Submit `query` in a form the engine authorizes but does not execute, as the
+    /// session's current identity, or as `as_role` on upstreams that can assume a role
+    /// in-session. `n_params` is the statement's placeholder count. Returns `Denied`
+    /// only for the engine's permission error; any other failure is transient and
+    /// surfaces as `Err`.
+    async fn acl_probe(
+        &mut self,
+        query: &str,
+        n_params: usize,
+        as_role: Option<&str>,
+    ) -> Result<AclProbeOutcome, Self::Error>;
+
+    /// Engine-evaluated hash of the session identity's (or `as_role`'s) effective
+    /// privileges over `relations`. See [`fingerprint_rows`] for the contract: an
+    /// invalidation signal deciding when to re-probe, never what the answer is.
+    async fn grant_fingerprint(
+        &mut self,
+        relations: &[Relation],
+        as_role: Option<&str>,
+    ) -> Result<u64, Self::Error>;
+
+    /// The roles the session's current identity is a member of and could assume
+    /// with `SET ROLE`, engine-evaluated. Empty on upstreams whose sessions the
+    /// cache ACL never keys by an assumed role.
+    async fn assumable_roles(&mut self) -> Result<Vec<String>, Self::Error>;
 
     /// Send a request to the upstream database to prepare the given query, returning a unique ID
     /// for that prepared statement
@@ -440,6 +485,33 @@ where
             Some(upstream) => upstream.can_prepare(query).await,
             None => Ok(()),
         }
+    }
+
+    async fn acl_probe(
+        &mut self,
+        query: &str,
+        n_params: usize,
+        as_role: Option<&str>,
+    ) -> Result<AclProbeOutcome, Self::Error> {
+        self.upstream()
+            .await?
+            .acl_probe(query, n_params, as_role)
+            .await
+    }
+
+    async fn grant_fingerprint(
+        &mut self,
+        relations: &[Relation],
+        as_role: Option<&str>,
+    ) -> Result<u64, Self::Error> {
+        self.upstream()
+            .await?
+            .grant_fingerprint(relations, as_role)
+            .await
+    }
+
+    async fn assumable_roles(&mut self) -> Result<Vec<String>, Self::Error> {
+        self.upstream().await?.assumable_roles().await
     }
 
     async fn prepare<'a, 'b, S>(

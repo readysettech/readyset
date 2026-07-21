@@ -18,7 +18,9 @@ use tokio::runtime::RuntimeFlavor;
 use tracing::{debug, error, info_span, Instrument};
 
 use database_utils::tls::{get_mysql_tls_config, ServerCertVerification};
-use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
+use readyset_adapter::upstream_database::{
+    fingerprint_rows, AclProbeOutcome, Refresh, UpstreamDestination, UpstreamStatementId,
+};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
@@ -27,7 +29,7 @@ use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata};
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
@@ -37,6 +39,29 @@ use crate::backend::write_query_results;
 use crate::{handle_error, Error};
 
 type StatementID = u32;
+
+/// MySQL server error codes that signal a privilege denial at prepare time:
+/// ER_DBACCESS_DENIED_ERROR, ER_TABLEACCESS_DENIED_ERROR,
+/// ER_COLUMNACCESS_DENIED_ERROR, ER_SPECIFIC_ACCESS_DENIED_ERROR,
+/// ER_PROCACCESS_DENIED_ERROR.
+fn is_privilege_error(code: u16) -> bool {
+    matches!(code, 1044 | 1142 | 1143 | 1227 | 1370)
+}
+
+/// Extract the granted roles from `SHOW GRANTS` output. Role grants are the
+/// rows without an ON clause, e.g. ``GRANT `r1`@`%`,`r2`@`%` TO `u`@`h` ``.
+fn granted_roles(grants: &[String]) -> Vec<String> {
+    grants
+        .iter()
+        .filter(|g| !g.contains(" ON "))
+        .filter_map(|g| {
+            let rest = g.strip_prefix("GRANT ")?;
+            let (roles, _) = rest.split_once(" TO ")?;
+            Some(roles.split(',').map(|r| r.trim().to_string()))
+        })
+        .flatten()
+        .collect()
+}
 
 /// One row of a shallow cache entry. Entries are keyed per results charset and filled from
 /// results the upstream converted into that charset. Text values are stored as canonical UTF-8
@@ -559,6 +584,58 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    async fn acl_probe(
+        &mut self,
+        query: &str,
+        _n_params: usize,
+        as_role: Option<&str>,
+    ) -> Result<AclProbeOutcome, Self::Error> {
+        if as_role.is_some() {
+            internal!("MySQL ACL probes do not support assuming a role");
+        }
+        // MySQL checks privileges at prepare time, so the prepare is the probe.
+        match self.conn.prep(query).await {
+            Ok(statement) => {
+                self.conn.close(statement).await?;
+                Ok(AclProbeOutcome::Authorized)
+            }
+            Err(mysql_async::Error::Server(ref e)) if is_privilege_error(e.code) => {
+                Ok(AclProbeOutcome::Denied)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    async fn grant_fingerprint(
+        &mut self,
+        _relations: &[Relation],
+        as_role: Option<&str>,
+    ) -> Result<u64, Self::Error> {
+        if as_role.is_some() {
+            internal!("MySQL grant fingerprints do not support assuming a role");
+        }
+        // The engine reports the session's own effective grants; granted roles
+        // are expanded with USING so a change to a role's own privileges flips
+        // the hash.
+        let mut rows: Vec<String> = self.conn.query("SHOW GRANTS").await?;
+        let roles = granted_roles(&rows);
+        if !roles.is_empty() {
+            let using = roles.join(", ");
+            let expanded: Vec<String> = self
+                .conn
+                .query(format!("SHOW GRANTS FOR CURRENT_USER() USING {using}"))
+                .await?;
+            rows.extend(expanded);
+        }
+        Ok(fingerprint_rows(rows))
+    }
+
+    async fn assumable_roles(&mut self) -> Result<Vec<String>, Self::Error> {
+        // Sessions that issue SET ROLE route off-cache in Phase 1, so the
+        // matrix never keys MySQL identities by an assumed role.
+        Ok(Vec::new())
+    }
+
     /// Prepares the given query using the mysql connection. Note, queries are prepared on a
     /// per connection basis. They are not universal.
     async fn prepare<'a, 'b, S>(
@@ -779,5 +856,32 @@ mod tests {
         let text = CacheEntry::Text(vec![DfValue::from(1)]);
         let binary = CacheEntry::Binary(vec![DfValue::from(1)]);
         assert_ne!(text.content_hash(), binary.content_hash());
+    }
+
+    #[test]
+    fn granted_roles_skips_privilege_grants() {
+        let grants = vec![
+            "GRANT USAGE ON *.* TO `alice`@`%`".to_string(),
+            "GRANT SELECT ON `db`.`t` TO `alice`@`%`".to_string(),
+            "GRANT `r1`@`%`,`r2`@`%` TO `alice`@`%`".to_string(),
+        ];
+        assert_eq!(granted_roles(&grants), vec!["`r1`@`%`", "`r2`@`%`"]);
+    }
+
+    #[test]
+    fn granted_roles_empty_without_role_grants() {
+        let grants = vec!["GRANT SELECT ON `db`.`t` TO `alice`@`%`".to_string()];
+        assert!(granted_roles(&grants).is_empty());
+    }
+
+    #[test]
+    fn privilege_error_codes() {
+        for code in [1044, 1142, 1143, 1227, 1370] {
+            assert!(is_privilege_error(code));
+        }
+        // Connect-phase and transient errors are not privilege denials.
+        for code in [1045, 1049, 1064, 2006] {
+            assert!(!is_privilege_error(code));
+        }
     }
 }

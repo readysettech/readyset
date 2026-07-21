@@ -12,6 +12,7 @@ use metrics::gauge;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_types::Kind;
 use tokio::task::JoinHandle;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::Type;
 use tokio_postgres::{
     Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
@@ -23,15 +24,17 @@ use tracing_futures::Instrument;
 
 use database_utils::tls::{ServerCertVerification, get_tls_connector};
 use psql_srv::{Column, TransferFormat};
-use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, UpstreamStatementId};
+use readyset_adapter::upstream_database::{
+    AclProbeOutcome, Refresh, UpstreamDestination, UpstreamStatementId, fingerprint_rows,
+};
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
-use readyset_sql::Dialect;
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Relation, SqlIdentifier};
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::SizeOf;
 use readyset_util::hash::hash;
 use readyset_util::redacted::RedactedString;
@@ -43,6 +46,48 @@ use crate::resultset::{Resultset, copy_simple_query_message};
 /// during connection phase if the version for the upstream server is too low.
 const MIN_UPSTREAM_MAJOR_VERSION: u16 = 13;
 const MIN_UPSTREAM_MINOR_VERSION: u16 = 0;
+
+/// Whether an ACL probe error is the engine withholding the statement from this
+/// identity. INSUFFICIENT_PRIVILEGE covers both the statement's permission check
+/// and a SET ROLE the session may not assume (A7/A16). A name that does not
+/// resolve counts too: without USAGE on a schema its objects are invisible
+/// rather than forbidden, so an identity that cannot reach the cache's relations
+/// arrives here. A genuinely dropped relation also reads as a denial, which
+/// withholds the cache until the grant fingerprint flips it back.
+fn probe_denies(code: &SqlState) -> bool {
+    matches!(
+        *code,
+        SqlState::INSUFFICIENT_PRIVILEGE
+            | SqlState::UNDEFINED_TABLE
+            | SqlState::INVALID_SCHEMA_NAME
+    )
+}
+
+/// Build the ACL probe script. Postgres defers privilege checks to executor
+/// startup, so a bare PREPARE succeeds without any grant; EXPLAIN EXECUTE runs
+/// executor startup -- where the permission check lives -- without executing
+/// the plan. The transaction is rolled back so the assumed role never outlives
+/// the probe, and the prepared statement -- a session object that survives
+/// ROLLBACK -- is deallocated explicitly so back-to-back probes on one
+/// connection cannot collide.
+fn acl_probe_script(query: &str, n_params: usize, as_role: Option<&str>) -> String {
+    let mut script = String::from("BEGIN; ");
+    if let Some(role) = as_role {
+        script.push_str("SET LOCAL ROLE ");
+        script.push_str(&Dialect::PostgreSQL.quote_identifier(role).to_string());
+        script.push_str("; ");
+    }
+    script.push_str("PREPARE __readyset_acl_probe AS ");
+    script.push_str(query);
+    script.push_str("; EXPLAIN EXECUTE __readyset_acl_probe");
+    if n_params > 0 {
+        script.push('(');
+        script.push_str(&vec!["NULL"; n_params].join(", "));
+        script.push(')');
+    }
+    script.push_str("; ROLLBACK; DEALLOCATE ALL;");
+    script
+}
 
 enum PreparedStatementWrapper {
     // Wraps an actual, live statement that's been prepared on the upstream postgres.
@@ -456,6 +501,96 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(())
     }
 
+    async fn acl_probe(
+        &mut self,
+        query: &str,
+        n_params: usize,
+        as_role: Option<&str>,
+    ) -> Result<AclProbeOutcome, Self::Error> {
+        let script = acl_probe_script(query, n_params, as_role);
+        match self.client.simple_query(&script).await {
+            Ok(_) => Ok(AclProbeOutcome::Authorized),
+            Err(e) => {
+                // End the aborted transaction and drop any prepared statement
+                // that outlived it, so the connection stays usable.
+                let _ = self.client.simple_query("ROLLBACK; DEALLOCATE ALL").await;
+                if e.code().is_some_and(probe_denies) {
+                    Ok(AclProbeOutcome::Denied)
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
+    }
+
+    async fn grant_fingerprint(
+        &mut self,
+        relations: &[Relation],
+        as_role: Option<&str>,
+    ) -> Result<u64, Self::Error> {
+        // The engine evaluates its own grant model (roles, inheritance, PUBLIC)
+        // via has_*_privilege, as the connected user or the explicit role.
+        // Relations that no longer resolve drop out of the join; the resulting
+        // flip costs one row of re-probes (A13 over-approximation).
+        let names: Vec<String> = relations
+            .iter()
+            .map(|r| r.display(Dialect::PostgreSQL).to_string())
+            .collect();
+        let (schema_priv, table_priv, column_priv) = if as_role.is_some() {
+            (
+                "has_schema_privilege($2, ns.nspname, 'USAGE')",
+                "has_table_privilege($2, c.oid, 'SELECT')",
+                "has_column_privilege($2, c.oid, a.attnum, 'SELECT')",
+            )
+        } else {
+            (
+                "has_schema_privilege(ns.nspname, 'USAGE')",
+                "has_table_privilege(c.oid, 'SELECT')",
+                "has_column_privilege(c.oid, a.attnum, 'SELECT')",
+            )
+        };
+        let sql = format!(
+            "SELECT r.name, {schema_priv}, {table_priv}, a.attname::text, {column_priv} \
+             FROM unnest($1::text[]) AS r(name) \
+             JOIN pg_class c ON c.oid = to_regclass(r.name) \
+             JOIN pg_namespace ns ON ns.oid = c.relnamespace \
+             LEFT JOIN pg_attribute a \
+               ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped"
+        );
+        let rows = match as_role {
+            Some(role) => self.client.query(&sql, &[&names, &role]).await?,
+            None => self.client.query(&sql, &[&names]).await?,
+        };
+        let rows = rows
+            .iter()
+            .map(|row| {
+                format!(
+                    "{}|{}|{}|{}|{}",
+                    row.get::<_, String>(0),
+                    row.get::<_, bool>(1),
+                    row.get::<_, bool>(2),
+                    row.get::<_, Option<String>>(3).unwrap_or_default(),
+                    row.get::<_, Option<bool>>(4).unwrap_or_default(),
+                )
+            })
+            .collect();
+        Ok(fingerprint_rows(rows))
+    }
+
+    async fn assumable_roles(&mut self) -> Result<Vec<String>, Self::Error> {
+        // MEMBER covers direct and inherited membership -- what SET ROLE
+        // requires -- and over-approximates the PG16 SET attribute; a probe
+        // through a member the engine refuses simply reads Denied.
+        let rows = self
+            .client
+            .query(
+                "SELECT rolname FROM pg_roles                  WHERE pg_has_role(oid, 'member')                    AND rolname <> current_user::text                    AND rolname NOT LIKE 'pg\\_%'",
+                &[],
+            )
+            .await?;
+        Ok(rows.iter().map(|row| row.get::<_, String>(0)).collect())
+    }
+
     async fn prepare<'a, S>(
         &'a mut self,
         query: S,
@@ -795,5 +930,49 @@ mod tests {
             cc(1, "SELECT 1").content_hash(),
             cc(2, "SELECT 2").content_hash()
         );
+    }
+
+    #[test]
+    fn acl_probe_script_no_params() {
+        assert_eq!(
+            acl_probe_script("SELECT a FROM t", 0, None),
+            "BEGIN; PREPARE __readyset_acl_probe AS SELECT a FROM t; \
+             EXPLAIN EXECUTE __readyset_acl_probe; ROLLBACK; DEALLOCATE ALL;"
+        );
+    }
+
+    #[test]
+    fn acl_probe_script_params_and_role() {
+        assert_eq!(
+            acl_probe_script(
+                "SELECT a FROM t WHERE b = $1 AND c = $2",
+                2,
+                Some("limited")
+            ),
+            "BEGIN; SET LOCAL ROLE \"limited\"; \
+             PREPARE __readyset_acl_probe AS SELECT a FROM t WHERE b = $1 AND c = $2; \
+             EXPLAIN EXECUTE __readyset_acl_probe(NULL, NULL); ROLLBACK; DEALLOCATE ALL;"
+        );
+    }
+
+    #[test]
+    fn probe_denies_unreachable_names_and_privileges() {
+        for code in [
+            SqlState::INSUFFICIENT_PRIVILEGE,
+            SqlState::UNDEFINED_TABLE,
+            SqlState::INVALID_SCHEMA_NAME,
+        ] {
+            assert!(probe_denies(&code), "{code:?} should deny");
+        }
+        // Anything the engine could answer differently on a retry stays
+        // unresolved rather than recording a denial upstream never made.
+        for code in [
+            SqlState::CONNECTION_FAILURE,
+            SqlState::ADMIN_SHUTDOWN,
+            SqlState::SYNTAX_ERROR,
+            SqlState::LOCK_NOT_AVAILABLE,
+        ] {
+            assert!(!probe_denies(&code), "{code:?} should not deny");
+        }
     }
 }
