@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::fmt::{self, Debug};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -414,10 +413,6 @@ impl VrelTableProvider {
 
 #[async_trait]
 impl TableProvider for VrelTableProvider {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         Arc::clone(&self.schema)
     }
@@ -505,10 +500,6 @@ impl DisplayAs for VrelExecutionPlan {
 impl ExecutionPlan for VrelExecutionPlan {
     fn name(&self) -> &str {
         "VrelExecutionPlan"
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn properties(&self) -> &Arc<PlanProperties> {
