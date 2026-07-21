@@ -157,8 +157,10 @@ deny = [
 skip = [
     { name = "bit-vec", version = "0.6.3" },
     { name = "hashbrown", version = "0.15.5" },
-    # forked mysql_async still uses lru 0.16; adapter uses 0.18
-    { name = "lru", version = "0.16.4" },
+    # bindgen (via librocksdb-sys) caps itertools below 0.14
+    { name = "itertools", version = "0.13.0" },
+    # hdrhistogram 7.6 uses nom 8; the SQL parser stack is still on nom 7
+    { name = "nom", version = "8.0.0" },
     # upstream tokio-postgres 0.7.18 uses newer versions of these crates
     { name = "phf", version = "0.13.1" },
     { name = "phf_shared", version = "0.13.1" },
@@ -172,9 +174,7 @@ skip = [
     { name = "digest", version = "0.11.3" },
     { name = "hmac", version = "0.13.0" },
     { name = "sha2", version = "0.11.0" },
-    # test-discovery uses toml 0.9 (toml_datetime 0.7, winnow 0.7),
-    # while trybuild / proc-macro-crate use newer toml 1.0 / toml_edit 0.25
-    { name = "toml_datetime", version = "0.7.5" },
+    # sqlformat still uses winnow 0.7; toml_edit uses winnow 1.0
     { name = "winnow", version = "0.7.15" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -200,7 +200,6 @@ skip-tree = [
     { name = "windows-core", version = "0.62.2" },
     { name = "windows-result", version = "0.4.1" },
     { name = "windows-strings", version = "0.5.1" },
-    { name = "windows-sys", version = "0.52.0" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
