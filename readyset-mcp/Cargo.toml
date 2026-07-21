@@ -30,7 +30,7 @@ openssl = { version = "0.10" }
 pem = { workspace = true }
 postgres-native-tls = { workspace = true }
 
-rmcp = { version = "1.4", features = ["server", "transport-io"] }
+rmcp = { version = "2.2", features = ["server", "transport-io"] }
 schemars = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

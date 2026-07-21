@@ -30,7 +30,7 @@ papaya = { workspace = true }
 parking_lot = { workspace = true }
 quanta = { workspace = true }
 rand = { workspace = true }
-rmcp = { version = "1.4", features = ["server", "transport-streamable-http-server", "macros"] }
+rmcp = { version = "2.2", features = ["server", "transport-streamable-http-server", "macros"] }
 schemars = "1"
 serde = { workspace = true }
 serde_json = { workspace = true }
