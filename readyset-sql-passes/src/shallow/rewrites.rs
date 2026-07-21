@@ -447,6 +447,38 @@ pub fn convert_placeholders_to_question_marks(query: &mut ShallowCacheQuery) {
     let _ = VisitMut::visit(&mut **query, &mut visitor);
 }
 
+/// Finds the highest `$n` placeholder index in the query, i.e. its parameter
+/// count. Zero for a query without numbered placeholders.
+struct MaxPlaceholderVisitor {
+    max: usize,
+}
+
+impl Visitor for MaxPlaceholderVisitor {
+    type Break = Infallible;
+
+    fn post_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
+        if let Expr::Value(ValueWithSpan {
+            value: Value::Placeholder(placeholder_str),
+            ..
+        }) = expr
+            && let Some(n) = placeholder_str
+                .strip_prefix('$')
+                .and_then(|n| n.parse::<usize>().ok())
+        {
+            self.max = self.max.max(n);
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+/// The highest `$n` placeholder index the query references -- its parameter
+/// count. Zero for a query without numbered placeholders.
+pub fn max_placeholder_index(query: &ShallowCacheQuery) -> usize {
+    let mut visitor = MaxPlaceholderVisitor { max: 0 };
+    let _ = Visit::visit(&**query, &mut visitor);
+    visitor.max
+}
+
 /// Replaces identifiers and literals with anonymized values.
 struct AnonymizeVisitor<'a> {
     anonymizer: &'a mut Anonymizer,
@@ -749,6 +781,21 @@ mod tests {
     fn parse_query(dialect: Dialect, sql: &str) -> ShallowCacheQuery {
         let (query, _) = parse_shallow_query(dialect, sql).expect("Failed to parse query");
         query
+    }
+
+    #[test]
+    fn max_placeholder_index_reads_numbered_placeholders() {
+        let q = parse_query(
+            Dialect::PostgreSQL,
+            "SELECT * FROM t WHERE id = $2 AND val = $1",
+        );
+        assert_eq!(max_placeholder_index(&q), 2);
+        let q = parse_query(Dialect::PostgreSQL, "SELECT * FROM t WHERE id = 1");
+        assert_eq!(max_placeholder_index(&q), 0);
+        let mut q = parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id = $1");
+        convert_placeholders_to_question_marks(&mut q);
+        // `?` placeholders carry no index.
+        assert_eq!(max_placeholder_index(&q), 0);
     }
 
     #[test]

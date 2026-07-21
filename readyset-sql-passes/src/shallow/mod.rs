@@ -14,5 +14,5 @@ pub use auto_cache_eligibility::{
 };
 pub use rewrites::{
     anonymize_shallow_query, convert_placeholders_to_question_marks, literalize_shallow_prepared,
-    literalize_shallow_query, rewrite_shallow,
+    literalize_shallow_query, max_placeholder_index, rewrite_shallow,
 };

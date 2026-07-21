@@ -192,6 +192,12 @@ pub trait UpstreamDatabase: Sized + Send {
     where
         S: AsRef<str> + Send + Sync;
 
+    /// Whether `error` is the engine refusing for lack of privilege, as opposed to any
+    /// other failure. Probing has to reach the statement through session setup that can
+    /// itself be refused -- entering the cache's schema is a privileged act on MySQL --
+    /// so the worker classifies those errors rather than treating them all as transient.
+    fn is_privilege_error(error: &Self::Error) -> bool;
+
     /// Submit `query` in a form the engine authorizes but does not execute, as the
     /// session's current identity, or as `as_role` on upstreams that can assume a role
     /// in-session. `n_params` is the statement's placeholder count. Returns `Denied`
@@ -475,6 +481,10 @@ where
             Some(u) => u.version(),
             None => U::DEFAULT_DB_VERSION.into(),
         }
+    }
+
+    fn is_privilege_error(error: &Self::Error) -> bool {
+        U::is_privilege_error(error)
     }
 
     async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>

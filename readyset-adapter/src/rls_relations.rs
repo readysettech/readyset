@@ -80,6 +80,19 @@ pub fn extract_referenced_relation_oids(
     Ok(oids)
 }
 
+/// Collect the catalog relations `query` references, deduplicated, as written: schema-qualified
+/// where the query qualifies them, bare otherwise (the caller resolves against its search path).
+/// Used by the cache-ACL fingerprint to scope privilege reads to cache-referenced relations.
+pub fn extract_referenced_relation_names(
+    query: &ShallowCacheQuery,
+) -> Vec<(Option<String>, String)> {
+    let mut names = Vec::new();
+    walk_query(query, &HashSet::new(), &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Resolve an unqualified relation name against the search path, first match wins. An empty path
 /// falls back to `public`; schemas holding no such relation (or nonexistent, e.g. an unexpanded
 /// `$user`) are skipped.

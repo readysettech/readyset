@@ -153,6 +153,10 @@ pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
 /// connections so they are identifiable on the upstream database.
 pub(crate) const READYSET_SHALLOW_REFRESHER: &str = "READYSET_SHALLOW_REFRESHER";
 
+/// Reserved program/application name reported by the cache-ACL prober on its per-user upstream
+/// connections so probe traffic is identifiable in the processlist and audit logs.
+pub const READYSET_ACL_POOLER: &str = "READYSET_ACL_POOLER";
+
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
 /// Placeholder username for connections that have not yet authenticated
@@ -255,7 +259,7 @@ impl AllowedUsers {
     /// Look up `user`'s plaintext password, cloning it out so the read lock isn't held by the
     /// caller. A poisoned lock is recovered rather than propagated so a single panic elsewhere
     /// cannot turn into a blanket authentication outage.
-    fn password_for(&self, user: &str) -> Option<String> {
+    pub(crate) fn password_for(&self, user: &str) -> Option<String> {
         self.map
             .read()
             .unwrap_or_else(PoisonError::into_inner)

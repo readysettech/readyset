@@ -501,6 +501,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(())
     }
 
+    fn is_privilege_error(error: &Self::Error) -> bool {
+        matches!(error, Error::PostgreSql(e) if e.code() == Some(&SqlState::INSUFFICIENT_PRIVILEGE))
+    }
+
     async fn acl_probe(
         &mut self,
         query: &str,

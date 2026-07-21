@@ -584,6 +584,10 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    fn is_privilege_error(error: &Self::Error) -> bool {
+        matches!(error, Error::MySql(mysql_async::Error::Server(e)) if is_privilege_error(e.code))
+    }
+
     async fn acl_probe(
         &mut self,
         query: &str,

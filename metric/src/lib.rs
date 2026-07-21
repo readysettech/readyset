@@ -14,6 +14,7 @@ macro_rules! export_metrics {
 }
 
 export_metrics!(allocator);
+export_metrics!(cache_acl);
 export_metrics!(connections);
 export_metrics!(controller);
 export_metrics!(dataflow);

@@ -98,6 +98,13 @@ impl AclMatrix {
             .map(|e| e.verdict)
     }
 
+    /// Whether the identity has at least one stored cell. The worker uses this
+    /// to deduplicate resolve-identity requests: query-rate misses for an
+    /// identity whose row is already being resolved are dropped.
+    pub fn has_row(&self, identity: &SqlIdentifier) -> bool {
+        self.cells.iter().any(|kv| kv.key().0 == *identity)
+    }
+
     /// Discard an identity's row; its cells read `Unknown` until re-probed.
     pub fn discard_row(&self, identity: &SqlIdentifier) {
         self.cells.retain(|(id, _), _| id != identity);

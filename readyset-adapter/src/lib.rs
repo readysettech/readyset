@@ -1,6 +1,7 @@
 #![deny(unreachable_pub)]
 pub mod backend;
 pub mod cache_acl;
+pub mod cache_acl_worker;
 mod deep_vrels;
 pub mod http_router;
 pub mod mcp_http;
