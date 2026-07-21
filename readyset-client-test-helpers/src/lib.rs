@@ -17,6 +17,7 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter::cache_acl::{AclHandle, AclMatrix, ACL_QUEUE_CAPACITY};
 use readyset_adapter::cache_acl_worker::AclWorker;
+use readyset_adapter::cache_grants_vrel::AclCacheGrants;
 use readyset_adapter::query_status_cache::{
     MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
@@ -797,7 +798,12 @@ impl TestBuilder {
                 &shallow_for_schema,
                 controller,
                 &(),
-                users_for_schema,
+                users_for_schema.clone(),
+                Arc::new(AclCacheGrants {
+                    acl: cache_acl.clone(),
+                    users: users_for_schema,
+                    shallow: Arc::clone(&shallow_for_schema) as _,
+                }),
             )
             .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();

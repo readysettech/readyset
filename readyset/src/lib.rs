@@ -40,6 +40,7 @@ use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{AllowedUsers, MigrationMode, UnsupportedSetMode};
 use readyset_adapter::cache_acl::{AclHandle, AclMatrix, ACL_QUEUE_CAPACITY};
 use readyset_adapter::cache_acl_worker::AclWorker;
+use readyset_adapter::cache_grants_vrel::AclCacheGrants;
 use readyset_adapter::http_router::NoriaAdapterHttpRouter;
 use readyset_adapter::migration_handler::MigrationHandler;
 use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
@@ -1834,6 +1835,11 @@ where
             controller,
             query_status_cache,
             users.clone(),
+            Arc::new(AclCacheGrants {
+                acl: cache_acl.clone(),
+                users: users.clone(),
+                shallow: Arc::clone(&shallow) as _,
+            }),
         )?;
 
         // MCP tool calls dispatch via a loopback SQL connection to the

@@ -27,7 +27,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_sql::Dialect;
 
-use crate::shallow_vrels::ShallowInfo;
+pub use crate::shallow_vrels::ShallowInfo;
 
 /// The rows yielded by a vrel read.
 pub type VrelRows = Box<dyn Iterator<Item = Vec<DfValue>> + Send>;
@@ -45,6 +45,7 @@ pub struct VrelContext {
     pub controller: ReadySetHandle,
     pub query_status_cache: &'static (dyn std::any::Any + Send + Sync),
     pub users: Arc<dyn UsersInfo>,
+    pub cache_grants: Arc<dyn CacheGrantsInfo>,
 }
 
 /// Provides the set of usernames allowed to authenticate against the adapter, backing the
@@ -52,6 +53,31 @@ pub struct VrelContext {
 pub trait UsersInfo: Send + Sync {
     /// Returns the current allowed usernames.
     fn usernames(&self) -> Vec<String>;
+}
+
+/// One row of `readyset.cache_grants`: the cache-ACL verdict for an (identity, cache) pair.
+pub struct CacheGrantRow {
+    pub user: String,
+    pub cache: String,
+    pub verdict: &'static str,
+    /// Wall clock of the probe that set this cell; `None` for pairs derived as unknown.
+    pub probed_at: Option<std::time::SystemTime>,
+}
+
+/// Exposes the cache-ACL verdict matrix, backing the `readyset.cache_grants` vrel.
+pub trait CacheGrantsInfo: Send + Sync {
+    /// Returns every stored verdict cell plus the derived unknown pairs
+    /// (users x caches minus the stored cells).
+    fn grants(&self) -> Vec<CacheGrantRow>;
+}
+
+/// A [`CacheGrantsInfo`] with no matrix behind it, for deployments where the ACL is disabled.
+pub struct NoCacheGrants;
+
+impl CacheGrantsInfo for NoCacheGrants {
+    fn grants(&self) -> Vec<CacheGrantRow> {
+        Vec::new()
+    }
 }
 
 /// A function that produces a new vrel read.
@@ -708,6 +734,7 @@ mod tests {
             stub_controller(),
             &(),
             Arc::new(NoopUsers),
+            Arc::new(NoCacheGrants),
         )
         .expect("init succeeds");
 
