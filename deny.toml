@@ -155,11 +155,16 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    { name = "bit-vec", version = "0.6.3" },
+    # arrow-cast (via datafusion) still uses atoi 2
+    { name = "atoi", version = "2.0.0" },
+    # proptest (via bit-set) still uses bit-vec 0.8
+    { name = "bit-vec", version = "0.8.0" },
     { name = "hashbrown", version = "0.15.5" },
-    # bindgen (via librocksdb-sys) caps itertools below 0.14
+    # bindgen (via librocksdb-sys) caps itertools below 0.14;
+    # datafusion and prost-derive use 0.14; the workspace is on 0.15
     { name = "itertools", version = "0.13.0" },
-    # hdrhistogram 7.6 uses nom 8; the SQL parser stack is still on nom 7
+    { name = "itertools", version = "0.14.0" },
+    # hdrhistogram uses nom 8; the workspace parser stack is still on nom 7
     { name = "nom", version = "8.0.0" },
     # upstream tokio-postgres 0.7.18 uses newer versions of these crates
     { name = "phf", version = "0.13.1" },

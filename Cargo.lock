@@ -240,7 +240,7 @@ dependencies = [
  "arrow-ord",
  "arrow-schema",
  "arrow-select",
- "atoi",
+ "atoi 2.0.0",
  "base64",
  "chrono",
  "comfy-table",
@@ -460,6 +460,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atoi"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a8bbe9949e43a1edaa043038c68703b04774156afdfb62ba2cef5bf93d67be"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -563,7 +572,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "indicatif",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util",
@@ -654,18 +663,18 @@ dependencies = [
 
 [[package]]
 name = "bit-vec"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+
+[[package]]
+name = "bit-vec"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bitflags"
@@ -936,9 +945,9 @@ dependencies = [
 
 [[package]]
 name = "cidr"
-version = "0.2.3"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bdf600c45bd958cf2945c445264471cca8b6c8e67bc87b71affd6d7e5682621"
+checksum = "579504560394e388085d0c080ea587dfa5c15f7e251b4d5247d1e1a61d1d6928"
 
 [[package]]
 name = "clang-sys"
@@ -1419,7 +1428,7 @@ name = "data-generator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "chrono",
  "eui48",
  "growable-bloom-filter",
@@ -1476,7 +1485,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "criterion",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "mysql-time",
  "mysql_async",
@@ -1514,7 +1523,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bincode",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "clap",
  "criterion",
  "derive_more",
@@ -1522,7 +1531,7 @@ dependencies = [
  "failpoint-macros",
  "hashbag",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "metric",
  "metrics",
@@ -2715,9 +2724,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "fork"
-version = "0.7.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bcc4b4161e53d499e41af904acb23950adf85682c772921ef3957cf1ecc98b3"
+checksum = "aafa2fb0e6b3b0886eb36b909c13a5e3dc9d7e0cf436376e43f095177050c029"
 dependencies = [
  "libc",
 ]
@@ -3827,6 +3836,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4141,9 +4159,9 @@ dependencies = [
 
 [[package]]
 name = "machine-uid"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d7217d573cdb141d6da43113b098172e057d39915d79c4bdedbc3aacd46bd96"
+checksum = "cfe0d6336d341b10ae80e099b8f3c59f34bf8aef66ef25e83aa98bf2955c0ae7"
 dependencies = [
  "libc",
  "windows-registry",
@@ -4575,7 +4593,7 @@ name = "nom-sql"
 version = "0.0.11"
 dependencies = [
  "assert_approx_eq",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "criterion",
  "fail",
  "failpoint-macros",
@@ -5321,7 +5339,7 @@ name = "postgres-types"
 version = "0.2.14"
 source = "git+https://github.com/readysettech/rust-postgres.git?tag=readyset-20260625#a3aa82410b8caedbd9009952b58704f0157bc727"
 dependencies = [
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "cidr",
@@ -5574,7 +5592,7 @@ name = "psql-srv"
 version = "0.1.0"
 dependencies = [
  "base64",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "cidr",
@@ -5665,7 +5683,7 @@ dependencies = [
  "data-generator",
  "dataflow-expression",
  "derive_more",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "mysql_async",
  "parking_lot",
@@ -5917,7 +5935,7 @@ dependencies = [
  "antithesis_sdk",
  "indexmap 2.14.0",
  "iter-enum",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "left-right",
  "metric",
  "metrics",
@@ -6027,7 +6045,7 @@ dependencies = [
  "futures-util",
  "health-reporter",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "linkme",
  "lru",
  "metric",
@@ -6134,7 +6152,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "futures-util",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "metric",
  "metrics",
  "metrics-util",
@@ -6256,14 +6274,14 @@ version = "0.1.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "clap",
  "dante",
  "data-generator",
  "database-utils",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "mysql-time",
  "mysql_async",
  "mysql_common",
@@ -6287,7 +6305,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "bincode",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "chrono-tz",
@@ -6298,7 +6316,7 @@ dependencies = [
  "eui48",
  "fallible-iterator",
  "icu",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "log-once",
  "mysql-time",
@@ -6353,7 +6371,7 @@ dependencies = [
  "failpoint-macros",
  "futures-util",
  "html-escape",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "merging-interval-tree",
  "metric",
  "metrics",
@@ -6423,7 +6441,7 @@ dependencies = [
  "fail",
  "fallible-iterator",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "mysql-srv",
  "mysql_async",
  "mysql_common",
@@ -6494,7 +6512,7 @@ version = "0.1.0"
 dependencies = [
  "antithesis_sdk",
  "anyhow",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "clap",
@@ -6505,7 +6523,7 @@ dependencies = [
  "futures",
  "hex",
  "indicatif",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "md5",
  "mysql-srv",
@@ -6586,7 +6604,7 @@ dependencies = [
  "dataflow-expression",
  "derive_more",
  "fixedbitset 0.4.2",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "petgraph 0.6.5",
  "readyset-client",
@@ -6630,7 +6648,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-util",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "metric",
  "metrics",
@@ -6685,7 +6703,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "chrono",
  "cidr",
  "clap",
@@ -6695,7 +6713,7 @@ dependencies = [
  "fail",
  "fallible-iterator",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "metric",
  "metrics",
@@ -6850,7 +6868,7 @@ dependencies = [
  "http",
  "include_dir",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "lazy_static",
  "metric",
  "metrics",
@@ -6957,13 +6975,13 @@ name = "readyset-sql"
 version = "0.1.0"
 dependencies = [
  "bincode",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "clap",
  "concrete-iter",
  "derive_more",
  "eui48",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "proptest",
  "readyset-decimal",
  "readyset-sql-parsing",
@@ -7007,7 +7025,7 @@ dependencies = [
  "criterion",
  "dataflow-expression",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "parking_lot",
  "pretty_assertions",
  "readyset-data",
@@ -7088,7 +7106,7 @@ name = "readyset-util"
 version = "0.1.0"
 dependencies = [
  "async-stream",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "chrono-tz",
@@ -7236,9 +7254,9 @@ dependencies = [
  "antithesis_sdk",
  "anyhow",
  "async-trait",
- "atoi",
+ "atoi 3.1.0",
  "bincode",
- "bit-vec 0.6.3",
+ "bit-vec 0.9.1",
  "bytes",
  "chrono",
  "database-utils",
@@ -7247,7 +7265,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "metric",
  "metrics",
  "mysql-srv",
@@ -8436,7 +8454,7 @@ dependencies = [
  "database-utils",
  "fork",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libc",
  "metric",
  "mysql-srv",
@@ -9937,9 +9955,9 @@ dependencies = [
 
 [[package]]
 name = "yore"
-version = "1.4.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a7947b754c504609dca276b5904e1049423769126de1dcd8259d96b43a5a764"
+checksum = "fb62c05420bd427bd71b7a78c963f3bff55a518e5827ccf1119b2c380ec9d2bb"
 
 [[package]]
 name = "zerocopy"

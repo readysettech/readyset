@@ -26,7 +26,7 @@ tokio-postgres = { workspace = true, features = [
     "with-eui48-1",
     "with-uuid-1",
     "with-serde_json-1",
-    "with-bit-vec-0_6",
+    "with-bit-vec-0_9",
 ] }
 readyset-multiplex = { path = "../readyset-multiplex" }
 url = { workspace = true, features = ["serde"] }
