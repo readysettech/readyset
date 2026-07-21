@@ -24,7 +24,6 @@ md5 = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
 nom = { workspace = true }
-nom_locate = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 regex = { workspace = true }
@@ -38,7 +37,6 @@ walkdir = { workspace = true }
 database-utils = { path = "../database-utils" }
 mysql-srv = { path = "../mysql-srv" }
 mysql-time = { path = "../mysql-time" }
-nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv", optional = true }
 query-generator = { path = "../query-generator" }
 readyset-adapter = { path = "../readyset-adapter", optional = true }

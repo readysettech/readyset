@@ -82,7 +82,7 @@ fn should_validate_results(query: &str, parsed_query: &Option<SqlQuery>) -> bool
         }
     } else {
         // WARNING:  Here be hacks.
-        // These conditionals work around nom_sql not parsing SHOW and certain SELECT queries.
+        // These conditionals work around the parser not parsing SHOW and certain SELECT queries.
         // From what I've seen thus far, subselects and SELECT DATABASE() are the SELECT queries
         // that fail.  In a future with flawless parsing, we can move the SHOW TABLES check to be a
         // SqlQuery::Show case above, and unconditionally return false here.

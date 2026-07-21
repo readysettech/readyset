@@ -15,7 +15,7 @@ use anyhow::{anyhow, bail, Context};
 use bit_vec::BitVec;
 use mysql_time::MySqlTime;
 use nom::branch::alt;
-use nom::bytes::complete::{tag, tag_no_case};
+use nom::bytes::complete::{tag, tag_no_case, take_until};
 use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, line_ending, not_line_ending, one_of, space0, space1,
 };
@@ -23,15 +23,30 @@ use nom::combinator::{complete, eof, map, map_opt, map_parser, map_res, opt, pee
 use nom::multi::{count, fold_many1, many0, many1, many_till};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::IResult;
-use nom_locate::LocatedSpan;
-use nom_sql::to_nom_result;
 use readyset_data::TimestampTz;
 use readyset_decimal::Decimal;
 
 use crate::ast::*;
 
 fn whitespace1(i: &[u8]) -> IResult<&[u8], ()> {
-    to_nom_result(nom_sql::whitespace::whitespace1(LocatedSpan::new(i))).map(|(i, _)| (i, ()))
+    map(many1(whitespace_unit), |_| ())(i)
+}
+
+fn whitespace_unit(i: &[u8]) -> IResult<&[u8], ()> {
+    alt((
+        map(multiline_comment, |_| ()),
+        map(eol_comment("#"), |_| ()),
+        map(eol_comment("--"), |_| ()),
+        map(one_of(" \t\r\n"), |_| ()),
+    ))(i)
+}
+
+fn multiline_comment(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    delimited(tag_no_case("/*"), take_until("*/"), tag_no_case("*/"))(i)
+}
+
+fn eol_comment(start: &'static str) -> impl Fn(&[u8]) -> IResult<&[u8], &[u8]> {
+    move |i| delimited(tag_no_case(start), not_line_ending, line_ending)(i)
 }
 
 fn comment(i: &[u8]) -> IResult<&[u8], ()> {
@@ -514,6 +529,14 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn whitespace1_consumes_spaces_and_comments() {
+        let input = b" \t\n/* block */\n# hash comment\n-- dash comment\nrest";
+        let (rem, ()) = whitespace1(input).unwrap();
+        assert_eq!(rem, b"rest");
+        assert!(whitespace1(b"rest").is_err());
+    }
 
     #[test]
     fn parse_conditional() {

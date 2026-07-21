@@ -6703,8 +6703,6 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "nom 7.1.3",
- "nom-sql",
- "nom_locate",
  "pretty_assertions",
  "proptest",
  "psql-srv",
