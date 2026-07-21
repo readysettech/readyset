@@ -30,7 +30,6 @@ metrics = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["binlog"] }
 native-tls = { workspace = true }
-nom_locate = { workspace = true }
 parking_lot = { workspace = true }
 pem = { workspace = true }
 postgres-native-tls = { workspace = true }
@@ -55,7 +54,6 @@ failpoint-macros = { path = "../failpoint-macros" }
 metric = { path = "../metric" }
 mysql-srv = { path = "../mysql-srv" }
 mysql-time = { path = "../mysql-time" }
-nom-sql = { path = "../nom-sql" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }

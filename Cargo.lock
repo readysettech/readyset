@@ -7465,8 +7465,6 @@ dependencies = [
  "mysql_async",
  "mysql_common",
  "native-tls",
- "nom-sql",
- "nom_locate",
  "parking_lot",
  "pem",
  "postgres-native-tls",

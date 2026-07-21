@@ -9,11 +9,11 @@ use readyset_sql::ast::{
     AutoparamControl, CacheInner, CacheType, ChangeCdcStatement, ChangeUpstreamStatement,
     CreateCacheOptions, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
     DropCacheStatement, DropUserStatement, EvictionPolicy, Expr, FlushAllShallowCachesStatement,
-    FlushCacheStatement, ModifyUserAction, ModifyUserStatement, ReadysetHintDirective,
+    FlushCacheStatement, ModifyUserAction, ModifyUserStatement, ReadysetHintDirective, Relation,
     ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue, SetEviction,
     SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
     ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShallowCacheQuery, ShowLimit,
-    ShowStatement, ShutdownStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    ShowStatement, ShutdownStatement, SqlIdentifier, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -1189,6 +1189,44 @@ pub fn parse_hint_directive(
     }
 
     Ok(directive)
+}
+
+fn parse_table_name_component(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<SqlIdentifier, sqlparser::parser::ParserError> {
+    if parser.consume_token(&Token::Mul) {
+        Ok(SqlIdentifier::from("*"))
+    } else {
+        Ok(parser.parse_identifier()?.into_dialect(dialect))
+    }
+}
+
+fn parse_table_list_one(
+    parser: &mut Parser,
+    dialect: Dialect,
+) -> Result<Relation, sqlparser::parser::ParserError> {
+    let first = parse_table_name_component(parser, dialect)?;
+    if parser.consume_token(&Token::Period) {
+        let name = parse_table_name_component(parser, dialect)?;
+        Ok(Relation::new(Some(first), name))
+    } else {
+        Ok(Relation::new(None, first))
+    }
+}
+
+/// Parse a comma-separated list of optionally schema-qualified tables.
+pub fn parse_table_list(
+    dialect: Dialect,
+    input: &str,
+) -> Result<Vec<Relation>, ReadysetParsingError> {
+    let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
+    let mut parser = Parser::new(sqlparser_dialect.as_ref())
+        .try_with_sql(input)
+        .map_err(ReadysetParsingError::SqlparserError)?;
+    let tables = parser.parse_comma_separated(|p| parse_table_list_one(p, dialect))?;
+    parser.expect_token(&Token::EOF)?;
+    Ok(tables)
 }
 
 fn peek_create_cache(parser: &mut Parser) -> bool {
@@ -2619,5 +2657,60 @@ mod tests {
             "display should emit the RECURSIVE marker, got {}",
             recursive.display(Dialect::PostgreSQL)
         );
+    }
+
+    fn rel(schema: Option<&str>, name: &str) -> Relation {
+        Relation::new(schema.map(SqlIdentifier::from), SqlIdentifier::from(name))
+    }
+
+    #[test]
+    fn replicator_table_list_parses_names_schemas_and_wildcards() {
+        // Bare names, schema-qualified names, and wildcards, with arbitrary surrounding
+        // whitespace, in a single comma-separated list.
+        let tables = parse_table_list(Dialect::MySQL, "t1, noria.t2 , readyset.* , t3").unwrap();
+        assert_eq!(
+            tables,
+            vec![
+                rel(None, "t1"),
+                rel(Some("noria"), "t2"),
+                rel(Some("readyset"), "*"),
+                rel(None, "t3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn replicator_table_list_parses_quoted_identifiers() {
+        let tables = parse_table_list(Dialect::MySQL, "`my db`.`my table`").unwrap();
+        assert_eq!(tables, vec![rel(Some("my db"), "my table")]);
+        let tables = parse_table_list(Dialect::PostgreSQL, r#""My DB"."My Table""#).unwrap();
+        assert_eq!(tables, vec![rel(Some("My DB"), "My Table")]);
+    }
+
+    #[test]
+    fn replicator_table_list_unescapes_doubled_quotes() {
+        let tables = parse_table_list(Dialect::MySQL, "`my``db`.`my``table`").unwrap();
+        assert_eq!(tables, vec![rel(Some("my`db"), "my`table")]);
+        let tables = parse_table_list(Dialect::PostgreSQL, r#""my""db"."my""table""#).unwrap();
+        assert_eq!(tables, vec![rel(Some(r#"my"db"#), r#"my"table"#)]);
+    }
+
+    #[test]
+    fn replicator_table_list_postgres_quoting_controls_case() {
+        let insensitive = parse_table_list(Dialect::PostgreSQL, "MySchema.MyTable").unwrap();
+        assert_eq!(insensitive, vec![rel(Some("myschema"), "mytable")]);
+
+        let sensitive = parse_table_list(Dialect::PostgreSQL, r#""MySchema"."MyTable""#).unwrap();
+        assert_eq!(sensitive, vec![rel(Some("MySchema"), "MyTable")]);
+
+        let mixed = parse_table_list(Dialect::PostgreSQL, r#"MySchema."MyTable""#).unwrap();
+        assert_eq!(mixed, vec![rel(Some("myschema"), "MyTable")]);
+    }
+
+    #[test]
+    fn replicator_table_list_rejects_trailing_garbage() {
+        assert!(parse_table_list(Dialect::MySQL, "t1 t2").is_err());
+        assert!(parse_table_list(Dialect::MySQL, "t1,").is_err());
+        assert!(parse_table_list(Dialect::MySQL, "").is_err());
     }
 }

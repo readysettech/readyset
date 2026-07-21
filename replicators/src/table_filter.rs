@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use nom_locate::LocatedSpan;
-use nom_sql::replicator_table_list;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
+use readyset_sql_parsing::parse_table_list;
 
 /// A [`TableFilter`] keeps lists of all the tables readyset-server is interested in, as well as a
 /// list of tables that we explicitly want to filter out of replication. Tables may be filtered
@@ -170,26 +169,18 @@ impl TableFilter {
         let allow_unregistered_schemas = replication_tables.is_none() && default_schema.is_none();
 
         if let Some(arg) = replication_tables_ignore {
-            let tables = match replicator_table_list(dialect)(LocatedSpan::new(arg.as_bytes())) {
-                Ok((rem, tables)) if rem.is_empty() => tables,
-                _ => {
-                    return Err(ReadySetError::ReplicationFailed(
-                        "Unable to parse --replication-tables-ignore".to_string(),
-                    ))
-                }
-            };
+            let tables = parse_table_list(dialect, arg).map_err(|_| {
+                ReadySetError::ReplicationFailed(
+                    "Unable to parse --replication-tables-ignore".to_string(),
+                )
+            })?;
             return Self::allow_tables(default_schema, tables, allow_unregistered_schemas, false);
         }
 
         if let Some(arg) = replication_tables {
-            let tables = match replicator_table_list(dialect)(LocatedSpan::new(arg.as_bytes())) {
-                Ok((rem, tables)) if rem.is_empty() => tables,
-                _ => {
-                    return Err(ReadySetError::ReplicationFailed(
-                        "Unable to parse --replication-tables".to_string(),
-                    ))
-                }
-            };
+            let tables = parse_table_list(dialect, arg).map_err(|_| {
+                ReadySetError::ReplicationFailed("Unable to parse --replication-tables".to_string())
+            })?;
             return Self::allow_tables(default_schema, tables, allow_unregistered_schemas, true);
         }
 
