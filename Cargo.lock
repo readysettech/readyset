@@ -3042,15 +3042,6 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hmac"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
-dependencies = [
- "digest 0.10.7",
-]
-
-[[package]]
-name = "hmac"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
@@ -4398,7 +4389,7 @@ dependencies = [
  "readyset-util",
  "rsa",
  "sha-1",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "slab",
  "subtle",
  "tempfile",
@@ -5326,7 +5317,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "fallible-iterator",
- "hmac 0.13.0",
+ "hmac",
  "md-5",
  "memchr",
  "rand 0.10.2",
@@ -5601,7 +5592,7 @@ dependencies = [
  "eui48",
  "futures",
  "hex",
- "hmac 0.12.1",
+ "hmac",
  "nom 7.1.3",
  "postgres",
  "postgres-native-tls",
@@ -5615,7 +5606,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "smallvec",
  "stringprep",
  "test-discovery",
@@ -6152,6 +6143,7 @@ dependencies = [
  "failpoint-macros",
  "futures",
  "futures-util",
+ "hex",
  "itertools 0.15.0",
  "metric",
  "metrics",
@@ -6176,7 +6168,7 @@ dependencies = [
  "schema-catalog",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "slab",
  "smallvec",
  "streaming-iterator",

@@ -171,13 +171,12 @@ skip = [
     { name = "phf_shared", version = "0.13.1" },
     { name = "rand", version = "0.9.2" },
     { name = "cpufeatures", version = "0.2.17" },
-    # tokio-postgres 0.7.18 uses the RustCrypto 0.11/0.13 generation, while the
-    # rest of the workspace stays on the 0.10/0.12 generation
+    # the workspace and tokio-postgres use the RustCrypto 0.11 generation,
+    # while sha1, mysql_common, and rsa still pull the 0.10 generation
     { name = "block-buffer", version = "0.12.1" },
     { name = "const-oid", version = "0.10.2" },
     { name = "crypto-common", version = "0.2.2" },
     { name = "digest", version = "0.11.3" },
-    { name = "hmac", version = "0.13.0" },
     { name = "sha2", version = "0.11.0" },
     # sqlformat still uses winnow 0.7; toml_edit uses winnow 1.0
     { name = "winnow", version = "0.7.15" },

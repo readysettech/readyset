@@ -9,7 +9,7 @@ use std::str::{self, Utf8Error};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use hmac::digest::FixedOutput;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::RngExt;
 use sha2::{Digest, Sha256};
 use thiserror::Error;

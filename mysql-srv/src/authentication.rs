@@ -24,6 +24,7 @@ use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Oaep, RsaPrivateKey};
 use sha1::{Digest, Sha1};
+use sha2::digest::Digest as Sha2Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use thiserror::Error;

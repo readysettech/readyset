@@ -22,6 +22,7 @@ bytes = { workspace = true }
 serde = { workspace = true, features = ["rc", "derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 rmp-serde = { workspace = true }
+hex = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
