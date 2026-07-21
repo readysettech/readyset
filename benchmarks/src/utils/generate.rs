@@ -12,22 +12,17 @@ use anyhow::{anyhow, Result};
 use clap::{Parser, ValueHint};
 use futures::StreamExt;
 use itertools::Itertools;
-use nom::multi::many1;
-use nom::sequence::delimited;
-use nom_locate::LocatedSpan;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::warn;
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection};
-use nom_sql::parser::sql_query;
-use nom_sql::whitespace::whitespace0;
-use nom_sql::NomSqlResult;
 use query_generator::{ColumnName, TableName, TableSpec};
 use readyset_data::DfValue;
 use readyset_sql::ast::{Column, Expr, InsertStatement, ItemPlaceholder, Relation, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_queries;
 
 use super::spec::{DatabaseGenerationSpec, DatabaseSchema, SchemaKind, TableGenerationSpec};
 use crate::utils::path::benchmark_path;
@@ -48,8 +43,8 @@ pub struct DataGenerator {
     var_overrides: Option<serde_json::Value>,
 }
 
-fn multi_ddl(input: LocatedSpan<&[u8]>, dialect: Dialect) -> NomSqlResult<&[u8], Vec<SqlQuery>> {
-    many1(delimited(whitespace0, sql_query(dialect), whitespace0))(input)
+fn multi_ddl(input: &str, dialect: Dialect) -> anyhow::Result<Vec<SqlQuery>> {
+    parse_queries(dialect, input).map_err(|e| anyhow!("Error parsing DDL {e}"))
 }
 
 impl DataGenerator {
@@ -84,10 +79,9 @@ impl DataGenerator {
             .await?;
         let ddl = std::fs::read_to_string(benchmark_path(&self.schema)?)?;
 
-        let parsed = multi_ddl(LocatedSpan::new(ddl.as_bytes()), conn.dialect())
-            .map_err(|e| anyhow!("Error parsing DDL {e}"))?;
+        let parsed = multi_ddl(&ddl, conn.dialect())?;
         // This may be a multi-line DDL, if it is semi-colons terminate the statements.
-        for statement in parsed.1 {
+        for statement in parsed {
             conn.query_drop(statement.display(conn.dialect()).to_string())
                 .await?;
         }

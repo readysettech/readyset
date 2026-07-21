@@ -2324,6 +2324,19 @@ pub fn parse_query(
     parse_query_with_config(ParsingPreset::for_tests(), dialect, input)
 }
 
+/// Parse a sequence of `;`-separated SQL statements, and return one [`SqlQuery`] per statement.
+pub fn parse_queries(
+    dialect: Dialect,
+    input: impl AsRef<str>,
+) -> Result<Vec<SqlQuery>, ReadysetParsingError> {
+    let sqlparser_dialect = sqlparser_dialect_from_readyset_dialect(dialect);
+    Parser::parse_sql(sqlparser_dialect.as_ref(), input.as_ref())
+        .map_err(ReadysetParsingError::SqlparserError)?
+        .into_iter()
+        .map(|stmt| Ok(stmt.try_into_dialect(dialect)?))
+        .collect()
+}
+
 export_parser!(
     /// Parse a single SQL expression.
     expr,
@@ -2364,6 +2377,8 @@ export_parser!(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use readyset_sql::ast::SqlQuery;
     use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
@@ -2712,5 +2727,18 @@ mod tests {
         assert!(parse_table_list(Dialect::MySQL, "t1 t2").is_err());
         assert!(parse_table_list(Dialect::MySQL, "t1,").is_err());
         assert!(parse_table_list(Dialect::MySQL, "").is_err());
+    }
+
+    #[test]
+    fn parse_queries_splits_semicolon_separated_statements() {
+        let queries = parse_queries(
+            Dialect::MySQL,
+            "CREATE TABLE t (a INT); DROP TABLE t; SELECT 1;",
+        )
+        .unwrap();
+        assert_eq!(queries.len(), 3);
+        assert_matches!(queries[0], SqlQuery::CreateTable(_));
+        assert_matches!(queries[1], SqlQuery::DropTable(_));
+        assert_matches!(queries[2], SqlQuery::Select(_));
     }
 }

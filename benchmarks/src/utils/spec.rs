@@ -10,14 +10,10 @@ use std::collections::HashMap;
 use anyhow::{anyhow, bail};
 use database_utils::{DatabaseConnection, DatabaseType};
 use itertools::{Either, Itertools};
-use nom::multi::many1;
-use nom::sequence::{preceded, terminated};
-use nom_locate::LocatedSpan;
-use nom_sql::sql_query;
-use nom_sql::whitespace::whitespace0;
 use query_generator::{TableName, TableSpec};
 use readyset_sql::ast::{CommentStatement, CreateTableOption, Expr, SqlQuery, VariableScope};
 use readyset_sql::{Dialect, DialectDisplay};
+use readyset_sql_parsing::parse_queries;
 
 /// Set of parameters used to generate a single table's data.
 #[derive(Clone)]
@@ -107,25 +103,8 @@ impl From<&DatabaseConnection> for SchemaKind {
     }
 }
 
-fn parse_ddl(input: LocatedSpan<&[u8]>, dialect: Dialect) -> anyhow::Result<Vec<SqlQuery>> {
-    let (remain, query) = terminated(
-        many1(preceded(
-            // Skip comments, newlines, variables
-            whitespace0,
-            sql_query(dialect),
-        )),
-        whitespace0,
-    )(input)
-    .map_err(|err| anyhow!("Error parsing ddl into SqlQuery {:?}", err))?;
-
-    if !remain.is_empty() {
-        return Err(anyhow!(
-            "Unable to parse schema, beginning with {:?}",
-            std::str::from_utf8(remain.chunks(100).next().unwrap())
-        ));
-    }
-
-    Ok(query)
+fn parse_ddl(input: &str, dialect: Dialect) -> anyhow::Result<Vec<SqlQuery>> {
+    parse_queries(dialect, input).map_err(|err| anyhow!("Error parsing ddl into SqlQuery: {err}"))
 }
 
 fn parse_row_count_assignment(comment: &str) -> Option<&str> {
@@ -145,7 +124,7 @@ impl DatabaseSchema {
     }
 
     fn new_mysql(ddl: &str, mut user_vars: HashMap<String, String>) -> anyhow::Result<Self> {
-        let ddl = parse_ddl(LocatedSpan::new(ddl.as_bytes()), Dialect::MySQL).unwrap();
+        let ddl = parse_ddl(ddl, Dialect::MySQL).unwrap();
 
         let mut schema = DatabaseSchema {
             tables: HashMap::new(),
@@ -226,7 +205,7 @@ impl DatabaseSchema {
     }
 
     fn new_postgres(ddl: &str) -> anyhow::Result<Self> {
-        let ddl = parse_ddl(LocatedSpan::new(ddl.as_bytes()), Dialect::PostgreSQL).unwrap();
+        let ddl = parse_ddl(ddl, Dialect::PostgreSQL).unwrap();
         let (comments, ddl): (Vec<CommentStatement>, Vec<SqlQuery>) =
             ddl.into_iter().partition_map(|stmt| match stmt {
                 SqlQuery::Comment(comment) => Either::Left(comment),
@@ -365,7 +344,7 @@ mod tests {
         user_id int(11) NOT NULL,
         article_id int(11) NOT NULL
     );";
-        parse_ddl(LocatedSpan::new(q.as_bytes()), Dialect::MySQL).unwrap();
+        parse_ddl(q, Dialect::MySQL).unwrap();
     }
 
     #[test]
@@ -451,7 +430,7 @@ mod tests {
         user_id int NOT NULL,
         article_id int NOT NULL
     );";
-        parse_ddl(LocatedSpan::new(q.as_bytes()), Dialect::PostgreSQL).unwrap();
+        parse_ddl(q, Dialect::PostgreSQL).unwrap();
     }
 
     #[test]
