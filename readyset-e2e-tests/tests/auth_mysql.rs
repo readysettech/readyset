@@ -5,7 +5,7 @@ use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
 use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
-use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_util::shutdown::ShutdownSender;
 use rsa::RsaPublicKey;
@@ -163,5 +163,67 @@ async fn e2e_sha2_prepopulated_cache_skips_full_auth() {
     }
 
     fail::remove(failpoints::CACHING_SHA2_FULL_AUTH_BEGIN);
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn authenticated_upstream_uses_client_user() {
+    readyset_tracing::init_test_logging();
+    let mut upstream = mysql_async::Conn::new(mysql_helpers::upstream_config())
+        .await
+        .unwrap();
+    upstream
+        .query_drop(
+            "DROP USER IF EXISTS 'alice'@'%';
+             CREATE USER 'alice'@'%' IDENTIFIED BY 'secret';
+             GRANT ALL PRIVILEGES ON *.* TO 'alice'@'%';",
+        )
+        .await
+        .unwrap();
+
+    let users = HashMap::from([("alice".to_string(), "secret".to_string())]);
+    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) = TestBuilder::new(
+        BackendBuilder::new()
+            .require_authentication(true)
+            .users(Arc::new(AllowedUsers::new(users, None))),
+    )
+    .auth_plugin(AuthPlugin::Sha2(CachingSha2Password))
+    .fallback(true)
+    .build::<MySQLAdapter>()
+    .await;
+
+    let mut conn = mysql_async::Conn::new(
+        mysql_async::OptsBuilder::from_opts(rs_opts)
+            .user(Some("alice"))
+            .pass(Some("secret")),
+    )
+    .await
+    .unwrap();
+    let user: Option<(String,)> = conn.query_first("SELECT CURRENT_USER()").await.unwrap();
+    assert!(user.unwrap().0.starts_with("alice@"));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn unauthenticated_upstream_uses_configured_user() {
+    readyset_tracing::init_test_logging();
+    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+        TestBuilder::new(BackendBuilder::new().require_authentication(false))
+            .fallback(true)
+            .build::<MySQLAdapter>()
+            .await;
+
+    let mut conn =
+        mysql_async::Conn::new(mysql_async::OptsBuilder::from_opts(rs_opts).user(Some("nobody")))
+            .await
+            .unwrap();
+    let user: Option<(String,)> = conn.query_first("SELECT CURRENT_USER()").await.unwrap();
+    assert!(user.unwrap().0.starts_with("root@"));
+
     shutdown_tx.shutdown().await;
 }

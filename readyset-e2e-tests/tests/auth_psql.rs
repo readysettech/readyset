@@ -130,3 +130,74 @@ async fn user_default_schema_is_used() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn authenticated_upstream_uses_client_user() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+
+    let mut cfg = psql_helpers::upstream_config();
+    cfg.dbname(&test_name);
+    psql_helpers::connect(cfg)
+        .await
+        .simple_query(
+            "DO $$ BEGIN
+                 CREATE ROLE alice LOGIN PASSWORD 'secret';
+             EXCEPTION WHEN duplicate_object THEN
+                 ALTER ROLE alice LOGIN PASSWORD 'secret';
+             END $$;",
+        )
+        .await
+        .unwrap();
+
+    let users = HashMap::from([("alice".to_string(), "secret".to_string())]);
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
+        BackendBuilder::new()
+            .require_authentication(true)
+            .users(Arc::new(AllowedUsers::new(users, None))),
+    )
+    .fallback(true)
+    .replicate_db(&test_name)
+    .recreate_database(false)
+    .build::<PostgreSQLAdapter>()
+    .await;
+
+    let mut user_cfg = rs_opts.clone();
+    user_cfg.dbname(&test_name).user("alice").password(b"secret");
+    let conn = psql_helpers::connect(user_cfg).await;
+    let user: String = conn
+        .query_one("SELECT current_user", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(user, "alice");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn unauthenticated_upstream_uses_configured_user() {
+    init_test_logging();
+    let (rs_opts, _handle, shutdown_tx) =
+        TestBuilder::new(BackendBuilder::new().require_authentication(false))
+            .fallback(true)
+            .build::<PostgreSQLAdapter>()
+            .await;
+
+    let mut cfg = rs_opts.clone();
+    cfg.user("nobody");
+    let user: String = psql_helpers::connect(cfg)
+        .await
+        .query_one("SELECT current_user", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(user, "postgres");
+
+    shutdown_tx.shutdown().await;
+}
