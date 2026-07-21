@@ -534,7 +534,7 @@ impl UpstreamDatabase for MySqlUpstream {
             statement_id: statement.id(),
             meta: StatementMeta {
                 params: statement.params().to_owned(),
-                schema: statement.columns().to_owned(),
+                schema: statement.columns().to_vec(),
             },
         })
     }

@@ -1037,7 +1037,7 @@ async fn reset_user() {
 
     assert_eq!(
         row.map_err(|e| e.to_string()),
-        Err("Server error: `ERROR 42S02 (1146): Table 'noria.t' doesn't exist'".to_string())
+        Err("Server error: `ERROR 1146 (42S02): Table 'noria.t' doesn't exist'".to_string())
     );
 
     shutdown_tx.shutdown().await;
@@ -1140,7 +1140,7 @@ async fn it_change_user() {
 
     assert_eq!(
         row.map_err(|e| e.to_string()),
-        Err("Server error: `ERROR 42S02 (1146): Table 'noria.t' doesn't exist'".to_string())
+        Err("Server error: `ERROR 1146 (42S02): Table 'noria.t' doesn't exist'".to_string())
     );
 
     // Run change user again to make sure it can query the database

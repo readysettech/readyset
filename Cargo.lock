@@ -112,7 +112,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -123,7 +123,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2510,7 +2510,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3210,7 +3210,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3791,7 +3791,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4130,15 +4130,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.16.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
-dependencies = [
- "hashbrown 0.16.1",
-]
-
-[[package]]
-name = "lru"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
@@ -4174,6 +4165,29 @@ dependencies = [
  "libc",
  "windows-registry",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "manyhow"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b33efb3ca6d3b07393750d4030418d594ab1139cee518f0dc88db70fec873587"
+dependencies = [
+ "manyhow-macros",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "manyhow-macros"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46fce34d199b78b6e6073abf984c9cf5fd3e9330145a93ee0738a7443e371495"
+dependencies = [
+ "proc-macro-utils",
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]
@@ -4346,14 +4360,15 @@ dependencies = [
 
 [[package]]
 name = "mysql-common-derive"
-version = "0.32.1"
-source = "git+https://github.com/readysettech/rust_mysql_common#1d884b47573a802464a758ea9b328f042360e680"
+version = "0.32.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4db8a44120571277accfaa3f3d91e7d3989d601d817c2fc01a9391b86135666"
 dependencies = [
- "darling 0.20.11",
+ "darling 0.23.0",
  "heck",
+ "manyhow",
  "num-bigint",
  "proc-macro-crate",
- "proc-macro-error2",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -4410,25 +4425,25 @@ dependencies = [
 
 [[package]]
 name = "mysql_async"
-version = "0.36.1"
-source = "git+https://github.com/readysettech/mysql_async?branch=gtid_tags#5eba329af2ea18e51aa2e1f4ba4945778fe99759"
+version = "0.37.0"
+source = "git+https://github.com/readysettech/mysql_async?branch=rs-v0.37.0#4237721a092782bac6bd3442b2a1aeef6b17109c"
 dependencies = [
  "bytes",
  "crossbeam-queue",
+ "crossbeam-utils",
  "flate2",
  "futures-core",
  "futures-sink",
  "futures-util",
  "keyed_priority_queue",
- "lru 0.16.4",
+ "lru",
  "mysql_common",
  "native-tls",
  "pem",
  "percent-encoding",
- "rand 0.9.4",
+ "rand 0.10.1",
  "serde",
- "serde_json",
- "socket2 0.5.10",
+ "socket2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-native-tls",
@@ -4439,8 +4454,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.36.2"
-source = "git+https://github.com/readysettech/rust_mysql_common#1d884b47573a802464a758ea9b328f042360e680"
+version = "0.37.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f27695f286b461da077b8c2f72f47feaa04ce3c3f9c0976257410e90e21208a"
 dependencies = [
  "base64 0.22.1",
  "bigdecimal",
@@ -4646,7 +4662,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5446,25 +5462,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
+name = "proc-macro-utils"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+checksum = "eeaf08a13de400bc215877b5bdc088f241b12eb42f0a548d3390dc1c56bb7071"
 dependencies = [
  "proc-macro2",
  "quote",
-]
-
-[[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
-dependencies = [
- "proc-macro-error-attr2",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
+ "smallvec",
 ]
 
 [[package]]
@@ -6037,7 +6042,7 @@ dependencies = [
  "indexmap 2.14.0",
  "itertools 0.14.0",
  "linkme",
- "lru 0.18.0",
+ "lru",
  "metric",
  "metrics",
  "metrics-exporter-prometheus",
@@ -6384,7 +6389,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
- "socket2 0.6.3",
+ "socket2",
  "strum",
  "test-strategy",
  "test-utils",
@@ -7564,7 +7569,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7800,7 +7805,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8121,22 +8126,12 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "socket2"
-version = "0.5.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
-dependencies = [
- "libc",
- "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "socket2"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8246,7 +8241,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8533,7 +8528,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8563,7 +8558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8799,7 +8794,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2 0.6.3",
+ "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
@@ -8844,7 +8839,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "rand 0.10.1",
- "socket2 0.6.3",
+ "socket2",
  "tokio",
  "tokio-util",
  "whoami",
@@ -9631,7 +9626,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
