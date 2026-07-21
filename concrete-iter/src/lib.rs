@@ -173,7 +173,7 @@ fn generate_iterator_impl(
 
     let generic_param_bounds: Punctuated<_, Comma> = lifetime_params
         .into_iter()
-        .map(|lt| GenericParam::from(LifetimeParam::new(lt)))
+        .map(|lt| GenericParam::Lifetime(LifetimeParam::new(lt)))
         .chain(type_param_names.iter().map(|tn| -> GenericParam {
             parse_quote!(#tn : ::std::iter::Iterator<Item = #item_ty>)
         }))
