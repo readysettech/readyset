@@ -908,7 +908,7 @@ impl Ingredient for Union {
         tag: Tag,
         keys: &[KeyComparison],
         _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) {
+    ) -> usize {
         for key in keys {
             // TODO: the key.clone()s here are really sad
             if let Some(e) = self.replay_pieces.get_mut(&BufferedReplayKey {
@@ -936,6 +936,8 @@ impl Ingredient for Union {
                 }
             }
         }
+        // Buffered replay pieces are marked for eviction, not dropped here, so no bytes are freed.
+        0
     }
 
     fn suggest_indexes(&self, _: NodeIndex) -> HashMap<NodeIndex, LookupIndex> {

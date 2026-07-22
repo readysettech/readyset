@@ -164,6 +164,18 @@ impl AverageAccumulator {
     }
 }
 
+impl readyset_util::SizeOf for AverageAccumulator {
+    fn deep_size_of(&self) -> usize {
+        // A Numeric sum's BigDecimal heap allocation is not counted, matching
+        // `DfValue::deep_size_of`, which also treats `Numeric` as inline-only.
+        size_of::<Self>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2447,6 +2447,10 @@ impl Domain {
                             .get(local_index)
                             .map(|s| s.deep_size_of())
                             .unwrap_or(0)
+                            + self
+                                .auxiliary_node_states
+                                .get(local_index)
+                                .map_or(0, SizeOf::deep_size_of)
                     });
 
                 let mat_state = self
@@ -2516,8 +2520,13 @@ impl Domain {
                     ));
                 }
             } else if let Some(state) = self.state.get(local_index) {
-                // non-reader node with state
-                res.push((node.global_addr(), state.key_count(), state.deep_size_of()))
+                // non-reader node with state; auxiliary operator state counts toward its total
+                let size = state.deep_size_of()
+                    + self
+                        .auxiliary_node_states
+                        .get(local_index)
+                        .map_or(0, SizeOf::deep_size_of);
+                res.push((node.global_addr(), state.key_count(), size))
             }
         }
         Ok(Some(bincode::serialize(&res)?))
@@ -4282,7 +4291,7 @@ impl Domain {
             replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
         {
             // Call eviction hook on the source node
-            nodes[node].borrow_mut().process_eviction(
+            bytes_freed += nodes[node].borrow_mut().process_eviction(
                 node,
                 &keys,
                 tag,
@@ -4292,7 +4301,7 @@ impl Domain {
                 auxiliary_node_states,
             )?;
 
-            Self::walk_path(
+            bytes_freed += Self::walk_path(
                 &path.path[..],
                 &keys,
                 tag,
@@ -4374,11 +4383,12 @@ impl Domain {
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         executor: &mut dyn Executor,
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<usize> {
+        let mut aux_bytes_freed = 0;
         let mut from = path[0].node;
         for segment in path {
             // partial_key must be Some for partial replay paths
-            nodes[segment.node].borrow_mut().process_eviction(
+            aux_bytes_freed += nodes[segment.node].borrow_mut().process_eviction(
                 from,
                 keys,
                 tag,
@@ -4389,7 +4399,7 @@ impl Domain {
             )?;
             from = segment.node;
         }
-        Ok(())
+        Ok(aux_bytes_freed)
     }
 
     fn eviction_candidates(
@@ -4397,6 +4407,7 @@ impl Domain {
         num_bytes: &mut usize,
         state: &StateMap,
         reader_write_handles: &NodeMap<backlog::WriteHandle>,
+        auxiliary_node_states: &AuxiliaryNodeStateMap,
     ) -> Vec<(LocalNodeIndex, usize)> {
         let mut candidates: Vec<_> = nodes
             .values()
@@ -4411,10 +4422,18 @@ impl Domain {
                         None
                     }
                 } else {
+                    // Auxiliary operator state rides along: evicting keys from the node's state
+                    // releases the matching auxiliary entries, so it counts toward the node's
+                    // evictable bytes.
                     state
                         .get(local_index)
                         .filter(|state| state.is_partial())
-                        .map(|state| state.deep_size_of())
+                        .map(|state| {
+                            state.deep_size_of()
+                                + auxiliary_node_states
+                                    .get(local_index)
+                                    .map_or(0, SizeOf::deep_size_of)
+                        })
                 }
                 .map(|s| (local_index, s))
             })
@@ -4477,6 +4496,7 @@ impl Domain {
                 &mut num_bytes,
                 &self.state,
                 &self.reader_write_handles,
+                &self.auxiliary_node_states,
             )
         };
 
@@ -4560,7 +4580,7 @@ impl Domain {
             .iter()
             .position(|ps| ps.node == dst)
             .ok_or_else(|| ReadySetError::NoSuchNode(dst.id()))?;
-        Self::walk_path(
+        let aux_freed = Self::walk_path(
             &path[i..],
             &keys,
             tag,
@@ -4570,6 +4590,9 @@ impl Domain {
             ex,
             &mut self.auxiliary_node_states,
         )?;
+        if aux_freed > 0 {
+            self.state_size.fetch_sub(aux_freed, Ordering::AcqRel);
+        }
 
         match trigger {
             TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) => {
@@ -4782,11 +4805,19 @@ impl Domain {
                     self.metrics.set_reader_state_size(n.name(), size);
                     size
                 } else {
-                    // Not a reader, state is with domain
+                    // Not a reader, state is with domain. Auxiliary operator state is memory the
+                    // materialized state does not cover but the same evictions release, so it
+                    // counts toward the same partial total.
                     self.state
                         .get(local_index)
                         .filter(|state| state.is_partial())
-                        .map(|s| s.deep_size_of())
+                        .map(|s| {
+                            s.deep_size_of()
+                                + self
+                                    .auxiliary_node_states
+                                    .get(local_index)
+                                    .map_or(0, SizeOf::deep_size_of)
+                        })
                         .unwrap_or(0)
                 }
             })

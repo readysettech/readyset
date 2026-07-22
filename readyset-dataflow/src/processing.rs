@@ -806,14 +806,17 @@ where
     }
 
     /// Triggered whenever an eviction occurs, to allow the operator to react by evicting from any
-    /// auxiliary state other than what is stored in its materialization.
+    /// auxiliary state other than what is stored in its materialization. Returns the number of
+    /// auxiliary bytes freed, so the domain can subtract them from its memory accounting the same
+    /// way it subtracts the bytes freed from materialized state.
     fn on_eviction(
         &mut self,
         _from: LocalNodeIndex,
         _tag: Tag,
         _keys: &[KeyComparison],
         _auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) {
+    ) -> usize {
+        0
     }
 
     fn can_query_through(&self) -> bool {

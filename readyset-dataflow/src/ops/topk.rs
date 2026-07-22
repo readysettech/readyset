@@ -14,7 +14,7 @@ use readyset_client::{KeyComparison, internal};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetResult, internal, internal_err};
 use readyset_sql::ast::{NullOrder, OrderType, Relation};
-use readyset_util::Indices;
+use readyset_util::{Indices, SizeOf};
 use serde::{Deserialize, Serialize};
 use tracing::{error, trace};
 
@@ -351,19 +351,22 @@ impl Ingredient for TopK {
         _tag: Tag,
         keys: &[KeyComparison],
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) {
+    ) -> usize {
         let us = self
             .our_index
             .expect("TopK node index must be set after on_commit");
         let Some(AuxiliaryNodeState::TopK(aux_state)) = auxiliary_node_states.get_mut(*us) else {
             error!("TopK operator received wrong auxiliary node state during eviction");
-            return;
+            return 0;
         };
 
+        let mut freed = 0;
         for key in keys {
             match key {
                 KeyComparison::Equal(exact) => {
-                    aux_state.remove(exact.as_slice());
+                    if let Some((group_key, rows)) = aux_state.remove_entry(exact.as_slice()) {
+                        freed += group_key.deep_size_of() + rows.deep_size_of();
+                    }
                 }
                 KeyComparison::Range(_) => {
                     // Range evictions don't normally reach here: TopK is
@@ -371,10 +374,17 @@ impl Ingredient for TopK {
                     // produces point evictions for it. We handle Range
                     // defensively in case a future dataflow shape routes
                     // one through.
-                    aux_state.retain(|group_key, _| !key.contains(group_key.iter()));
+                    aux_state.retain(|group_key, rows| {
+                        let keep = !key.contains(group_key.iter());
+                        if !keep {
+                            freed += group_key.deep_size_of() + rows.deep_size_of();
+                        }
+                        keep
+                    });
                 }
             }
         }
+        freed
     }
 
     #[allow(clippy::cognitive_complexity)]

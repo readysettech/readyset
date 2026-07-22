@@ -229,7 +229,7 @@ impl Ingredient for NodeOperator {
         tag: Tag,
         keys: &[KeyComparison],
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) {
+    ) -> usize {
         impl_ingredient_fn_mut!(self, on_eviction, from, tag, keys, auxiliary_node_states)
     }
 

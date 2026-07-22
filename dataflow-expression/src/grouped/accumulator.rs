@@ -24,6 +24,7 @@ use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     DistinctOption, Expr, FieldReference, FunctionExpr, NullOrder, OrderClause, OrderType,
 };
+use readyset_util::SizeOf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use strum::IntoStaticStr;
@@ -536,6 +537,37 @@ pub enum AccumulatorData {
         values: Vec<DfValue>,
         order_by: Option<(OrderType, NullOrder)>,
     },
+}
+
+impl SizeOf for AccumulatorData {
+    fn deep_size_of(&self) -> usize {
+        size_of::<Self>()
+            + match self {
+                AccumulatorData::Simple(values) | AccumulatorData::Ordered { values, .. } => {
+                    values.deep_size_of()
+                }
+                AccumulatorData::DistinctOrdered(map) => map.deep_size_of(),
+            }
+    }
+
+    fn size_is_empty(&self) -> bool {
+        match self {
+            AccumulatorData::Simple(values) | AccumulatorData::Ordered { values, .. } => {
+                values.is_empty()
+            }
+            AccumulatorData::DistinctOrdered(map) => map.is_empty(),
+        }
+    }
+}
+
+impl SizeOf for OrderableDfValue {
+    fn deep_size_of(&self) -> usize {
+        self.value.deep_size_of() + size_of::<Option<(OrderType, NullOrder)>>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        false
+    }
 }
 
 /// Sort a `Vec<DfValue>` according to an optional `(OrderType, NullOrder)`.  For text,

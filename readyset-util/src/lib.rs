@@ -4,7 +4,7 @@
 #![deny(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::mem::size_of_val;
 use std::sync::Arc;
@@ -273,6 +273,57 @@ sizeof_integer!(i16);
 sizeof_integer!(i32);
 sizeof_integer!(i64);
 sizeof_integer!(i128);
+sizeof_integer!(usize);
+sizeof_integer!(isize);
+
+impl<K, V, S> SizeOf for HashMap<K, V, S>
+where
+    K: SizeOf,
+    V: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self)
+            + self
+                .iter()
+                .map(|(k, v)| k.deep_size_of() + v.deep_size_of())
+                .sum::<usize>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<K, V> SizeOf for BTreeMap<K, V>
+where
+    K: SizeOf,
+    V: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self)
+            + self
+                .iter()
+                .map(|(k, v)| k.deep_size_of() + v.deep_size_of())
+                .sum::<usize>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
+
+impl<T, S> SizeOf for HashSet<T, S>
+where
+    T: SizeOf,
+{
+    fn deep_size_of(&self) -> usize {
+        size_of_val(self) + self.iter().map(|v| v.deep_size_of()).sum::<usize>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+}
 
 impl<A, B> SizeOf for (A, B)
 where

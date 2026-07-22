@@ -4,6 +4,7 @@ use readyset_data::dialect::SqlEngine;
 use readyset_data::{AverageAccumulator, AvgScaleMode, DfType, Dialect};
 use readyset_errors::{ReadySetResult, invariant};
 pub use readyset_sql::ast::{BinaryOperator, Literal, SqlType};
+use readyset_util::SizeOf;
 use serde::{Deserialize, Serialize};
 
 use crate::node::AuxiliaryNodeState;
@@ -170,6 +171,16 @@ fn default_scale_mode() -> AvgScaleMode {
 /// Auxiliary State for an Aggregator node, which is owned by a Domain
 pub struct AggregatorState {
     count_sum_map: HashMap<GroupHash, AverageAccumulator>,
+}
+
+impl SizeOf for AggregatorState {
+    fn deep_size_of(&self) -> usize {
+        self.count_sum_map.deep_size_of()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.count_sum_map.is_empty()
+    }
 }
 
 impl Aggregator {

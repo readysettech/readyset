@@ -9,6 +9,7 @@ use common::DfValue;
 use dataflow_expression::grouped::accumulator::{AccumulationOp, AccumulatorData};
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{ReadySetResult, internal_err, invariant_eq};
+use readyset_util::SizeOf;
 use serde::{Deserialize, Serialize};
 
 use super::{GroupHash, hash_grouped_records};
@@ -20,6 +21,16 @@ struct LastState {
     last_output: Option<DfValue>,
     /// The actual data
     data: AccumulatorData,
+}
+
+impl SizeOf for LastState {
+    fn deep_size_of(&self) -> usize {
+        self.last_output.deep_size_of() + self.data.deep_size_of()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.last_output.is_none() && self.data.size_is_empty()
+    }
 }
 
 /// `Accumulator` implements accumulation-based aggregation operations that collect
@@ -292,6 +303,16 @@ impl GroupedOperation for Accumulator {
 /// Auxiliary State for accumulation operations, which is owned by a Domain.
 pub struct AccumulatorState {
     last_state: HashMap<GroupHash, LastState>,
+}
+
+impl SizeOf for AccumulatorState {
+    fn deep_size_of(&self) -> usize {
+        self.last_state.deep_size_of()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        self.last_state.is_empty()
+    }
 }
 
 #[cfg(test)]

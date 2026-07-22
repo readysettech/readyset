@@ -340,8 +340,11 @@ impl Node {
         reader_write_handles: &mut NodeMap<backlog::WriteHandle>,
         ex: &mut dyn Executor,
         auxiliary_node_states: &mut AuxiliaryNodeStateMap,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<usize> {
         let addr = self.local_addr();
+        // Auxiliary bytes freed by the operator's eviction hook; reader and state bytes are
+        // accounted by their own tracking.
+        let mut aux_bytes_freed = 0;
         match self.inner {
             NodeType::Base(..) => {}
             NodeType::Constant(_) => {
@@ -366,7 +369,7 @@ impl Node {
                 )?;
             }
             NodeType::Internal(ref mut i) => {
-                i.on_eviction(from, tag, keys, auxiliary_node_states);
+                aux_bytes_freed = i.on_eviction(from, tag, keys, auxiliary_node_states);
             }
             NodeType::Reader(_) => {
                 if let Some(state) = reader_write_handles.get_mut(addr) {
@@ -387,7 +390,7 @@ impl Node {
             NodeType::Dropped => {}
             NodeType::Egress(None) | NodeType::Source => internal!(),
         }
-        Ok(())
+        Ok(aux_bytes_freed)
     }
 
     // When we miss in can_query_through, that miss is *really* in the can_query_through node's

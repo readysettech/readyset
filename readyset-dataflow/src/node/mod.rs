@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
+use readyset_util::SizeOf;
 use serde::{Deserialize, Serialize};
 
 use crate::ops::grouped::accumulator::AccumulatorState;
@@ -219,6 +220,28 @@ pub enum AuxiliaryNodeState {
     Accumulator(AccumulatorState),
     Aggregation(AggregatorState),
     TopK(TopKState),
+}
+
+/// Auxiliary state is real operator memory that the node's materialized state does not cover, so
+/// it is counted toward the same per-node totals the domain reports and evicts against. Evicting
+/// keys from the owning node's state releases the corresponding auxiliary entries through the
+/// operator's `on_eviction` hook.
+impl SizeOf for AuxiliaryNodeState {
+    fn deep_size_of(&self) -> usize {
+        match self {
+            AuxiliaryNodeState::Accumulator(s) => s.deep_size_of(),
+            AuxiliaryNodeState::Aggregation(s) => s.deep_size_of(),
+            AuxiliaryNodeState::TopK(s) => s.deep_size_of(),
+        }
+    }
+
+    fn size_is_empty(&self) -> bool {
+        match self {
+            AuxiliaryNodeState::Accumulator(s) => s.size_is_empty(),
+            AuxiliaryNodeState::Aggregation(s) => s.size_is_empty(),
+            AuxiliaryNodeState::TopK(s) => s.size_is_empty(),
+        }
+    }
 }
 
 // external parts of Ingredient
