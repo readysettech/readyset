@@ -244,6 +244,9 @@ const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     "json_unquote",
     "json_valid",
     "json_value",
+    // Version checks.
+    "version",
+    "icu_version",
 ];
 
 /// MySQL non-deterministic builtins: clock and randomness whose result varies
@@ -267,23 +270,10 @@ const MYSQL_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
     "utc_date",
     "utc_time",
     "utc_timestamp",
-    "version",
     "rand",
     "uuid",
     "uuid_short",
     "random_bytes",
-    "is_free_lock",
-    "is_used_lock",
-    "icu_version",
-    "group_replication_get_communication_protocol",
-    "group_replication_get_write_concurrency",
-    // Charset/collation introspection and password-strength checks vary with
-    // connection or server state.
-    "charset",
-    "collation",
-    "coercibility",
-    "validate_password_strength",
-    // information_schema internal storage-stat readers reflect live table state.
     "internal_auto_increment",
     "internal_avg_row_length",
     "internal_check_time",
@@ -297,12 +287,6 @@ const MYSQL_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
 /// MySQL builtins whose result depends on session identity (current user, role,
 /// database, schema) or privileges. Caching one would serve another session's
 /// value; `--shallow-cache-allow-session-specific` opts into caching these.
-///
-/// Connection- and statement-state reads (`last_insert_id`, `connection_id`,
-/// `found_rows`, `row_count`, the `ps_*` thread ids) are deliberately absent: a
-/// cached value is always some other connection's, so they are left to the
-/// builtin default-deny that no per-category flag relaxes. Only
-/// `--shallow-cache-allow-all-functions` or the runtime allowlist caches one.
 const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "user",
     "current_user",
@@ -316,6 +300,9 @@ const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "can_access_table",
     "can_access_user",
     "can_access_view",
+    "charset",
+    "collation",
+    "coercibility",
 ];
 
 /// MySQL side-effecting or blocking builtins. Under default-deny these are
@@ -358,16 +345,7 @@ const MYSQL_SIDE_EFFECTING_FUNCTIONS: &[&str] = &[
 /// them to `--shallow-cache-allow-session-specific` rather than the broader
 /// `--shallow-cache-allow-nondeterministic`. The bare-identifier session
 /// specials (`current_user`, ...) are handled by [`SESSION_SPECIFIC_BARE_IDENTIFIERS`].
-///
-/// Connection-identity reads (`pg_backend_pid`, `inet_client_addr`,
-/// `inet_client_port`) are deliberately absent: a cached value is always some
-/// other connection's, so they fall to the builtin default-deny that no
-/// per-category flag relaxes. `inet_server_*` stay -- the server address is the
-/// same for every session.
 const PG_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
-    // Identity/context specials, which sqlparser may surface as a function call
-    // (`current_user`) as well as a bare identifier (see
-    // [`SESSION_SPECIFIC_BARE_IDENTIFIERS`]).
     "current_user",
     "current_role",
     "session_user",
@@ -375,11 +353,8 @@ const PG_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "current_database",
     "current_schema",
     "current_catalog",
-    // Function-only session reads.
     "current_setting",
     "current_query",
-    "inet_server_addr",
-    "inet_server_port",
 ];
 
 /// PostgreSQL non-deterministic builtins worth an explicit opt-in: clock and
@@ -448,6 +423,9 @@ const PG_SIDE_EFFECTING_FUNCTIONS: &[&str] = &[
     // Random-seed mutation.
     "setseed",
 ];
+
+/// PostgreSQL functions not explicitly marked immutable, but still considered safe for caching.
+const PG_ADDITIONAL_ALLOWED: &[&str] = &["inet_server_addr", "inet_server_port"];
 
 /// Bare identifiers (no parentheses) that some dialects parse as session
 /// references rather than function calls: session identity and current
@@ -912,7 +890,10 @@ impl AutoCacheVisitor<'_> {
             // never opens a caching hole. Every non-immutable call is reachable
             // only via allow_all_functions (checked above) or the allowlist.
             Dialect::PostgreSQL => {
-                if is_immutable_builtin(name, self.dialect) || is_keyword_function(name) {
+                if is_immutable_builtin(name, self.dialect)
+                    || is_keyword_function(name)
+                    || on(PG_ADDITIONAL_ALLOWED)
+                {
                     None
                 } else if on(PG_SIDE_EFFECTING_FUNCTIONS) {
                     Some(REASON_SIDE_EFFECT)
@@ -1320,16 +1301,18 @@ mod tests {
             "SELECT current_timestamp()",
             "SELECT RAND()",
             "SELECT uuid()",
-            "SELECT VERSION()",
             "SELECT CURDATE()",
             "SELECT CURTIME()",
             "SELECT UTC_TIMESTAMP()",
-            "SELECT IS_FREE_LOCK('a')",
             "SELECT RANDOM_BYTES(16)",
-            "SELECT ICU_VERSION()",
-            "SELECT GROUP_REPLICATION_GET_WRITE_CONCURRENCY()",
         ] {
             assert_rejected(Dialect::MySQL, q, REASON_NON_DETERMINISTIC);
+        }
+        for q in [
+            "SELECT IS_FREE_LOCK('a')",
+            "SELECT GROUP_REPLICATION_GET_WRITE_CONCURRENCY()",
+        ] {
+            assert_rejected(Dialect::MySQL, q, REASON_BUILTIN_NOT_ALLOWED);
         }
         for q in [
             "SELECT random()",
@@ -1790,6 +1773,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pg_server_address_functions_are_eligible() {
+        // inet_server_addr/inet_server_port report the same server endpoint for
+        // every session, so they are safe to cache and allowed by default even
+        // though PostgreSQL does not mark them IMMUTABLE.
+        assert_eligible(
+            Dialect::PostgreSQL,
+            "SELECT inet_server_addr(), inet_server_port()",
+        );
+    }
+
     // The visitor inspects the whole query tree, so a non-deterministic or
     // side-effecting call outside the projection and WHERE clause is caught
     // too. The prior hand-rolled walk did not descend into these positions.
@@ -1998,7 +1992,13 @@ mod tests {
     fn session_specific_functions_are_blocked() {
         // Session-dependent functions are denied by default and routed to
         // allow-session-specific, not the broader allow-nondeterministic.
-        for q in ["SELECT current_user()", "SELECT DATABASE()"] {
+        for q in [
+            "SELECT current_user()",
+            "SELECT DATABASE()",
+            "SELECT CHARSET('x')",
+            "SELECT COLLATION('x')",
+            "SELECT COERCIBILITY('x')",
+        ] {
             assert_rejected(Dialect::MySQL, q, REASON_SESSION_SPECIFIC);
         }
         for q in [
@@ -2196,6 +2196,7 @@ mod tests {
             "SELECT datediff(a, b), to_days(c), dayofweek(d) FROM t",
             "SELECT json_extract(doc, '$.k'), json_length(doc) FROM t",
             "SELECT inet_aton(ip), hex(x) FROM t",
+            "SELECT version(), icu_version()",
         ] {
             assert_eligible(Dialect::MySQL, q);
         }
