@@ -131,8 +131,7 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
 };
 use readyset_sql_passes::shallow::{
-    ShallowCacheAllowlists, ShallowCacheEligibility, auto_cache_skip_reasons,
-    convert_placeholders_to_question_marks, rewrite_shallow,
+    ShallowCacheAllowlists, ShallowCacheEligibility, auto_cache_skip_reasons, rewrite_shallow,
 };
 use readyset_sql_passes::{DetectBucketFunctions, adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -1267,7 +1266,8 @@ where
         let Ok(params) = rewrite_shallow(&mut shallow, self.noria.rewrite_params()) else {
             return None;
         };
-        let shallow = ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned());
+        let shallow =
+            ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned(), None);
         Some((shallow, params))
     }
 
@@ -1317,21 +1317,16 @@ where
         ))
     }
 
-    /// Determines via running PREPARE if the upstream can support this query.
-    async fn upstream_supports(&mut self, req: &ShallowViewRequest) -> anyhow::Result<()> {
+    /// Determines via running PREPARE if the upstream can support this literal query text.
+    ///
+    /// Prepares the original query in order to avoid additional parameterization we may do that
+    /// could otherwise introduce a placeholder in an invalid PREPARE position.
+    async fn upstream_supports(&mut self, sql: &str) -> anyhow::Result<()> {
         let Some(upstream) = self.upstream.as_mut() else {
             bail!("No upstream database found");
         };
 
-        let query = if matches!(DB::SQL_DIALECT, Dialect::MySQL) {
-            let mut stmt = req.query.clone();
-            convert_placeholders_to_question_marks(&mut stmt)?;
-            stmt.display(DB::SQL_DIALECT).to_string()
-        } else {
-            req.query.display(DB::SQL_DIALECT).to_string()
-        };
-
-        upstream.can_prepare(&query).await
+        upstream.can_prepare(sql).await
     }
 
     /// Initialize the search_path by reading it from the upstream.
@@ -1546,7 +1541,7 @@ where
             return Ok(());
         };
 
-        let view_request = ShallowViewRequest::new(query, schema_search_path);
+        let view_request = ShallowViewRequest::new(query, schema_search_path, None);
         self.drop_shallow_view_request(&view_request);
 
         if let Err(e) = retry_with_exponential_backoff!(
@@ -2664,6 +2659,7 @@ where
                 &self.settings,
                 &mut self.state,
                 &shallow,
+                query,
                 hint,
             )
             .await
@@ -4118,7 +4114,10 @@ where
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
         let shallow = shallow?;
-        if let Err(e) = connectors.upstream_supports(&shallow).await {
+        if let Err(e) = connectors
+            .upstream_supports(&shallow.original_query(settings.dialect))
+            .await
+        {
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
@@ -4435,13 +4434,16 @@ where
                     }
                 };
 
-                // Rewrite for shallow.
+                // Rewrite for shallow, first rendering a copy of the AST as plaintext before the
+                // rewrite potentially puts placeholders in places the upstream doesn't support.
                 let shallow = match shallow {
                     Ok(mut shallow) => {
+                        let shallow_orig = shallow.display(settings.dialect).to_string();
                         rewrite_shallow(&mut shallow, connectors.noria.rewrite_params())?;
                         Ok(ShallowViewRequest::new(
                             *shallow,
                             connectors.noria.schema_search_path().to_owned(),
+                            Some(shallow_orig),
                         ))
                     }
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
@@ -4647,7 +4649,10 @@ where
             }
             Some(CacheType::Shallow) => {
                 let shallow = shallow?;
-                let supported = if let Err(e) = connectors.upstream_supports(&shallow).await {
+                let supported = if let Err(e) = connectors
+                    .upstream_supports(&shallow.original_query(settings.dialect))
+                    .await
+                {
                     &format!("no: {e}")
                 } else {
                     "yes"
@@ -4672,7 +4677,10 @@ where
                     | MigrationState::Supported
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
-                        if let Err(e) = connectors.upstream_supports(&shallow).await {
+                        if let Err(e) = connectors
+                            .upstream_supports(&shallow.original_query(settings.dialect))
+                            .await
+                        {
                             (None, Some(shallow), &format!("no: {e}"))
                         } else {
                             (None, Some(shallow), "yes")
@@ -5827,9 +5835,18 @@ where
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         shallow: &ShallowViewRequest,
+        shallow_orig: &str,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, TrxCachePolicy)> {
-        let (query_id, migration) = state.query_status_cache.query_migration_state(shallow);
+        let (query_id, migration) =
+            match state.query_status_cache.try_query_migration_state(shallow) {
+                (id, Some(migration)) => (id, migration),
+                (_, None) => state.query_status_cache.insert(ShallowViewRequest::new(
+                    shallow.query.clone(),
+                    shallow.schema_search_path.clone(),
+                    Some(shallow_orig.to_string()),
+                )),
+            };
 
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
             if migration == MigrationState::Successful(CacheType::Shallow) {
@@ -5844,6 +5861,7 @@ where
                 settings,
                 state,
                 shallow,
+                shallow_orig,
                 hint_directive,
             )
             .await;
@@ -5889,6 +5907,7 @@ where
         settings: &BackendSettings,
         state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
+        shallow_orig: &str,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<MigrationState> {
         let (mut opts, trigger) = match hint_directive {
@@ -5976,8 +5995,12 @@ where
             return None;
         }
 
-        if let Err(e) = connectors.upstream_supports(shallow).await {
-            warn!(trigger = trigger.as_str(), error = %e, "Shallow cache auto-creation failed: upstream unsupported");
+        if let Err(error) = connectors.upstream_supports(shallow_orig).await {
+            warn!(
+                trigger = trigger.as_str(),
+                %error,
+                "Shallow cache auto-creation failed: upstream unsupported"
+            );
             return None;
         }
 
@@ -6905,9 +6928,10 @@ where
                 }
 
                 if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
-                    if let Some((query_id, _)) =
-                        Self::should_query_shallow(connectors, settings, state, &shallow, hint)
-                            .await
+                    if let Some((query_id, _)) = Self::should_query_shallow(
+                        connectors, settings, state, &shallow, query, hint,
+                    )
+                    .await
                     {
                         let result =
                             Self::query_shallow(connectors, state, query, query_id, event, params)
@@ -7795,12 +7819,12 @@ where
     }
 
     query_status_cache.update_query_migration_state(
-        &ShallowViewRequest::new(select_stmt.clone(), schema_search_path.clone()),
+        &ShallowViewRequest::new(select_stmt.clone(), schema_search_path.clone(), None),
         MigrationState::Successful(CacheType::Shallow),
         None,
     );
     query_status_cache.set_trx_cache_policy(
-        &ShallowViewRequest::new(select_stmt, schema_search_path),
+        &ShallowViewRequest::new(select_stmt, schema_search_path, None),
         stmt.trx_cache_policy,
     );
 

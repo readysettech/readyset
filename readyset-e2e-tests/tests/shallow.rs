@@ -3057,3 +3057,80 @@ async fn hint_creates_adaptive_shallow_cache() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn shallow_cache_checks_support_without_excessive_parameterization_mysql() {
+    init_test_logging();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) =
+        TestBuilder::default().fallback(true).build::<MySQLAdapter>().await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+
+    readyset
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT CURRENT_TIME(4)")
+        .await
+        .expect("CREATE SHALLOW CACHE should succeed by probing the original query");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn shallow_cache_checks_support_without_excessive_parameterization_psql() {
+    init_test_logging();
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let rs = psql_helpers::connect(rs_opts).await;
+
+    rs.simple_query("CREATE SHALLOW CACHE FROM SELECT CURRENT_TIME(4)")
+        .await
+        .expect("CREATE SHALLOW CACHE should succeed by probing the original query");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn shallow_cache_create_from_id_using_original_query_text() {
+    init_test_logging();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .cache_mode(readyset_client::CacheMode::Shallow)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+
+    // Use a query that that depends on us saving the original query text to accurately determine
+    // support (our full-parameterized version does not successfully prepare).
+    readyset
+        .query_drop("SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+
+    // Get that query's query id.
+    let rows: Vec<mysql_async::Row> = readyset
+        .query("EXPLAIN CREATE CACHE FROM SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+    let row = rows.first().expect("EXPLAIN returns a row");
+    let id: String = row.get(0).unwrap();
+    let supported: String = row.get(2).unwrap();
+    assert_eq!(supported, "yes");
+
+    // This should only succeed if we successfully use the original query text to check support.
+    readyset
+        .query_drop(format!("CREATE CACHE FROM {id}"))
+        .await
+        .expect("CREATE CACHE FROM <id> should succeed by probing the original query");
+
+    shutdown_tx.shutdown().await;
+}

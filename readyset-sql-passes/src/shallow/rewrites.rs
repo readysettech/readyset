@@ -527,10 +527,9 @@ impl VisitorMut for QuestionMarkPlaceholdersVisitor {
 /// Converts all placeholders to MySQL-style `?` placeholders.
 ///
 /// This is primarily used for MySQL compatibility checks when preparing statements.
-pub fn convert_placeholders_to_question_marks(query: &mut ShallowCacheQuery) -> ReadySetResult<()> {
+pub fn convert_placeholders_to_question_marks(query: &mut ShallowCacheQuery) {
     let mut visitor = QuestionMarkPlaceholdersVisitor;
     let _ = VisitMut::visit(&mut **query, &mut visitor);
-    Ok(())
 }
 
 /// Replaces identifiers and literals with anonymized values.
@@ -1229,7 +1228,7 @@ mod tests {
         let dialect = Dialect::PostgreSQL;
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = $1 AND val = $2");
 
-        convert_placeholders_to_question_marks(&mut query).unwrap();
+        convert_placeholders_to_question_marks(&mut query);
 
         let query_str = format!("{query}");
         assert!(!query_str.contains("$1"));
@@ -1242,7 +1241,7 @@ mod tests {
         let dialect = Dialect::MySQL;
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = ? AND val = ?");
 
-        convert_placeholders_to_question_marks(&mut query).unwrap();
+        convert_placeholders_to_question_marks(&mut query);
 
         let query_str = format!("{query}");
         assert_eq!(query_str.matches('?').count(), 2);
@@ -1254,7 +1253,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = 1");
         let original = format!("{query}");
 
-        convert_placeholders_to_question_marks(&mut query).unwrap();
+        convert_placeholders_to_question_marks(&mut query);
 
         assert_eq!(format!("{query}"), original);
     }

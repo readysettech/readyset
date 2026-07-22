@@ -28,8 +28,10 @@ use readyset_sql::ast::{
     BinaryOperator, ItemPlaceholder, Literal, Relation, SelectStatement, ShallowCacheQuery,
     SqlIdentifier,
 };
+use readyset_sql::DialectDisplay;
 use readyset_sql::TryFromDialect as _;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
+use readyset_sql_passes::shallow::convert_placeholders_to_question_marks;
 use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
@@ -102,7 +104,7 @@ impl ViewCreateRequest {
 ///
 /// This structure is similar to [`ViewCreateRequest`] but stores the query as a `ShallowViewRequest`
 /// instead of a `SelectStatement`, allowing it to handle queries with syntax unsupported by deep caching.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShallowViewRequest {
     /// The query itself, stored as sqlparser AST to support unsupported syntax
     pub query: ShallowCacheQuery,
@@ -112,14 +114,65 @@ pub struct ShallowViewRequest {
     /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
     /// views are created.
     pub schema_search_path: Vec<SqlIdentifier>,
+
+    /// An example of the query as originally written, before we apply our rewrites.
+    ///
+    /// An original copy is useful for determining support via preparing it upstream.  Our
+    /// fully-parameterized form may have put placeholders in positions not valid in a prepared
+    /// statement, which could lead us to falsely report a query as unsupported.
+    query_orig: Option<String>,
+}
+
+impl PartialEq for ShallowViewRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.query == other.query && self.schema_search_path == other.schema_search_path
+    }
+}
+
+impl Eq for ShallowViewRequest {}
+
+impl Hash for ShallowViewRequest {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.query.hash(state);
+        self.schema_search_path.hash(state);
+    }
 }
 
 impl ShallowViewRequest {
-    /// Initialize a new [`ShallowViewRequest`] with the given query and schema search path
-    pub fn new(query: ShallowCacheQuery, schema_search_path: Vec<SqlIdentifier>) -> Self {
+    /// Initialize a new [`ShallowViewRequest`].
+    ///
+    /// Please provide the pre-rewrite form of the query via `query_orig` if this
+    /// [`ShallowViewRequest`] is going to be stored in the query status cache.
+    pub fn new(
+        query: ShallowCacheQuery,
+        schema_search_path: Vec<SqlIdentifier>,
+        query_orig: Option<String>,
+    ) -> Self {
         Self {
             query,
             schema_search_path,
+            query_orig,
+        }
+    }
+
+    /// The query to PREPARE-probe for upstream support: the original text when we have it,
+    /// otherwise the rendered parameterized query as a fallback, with numbered placeholders
+    /// normalized to `?` for MySQL (which rejects `$N` in a prepared statement).
+    pub fn original_query(&self, dialect: readyset_sql::Dialect) -> Cow<'_, str> {
+        match &self.query_orig {
+            Some(original) => Cow::Borrowed(original),
+            None => match dialect {
+                readyset_sql::Dialect::MySQL => {
+                    // MySQL rejects `$N`, so normalize on a clone before rendering.
+                    let mut query = self.query.clone();
+                    convert_placeholders_to_question_marks(&mut query);
+                    let sql = query.display(dialect).to_string();
+                    Cow::Owned(sql)
+                }
+                readyset_sql::Dialect::PostgreSQL => {
+                    Cow::Owned(self.query.display(dialect).to_string())
+                }
+            },
         }
     }
 }
