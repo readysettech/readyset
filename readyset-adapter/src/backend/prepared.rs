@@ -36,7 +36,8 @@ use super::noria_connector::{self, ExecuteSelectContext, NoriaConnector, Prepare
 use super::routing::{ProxyState, SelectRouter, record_skip_cache};
 use super::{
     Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
-    acl_decline_reason, convert_or_parse_query, log_query, parse_query, parse_shallow_query,
+    acl_decline_reason, convert_or_parse_query, log_query, no_upstream_err, parse_query,
+    parse_shallow_query,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::ManualCacheEntry;
@@ -1210,7 +1211,7 @@ where
     fn upstream_mut(upstream: &mut Option<DB>) -> ReadySetResult<&mut DB> {
         upstream
             .as_mut()
-            .ok_or_else(|| internal_err!("Execution upstream requires an upstream"))
+            .ok_or_else(|| no_upstream_err("Execution upstream requires an upstream"))
     }
 
     /// Executes a prepared statement identified by `id` with parameters specified by the client

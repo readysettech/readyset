@@ -14,8 +14,7 @@ use readyset_adapter::{
     backend::{MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
     shallow_refresh_pool::ShallowRefreshPool,
-    upstream_database::LazyUpstream,
-    BackendBuilder, ReadySetStatusReporter, UpstreamDatabase,
+    BackendBuilder, ReadySetStatusReporter,
 };
 use readyset_client::ReadySetHandle;
 use readyset_data::{
@@ -152,21 +151,9 @@ async fn setup_adapter(
 
         macro_rules! make_backend {
             ($upstream:ty, $handler:ty, $dialect:expr $(,)?) => {{
-                // cannot use .await inside map
-                #[allow(clippy::manual_map)]
-                let upstream = match &replication_url {
-                    Some(url) => Some(
-                        <LazyUpstream<$upstream> as UpstreamDatabase>::connect(
-                            UpstreamConfig::from_url(url),
-                            None,
-                            None,
-                            false,
-                        )
-                        .await
-                        .unwrap(),
-                    ),
-                    None => None,
-                };
+                let upstream_config = replication_url
+                    .as_ref()
+                    .map(|url| Arc::new(RwLock::new(UpstreamConfig::from_url(url))));
 
                 let status_reporter = ReadySetStatusReporter::new(
                     replication_url
@@ -180,24 +167,24 @@ async fn setup_adapter(
                     std::path::Path::new("/"),
                 );
                 let shallow = Arc::new(CacheManager::new(None, None));
-                let shallow_refresh_pool =
-                    if let Some(config) = replication_url.as_ref().map(UpstreamConfig::from_url) {
-                        Some(ShallowRefreshPool::<LazyUpstream<$upstream>>::new(
-                            &tokio::runtime::Handle::current(),
-                            Arc::new(RwLock::new(config)),
-                            100,
-                        ))
-                    } else {
-                        None
-                    };
-                BackendBuilder::new()
+                let shallow_refresh_pool = upstream_config.as_ref().map(|config| {
+                    ShallowRefreshPool::<$upstream>::new(
+                        &tokio::runtime::Handle::current(),
+                        Arc::clone(config),
+                        100,
+                    )
+                });
+                let mut builder = BackendBuilder::new()
                     .require_authentication(false)
                     .dialect($dialect)
                     .parsing_preset(parsing_preset)
-                    .migration_mode(migration_mode)
-                    .build::<_, $handler>(
+                    .migration_mode(migration_mode);
+                if let Some(config) = upstream_config {
+                    builder = builder.upstream_config(Some(config));
+                }
+                builder
+                    .build::<$upstream, $handler>(
                         noria,
-                        upstream,
                         authority,
                         query_status_cache,
                         schema_catalog,

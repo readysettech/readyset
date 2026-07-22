@@ -4,6 +4,7 @@ use psql_srv as ps;
 use readyset_adapter::upstream_database::IsFatalError;
 use readyset_errors::ReadySetError;
 use thiserror::Error;
+use tracing::error;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -32,6 +33,10 @@ impl From<Error> for ps::Error {
             ReadySet(ReadySetError::Unsupported(s)) => ps::Error::Unsupported(s),
             ReadySet(ReadySetError::ConnectionClosed(s)) => ps::Error::ConnectionClosed(s),
             ReadySet(e) => ps::Error::Unknown(e.to_string()),
+            PostgreSql(e) if e.is_closed() => {
+                error!("upstream connection closed");
+                ps::Error::ConnectionClosed("upstream connection closed".into())
+            }
             PostgreSql(e) => e.into(),
             Tls(e) => ps::Error::Unknown(e.to_string()),
         }

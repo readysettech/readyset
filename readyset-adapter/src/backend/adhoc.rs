@@ -451,9 +451,12 @@ where
                         pending_set_state.apply(&mut connectors.noria);
                         Ok(noria_connector::QueryResult::Empty)
                     }
-                    SqlQuery::Commit(_) | SqlQuery::Use(_) | SqlQuery::Comment(_) => {
-                        Ok(noria_connector::QueryResult::Empty)
-                    }
+                    SqlQuery::StartTransaction(_)
+                    | SqlQuery::Commit(_)
+                    | SqlQuery::Rollback(_)
+                    | SqlQuery::Use(_)
+                    | SqlQuery::Comment(_)
+                    | SqlQuery::Discard(_) => Ok(noria_connector::QueryResult::Empty),
                     q => {
                         error!(query = ?q, "unsupported query");
                         unsupported!("query type unsupported: {q:?}");
@@ -602,7 +605,6 @@ where
         match parsed {
             // Parse error, but no fallback exists
             Err(e) if !connectors.has_fallback() => {
-                error!("{}", e);
                 event.set_noria_error(&e);
                 Err(e.into())
             }

@@ -64,7 +64,12 @@
 //!         Ok(())
 //!     }
 //!
-//!     async fn set_auth_info(&mut self, _: &str, _: Option<RedactedString>) -> io::Result<()> {
+//!     async fn set_auth_info(
+//!         &mut self,
+//!         _: &str,
+//!         _: Option<RedactedString>,
+//!         _interactive: bool,
+//!     ) -> io::Result<()> {
 //!         Ok(())
 //!     }
 //!
@@ -420,17 +425,18 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Called when client switches user.
     async fn on_change_user(&mut self, _: &str, _: &str, _: &str) -> io::Result<()>;
 
-    /// Called when client authenticates to inform which users we should use.
-    async fn set_auth_info(&mut self, _: &str, _: Option<RedactedString>) -> io::Result<()>;
+    /// Called when the client authenticates, to inform which user we should use. `interactive` is
+    /// the negotiated `CLIENT_INTERACTIVE` capability, forwarded to the upstream connection opened
+    /// for this session.
+    async fn set_auth_info(
+        &mut self,
+        _: &str,
+        _: Option<RedactedString>,
+        _interactive: bool,
+    ) -> io::Result<()>;
 
     /// Called when default character set changes after handshake or client switches user.
     async fn set_charset(&mut self, _: u16) -> io::Result<()>;
-
-    /// Called after handshake to inform whether the client negotiated the
-    /// `CLIENT_INTERACTIVE` capability. Default implementation is a no-op.
-    async fn set_interactive(&mut self, _interactive: bool) -> io::Result<()> {
-        Ok(())
-    }
 
     /// Optional hook invoked once after parsing client handshake to pass MySQL connect attributes
     /// Default implementation is a no-op.
@@ -624,15 +630,14 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             charset,
         } = mi.init().await?
         {
-            mi.shim.set_auth_info(&username, plain_password).await?;
-            mi.shim.set_charset(charset).await?;
+            let interactive = mi
+                .conn
+                .client_capabilities
+                .contains(CapabilityFlags::CLIENT_INTERACTIVE);
             mi.shim
-                .set_interactive(
-                    mi.conn
-                        .client_capabilities
-                        .contains(CapabilityFlags::CLIENT_INTERACTIVE),
-                )
+                .set_auth_info(&username, plain_password, interactive)
                 .await?;
+            mi.shim.set_charset(charset).await?;
             if let Some(database) = database {
                 mi.shim.on_init(&database).await?;
             }

@@ -32,7 +32,6 @@ use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetada
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 use readyset_util::hash::hash;
-use readyset_util::redacted::RedactedString;
 use readyset_util::SizeOf;
 
 use crate::backend::write_query_results;
@@ -547,14 +546,6 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn ping(&mut self) -> Result<(), Self::Error> {
         self.conn.ping().await.map_err(Error::MySql)?;
-        Ok(())
-    }
-
-    async fn set_user(
-        &mut self,
-        _user: &str,
-        _password: RedactedString,
-    ) -> Result<(), Self::Error> {
         Ok(())
     }
 

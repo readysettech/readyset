@@ -80,8 +80,13 @@ pub trait PsqlBackend {
     /// [libpq-server-version]: https://github.com/postgres/postgres/blob/d22646922d66012705e0e2948cfb5b4a07092a29/src/interfaces/libpq/fe-exec.c#L1146-L1178
     fn version(&self) -> String;
 
-    /// Called when client authenticates to inform which users we should use.
-    async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>);
+    /// Called when the client authenticates, to inform which user we should use and to open the
+    /// upstream connection for the session. Returning an error rejects the connection.
+    async fn set_auth_info(
+        &mut self,
+        user: &str,
+        password: Option<RedactedString>,
+    ) -> Result<(), Error>;
 
     /// Optional hook invoked once at startup if the client provided application_name.
     /// Default implementation is a no-op.

@@ -6,7 +6,6 @@ use clap::Parser;
 use database_utils::TlsMode;
 use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::backend::UsersSync;
-use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsAcceptor;
@@ -54,13 +53,13 @@ pub struct MySqlHandler {
 }
 
 impl ConnectionHandler for MySqlHandler {
-    type UpstreamDatabase = LazyUpstream<MySqlUpstream>;
+    type UpstreamDatabase = MySqlUpstream;
     type Handler = MySqlQueryHandler;
 
     async fn process_connection(
         &mut self,
         stream: TcpStream,
-        backend: readyset_adapter::Backend<LazyUpstream<MySqlUpstream>, MySqlQueryHandler>,
+        backend: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
         if let Err(e) = MySqlIntermediary::run_on_tcp(
             readyset_mysql::Backend {

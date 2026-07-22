@@ -43,7 +43,13 @@ impl PsqlBackend for ScramSha256Backend {
         "13.4 Readyset".to_string()
     }
 
-    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
+    async fn set_auth_info(
+        &mut self,
+        _user: &str,
+        _password: Option<RedactedString>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
     fn credentials_for_user(&self, user: &str) -> Option<Credentials> {
         if self.username == user {
             Some(Credentials::CleartextPassword(self.password.to_string()))

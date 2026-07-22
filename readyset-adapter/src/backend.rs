@@ -115,7 +115,7 @@ use readyset_sql_passes::detect_schema_references;
 use readyset_sql_passes::shallow::{
     ShallowCacheAllowlists, ShallowCacheEligibility, rewrite_shallow,
 };
-use readyset_telemetry_reporter::TelemetrySender;
+use readyset_telemetry_reporter::{TelemetryEvent, TelemetrySender};
 use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -163,6 +163,12 @@ const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned thro
 
 /// Placeholder username for connections that have not yet authenticated
 const UNAUTHENTICATED_USER: &str = "unauthenticated";
+
+/// `ConnectionClosed` makes the protocol layer end the session, so the client's reconnect
+/// performs a fresh upstream connection attempt.
+fn no_upstream_err(message: &str) -> ReadySetError {
+    ReadySetError::ConnectionClosed(message.into())
+}
 
 /// `EXPLAIN LAST STATEMENT` reason for a query upstream served while filling a shallow
 /// cache, distinguishing it from the fallbacks that share its destination.
@@ -487,7 +493,6 @@ impl BackendBuilder {
     pub async fn build<DB: UpstreamDatabase + 'static, Handler: 'static>(
         self,
         noria: NoriaConnector,
-        upstream: Option<DB>,
         authority: Arc<Authority>,
         query_status_cache: &'static QueryStatusCache,
         schema_handle: SchemaCatalogHandle,
@@ -500,7 +505,13 @@ impl BackendBuilder {
         gauge!(metric::CONNECTED_CLIENTS).increment(1.0);
         counter!(metric::CLIENT_CONNECTIONS_OPENED).increment(1);
 
-        let proxy_state = if upstream.is_some() {
+        // This session proxies to an upstream iff one is configured with a URL. The connection
+        // itself is opened later, at auth, by `connect_upstream`.
+        let upstream_configured = match &self.upstream_config {
+            Some(config) => config.read().await.upstream_db_url.is_some(),
+            None => false,
+        };
+        let proxy_state = if upstream_configured {
             ProxyState::Fallback
         } else {
             ProxyState::Never
@@ -521,7 +532,7 @@ impl BackendBuilder {
         Backend {
             connectors: BackendConnectors {
                 noria,
-                upstream,
+                upstream: None,
                 readyset_schema_session: None,
                 session: None,
             },
@@ -1834,31 +1845,52 @@ where
         self.state.client_identity = Some(SqlIdentifier::from(new_username));
     }
 
-    /// Change the user for the upstream connection, if it exists
-    ///
-    /// This is called when the client authenticates to the server.
-    pub async fn set_user(
+    /// Open the upstream fallback connection for this session, if one is configured.
+    pub async fn connect_upstream(
         &mut self,
         user: &str,
-        password: RedactedString,
+        password: Option<RedactedString>,
+        interactive: bool,
     ) -> Result<(), DB::Error> {
-        Self::check_routing(&self.connectors, &mut self.state).await?;
-        if let Some(upstream) = &mut self.connectors.upstream {
-            let _ = upstream.set_user(user, password).await;
+        if password.is_some() {
+            self.update_connection_username(user);
         }
 
-        // Update connection tracking with authenticated username
-        self.update_connection_username(user);
+        let Some(config) = &self.state.upstream_config else {
+            return Ok(());
+        };
+        let config = config.read().await.clone();
+        if config.upstream_db_url.is_none() {
+            return Ok(());
+        }
 
+        let (username, password) = if self.settings.require_authentication {
+            let password = password.ok_or_else(|| {
+                internal_err!("authenticated connection reached upstream setup without a password")
+            })?;
+            (Some(user.to_string()), Some(password.to_string()))
+        } else {
+            (None, None)
+        };
+
+        // An unreachable upstream does not reject the connection: the session runs without an
+        // upstream (statements needing one fail individually), so clients keep access to the
+        // Readyset schema and its commands during an upstream outage.
+        match DB::connect(config, username, password, interactive).await {
+            Ok(upstream) => {
+                self.connectors.upstream = Some(upstream);
+                if let Some(telemetry_sender) = &self.state.telemetry_sender
+                    && let Err(error) =
+                        telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
+                {
+                    warn!(%error, "Failed to send upstream connected metric");
+                }
+            }
+            Err(error) => {
+                debug!(%error, "Failed to connect to the upstream; serving without one");
+            }
+        }
         Ok(())
-    }
-
-    /// Mark whether the client session is interactive, so the upstream connection (if any)
-    /// is established with the matching capability when it is lazily opened.
-    pub fn set_interactive(&mut self, interactive: bool) {
-        if let Some(upstream) = &mut self.connectors.upstream {
-            upstream.set_interactive(interactive);
-        }
     }
 
     pub async fn change_user(
@@ -1898,9 +1930,8 @@ where
         event: &mut QueryExecutionEvent,
         cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let upstream = upstream.ok_or_else(|| {
-            ReadySetError::Internal("Un-prepared fallback requires an upstream".to_string())
-        })?;
+        let upstream =
+            upstream.ok_or_else(|| no_upstream_err("Un-prepared fallback requires an upstream"))?;
         let _t = event.start_upstream_timer();
         let result = upstream.query(query).await;
         drop(_t);
@@ -1963,9 +1994,11 @@ where
         query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
-        let upstream = self.connectors.upstream.as_mut().ok_or_else(|| {
-            ReadySetError::Internal("Simple query requires an upstream".to_string())
-        })?;
+        let upstream = self
+            .connectors
+            .upstream
+            .as_mut()
+            .ok_or_else(|| no_upstream_err("Simple query requires an upstream"))?;
         let result = upstream.simple_query(query).await;
         result.map(QueryResult::UpstreamBufferedInMemory)
     }
@@ -1979,9 +2012,11 @@ where
         statement_type: PreparedStatementType,
     ) -> Result<UpstreamPrepare<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
-        let upstream = self.connectors.upstream.as_mut().ok_or_else(|| {
-            ReadySetError::Internal("Prepare fallback requires an upstream".to_string())
-        })?;
+        let upstream = self
+            .connectors
+            .upstream
+            .as_mut()
+            .ok_or_else(|| no_upstream_err("Prepare fallback requires an upstream"))?;
         upstream.prepare(query, data, statement_type).await
     }
 
@@ -2051,11 +2086,8 @@ where
         query: &SqlQuery,
         raw_query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let upstream = upstream.ok_or_else(|| {
-            ReadySetError::Internal(
-                "Transaction boundary fallback requires an upstream".to_string(),
-            )
-        })?;
+        let upstream = upstream
+            .ok_or_else(|| no_upstream_err("Transaction boundary fallback requires an upstream"))?;
 
         match query {
             SqlQuery::StartTransaction(_) => {

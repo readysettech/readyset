@@ -141,7 +141,13 @@ impl PsqlBackend for Backend {
         Some(Credentials::Any)
     }
 
-    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
+    async fn set_auth_info(
+        &mut self,
+        _user: &str,
+        _password: Option<RedactedString>,
+    ) -> Result<(), psql_srv::Error> {
+        Ok(())
+    }
 
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, psql_srv::Error> {
         Ok(CredentialsNeeded::None)

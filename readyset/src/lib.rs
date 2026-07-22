@@ -488,13 +488,6 @@ pub struct Options {
     )]
     feature_placeholder_inlining: bool,
 
-    /// Don't make connections to the upstream database for new client connections.
-    ///
-    /// If this flag is set queries will never be proxied upstream - even if they are unsupported,
-    /// fail to execute, or are run in a transaction.
-    #[arg(long, env = "NO_UPSTREAM_CONNECTIONS", hide = true)]
-    no_upstream_connections: bool,
-
     /// If supplied we will clean up assets for the supplied deployment. If an upstream url is
     /// supplied, we will also clean up various assets related to upstream (replication slot, etc.)
     #[arg(long)]
@@ -958,14 +951,11 @@ impl Options {
     }
 }
 
-async fn connect_upstream<U>(
-    upstream_config: UpstreamConfig,
-    no_upstream_connections: bool,
-) -> Result<Option<U>, U::Error>
+async fn connect_upstream<U>(upstream_config: UpstreamConfig) -> Result<Option<U>, U::Error>
 where
     U: UpstreamDatabase,
 {
-    if upstream_config.upstream_db_url.is_some() && !no_upstream_connections {
+    if upstream_config.upstream_db_url.is_some() {
         set_failpoint!(failpoints::UPSTREAM);
 
         // Upstream services can start accepting connections slightly after the adapter/server
@@ -1002,14 +992,11 @@ where
 /// Queries the upstream for its system properties (search path, timezone, casing, version),
 /// retrying until the upstream is reachable. The adapter can't serve without these, so callers
 /// block on this at startup.
-async fn load_system_props<U>(
-    upstream_config: UpstreamConfig,
-    no_upstream_conns: bool,
-) -> UpstreamSystemProperties
+async fn load_system_props<U>(upstream_config: UpstreamConfig) -> UpstreamSystemProperties
 where
     U: UpstreamDatabase,
 {
-    if no_upstream_conns || upstream_config.upstream_db_url.is_none() {
+    if upstream_config.upstream_db_url.is_none() {
         return UpstreamSystemProperties {
             search_path: upstream_config.default_schema_search_path(),
             timezone: parse_upstream_timezone(&upstream_config.default_timezone_name()),
@@ -1018,7 +1005,7 @@ where
     }
 
     let try_load = move |upstream_config: UpstreamConfig| async move {
-        let upstream = connect_upstream::<U>(upstream_config.clone(), no_upstream_conns).await?;
+        let upstream = connect_upstream::<U>(upstream_config.clone()).await?;
 
         let Some(mut upstream) = upstream else {
             return Err(internal_err!(
@@ -1184,7 +1171,6 @@ where
                 .feature_mixed_comparisons,
             autoparameterize: true,
         };
-        let no_upstream_connections = options.no_upstream_connections;
 
         let migration_request_timeout = if options.migration_request_timeout_ms > 0 {
             Some(Duration::from_millis(options.migration_request_timeout_ms))
@@ -1392,7 +1378,6 @@ where
             tokio::select! {
                 props = load_system_props::<H::UpstreamDatabase>(
                     upstream_config.clone(),
-                    no_upstream_connections,
                 ) => Some(props),
                 _ = startup_sigterm.recv() => None,
             }
@@ -2002,7 +1987,6 @@ where
                 Some(registry) => backend_builder.policy_registry(registry.clone()),
                 None => backend_builder,
             };
-            let telemetry_sender = telemetry_sender.clone();
 
             // Initialize the reader layer for the adapter.
             let r = options.deployment_mode.has_reader_nodes().then(|| {
@@ -2014,65 +1998,42 @@ where
                 ReadRequestHandler::new(readers.clone(), tx, upquery_timeout)
             });
 
-            let upstream_config = Arc::clone(&upstream_config);
             let status_reporter_clone = status_reporter.clone();
             let schema_catalog_clone = schema_catalog.clone();
             let fut = async move {
-                let upstream_res = connect_upstream::<H::UpstreamDatabase>(
-                    upstream_config.read().await.clone(),
-                    no_upstream_connections,
+                let sys_props = system_props();
+                let noria = NoriaConnector::new_with_local_reads(
+                    rh.clone(),
+                    auto_increments,
+                    view_name_cache.new_local(),
+                    view_cache.new_local(),
+                    r,
+                    expr_dialect,
+                    parse_dialect,
+                    sys_props.search_path.clone(),
+                    adapter_rewrite_params,
                 )
-                .await
-                .map_err(|e| format!("Error connecting to upstream database: {e}"));
+                .instrument(debug_span!("Building noria connector"))
+                .await;
 
-                match upstream_res {
-                    Ok(upstream) => {
-                        if let Err(e) =
-                            telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
-                        {
-                            warn!(error = %e, "Failed to send upstream connected metric");
-                        }
-
-                        let sys_props = system_props();
-                        let noria = NoriaConnector::new_with_local_reads(
-                            rh.clone(),
-                            auto_increments,
-                            view_name_cache.new_local(),
-                            view_cache.new_local(),
-                            r,
-                            expr_dialect,
-                            parse_dialect,
-                            sys_props.search_path.clone(),
-                            adapter_rewrite_params,
-                        )
-                        .instrument(debug_span!("Building noria connector"))
-                        .await;
-
-                        let mut builder = backend_builder.clone();
-                        if !sys_props.db_version.is_empty() {
-                            builder = builder.db_version(sys_props.db_version.clone());
-                        }
-                        let backend = builder
-                            .build(
-                                noria,
-                                upstream,
-                                adapter_authority.clone(),
-                                query_status_cache,
-                                schema_catalog_clone,
-                                status_reporter_clone,
-                                adapter_start_time,
-                                shallow,
-                                rls_coordinator,
-                                Some(shallow_refresh_pool),
-                            )
-                            .await;
-                        connection_handler.process_connection(s, backend).await;
-                    }
-                    Err(error) => {
-                        error!(%error, "Error during initial connection establishment");
-                        connection_handler.immediate_error(s, error).await;
-                    }
+                let mut builder = backend_builder.clone();
+                if !sys_props.db_version.is_empty() {
+                    builder = builder.db_version(sys_props.db_version.clone());
                 }
+                let backend = builder
+                    .build(
+                        noria,
+                        adapter_authority.clone(),
+                        query_status_cache,
+                        schema_catalog_clone,
+                        status_reporter_clone,
+                        adapter_start_time,
+                        shallow,
+                        rls_coordinator,
+                        Some(shallow_refresh_pool),
+                    )
+                    .await;
+                connection_handler.process_connection(s, backend).await;
 
                 debug!("disconnected");
             }

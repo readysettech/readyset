@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use database_utils::TlsMode;
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
-use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_util::retry_with_exponential_backoff;
@@ -46,7 +45,7 @@ pub struct PostgreSQLAdapter;
 #[async_trait]
 impl Adapter for PostgreSQLAdapter {
     type ConnectionOpts = Config;
-    type Upstream = LazyUpstream<PostgreSqlUpstream>;
+    type Upstream = PostgreSqlUpstream;
     type Handler = PostgreSqlQueryHandler;
 
     const DIALECT: readyset_sql::Dialect = readyset_sql::Dialect::PostgreSQL;

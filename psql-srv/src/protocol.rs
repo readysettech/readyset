@@ -400,7 +400,7 @@ impl Protocol {
                 // the per-connection context (RLS startup user, etc.) is set up
                 // with the startup user, matching the authenticated path.
                 if let Some(user) = user.as_ref() {
-                    backend.set_auth_info(user, None).await;
+                    backend.set_auth_info(user, None).await?;
                 }
                 self.state = State::Ready;
                 Self::get_ready_message(backend.version())
@@ -449,9 +449,9 @@ impl Protocol {
 
         // Set it here in case the backend gets closed and reconnect
         self.backend_password = Some(RedactedString::from(password.to_string()));
-        let _ = backend
+        backend
             .set_auth_info(&user, Some(RedactedString::from(password.to_string())))
-            .await;
+            .await?;
         Ok(Response::Messages(Self::get_ready_message(
             backend.version(),
         )))
@@ -575,14 +575,14 @@ impl Protocol {
                 sasl_data: server_final_message.to_string().into(),
             }];
             messages.extend(Self::get_ready_message(backend.version()));
-            let _ = backend
+            backend
                 .set_auth_info(
                     &user,
                     self.backend_password
                         .as_ref()
                         .map(|password| RedactedString::from(password.to_string())),
                 )
-                .await;
+                .await?;
             Ok(Response::Messages(messages.into()))
         } else {
             Err(Error::AuthenticationFailure {
@@ -1030,6 +1030,12 @@ impl Protocol {
                 Ok(Response::Message(error.into()))
             }
             _ => {
+                // A connection-closing error ends the session: skip the ReadyForQuery so the
+                // client notices the disconnect on this statement instead of the next one.
+                if matches!(error, Error::ConnectionClosed(_)) {
+                    return Ok(Response::Message(error.into()));
+                }
+
                 let status = if in_transaction {
                     TransactionState::InTransactionError
                 } else {
@@ -1301,7 +1307,13 @@ mod tests {
             "14.5 Readyset".to_string()
         }
 
-        async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
+        async fn set_auth_info(
+            &mut self,
+            _user: &str,
+            _password: Option<RedactedString>,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
 
         async fn on_init(&mut self, database: &str) -> Result<CredentialsNeeded, Error> {
             self.database = Some(database.to_string());

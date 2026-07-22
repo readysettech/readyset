@@ -184,10 +184,12 @@ pub trait Adapter: Send {
     /// name.
     fn upstream_url(_db_name: &str) -> String;
 
-    async fn make_upstream(addr: String) -> Self::Upstream {
+    /// Connect to the upstream at `addr`, returning `None` when it is unreachable.
+    async fn make_upstream(addr: String) -> Option<Self::Upstream> {
         Self::Upstream::connect(UpstreamConfig::from_url(addr), None, None, false)
             .await
-            .unwrap()
+            .inspect_err(|error| tracing::warn!(%error, "Failed to connect to upstream"))
+            .ok()
     }
 
     async fn recreate_database(db_name: &str);
@@ -822,10 +824,11 @@ impl TestBuilder {
                             Some(url) => Some(url.to_string()),
                             None => cdc_url.clone(),
                         };
-                    let mut cdc_upstream = if let Some(url) = &upstream_url {
-                        Some(A::make_upstream(url.clone()).await)
-                    } else {
-                        None
+                    // Probe the upstream for system properties; an unreachable upstream falls
+                    // back to the defaults below.
+                    let mut cdc_upstream = match &upstream_url {
+                        Some(url) => A::make_upstream(url.clone()).await,
+                        None => None,
                     };
                     let sys_props = if let Some(cdc_upstream) = &mut cdc_upstream {
                         UpstreamSystemProperties {
@@ -857,14 +860,9 @@ impl TestBuilder {
                         }
                     };
 
-                    let fallback_upstream = match self.fallback {
-                        FallbackBehavior::NoFallback => None,
-                        FallbackBehavior::UseReplicationUpstream
-                        | FallbackBehavior::UpstreamWithoutReplication => match &upstream_url {
-                            Some(url) => Some(A::make_upstream(url.clone()).await),
-                            None => cdc_upstream,
-                        },
-                    };
+                    let enable_fallback = upstream_url.is_some()
+                        && !matches!(self.fallback, FallbackBehavior::NoFallback);
+                    drop(cdc_upstream);
 
                     init_system_props(&sys_props);
 
@@ -890,15 +888,22 @@ impl TestBuilder {
                         Vec::new(),
                         std::path::Path::new("/"),
                     );
-                    let backend = backend_builder
+                    let mut backend_builder = backend_builder
                         .dialect(A::DIALECT)
                         .migration_mode(self.migration_mode)
                         .parsing_preset(self.parsing_preset)
                         .cache_acl(cache_acl.clone())
-                        .readyset_schema(Arc::clone(&readyset_schema))
+                        .readyset_schema(Arc::clone(&readyset_schema));
+                    if enable_fallback && backend_builder.get_upstream_config().is_none() {
+                        if let Some(url) = &upstream_url {
+                            backend_builder = backend_builder.upstream_config(Some(Arc::new(
+                                RwLock::new(UpstreamConfig::from_url(url)),
+                            )));
+                        }
+                    }
+                    let backend = backend_builder
                         .build(
                             noria,
-                            fallback_upstream,
                             authority.clone(),
                             query_status_cache,
                             schema_catalog_clone.clone(),

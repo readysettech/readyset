@@ -10,7 +10,6 @@ use postgres_types::{Oid, Type};
 use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
-use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_util::redacted::RedactedString;
@@ -53,14 +52,12 @@ impl FromStr for AuthenticationMethod {
 /// wrapped `noria_client` `Backend`. All request parameters and response results are forwarded
 /// using type conversion.
 pub struct Backend {
-    inner: cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>,
+    inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
     authentication_method: AuthenticationMethod,
 }
 
 impl Backend {
-    pub fn new(
-        inner: cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>,
-    ) -> Self {
+    pub fn new(inner: cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>) -> Self {
         Self {
             inner,
             authentication_method: Default::default(),
@@ -76,7 +73,7 @@ impl Backend {
 }
 
 impl Deref for Backend {
-    type Target = cl::Backend<LazyUpstream<PostgreSqlUpstream>, PostgreSqlQueryHandler>;
+    type Target = cl::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -137,16 +134,19 @@ impl ps::PsqlBackend for Backend {
             .map(ps::Credentials::CleartextPassword)
     }
 
-    async fn set_auth_info(&mut self, user: &str, password: Option<RedactedString>) {
-        if let Some(password) = password {
-            let _ = self.inner.set_user(user, password).await;
-            self.inner.connectors.init_schema_search_path().await;
-        }
+    async fn set_auth_info(
+        &mut self,
+        user: &str,
+        password: Option<RedactedString>,
+    ) -> Result<(), ps::Error> {
+        self.inner.connect_upstream(user, password, false).await?;
+        self.inner.connectors.init_schema_search_path().await;
         // Stand up the RLS per-session security context with the
         // authenticated `startup_user`. Subsequent SET / set_config /
         // COMMIT traffic mirrors into this; MySQL leaves the slot
         // empty.
         self.inner.attach_session(user);
+        Ok(())
     }
 
     async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {

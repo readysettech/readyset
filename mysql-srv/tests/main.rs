@@ -84,6 +84,7 @@ where
         &mut self,
         _user: &str,
         _password: Option<RedactedString>,
+        _interactive: bool,
     ) -> io::Result<()> {
         Ok(())
     }

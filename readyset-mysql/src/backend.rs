@@ -19,7 +19,6 @@ use readyset_adapter::backend::noria_connector::{
 use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
-use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue, DfValueKind};
@@ -29,7 +28,7 @@ use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncRead, AsyncWrite};
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_COLLATION;
@@ -355,14 +354,14 @@ fn handshake_collation(collation_id: u16) -> u16 {
 
 pub struct Backend {
     /// Handle to the backing noria client
-    pub noria: readyset_adapter::Backend<LazyUpstream<MySqlUpstream>, MySqlQueryHandler>,
+    pub noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     /// Enables logging of statements received from the client. The `Backend` only logs Query,
     /// Prepare and Execute statements.
     pub enable_statement_logging: bool,
 }
 
 impl Deref for Backend {
-    type Target = readyset_adapter::Backend<LazyUpstream<MySqlUpstream>, MySqlQueryHandler>;
+    type Target = readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>;
 
     fn deref(&self) -> &Self::Target {
         &self.noria
@@ -442,23 +441,18 @@ macro_rules! handle_error {
                 // This should cause them to re-initiate a
                 // connection, allowing us to form a new connection
                 // to fallback.
-                error!("upstream connection closed");
-                 Err(io::Error::new(
+                Err(io::Error::new(
                     io::ErrorKind::ConnectionAborted,
                     "upstream connection closed",
                 ))
             }
             Error::ReadySet(ReadySetError::ConnectionClosed(ref msg)) => {
-                error!(%msg, "connection closed");
-                Err(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    msg.clone(),
-                ))
+                Err(io::Error::other(msg.clone()))
             }
             Error::Io(e)
             | Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e)))
             | Error::MsqlSrv(MsqlSrvError::IoError(e)) => {
-                error!(err = %e, "encountered io error while attempting to execute query");
+                debug!(err = %e, "encountered io error while attempting to execute query");
                 // In the case that we encountered an io error, we should bubble it up so the
                 // connection can be closed. This is usually an unrecoverable error, and the client
                 // should re-initiate a connection with us so we can start with a fresh slate.
@@ -636,7 +630,7 @@ where
 }
 
 async fn handle_execute_result<S>(
-    result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
+    result: Result<QueryResult<'_, MySqlUpstream>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
     results_collation: u16,
@@ -683,7 +677,7 @@ where
 }
 
 async fn handle_query_result<S>(
-    result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
+    result: Result<QueryResult<'_, MySqlUpstream>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
     results_collation: u16,
@@ -824,18 +818,13 @@ where
                 // This should cause them to re-initiate a
                 // connection, allowing us to form a new connection
                 // to fallback.
-                error!("upstream connection closed");
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionAborted,
                     "upstream connection closed",
                 ));
             }
             Err(Error::ReadySet(ReadySetError::ConnectionClosed(ref msg))) => {
-                error!(%msg, "connection closed");
-                return Err(io::Error::new(
-                    io::ErrorKind::ConnectionAborted,
-                    msg.clone(),
-                ));
+                return Err(io::Error::other(msg.clone()));
             }
             Err(Error::Io(e))
             | Err(Error::MySql(mysql_async::Error::Io(mysql_async::IoError::Io(e))))
@@ -983,15 +972,12 @@ where
         &mut self,
         user: &str,
         password: Option<RedactedString>,
+        interactive: bool,
     ) -> io::Result<()> {
-        if let Some(password) = password {
-            let _ = self.set_user(user, password).await;
-        }
-        Ok(())
-    }
-
-    async fn set_interactive(&mut self, interactive: bool) -> io::Result<()> {
-        self.noria.set_interactive(interactive);
+        self.noria
+            .connect_upstream(user, password, interactive)
+            .await
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -1122,10 +1108,9 @@ async fn handle_column_write_err<S: AsyncRead + AsyncWrite + Unpin>(
                 "upstream connection closed",
             ))
         }
-        Error::ReadySet(ReadySetError::ConnectionClosed(ref msg)) => Err(io::Error::new(
-            io::ErrorKind::ConnectionAborted,
-            msg.clone(),
-        )),
+        Error::ReadySet(ReadySetError::ConnectionClosed(ref msg)) => {
+            Err(io::Error::other(msg.clone()))
+        }
         _ => rw.error(e.error_kind(), e.to_string().as_bytes()).await,
     }
 }

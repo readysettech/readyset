@@ -15,7 +15,6 @@ use tracing::warn;
 use crate::UpstreamDatabase;
 use crate::backend::ConnectionInfo;
 use crate::backend::noria_connector::{MetaVariable, QueryResult};
-use crate::upstream_database::LazyUpstream;
 use crate::utils::time_or_null;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -146,12 +145,13 @@ where
         enabled_features: Vec<String>,
         disk_path: &Path,
     ) -> Self {
-        let upstream = upstream_config
+        let upstream_config = upstream_config
             .upstream_db_url
             .is_some()
-            .then(|| upstream_config.into());
+            .then_some(upstream_config);
         let inner = Arc::new(Mutex::new(ReadySetStatusReporterInner {
-            upstream,
+            upstream: None,
+            upstream_config,
             rs_handle,
             connections,
             authority,
@@ -171,7 +171,8 @@ where
 /// [`ReadySetStatusReporterInner`] is responsible for aggregating status-related information from
 /// various sources and generating a [`ReadySetStatus`].
 struct ReadySetStatusReporterInner<U> {
-    pub(crate) upstream: Option<LazyUpstream<U>>,
+    pub(crate) upstream: Option<U>,
+    pub(crate) upstream_config: Option<UpstreamConfig>,
     /// A handle to the ReadySet controller, for making controller rpc calls to obtain
     /// a [`ReadySetControllerStatus`]
     pub(crate) rs_handle: Option<ReadySetHandle>,
@@ -207,23 +208,22 @@ where
     }
 
     async fn upstream_reachable(&mut self) -> Option<bool> {
-        let upstream = self.upstream.as_mut()?;
+        let config = self.upstream_config.clone()?;
 
-        // Check current connection status
-        if upstream.is_connected().await.unwrap_or(false) {
+        if let Some(upstream) = self.upstream.as_mut()
+            && upstream.is_connected().await.unwrap_or(false)
+        {
             return Some(true);
         }
 
         // Our connection may have been broken.
         // Attempt to reconnect once to confirm reachability.
-        match upstream.connect().await {
-            Ok(_) => match upstream.is_connected().await {
-                Ok(is_connected) => Some(is_connected),
-                _ => {
-                    warn!("Unable to re-establish connection to Upstream");
-                    None
-                }
-            },
+        match U::connect(config, None, None, false).await {
+            Ok(mut upstream) => {
+                let reachable = upstream.is_connected().await.unwrap_or(false);
+                self.upstream = Some(upstream);
+                Some(reachable)
+            }
             Err(e) => {
                 warn!("Unable to re-establish connection to Upstream: {}", e);
                 None

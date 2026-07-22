@@ -37,7 +37,6 @@ use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::SizeOf;
 use readyset_util::hash::hash;
-use readyset_util::redacted::RedactedString;
 
 use crate::Error;
 use crate::resultset::{Resultset, copy_simple_query_message};
@@ -471,13 +470,6 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         Ok(())
     }
 
-    async fn set_user(
-        &mut self,
-        _user: &str,
-        _password: RedactedString,
-    ) -> Result<(), Self::Error> {
-        Ok(())
-    }
     async fn change_user(
         &mut self,
         _user: &str,

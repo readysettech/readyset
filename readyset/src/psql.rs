@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use database_utils::TlsMode;
-use readyset_adapter::upstream_database::LazyUpstream;
 use readyset_errors::ReadySetResult;
 use readyset_psql::{AuthenticationMethod, PostgreSqlQueryHandler, PostgreSqlUpstream};
 use tokio::net;
@@ -58,16 +57,13 @@ impl PsqlHandler {
 }
 
 impl ConnectionHandler for PsqlHandler {
-    type UpstreamDatabase = LazyUpstream<PostgreSqlUpstream>;
+    type UpstreamDatabase = PostgreSqlUpstream;
     type Handler = PostgreSqlQueryHandler;
 
     async fn process_connection(
         &mut self,
         stream: net::TcpStream,
-        backend: readyset_adapter::Backend<
-            LazyUpstream<PostgreSqlUpstream>,
-            PostgreSqlQueryHandler,
-        >,
+        backend: readyset_adapter::Backend<PostgreSqlUpstream, PostgreSqlQueryHandler>,
     ) {
         psql_srv::run_backend(
             readyset_psql::Backend::new(backend)

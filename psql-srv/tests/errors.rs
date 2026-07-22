@@ -36,7 +36,13 @@ impl PsqlBackend for ErrorBackend {
         Some(Credentials::Any)
     }
 
-    async fn set_auth_info(&mut self, _user: &str, _password: Option<RedactedString>) {}
+    async fn set_auth_info(
+        &mut self,
+        _user: &str,
+        _password: Option<RedactedString>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
     async fn on_init(&mut self, _database: &str) -> Result<CredentialsNeeded, Error> {
         Ok(CredentialsNeeded::None)
     }
