@@ -19,12 +19,12 @@ use std::mem;
 use std::ops::ControlFlow;
 
 use readyset_data::DfValue;
-use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported_err};
+use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported, unsupported_err};
 use readyset_sql::ast::{ItemPlaceholder, Literal, ShallowCacheQuery, SqlIdentifier};
 use readyset_sql::{AstConversionError, Dialect, DialectDisplay};
 use sqlparser::ast::{
     Expr, GroupByExpr, Ident, ObjectName, ObjectNamePart, OrderBy, OrderByExpr, OrderByKind, Query,
-    Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
+    SetExpr, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
 };
 use sqlparser::tokenizer::Span;
 use tracing::{trace, trace_span};
@@ -57,6 +57,13 @@ pub fn rewrite_shallow(
         "Rewriting query placeholders"
     );
 
+    validate_support(query)?;
+    trace!(
+        parent: &span,
+        pass = "validate_support",
+        query = %query.display(flags.dialect),
+    );
+
     let reordered_placeholders = reorder_numbered_placeholders(query);
     trace!(
         parent: &span,
@@ -87,6 +94,29 @@ pub fn rewrite_shallow(
         auto_parameters,
         in_array_params,
     ))
+}
+
+/// Reject queries that are invalid or otherwise dangerous to cache.
+fn validate_support(query: &ShallowCacheQuery) -> ReadySetResult<()> {
+    if !query.locks.is_empty() {
+        unsupported!("Row-level locking (FOR UPDATE, FOR SHARE) cannot be shallow-cached");
+    }
+    if body_has_select_into(&query.body) {
+        unsupported!("SELECT ... INTO cannot be shallow-cached");
+    }
+    Ok(())
+}
+
+/// Whether any SELECT in `body` has an `INTO` target.
+fn body_has_select_into(body: &SetExpr) -> bool {
+    match body {
+        SetExpr::Select(select) => select.into.is_some(),
+        SetExpr::Query(query) => body_has_select_into(&query.body),
+        SetExpr::SetOperation { left, right, .. } => {
+            body_has_select_into(left) || body_has_select_into(right)
+        }
+        _ => false,
+    }
 }
 
 /// Anonymizes a sqlparser query for safe, PII-free logging and telemetry.
@@ -792,6 +822,8 @@ fn dfvalue_to_sql_value(v: &DfValue) -> ReadySetResult<Value> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use readyset_data::DfValue;
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_shallow_query;
@@ -841,6 +873,39 @@ mod tests {
         let query_str = format!("{query}");
         assert!(query_str.contains("$1"));
         assert!(query_str.contains("$2"));
+    }
+
+    #[test]
+    fn rewrite_declines_uncacheable_shapes() {
+        let dialect = Dialect::MySQL;
+        for query in [
+            "SELECT id FROM t FOR UPDATE",
+            "SELECT id FROM t UNION SELECT id FROM u FOR UPDATE",
+        ] {
+            let mut q = parse_query(dialect, query);
+            let err = rewrite_shallow(&mut q, AdapterRewriteParams::new(dialect)).unwrap_err();
+            assert_matches!(err, ReadySetError::Unsupported(..), "{dialect}: {query}");
+        }
+
+        let dialect = Dialect::PostgreSQL;
+        for query in [
+            "SELECT id FROM t FOR UPDATE",
+            "SELECT id FROM t FOR SHARE",
+            "SELECT id INTO scratch FROM t",
+            "SELECT id INTO scratch FROM t UNION SELECT id FROM u",
+        ] {
+            let mut q = parse_query(dialect, query);
+            let err = rewrite_shallow(&mut q, AdapterRewriteParams::new(dialect)).unwrap_err();
+            assert_matches!(err, ReadySetError::Unsupported(..), "{dialect}: {query}");
+        }
+
+        // Plain reads still rewrite.
+        let dialect = Dialect::MySQL;
+        let mut q = parse_query(dialect, "SELECT id FROM t WHERE id = 1");
+        rewrite_shallow(&mut q, AdapterRewriteParams::new(dialect)).expect("plain read");
+        let dialect = Dialect::PostgreSQL;
+        let mut q = parse_query(dialect, "SELECT id FROM t UNION SELECT id FROM u");
+        rewrite_shallow(&mut q, AdapterRewriteParams::new(dialect)).expect("plain read");
     }
 
     #[test]
