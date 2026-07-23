@@ -3670,7 +3670,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // should miss due to no metadata
     let _: Vec<(i32, i32)> = conn
@@ -3686,7 +3686,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // should hit; metadata are present but unneeded
     let _: Vec<(i32, i32)> = conn
@@ -3694,7 +3694,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -3731,7 +3731,7 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 
     let _: Vec<i32> = conn.exec("SELECT a FROM shallow", ()).await.unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -3798,7 +3798,7 @@ async fn shallow_cache_equality_and_in_clause() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // In set contents should be normalized (sorted)
     let mut results: Vec<(i32, i32, i32)> = conn
@@ -3809,7 +3809,7 @@ async fn shallow_cache_equality_and_in_clause() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // Different IN values should miss
     let mut results: Vec<(i32, i32, i32)> = conn
@@ -3888,7 +3888,7 @@ async fn shallow_cache_in_clause_prepared() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // In set contents should be normalized (sorted)
     let mut results: Vec<(i32, i32, i32)> = conn
@@ -3899,7 +3899,7 @@ async fn shallow_cache_in_clause_prepared() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // Prepared statement should also hit cache
     let mut results: Vec<(i32, i32, i32)> = conn.exec(&stmt, (10, 20)).await.unwrap();
@@ -3907,7 +3907,7 @@ async fn shallow_cache_in_clause_prepared() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // Different IN values should miss
     let mut results: Vec<(i32, i32, i32)> = conn

@@ -13,10 +13,13 @@
 //! code path, so these reproduce the extended-protocol unnamed slot with a raw
 //! pgwire client that sends Parse/Bind/Execute with an empty statement name.
 
+use std::assert_matches;
+
 use bytes::BytesMut;
 use postgres_protocol::IsNull;
 use postgres_protocol::message::{backend, frontend};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
+use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
     Adapter, TestBuilder, derive_test_name, psql_helpers::PostgreSQLAdapter,
 };
@@ -101,13 +104,16 @@ impl RawPgConn {
         }
     }
 
-    /// Route of the most recent statement, per `EXPLAIN LAST STATEMENT`.
-    async fn last_query_destination(&mut self) -> String {
+    /// Route of the most recent statement, per `EXPLAIN LAST STATEMENT`. Parsed rather
+    /// than compared as text, so a destination that names its cache still matches on kind.
+    async fn last_query_destination(&mut self) -> QueryDestination {
         let rows = self.simple_query_rows("EXPLAIN LAST STATEMENT").await;
-        rows.into_iter()
+        let dest = rows
+            .into_iter()
             .next()
             .and_then(|cols| cols.into_iter().next())
-            .expect("EXPLAIN LAST STATEMENT row")
+            .expect("EXPLAIN LAST STATEMENT row");
+        QueryDestination::try_from(dest.as_str()).expect("valid query destination")
     }
 
     /// Parse/Bind/Execute `query` as an unnamed prepared statement with a single
@@ -259,10 +265,13 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
     // query id; the second serves from the shallow cache.
     let rows_a = conn.unnamed_query(query, "1").await;
     assert_eq!(rows_a, vec!["a-one", "a-two"], "schema_a rows");
-    assert_eq!(conn.last_query_destination().await, "upstream");
+    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
     let rows_a = conn.unnamed_query(query, "1").await;
     assert_eq!(rows_a, vec!["a-one", "a-two"], "schema_a rows (cached)");
-    assert_eq!(conn.last_query_destination().await, "readyset_shallow");
+    assert_matches!(
+        conn.last_query_destination().await,
+        QueryDestination::ReadysetShallow(_)
+    );
 
     conn.simple_query("SET search_path = schema_b, public").await;
     let rows_b = conn.unnamed_query(query, "1").await;
@@ -311,7 +320,7 @@ async fn unnamed_prepared_recovers_cache_after_transaction() {
     conn.simple_query("BEGIN").await;
     let rows = conn.unnamed_query(query, "1").await;
     assert_eq!(rows, vec!["0"], "in-transaction rows");
-    assert_eq!(conn.last_query_destination().await, "upstream");
+    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
     conn.simple_query("COMMIT").await;
 
     // After COMMIT the connection is transaction-free. The first read re-plans and
@@ -319,13 +328,13 @@ async fn unnamed_prepared_recovers_cache_after_transaction() {
     // shallow cache instead of staying pinned to the transaction-bypassed plan.
     let rows = conn.unnamed_query(query, "1").await;
     assert_eq!(rows, vec!["0"], "post-commit fill rows");
-    assert_eq!(conn.last_query_destination().await, "upstream");
+    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
     for read in 0..3 {
         let rows = conn.unnamed_query(query, "1").await;
         assert_eq!(rows, vec!["0"], "post-commit cached rows (read {read})");
-        assert_eq!(
+        assert_matches!(
             conn.last_query_destination().await,
-            "readyset_shallow",
+            QueryDestination::ReadysetShallow(_),
             "re-Parsing after COMMIT must recover shallow caching (read {read})",
         );
     }

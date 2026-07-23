@@ -28,6 +28,7 @@
 //! post-column EOF and an EOF terminator) is covered by the `mysql-srv` unit tests;
 //! `mysql_async` always negotiates the capability, so it is not exercised here.
 
+use std::assert_matches;
 use std::panic::AssertUnwindSafe;
 
 use mysql_async::consts::{ColumnType, Command};
@@ -238,8 +239,8 @@ async fn mysql_shallow_text_protocol_matches_upstream_bytes() {
             AssertUnwindSafe(move || (info1, info2, hit1, hit2))
         }, then_assert: |result| {
             let (info1, info2, hit1, hit2) = result();
-            assert_eq!(info1.destination, QueryDestination::ReadysetShallow, "[{label}] key=1");
-            assert_eq!(info2.destination, QueryDestination::ReadysetShallow, "[{label}] key=2");
+            assert_matches!(info1.destination, QueryDestination::ReadysetShallow(_), "[{label}] key=1");
+            assert_matches!(info2.destination, QueryDestination::ReadysetShallow(_), "[{label}] key=2");
             assert_eq!(hit1, upstream1, "[{label}] key=1 shallow hit vs upstream");
             assert_eq!(hit2, upstream2, "[{label}] key=2 shallow hit vs upstream");
         });
@@ -303,8 +304,8 @@ async fn mysql_shallow_binary_protocol_matches_upstream_bytes() {
             AssertUnwindSafe(move || (info1, info2, hit1, hit2))
         }, then_assert: |result| {
             let (info1, info2, hit1, hit2) = result();
-            assert_eq!(info1.destination, QueryDestination::ReadysetShallow, "[{label}] key=1");
-            assert_eq!(info2.destination, QueryDestination::ReadysetShallow, "[{label}] key=2");
+            assert_matches!(info1.destination, QueryDestination::ReadysetShallow(_), "[{label}] key=1");
+            assert_matches!(info2.destination, QueryDestination::ReadysetShallow(_), "[{label}] key=2");
             assert_eq!(hit1, upstream1, "[{label}] key=1 shallow hit vs upstream");
             assert_eq!(hit2, upstream2, "[{label}] key=2 shallow hit vs upstream");
         });
@@ -393,8 +394,8 @@ async fn mysql_shallow_aggregate_matches_upstream_bytes() {
         AssertUnwindSafe(move || (info1, info2, hit1, hit2))
     }, then_assert: |result| {
         let (info1, info2, hit1, hit2) = result();
-        assert_eq!(info1.destination, QueryDestination::ReadysetShallow);
-        assert_eq!(info2.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info1.destination, QueryDestination::ReadysetShallow(_));
+        assert_matches!(info2.destination, QueryDestination::ReadysetShallow(_));
         assert_eq!(hit1, upstream1, "group 1 shallow hit vs upstream");
         assert_eq!(hit2, upstream2, "group 2 shallow hit vs upstream");
     });

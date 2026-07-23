@@ -122,10 +122,11 @@ async fn try_set_role(
 
 /// Assert the routing of the most recently executed query.
 async fn assert_dest(client: &Client, expected: QueryDestination, ctx: &str) {
+    let actual = psql_helpers::last_query_info(client).await.destination;
     assert_eq!(
-        psql_helpers::last_query_info(client).await.destination,
-        expected,
-        "{ctx}",
+        std::mem::discriminant(&actual),
+        std::mem::discriminant(&expected),
+        "{ctx}: expected {expected:?}, got {actual:?}",
     );
 }
 
@@ -246,7 +247,7 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
     assert_eq!(read_todos(&admin, proto).await, all, "bypass role sees all rows");
     assert_dest(&admin, QueryDestination::Upstream, "bypass partition fills").await;
     assert_eq!(read_todos(&admin, proto).await, all);
-    assert_dest(&admin, QueryDestination::ReadysetShallow, "bypass partition resident").await;
+    assert_dest(&admin, QueryDestination::ReadysetShallow(None), "bypass partition resident").await;
 
     // The victim (member of `authenticated` only) establishes its own scoped
     // partition and confirms it hits.
@@ -257,7 +258,7 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
     assert_eq!(read_todos(&victim, proto).await, vec!["bob"], "victim scoped to bob");
     assert_dest(&victim, QueryDestination::Upstream, "victim partition fills").await;
     assert_eq!(read_todos(&victim, proto).await, vec!["bob"]);
-    assert_dest(&victim, QueryDestination::ReadysetShallow, "victim partition hits").await;
+    assert_dest(&victim, QueryDestination::ReadysetShallow(None), "victim partition hits").await;
 
     // The attack: the victim asks to assume the BYPASSRLS role. Its own upstream
     // connection is a non-member, so upstream must reject the statement.
@@ -285,7 +286,7 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
     );
     assert_dest(
         &victim,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(None),
         "a rejected SET ROLE must leave the session on its own cached partition, \
          not move it off (the observable sign the mirror wrongly advanced)",
     )

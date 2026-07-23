@@ -14,6 +14,7 @@
 //! tenant looking up another tenant's row by id sees zero rows, never the
 //! other's cached row.
 
+use std::assert_matches;
 use std::time::Duration;
 
 use readyset_adapter::backend::UnsupportedSetMode;
@@ -238,12 +239,14 @@ async fn read_todo_by_id(client: &Client, proto: Protocol, id: i32) -> Vec<Strin
     }
 }
 
-/// Assert the routing of the most recently executed query.
+/// Assert the routing of the most recently executed query. Compares only the
+/// destination's variant, ignoring any cache name it carries.
 async fn assert_dest(client: &Client, expected: QueryDestination, ctx: &str) {
+    let actual = psql_helpers::last_query_info(client).await.destination;
     assert_eq!(
-        psql_helpers::last_query_info(client).await.destination,
-        expected,
-        "{ctx}",
+        std::mem::discriminant(&actual),
+        std::mem::discriminant(&expected),
+        "{ctx}: expected {expected:?}, got {actual:?}",
     );
 }
 
@@ -265,7 +268,7 @@ async fn assert_owner_ids_cached(
     let rows = read_owner_ids(client, proto, sql).await;
     let got: Vec<&str> = rows.iter().map(String::as_str).collect();
     assert_eq!(got, expected, "{ctx}: cached rows");
-    assert_dest(client, QueryDestination::ReadysetShallow, ctx).await;
+    assert_dest(client, QueryDestination::ReadysetShallow(None), ctx).await;
 }
 
 /// Like [`assert_owner_ids_cached`] for the default `SELECT * FROM api.todos`.
@@ -278,7 +281,7 @@ async fn assert_count_cached(client: &Client, proto: Protocol, sql: &str, expect
     read_count(client, proto, sql).await;
     let n = read_count(client, proto, sql).await;
     assert_eq!(n, expected, "{ctx}: cached count");
-    assert_dest(client, QueryDestination::ReadysetShallow, ctx).await;
+    assert_dest(client, QueryDestination::ReadysetShallow(None), ctx).await;
 }
 
 /// Prove the session fails closed: two identical reads both route `Upstream`. A
@@ -429,10 +432,10 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
         .await
         .expect("bob second read");
     assert_eq!(owner_ids(&rows), vec!["bob"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
-        "repeated read in the same context must hit the shallow cache",
+        QueryDestination::ReadysetShallow(_),
+        "repeated read in the same context must hit the shallow cache"
     );
 
     // Switch to the alice context: a distinct partition. The first read must
@@ -461,9 +464,9 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
         .await
         .expect("alice second read");
     assert_eq!(owner_ids(&rows), vec!["alice", "alice"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     // Back to bob: bob's partition is intact and still hits, uncontaminated by
@@ -476,9 +479,9 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
         .await
         .expect("bob third read");
     assert_eq!(owner_ids(&rows), vec!["bob"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     shutdown_tx.shutdown().await;
@@ -537,10 +540,10 @@ async fn pg_rls_shallow_cache_extended_protocol_set_config() {
         .await
         .expect("bob second read");
     assert_eq!(owner_ids_ext(&rows), vec!["bob"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
-        "repeated read with the bound claim must hit the shallow cache",
+        QueryDestination::ReadysetShallow(_),
+        "repeated read with the bound claim must hit the shallow cache"
     );
 
     // Rebind a different claim: a distinct partition (miss, alice's rows).
@@ -570,10 +573,10 @@ async fn pg_rls_shallow_cache_extended_protocol_set_config() {
         .await
         .expect("alice second read");
     assert_eq!(owner_ids_ext(&rows), vec!["alice", "alice"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
-        "repeated read in alice's context must hit the shallow cache",
+        QueryDestination::ReadysetShallow(_),
+        "repeated read in alice's context must hit the shallow cache"
     );
 
     // Back to bob: bob's partition is intact and still served from cache,
@@ -589,10 +592,10 @@ async fn pg_rls_shallow_cache_extended_protocol_set_config() {
         .await
         .expect("bob third read");
     assert_eq!(owner_ids_ext(&rows), vec!["bob"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
-        "bob's partition is intact and served from cache",
+        QueryDestination::ReadysetShallow(_),
+        "bob's partition is intact and served from cache"
     );
 
     shutdown_tx.shutdown().await;
@@ -629,7 +632,7 @@ async fn run_cross_tenant_pk(proto: Protocol) {
     );
     assert_dest(&rs, QueryDestination::Upstream, "bob id=3 fills").await;
     assert_eq!(read_todo_by_id(&rs, proto, 3).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "bob id=3 hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob id=3 hits").await;
 
     // Cross-tenant probe: bob asks for alice's row by primary key -> zero rows.
     // The no-leak invariant: bob's partition never serves alice's row.
@@ -651,7 +654,7 @@ async fn run_cross_tenant_pk(proto: Protocol) {
     );
     assert_dest(&rs, QueryDestination::Upstream, "alice id=1 fills").await;
     assert_eq!(read_todo_by_id(&rs, proto, 1).await, vec!["alice"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "alice id=1 hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "alice id=1 hits").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -692,7 +695,7 @@ async fn run_bypass_role(proto: Protocol) {
     assert_eq!(read_todos(&rs, proto).await, all, "bypass role sees all rows");
     assert_dest(&rs, QueryDestination::Upstream, "bypass fills").await;
     assert_eq!(read_todos(&rs, proto).await, all);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "bypass hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bypass hits").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -745,7 +748,7 @@ async fn run_anon_no_claims(proto: Protocol) {
     );
     assert_dest(&rs, QueryDestination::Upstream, "bob fills").await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "bob hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob hits").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -792,7 +795,7 @@ async fn pg_rls_shallow_cache_set_config_simple() {
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::Upstream, "set_config simple fills").await;
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "set_config simple hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "set_config simple hits").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -825,7 +828,7 @@ async fn pg_rls_shallow_cache_set_namespaced_extended() {
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::Upstream, "extended SET fills").await;
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow, "extended SET hits").await;
+    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "extended SET hits").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1360,11 +1363,11 @@ async fn run_golden_production_pattern(proto: Protocol) {
         // Second identical request must be served from the shallow cache.
         let (rows, dest) = request(&rs, proto, sub).await;
         assert_eq!(rows, expected, "second request returns {sub}'s cached rows");
-        assert_eq!(
-            dest,
-            QueryDestination::ReadysetShallow,
-            "second identical request must hit the shallow cache, not re-proxy upstream",
-        );
+        assert_matches!(
+        dest,
+        QueryDestination::ReadysetShallow(_),
+        "second identical request must hit the shallow cache, not re-proxy upstream"
+    );
     }
 
     shutdown_tx.shutdown().await;

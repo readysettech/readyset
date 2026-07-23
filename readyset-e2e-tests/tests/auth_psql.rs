@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -87,9 +88,9 @@ async fn user_default_schema_is_used() {
         .unwrap()
         .get(0);
     assert_eq!(name, "alice");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&alice).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     let mut bob_cfg = rs_opts.clone();
@@ -117,9 +118,9 @@ async fn user_default_schema_is_used() {
         .unwrap()
         .get(0);
     assert_eq!(name, "bob");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&bob).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     shutdown_tx.shutdown().await;

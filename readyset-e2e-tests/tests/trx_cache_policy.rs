@@ -3,6 +3,8 @@
 //! Verifies the user-visible "serve from cache until first write" behavior the
 //! the auto-cache configuration relies on. The matrix below pairs the
 //! `(MigrationMode, CacheMode, policy)` tuples that produce distinct routing decisions.
+use std::assert_matches;
+
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
@@ -70,9 +72,9 @@ async fn until_write_in_request_path_shallow() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "cache must be hot before transaction starts"
     );
 
@@ -81,9 +83,9 @@ async fn until_write_in_request_path_shallow() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "UntilWrite must serve from cache before any write in the transaction"
     );
 
@@ -106,9 +108,9 @@ async fn until_write_in_request_path_shallow() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "cache must serve again once the writing transaction commits"
     );
 
@@ -139,9 +141,9 @@ async fn manual_no_keyword_stays_never() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     // Inside an explicit transaction, Never always proxies — even on the very first read.
@@ -181,9 +183,9 @@ async fn manual_until_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     let (always, until_write): (bool, bool) = conn
@@ -199,9 +201,9 @@ async fn manual_until_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
     conn.query_drop("INSERT INTO foo VALUES (5)").await.unwrap();
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
@@ -239,9 +241,9 @@ async fn manual_always_unaffected_by_writes() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     conn.query_drop("BEGIN").await.unwrap();
@@ -250,9 +252,9 @@ async fn manual_always_unaffected_by_writes() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "ALWAYS must serve from cache regardless of in-transaction writes"
     );
     conn.query_drop("COMMIT").await.unwrap();
@@ -277,9 +279,9 @@ async fn autocommit_off_carries_had_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     // BEGIN; INSERT (had_write = true); SET autocommit=0 -> AutocommitOff{had_write=true}.
@@ -302,9 +304,9 @@ async fn autocommit_off_carries_had_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "implicit COMMIT under autocommit=0 must reset had_write"
     );
 

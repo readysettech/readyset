@@ -3149,12 +3149,16 @@ where
             .get_or_start_insert(query_id, shallow_key, DB::is_meta_compatible)
             .await;
 
+        let cache_name = shallow
+            .get(None, Some(query_id))
+            .and_then(|cache| cache.display_name());
+
         match res {
             CacheResult::Hit(values) => {
                 event.readyset_event = Some(ReadysetExecutionEvent::Other {
                     duration: start.elapsed(),
                 });
-                event.destination = Some(QueryDestination::ReadysetShallow);
+                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::HitAndRefresh(values, cache) => {
@@ -3176,7 +3180,7 @@ where
                     refresh.send(request).await;
                 }
 
-                event.destination = Some(QueryDestination::ReadysetShallow);
+                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(mut cache) => {
@@ -6078,12 +6082,17 @@ where
             .get_or_start_insert(&query_id, shallow_key, |_| true)
             .await;
 
+        let cache_name = state
+            .shallow
+            .get(None, Some(&query_id))
+            .and_then(|cache| cache.display_name());
+
         match res {
             CacheResult::Hit(values) => {
                 event.readyset_event = Some(ReadysetExecutionEvent::Other {
                     duration: start.elapsed(),
                 });
-                event.destination = Some(QueryDestination::ReadysetShallow);
+                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::HitAndRefresh(values, cache) => {
@@ -6102,7 +6111,7 @@ where
                 event.readyset_event = Some(ReadysetExecutionEvent::Other {
                     duration: start.elapsed(),
                 });
-                event.destination = Some(QueryDestination::ReadysetShallow);
+                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(mut cache) => {

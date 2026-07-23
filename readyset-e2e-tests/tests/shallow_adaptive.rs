@@ -202,7 +202,10 @@ async fn sample_staleness(opts: mysql_async::Opts, db: String) -> (Vec<u64>, Vec
                 .unwrap()
                 .unwrap();
             let staleness = current_timestamp_ms().saturating_sub(modified_ms);
-            if last_query_info(&mut conn).await.destination == QueryDestination::ReadysetShallow {
+            if matches!(
+                last_query_info(&mut conn).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            ) {
                 samples.push(staleness);
             }
         }
@@ -231,7 +234,10 @@ async fn sample_counters(
             .unwrap()
             .unwrap();
         let staleness = current_timestamp_ms().saturating_sub(modified_ms);
-        if last_query_info(&mut conn).await.destination == QueryDestination::ReadysetShallow {
+        if matches!(
+            last_query_info(&mut conn).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
             staleness_samples.push(staleness);
         }
     }

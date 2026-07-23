@@ -100,7 +100,7 @@ impl ReadysetExecutionEvent {
 #[derive(Debug, PartialEq, Eq, Serialize, Clone)]
 pub enum QueryDestination {
     Readyset(Option<String>),
-    ReadysetShallow,
+    ReadysetShallow(Option<String>),
     ReadysetThenUpstream,
     Upstream,
     Both,
@@ -122,9 +122,16 @@ impl TryFrom<&str> for QueryDestination {
             return Ok(QueryDestination::Readyset(Some(name.to_string())));
         };
 
+        if let Some(name) = value
+            .strip_prefix("readyset_shallow(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return Ok(QueryDestination::ReadysetShallow(Some(name.to_string())));
+        };
+
         match value {
             "readyset" => Ok(QueryDestination::Readyset(None)),
-            "readyset_shallow" => Ok(QueryDestination::ReadysetShallow),
+            "readyset_shallow" => Ok(QueryDestination::ReadysetShallow(None)),
             "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
             "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
@@ -145,7 +152,10 @@ impl fmt::Display for QueryDestination {
         match self {
             QueryDestination::Readyset(Some(name)) => write!(f, "readyset({})", name),
             QueryDestination::Readyset(None) => write!(f, "readyset"),
-            QueryDestination::ReadysetShallow => write!(f, "readyset_shallow"),
+            QueryDestination::ReadysetShallow(Some(name)) => {
+                write!(f, "readyset_shallow({})", name)
+            }
+            QueryDestination::ReadysetShallow(None) => write!(f, "readyset_shallow"),
             QueryDestination::ReadysetThenUpstream => write!(f, "readyset_then_upstream"),
             QueryDestination::Upstream => write!(f, "upstream"),
             QueryDestination::Both => write!(f, "both"),

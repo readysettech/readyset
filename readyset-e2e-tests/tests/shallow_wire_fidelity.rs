@@ -139,11 +139,11 @@ async fn postgres_shallow_extended_protocol_matches_upstream_bytes() {
             // A fallback to upstream would compare upstream against itself and
             // pass vacuously; require the rows to come from the shallow cache.
             assert_matches!(
-                &info1.destination, QueryDestination::ReadysetShallow,
+                &info1.destination, QueryDestination::ReadysetShallow(_),
                 "[{label}] key=1",
             );
             assert_matches!(
-                &info2.destination, QueryDestination::ReadysetShallow,
+                &info2.destination, QueryDestination::ReadysetShallow(_),
                 "[{label}] key=2",
             );
             assert_eq!(
@@ -211,8 +211,8 @@ async fn postgres_shallow_aggregate_matches_upstream_bytes() {
         AssertUnwindSafe(move || (info1, info2, bodies))
     }, then_assert: |result| {
         let (info1, info2, rs_bodies) = result();
-        assert_matches!(&info1.destination, QueryDestination::ReadysetShallow);
-        assert_matches!(&info2.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(&info1.destination, QueryDestination::ReadysetShallow(_));
+        assert_matches!(&info2.destination, QueryDestination::ReadysetShallow(_));
         assert_eq!(
             upstream_bodies.len(), 2,
             "expected one row per group, not an empty comparison",
@@ -272,7 +272,7 @@ async fn postgres_shallow_simple_protocol_matches_upstream() {
         AssertUnwindSafe(move || (info, messages))
     }, then_assert: |result| {
         let (info, rs_messages) = result();
-        assert_matches!(&info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(&info.destination, QueryDestination::ReadysetShallow(_));
         let row_count = upstream_messages.iter().filter(|m| m.starts_with("Row(")).count();
         assert_eq!(row_count, 2, "expected both rows, not an empty comparison");
         assert_eq!(

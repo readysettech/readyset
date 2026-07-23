@@ -1100,6 +1100,13 @@ where
         &self.name
     }
 
+    /// This cache's name rendered for display, if it has one.
+    pub fn display_name(&self) -> Option<String> {
+        self.name
+            .as_ref()
+            .map(|name| name.display_unquoted().to_string())
+    }
+
     pub(crate) fn query_id(&self) -> &QueryId {
         &self.query_id
     }

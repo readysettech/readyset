@@ -2690,7 +2690,9 @@ async fn query_cache_mode(readyset: &mut DatabaseConnection) -> CacheMode {
 /// Classify the cache mode from an `EXPLAIN LAST STATEMENT` result. The result
 /// is COLUMNAR: one data row whose first column (`Query_destination`) holds the
 /// destination -- "readyset(<id>)" or "readyset" => served from a deep cache,
-/// "readyset_shallow" => shallow, anything else (e.g. "upstream") => proxied.
+/// "readyset_shallow(<name>)" or "readyset_shallow" => shallow, anything else
+/// (e.g. "upstream") => proxied. Both cache destinations name their cache when
+/// they can, so each is matched by prefix as well as bare.
 /// The column NAME lives in the header, not in the returned data, so we read the
 /// value positionally from `row[0]` rather than scanning for a "Query_destination"
 /// key (which never appears in the data rows).
@@ -2701,7 +2703,7 @@ fn classify_destination(rows: &[Vec<Value>]) -> CacheMode {
     let dest = dest.to_string();
     if dest.starts_with("readyset(") || dest == "readyset" {
         CacheMode::Deep
-    } else if dest == "readyset_shallow" {
+    } else if dest.starts_with("readyset_shallow(") || dest == "readyset_shallow" {
         CacheMode::Shallow
     } else {
         CacheMode::Proxy
@@ -3514,6 +3516,10 @@ mod tests {
         );
         assert_eq!(
             classify_destination(&[vec![Value::Text("readyset_shallow".into())]]),
+            CacheMode::Shallow
+        );
+        assert_eq!(
+            classify_destination(&[vec![Value::Text("readyset_shallow(my_cache)".into())]]),
             CacheMode::Shallow
         );
         assert_eq!(

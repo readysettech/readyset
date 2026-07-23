@@ -71,9 +71,9 @@ async fn cache_mode_shallow() {
         .query_drop("SELECT a FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow
+        QueryDestination::ReadysetShallow(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -190,9 +190,9 @@ async fn cache_mode_deep_then_shallow() {
         .query_drop("SELECT a, RAND() FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow
+        QueryDestination::ReadysetShallow(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -254,9 +254,9 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
         .query_drop("SELECT a FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow
+        QueryDestination::ReadysetShallow(_)
     );
 
     // Auto-created caches use adaptive refresh.
@@ -312,9 +312,9 @@ async fn cache_mode_shallow_auto_create_skips_ineligible() {
     // from an auto-created shallow cache.
     readyset.query_drop("SELECT a FROM foo").await.unwrap();
     readyset.query_drop("SELECT a FROM foo").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "a plain SELECT should auto-create a shallow cache"
     );
 
@@ -361,9 +361,9 @@ async fn cache_mode_shallow_auto_create_skips_ineligible_pg() {
     // Control: a plain SELECT auto-caches on the second execution.
     rs.simple_query("SELECT a FROM foo").await.unwrap();
     rs.simple_query("SELECT a FROM foo").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "a plain SELECT should auto-create a shallow cache"
     );
 
@@ -455,7 +455,7 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect() {
             .query_drop("SELECT a, NOW() FROM foo")
             .await
             .unwrap();
-        if last_query_info(&mut readyset).await.destination == QueryDestination::ReadysetShallow {
+        if matches!(last_query_info(&mut readyset).await.destination, QueryDestination::ReadysetShallow(_)) {
             cached = true;
             break;
         }
@@ -547,7 +547,10 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect() {
     let mut cached = false;
     for _ in 0..5 {
         readyset.query_drop(schema_query).await.unwrap();
-        if last_query_info(&mut readyset).await.destination == QueryDestination::ReadysetShallow {
+        if matches!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
             cached = true;
             break;
         }
@@ -657,9 +660,7 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect_pg() {
     let mut cached = false;
     for _ in 0..5 {
         rs.simple_query("SELECT a, now() FROM foo").await.unwrap();
-        if psql_helpers::last_query_info(&rs).await.destination
-            == QueryDestination::ReadysetShallow
-        {
+        if matches!(psql_helpers::last_query_info(&rs).await.destination, QueryDestination::ReadysetShallow(_)) {
             cached = true;
             break;
         }
@@ -913,9 +914,9 @@ async fn cache_mode_shallow_allow_nondeterministic_makes_eligible() {
     // execution is served from an auto-created shallow cache.
     readyset.query_drop("SELECT NOW()").await.unwrap();
     readyset.query_drop("SELECT NOW()").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "NOW() should auto-cache once non-deterministic calls are allowed"
     );
 
@@ -978,9 +979,9 @@ async fn cache_mode_shallow_allow_nondeterministic_makes_eligible_pg() {
     // eligible and it auto-caches on the second execution.
     rs.simple_query("SELECT now()").await.unwrap();
     rs.simple_query("SELECT now()").await.unwrap();
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "now() should auto-cache once non-deterministic calls are allowed"
     );
 

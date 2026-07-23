@@ -8,6 +8,8 @@
 //! COM_STMT_PREPARE, mirroring how the Postgres client re-Parses the unnamed
 //! statement on every query.
 
+use std::assert_matches;
+
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
@@ -75,9 +77,9 @@ async fn prepared_reresolves_after_use_db() {
 
     let rows_a: Vec<String> = conn.exec(query, (1,)).await.unwrap();
     assert_eq!(rows_a, vec!["a-one", "a-two"], "db_a rows (cached)");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     conn.query_drop(format!("USE {db_b}")).await.unwrap();

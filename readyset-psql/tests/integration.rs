@@ -1743,7 +1743,7 @@ async fn dropped_shallow_cache_does_not_resurrect_after_restart() {
         conn.simple_query("SELECT a FROM shallow").await.unwrap();
         conn.simple_query("SELECT a FROM shallow").await.unwrap();
         let info = explain_last_statement(&mut conn).await;
-        assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
         conn.simple_query("DROP CACHE q").await.expect("drop failed");
         sleep().await;
@@ -1781,7 +1781,7 @@ async fn dropped_shallow_cache_does_not_resurrect_after_restart() {
     conn.simple_query("SELECT a FROM shallow").await.unwrap();
     let info = explain_last_statement(&mut conn).await;
     assert!(
-        !matches!(info.destination, QueryDestination::ReadysetShallow),
+        !matches!(info.destination, QueryDestination::ReadysetShallow(_)),
         "dropped shallow cache resurrected after restart: {:?}",
         info.destination,
     );
@@ -2414,7 +2414,7 @@ async fn shallow_cache_scheduled_refresh() {
     }
 
     let last = explain_last_statement(&mut conn).await;
-    assert_matches!(last.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(last.destination, QueryDestination::ReadysetShallow(_));
 
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     conn.simple_query("UPDATE test_data SET value = 101 WHERE id = 1")
@@ -2437,7 +2437,7 @@ async fn shallow_cache_scheduled_refresh() {
         assert_eq!(cached, expected);
 
         let last = explain_last_statement(&mut conn).await;
-        assert_matches!(last.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(last.destination, QueryDestination::ReadysetShallow(_));
 
         conn.simple_query(&format!(
             "UPDATE test_data SET value = {} WHERE id = 1",
@@ -2496,7 +2496,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // should miss due to no metadata
     let stmt = conn
@@ -2510,14 +2510,14 @@ async fn shallow_cache_protocol_crossing() {
     // should hit
     conn.execute(&stmt, &[&1]).await.unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // should hit; metadata are present but unneeded
     conn.simple_query("SELECT id, value FROM shallow WHERE id = 1")
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -2559,7 +2559,7 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 
     conn.execute::<_, &[&i32]>(&stmt, &[]).await.unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -2620,14 +2620,14 @@ async fn shallow_cache_equality_and_in_clause() {
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // In set contents should be normalized (sorted)
     conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 10)")
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow);
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
     // Different IN values should miss
     conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (20, 30)")

@@ -5,6 +5,7 @@
 //! governed by the per-cache `TrxCachePolicy` (`NEVER` / `ALWAYS` / `UNTIL WRITE`), not
 //! this window. The window gives upstream replication a chance to catch up before
 //! serving cached reads of just-written rows; it is opportunistic, not a guarantee.
+use std::assert_matches;
 use std::time::Duration;
 
 use mysql_async::prelude::Queryable;
@@ -79,9 +80,9 @@ async fn opportunistic_ryw_window_skips_cache_after_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "cache must be hot before the write"
     );
 
@@ -103,9 +104,9 @@ async fn opportunistic_ryw_window_skips_cache_after_write() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "cache must serve again once the RYW window elapses"
     );
 
@@ -129,9 +130,9 @@ async fn opportunistic_ryw_disabled_does_not_skip_cache() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     conn.query_drop("INSERT INTO foo VALUES (5)").await.unwrap();
@@ -140,9 +141,9 @@ async fn opportunistic_ryw_disabled_does_not_skip_cache() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "RYW disabled: post-write reads must still serve from cache"
     );
 
@@ -167,9 +168,9 @@ async fn opportunistic_ryw_fires_after_commit() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     conn.query_drop("BEGIN").await.unwrap();
@@ -205,9 +206,9 @@ async fn opportunistic_ryw_cleared_on_rollback() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
     );
 
     conn.query_drop("BEGIN").await.unwrap();
@@ -218,9 +219,9 @@ async fn opportunistic_ryw_cleared_on_rollback() {
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow,
+        QueryDestination::ReadysetShallow(_),
         "ROLLBACK must drop RYW since the writes never landed"
     );
 
