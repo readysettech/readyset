@@ -245,7 +245,7 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .expect("create cache");
     let all = vec!["alice", "alice", "bob"];
     assert_eq!(read_todos(&admin, proto).await, all, "bypass role sees all rows");
-    assert_dest(&admin, QueryDestination::Upstream, "bypass partition fills").await;
+    assert_dest(&admin, QueryDestination::ReadysetThenUpstream(None), "bypass partition fills").await;
     assert_eq!(read_todos(&admin, proto).await, all);
     assert_dest(&admin, QueryDestination::ReadysetShallow(None), "bypass partition resident").await;
 
@@ -256,7 +256,7 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .expect("victim may assume authenticated");
     set_sub_claim(&victim, proto, "bob").await;
     assert_eq!(read_todos(&victim, proto).await, vec!["bob"], "victim scoped to bob");
-    assert_dest(&victim, QueryDestination::Upstream, "victim partition fills").await;
+    assert_dest(&victim, QueryDestination::ReadysetThenUpstream(None), "victim partition fills").await;
     assert_eq!(read_todos(&victim, proto).await, vec!["bob"]);
     assert_dest(&victim, QueryDestination::ReadysetShallow(None), "victim partition hits").await;
 

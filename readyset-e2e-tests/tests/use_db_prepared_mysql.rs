@@ -70,9 +70,9 @@ async fn prepared_reresolves_after_use_db() {
 
     let rows_a: Vec<String> = conn.exec(query, (1,)).await.unwrap();
     assert_eq!(rows_a, vec!["a-one", "a-two"], "db_a rows");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     let rows_a: Vec<String> = conn.exec(query, (1,)).await.unwrap();

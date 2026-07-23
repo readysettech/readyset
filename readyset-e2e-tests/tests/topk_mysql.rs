@@ -15,7 +15,7 @@ async fn assert_last_target_was(rs_conn: &mut Conn, expected: QueryDestination) 
         .await
         .unwrap()
         .unwrap();
-    let msg = destination.noria_error;
+    let msg = destination.reason;
     assert_eq!(destination.destination, expected, "{msg}");
 }
 

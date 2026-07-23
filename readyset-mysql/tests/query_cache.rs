@@ -66,8 +66,8 @@ async fn in_request_path_query_with_fallback() {
     assert_eq!(query_status_cache.cached_list().len(), 1);
     assert_eq!(query_status_cache.proxied_list(CacheType::Deep).len(), 1);
     let info = last_query_info(&mut conn).await;
-    assert_eq!(info.destination, QueryDestination::ReadysetThenUpstream);
-    assert!(!info.noria_error.is_empty());
+    assert_eq!(info.destination, QueryDestination::ReadysetThenUpstream(None));
+    assert!(!info.reason.is_empty());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;
     res.unwrap(); // Executed successfully against fallback.

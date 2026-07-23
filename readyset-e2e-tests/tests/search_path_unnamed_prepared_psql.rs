@@ -265,7 +265,10 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
     // query id; the second serves from the shallow cache.
     let rows_a = conn.unnamed_query(query, "1").await;
     assert_eq!(rows_a, vec!["a-one", "a-two"], "schema_a rows");
-    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
+    assert_matches!(
+        conn.last_query_destination().await,
+        QueryDestination::ReadysetThenUpstream(_)
+    );
     let rows_a = conn.unnamed_query(query, "1").await;
     assert_eq!(rows_a, vec!["a-one", "a-two"], "schema_a rows (cached)");
     assert_matches!(
@@ -328,7 +331,10 @@ async fn unnamed_prepared_recovers_cache_after_transaction() {
     // shallow cache instead of staying pinned to the transaction-bypassed plan.
     let rows = conn.unnamed_query(query, "1").await;
     assert_eq!(rows, vec!["0"], "post-commit fill rows");
-    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
+    assert_matches!(
+        conn.last_query_destination().await,
+        QueryDestination::ReadysetThenUpstream(_)
+    );
     for read in 0..3 {
         let rows = conn.unnamed_query(query, "1").await;
         assert_eq!(rows, vec!["0"], "post-commit cached rows (read {read})");

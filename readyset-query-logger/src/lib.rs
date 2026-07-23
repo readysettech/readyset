@@ -329,6 +329,7 @@ mod tests {
                 duration: Duration::from_micros(100),
             }),
             noria_error: None,
+            reason: None,
             destination: None,
         }
     }

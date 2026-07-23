@@ -68,6 +68,7 @@ fn create_event(
         },
         readyset_event,
         noria_error: None,
+        reason: None,
         destination: None,
     }
 }

@@ -62,9 +62,9 @@ async fn cache_mode_shallow() {
         .query_drop("SELECT a FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     readyset
@@ -181,9 +181,9 @@ async fn cache_mode_deep_then_shallow() {
         .query_drop("SELECT a, RAND() FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     readyset
@@ -244,9 +244,9 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
         .query_drop("SELECT a FROM foo")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Second execution should be served from the auto-created shallow cache.

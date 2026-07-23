@@ -64,9 +64,9 @@ async fn scheduled_refresh_expiration() {
         .query_drop("SELECT a, RAND(), SLEEP(3) FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     readyset
@@ -84,9 +84,9 @@ async fn scheduled_refresh_expiration() {
         .query_drop("SELECT a, RAND(), SLEEP(3) FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     shutdown_tx.shutdown().await;
@@ -137,9 +137,9 @@ async fn execution_longer_than_ttl_is_cacheable() {
         .query_drop("SELECT a, SLEEP(6) FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     readyset
@@ -211,9 +211,9 @@ async fn scheduled_refresh_starts_immediately() {
         .query_drop("SELECT RAND(), SLEEP(5) FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     async fn collect_rand_cache_result(readyset: &mut mysql_async::Conn, i: i32) -> String {
@@ -313,9 +313,9 @@ async fn show_shallow_caches() {
         .query_drop("SELECT * FROM foo WHERE a = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
     readyset
         .query_drop("SELECT * FROM foo WHERE a = 1")
@@ -1083,9 +1083,9 @@ async fn mysql_change_upstream() {
         .expect("query db_a (1st)")
         .expect("row should exist");
     assert_eq!(row.0, 100);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second query hits shallow cache.
@@ -1122,7 +1122,8 @@ async fn mysql_change_upstream() {
     // Wait for TTL to expire so the shallow cache is stale.
     sleep(Duration::from_secs(3)).await;
 
-    // Query should go upstream to db_b.
+    // Query should go upstream to db_b. The shallow cache is keyed by query id, which
+    // covers the schema search path, so under db_b nothing shallow is attempted at all.
     let row: (i32,) = rs
         .query_first("SELECT b FROM foo WHERE a = 1")
         .await
@@ -1176,9 +1177,9 @@ async fn hint_creates_shallow_cache() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, 100)]);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Second query (same, with hint): should hit the shallow cache.
@@ -1233,9 +1234,9 @@ async fn hint_creates_shallow_cache_union() {
         .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ RAND() UNION SELECT RAND()")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Second query without hint: should hit the shallow cache.
@@ -1289,9 +1290,9 @@ async fn hint_creates_shallow_cache_cte() {
         .query_drop("WITH cte AS (SELECT 1 AS x) SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM cte")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Same CTE query without hint: should hit the shallow cache.
@@ -1347,9 +1348,9 @@ async fn hint_creates_shallow_cache_window_function() {
         )
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Same window function query without hint: should hit the shallow cache.
@@ -1403,9 +1404,9 @@ async fn hint_creates_shallow_cache_subquery() {
         .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ * FROM (SELECT id FROM t) AS sub")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Same subquery without hint: should hit the shallow cache.
@@ -1498,9 +1499,9 @@ async fn pg_change_upstream() {
         .await
         .expect("query db_a (1st)");
     assert_eq!(first_row_col(&rows, 0), "100");
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second query hits shallow cache.
@@ -1542,9 +1543,9 @@ async fn pg_change_upstream() {
         .await
         .expect("query after change upstream");
     assert_eq!(first_row_col(&rows, 0), "200");
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second query should hit shallow cache with db_b data.
@@ -1709,9 +1710,9 @@ async fn hint_ttl_option_applies() {
         .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE POLICY TTL 3 SECONDS */ id, val FROM t4 WHERE id = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "First query should be a cache miss (upstream)"
     );
 
@@ -1734,9 +1735,9 @@ async fn hint_ttl_option_applies() {
         .query_drop("SELECT id, val FROM t4 WHERE id = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "After TTL expiry the entry should be evicted"
     );
 
@@ -1788,9 +1789,9 @@ async fn hint_prepared_statement_creates_cache() {
         .unwrap()
         .unwrap();
     assert_eq!(row, (1, 10));
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "First prepared exec should be a cache miss (upstream)"
     );
 
@@ -2000,9 +2001,9 @@ async fn multiple_hints_produce_same_cache() {
         .query_drop("SELECT /*rs+ CREATE SHALLOW CACHE */ id, val FROM t_multi WHERE id = 1")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "First hinted query should be a cache miss"
     );
 
@@ -2086,9 +2087,9 @@ async fn malformed_hint_does_not_bypass_existing_cache() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, 77)]);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second query (no hint): should hit the shallow cache.
@@ -2166,9 +2167,9 @@ async fn skip_cache_hint_bypasses_shallow_cache() {
         .await
         .unwrap();
     assert_eq!(rows, vec![(1, 100)]);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "First query should go to upstream (cache miss)"
     );
 
@@ -2264,9 +2265,9 @@ async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
         .unwrap()
         .unwrap();
     assert_eq!(row, (1, 100));
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "First prepared exec should be a cache miss (upstream)"
     );
 
@@ -2376,9 +2377,9 @@ async fn pg_hint_creates_shallow_cache() {
         .expect("first hinted query");
     assert_eq!(pg_first_col_i32(&rows, 0), 1);
     assert_eq!(pg_first_col_i32(&rows, 1), 100);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second query (same, with hint): should hit the shallow cache.
@@ -2531,9 +2532,9 @@ async fn pg_hint_prepared_statement_creates_cache() {
         .expect("first exec");
     assert_eq!(row.get::<_, i32>(0), 1);
     assert_eq!(row.get::<_, i32>(1), 10);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second execute: same prepared statement should hit the shallow cache.
@@ -2608,9 +2609,9 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache() {
     rs.simple_query("SELECT id, val FROM t WHERE id = 1")
         .await
         .expect("populate cache");
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
     rs.simple_query("SELECT id, val FROM t WHERE id = 1")
         .await
@@ -2697,9 +2698,9 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache_prepared() {
     rs.query_one(&plain_stmt, &[&1i32])
         .await
         .expect("first exec");
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
     rs.query_one(&plain_stmt, &[&1i32])
         .await
@@ -2788,7 +2789,7 @@ async fn coalesce_upstream_query_failure_midflight() {
     readyset_b.query_drop(query).await.unwrap();
     let elapsed = start.elapsed();
     let destination = last_query_info(&mut readyset_b).await.destination;
-    assert_eq!(destination, QueryDestination::Upstream);
+    assert_matches!(destination, QueryDestination::ReadysetThenUpstream(_));
 
     // Check if the second miss waited the COALESCE window or not (REA-6673).
     assert!(
@@ -2832,9 +2833,9 @@ async fn refresh_resumes_after_upstream_failure() {
     readyset.query_drop(create_cache).await.unwrap();
     let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
     assert_eq!(v, 1);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut readyset).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
     sleep(Duration::from_secs(2)).await;
 

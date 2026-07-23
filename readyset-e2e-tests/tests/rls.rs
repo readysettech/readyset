@@ -421,9 +421,9 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
         .await
         .expect("bob first read");
     assert_eq!(owner_ids(&rows), vec!["bob"], "upstream RLS scopes to bob");
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second read on the same context: served from the shallow cache.
@@ -452,9 +452,9 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
         vec!["alice", "alice"],
         "alice sees her own rows, not bob's cached row",
     );
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
         "a new security context is a distinct partition (cache miss)",
     );
 
@@ -529,9 +529,9 @@ async fn pg_rls_shallow_cache_extended_protocol_set_config() {
         .await
         .expect("bob first read");
     assert_eq!(owner_ids_ext(&rows), vec!["bob"]);
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Second read on the same context: served from the shallow cache.
@@ -562,9 +562,9 @@ async fn pg_rls_shallow_cache_extended_protocol_set_config() {
         vec!["alice", "alice"],
         "rebinding the claim must isolate alice from bob's cached partition",
     );
-    assert_eq!(
+    assert_matches!(
         psql_helpers::last_query_info(&rs).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     // Repeat as alice: served from alice's partition (cached retrieval).
@@ -630,7 +630,7 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         vec!["bob"],
         "bob sees his own row by id",
     );
-    assert_dest(&rs, QueryDestination::Upstream, "bob id=3 fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob id=3 fills").await;
     assert_eq!(read_todo_by_id(&rs, proto, 3).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob id=3 hits").await;
 
@@ -642,7 +642,7 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         empty,
         "bob cannot see alice's row by id",
     );
-    assert_dest(&rs, QueryDestination::Upstream, "bob id=1 fills empty").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob id=1 fills empty").await;
 
     // The same key under alice's context returns alice's row from alice's
     // partition, not bob's cached empty result -- and repeats hit her partition.
@@ -652,7 +652,7 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         vec!["alice"],
         "alice sees her own row by id, not bob's cached empty result",
     );
-    assert_dest(&rs, QueryDestination::Upstream, "alice id=1 fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "alice id=1 fills").await;
     assert_eq!(read_todo_by_id(&rs, proto, 1).await, vec!["alice"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "alice id=1 hits").await;
 
@@ -693,7 +693,7 @@ async fn run_bypass_role(proto: Protocol) {
 
     let all = vec!["alice", "alice", "bob"];
     assert_eq!(read_todos(&rs, proto).await, all, "bypass role sees all rows");
-    assert_dest(&rs, QueryDestination::Upstream, "bypass fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bypass fills").await;
     assert_eq!(read_todos(&rs, proto).await, all);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bypass hits").await;
 
@@ -733,7 +733,7 @@ async fn run_anon_no_claims(proto: Protocol) {
     rs.simple_query("SET ROLE anon").await.expect("set anon");
     let empty: Vec<String> = vec![];
     assert_eq!(read_todos(&rs, proto).await, empty, "anon sees no rows");
-    assert_dest(&rs, QueryDestination::Upstream, "anon fills empty").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "anon fills empty").await;
 
     // An authenticated tenant is a distinct partition and sees its own rows,
     // never served anon's (or anyone else's) result.
@@ -746,7 +746,7 @@ async fn run_anon_no_claims(proto: Protocol) {
         vec!["bob"],
         "authenticated bob is isolated from anon",
     );
-    assert_dest(&rs, QueryDestination::Upstream, "bob fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob hits").await;
 
@@ -793,7 +793,7 @@ async fn pg_rls_shallow_cache_set_config_simple() {
         .expect("set_config (simple)");
 
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::Upstream, "set_config simple fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "set_config simple fills").await;
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "set_config simple hits").await;
 
@@ -826,7 +826,7 @@ async fn pg_rls_shallow_cache_set_namespaced_extended() {
         .expect("SET namespaced (extended)");
 
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::Upstream, "extended SET fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "extended SET fills").await;
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "extended SET hits").await;
 
@@ -855,7 +855,7 @@ async fn run_reset_all(proto: Protocol) {
         .expect("create cache");
     set_sub_claim(&rs, proto, "bob").await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"], "bob scoped");
-    assert_dest(&rs, QueryDestination::Upstream, "bob fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
 
     // RESET ALL keeps the role (authenticated) and clears the claim to empty, so
     // the policy yields no rows -- a re-based, claim-less partition.
@@ -868,7 +868,7 @@ async fn run_reset_all(proto: Protocol) {
     );
     assert_dest(
         &rs,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(None),
         "re-based partition fills after RESET ALL",
     )
     .await;
@@ -1008,7 +1008,7 @@ async fn run_reset_claim(proto: Protocol) {
         .expect("create cache");
     set_sub_claim(&rs, proto, "bob").await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"], "bob scoped");
-    assert_dest(&rs, QueryDestination::Upstream, "bob fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
 
     // Clear only the claim; role stays authenticated -> NULL claim -> no rows.
     run_stmt(&rs, proto, "RESET request.jwt.claims").await;
@@ -1018,7 +1018,7 @@ async fn run_reset_claim(proto: Protocol) {
         empty,
         "cleared claim sees no rows, not bob's",
     );
-    assert_dest(&rs, QueryDestination::Upstream, "unset partition fills").await;
+    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "unset partition fills").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1358,7 +1358,11 @@ async fn run_golden_production_pattern(proto: Protocol) {
         // First request fills the tenant's partition.
         let (rows, dest) = request(&rs, proto, sub).await;
         assert_eq!(rows, expected, "first request scopes to {sub}");
-        assert_eq!(dest, QueryDestination::Upstream, "first request fills from upstream");
+        assert_matches!(
+            dest,
+            QueryDestination::ReadysetThenUpstream(_),
+            "first request fills from upstream"
+        );
 
         // Second identical request must be served from the shallow cache.
         let (rows, dest) = request(&rs, proto, sub).await;

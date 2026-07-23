@@ -215,15 +215,15 @@ async fn mysql_shallow_text_protocol_matches_upstream_bytes() {
         // The first execution of each key misses and proxies to upstream, filling the cache.
         send_text(&mut rs, &q1).await;
         let fallback1 = read_rs_response(&mut rs).await;
-        assert_eq!(
+        assert_matches!(
             last_query_info(&mut rs).await.destination,
-            QueryDestination::Upstream
+            QueryDestination::ReadysetThenUpstream(_)
         );
         send_text(&mut rs, &q2).await;
         let fallback2 = read_rs_response(&mut rs).await;
-        assert_eq!(
+        assert_matches!(
             last_query_info(&mut rs).await.destination,
-            QueryDestination::Upstream
+            QueryDestination::ReadysetThenUpstream(_)
         );
 
         assert_eq!(fallback1, upstream1, "[{label}] key=1 fallback vs upstream");
@@ -280,15 +280,15 @@ async fn mysql_shallow_binary_protocol_matches_upstream_bytes() {
 
         send_binary(&mut rs, &query, 1).await;
         let fallback1 = read_rs_response(&mut rs).await;
-        assert_eq!(
+        assert_matches!(
             last_query_info(&mut rs).await.destination,
-            QueryDestination::Upstream
+            QueryDestination::ReadysetThenUpstream(_)
         );
         send_binary(&mut rs, &query, 2).await;
         let fallback2 = read_rs_response(&mut rs).await;
-        assert_eq!(
+        assert_matches!(
             last_query_info(&mut rs).await.destination,
-            QueryDestination::Upstream
+            QueryDestination::ReadysetThenUpstream(_)
         );
 
         assert_eq!(fallback1, upstream1, "[{label}] key=1 fallback vs upstream");
@@ -370,15 +370,15 @@ async fn mysql_shallow_aggregate_matches_upstream_bytes() {
 
     send_binary(&mut rs, query, 1).await;
     let fallback1 = read_rs_response(&mut rs).await;
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut rs).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
     send_binary(&mut rs, query, 2).await;
     let fallback2 = read_rs_response(&mut rs).await;
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut rs).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(_)
     );
 
     assert_eq!(fallback1, upstream1, "group 1 fallback vs upstream");

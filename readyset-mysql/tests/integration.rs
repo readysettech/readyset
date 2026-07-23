@@ -2011,10 +2011,10 @@ async fn select_falls_through_on_zero_upquery_timeout() {
 
     let res: Result<Vec<mysql_async::Row>, _> =
         conn.exec("SELECT * FROM test WHERE x = 4", ()).await;
-    let noria_error = last_query_info(&mut conn).await.noria_error;
+    let reason = last_query_info(&mut conn).await.reason;
     assert!(
-        noria_error.contains(&ReadySetError::UpqueryTimeout.to_string()),
-        "expected noria_error to mention upquery timeout, got: {noria_error}"
+        reason.contains(&ReadySetError::UpqueryTimeout.to_string()),
+        "expected reason to mention upquery timeout, got: {reason}"
     );
     res.unwrap_err();
 
@@ -3662,7 +3662,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // should hit
     let _: Vec<(i32, i32)> = conn
@@ -3678,7 +3678,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // should hit
     let _: Vec<(i32, i32)> = conn
@@ -3727,7 +3727,7 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 
     let _: Vec<i32> = conn.exec("SELECT a FROM shallow", ()).await.unwrap();
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     let _: Vec<i32> = conn.exec("SELECT a FROM shallow", ()).await.unwrap();
     let info = last_query_info(&mut conn).await;
@@ -3787,7 +3787,7 @@ async fn shallow_cache_equality_and_in_clause() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // Second identical query should hit
     let mut results: Vec<(i32, i32, i32)> = conn
@@ -3820,7 +3820,7 @@ async fn shallow_cache_equality_and_in_clause() {
     results.sort();
     assert_eq!(results, vec![(1, 20, 200), (1, 30, 300)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     shutdown_tx.shutdown().await;
 }
@@ -3877,7 +3877,7 @@ async fn shallow_cache_in_clause_prepared() {
     results.sort();
     assert_eq!(results, vec![(1, 10, 100), (1, 20, 200)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // Second identical query should hit
     let mut results: Vec<(i32, i32, i32)> = conn
@@ -3918,7 +3918,7 @@ async fn shallow_cache_in_clause_prepared() {
     results.sort();
     assert_eq!(results, vec![(1, 20, 200), (1, 30, 300)]);
     let info = last_query_info(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     shutdown_tx.shutdown().await;
 }

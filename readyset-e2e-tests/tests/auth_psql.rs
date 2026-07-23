@@ -77,9 +77,9 @@ async fn user_default_schema_is_used() {
         .unwrap()
         .get(0);
     assert_eq!(name, "alice");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&alice).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     let name: String = alice
@@ -107,9 +107,9 @@ async fn user_default_schema_is_used() {
         .unwrap()
         .get(0);
     assert_eq!(name, "bob");
-    assert_eq!(
+    assert_matches!(
         last_query_info(&bob).await.destination,
-        QueryDestination::Upstream,
+        QueryDestination::ReadysetThenUpstream(_),
     );
 
     let name: String = bob

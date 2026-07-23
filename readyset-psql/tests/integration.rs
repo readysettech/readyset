@@ -2489,7 +2489,7 @@ async fn shallow_cache_protocol_crossing() {
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // should hit
     conn.simple_query("SELECT id, value FROM shallow WHERE id = 1")
@@ -2505,7 +2505,7 @@ async fn shallow_cache_protocol_crossing() {
         .unwrap();
     conn.execute(&stmt, &[&1]).await.unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // should hit
     conn.execute(&stmt, &[&1]).await.unwrap();
@@ -2555,7 +2555,7 @@ async fn shallow_cache_prepared_statement_without_parameters() {
 
     conn.execute::<_, &[&i32]>(&stmt, &[]).await.unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     conn.execute::<_, &[&i32]>(&stmt, &[]).await.unwrap();
     let info = explain_last_statement(&mut conn).await;
@@ -2613,7 +2613,7 @@ async fn shallow_cache_equality_and_in_clause() {
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     // Second identical query should hit
     conn.simple_query("SELECT a, b, value FROM shallow_in WHERE a = 1 AND b IN (10, 20)")
@@ -2634,7 +2634,7 @@ async fn shallow_cache_equality_and_in_clause() {
         .await
         .unwrap();
     let info = explain_last_statement(&mut conn).await;
-    assert_matches!(info.destination, QueryDestination::Upstream);
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_));
 
     shutdown_tx.shutdown().await;
 }

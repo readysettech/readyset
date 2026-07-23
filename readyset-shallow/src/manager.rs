@@ -625,6 +625,11 @@ where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
+    /// The display name of the cache this guard will insert into.
+    pub fn cache_display_name(&self) -> Option<String> {
+        self.cache.display_name()
+    }
+
     /// Add a row to the result set.
     pub fn push(&mut self, row: V) {
         self.results.as_mut().unwrap().push(row);

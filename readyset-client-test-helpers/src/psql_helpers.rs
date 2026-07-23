@@ -137,10 +137,10 @@ pub async fn last_query_info(conn: &Client) -> QueryInfo {
     };
 
     let destination = QueryDestination::try_from(row.get("Query_destination").unwrap()).unwrap();
-    let noria_error = row.get("Readyset_error").unwrap().to_owned();
+    let reason = row.get("Readyset_reason").unwrap().to_owned();
 
     QueryInfo {
         destination,
-        noria_error,
+        reason,
     }
 }

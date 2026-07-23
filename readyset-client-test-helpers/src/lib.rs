@@ -934,6 +934,6 @@ pub async fn explain_last_statement(conn: &mut DatabaseConnection) -> QueryInfo 
 
     QueryInfo {
         destination,
-        noria_error: row.get(1).unwrap(),
+        reason: row.get(1).unwrap(),
     }
 }

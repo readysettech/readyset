@@ -174,6 +174,10 @@ const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned thro
 /// Placeholder username for connections that have not yet authenticated
 const UNAUTHENTICATED_USER: &str = "unauthenticated";
 
+/// `EXPLAIN LAST STATEMENT` reason for a query upstream served while filling a shallow
+/// cache, distinguishing it from the fallbacks that share its destination.
+const SHALLOW_CACHE_MISS: &str = "shallow cache miss";
+
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 pub type StatementId = u32;
 
@@ -1460,13 +1464,13 @@ where
 {
     /// Generates response to the `EXPLAIN LAST STATEMENT` query
     fn explain_last_statement(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let (destination, error) = self
+        let (destination, reason) = self
             .last_query
             .as_ref()
             .map(|info| {
                 (
                     info.destination.to_string(),
-                    match &info.noria_error {
+                    match &info.reason {
                         s if s.is_empty() => "ok".to_string(),
                         s => s.clone(),
                     },
@@ -1476,7 +1480,7 @@ where
 
         Ok(noria_connector::QueryResult::Meta(vec![
             ("Query_destination", destination).into(),
-            ("Readyset_error", error).into(),
+            ("Readyset_reason", reason).into(),
         ]))
     }
 
@@ -1826,7 +1830,24 @@ impl BackendSettings {
 #[derive(Debug, Default)]
 pub struct QueryInfo {
     pub destination: QueryDestination,
-    pub noria_error: String,
+    pub reason: String,
+}
+
+impl QueryInfo {
+    /// Fold a finished execution into the last-query record, if it reached a destination
+    /// at all. A ReadySet error outranks the event's own reason: a query that errored has
+    /// already said why it landed where it did.
+    fn from_event(event: &QueryExecutionEvent) -> Option<Self> {
+        Some(QueryInfo {
+            destination: event.destination.clone()?,
+            reason: event
+                .noria_error
+                .as_ref()
+                .map(|e| e.to_string())
+                .or_else(|| event.reason.clone())
+                .unwrap_or_default(),
+        })
+    }
 }
 
 impl FromRow for QueryInfo {
@@ -1841,8 +1862,8 @@ impl FromRow for QueryInfo {
                 if c.name_str() == "Query_destination" {
                     res.destination =
                         QueryDestination::try_from(dest).map_err(|_| FromRowError(row.clone()))?;
-                } else if c.name_str() == "Readyset_error" {
-                    res.noria_error = std::str::from_utf8(d)
+                } else if c.name_str() == "Readyset_reason" {
+                    res.reason = std::str::from_utf8(d)
                         .map_err(|_| FromRowError(row.clone()))?
                         .to_string();
                 } else {
@@ -2293,10 +2314,17 @@ where
         let _t = event.start_upstream_timer();
         let result = upstream.query(query).await;
         drop(_t);
-        event.destination = Some(match &result {
-            Ok(qr) => qr.destination(),
-            Err(_) => QueryDestination::Upstream,
-        });
+        if let Some(cache) = &cache {
+            event.reason = Some(SHALLOW_CACHE_MISS.to_string());
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(
+                cache.cache_display_name(),
+            ));
+        } else {
+            event.destination = Some(match &result {
+                Ok(qr) => qr.destination(),
+                Err(_) => QueryDestination::Upstream,
+            });
+        }
         result.map(|r| QueryResult::Upstream(r, cache, None))
     }
 
@@ -2373,7 +2401,7 @@ where
 
         self.state.last_query = destination.map(|d| QueryInfo {
             destination: d,
-            noria_error: String::new(),
+            reason: String::new(),
         });
 
         // Update noria migration state for query
@@ -2464,7 +2492,7 @@ where
                 .map(PrepareResultInner::Upstream);
             self.state.last_query = Some(QueryInfo {
                 destination: QueryDestination::Upstream,
-                noria_error: String::new(),
+                reason: String::new(),
             });
             res
         } else {
@@ -2484,7 +2512,7 @@ where
             };
             self.state.last_query = Some(QueryInfo {
                 destination: QueryDestination::Readyset(None),
-                noria_error: String::new(),
+                reason: String::new(),
             });
 
             event.readyset_event = Some(ReadysetExecutionEvent::Other {
@@ -2797,7 +2825,7 @@ where
 
                 self.state.last_query = Some(QueryInfo {
                     destination: QueryDestination::Upstream,
-                    noria_error: String::new(),
+                    reason: String::new(),
                 });
 
                 res
@@ -3072,7 +3100,12 @@ where
         cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         if is_fallback {
-            event.destination = Some(QueryDestination::ReadysetThenUpstream);
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(None));
+        } else if let Some(cache) = &cache {
+            event.reason = Some(SHALLOW_CACHE_MISS.to_string());
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(
+                cache.cache_display_name(),
+            ));
         } else {
             event.destination = Some(QueryDestination::Upstream);
         }
@@ -3749,14 +3782,7 @@ where
             }
         };
 
-        self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
-            destination: d.clone(),
-            noria_error: event
-                .noria_error
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_default(),
-        });
+        self.state.last_query = QueryInfo::from_event(&event);
         log_query(
             self.state.query_log_sender.as_ref(),
             event,
@@ -6358,7 +6384,7 @@ where
                         Err(noria_err.into())
                     }
                     (false, Some(fallback)) => {
-                        event.destination = Some(QueryDestination::ReadysetThenUpstream);
+                        event.destination = Some(QueryDestination::ReadysetThenUpstream(None));
                         let _t = event.start_upstream_timer();
                         fallback
                             .query(original_query)
@@ -7248,14 +7274,7 @@ where
 
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
-        self.state.last_query = event.destination.as_ref().map(|d| QueryInfo {
-            destination: d.clone(),
-            noria_error: event
-                .noria_error
-                .as_ref()
-                .map(|e| e.to_string())
-                .unwrap_or_default(),
-        });
+        self.state.last_query = QueryInfo::from_event(&event);
 
         log_query(
             self.state.query_log_sender.as_ref(),

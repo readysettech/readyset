@@ -62,6 +62,11 @@ pub struct QueryExecutionEvent {
     /// Error returned by noria, if any.
     pub noria_error: Option<ReadySetError>,
 
+    /// Why the query landed on the destination it did, when the destination alone does
+    /// not say. A `ReadysetThenUpstream` shallow-cache miss sets this; an error path
+    /// leaves it unset, since `noria_error` is the better answer.
+    pub reason: Option<String>,
+
     /// Where the query ended up executing
     pub destination: Option<QueryDestination>,
 }
@@ -101,7 +106,11 @@ impl ReadysetExecutionEvent {
 pub enum QueryDestination {
     Readyset(Option<String>),
     ReadysetShallow(Option<String>),
-    ReadysetThenUpstream,
+    /// Readyset had a go at the query and upstream finished it: a shallow-cache miss
+    /// that upstream fills, or a cache Readyset started serving and fell back on. The
+    /// name, where there is one, is the cache involved; `QueryExecutionEvent::reason`
+    /// says which of the two happened.
+    ReadysetThenUpstream(Option<String>),
     Upstream,
     Both,
 }
@@ -129,10 +138,19 @@ impl TryFrom<&str> for QueryDestination {
             return Ok(QueryDestination::ReadysetShallow(Some(name.to_string())));
         };
 
+        if let Some(name) = value
+            .strip_prefix("readyset_then_upstream(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return Ok(QueryDestination::ReadysetThenUpstream(Some(
+                name.to_string(),
+            )));
+        };
+
         match value {
             "readyset" => Ok(QueryDestination::Readyset(None)),
             "readyset_shallow" => Ok(QueryDestination::ReadysetShallow(None)),
-            "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream),
+            "readyset_then_upstream" => Ok(QueryDestination::ReadysetThenUpstream(None)),
             "upstream" => Ok(QueryDestination::Upstream),
             "both" => Ok(QueryDestination::Both),
             _ => internal!("Invalid query destination: {value}"),
@@ -156,7 +174,10 @@ impl fmt::Display for QueryDestination {
                 write!(f, "readyset_shallow({})", name)
             }
             QueryDestination::ReadysetShallow(None) => write!(f, "readyset_shallow"),
-            QueryDestination::ReadysetThenUpstream => write!(f, "readyset_then_upstream"),
+            QueryDestination::ReadysetThenUpstream(Some(name)) => {
+                write!(f, "readyset_then_upstream({})", name)
+            }
+            QueryDestination::ReadysetThenUpstream(None) => write!(f, "readyset_then_upstream"),
             QueryDestination::Upstream => write!(f, "upstream"),
             QueryDestination::Both => write!(f, "both"),
         }
@@ -232,6 +253,7 @@ impl QueryExecutionEvent {
             upstream_duration: None,
             readyset_event: None,
             noria_error: None,
+            reason: None,
             destination: None,
         }
     }
@@ -270,5 +292,34 @@ impl Drop for QueryExecutionTimerHandle<'_> {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
         *self.duration = Some(self.duration.map_or(elapsed, |d| d + elapsed));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `EXPLAIN LAST STATEMENT` prints a destination and its readers parse it back, so a
+    /// variant whose name payload only one side knows about silently reads as a different
+    /// destination.
+    #[test]
+    fn query_destination_round_trips_through_display() {
+        for dest in [
+            QueryDestination::Readyset(None),
+            QueryDestination::Readyset(Some("q_abc".into())),
+            QueryDestination::ReadysetShallow(None),
+            QueryDestination::ReadysetShallow(Some("shallow_cache".into())),
+            QueryDestination::ReadysetThenUpstream(None),
+            QueryDestination::ReadysetThenUpstream(Some("shallow_cache".into())),
+            QueryDestination::Upstream,
+            QueryDestination::Both,
+        ] {
+            let printed = dest.to_string();
+            assert_eq!(
+                QueryDestination::try_from(printed.as_str()).unwrap(),
+                dest,
+                "{printed} did not parse back to {dest:?}"
+            );
+        }
     }
 }
