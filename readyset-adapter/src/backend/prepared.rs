@@ -36,7 +36,7 @@ use super::noria_connector::{self, ExecuteSelectContext, NoriaConnector, Prepare
 use super::routing::{ProxyState, SelectRouter, record_skip_cache};
 use super::{
     Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
-    acl_allows, convert_or_parse_query, log_query, parse_query, parse_shallow_query,
+    acl_decline_reason, convert_or_parse_query, log_query, parse_query, parse_shallow_query,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::ManualCacheEntry;
@@ -125,6 +125,10 @@ where
     /// Stored at prepare time so the execute path can emit the skip-cache
     /// metric with `reason => "hint"`.
     is_skip_cache: bool,
+    /// Why planning declined a cache Readyset holds for this statement (the
+    /// serve seams stage it while the prepare runs). Executes of the
+    /// resulting upstream-only plan surface it in EXPLAIN LAST STATEMENT.
+    prepare_proxy_reason: Option<&'static str>,
 }
 
 impl<DB> PreparedStatement<DB>
@@ -384,9 +388,10 @@ where
             (false, false) => None,
         };
 
+        let reason = self.state.take_proxy_reason();
         self.state.last_query = destination.map(|d| QueryInfo {
             destination: d,
-            reason: String::new(),
+            reason,
         });
 
         // Update noria migration state for query
@@ -477,7 +482,7 @@ where
                 .map(PrepareResultInner::Upstream);
             self.state.last_query = Some(QueryInfo {
                 destination: QueryDestination::Upstream,
-                reason: String::new(),
+                reason: self.state.take_proxy_reason(),
             });
             res
         } else {
@@ -497,7 +502,7 @@ where
             };
             self.state.last_query = Some(QueryInfo {
                 destination: QueryDestination::Readyset(None),
-                reason: String::new(),
+                reason: self.state.take_proxy_reason(),
             });
 
             event.readyset_event = Some(ReadysetExecutionEvent::Other {
@@ -818,7 +823,7 @@ where
 
                 self.state.last_query = Some(QueryInfo {
                     destination: QueryDestination::Upstream,
-                    reason: String::new(),
+                    reason: self.state.take_proxy_reason(),
                 });
 
                 res
@@ -843,6 +848,7 @@ where
         prep: PrepareResultInner<DB>,
         statement_id: StatementId,
         is_skip_cache: bool,
+        prepare_proxy_reason: Option<&'static str>,
     ) -> PreparedStatement<DB> {
         match prepare_meta {
             PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => PreparedStatement {
@@ -856,6 +862,7 @@ where
                 trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
+                prepare_proxy_reason,
             },
             PrepareMeta::Set { stmt } => PreparedStatement {
                 query_id: None,
@@ -868,6 +875,7 @@ where
                 trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
+                prepare_proxy_reason,
             },
             PrepareMeta::Discard { stmt } => PreparedStatement {
                 query_id: None,
@@ -880,6 +888,7 @@ where
                 trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
+                prepare_proxy_reason,
             },
             PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
@@ -899,6 +908,7 @@ where
                 trx_cache_policy,
                 params: None,
                 is_skip_cache,
+                prepare_proxy_reason,
             },
             PrepareMeta::ShallowSelect(PrepareShallowSelectMeta {
                 query_id,
@@ -916,6 +926,7 @@ where
                 trx_cache_policy,
                 params: Some(params),
                 is_skip_cache,
+                prepare_proxy_reason,
             },
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
@@ -931,6 +942,7 @@ where
                 trx_cache_policy: TrxCachePolicy::Never,
                 params: None,
                 is_skip_cache,
+                prepare_proxy_reason,
             },
         }
     }
@@ -953,6 +965,10 @@ where
         }
 
         let (meta, is_skip_cache) = self.plan_prepare(query, query_shallow, event).await?;
+        // Capture the serve seams' staged decline before do_prepare's own
+        // QueryInfo consumes it, so executes of the resulting plan can still
+        // surface it.
+        let prepare_proxy_reason = self.state.pending_proxy_reason;
         let prep = self
             .do_prepare(&meta, query, data, statement_type, event)
             .await?;
@@ -973,7 +989,13 @@ where
             .ok()
             .as_ref()
             .and_then(session_mutation::recognize);
-        let prepared_statement = self.create_prepared_statement(meta, prep, next_id, is_skip_cache);
+        let prepared_statement = self.create_prepared_statement(
+            meta,
+            prep,
+            next_id,
+            is_skip_cache,
+            prepare_proxy_reason,
+        );
         let statement_id = self
             .state
             .prepared
@@ -1203,6 +1225,7 @@ where
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
         self.state.last_query = None;
+        self.state.pending_proxy_reason = None;
         let schema_search_path = self.connectors.noria.schema_search_path().to_vec();
         // Taken before the statement is borrowed, since that borrow spans the dispatch below and
         // the template is only applied afterwards. `None` for everything but the recognised
@@ -1326,17 +1349,22 @@ where
             let policy = cached_statement.trx_cache_policy;
             // Per-execute ACL gate: a statement prepared before a revocation sees the new
             // verdict here. Checked ahead of the ALWAYS pin, which it overrides.
-            let acl_denied = matches!(&cached_statement.prep.inner, PrepareResultInner::Shallow(_))
-                && cached_statement.query_id.is_some_and(|query_id| {
-                    !acl_allows(
-                        &self.state.acl,
-                        self.connectors.session.as_ref(),
-                        self.state.client_identity.as_ref(),
-                        self.settings.require_authentication,
-                        query_id,
-                    )
-                });
-            if acl_denied {
+            let acl_reason =
+                if matches!(&cached_statement.prep.inner, PrepareResultInner::Shallow(_)) {
+                    cached_statement.query_id.and_then(|query_id| {
+                        acl_decline_reason(
+                            &self.state.acl,
+                            self.connectors.session.as_ref(),
+                            self.state.client_identity.as_ref(),
+                            self.settings.require_authentication,
+                            query_id,
+                        )
+                    })
+                } else {
+                    None
+                };
+            if let Some(reason) = acl_reason {
+                self.state.pending_proxy_reason = Some(reason);
                 true
             } else if matches!(policy, TrxCachePolicy::Always) {
                 false
@@ -1360,7 +1388,7 @@ where
                 // A bypassed cache is only worth reporting when the policy is why we fell back.
                 let record_skip =
                     has_cache && !is_recovering && !cached_statement.is_unsupported_execute();
-                let should_skip = !SelectRouter::may_serve_from_cache(
+                let skip_reason = SelectRouter::cache_skip_reason(
                     self.state.proxy_state,
                     &mut self.state.write_tracker,
                     policy,
@@ -1374,8 +1402,13 @@ where
                             .unwrap_or_default()
                     },
                 );
+                // Only the policy's own bypass is worth reporting: recovery and unsupported
+                // executes leave the cache for a different reason, tagged elsewhere.
+                if let (true, Some(reason)) = (record_skip, skip_reason) {
+                    self.state.pending_proxy_reason = Some(reason);
+                }
 
-                cached_statement.is_unsupported_execute() || is_recovering || should_skip
+                cached_statement.is_unsupported_execute() || is_recovering || skip_reason.is_some()
             }
         };
 
@@ -1562,7 +1595,12 @@ where
             }
         };
 
-        self.state.last_query = QueryInfo::from_event(&event);
+        let staged = self
+            .state
+            .pending_proxy_reason
+            .take()
+            .or(cached_statement.prepare_proxy_reason);
+        self.state.last_query = QueryInfo::from_event(&event).map(|i| i.or_reason(staged));
         log_query(
             self.state.query_log_sender.as_ref(),
             event,

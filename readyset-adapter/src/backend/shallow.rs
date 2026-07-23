@@ -31,7 +31,7 @@ use tracing::{debug, warn};
 use super::routing::{SelectRouter, record_skip_cache};
 use super::{
     AutoCreateTrigger, Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode,
-    QueryResult, acl_allows, acl_creator, build_hint_ddl_string,
+    QueryResult, acl_creator, acl_decline_reason, build_hint_ddl_string,
 };
 use crate::rls_coordinator::RlsCoordinator;
 use crate::session_context::SessionContext;
@@ -73,6 +73,7 @@ where
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
             if migration == MigrationState::Successful(CacheType::Shallow) {
                 record_skip_cache(query_id.to_string(), "shallow", "hint");
+                state.pending_proxy_reason = Some("hint");
             }
             return None;
         }
@@ -96,7 +97,7 @@ where
             .try_query_status(shallow)
             .map(|status| status.trx_cache_policy)
             .unwrap_or_default();
-        if !SelectRouter::may_serve_from_cache(
+        if let Some(reason) = SelectRouter::cache_skip_reason(
             state.proxy_state,
             &mut state.write_tracker,
             trx_cache_policy,
@@ -104,6 +105,7 @@ where
             true,
             || query_id.to_string(),
         ) {
+            state.pending_proxy_reason = Some(reason);
             return None;
         }
         Some((query_id, trx_cache_policy))
@@ -121,16 +123,22 @@ where
     pub(super) fn acl_declines_serve(
         connectors: &BackendConnectors<DB>,
         settings: &BackendSettings,
-        state: &BackendState<DB>,
+        state: &mut BackendState<DB>,
         query_id: QueryId,
     ) -> bool {
-        !acl_allows(
+        match acl_decline_reason(
             &state.acl,
             connectors.session.as_ref(),
             state.client_identity.as_ref(),
             settings.require_authentication,
             query_id,
-        )
+        ) {
+            Some(reason) => {
+                state.pending_proxy_reason = Some(reason);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Attempt to auto-create a shallow cache via [`create_shallow_cache_core`]

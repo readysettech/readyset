@@ -236,26 +236,27 @@ fn acl_creator(
 
 /// The cache-ACL gate (deny-means-proxy): whether this session may be served from the
 /// shallow cache identified by `query_id`. Anything but an `Allowed` verdict for the
-/// session's effective identity declines, and the query falls through to upstream, which
+/// session's effective identity declines -- returning the decline reason for
+/// `EXPLAIN LAST STATEMENT` -- and the query falls through to upstream, which
 /// re-authorizes it. Runs before RLS scoping and independent of `TrxCachePolicy`: the
 /// verdict overrides even an `ALWAYS` pin, since a pin to the cache cannot pin a user who
 /// lost access. Inert when authentication is off (no user identities to authorize).
-fn acl_allows(
+fn acl_decline_reason(
     acl: &AclHandle,
     session: Option<&Arc<SessionContext>>,
     client_identity: Option<&SqlIdentifier>,
     require_authentication: bool,
     query_id: QueryId,
-) -> bool {
+) -> Option<&'static str> {
     if !require_authentication {
-        return true;
+        return None;
     }
     let Some(identity) = acl_identity(session, client_identity) else {
         record_acl_decline(query_id, "untrusted");
-        return false;
+        return Some("cache_acl_untrusted");
     };
     match acl.matrix().verdict_for(&identity, query_id) {
-        Verdict::Allowed => true,
+        Verdict::Allowed => None,
         verdict => {
             if verdict == Verdict::Unknown {
                 // Ask the worker to resolve the identity (a role assumed via SET ROLE has
@@ -265,7 +266,10 @@ fn acl_allows(
                 acl.send_demand(AclMessage::ResolveIdentity { identity, via });
             }
             record_acl_decline(query_id, verdict.as_str());
-            false
+            Some(match verdict {
+                Verdict::Denied => "cache_acl_denied",
+                _ => "cache_acl_unknown",
+            })
         }
     }
 }
@@ -528,6 +532,7 @@ impl BackendBuilder {
                     self.opportunistic_ryw_ms.map(Duration::from_millis),
                 ),
                 last_query: None,
+                pending_proxy_reason: None,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared: Default::default(),
                 query_status_cache,
@@ -970,6 +975,10 @@ where
     /// Information regarding the last query sent over this connection. If None, then no queries
     /// have been handled using this connection (Backend) yet.
     last_query: Option<QueryInfo>,
+    /// Why the in-flight statement was routed off-cache, staged by the
+    /// serve-or-proxy seams and folded into [`Self::last_query`] when the
+    /// statement finishes.
+    pending_proxy_reason: Option<&'static str>,
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: &'static QueryStatusCache,
     /// A cache of all previously parsed queries
@@ -1048,6 +1057,15 @@ impl<DB> BackendState<DB>
 where
     DB: UpstreamDatabase,
 {
+    /// Consume the off-cache reason the serve seams staged for the statement just
+    /// finished. Empty when a cache was consulted, or when Readyset holds none.
+    fn take_proxy_reason(&mut self) -> String {
+        self.pending_proxy_reason
+            .take()
+            .unwrap_or_default()
+            .to_string()
+    }
+
     /// Generates response to the `EXPLAIN LAST STATEMENT` query
     fn explain_last_statement(&mut self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let (destination, reason) = self
@@ -1406,6 +1424,18 @@ impl QueryInfo {
                 .or_else(|| event.reason.clone())
                 .unwrap_or_default(),
         })
+    }
+
+    /// Supply the seams' staged off-cache reason when the execution recorded none of its
+    /// own, so a statement Readyset declined to serve from a cache it holds still reports
+    /// why it went upstream.
+    fn or_reason(mut self, staged: Option<&'static str>) -> Self {
+        if self.reason.is_empty()
+            && let Some(staged) = staged
+        {
+            self.reason = staged.to_string();
+        }
+        self
     }
 }
 
@@ -2677,7 +2707,7 @@ mod tests {
         let cache = QueryId::from_unparsed_select("select 1");
         let acl = acl_with(None, "alice", cache);
         // No identity at all, verdict Unknown: still allowed, the gate does not apply.
-        assert!(acl_allows(&acl, None, None, false, cache));
+        assert!(acl_decline_reason(&acl, None, None, false, cache).is_none());
     }
 
     #[test]
@@ -2692,7 +2722,7 @@ mod tests {
         ] {
             let acl = acl_with(verdict, "alice", cache);
             assert_eq!(
-                acl_allows(&acl, None, Some(&identity), true, cache),
+                acl_decline_reason(&acl, None, Some(&identity), true, cache).is_none(),
                 expected,
                 "verdict {verdict:?}"
             );
@@ -2704,7 +2734,10 @@ mod tests {
         let cache = QueryId::from_unparsed_select("select 1");
         let acl = acl_with(Some(Verdict::Allowed), "alice", cache);
         // Authenticated mode but no established identity: deny.
-        assert!(!acl_allows(&acl, None, None, true, cache));
+        assert_eq!(
+            acl_decline_reason(&acl, None, None, true, cache),
+            Some("cache_acl_untrusted")
+        );
     }
 
     #[test]
@@ -2712,16 +2745,22 @@ mod tests {
         let cache = QueryId::from_unparsed_select("select 1");
         let acl = acl_with(Some(Verdict::Allowed), "alice", cache);
         let session = SessionContext::new("alice".into());
-        assert!(acl_allows(&acl, Some(&session), None, true, cache));
+        assert!(acl_decline_reason(&acl, Some(&session), None, true, cache).is_none());
 
         // A role switch is judged by the assumed role's (absent) row.
         session.set_effective_role_scoped("limited".into(), false, false);
-        assert!(!acl_allows(&acl, Some(&session), None, true, cache));
+        assert_eq!(
+            acl_decline_reason(&acl, Some(&session), None, true, cache),
+            Some("cache_acl_unknown")
+        );
 
         // An untrusted mirror fails closed even with an Allowed cell.
         let session = SessionContext::new("alice".into());
         session.mark_session_untrusted();
-        assert!(!acl_allows(&acl, Some(&session), None, true, cache));
+        assert_eq!(
+            acl_decline_reason(&acl, Some(&session), None, true, cache),
+            Some("cache_acl_untrusted")
+        );
     }
 
     /// The verdict is the ACL's alone: the gate takes no transaction policy and no proxy
@@ -2731,9 +2770,12 @@ mod tests {
         let cache = QueryId::from_unparsed_select("select 1");
         let identity: SqlIdentifier = "alice".into();
         let denied = acl_with(Some(Verdict::Denied), "alice", cache);
-        assert!(!acl_allows(&denied, None, Some(&identity), true, cache));
+        assert_eq!(
+            acl_decline_reason(&denied, None, Some(&identity), true, cache),
+            Some("cache_acl_denied")
+        );
         let allowed = acl_with(Some(Verdict::Allowed), "alice", cache);
-        assert!(acl_allows(&allowed, None, Some(&identity), true, cache));
+        assert!(acl_decline_reason(&allowed, None, Some(&identity), true, cache).is_none());
     }
 
     #[test]

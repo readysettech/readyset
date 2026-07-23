@@ -420,6 +420,73 @@ async fn acl_prepared_statement_sees_revocation() {
     shutdown_tx.shutdown().await;
 }
 
+/// EXPLAIN LAST STATEMENT surfaces why a statement was routed off-cache.
+/// A user whose probe session cannot open (NOLOGIN) is denied per A7 while
+/// their live connection keeps working, so their reads proxy successfully
+/// and report the ACL as the reason.
+#[test]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn acl_proxy_reason_surfaces_denial() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    let (rs_opts, _handle, shutdown_tx, upstream, roles) = setup(&test_name).await;
+
+    let alice = connect_as(&rs_opts, &test_name, &roles.alice).await;
+    alice
+        .simple_query("CREATE SHALLOW CACHE FROM SELECT val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    let query = "SELECT val FROM t WHERE id = 1";
+    alice.query(query, &[]).await.unwrap();
+
+    let bob = connect_as(&rs_opts, &test_name, &roles.bob).await;
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "bob never converged to Allowed",
+        { is_shallow(&destination(&bob, query).await) }
+    );
+
+    // Block new sessions as bob without touching his grants: his open client
+    // connection keeps working, but the prober cannot open a session, which
+    // denies his row (A7) and routes him through the proxy path only.
+    upstream
+        .simple_query(&format!("ALTER ROLE {} NOLOGIN", roles.bob))
+        .await
+        .unwrap();
+    alice
+        .simple_query("ALTER READYSET FLUSH PRIVILEGES")
+        .await
+        .unwrap();
+
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "bob's off-cache routing never reported the ACL as the reason",
+        {
+            bob.query(query, &[]).await.unwrap();
+            let info = last_query_info(&bob).await;
+            info.destination == QueryDestination::Upstream
+                && info.reason == "cache_acl_denied"
+        }
+    );
+
+    // Alice is served from the cache with no off-cache reason.
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "alice was never served from the cache with no off-cache reason",
+        {
+            alice.query(query, &[]).await.unwrap();
+            let info = last_query_info(&alice).await;
+            is_shallow(&info.destination) && info.reason == "ok"
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// readyset.cache_grants exposes the matrix: stored verdicts with a probe
 /// timestamp, derived unknown pairs with none, and rows disappear when their
 /// user is dropped from the adapter.

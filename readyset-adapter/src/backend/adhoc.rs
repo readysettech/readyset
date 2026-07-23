@@ -803,7 +803,8 @@ where
 
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
-        self.state.last_query = QueryInfo::from_event(&event);
+        let staged = self.state.pending_proxy_reason.take();
+        self.state.last_query = QueryInfo::from_event(&event).map(|i| i.or_reason(staged));
 
         log_query(
             self.state.query_log_sender.as_ref(),
