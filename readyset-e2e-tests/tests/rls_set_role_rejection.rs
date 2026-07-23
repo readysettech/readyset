@@ -18,10 +18,11 @@
 //! asserted.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use readyset_adapter::BackendBuilder;
-use readyset_adapter::backend::UnsupportedSetMode;
+use readyset_adapter::backend::{AllowedUsers, UnsupportedSetMode};
 use readyset_client::CacheMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
@@ -192,7 +193,7 @@ async fn connect_auth_rls(test_name: &str) -> (Client, Client, Handle, ShutdownS
         BackendBuilder::new()
             .require_authentication(true)
             .cache_mode(CacheMode::Shallow)
-            .users(users),
+            .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .recreate_database(false)
     .replicate_db(test_name)
