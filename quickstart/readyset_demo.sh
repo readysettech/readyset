@@ -117,12 +117,20 @@ check_all_dependencies() {
 
 download_demo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the Readyset Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.postgres.yml"
+  if ! curl -fsSL --retry 3 --connect-timeout 30 -o readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.postgres.yml"; then
+    echo -e "${RED}Failed to download the Readyset Docker Compose file.${NOCOLOR}"
+    rm -f readyset.compose.yml
+    exit 1
+  fi
 }
 
 download_byo_compose_file() {
   echo -e "${BLUE}${WHALE}Downloading the Readyset Docker Compose file... ${NOCOLOR}"
-  curl -Ls -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.yml"
+  if ! curl -fsSL --retry 3 --connect-timeout 30 -o /tmp/readyset.compose.yml "https://raw.githubusercontent.com/readysettech/readyset/current/quickstart/compose.yml"; then
+    echo -e "${RED}Failed to download the Readyset Docker Compose file.${NOCOLOR}"
+    rm -f /tmp/readyset.compose.yml
+    exit 1
+  fi
 }
 
 run_docker_compose() {
@@ -189,18 +197,37 @@ import_data() {
   if [[ $import_choice == "y" ]]; then
     if [ ! -f imdb-postgres.sql ]; then
       echo -e "${BLUE}${ELEPHANT}Downloading IMDB sample data to imdb-postgres.sql...${NOCOLOR}"
-      curl -L "https://readyset.io/quickstart/imdb-postgres.sql" -o imdb-postgres.sql
+      if ! curl -fL --retry 3 --connect-timeout 30 "https://readyset.io/quickstart/imdb-postgres.sql" -o imdb-postgres.sql; then
+        echo -e "${RED}Failed to download sample data from https://readyset.io/quickstart/imdb-postgres.sql${NOCOLOR}"
+        rm -f imdb-postgres.sql
+        exit 1
+      fi
     else
       echo "Sample data found."
     fi
 
     echo -e "${BLUE}${ELEPHANT}Importing sample data...${NOCOLOR}"
+    local import_status=0
+    local import_errors
+    import_errors=$(mktemp)
+    # ON_ERROR_STOP makes psql exit non-zero on the first bad statement, so a
+    # truncated or non-SQL file (e.g. an HTML error page) fails loudly here.
     if command -v pv &>/dev/null; then
-      pv -w 80 imdb-postgres.sql | psql $CONNECTION_STRING >/dev/null 2>&1
+      pv -w 80 imdb-postgres.sql | psql -v ON_ERROR_STOP=1 $CONNECTION_STRING >/dev/null 2>"$import_errors" \
+        || import_status=$?
     else
       echo -e "This may take a few minutes. Install \`pv\` if you would like to see a progress bar for this step."
-      psql $CONNECTION_STRING < imdb-postgres.sql >/dev/null 2>&1
+      psql -v ON_ERROR_STOP=1 $CONNECTION_STRING < imdb-postgres.sql >/dev/null 2>"$import_errors" \
+        || import_status=$?
     fi
+
+    if [[ $import_status -ne 0 ]]; then
+      echo -e "${RED}Failed to import sample data. The downloaded file may be incomplete or invalid.${NOCOLOR}"
+      head -n 5 "$import_errors" >&2
+      rm -f "$import_errors"
+      exit 1
+    fi
+    rm -f "$import_errors"
 
     echo -e "${GREEN}${GREEN_CHECK}Sample data imported successfully!${NOCOLOR}"
   fi

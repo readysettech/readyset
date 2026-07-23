@@ -113,12 +113,12 @@ run_script() {
               if {\"$4\" == \"y\"} {
                 for {set i 0} {\$i < $N_ENTERS} {incr i} {
                   expect {
-                    -re \".*Press enter.*\" {
-                        send \"\r\"
-                    }
-                    -re \".*error:,*\" {
+                    -nocase -re \"error:\" {
                       send_user -- \"psql error encountered\n\"
                       exit 2
+                    }
+                    -re \"Press enter\" {
+                        send \"\r\"
                     }
                   }
                   sleep 3
