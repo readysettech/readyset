@@ -60,6 +60,7 @@ members = [
     "readyset-schema",
     "readyset-server",
     "readyset-shallow",
+    "readyset-shallow-bench",
     "readyset-spatial",
     "readyset-sql",
     "readyset-sql-parsing",

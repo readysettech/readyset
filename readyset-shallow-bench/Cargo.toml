@@ -1,0 +1,19 @@
+[package]
+name = "readyset-shallow-bench"
+version = "0.1.0"
+publish = false
+authors = ["Readyset Technology, Inc. <info@readyset.io>"]
+edition = "2024"
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+mysql_async = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+readyset-client-metrics = { path = "../readyset-client-metrics" }
+readyset-client-test-helpers = { path = "../readyset-client-test-helpers" }
+readyset-util = { path = "../readyset-util" }
+
+[lints]
+workspace = true

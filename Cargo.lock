@@ -6944,6 +6944,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "readyset-shallow-bench"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "mysql_async",
+ "rand 0.10.2",
+ "readyset-client-metrics",
+ "readyset-client-test-helpers",
+ "readyset-util",
+ "tokio",
+]
+
+[[package]]
 name = "readyset-spatial"
 version = "0.0.1"
 dependencies = [
