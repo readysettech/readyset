@@ -1,0 +1,67 @@
+# End-to-end coverage for null-rejecting LEFT->INNER promotion of spuriously-outer
+# joins, which clears two LOJ decorrelation barriers: the `unnest_subqueries` hoist
+# barrier (first query) and the LEFT-join ON-subquery wrap's single-operand
+# restriction (second query).
+#
+# `pw` is a subquery correlated to the grand-outer `o`, attached under a LEFT
+# JOIN. The subquery's `WHERE pw.qty > 100` null-rejects `pw.qty`, so the join is
+# only spuriously outer and promotes to INNER; the `z.jn = o.jn` correlation then
+# hoists across the now-INNER edge and decorrelates to inner joins. Before the
+# promotion this bailed with "Cannot hoist across a LEFT OUTER join attachment".
+#
+# Data: jn 1000 and 3000 each have an spj row with qty > 100 whose pn matches a
+# part; jn 2000's only spj row has qty = 50, so it is excluded.
+
+skipif readyset
+statement ok
+CREATE SCHEMA q
+
+statement ok
+create table q.j (jn int)
+
+statement ok
+insert into q.j values (1000), (2000), (3000)
+
+statement ok
+create table q.p (pn int)
+
+statement ok
+insert into q.p values (10), (20)
+
+statement ok
+create table q.spj (pn int, jn int, qty int)
+
+statement ok
+insert into q.spj values (10, 1000, 150), (20, 2000, 50), (10, 3000, 200)
+
+query I rowsort
+SELECT o.jn FROM q.j o
+WHERE EXISTS (
+    SELECT 1 FROM q.p p
+    LEFT JOIN (SELECT z.pn AS pn, z.qty AS qty FROM q.spj z WHERE z.jn = o.jn) pw
+    ON p.pn = pw.pn
+    WHERE pw.qty > 100
+)
+----
+1000
+3000
+
+# A subquery in a LEFT JOIN ON correlated to BOTH operands (p and z) is rejected
+# by the ON-subquery wrap today. But `WHERE z.qty > 100` null-rejects z, so the
+# join is spuriously outer and promotes to INNER; the ON-subquery then moves to
+# WHERE and decorrelates. p=10 has a qty>100 spj row with a matching lk row; p=20
+# has none.
+
+statement ok
+create table q.lk (pn int, jn int)
+
+statement ok
+insert into q.lk values (10, 1000)
+
+query I rowsort
+SELECT p.pn FROM q.p p
+LEFT JOIN q.spj z ON p.pn = z.pn
+                 AND EXISTS (SELECT 1 FROM q.lk l WHERE l.pn = p.pn AND l.jn = z.jn)
+WHERE z.qty > 100
+----
+10

@@ -48,6 +48,7 @@ use std::collections::HashSet;
 use std::convert::Infallible;
 use std::mem;
 
+use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
 use crate::rewrite_utils::{
     alias_for_expr, as_sub_query_with_alias, collect_local_from_items, conjoin_all_dedup,
     contains_select, deep_columns_visitor_mut_in_set,
@@ -67,8 +68,8 @@ use readyset_sql::analysis::visit_mut::{
     VisitorMut, walk_expr, walk_function_expr, walk_select_statement,
 };
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, FieldReference, OrderBy, OrderClause, Relation,
-    SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
+    Column, Expr, FieldDefinitionExpr, FieldReference, JoinConstraint, OrderBy, OrderClause,
+    Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExpr, TableExprInner,
 };
 /// Prefix for aliases minted by the wrap for its inserted derived tables.
 /// The full alias is `{WRAP_ALIAS_PREFIX}{N}` where `N` is a counter unique
@@ -213,6 +214,20 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
     ) -> Result<(), Self::Error> {
         // Bottom-up: descend first.
         walk_select_statement(self, stmt)?;
+
+        // Promote spuriously-outer LEFT joins whose ON carries a subquery to
+        // INNER before the move/wrap below.  A promotable such join is then
+        // handled by the INNER-join ON-to-WHERE move rather than the LEFT-join
+        // subquery wrap, which admits only single-operand correlation -- so a
+        // both-side-correlated ON subquery decorrelates when the join is only
+        // spuriously outer.  Scoped to ON-subquery joins (the shapes the wrap
+        // handles); other LEFT joins are left untouched.  Sound even though the
+        // subquery predicates are not yet decorrelated, because NOT IN
+        // (subquery) is not treated as null-rejecting.
+        promote_null_rejecting_outer_joins_where(
+            stmt,
+            |s, i| matches!(&s.join[i].constraint, JoinConstraint::On(on) if contains_select(on)),
+        )?;
 
         // Move subquery-bearing predicates from INNER JOIN ON positions to
         // WHERE, so `unnest_subqueries` picks them up via its WHERE-position

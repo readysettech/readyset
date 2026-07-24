@@ -1,3 +1,4 @@
+use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
 use crate::detect_problematic_self_joins::contains_problematic_self_joins;
 use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::inline_subquery::limit_clause_as_numbers;
@@ -732,6 +733,19 @@ fn hoist_correlated_from_nested_and_rewrite_top_k(
 ) -> ReadySetResult<bool> {
     // Track if any rewrite (e.g., TOP-K inside LATERAL) happened, even if not hoisting
     let mut any_rewrite = false;
+
+    // Clear the LEFT-OUTER hoist barrier for spuriously-outer joins that attach a
+    // subquery derived table: when a downstream null-rejecting predicate proves the
+    // RHS present, the join is equivalent to INNER, so the correlated subquery can
+    // hoist normally instead of bailing below. Restricted to subquery-RHS joins (the
+    // only shapes that reach the barrier) so base-table LOJs are left untouched for
+    // the dedicated post-unnest pass. Local -- this function recurses per level.
+    if promote_null_rejecting_outer_joins_where(
+        stmt,
+        |s, i| matches!(&s.join[i].right, JoinRightSide::Table(te) if as_sub_query_with_alias(te).is_some()),
+    )? {
+        any_rewrite = true;
+    }
 
     // Set of 0-based indexes of all inner-joined relations.
     let mut inner_joined_from_items_indexes = HashSet::new();

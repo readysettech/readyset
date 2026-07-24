@@ -791,8 +791,29 @@ fn derived_tables_rewrite_impl<U: UniqueColumnsSchema>(
 /// information is inherited from outer scopes, as subqueries have independent null contexts.
 ///
 /// Returns `true` if any join was promoted.
-pub(crate) fn normalize_null_rejecting_outer_joins(
+/// Promote the LEFT/OUTER joins **of this statement** to INNER where a downstream
+/// null-rejecting predicate proves every RHS relation present for surviving rows.
+/// Does NOT descend into subqueries -- callers needing the whole tree drive the
+/// recursion themselves (see `normalize_null_rejecting_outer_joins`).
+pub(crate) fn promote_null_rejecting_outer_joins_local(
     stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
+    promote_null_rejecting_outer_joins_where(stmt, |_, _| true)
+}
+
+/// As [`promote_null_rejecting_outer_joins_local`], but only joins for which
+/// `eligible(stmt, join_idx)` returns true are considered.  `unnest_subqueries` uses
+/// this to promote only the joins attaching a subquery derived table -- the shapes
+/// that can hit the LEFT-OUTER hoist barrier -- leaving base-table LOJs to the
+/// dedicated post-unnest pass so unnest's output is not perturbed for them.
+///
+/// Nullability is derived purely from query structure (an empty schema), so the
+/// promotion is catalog-independent and sound to run pre- or post-unnest -- provided
+/// `derive_from_stmt` is sound on the statement as given (notably, `NOT IN (subquery)`
+/// must not be treated as null-rejecting; see `infer_nullability`).
+pub(crate) fn promote_null_rejecting_outer_joins_where(
+    stmt: &mut SelectStatement,
+    eligible: impl Fn(&SelectStatement, usize) -> bool,
 ) -> ReadySetResult<bool> {
     // Stub schema used with derive_from_stmt: no columns are statically known non-null from
     // DDL at this stage; nullability is derived purely from the query structure.
@@ -814,6 +835,9 @@ pub(crate) fn normalize_null_rejecting_outer_joins(
         let mut jc_idx_to_promote = Vec::new();
         for (i, join) in stmt.join.iter().enumerate() {
             if join.operator.is_inner_join() {
+                continue;
+            }
+            if !eligible(stmt, i) {
                 continue;
             }
 
@@ -867,6 +891,16 @@ pub(crate) fn normalize_null_rejecting_outer_joins(
 
         did_rewrite = true;
     }
+
+    Ok(did_rewrite)
+}
+
+/// Whole-tree null-rejecting LEFT->INNER promotion: promotes this statement's joins
+/// (via `promote_null_rejecting_outer_joins_local`), then recurses into FROM subqueries.
+pub(crate) fn normalize_null_rejecting_outer_joins(
+    stmt: &mut SelectStatement,
+) -> ReadySetResult<bool> {
+    let mut did_rewrite = promote_null_rejecting_outer_joins_local(stmt)?;
 
     // Recurse into subqueries with a fresh (empty) context
     for from_item in get_local_from_items_iter_mut!(stmt) {

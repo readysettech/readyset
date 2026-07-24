@@ -2344,3 +2344,58 @@ fn loj_in_multicolumn_subquery_declines() {
         "multi-column IN must not be projected: {s}"
     );
 }
+
+// Null-rejecting LEFT->INNER promotion in WrapVisitor: a promotable
+// both-side-correlated LOJ-ON subquery is moved to WHERE for the now-INNER
+// join instead of hitting the LEFT-join subquery wrap's single-operand
+// rejection; genuinely-outer and out-of-scope joins are untouched.
+
+#[test]
+fn promotable_both_side_loj_on_subquery_accepted() {
+    // `WHERE z.v > 100` null-rejects z, so `p LEFT JOIN z` is spuriously outer.
+    // It is promoted to INNER and the both-side-correlated ON-subquery is moved
+    // to WHERE -- accepted, where the LEFT-join wrap would reject both-side
+    // correlation.
+    let stmt = normalize(
+        "SELECT p.k FROM p \
+         LEFT JOIN z ON p.k = z.k \
+                     AND EXISTS (SELECT 1 FROM f WHERE f.a = p.c AND f.b = z.v) \
+         WHERE z.v > 100",
+    );
+    assert!(
+        stmt.join[0].operator.is_inner_join(),
+        "expected LEFT JOIN promoted to INNER: {}",
+        rendered(&stmt)
+    );
+}
+
+#[test]
+fn genuinely_outer_both_side_loj_on_subquery_still_rejected() {
+    // No null-rejecting predicate on z -> genuinely outer, not promotable, so the
+    // LEFT-join subquery wrap still rejects the both-side correlation (no
+    // over-promotion).
+    let mut stmt = parse(
+        "SELECT p.k FROM p \
+         LEFT JOIN z ON p.k = z.k \
+                     AND EXISTS (SELECT 1 FROM f WHERE f.a = p.c AND f.b = z.v)",
+    );
+    let err = stmt
+        .normalize_subquery_positions()
+        .expect_err("genuinely-outer both-side LOJ-ON subquery must still be rejected");
+    assert!(
+        err.to_string().contains("single join operand"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn nsp_promotion_scoped_to_on_subquery_lojs() {
+    // A promotable base-table LEFT join (no ON-subquery) is out of scope: it is
+    // left LEFT for the separate null-rejecting outer-join promotion pass.
+    let stmt = normalize("SELECT p.k FROM p LEFT JOIN w ON p.k = w.k WHERE w.u > 5");
+    assert!(
+        !stmt.join[0].operator.is_inner_join(),
+        "base-table LOJ must stay LEFT: {}",
+        rendered(&stmt)
+    );
+}

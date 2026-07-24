@@ -7535,3 +7535,72 @@ fn t4_scalar_with_or_join_in_where_still_rejected() {
         "Subquery should be aggregated or have LIMIT 1",
     );
 }
+
+#[test]
+fn promotable_loj_under_exists_decorrelates_after_promotion() {
+    // `pw` is the RHS of a LEFT JOIN and correlates to the grand-outer `o`; the
+    // subquery's `WHERE pw.v = 12` null-rejects `pw.v`, so `b LEFT JOIN pw` is
+    // promotable to INNER. After promotion the correlation hoists across the
+    // now-INNER edge and decorrelates. Before Part 2 this bails at the
+    // LEFT-OUTER hoist barrier (unnest_subqueries.rs "Cannot hoist across ...").
+    let sql = "SELECT o.id FROM a o \
+               WHERE EXISTS ( \
+                 SELECT 1 FROM b \
+                 LEFT JOIN (SELECT c.k AS k, c.v AS v FROM c WHERE c.owner = o.id) pw \
+                 ON b.k = pw.k \
+                 WHERE pw.v = 12 )";
+    let res = rewrite_statement(sql, get_schema_guard());
+    assert!(
+        res.is_ok(),
+        "expected decorrelation to succeed, got: {res:?}"
+    );
+}
+
+#[test]
+fn genuinely_outer_loj_under_exists_still_declines() {
+    // Same shape, but the predicate on `pw` sits in the LOJ's own ON, so the join
+    // is genuinely outer (b rows preserved regardless) -- not promotable. The
+    // correlation must still bail at the hoist barrier rather than be promoted,
+    // guarding against over-promotion.
+    assert_rewrite_fails_with(
+        "SELECT o.id FROM a o \
+         WHERE EXISTS ( \
+           SELECT 1 FROM b \
+           LEFT JOIN (SELECT c.k AS k, c.v AS v FROM c WHERE c.owner = o.id) pw \
+           ON b.k = pw.k AND pw.v = 12 )",
+        "Cannot hoist across a LEFT OUTER join attachment",
+    );
+}
+
+#[test]
+fn nsp_promoted_both_side_loj_on_subquery_fully_decorrelates() {
+    // Decisive check that NSP-acceptance of the promoted both-side ON subquery
+    // actually yields a lowerable shape: NSP promotes the spuriously-outer LOJ
+    // (WHERE z.qty > 100 null-rejects z) and moves the both-side-correlated ON
+    // subquery to WHERE; unnest must then FULLY decorrelate it -- no residual
+    // EXISTS and no LEFT join left behind, otherwise it would only proxy.
+    use crate::normalize_subquery_positions::NormalizeSubqueryPositions;
+    let schema = SpjNonNullSchema::default();
+    let unique = SpjUniqueSchema::default();
+    let mut stmt = parse_select_with_config(
+        PARSING_CONFIG,
+        Dialect::PostgreSQL,
+        "SELECT p.pn FROM p \
+         LEFT JOIN z ON p.pn = z.pn \
+                     AND EXISTS (SELECT 1 FROM lk l WHERE l.pn = p.pn AND l.jn = z.jn) \
+         WHERE z.qty > 100",
+    )
+    .expect("parses");
+    stmt.normalize_subquery_positions()
+        .expect("normalize_subquery_positions succeeds");
+    unnest_subqueries_main(&mut stmt, &schema, &unique).expect("unnest_subqueries succeeds");
+    let out = stmt.display(Dialect::PostgreSQL).to_string().to_uppercase();
+    assert!(
+        !out.contains("EXISTS"),
+        "residual EXISTS -- not decorrelated:\n{out}"
+    );
+    assert!(
+        !out.contains("LEFT"),
+        "residual LEFT join -- not promoted:\n{out}"
+    );
+}
