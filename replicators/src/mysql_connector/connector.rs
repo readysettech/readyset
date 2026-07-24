@@ -45,8 +45,8 @@ use readyset_errors::{
     ReadySetError, ReadySetResult,
 };
 use readyset_sql::ast::{
-    AlterTableStatement, CollationName, CreateTableBody, CreateTableOption, NonReplicatedRelation,
-    NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
+    AlterTableStatement, CollationName, CreateTableBody, CreateTableOption, CreateTableStatement,
+    NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier, SqlQuery,
 };
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
@@ -198,9 +198,8 @@ pub(crate) struct MySqlBinlogConnector {
     last_reported_pos_ts: Instant,
     /// Table filter
     table_filter: TableFilter,
-    /// A cache of `CREATE TABLE` statements retrieved from the controller. This is only populated
-    /// and referenced if it is not otherwise possible to determine the character set for a text
-    /// column, which happens in MySQL 5.7.
+    /// `CREATE TABLE` bodies keyed by schema-qualified name, consulted when a table map event
+    /// carries no charset for a text column (MySQL 5.7).
     table_schemas: HashMap<Relation, CreateTableBody>,
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
@@ -1201,56 +1200,27 @@ impl MySqlBinlogConnector {
                             .status_vars()
                             .get_status_var(binlog::consts::StatusVarKey::Charset);
 
-                        if let Some(charset) = charset {
-                            let default_server_charset = match charset.get_value().unwrap() {
-                                StatusVarVal::Charset {
-                                    charset_client: _,
-                                    collation_connection: _,
-                                    collation_server,
-                                } => collation_server,
-                                _ => unreachable!(),
-                            };
-
-                            for change in changelist.changes_mut() {
-                                match change {
-                                    Change::CreateTable { statement, .. } => {
-                                        let default_table_collation = statement.get_collation();
-                                        if default_table_collation.is_none() {
-                                            let collation = Collation::resolve(CollationId::from(
-                                                default_server_charset,
-                                            ));
-                                            let options = match statement.options.as_mut() {
-                                                Ok(opts) => opts,
-                                                Err(_) => &mut Vec::new(),
-                                            };
-                                            options.push(CreateTableOption::Collate(
-                                                CollationName {
-                                                    name: SqlIdentifier::from(
-                                                        collation.collation(),
-                                                    ),
-                                                    quote_style: None,
-                                                },
-                                            ));
-                                        }
-                                        statement.propagate_default_charset(
-                                            readyset_sql::Dialect::MySQL,
-                                        );
-                                        statement.rewrite_binary_collation_columns();
-                                        if let Ok(body) = &statement.body {
-                                            self.table_schemas
-                                                .insert(statement.table.clone(), body.clone());
-                                        }
-                                    }
-                                    Change::Drop { name, .. } => {
-                                        self.table_schemas.remove(name);
-                                    }
-                                    Change::AlterTable(AlterTableStatement { table, .. }) => {
-                                        self.table_schemas.remove(table);
-                                    }
-                                    _ => {}
+                        let default_server_charset =
+                            match charset.as_ref().map(|var| var.get_value()) {
+                                Some(Ok(StatusVarVal::Charset {
+                                    collation_server, ..
+                                })) => Some(collation_server),
+                                Some(unreadable) => {
+                                    warn!(
+                                        ?unreadable,
+                                        "Charset status var did not read as a server collation, \
+                                         falling back to Readyset's default collation"
+                                    );
+                                    None
                                 }
-                            }
-                        }
+                                None => None,
+                            };
+                        Self::apply_ddl_to_table_schemas(
+                            &mut self.table_schemas,
+                            changelist.changes_mut(),
+                            default_server_charset,
+                            &schema,
+                        );
                         Ok(ReplicationAction::DdlChange {
                             schema,
                             changes: changelist.changes,
@@ -1270,6 +1240,70 @@ impl MySqlBinlogConnector {
             Err(err) => {
                 debug!(%err, raw_query = %q_event.query(), "Unable to parse statement event");
                 Err(ReadySetError::SkipEvent)
+            }
+        }
+    }
+
+    /// Applies replicated DDL to [`Self::table_schemas`]. Charset propagation, binary-collation
+    /// rewriting, and caching run for every replicated `CREATE TABLE`; only the injected default
+    /// collation depends on the event carrying a server charset.
+    fn apply_ddl_to_table_schemas(
+        table_schemas: &mut HashMap<Relation, CreateTableBody>,
+        changes: &mut [Change],
+        default_server_charset: Option<u16>,
+        schema: &str,
+    ) {
+        for change in changes {
+            match change {
+                Change::CreateTable { statement, .. } => {
+                    if let Some(default_server_charset) = default_server_charset {
+                        if statement.get_collation().is_none() {
+                            if let Ok(options) = statement.options.as_mut() {
+                                let collation =
+                                    Collation::resolve(CollationId::from(default_server_charset));
+                                options.push(CreateTableOption::Collate(CollationName {
+                                    name: SqlIdentifier::from(collation.collation()),
+                                    quote_style: None,
+                                }));
+                            }
+                        }
+                    }
+                    statement.propagate_default_charset(readyset_sql::Dialect::MySQL);
+                    statement.rewrite_binary_collation_columns();
+                    Self::cache_created_table(table_schemas, statement, schema);
+                }
+                Change::Drop { name, .. } => {
+                    table_schemas.remove(&Self::table_schemas_key(name, schema));
+                }
+                Change::AlterTable(AlterTableStatement { table, .. }) => {
+                    table_schemas.remove(&Self::table_schemas_key(table, schema));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Qualifies `table` with the effective schema; reads look entries up by qualified name.
+    fn table_schemas_key(table: &Relation, schema: &str) -> Relation {
+        let mut table = table.clone();
+        table.schema.get_or_insert_with(|| schema.into());
+        table
+    }
+
+    /// Records a `CREATE TABLE` body in [`Self::table_schemas`]; `IF NOT EXISTS` and unparseable
+    /// bodies evict instead, deferring to the controller.
+    fn cache_created_table(
+        table_schemas: &mut HashMap<Relation, CreateTableBody>,
+        statement: &CreateTableStatement,
+        schema: &str,
+    ) {
+        let key = Self::table_schemas_key(&statement.table, schema);
+        match &statement.body {
+            Ok(body) if !statement.if_not_exists => {
+                table_schemas.insert(key, body.clone());
+            }
+            _ => {
+                table_schemas.remove(&key);
             }
         }
     }
@@ -2080,11 +2114,8 @@ impl MySqlBinlogConnector {
 
     /// Retrieves the charset for the given column based on the DDL schema of the table.
     ///
-    /// If the table was created during streaming replication, we should have already stored its
-    /// schema in [`MySqlBinlogConnector::process_query_event`]. Otherwise, if it was encountered
-    /// during snapshotting or during a previous run of the readyset binary, we consult the
-    /// controller's `Recipe`. This will slow us down because we have to communicate with the
-    /// server, but we do retain it until/unless it becomes invalidated in
+    /// A table created during replication is cached by [`Self::cache_created_table`]; on a miss
+    /// we fetch the schema from the controller and retain it until invalidated in
     /// [`MySqlBinlogConnector::process_event_query`].
     ///
     /// Note that this relies on already having called
@@ -2548,6 +2579,7 @@ impl Connector for MySqlBinlogConnector {
 mod tests {
     use super::*;
     use readyset_client::TableOperation;
+    use readyset_sql::ast::SqlType;
 
     fn make_relation(name: &str) -> Relation {
         Relation {
@@ -2577,6 +2609,118 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    fn parse_create_table(sql: &str) -> CreateTableStatement {
+        readyset_sql_parsing::parse_create_table(readyset_sql::Dialect::MySQL, sql).expect("parses")
+    }
+
+    #[test]
+    fn table_schemas_key_is_always_qualified() {
+        assert_eq!(
+            MySqlBinlogConnector::table_schemas_key(&Relation::from("users"), "test_db"),
+            make_relation("users")
+        );
+        assert_eq!(
+            MySqlBinlogConnector::table_schemas_key(&make_relation("users"), "other_db"),
+            make_relation("users")
+        );
+    }
+
+    #[test]
+    fn cache_created_table_qualifies_key() {
+        let mut cache = HashMap::new();
+        let statement = parse_create_table("CREATE TABLE users (id INT, name VARCHAR(8))");
+        MySqlBinlogConnector::cache_created_table(&mut cache, &statement, "test_db");
+
+        assert!(cache.contains_key(&make_relation("users")));
+        assert!(!cache.contains_key(&Relation::from("users")));
+    }
+
+    #[test]
+    fn apply_ddl_without_server_charset_still_rewrites_binary_collation() {
+        let mut cache = HashMap::new();
+        let statement =
+            parse_create_table("CREATE TABLE users (id INT, name CHAR(10) COLLATE binary)");
+        let mut changes = vec![Change::CreateTable {
+            statement,
+            pg_meta: None,
+        }];
+        MySqlBinlogConnector::apply_ddl_to_table_schemas(&mut cache, &mut changes, None, "test_db");
+
+        let body = cache.get(&make_relation("users")).expect("table cached");
+        let name = body
+            .fields
+            .iter()
+            .find(|field| field.column.name == "name")
+            .expect("name column exists");
+        assert_eq!(name.sql_type, SqlType::Binary(Some(10)));
+    }
+
+    #[test]
+    fn apply_ddl_without_server_charset_still_propagates_explicit_charset() {
+        let mut cache = HashMap::new();
+        let statement =
+            parse_create_table("CREATE TABLE users (id INT, name VARCHAR(8)) CHARACTER SET latin1");
+        let mut changes = vec![Change::CreateTable {
+            statement,
+            pg_meta: None,
+        }];
+        MySqlBinlogConnector::apply_ddl_to_table_schemas(&mut cache, &mut changes, None, "test_db");
+
+        let body = cache.get(&make_relation("users")).expect("table cached");
+        let name = body
+            .fields
+            .iter()
+            .find(|field| field.column.name == "name")
+            .expect("name column exists");
+        assert!(name.get_charset().is_some());
+    }
+
+    #[test]
+    fn cache_created_table_if_not_exists_evicts() {
+        let existing =
+            parse_create_table("CREATE TABLE users (id INT, name VARCHAR(8) CHARACTER SET latin1)");
+        let mut cache =
+            HashMap::from([(make_relation("users"), existing.body.expect("body parses"))]);
+
+        let replayed = parse_create_table(
+            "CREATE TABLE IF NOT EXISTS test_db.users \
+             (id INT, name VARCHAR(8) CHARACTER SET utf8mb4)",
+        );
+        MySqlBinlogConnector::cache_created_table(&mut cache, &replayed, "test_db");
+
+        assert!(!cache.contains_key(&make_relation("users")));
+    }
+
+    #[test]
+    fn cache_created_table_without_a_body_evicts() {
+        let existing =
+            parse_create_table("CREATE TABLE users (id INT, name VARCHAR(8) CHARACTER SET latin1)");
+        let mut cache =
+            HashMap::from([(make_relation("users"), existing.body.expect("body parses"))]);
+
+        let unparsed = parse_create_table("CREATE TABLE users LIKE other_users");
+        assert!(unparsed.body.is_err(), "expected a statement with no body");
+        MySqlBinlogConnector::cache_created_table(&mut cache, &unparsed, "test_db");
+
+        assert!(!cache.contains_key(&make_relation("users")));
+    }
+
+    #[test]
+    fn ddl_without_a_server_charset_still_invalidates() {
+        let existing =
+            parse_create_table("CREATE TABLE users (id INT, name VARCHAR(8) CHARACTER SET latin1)");
+        let mut cache =
+            HashMap::from([(make_relation("users"), existing.body.expect("body parses"))]);
+
+        let mut changes = vec![Change::Drop {
+            name: Relation::from("users"),
+            if_exists: false,
+        }];
+        MySqlBinlogConnector::apply_ddl_to_table_schemas(&mut cache, &mut changes, None, "test_db");
+
+        assert!(!cache.contains_key(&make_relation("users")));
     }
 
     #[test]
