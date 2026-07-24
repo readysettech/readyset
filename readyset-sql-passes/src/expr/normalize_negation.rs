@@ -70,6 +70,15 @@ fn negate_expr(expr: &mut Expr) -> bool {
         Expr::Between { negated, .. } | Expr::In { negated, .. } => {
             *negated = !*negated;
         }
+        Expr::Exists(_) => {
+            // EXISTS has no inverse operator, so wrap it in NOT. The `UnaryOp::Not`
+            // arm above reverses this, keeping `negate_expr` involutive.
+            *expr = Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                rhs: Box::new(expr.take()),
+            };
+            return true;
+        }
         _ => {
             return false;
         }
@@ -192,5 +201,76 @@ mod tests {
         let expected = parse_expr(Dialect::PostgreSQL, "NOT arr && ARRAY[1,2] OR b").unwrap();
         normalize_negation(&mut expr);
         assert_eq!(expr, expected);
+    }
+
+    #[test]
+    fn normalize_exists_in_negated_conjunction() {
+        // EXISTS has no inverse operator, so negating it wraps in NOT; De Morgan
+        // then turns the conjunction into a disjunction.
+        let mut expr = parse_expr(
+            Dialect::PostgreSQL,
+            "NOT (EXISTS (SELECT 1 FROM posts WHERE author_id = users.id) AND id > 5)",
+        )
+        .unwrap();
+        let expected = parse_expr(
+            Dialect::PostgreSQL,
+            "NOT EXISTS (SELECT 1 FROM posts WHERE author_id = users.id) OR id <= 5",
+        )
+        .unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(
+            expr,
+            expected,
+            "expected = {}\nactual = {}",
+            expected.display(Dialect::PostgreSQL),
+            expr.display(Dialect::PostgreSQL)
+        );
+    }
+
+    #[test]
+    fn normalize_exists_in_negated_disjunction() {
+        // NOT (EXISTS OR X) -> NOT EXISTS AND NOT X: the NOT EXISTS lands as a
+        // top-level AND-conjunct, which downstream decorrelation can extract.
+        let mut expr = parse_expr(
+            Dialect::PostgreSQL,
+            "NOT (EXISTS (SELECT 1 FROM posts WHERE author_id = users.id) OR id > 5)",
+        )
+        .unwrap();
+        let expected = parse_expr(
+            Dialect::PostgreSQL,
+            "NOT EXISTS (SELECT 1 FROM posts WHERE author_id = users.id) AND id <= 5",
+        )
+        .unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(
+            expr,
+            expected,
+            "expected = {}\nactual = {}",
+            expected.display(Dialect::PostgreSQL),
+            expr.display(Dialect::PostgreSQL)
+        );
+    }
+
+    #[test]
+    fn normalize_double_negated_exists() {
+        // NOT NOT EXISTS(...) collapses to EXISTS(...).
+        let mut expr = parse_expr(
+            Dialect::PostgreSQL,
+            "NOT (NOT EXISTS (SELECT 1 FROM posts WHERE author_id = users.id))",
+        )
+        .unwrap();
+        let expected = parse_expr(
+            Dialect::PostgreSQL,
+            "EXISTS (SELECT 1 FROM posts WHERE author_id = users.id)",
+        )
+        .unwrap();
+        normalize_negation(&mut expr);
+        assert_eq!(
+            expr,
+            expected,
+            "expected = {}\nactual = {}",
+            expected.display(Dialect::PostgreSQL),
+            expr.display(Dialect::PostgreSQL)
+        );
     }
 }
