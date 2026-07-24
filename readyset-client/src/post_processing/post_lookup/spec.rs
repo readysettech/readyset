@@ -10,7 +10,7 @@ use std::sync::Arc;
 use dataflow_expression::grouped::accumulator::{
     finalize_raw_json, truncate_group_concat, AccumulationOp, AccumulatorData,
 };
-use readyset_data::upstream_system_props::get_group_concat_max_len;
+use readyset_data::upstream_system_props::group_concat_max_len;
 use readyset_data::DfValue;
 use readyset_errors::{internal, ReadySetResult};
 use readyset_sql::ast::{NullOrder, OrderType};
@@ -235,7 +235,7 @@ impl PostLookupAggregateFunction {
         };
 
         let max_len = if matches!(self, PostLookupAggregateFunction::GroupConcat { .. }) {
-            Some(get_group_concat_max_len())
+            Some(group_concat_max_len())
         } else {
             None
         };

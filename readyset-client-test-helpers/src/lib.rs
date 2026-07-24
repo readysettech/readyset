@@ -27,7 +27,7 @@ use readyset_adapter::{
 use readyset_client::consensus::{Authority, AuthorityControl, LocalAuthorityStore};
 use readyset_client_metrics::QueryLogMode;
 use readyset_data::upstream_system_props::{
-    init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
+    init_system_props, parse_upstream_timezone, UpstreamSystemProperties,
 };
 use readyset_data::Dialect;
 use readyset_errors::ReadySetError;
@@ -784,10 +784,12 @@ impl TestBuilder {
                     } else {
                         None
                     };
-                    let mut sys_props = if let Some(cdc_upstream) = &mut cdc_upstream {
+                    let sys_props = if let Some(cdc_upstream) = &mut cdc_upstream {
                         UpstreamSystemProperties {
                             search_path: cdc_upstream.schema_search_path().await.unwrap(),
-                            timezone_name: cdc_upstream.timezone_name().await.unwrap(),
+                            timezone: parse_upstream_timezone(
+                                &cdc_upstream.timezone_name().await.unwrap(),
+                            ),
                             lower_case_database_names: cdc_upstream
                                 .lower_case_database_names()
                                 .await
@@ -805,7 +807,9 @@ impl TestBuilder {
                     } else {
                         UpstreamSystemProperties {
                             search_path: UpstreamConfig::default().default_schema_search_path(),
-                            timezone_name: UpstreamConfig::default().default_timezone_name(),
+                            timezone: parse_upstream_timezone(
+                                &UpstreamConfig::default().default_timezone_name(),
+                            ),
                             ..Default::default()
                         }
                     };
@@ -819,10 +823,7 @@ impl TestBuilder {
                         },
                     };
 
-                    if init_system_props(&sys_props).is_err() {
-                        sys_props.timezone_name = DEFAULT_TIMEZONE_NAME.into();
-                        init_system_props(&sys_props).expect("Should not fail");
-                    }
+                    init_system_props(&sys_props);
 
                     let mut rh = ReadySetHandle::new(authority.clone()).await;
                     let adapter_rewrite_params = rh.adapter_rewrite_params().await.unwrap();

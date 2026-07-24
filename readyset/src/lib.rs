@@ -28,6 +28,7 @@ use futures_util::stream::{SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use metrics::{counter, gauge};
 use tokio::net;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 use tokio_native_tls::{native_tls, TlsAcceptor};
@@ -56,7 +57,9 @@ use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::host_info::collect_host_info;
 use readyset_common::startup::init_early_common;
-use readyset_data::upstream_system_props::{init_system_props, UpstreamSystemProperties};
+use readyset_data::upstream_system_props::{
+    init_system_props, parse_upstream_timezone, system_props, UpstreamSystemProperties,
+};
 use readyset_dataflow::Readers;
 use readyset_errors::{internal_err, ReadySetError};
 use readyset_metrics::init_global_recorder;
@@ -987,25 +990,22 @@ where
     }
 }
 
-/// Spawn a task to query the upstream for its currently-configured schema search path and
-/// timezone name in a loop until it succeeds, returning a lock that will contain the result
-/// when it finishes
-///
-/// NOTE: when we start tracking all configuration parameters, this should be folded into
-/// whatever loads those initially
+/// Queries the upstream for its system properties (search path, timezone, casing, version),
+/// retrying until the upstream is reachable. The adapter can't serve without these, so callers
+/// block on this at startup.
 async fn load_system_props<U>(
     upstream_config: UpstreamConfig,
     no_upstream_conns: bool,
-) -> Arc<RwLock<Result<UpstreamSystemProperties, U::Error>>>
+) -> UpstreamSystemProperties
 where
     U: UpstreamDatabase,
 {
     if no_upstream_conns || upstream_config.upstream_db_url.is_none() {
-        return Arc::new(RwLock::new(Ok(UpstreamSystemProperties {
+        return UpstreamSystemProperties {
             search_path: upstream_config.default_schema_search_path(),
-            timezone_name: upstream_config.default_timezone_name(),
+            timezone: parse_upstream_timezone(&upstream_config.default_timezone_name()),
             ..Default::default()
-        })));
+        };
     }
 
     let try_load = move |upstream_config: UpstreamConfig| async move {
@@ -1025,9 +1025,9 @@ where
         let db_version = upstream.version();
         let group_concat_max_len = upstream.group_concat_max_len().await?;
 
-        Ok(UpstreamSystemProperties {
+        Ok::<_, U::Error>(UpstreamSystemProperties {
             search_path,
-            timezone_name,
+            timezone: parse_upstream_timezone(&timezone_name),
             lower_case_database_names,
             lower_case_table_names,
             db_version,
@@ -1035,43 +1035,21 @@ where
         })
     };
 
-    // First, try to load once outside the loop
-    let e = match try_load(upstream_config.clone()).await {
-        Ok(res) => return Arc::new(RwLock::new(Ok(res))),
-        Err(error) => {
-            warn!(%error, "Loading initial upstream system properties failed, spawning retry loop");
-            error
-        }
-    };
-
-    // If that fails, spawn a task to keep retrying
-    let out = Arc::new(RwLock::new(Err(e)));
-    tokio::spawn({
-        let out = Arc::clone(&out);
-        async move {
-            let mut first_loop = true;
-            loop {
-                if !first_loop {
-                    sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
+    let mut first_failure = true;
+    loop {
+        match try_load(upstream_config.clone()).await {
+            Ok(props) => return props,
+            Err(error) => {
+                if first_failure {
+                    warn!(%error, "Loading upstream system properties failed, retrying");
+                    first_failure = false;
+                } else {
+                    debug!(%error, "Loading upstream system properties failed, retrying");
                 }
-                first_loop = false;
-
-                let res = try_load(upstream_config.clone()).await;
-
-                if let Ok(ssp) = &res {
-                    debug!(?ssp, "Successfully loaded schema search path from upstream");
-                }
-
-                let was_ok = res.is_ok();
-                *out.write().await = res;
-                if was_ok {
-                    break;
-                }
+                sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await;
             }
         }
-    });
-
-    out
+    }
 }
 
 pub fn init_adapter_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
@@ -1232,9 +1210,13 @@ where
             &deployment_dir,
         );
         let ctrlc = tokio::signal::ctrl_c();
+        let mut startup_sigterm = {
+            let _guard = rt.enter();
+            signal(SignalKind::terminate()).unwrap()
+        };
         let mut sigterm = {
             let _guard = rt.enter();
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap()
+            signal(SignalKind::terminate()).unwrap()
         };
         let mut listener = Box::pin(futures_util::stream::select(
             all_listeners,
@@ -1396,28 +1378,20 @@ where
             rt.block_on(fut);
         }
 
-        let sys_props = rt.block_on(load_system_props::<H::UpstreamDatabase>(
-            upstream_config.clone(),
-            no_upstream_connections,
-        ));
-
-        macro_rules! await_sys_props {
-            ($sys_props:ident, $shutdown_rx:ident) => {{
-                let retry_loop = async {
-                    loop {
-                        if let Ok(v) = &*$sys_props.read().await {
-                            break v.clone();
-                        }
-                        sleep(UPSTREAM_CONNECTION_RETRY_INTERVAL).await
-                    }
-                };
-
-                tokio::select! {
-                    v = retry_loop => Some(v),
-                    _ = $shutdown_rx.recv() => None,
-                }
-            }};
-        }
+        // Load system properties in retry loop before continuing with startup, bailing on SIGTERM.
+        let Some(sys_props) = rt.block_on(async {
+            tokio::select! {
+                props = load_system_props::<H::UpstreamDatabase>(
+                    upstream_config.clone(),
+                    no_upstream_connections,
+                ) => Some(props),
+                _ = startup_sigterm.recv() => None,
+            }
+        }) else {
+            info!("Received SIGTERM while waiting for upstream system properties");
+            return Ok(());
+        };
+        init_system_props(&sys_props);
 
         if let MigrationMode::OutOfBand = migration_mode {
             set_failpoint!(failpoints::ADAPTER_OUT_OF_BAND);
@@ -1425,28 +1399,16 @@ where
             let auto_increments = auto_increments.clone();
             let view_name_cache = view_name_cache.clone();
             let view_cache = view_cache.clone();
-            let mut shutdown_rx = shutdown_rx.clone();
+            let shutdown_rx = shutdown_rx.clone();
             let loop_interval = options.migration_task_interval;
             let max_retry = options.max_processing_minutes;
             let dry_run = matches!(migration_style, MigrationStyle::Explicit);
             let expr_dialect = self.expr_dialect;
             let parse_dialect = self.parse_dialect;
             let schema_catalog = schema_catalog.clone();
-            let sys_props = sys_props.clone();
-
             rs_connect.in_scope(|| info!("Spawning migration handler task"));
             let fut = async move {
                 let connection = span!(Level::INFO, "migration task upstream database connection");
-
-                let sys_props = await_sys_props!(sys_props, shutdown_rx);
-                let Some(sys_props) = sys_props else {
-                    debug!("Failed to retrieve system properties before receiving shutdown");
-                    return Ok(());
-                };
-
-                if let Err(e) = init_system_props(&sys_props) {
-                    info!("{e}");
-                }
 
                 let noria =
                     NoriaConnector::new(
@@ -1456,7 +1418,7 @@ where
                         view_cache.new_local(),
                         expr_dialect,
                         parse_dialect,
-                        sys_props.search_path,
+                        system_props().search_path.clone(),
                         adapter_rewrite_params,
                     )
                     .instrument(connection.in_scope(|| {
@@ -1487,15 +1449,6 @@ where
 
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log_mode.is_enabled() {
-            let mut shutdown_rx_props = shutdown_rx.clone();
-            let sys_props = sys_props.clone();
-            let sys_props =
-                rt.block_on(async move { await_sys_props!(sys_props, shutdown_rx_props) });
-            let Some(sys_props) = sys_props else {
-                debug!("Failed to retrieve system properties before receiving shutdown");
-                return Ok(());
-            };
-
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -1519,7 +1472,7 @@ where
                         query_log_mode,
                         rewrite_params,
                         dialect,
-                        sys_props.search_path,
+                        system_props().search_path.clone(),
                         schema_catalog_handle,
                     );
                     runtime.block_on(logger.run(qlog_receiver, shutdown_rx));
@@ -2023,7 +1976,6 @@ where
             });
 
             let upstream_config = Arc::clone(&upstream_config);
-            let sys_props = Arc::clone(&sys_props);
             let status_reporter_clone = status_reporter.clone();
             let schema_catalog_clone = schema_catalog.clone();
             let fut = async move {
@@ -2042,62 +1994,40 @@ where
                             warn!(error = %e, "Failed to send upstream connected metric");
                         }
 
-                        match &*sys_props.read().await {
-                            Ok(sys_props) => {
-                                if let Err(e) = init_system_props(sys_props) {
-                                    info!("{e}");
-                                }
+                        let sys_props = system_props();
+                        let noria = NoriaConnector::new_with_local_reads(
+                            rh.clone(),
+                            auto_increments,
+                            view_name_cache.new_local(),
+                            view_cache.new_local(),
+                            r,
+                            expr_dialect,
+                            parse_dialect,
+                            sys_props.search_path.clone(),
+                            adapter_rewrite_params,
+                        )
+                        .instrument(debug_span!("Building noria connector"))
+                        .await;
 
-                                let noria = NoriaConnector::new_with_local_reads(
-                                    rh.clone(),
-                                    auto_increments,
-                                    view_name_cache.new_local(),
-                                    view_cache.new_local(),
-                                    r,
-                                    expr_dialect,
-                                    parse_dialect,
-                                    sys_props.search_path.clone(),
-                                    adapter_rewrite_params,
-                                )
-                                .instrument(debug_span!("Building noria connector"))
-                                .await;
-
-                                let mut builder = backend_builder.clone();
-                                if !sys_props.db_version.is_empty() {
-                                    builder = builder.db_version(sys_props.db_version.clone());
-                                }
-                                let backend = builder
-                                    .build(
-                                        noria,
-                                        upstream,
-                                        adapter_authority.clone(),
-                                        query_status_cache,
-                                        schema_catalog_clone,
-                                        status_reporter_clone,
-                                        adapter_start_time,
-                                        shallow,
-                                        rls_coordinator,
-                                        Some(shallow_refresh_pool),
-                                    )
-                                    .await;
-                                connection_handler.process_connection(s, backend).await;
-                            }
-                            Err(error) => {
-                                error!(
-                                    %error,
-                                    "Error loading initial upstream system properties from ~"
-                                );
-                                connection_handler
-                                    .immediate_error(
-                                        s,
-                                        format!(
-                                            "Error loading initial upstream system properties from \
-                                             upstream: {error}"
-                                        ),
-                                    )
-                                    .await;
-                            }
+                        let mut builder = backend_builder.clone();
+                        if !sys_props.db_version.is_empty() {
+                            builder = builder.db_version(sys_props.db_version.clone());
                         }
+                        let backend = builder
+                            .build(
+                                noria,
+                                upstream,
+                                adapter_authority.clone(),
+                                query_status_cache,
+                                schema_catalog_clone,
+                                status_reporter_clone,
+                                adapter_start_time,
+                                shallow,
+                                rls_coordinator,
+                                Some(shallow_refresh_pool),
+                            )
+                            .await;
+                        connection_handler.process_connection(s, backend).await;
                     }
                     Err(error) => {
                         error!(%error, "Error during initial connection establishment");

@@ -2,7 +2,7 @@ use std::{cmp, iter};
 
 use chrono_tz::Tz;
 use readyset_data::dialect::SqlEngine;
-use readyset_data::upstream_system_props::get_system_timezone;
+use readyset_data::upstream_system_props::system_props;
 use readyset_data::{Array, ArrayD, CharsetFamily, Collation, DfType, DfValue, IxDyn};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
@@ -1775,7 +1775,7 @@ impl Expr {
                         }
                     };
 
-                    let default_time_zone = get_system_timezone()?;
+                    let default_time_zone = system_props().timezone;
 
                     return Ok(Self::AtTimeZone {
                         expr: left,

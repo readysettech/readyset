@@ -4,7 +4,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use anyhow::anyhow;
 use database_utils::{
     DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection as _, TlsMode,
     UpstreamConfig,
@@ -20,7 +19,9 @@ use readyset_adapter::{
 };
 use readyset_client::ReadySetHandle;
 use readyset_data::{
-    upstream_system_props::{init_system_props, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME},
+    upstream_system_props::{
+        init_system_props, parse_upstream_timezone, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
+    },
     DfValue,
 };
 use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
@@ -299,27 +300,28 @@ pub(crate) async fn start_readyset(
 }
 
 pub(crate) async fn update_system_timezone(conn: &mut DatabaseConnection) -> anyhow::Result<()> {
-    let timezone_name = if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
-        let res: Vec<Vec<DfValue>> = conn.simple_query("show timezone").await?.try_into()?;
-        if let Some(row) = res.into_iter().at_most_one()? {
-            let val = row.into_iter().at_most_one()?;
-            match &val {
-                Some(v) if v.is_string() => v.as_str().unwrap(),
-                _ => DEFAULT_TIMEZONE_NAME,
+    let timezone_name: readyset_sql::ast::SqlIdentifier =
+        if matches!(conn, DatabaseConnection::PostgreSQL(..)) {
+            let res: Vec<Vec<DfValue>> = conn.simple_query("show timezone").await?.try_into()?;
+            if let Some(row) = res.into_iter().at_most_one()? {
+                let val = row.into_iter().at_most_one()?;
+                match &val {
+                    Some(v) if v.is_string() => v.as_str().unwrap(),
+                    _ => DEFAULT_TIMEZONE_NAME,
+                }
+                .into()
+            } else {
+                DEFAULT_TIMEZONE_NAME.into()
             }
-            .into()
         } else {
+            // Have yet to implement system timezone support for MySQL
             DEFAULT_TIMEZONE_NAME.into()
-        }
-    } else {
-        // Have yet to implement system timezone support for MySQL
-        DEFAULT_TIMEZONE_NAME.into()
-    };
+        };
     init_system_props(&UpstreamSystemProperties {
-        timezone_name,
+        timezone: parse_upstream_timezone(&timezone_name),
         ..Default::default()
-    })
-    .map_err(|e| anyhow!(e))
+    });
+    Ok(())
 }
 
 pub(crate) fn might_be_timezone_changing_statement(

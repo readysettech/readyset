@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter, Result};
 use std::sync::Arc;
 
-use readyset_data::upstream_system_props::get_group_concat_max_len;
+use readyset_data::upstream_system_props::group_concat_max_len;
 use readyset_data::{Array, Collation, DfValue};
 use readyset_errors::{internal, internal_err, unsupported, ReadySetError, ReadySetResult};
 use readyset_sql::analysis::is_aggregate;
@@ -425,7 +425,7 @@ impl AccumulationOp {
         match self {
             AccumulationOp::ArrayAgg { .. } => self.apply_array_agg(data),
             AccumulationOp::GroupConcat { separator, .. } => {
-                let max_len = get_group_concat_max_len();
+                let max_len = group_concat_max_len();
                 self.apply_group_concat(data, separator, Some(max_len))
             }
             AccumulationOp::JsonObjectAgg {
@@ -2067,12 +2067,8 @@ mod tests {
     fn group_concat_truncates_at_max_len() {
         // Initialize the global group_concat_max_len for this test.
         readyset_data::upstream_system_props::init_system_props(
-            &readyset_data::upstream_system_props::UpstreamSystemProperties {
-                timezone_name: "Etc/UTC".into(),
-                ..Default::default()
-            },
-        )
-        .ok(); // ok() because OnceCell may already be set by another test
+            &readyset_data::upstream_system_props::UpstreamSystemProperties::default(),
+        );
 
         let op = AccumulationOp::GroupConcat {
             separator: ",".to_string(),
