@@ -278,6 +278,22 @@ impl SqlIncorporator {
                     pg_meta,
                 } => {
                     cts = self.rewrite(cts, None, &schema_search_path, dialect, None, None)?;
+
+                    if cts.if_not_exists
+                        && matches!(
+                            self.registry.get(&cts.table),
+                            Some(RecipeExpr::Table { .. })
+                        )
+                    {
+                        antithesis_sdk::assert_reachable!(
+                            "Ignored replayed CREATE TABLE IF NOT EXISTS for an existing table",
+                            &serde_json::json!({
+                                "table": cts.table.display_unquoted().to_string()
+                            })
+                        );
+                        continue;
+                    }
+
                     let body = match cts.body {
                         Ok(body) => body,
                         Err(unparsed) => unsupported!(
