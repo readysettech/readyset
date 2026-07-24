@@ -1,4 +1,4 @@
-use crate::infer_nullability::infer_select_field_nullability;
+use crate::infer_nullability::{derive_from_stmt, infer_select_field_nullability};
 use crate::rewrite_utils::expect_field_as_expr;
 use crate::unnest_subqueries::NonNullSchema;
 use readyset_sql::Dialect;
@@ -601,4 +601,47 @@ fn null_inf_35_or_inside_and_promotes_via_disjunctive_evidence() {
           AND spj.qty > 0
         "#;
     assert_nullability(sql, true, &TestSchema::new());
+}
+
+/// Direct `derive_from_stmt` probe: does the pass prove `<table>.<col>` non-NULL?
+/// Guards the null-rejection soundness that LOJ->INNER promotion depends on.
+fn derives_non_null(sql: &str, table: &str, col: &str, schema: &dyn NonNullSchema) -> bool {
+    let stmt = parse_select(sql);
+    let non_null = derive_from_stmt(&stmt, schema).expect("derive_from_stmt succeeds");
+    non_null.contains(&Column {
+        name: col.into(),
+        table: Some(table.into()),
+    })
+}
+
+#[test]
+fn derive_not_in_subquery_does_not_prove_non_null() {
+    // `x NOT IN (subquery)` is NOT null-rejecting: an empty subquery makes
+    // `NULL NOT IN (empty)` TRUE, so a NULL x survives. Proving x non-NULL here
+    // would let LOJ->INNER promotion silently drop null-extended rows.
+    let sql = "SELECT t.col FROM t WHERE t.col NOT IN (SELECT u.x FROM u)";
+    assert!(
+        !derives_non_null(sql, "t", "col", &TestSchema::new()),
+        "NOT IN (subquery) must not prove the LHS non-NULL"
+    );
+}
+
+#[test]
+fn derive_in_subquery_proves_non_null() {
+    // `x IN (subquery)` IS null-rejecting -- `NULL IN (anything)` is never TRUE.
+    let sql = "SELECT t.col FROM t WHERE t.col IN (SELECT u.x FROM u)";
+    assert!(
+        derives_non_null(sql, "t", "col", &TestSchema::new()),
+        "IN (subquery) rejects a NULL LHS"
+    );
+}
+
+#[test]
+fn derive_not_in_value_list_proves_non_null() {
+    // `x NOT IN (values)` IS null-rejecting -- `NULL NOT IN (1,2)` is UNKNOWN -> filtered.
+    let sql = "SELECT t.col FROM t WHERE t.col NOT IN (1, 2)";
+    assert!(
+        derives_non_null(sql, "t", "col", &TestSchema::new()),
+        "NOT IN (value-list) rejects a NULL LHS"
+    );
 }

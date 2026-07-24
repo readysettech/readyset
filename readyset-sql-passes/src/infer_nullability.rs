@@ -252,8 +252,10 @@ fn derive_from_expr(predicate: &Expr, non_null_columns: &mut HashSet<Column>) {
             derive_from_expr(min.as_ref(), non_null_columns);
             derive_from_expr(max.as_ref(), non_null_columns);
         }
-        // lhs IN (values) / lhs IN (subquery) -> null rejecting
-        Expr::In { lhs, .. } => {
+        // `x IN (...)` rejects a NULL x -- `NULL IN (anything)` is never TRUE, and
+        // `x NOT IN (values)` rejects it too. But `x NOT IN (subquery)` does NOT: an
+        // empty subquery makes `NULL NOT IN (empty)` TRUE, so a NULL x survives.
+        Expr::In { lhs, rhs, negated } if !(*negated && matches!(rhs, InValue::Subquery(_))) => {
             derive_from_expr(lhs.as_ref(), non_null_columns);
         }
         // Survived column
