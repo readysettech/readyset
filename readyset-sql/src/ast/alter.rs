@@ -304,6 +304,24 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 .try_into_dialect(dialect)?,
                 position: column_position.map(Into::into),
             }),
+            ModifyColumn {
+                col_name,
+                data_type,
+                options,
+                column_position,
+            } => Ok(Self::ChangeColumn {
+                name: col_name.clone().into_dialect(dialect),
+                spec: sqlparser::ast::ColumnDef {
+                    name: col_name,
+                    data_type,
+                    options: options
+                        .into_iter()
+                        .map(|option| sqlparser::ast::ColumnOptionDef { name: None, option })
+                        .collect(),
+                }
+                .try_into_dialect(dialect)?,
+                position: column_position.map(Into::into),
+            }),
             AlterColumn { column_name, op } => Ok(Self::AlterColumn {
                 name: column_name.into_dialect(dialect),
                 operation: op.try_into()?,

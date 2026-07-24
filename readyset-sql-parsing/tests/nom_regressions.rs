@@ -1,4 +1,7 @@
+use std::assert_matches;
+
 use readyset_sql::Dialect;
+use readyset_sql::ast::{AlterTableDefinition, SqlQuery};
 use readyset_sql_parsing::{ParsingPreset, parse_expr, parse_query_with_config};
 
 #[test]
@@ -9,6 +12,21 @@ fn alter_both() {
     check_parse_both!("ALTER TABLE t REPLICA IDENTITY FULL");
     check_parse_both!("ALTER TABLE t REPLICA IDENTITY USING INDEX asdf");
     check_parse_both!("ALTER TABLE t RENAME COLUMN x TO y");
+}
+
+#[test]
+fn mysql_modify_column() {
+    let SqlQuery::AlterTable(stmt) = check_parse_mysql!("ALTER TABLE t MODIFY COLUMN c BIGINT")
+    else {
+        panic!("expected ALTER TABLE");
+    };
+    assert_matches!(
+        stmt.definitions.as_deref(),
+        Ok([AlterTableDefinition::ChangeColumn { .. }]),
+        "MODIFY COLUMN should convert to ChangeColumn, got {:?}",
+        stmt.definitions
+    );
+    check_parse_mysql!("ALTER TABLE t MODIFY f VARCHAR(255) NOT NULL");
 }
 
 #[test]
