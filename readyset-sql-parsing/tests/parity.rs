@@ -3,6 +3,8 @@
 //! for some queries for which we don't otherwise have coverage. Likely, these should be replaced by
 //! tests of actual relevant cache functionality.
 
+use std::assert_matches;
+
 use readyset_sql::{
     Dialect, DialectDisplay,
     ast::{
@@ -892,18 +894,19 @@ fn key_part_expression() {
         }
         stmt => panic!("expected CreateTableStatement, got {stmt:?}"),
     }
-    // We should throw away the unsupported part and succeed overall
-    match check_parse_mysql!(
-        r#"ALTER TABLE blobs ADD INDEX index_blobs_on_id ((CAST(jsonblob->>"$.id" AS UNSIGNED)));"#
-    ) {
-        SqlQuery::AlterTable(AlterTableStatement {
-            table, definitions, ..
-        }) => {
-            assert_eq!(table.name, "blobs");
-            assert!(
-                definitions.is_err(),
-                "Expected unsupported definitions: {definitions:?}"
-            )
+    match parse_query_with_config(
+        ParsingPreset::OnlySqlparser,
+        Dialect::MySQL,
+        r#"ALTER TABLE blobs ADD INDEX index_blobs_on_id ((CAST(jsonblob->>"$.id" AS UNSIGNED)));"#,
+    )
+    .expect("ADD INDEX with functional key part should parse")
+    {
+        SqlQuery::AlterTable(AlterTableStatement { definitions, .. }) => {
+            assert_matches!(
+                definitions.as_deref(),
+                Ok([AlterTableDefinition::AddKey(_)]),
+                "expected AddKey, got {definitions:?}"
+            );
         }
         stmt => panic!("expected AlterTableStatement, got {stmt:?}"),
     };

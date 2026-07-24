@@ -1,7 +1,7 @@
 use std::assert_matches;
 
 use readyset_sql::Dialect;
-use readyset_sql::ast::{AlterTableDefinition, SqlQuery};
+use readyset_sql::ast::{AlterTableDefinition, SqlQuery, TableKey};
 use readyset_sql_parsing::{ParsingPreset, parse_expr, parse_query_with_config};
 
 #[test]
@@ -27,6 +27,43 @@ fn mysql_modify_column() {
         stmt.definitions
     );
     check_parse_mysql!("ALTER TABLE t MODIFY f VARCHAR(255) NOT NULL");
+}
+
+#[test]
+fn alter_add_constraint_converts_to_add_key() {
+    fn add_key(q: SqlQuery) -> TableKey {
+        let SqlQuery::AlterTable(stmt) = q else {
+            panic!("expected ALTER TABLE");
+        };
+        match stmt
+            .definitions
+            .expect("definitions should parse")
+            .into_iter()
+            .next()
+            .expect("one definition")
+        {
+            AlterTableDefinition::AddKey(key) => key,
+            other => panic!("expected AddKey, got {other:?}"),
+        }
+    }
+    assert_matches!(
+        add_key(check_parse_mysql!("ALTER TABLE t ADD PRIMARY KEY (id)")),
+        TableKey::PrimaryKey { .. }
+    );
+    assert_matches!(
+        add_key(check_parse_mysql!("ALTER TABLE t ADD UNIQUE (email)")),
+        TableKey::UniqueKey { .. }
+    );
+    assert_matches!(
+        add_key(check_parse_mysql!(
+            "ALTER TABLE t ADD FOREIGN KEY (a) REFERENCES o (id)"
+        )),
+        TableKey::ForeignKey { .. }
+    );
+    assert_matches!(
+        add_key(check_parse_postgres!("ALTER TABLE t ADD CONSTRAINT c CHECK (a > 0)")),
+        TableKey::CheckConstraint { .. }
+    );
 }
 
 #[test]

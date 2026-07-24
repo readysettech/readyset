@@ -251,6 +251,10 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 spec: column_def.try_into_dialect(dialect)?,
                 position: column_position.map(Into::into),
             }),
+            AddConstraint {
+                constraint,
+                not_valid: _,
+            } => Ok(Self::AddKey(constraint.try_into_dialect(dialect)?)),
             DropConstraint {
                 if_exists: _,
                 name,
