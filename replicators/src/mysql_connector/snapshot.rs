@@ -37,7 +37,9 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
 use tracing_futures::Instrument;
 
-use super::utils::{get_mysql_version, mysql_pad_binary_column, mysql_pad_char_column};
+use super::utils::{
+    get_mysql_version, mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
+};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
 use crate::table_filter::TableFilter;
@@ -1053,7 +1055,7 @@ fn mysql_row_to_noria_row(
                     mysql_common::value::Value::Bytes(b) => str::from_utf8(&b)
                         .ok()
                         .and_then(|s: &str| serde_json::from_str(s).ok())
-                        .map(|j: Value| DfValue::from(j))
+                        .map(|j: Value| DfValue::from(mysql_json_print(&j)))
                         .ok_or_else(|| internal_err!("Failed to parse JSON value"))?,
                     mysql_common::value::Value::NULL => DfValue::None,
                     _ => {

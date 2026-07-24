@@ -3,6 +3,7 @@ use mysql_common::collations::{Collation as MyCollation, CollationId};
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation as RsCollation, DfValue, Dialect};
 use readyset_errors::{internal, replication_failed, replication_failed_err, ReadySetResult};
+use serde_json::Value as JsonValue;
 use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
@@ -108,6 +109,58 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
     Ok(major * 10000 + minor * 100 + patch)
 }
 
+/// Format JSON the same way MySQL renders a JSON column in a result set.
+pub(crate) fn mysql_json_print(json: &JsonValue) -> String {
+    fn write_json_string(output: &mut String, string: &str) {
+        match serde_json::to_string(string) {
+            Ok(string) => output.push_str(&string),
+            Err(_) => unreachable!("serializing a JSON string cannot fail"),
+        }
+    }
+
+    fn write_json(output: &mut String, json: &JsonValue) {
+        match json {
+            JsonValue::Object(object) => {
+                let mut fields = object.iter().collect::<Vec<_>>();
+                fields.sort_unstable_by(|(left, _), (right, _)| {
+                    left.len()
+                        .cmp(&right.len())
+                        .then_with(|| left.as_bytes().cmp(right.as_bytes()))
+                });
+
+                output.push('{');
+                for (index, (key, value)) in fields.into_iter().enumerate() {
+                    if index != 0 {
+                        output.push_str(", ");
+                    }
+                    write_json_string(output, key);
+                    output.push_str(": ");
+                    write_json(output, value);
+                }
+                output.push('}');
+            }
+            JsonValue::Array(array) => {
+                output.push('[');
+                for (index, value) in array.iter().enumerate() {
+                    if index != 0 {
+                        output.push_str(", ");
+                    }
+                    write_json(output, value);
+                }
+                output.push(']');
+            }
+            JsonValue::String(string) => write_json_string(output, string),
+            JsonValue::Number(number) => output.push_str(&number.to_string()),
+            JsonValue::Bool(boolean) => output.push_str(if *boolean { "true" } else { "false" }),
+            JsonValue::Null => output.push_str("null"),
+        }
+    }
+
+    let mut output = String::new();
+    write_json(&mut output, json);
+    output
+}
+
 /// Get MySQL Server Version
 pub async fn get_mysql_version(conn: &mut mysql_async::Conn) -> mysql::Result<u32> {
     let version: mysql::Row = conn.query_first("SELECT VERSION()").await?.unwrap();
@@ -132,5 +185,41 @@ mod tests {
         let version = "8.0.23-rds.20240529-log";
         let version_number = parse_mysql_version(version).unwrap();
         assert_eq!(version_number, 80023);
+    }
+
+    #[test]
+    fn mysql_json_print_matches_mysql_key_order_and_spacing() {
+        let json = serde_json::json!({
+            "zeta": 1,
+            "alpha": 2,
+            "middle": {
+                "z": 1,
+                "a": 2,
+                "m": 3
+            },
+            "numeric": {
+                "10": "ten",
+                "2": "two",
+                "1": "one",
+                "20": "twenty"
+            }
+        });
+
+        assert_eq!(
+            mysql_json_print(&json),
+            r#"{"zeta": 1, "alpha": 2, "middle": {"a": 2, "m": 3, "z": 1}, "numeric": {"1": "one", "2": "two", "10": "ten", "20": "twenty"}}"#
+        );
+    }
+
+    #[test]
+    fn mysql_json_print_escapes_strings() {
+        let json = serde_json::json!({
+            "quote\"": "line\nslash\\tab\t"
+        });
+
+        assert_eq!(
+            mysql_json_print(&json),
+            r#"{"quote\"": "line\nslash\\tab\t"}"#
+        );
     }
 }
