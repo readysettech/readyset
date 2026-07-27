@@ -189,7 +189,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_6`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` >= 1) GROUP BY `table_1`.`column_4`
 ----
 1
@@ -213,7 +213,7 @@ SELECT `table_1`.`column_4` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_7`) AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_4` >= 1) GROUP BY `table_1`.`column_4`
 ----
 1
@@ -237,7 +237,7 @@ SELECT `table_1`.`column_4` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT sum(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_4` > ?)
 ? = 10
 ----
@@ -295,7 +295,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 27 values hashing to e0c05ca97084de6f0098b4b4a8a48dfe
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_10`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` >= 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
 1
@@ -350,7 +350,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_12`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
@@ -365,7 +365,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 27 values hashing to e0c05ca97084de6f0098b4b4a8a48dfe
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_13`) AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` >= 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ----
 1
@@ -420,7 +420,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_15`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
@@ -462,7 +462,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2` FROM
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_17`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` >= 1) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
@@ -476,7 +476,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_17`) AS
 911205047
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, sum(distinct `table_1`.`column_18`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_4` >= 1) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`
 ? = 10
 ----
@@ -495,7 +495,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 36 values hashing to c378d4720a00daba6a9de0aba941d01f
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `table_1`.`column_4` AS `alias_3`, sum(distinct `table_1`.`column_19`) AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) OR (`table_1`.`column_4` >= `table_1`.`column_8`)) AND (`table_1`.`column_4` >= 1)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`, `table_1`.`column_4`
 ----
 1
@@ -564,7 +564,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_21`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) OR (`table_1`.`column_4` >= `table_1`.`column_8`)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -617,7 +617,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_23`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` >= 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -629,7 +629,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum
 -1559116060
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_24`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) OR (`table_1`.`column_4` >= 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -688,7 +688,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, `ta
 96314683
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_26`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) AND (`table_1`.`column_4` >= 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -700,7 +700,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum
 -901790902
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_27`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= `table_1`.`column_8`) OR (`table_1`.`column_4` >= 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -718,7 +718,7 @@ SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum
 1779729103
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_4` AS `alias_1`, `table_1`.`column_4` AS `alias_2`, sum(distinct `table_1`.`column_28`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_4` >= 1) OR (`table_1`.`column_4` >= 1)) AND (`table_1`.`column_4` > ?)) GROUP BY `table_1`.`column_4`, `table_1`.`column_4`
 ? = 10
 ----
@@ -750,7 +750,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 225441030
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, sum(distinct `table_1`.`column_30`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` >= `table_1`.`column_14`) OR (`table_1`.`column_7` >= `table_1`.`column_14`)) AND (`table_1`.`column_7` >= 1)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -760,7 +760,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 -88267673
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, sum(distinct `table_1`.`column_31`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` >= `table_1`.`column_14`) OR (`table_1`.`column_7` >= `table_1`.`column_14`)) OR (`table_1`.`column_7` >= 1)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -770,7 +770,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 1051267665
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, sum(distinct `table_1`.`column_32`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` >= `table_1`.`column_14`) AND (`table_1`.`column_7` >= 1)) OR (`table_1`.`column_7` >= 1)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -780,7 +780,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 -671677334
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, sum(distinct `table_1`.`column_33`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` >= `table_1`.`column_14`) AND (`table_1`.`column_7` >= 1)) OR (`table_1`.`column_7` >= 1)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -790,7 +790,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 -1578566782
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, `table_1`.`column_7` AS `alias_4`, sum(distinct `table_1`.`column_34`) AS `alias_5` FROM `table_1` WHERE (((((`table_1`.`column_7` >= `table_1`.`column_14`) OR (`table_1`.`column_7` >= `table_1`.`column_14`)) AND (`table_1`.`column_7` >= 1)) OR (`table_1`.`column_7` >= 1)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----

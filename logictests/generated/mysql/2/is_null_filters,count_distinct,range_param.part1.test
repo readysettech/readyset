@@ -225,7 +225,7 @@ SELECT `table_1`.`column_6` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 517019992
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT count(distinct `table_1`.`column_7`) AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -329,7 +329,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2` FROM
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, count(distinct `table_1`.`column_11`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`
 ? = 10
 ----
@@ -403,7 +403,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2` FROM
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, count(distinct `table_1`.`column_14`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_7` IS NOT NULL) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`
 ? = 10
 ----
@@ -448,13 +448,13 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2` FROM
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, count(distinct `table_1`.`column_16`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`
 ? = 10
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, count(distinct `table_1`.`column_17`) AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_7` IS NOT NULL) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`
 ? = 10
 ----
@@ -522,7 +522,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_20`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -547,13 +547,13 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_22`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NULL) OR (`table_1`.`column_7` IS NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_23`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NULL) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -587,7 +587,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_25`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NOT NULL) OR (`table_1`.`column_7` IS NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -602,7 +602,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, cou
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_26`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NOT NULL) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -617,7 +617,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, cou
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, count(distinct `table_1`.`column_27`) AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_7` IS NULL) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -654,13 +654,13 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 799037632
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, count(distinct `table_1`.`column_29`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` IS NOT NULL)) OR (`table_1`.`column_7` IS NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, count(distinct `table_1`.`column_30`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` IS NOT NULL)) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -678,7 +678,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, count(distinct `table_1`.`column_31`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` IS NULL) OR (`table_1`.`column_7` IS NULL)) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -696,7 +696,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, count(distinct `table_1`.`column_32`) AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_7` IS NOT NULL) OR (`table_1`.`column_7` IS NULL)) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----
@@ -714,7 +714,7 @@ SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `ta
 1
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ COUNT\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT `table_1`.`column_7` AS `alias_1`, `table_1`.`column_7` AS `alias_2`, `table_1`.`column_7` AS `alias_3`, `table_1`.`column_7` AS `alias_4`, count(distinct `table_1`.`column_33`) AS `alias_5` FROM `table_1` WHERE (((((`table_1`.`column_7` IS NULL) AND (`table_1`.`column_7` IS NOT NULL)) OR (`table_1`.`column_7` IS NULL)) OR (`table_1`.`column_7` IS NOT NULL)) AND (`table_1`.`column_7` > ?)) GROUP BY `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`, `table_1`.`column_7`
 ? = 10
 ----

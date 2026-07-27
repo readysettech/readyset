@@ -83,7 +83,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 2
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -101,7 +101,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 2
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -257,7 +257,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -279,7 +279,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -305,7 +305,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -333,7 +333,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -355,7 +355,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -383,7 +383,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -394,7 +394,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`colum
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE ((`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -477,7 +477,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -486,7 +486,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 21 values hashing to 26145d4ca2081d8b3fbcf4fa948ba926
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -511,7 +511,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -520,7 +520,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 30 values hashing to 40cfb9acc593cdf9b1a740be2f9b171b
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -533,7 +533,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -542,7 +542,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -551,7 +551,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 30 values hashing to 40cfb9acc593cdf9b1a740be2f9b171b
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -564,7 +564,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -573,7 +573,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (((`table_1`.`column_1` IN (?, ?, ?) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -629,7 +629,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)
 ? = 0
 ? = 1
@@ -638,7 +638,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 40 values hashing to 71d377a43583b2ebbd887697f6389f54
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -653,7 +653,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -662,7 +662,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 ----
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -677,7 +677,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -705,7 +705,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 1095805565
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ can't\ handle\ OR\ expressions\ between\ query\ parameter\ predicates
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((((`table_1`.`column_1` IN (?, ?, ?) AND `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1

@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_2`, `column_3`, `column_1`) VALUES (1, 0, 831869991), (658417232, 1, -1650468698), (1, 2, -471938201), (-150922463, 3, -1596931436), (1, 4, -8091563), (-1574041677, 5, -1639565851), (1, 6, -133551313), (1454699694, 7, 657099981), (1, 8, 616143015), (571147588, 9, 810188358)
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -21,7 +21,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -36,7 +36,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -51,7 +51,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -66,7 +66,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -78,7 +78,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -90,7 +90,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -105,7 +105,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -117,7 +117,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -129,7 +129,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -144,7 +144,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -156,7 +156,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= 1) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -171,7 +171,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -186,7 +186,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_5 ON (`table_1`.`column_2` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -201,7 +201,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -213,7 +213,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -228,7 +228,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -240,7 +240,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -255,7 +255,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -267,7 +267,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -282,7 +282,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -297,7 +297,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -309,7 +309,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -324,7 +324,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_2` >= 1) OR (`table_1`.`column_2` >= 1))) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -339,7 +339,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -354,7 +354,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -366,7 +366,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -381,7 +381,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -396,7 +396,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -411,7 +411,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_4`, `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_4`) WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -426,7 +426,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -440,7 +440,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -454,7 +454,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -472,7 +472,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -490,7 +490,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1`) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -508,7 +508,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -522,7 +522,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -536,7 +536,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -554,7 +554,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -568,7 +568,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -582,7 +582,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -600,7 +600,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= `table_1`.`column_1`)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -614,7 +614,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= 1) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -632,7 +632,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -650,7 +650,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_2` >= 1)) AS alias_6 ON (`table_1`.`column_2` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -668,7 +668,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -682,7 +682,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -700,7 +700,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -714,7 +714,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -732,7 +732,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -746,7 +746,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -764,7 +764,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -782,7 +782,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -796,7 +796,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -814,7 +814,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_2` >= 1) OR (`table_1`.`column_2` >= 1))) AS alias_7 ON (`table_1`.`column_2` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -832,7 +832,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7`, `table_1`.`column_2` AS `alias_8` FROM `table_1` WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_9 ON (`table_1`.`column_2` = `alias_9`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -850,7 +850,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -864,7 +864,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -882,7 +882,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -900,7 +900,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_2` >= `table_1`.`column_1`) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_8 ON (`table_1`.`column_2` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----
@@ -918,7 +918,7 @@ SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `ta
 658417232
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_2` AS `alias_1`, `table_1`.`column_2` AS `alias_2`, `table_1`.`column_2` AS `alias_3`, `table_1`.`column_2` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_2` AS `alias_5`, `table_1`.`column_2` AS `alias_6`, `table_1`.`column_2` AS `alias_7`, `table_1`.`column_2` AS `alias_8` FROM `table_1` WHERE ((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1))) AS alias_9 ON (`table_1`.`column_2` = `alias_9`.`alias_5`) WHERE (((((`table_1`.`column_2` >= `table_1`.`column_1`) OR (`table_1`.`column_2` >= `table_1`.`column_1`)) AND (`table_1`.`column_2` >= 1)) OR (`table_1`.`column_2` >= 1)) AND (`table_1`.`column_2` > ?))
 ? = 10
 ----

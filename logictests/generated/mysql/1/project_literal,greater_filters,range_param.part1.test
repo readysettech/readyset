@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_3`, `column_1`, `column_2`) VALUES (0, 1, -1201430391), (1, 461269992, -977313459), (2, 1, -1125346331), (3, 1841092924, -356952178), (4, 1, -1232025418), (5, 1837570984, 1974373835), (6, 1, 1240755204), (7, -1915642332, -312321165), (8, 1, -161349798), (9, 804884871, -103353306)
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Error\ during\ RPC\ \(extend_recipe\):\ SQL\ SELECT\ query\ 'q_[a-f0-9]+'\ couldn't\ be\ added:\ Operation\ unsupported:\ Queries\ with\ only\ VALUES\ clauses\ are\ not\ supported;\ at\ least\ one\ base\ table\ is\ required
 SELECT 1 AS `alias_1`
 ----
 1

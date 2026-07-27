@@ -41,7 +41,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 155387490
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
 SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -68,7 +68,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
 SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -122,7 +122,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 155387490
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
 SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -147,7 +147,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column
 
 
 # REA-6472
-query  rowsort error: ERROR\ HY000\ \(1105\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
+query  rowsort error: ERROR\ 1105\ \(HY000\):\ Operation\ unsupported:\ DISTINCT\ with\ parameterized\ IN\ is\ not\ supported
 SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1` WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
