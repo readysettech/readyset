@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use metrics::{counter, gauge};
 use thiserror::Error;
@@ -17,6 +17,18 @@ use tracing::{info, warn};
 
 use crate::policy_registry::PolicyRegistry;
 use crate::types::RlsConfig;
+
+/// Upper bound on the delay between attempts to recover a poller that lost its upstream connection,
+/// covering both the reconnect and the snapshot reseed that follows it.
+const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Delay before the poller retries a failed reconnect or snapshot reseed. Recovery runs on its own
+/// cadence rather than `poll_interval`, which is tunable up to 24h and would otherwise leave the
+/// registry stale for a whole interval after a blip. Deployments polling faster than
+/// [`RECOVERY_RETRY_INTERVAL`] keep their own cadence.
+fn recovery_retry_delay(poll_interval: Duration) -> Duration {
+    poll_interval.min(RECOVERY_RETRY_INTERVAL)
+}
 
 /// SQL for the three fingerprint queries. The diff helper compares old vs new maps keyed by OID.
 pub(crate) mod sql {
@@ -261,6 +273,7 @@ pub async fn run_poller<F, Fut>(
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<tokio_postgres::Client, crate::ConnectError>>,
 {
+    let retry_delay = recovery_retry_delay(config.poll_interval);
     let mut client = initial_client;
     let mut prev = Fingerprints::default();
     // The bootstrap snapshot already loaded the current catalog, so the first fingerprint load is
@@ -268,6 +281,10 @@ pub async fn run_poller<F, Fut>(
     // `prev` would report every relation and role as "changed" on the first tick, reloading the
     // whole catalog for nothing.
     let mut seeded = false;
+    // A reconnect leaves the registry owing a full reseed. It stays owed until `load_snapshot`
+    // succeeds, so a failed reseed retries instead of falling through to the diff path with stale
+    // view dependencies and role-default GUCs.
+    let mut needs_reseed = false;
     loop {
         if *shutdown.borrow() {
             tracing::info!("RLS poller received shutdown signal; exiting");
@@ -284,29 +301,7 @@ pub async fn run_poller<F, Fut>(
                 result = reconnect() => match result {
                     Ok(fresh) => {
                         client = fresh;
-                        // Reseed the full registry: the surgical diff path only reloads
-                        // fingerprinted objects (policies, RLS flags, roles), so reconnect is our
-                        // chance to also refresh view dependencies and role-default GUCs a diff
-                        // never observes. Retain the pre-outage fingerprints in `prev` so the next
-                        // tick diffs against them and drives any change that landed during the
-                        // outage through `apply_events`, refreshing descriptors before bumping the
-                        // generation. Keeping `prev` is also what purges a relation dropped during
-                        // the outage: `load_snapshot` only inserts and updates, so the diff-driven
-                        // `Removed` path is the only thing that removes it. Bumping the generation
-                        // here would publish it while descriptors are still stale, pairing the
-                        // fresh generation with an old partition and colliding tenants.
-                        if let Err(e) = crate::loader::load_snapshot(&client, &registry).await {
-                            health
-                                .errors
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            counter!(metric::RLS_POLL_ERRORS_TOTAL).increment(1);
-                            warn!(error = %e, "RLS snapshot reseed failed after reconnect");
-                            if sleep_until_shutdown(&mut shutdown, config.poll_interval).await {
-                                return;
-                            }
-                            continue;
-                        }
-                        *health.last_success.lock() = Some(Instant::now());
+                        needs_reseed = true;
                     }
                     Err(e) => {
                         health
@@ -314,13 +309,39 @@ pub async fn run_poller<F, Fut>(
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         counter!(metric::RLS_POLL_ERRORS_TOTAL).increment(1);
                         warn!(error = %e, "RLS reconnect failed");
-                        if sleep_until_shutdown(&mut shutdown, config.poll_interval).await {
+                        if sleep_until_shutdown(&mut shutdown, retry_delay).await {
                             return;
                         }
                         continue;
                     }
                 }
             }
+        }
+
+        if needs_reseed {
+            // Reseed the full registry: the surgical diff path only reloads fingerprinted objects
+            // (policies, RLS flags, roles), so reconnect is our chance to also refresh view
+            // dependencies and role-default GUCs a diff never observes. Retain the pre-outage
+            // fingerprints in `prev` so the next tick diffs against them and drives any change that
+            // landed during the outage through `apply_events`, refreshing descriptors before
+            // bumping the generation. Keeping `prev` is also what purges a relation dropped during
+            // the outage: `load_snapshot` only inserts and updates, so the diff-driven `Removed`
+            // path is the only thing that removes it. Bumping the generation here would publish it
+            // while descriptors are still stale, pairing the fresh generation with an old partition
+            // and colliding tenants.
+            if let Err(e) = crate::loader::load_snapshot(&client, &registry).await {
+                health
+                    .errors
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                counter!(metric::RLS_POLL_ERRORS_TOTAL).increment(1);
+                warn!(error = %e, "RLS snapshot reseed failed after reconnect");
+                if sleep_until_shutdown(&mut shutdown, retry_delay).await {
+                    return;
+                }
+                continue;
+            }
+            needs_reseed = false;
+            *health.last_success.lock() = Some(Instant::now());
         }
 
         tokio::select! {
@@ -618,6 +639,18 @@ mod tests {
         assert_eq!(parse_md5(&hex), Some(h));
         assert_eq!(parse_md5("not-hex"), None);
         assert_eq!(parse_md5(""), None);
+    }
+
+    #[test]
+    fn recovery_delay_is_bounded_by_poll_interval() {
+        assert_eq!(
+            recovery_retry_delay(Duration::from_secs(86400)),
+            RECOVERY_RETRY_INTERVAL
+        );
+        assert_eq!(
+            recovery_retry_delay(Duration::from_secs(1)),
+            Duration::from_secs(1)
+        );
     }
 
     #[test]
