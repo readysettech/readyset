@@ -436,6 +436,17 @@ pub struct Options {
     )]
     enabled_rls: bool,
 
+    /// How often, in seconds, the RLS catalog poller rescans the upstream for policy and
+    /// RLS-enablement changes. The interval bounds how long a scoped shallow cache can keep
+    /// serving under a stale view of the policies. Clamped to `[1, 86400]`. Applies only to a
+    /// Postgres upstream with RLS support enabled.
+    #[arg(
+        long,
+        env = "RLS_POLL_INTERVAL_SECS",
+        default_value_t = readyset_rls::RlsConfig::default().poll_interval.as_secs()
+    )]
+    rls_poll_interval_secs: u64,
+
     #[command(flatten)]
     pub server_worker_options: WorkerOptions,
 
@@ -1718,6 +1729,8 @@ where
                 .as_ref()
                 .map(|u| u.to_string());
             let deferred_sink = Arc::new(readyset_rls::DeferredSink::new());
+            let rls_config = readyset_rls::RlsConfig::default()
+                .with_poll_interval(Duration::from_secs(options.rls_poll_interval_secs));
             let handle = if !options.enabled_rls {
                 // Explicit operator opt-out: skip the catalog bootstrap
                 // entirely and run RLS-disabled. Loud because it is unsafe
@@ -1732,7 +1745,7 @@ where
                 upstream_url.as_deref().and_then(|url| {
                     match rt.block_on(readyset_rls::bootstrap_from_url(
                         url,
-                        readyset_rls::RlsConfig::default(),
+                        rls_config,
                         Some(deferred_sink.clone() as Arc<dyn readyset_rls::InvalidationSink>),
                     )) {
                         Ok(handle) => handle,
@@ -2233,6 +2246,31 @@ mod tests {
 
         assert_eq!(opts.max_processing_minutes, 15);
         assert_eq!(opts.migration_task_interval, 20000);
+    }
+
+    #[test]
+    fn rls_poll_interval_defaults_and_parses() {
+        let base = vec![
+            "readyset",
+            "--database-type",
+            "postgresql",
+            "--deployment",
+            "test",
+            "--address",
+            "0.0.0.0:5432",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+        ];
+        assert_eq!(
+            Options::parse_from(base.clone()).rls_poll_interval_secs,
+            readyset_rls::RlsConfig::default().poll_interval.as_secs(),
+            "default must match RlsConfig::default"
+        );
+
+        let mut with_flag = base;
+        with_flag.push("--rls-poll-interval-secs=5");
+        assert_eq!(Options::parse_from(with_flag).rls_poll_interval_secs, 5);
     }
 
     #[test]

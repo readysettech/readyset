@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 /// Configuration knobs the operator can tune for catalog polling. Built from
-/// `--readyset-rls-poll-interval` (default 60s) and passed to the poller.
+/// `--rls-poll-interval-secs` (default 60s) and passed to the poller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RlsConfig {
     /// Interval between catalog fingerprint scans. Clamped to
@@ -27,7 +27,45 @@ impl RlsConfig {
         let min = Duration::from_secs(1);
         let max = Duration::from_secs(24 * 60 * 60);
         self.poll_interval = interval.clamp(min, max);
+        if self.poll_interval != interval {
+            tracing::warn!(
+                requested = ?interval,
+                effective = ?self.poll_interval,
+                "RLS catalog poll interval outside the supported [1s, 24h] range; clamped"
+            );
+        }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_interval_clamps_to_supported_range() {
+        assert_eq!(RlsConfig::default().poll_interval, Duration::from_secs(60));
+
+        let one_sec = Duration::from_secs(1);
+        let one_day = Duration::from_secs(24 * 60 * 60);
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::ZERO)
+                .poll_interval,
+            one_sec
+        );
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::from_secs(u64::from(u32::MAX)))
+                .poll_interval,
+            one_day
+        );
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::from_secs(5))
+                .poll_interval,
+            Duration::from_secs(5)
+        );
     }
 }
 
