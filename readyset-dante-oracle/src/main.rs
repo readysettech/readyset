@@ -129,6 +129,11 @@ impl ReproLog {
 
     fn push_entry(&mut self, entry: String) {
         self.statements_total += 1;
+        // Stream every recorded statement to tracing (enable with
+        // `dante_repro=debug` in LOG_LEVEL). In Antithesis this lands in the
+        // captured jsonl log at execution time, so the history leading up to
+        // any moment (e.g. a SUT crash) contains the workload that drove it.
+        debug!(target: "dante_repro", "{entry}");
         if let Some(w) = self.writer.as_mut() {
             // Best-effort streaming write. A write error here is logged but
             // doesn't abort the run; the bounded ring buffer still preserves
