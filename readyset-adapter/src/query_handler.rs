@@ -101,6 +101,19 @@ impl SessionTimezone {
     }
 }
 
+/// What to send upstream for a `SET` statement that Readyset handles (in whole or in part)
+/// itself.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UpstreamSetRewrite {
+    /// Forward the client's `SET` statement to the upstream unchanged.
+    #[default]
+    ProxyVerbatim,
+    /// Forward this statement to the upstream in place of the client's.
+    Rewrite(SetStatement),
+    /// Don't send anything upstream; Readyset handles the statement entirely.
+    Skip,
+}
+
 /// How we should be handling a SQL `SET` statement.
 #[must_use]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +129,11 @@ pub struct SetBehavior {
     /// This `SET` statement changes the encoding to be used for results. Corresponds to `SET
     /// @@character_set_results` in MySQL or `SET NAMES` in Postgres or MySQL.
     pub set_results_encoding: Option<readyset_data::encoding::Encoding>,
+    /// This `SET` statement changes the encoding in which the client sends query text.
+    /// Corresponds to `SET @@character_set_client` or `SET NAMES` in MySQL.
+    pub set_client_encoding: Option<readyset_data::encoding::Encoding>,
+    /// What to forward upstream for this `SET` statement.
+    pub upstream_rewrite: UpstreamSetRewrite,
     /// This `SET` statement changes the session timezone for TIMESTAMP conversions.
     /// `Some(tz)` means change to the given timezone.
     /// `None` means no change (this SET didn't touch time_zone).
@@ -147,6 +165,23 @@ impl SetBehavior {
         } else {
             self.unsupported = true;
         }
+        self
+    }
+
+    pub fn set_client_encoding(
+        mut self,
+        encoding: Option<readyset_data::encoding::Encoding>,
+    ) -> Self {
+        if let Some(encoding) = encoding {
+            self.set_client_encoding = Some(encoding);
+        } else {
+            self.unsupported = true;
+        }
+        self
+    }
+
+    pub fn upstream_rewrite(mut self, rewrite: UpstreamSetRewrite) -> Self {
+        self.upstream_rewrite = rewrite;
         self
     }
 
@@ -233,6 +268,8 @@ impl Default for SetBehavior {
             set_autocommit: None,
             set_search_path: None,
             set_results_encoding: None,
+            set_client_encoding: None,
+            upstream_rewrite: UpstreamSetRewrite::default(),
             set_timezone: None,
         }
     }

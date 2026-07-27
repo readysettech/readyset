@@ -148,7 +148,7 @@ use tracing::{debug, error, info, trace, warn};
 use vec1::Vec1;
 
 use crate::backend::noria_connector::ExecuteSelectContext;
-use crate::query_handler::SetBehavior;
+use crate::query_handler::{SetBehavior, UpstreamSetRewrite};
 use crate::query_status_cache::{ManualCacheEntry, QueryStatusCache};
 use crate::session_mutation::{self, SessionMutationTemplate};
 use crate::status_reporter::ReadySetStatusReporter;
@@ -2537,7 +2537,7 @@ where
         // if `handle_set()` returns an error, we aren't supposed to process
         // the SET anyway, so propagating the error is expected.
         // Then we need to determine if we're actually going to proxy to the upstream.
-        Self::handle_set(
+        let upstream_set_rewrite = Self::handle_set(
             &mut self.connectors,
             &self.settings,
             &mut self.state,
@@ -2551,14 +2551,22 @@ where
         // mutating utility statements: gating on it dropped SET in autocommit,
         // leaving the session mirror ahead of an upstream that never saw the
         // statement. Fall back to a Noria no-op only with no upstream to carry
-        // the side effect.
-        let res = if let Some(upstream) = self.connectors.upstream.as_mut() {
-            let prep = upstream.prepare(query, data, statement_type).await?;
-            PrepareResultInner::Upstream(prep)
-        } else {
-            PrepareResultInner::Noria(noria_connector::PrepareResult::Set {
-                statement: stmt.clone(),
-            })
+        // the side effect, or when Readyset handles the statement entirely.
+        let res = match (self.connectors.upstream.as_mut(), upstream_set_rewrite) {
+            (Some(upstream), UpstreamSetRewrite::ProxyVerbatim) => {
+                let prep = upstream.prepare(query, data, statement_type).await?;
+                PrepareResultInner::Upstream(prep)
+            }
+            (Some(upstream), UpstreamSetRewrite::Rewrite(rewritten)) => {
+                let rewritten = rewritten.display(self.settings.dialect).to_string();
+                let prep = upstream.prepare(rewritten, data, statement_type).await?;
+                PrepareResultInner::Upstream(prep)
+            }
+            (None, _) | (Some(_), UpstreamSetRewrite::Skip) => {
+                PrepareResultInner::Noria(noria_connector::PrepareResult::Set {
+                    statement: stmt.clone(),
+                })
+            }
         };
 
         Ok(res)
@@ -6623,13 +6631,15 @@ where
         query: &str,
         set: &SetStatement,
         event: &mut QueryExecutionEvent,
-    ) -> Result<(), DB::Error> {
+    ) -> Result<UpstreamSetRewrite, DB::Error> {
         let SetBehavior {
             unsupported,
             proxy: _, // Basically ignored, caller will proxy unless we return an error
             set_autocommit,
             set_search_path,
             set_results_encoding,
+            set_client_encoding,
+            upstream_rewrite,
             set_timezone,
         } = Handler::handle_set_statement(set);
 
@@ -6695,6 +6705,10 @@ where
             trace!(?encoding, "Setting results_encoding");
             connectors.noria.set_results_encoding(encoding);
         }
+        if let Some(encoding) = set_client_encoding {
+            trace!(?encoding, "Setting client_encoding");
+            connectors.noria.set_client_encoding(encoding);
+        }
         // The handler records `set_timezone` even for non-UTC values so a
         // future eval-side fix can read it unchanged; only apply it here when
         // the SET resolved to a UTC-equivalent zone — otherwise cached
@@ -6717,7 +6731,7 @@ where
             let _ = session.apply_set_statement(set);
         }
 
-        Ok(())
+        Ok(upstream_rewrite)
     }
 
     /// Mirror `SET [LOCAL] ROLE <role>` into the session context, called only after upstream
@@ -6769,8 +6783,12 @@ where
         event: &mut QueryExecutionEvent,
         query: SqlQuery,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        let mut upstream_set_rewrite = UpstreamSetRewrite::ProxyVerbatim;
         match &query {
-            SqlQuery::Set(s) => Self::handle_set(connectors, settings, state, raw_query, s, event)?,
+            SqlQuery::Set(s) => {
+                upstream_set_rewrite =
+                    Self::handle_set(connectors, settings, state, raw_query, s, event)?
+            }
             SqlQuery::Use(UseStatement { database }) => connectors
                 .noria
                 .set_schema_search_path(vec![database.clone()]),
@@ -6822,6 +6840,20 @@ where
                     }
                     SqlQuery::Set(set) => {
                         event.sql_type = SqlQueryType::Other;
+                        match upstream_set_rewrite {
+                            UpstreamSetRewrite::ProxyVerbatim => {}
+                            UpstreamSetRewrite::Rewrite(stmt) => {
+                                // The trait ties the result's lifetime to the query text, so a
+                                // rewritten statement's result can't be returned; a SET only
+                                // produces an OK, so respond as the no-upstream branch does.
+                                let rewritten = stmt.display(settings.dialect).to_string();
+                                upstream.query(&rewritten).await?;
+                                return Ok(QueryResult::Noria(noria_connector::QueryResult::Empty));
+                            }
+                            UpstreamSetRewrite::Skip => {
+                                return Ok(QueryResult::Noria(noria_connector::QueryResult::Empty));
+                            }
+                        }
                         let result = upstream.query(raw_query).await?;
                         // Mirror an identity change only now that upstream has accepted it: a
                         // rejected statement must not leave the session mirror pointing at an

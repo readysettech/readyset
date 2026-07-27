@@ -8,14 +8,14 @@ use mysql_srv::AuthKeys;
 use readyset_adapter::backend::noria_connector::QueryResult;
 #[cfg(test)]
 use readyset_adapter::SessionTimezone;
-use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior};
+use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior, UpstreamSetRewrite};
 use readyset_client::post_processing::Results;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, ShowStatement, SqlIdentifier,
-    SqlQuery,
+    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SetVariables, ShowStatement,
+    SqlIdentifier, SqlQuery, Variable, VariableScope,
 };
 use tracing::warn;
 
@@ -953,8 +953,10 @@ impl QueryHandler for MySqlQueryHandler {
 
         match stmt {
             SetStatement::Variable(set) => {
+                let mut upstream_vars = Vec::with_capacity(set.variables.len());
                 for (variable, value) in &set.variables {
                     let var_name = variable.name.to_ascii_lowercase();
+                    let mut keep_for_upstream = true;
                     behavior = match var_name.as_str() {
                         "autocommit" => behavior.set_autocommit(
                             matches!(value, Expr::Literal(Literal::Integer(i)) if *i == 1),
@@ -993,8 +995,19 @@ impl QueryHandler for MySqlQueryHandler {
                             let encoding = get_encoding_for_charset(value, var_name);
                             behavior.set_results_encoding(encoding)
                         }
-                        "character_set_client" // TODO(mvzink): Remove and support reencoding queries before parsing
-                        | "character_set_connection" // TODO(mvzink): Remove and support plumbing collation through expression lowering
+                        // character_set_client describes the bytes the client sends, but
+                        // Readyset decodes those and sends UTF-8 text upstream, so the upstream
+                        // session's value must stay utf8mb4: handle it internally and drop it
+                        // from the statement forwarded upstream.
+                        "character_set_client" => {
+                            let encoding = get_encoding_for_charset(value, var_name);
+                            keep_for_upstream = encoding.is_none();
+                            behavior.set_client_encoding(encoding)
+                        }
+                        // character_set_connection, by contrast, governs conversion *after* the
+                        // server decodes the statement text, so it composes with the UTF-8 text
+                        // we send and is safe to forward verbatim.
+                        "character_set_connection" // TODO(mvzink): Remove and support plumbing collation through expression lowering
                         | "character_set_server"
                         | "collation_connection"
                         | "collation_server" => {
@@ -1003,6 +1016,18 @@ impl QueryHandler for MySqlQueryHandler {
                         }
                         p => behavior.unsupported(!ALLOWED_PARAMETERS_ANY_VALUE.contains(p)),
                     };
+                    if keep_for_upstream {
+                        upstream_vars.push((variable.clone(), value.clone()));
+                    }
+                }
+                if upstream_vars.len() < set.variables.len() {
+                    behavior = behavior.upstream_rewrite(if upstream_vars.is_empty() {
+                        UpstreamSetRewrite::Skip
+                    } else {
+                        UpstreamSetRewrite::Rewrite(SetStatement::Variable(SetVariables {
+                            variables: upstream_vars,
+                        }))
+                    });
                 }
             }
             // TODO(mvzink): Handle `SET CHARACTER SET`
@@ -1014,13 +1039,49 @@ impl QueryHandler for MySqlQueryHandler {
                 counter!(
                     metric::CHARACTER_SET_USAGE,
                     "type" => "names",
-                    "charset" => encoding_name,
+                    "charset" => encoding_name.clone(),
                 )
                 .increment(1);
 
                 behavior = behavior
                     .set_results_encoding(encoding)
-                    .unsupported(names.collation.is_some());
+                    .set_client_encoding(encoding);
+
+                // SET NAMES sets character_set_client, character_set_connection,
+                // character_set_results, and (with a COLLATE clause) collation_connection.
+                // Readyset decodes client bytes and sends UTF-8 text upstream, so the upstream's
+                // character_set_client must stay utf8mb4; the others apply after the upstream
+                // decodes our text, so they are forwarded to keep literal semantics and proxied
+                // result bytes in the client's charset. Setting collation_connection also sets
+                // character_set_connection to the collation's charset, so a COLLATE clause
+                // replaces the charset assignment.
+                if encoding.is_some() {
+                    let session_var = |name: &str| Variable {
+                        scope: VariableScope::Session,
+                        name: name.into(),
+                    };
+                    let connection_var = match &names.collation {
+                        Some(collation) => (
+                            session_var("collation_connection"),
+                            Expr::Literal(Literal::String(collation.to_ascii_lowercase())),
+                        ),
+                        None => (
+                            session_var("character_set_connection"),
+                            Expr::Literal(Literal::String(encoding_name.clone())),
+                        ),
+                    };
+                    behavior = behavior.upstream_rewrite(UpstreamSetRewrite::Rewrite(
+                        SetStatement::Variable(SetVariables {
+                            variables: vec![
+                                connection_var,
+                                (
+                                    session_var("character_set_results"),
+                                    Expr::Literal(Literal::String(encoding_name)),
+                                ),
+                            ],
+                        }),
+                    ));
+                }
             }
             SetStatement::PostgresParameter(_) | SetStatement::SessionAuthorization(_) => {
                 behavior = behavior.unsupported(true);
@@ -1254,6 +1315,29 @@ mod tests {
         }
     }
 
+    fn session_var(name: &str) -> Variable {
+        Variable {
+            scope: VariableScope::Session,
+            name: name.into(),
+        }
+    }
+
+    /// The upstream rewrite produced for a supported `SET NAMES <charset>`.
+    fn names_rewrite(charset: &str) -> UpstreamSetRewrite {
+        UpstreamSetRewrite::Rewrite(SetStatement::Variable(SetVariables {
+            variables: vec![
+                (
+                    session_var("character_set_connection"),
+                    Expr::Literal(Literal::String(charset.into())),
+                ),
+                (
+                    session_var("character_set_results"),
+                    Expr::Literal(Literal::String(charset.into())),
+                ),
+            ],
+        }))
+    }
+
     #[test]
     fn set_names_supported() {
         for (charset, encoding) in [
@@ -1268,9 +1352,122 @@ mod tests {
             });
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
-                SetBehavior::default().set_results_encoding(Some(encoding))
+                SetBehavior::default()
+                    .set_results_encoding(Some(encoding))
+                    .set_client_encoding(Some(encoding))
+                    .upstream_rewrite(names_rewrite(charset))
             )
         }
+    }
+
+    #[test]
+    fn set_names_with_collation_forwards_collation() {
+        let stmt = SetStatement::Names(SetNames {
+            charset: "latin1".to_owned(),
+            collation: Some("latin1_bin".to_owned()),
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+                .set_results_encoding(Some(Encoding::Latin1))
+                .set_client_encoding(Some(Encoding::Latin1))
+                .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
+                    SetVariables {
+                        variables: vec![
+                            (
+                                session_var("collation_connection"),
+                                Expr::Literal(Literal::String("latin1_bin".into())),
+                            ),
+                            (
+                                session_var("character_set_results"),
+                                Expr::Literal(Literal::String("latin1".into())),
+                            ),
+                        ],
+                    }
+                )))
+        )
+    }
+
+    #[test]
+    fn set_names_unsupported_charset_proxies_verbatim() {
+        let stmt = SetStatement::Names(SetNames {
+            charset: "petscii".to_owned(),
+            collation: None,
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().unsupported(true)
+        )
+    }
+
+    #[test]
+    fn set_character_set_client_alone_skips_upstream() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("character_set_client"),
+                Expr::Literal(Literal::String("latin1".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+                .set_client_encoding(Some(Encoding::Latin1))
+                .upstream_rewrite(UpstreamSetRewrite::Skip)
+        )
+    }
+
+    #[test]
+    fn set_character_set_client_compound_rewrites_remainder() {
+        let sql_mode = Expr::Literal(Literal::String(
+            "NO_ZERO_DATE,STRICT_ALL_TABLES,ONLY_FULL_GROUP_BY,NO_ZERO_IN_DATE".into(),
+        ));
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![
+                (
+                    session_var("character_set_client"),
+                    Expr::Literal(Literal::String("latin1".into())),
+                ),
+                (session_var("sql_mode"), sql_mode.clone()),
+            ],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+                .set_client_encoding(Some(Encoding::Latin1))
+                .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
+                    SetVariables {
+                        variables: vec![(session_var("sql_mode"), sql_mode)],
+                    }
+                )))
+        )
+    }
+
+    #[test]
+    fn set_character_set_client_unsupported_charset_proxies_verbatim() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("character_set_client"),
+                Expr::Literal(Literal::String("petscii".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().unsupported(true)
+        )
+    }
+
+    #[test]
+    fn set_character_set_connection_proxies_verbatim() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("character_set_connection"),
+                Expr::Literal(Literal::String("latin1".into())),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+        )
     }
 
     fn fixed(secs: i32) -> super::SessionTimezone {
