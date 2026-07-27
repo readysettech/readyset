@@ -48,13 +48,17 @@ URL = "https://docs.oracle.com/cd/E17952_01/mysql-{v}-en/built-in-function-refer
 USER_AGENT = "Mozilla/5.0 (readyset builtin-allowlist generator)"
 
 # Each reference entry is an anchor into #function_NAME / #operator_NAME whose
-# link text is the function spelled in a <code class="literal"> element. We take
-# the link text (not the href fragment, which lossily hyphenates ST_Area ->
-# st-area), then keep the identifier before the first '('.
-ENTRY_RE = re.compile(
-    r'#(?:function|operator)[^"]*"[^>]*>\s*<code class="literal">([^<]+)</code>',
-    re.IGNORECASE,
+# link text is the function spelled in one or more <code class="literal">
+# elements -- synonyms share a single anchor (e.g. SHA1()/SHA()), so the anchor
+# body is matched first and every <code> element within it is then extracted,
+# rather than only the first. We take the link text (not the href fragment,
+# which lossily hyphenates ST_Area -> st-area), then keep the identifier before
+# the first '('.
+ANCHOR_RE = re.compile(
+    r'<a class="link" href="[^"]*#(?:function|operator)[^"]*">(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
 )
+CODE_RE = re.compile(r'<code class="literal">([^<]+)</code>', re.IGNORECASE)
 
 # Band covers the union of the docs scrape and the help tables; the help-topic
 # source widens the upper end when it is populated.
@@ -79,7 +83,12 @@ def collect(version: str) -> set[str]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=30) as resp:
         html = resp.read().decode("utf-8", "replace")
-    names = {n for raw in ENTRY_RE.findall(html) if (n := normalize(raw))}
+    names = {
+        n
+        for body in ANCHOR_RE.findall(html)
+        for raw in CODE_RE.findall(body)
+        if (n := normalize(raw))
+    }
     print(f"  mysql {version}: {len(names)} doc-page names", file=sys.stderr)
     return names
 

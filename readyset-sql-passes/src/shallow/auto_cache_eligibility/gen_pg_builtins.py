@@ -9,9 +9,11 @@ resolve by bare name lives in the `pg_catalog` schema of `pg_proc`.  We spin up
 a throwaway container per supported major version. BUILTINS is unioned across
 versions -- the fail-safe direction, since a name present in any supported major
 is a builtin and one missing from a minor never causes a wrongful skip.
-IMMUTABLE_BUILTINS is intersected instead: a name is cacheable only if every one
-of its overloads is immutable in every major, so gaining a non-immutable overload
-anywhere excludes it.
+IMMUTABLE_BUILTINS requires a name to be immutable in every major where it
+exists: gaining a non-immutable overload anywhere excludes it, but a major
+that simply doesn't have the function yet (added in a later version) doesn't
+-- a name absent from one major's pg_proc contributes no provolatile row to
+veto it there.
 
 Usage:
     ./gen_pg_builtins.py [VERSION ...]        # defaults to the supported majors
@@ -39,9 +41,13 @@ BUILTINS_QUERY = (
 )
 
 # IMMUTABLE functions (provolatile = 'i') are the definitive safe-to-cache
-# builtins: the result depends only on the arguments, never on session, clock,
-# or table state. Under default-deny this is the base allowlist -- a builtin
-# that is not immutable is denied unless a curated list or opt-in permits it.
+# builtins: for the same arguments and table state, the result never varies
+# with session, clock, or side effects -- this includes aggregates and window
+# functions (count, sum, row_number, ...), whose dependence on the rows they
+# see is table state, kept current by the shallow cache's refresh path rather
+# than by this eligibility check. Under default-deny this is the base
+# allowlist -- a builtin that is not immutable is denied unless a curated list
+# or opt-in permits it.
 #
 # A function NAME is immutable only if EVERY overload of that name is immutable.
 # `date_trunc`, for example, is immutable for (text, timestamp) but STABLE for
@@ -137,22 +143,27 @@ def main() -> None:
     versions = sys.argv[1:] or DEFAULT_VERSIONS
     # BUILTINS is unioned across majors: a name present in any supported version
     # is a builtin, the fail-safe direction for the builtin-vs-UDF test (a name
-    # missing from one minor never causes a wrongful skip). IMMUTABLE is
-    # INTERSECTED: a name is treated as safe-to-cache only if it is immutable in
-    # EVERY supported major, so a name that gains a non-immutable overload in
-    # some version is never wrongly cached -- the fail-safe direction here is to
-    # under-admit, since default-deny only under-caches when the list is short.
+    # missing from one minor never causes a wrongful skip). IMMUTABLE requires a
+    # name to be immutable in every major where it *exists* -- so a name that
+    # gains a non-immutable overload in some version is never wrongly cached --
+    # but a version where the name is simply absent (not yet added, e.g.
+    # `bit_xor` before 14) doesn't veto it: that version contributes no
+    # `provolatile` row either way, so it's excluded from the check for that
+    # name rather than treated as a non-immutable one.
     all_union: set[str] = set()
-    immutable_intersection: set[str] | None = None
+    per_version: list[tuple[set[str], set[str]]] = []
     for version in versions:
         all_names, immutable_names = collect(version)
         all_union |= all_names
-        immutable_intersection = (
-            immutable_names
-            if immutable_intersection is None
-            else immutable_intersection & immutable_names
+        per_version.append((all_names, immutable_names))
+    immutable_intersection = {
+        name
+        for name in all_union
+        if all(
+            name not in all_names or name in immutable_names
+            for all_names, immutable_names in per_version
         )
-    immutable_intersection = immutable_intersection or set()
+    }
 
     if not (MIN_EXPECTED <= len(all_union) <= MAX_EXPECTED):
         raise SystemExit(
@@ -171,10 +182,11 @@ def main() -> None:
         "PostgreSQL builtin function names for shallow-cache eligibility.",
         "Source: pg_catalog.pg_proc across PostgreSQL majors "
         + ", ".join(versions)
-        + " (BUILTINS unioned, IMMUTABLE_BUILTINS intersected).",
+        + " (BUILTINS unioned, IMMUTABLE_BUILTINS intersected over the majors "
+        "where each name exists).",
         "BUILTINS: every pg_catalog function (builtin-vs-UDF test).",
-        "IMMUTABLE_BUILTINS: names whose every overload is provolatile='i', in "
-        "every major (default-deny cacheable base).",
+        "IMMUTABLE_BUILTINS: names whose every overload is provolatile='i' in "
+        "every major where the name exists (default-deny cacheable base).",
         "Regenerate: ./gen_pg_builtins.py",
     ]
     write_rust_list(

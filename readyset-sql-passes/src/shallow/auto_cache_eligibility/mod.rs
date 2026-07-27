@@ -12,7 +12,7 @@
 //! effects or be non-deterministic.  For PostgreSQL the pass is default-deny: a
 //! call is eligible only if it is an IMMUTABLE builtin (identified by
 //! `pg_proc.provolatile` and generated into `pg_builtins`), so any session-,
-//! clock-, or table-state-dependent builtin is treated as non-deterministic
+//! clock-, or side-effect-dependent builtin is treated as non-deterministic
 //! without a hand-curated list.  MySQL is default-deny too, but exposes no
 //! volatility signal, so its immutable set is the hand-curated
 //! `MYSQL_IMMUTABLE_FUNCTIONS`: only those builtins are cacheable and every
@@ -69,20 +69,23 @@ const MYSQL_SYSTEM_SCHEMAS: &[&str] = &["mysql", "information_schema", "performa
 /// tables such as `pg_class`, `pg_type`, `pg_proc`, ...).
 const PG_SYSTEM_SCHEMAS: &[&str] = &["information_schema", "readyset"];
 
-/// MySQL builtins whose result depends only on their arguments: deterministic,
-/// side-effect-free, and independent of session, connection, locale, time zone,
-/// clock, and table state. This is the MySQL analogue of PostgreSQL's
-/// `provolatile = 'i'` set, but hand-curated, since MySQL exposes no volatility
-/// signal to generate it from. Under default-deny this is the base allow-list --
-/// a builtin absent from it (and from the opt-in lists below) is denied -- so it
-/// errs toward omission: a missing deterministic function only under-caches,
-/// whereas a wrongly-included non-deterministic one would serve stale results.
+/// MySQL builtins safe to cache: for the same arguments and the same table
+/// state, deterministic, side-effect-free, and independent of session,
+/// connection, locale, time zone, and clock. This is the MySQL analogue of
+/// PostgreSQL's `provolatile = 'i'` set, but hand-curated, since MySQL exposes
+/// no volatility signal to generate it from. Under default-deny this is the
+/// base allow-list -- a builtin absent from it (and from the opt-in lists
+/// below) is denied -- so it errs toward omission: a missing deterministic
+/// function only under-caches, whereas a wrongly-included non-deterministic one
+/// would serve stale results.
 /// Deliberately excluded are functions that vary with `lc_time_names` or
 /// `lc_numeric` (`date_format`, `str_to_date`, `dayname`, `format`), the session
 /// time zone (`from_unixtime`, `convert_tz`), or a session variable
-/// (`week`/`yearweek` honor `default_week_format`). Standard-SQL keyword
-/// functions (`cast`, `coalesce`, `greatest`, ...) are handled by
-/// [`is_keyword_function`]. Not exhaustive by design.
+/// (`week`/`yearweek` honor `default_week_format`; `group_concat` is instead
+/// in [`MYSQL_SESSION_SPECIFIC_FUNCTIONS`], since it honors
+/// `group_concat_max_len`). Standard-SQL keyword functions (`cast`, `coalesce`,
+/// `greatest`, ...) are handled by [`is_keyword_function`]. Not exhaustive by
+/// design.
 const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     // Numeric and mathematical.
     "abs",
@@ -247,6 +250,37 @@ const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     // Version checks.
     "version",
     "icu_version",
+    // Aggregate.
+    "any_value",
+    "avg",
+    "bit_and",
+    "bit_or",
+    "bit_xor",
+    "count",
+    "json_arrayagg",
+    "json_objectagg",
+    "max",
+    "min",
+    "std",
+    "stddev",
+    "stddev_pop",
+    "stddev_samp",
+    "sum",
+    "var_pop",
+    "var_samp",
+    "variance",
+    // Window.
+    "cume_dist",
+    "dense_rank",
+    "first_value",
+    "lag",
+    "last_value",
+    "lead",
+    "nth_value",
+    "ntile",
+    "percent_rank",
+    "rank",
+    "row_number",
 ];
 
 /// MySQL non-deterministic builtins: clock and randomness whose result varies
@@ -285,8 +319,10 @@ const MYSQL_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
 ];
 
 /// MySQL builtins whose result depends on session identity (current user, role,
-/// database, schema) or privileges. Caching one would serve another session's
-/// value; `--shallow-cache-allow-session-specific` opts into caching these.
+/// database, schema), privileges, or a session-scoped setting (`group_concat`
+/// honors `group_concat_max_len`, truncating its result under a limit that
+/// differs by session). Caching one would serve another session's value;
+/// `--shallow-cache-allow-session-specific` opts into caching these.
 const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "user",
     "current_user",
@@ -303,6 +339,7 @@ const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "charset",
     "collation",
     "coercibility",
+    "group_concat",
 ];
 
 /// MySQL side-effecting or blocking builtins. Under default-deny these are
@@ -992,7 +1029,8 @@ fn is_builtin(name: &str, dialect: Dialect) -> bool {
     builtins.contains(lower.as_str())
 }
 
-/// Whether `name` is a builtin whose result depends only on its arguments --
+/// Whether `name` is a builtin safe to cache: for the same arguments and table
+/// state, deterministic and free of session/clock/side-effect dependence --
 /// the definitive safe-to-cache set. PostgreSQL derives this from
 /// `pg_proc.provolatile = 'i'` (generated into `pg_builtins`); MySQL has no
 /// volatility signal, so it is the hand-curated [`MYSQL_IMMUTABLE_FUNCTIONS`].
@@ -1489,6 +1527,35 @@ mod tests {
     }
 
     #[test]
+    fn immutable_list_entries_are_known_builtins() {
+        // Unlike the deny lists, a typo here is not merely under-denied: since
+        // is_immutable_builtin is checked before the UDF fallthrough in
+        // function_reason, a bogus entry would silently make any UDF of that
+        // name eligible for caching with no further check.
+        let known: HashSet<&str> = mysql_builtins::BUILTINS.iter().copied().collect();
+        for &f in MYSQL_IMMUTABLE_FUNCTIONS {
+            assert!(
+                known.contains(f),
+                "immutable-list entry {f:?} is not a known MySQL builtin (typo?)"
+            );
+        }
+    }
+
+    #[test]
+    fn mysql_immutable_list_has_no_duplicates() {
+        let lowered: Vec<String> = MYSQL_IMMUTABLE_FUNCTIONS
+            .iter()
+            .map(|s| s.to_ascii_lowercase())
+            .collect();
+        let set: HashSet<&String> = lowered.iter().collect();
+        assert_eq!(
+            set.len(),
+            lowered.len(),
+            "duplicate entry in MYSQL_IMMUTABLE_FUNCTIONS"
+        );
+    }
+
+    #[test]
     fn bare_session_keywords_are_blocked() {
         // Bare identity keywords route to session-specific; bare clock keywords
         // to non-deterministic.
@@ -1774,6 +1841,45 @@ mod tests {
     }
 
     #[test]
+    fn mysql_aggregate_and_window_functions_are_eligible() {
+        for q in [
+            "SELECT COUNT(*) FROM book_reviews",
+            "SELECT book_id, SUM(rating) FROM book_reviews GROUP BY book_id",
+            "SELECT AVG(rating), MIN(rating), MAX(rating) FROM book_reviews",
+            "SELECT BIT_AND(rating), BIT_OR(rating), BIT_XOR(rating) FROM book_reviews",
+            "SELECT STD(rating), STDDEV(rating) FROM book_reviews",
+            "SELECT STDDEV_POP(rating), STDDEV_SAMP(rating) FROM book_reviews",
+            "SELECT VAR_POP(rating), VAR_SAMP(rating), VARIANCE(rating) FROM book_reviews",
+            "SELECT ANY_VALUE(comment) FROM book_reviews GROUP BY book_id",
+            "SELECT JSON_ARRAYAGG(rating), JSON_OBJECTAGG(id, rating) FROM book_reviews",
+            "SELECT book_id, SUM(rating) FROM book_reviews GROUP BY book_id HAVING SUM(rating) > 5",
+            "SELECT id, ROW_NUMBER() OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, RANK() OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, DENSE_RANK() OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, NTILE(4) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, LAG(rating) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, LEAD(rating) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, FIRST_VALUE(rating) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, LAST_VALUE(rating) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, NTH_VALUE(rating, 2) OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, PERCENT_RANK() OVER (ORDER BY rating DESC) FROM book_reviews",
+            "SELECT id, CUME_DIST() OVER (ORDER BY rating DESC) FROM book_reviews",
+        ] {
+            assert_eligible(Dialect::MySQL, q);
+        }
+    }
+
+    #[test]
+    fn pg_functions_added_after_the_oldest_supported_major_are_immutable() {
+        // bit_xor (added in PG 14) and any_value (added in PG 16) don't exist in
+        // PG 13. The generator must not treat their absence there as a
+        // non-immutable overload: both are genuinely provolatile='i' in every
+        // major where they do exist, so they belong in IMMUTABLE_BUILTINS.
+        assert_eligible(Dialect::PostgreSQL, "SELECT bit_xor(rating) FROM t");
+        assert_eligible(Dialect::PostgreSQL, "SELECT any_value(reviewer) FROM t");
+    }
+
+    #[test]
     fn pg_server_address_functions_are_eligible() {
         // inet_server_addr/inet_server_port report the same server endpoint for
         // every session, so they are safe to cache and allowed by default even
@@ -1799,10 +1905,10 @@ mod tests {
     #[test]
     fn non_deterministic_function_in_group_by_is_blocked() {
         // The visitor must descend into GROUP BY: RAND() there contributes the
-        // non-deterministic reason (alongside the aggregate's own default-deny).
-        assert!(
-            skip_reasons(Dialect::MySQL, "SELECT count(*) FROM users GROUP BY RAND()")
-                .contains(&REASON_NON_DETERMINISTIC)
+        // non-deterministic reason, and count(*) itself contributes none.
+        assert_eq!(
+            skip_reasons(Dialect::MySQL, "SELECT count(*) FROM users GROUP BY RAND()"),
+            vec![REASON_NON_DETERMINISTIC]
         );
     }
 
@@ -1818,14 +1924,14 @@ mod tests {
     #[test]
     fn non_deterministic_function_in_window_spec_is_blocked() {
         // The visitor must descend into the window ORDER BY: RAND() there
-        // contributes the non-deterministic reason (alongside the window
-        // function's own default-deny).
-        assert!(
+        // contributes the non-deterministic reason, and row_number() itself
+        // contributes none.
+        assert_eq!(
             skip_reasons(
                 Dialect::MySQL,
                 "SELECT ROW_NUMBER() OVER (ORDER BY RAND()) FROM users"
-            )
-            .contains(&REASON_NON_DETERMINISTIC)
+            ),
+            vec![REASON_NON_DETERMINISTIC]
         );
     }
 
@@ -1998,6 +2104,7 @@ mod tests {
             "SELECT CHARSET('x')",
             "SELECT COLLATION('x')",
             "SELECT COERCIBILITY('x')",
+            "SELECT GROUP_CONCAT(comment) FROM book_reviews", // group_concat_max_len
         ] {
             assert_rejected(Dialect::MySQL, q, REASON_SESSION_SPECIFIC);
         }
@@ -2112,6 +2219,13 @@ mod tests {
             .is_none()
         );
         assert!(skip_reason_allow_session_specific(Dialect::MySQL, "SELECT DATABASE()").is_none());
+        assert!(
+            skip_reason_allow_session_specific(
+                Dialect::MySQL,
+                "SELECT GROUP_CONCAT(comment) FROM book_reviews"
+            )
+            .is_none()
+        );
         assert!(
             skip_reason_allow_session_specific(Dialect::PostgreSQL, "SELECT current_user")
                 .is_none()
