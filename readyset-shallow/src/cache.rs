@@ -314,6 +314,34 @@ where
     Miss(CacheInsertGuard<K, V>),
 }
 
+/// The resolution after a prior cache miss.
+#[derive(Debug)]
+enum MissResolution<K, V>
+where
+    K: Clone + Hash + Eq + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    Done(Lookup<K, V>),
+    Loading(Receiver<()>),
+}
+
+/// Coalesce state associated with a request.
+#[derive(Debug, Clone, Copy)]
+enum CoalesceWaited {
+    Zero,
+    Woken(Duration),
+    TimedOut(Duration),
+}
+
+impl CoalesceWaited {
+    fn duration(self) -> Option<Duration> {
+        match self {
+            CoalesceWaited::Zero => None,
+            CoalesceWaited::Woken(d) | CoalesceWaited::TimedOut(d) => Some(d),
+        }
+    }
+}
+
 pub(crate) struct CacheExpiration;
 
 impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
@@ -986,19 +1014,6 @@ where
         Lookup::Hit(res, refresh)
     }
 
-    /// Wait up to `wait` for an in-flight load of this key to resolve, returning how long we
-    /// actually blocked.  Returns `None` without blocking when there is no in-flight load to
-    /// coalesce with: the key is already populated, or absent entirely.
-    async fn coalesce(&self, k: &(u64, K), wait: Duration) -> Option<Duration> {
-        let entry = self.inner.get(k).await?;
-        let CacheEntry::Loading(stub) = &*entry else {
-            return None;
-        };
-        let start = Instant::now();
-        let _ = timeout(wait, stub.done.clone().changed()).await;
-        Some(start.elapsed())
-    }
-
     /// Create an insert guard and associated cache stub.
     fn start_fill(self: &Arc<Self>, key: K) -> (Arc<CacheEntry<V>>, CacheInsertGuard<K, V>) {
         let (tx, rx) = watch::channel(());
@@ -1007,72 +1022,95 @@ where
         (stub, guard)
     }
 
-    pub(crate) async fn get_on_miss(self: &Arc<Self>, k: K) -> Lookup<K, V> {
-        let mk = (self.id, k.clone());
-
-        let coalescing = self.coalesce_ms.is_some();
-        let waited = match self.coalesce_ms {
-            Some(coalesce_ms) => self.coalesce(&mk, Duration::from_millis(coalesce_ms)).await,
-            None => None,
-        };
-
-        let mut lookup = None;
+    /// Atomically resolve a miss for the provided key, returning a hit with result, a miss with an
+    /// insert guard, or the [`Receiver`] from a stub entry that provides state information about
+    /// an in-progress fill.
+    ///
+    /// The `waited` argument indicates any duration we've already spent coalescing.
+    async fn resolve_miss(
+        self: &Arc<Self>,
+        mk: &(u64, K),
+        k: &K,
+        waited: CoalesceWaited,
+    ) -> MissResolution<K, V> {
+        let mut result = None;
         self.inner
-            .entry(mk)
+            .entry(mk.clone())
             .and_compute_with(|e| {
                 let op = match e.as_ref().map(|e| &**e.value()) {
                     // Another request's fill populated the entry since our miss.
                     Some(CacheEntry::Present(values)) => {
-                        if coalescing {
+                        if let Some(waited) = waited.duration() {
                             self.increment_coalesce();
-                            if let Some(waited) = waited {
-                                self.record_coalesce_wait(waited);
-                            }
+                            self.record_coalesce_wait(waited);
                         }
-                        lookup = Some(self.hit(values));
+                        result = Some(MissResolution::Done(self.hit(values)));
                         Op::Nop
                     }
-                    // Another request's fill is still in flight; leave its stub in place and load
-                    // ourselves.
+                    // Another request's fill is still in flight.
                     Some(CacheEntry::Loading(stub)) if stub.done.has_changed().is_ok() => {
-                        if coalescing {
-                            self.increment_coalesce_timeout();
-                            if let Some(waited) = waited {
+                        match waited {
+                            CoalesceWaited::Zero => {}
+                            CoalesceWaited::Woken(waited) => {
+                                self.increment_coalesce_abort();
+                                self.record_coalesce_abort_wait(waited);
+                            }
+                            CoalesceWaited::TimedOut(waited) => {
+                                self.increment_coalesce_timeout();
                                 self.record_coalesce_timeout_wait(waited);
                             }
                         }
-                        lookup = Some(Lookup::Miss(Self::make_guard(
-                            Arc::clone(self),
-                            k.clone(),
-                            None,
-                            false,
-                        )));
+                        result = Some(MissResolution::Loading(stub.done.clone()));
                         Op::Nop
                     }
                     // A fill died without populating its stub; replace the stub and load
                     // ourselves.
                     Some(CacheEntry::Loading(..)) => {
-                        if coalescing {
+                        if let Some(waited) = waited.duration() {
                             self.increment_coalesce_abort();
-                            if let Some(waited) = waited {
-                                self.record_coalesce_abort_wait(waited);
-                            }
+                            self.record_coalesce_abort_wait(waited);
                         }
                         let (stub, guard) = self.start_fill(k.clone());
-                        lookup = Some(Lookup::Miss(guard));
+                        result = Some(MissResolution::Done(Lookup::Miss(guard)));
                         Op::Put(stub)
                     }
                     // No entry at all; start a fresh load.
                     None => {
                         let (stub, guard) = self.start_fill(k.clone());
-                        lookup = Some(Lookup::Miss(guard));
+                        result = Some(MissResolution::Done(Lookup::Miss(guard)));
                         Op::Put(stub)
                     }
                 };
                 future::ready(op)
             })
             .await;
-        lookup.expect("present or starting fill")
+        result.expect("result must be set using cache entry")
+    }
+
+    pub(crate) async fn get_on_miss(self: &Arc<Self>, k: K) -> Lookup<K, V> {
+        let mk = (self.id, k.clone());
+
+        let mut done = match self.resolve_miss(&mk, &k, CoalesceWaited::Zero).await {
+            MissResolution::Done(lookup) => return lookup,
+            MissResolution::Loading(done) => done,
+        };
+
+        let Some(coalesce_ms) = self.coalesce_ms else {
+            return Lookup::Miss(Self::make_guard(Arc::clone(self), k, None, false));
+        };
+
+        let start = Instant::now();
+        let waited = match timeout(Duration::from_millis(coalesce_ms), done.changed()).await {
+            Ok(..) => CoalesceWaited::Woken(start.elapsed()),
+            Err(..) => CoalesceWaited::TimedOut(start.elapsed()),
+        };
+
+        match self.resolve_miss(&mk, &k, waited).await {
+            MissResolution::Done(lookup) => lookup,
+            MissResolution::Loading(..) => {
+                Lookup::Miss(Self::make_guard(Arc::clone(self), k, None, false))
+            }
+        }
     }
 
     pub fn get_info(&self) -> CacheInfo {

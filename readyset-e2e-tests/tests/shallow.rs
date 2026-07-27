@@ -822,6 +822,80 @@ async fn shallow_coalesce_abort_stats() {
     shutdown_tx.shutdown().await;
 }
 
+#[test(flavor = "multi_thread", worker_threads = 4)]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn coalescing_handles_query_burst() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
+    let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream
+        .query_drop("CREATE TABLE foo (a INT)")
+        .await
+        .unwrap();
+    upstream
+        .query_drop("INSERT INTO foo VALUES (1)")
+        .await
+        .unwrap();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT a FROM foo WHERE a = ?")
+        .await
+        .unwrap();
+
+    // Create a number of connections that will concurrently query the cache on barrier signal.
+    let barrier = Arc::new(tokio::sync::Barrier::new(24));
+    let readers: Vec<_> = (0..24)
+        .map(|_| {
+            let (opts, db, barrier) =
+                (readyset_opts.clone(), test_name.clone(), Arc::clone(&barrier));
+            tokio::spawn(async move {
+                let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+                conn.query_drop(format!("USE {db}")).await.unwrap();
+                barrier.wait().await;
+                conn.query_drop("SELECT a FROM foo WHERE a = 1")
+                    .await
+                    .unwrap();
+            })
+        })
+        .collect();
+    for reader in readers {
+        reader.await.unwrap();
+    }
+
+    // Verify that we properly coalesced all the misses into a single upstream query.
+    let rows: Vec<(u64, u64, u64)> = readyset
+        .query(
+            "SELECT misses, coalesce_timeouts, coalesce_aborts
+             FROM readyset.shallow_caches JOIN readyset.shallow_cache_coalesce_stats
+             USING (query_id)",
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    let (misses, timeouts, aborts) = rows[0];
+    assert_eq!(misses, 1);
+    assert_eq!(timeouts, 0);
+    assert_eq!(aborts, 0);
+
+    shutdown_tx.shutdown().await;
+}
+
 #[test]
 #[tags(serial)]
 #[upstream(mysql)]
