@@ -303,6 +303,10 @@ pub struct NoriaConnector {
     /// MySQL and `SET NAMES` in both MySQL and Postgres.
     results_encoding: Encoding,
 
+    /// The encoding in which the client sends query text. Corresponds to `character_set_client`
+    /// in MySQL.
+    client_encoding: Encoding,
+
     /// The session timezone for TIMESTAMP conversion.
     timezone: SessionTimezone,
 }
@@ -406,6 +410,7 @@ impl NoriaConnector {
             parse_dialect,
             schema_search_path,
             results_encoding: Encoding::Utf8,
+            client_encoding: Encoding::Utf8,
             timezone: SessionTimezone::System,
         }
     }
@@ -916,6 +921,16 @@ impl NoriaConnector {
     /// Returns the encoding for result sets
     pub fn results_encoding(&self) -> Encoding {
         self.results_encoding
+    }
+
+    /// Set the encoding in which the client sends query text
+    pub fn set_client_encoding(&mut self, encoding: Encoding) {
+        self.client_encoding = encoding;
+    }
+
+    /// Returns the encoding in which the client sends query text
+    pub fn client_encoding(&self) -> Encoding {
+        self.client_encoding
     }
 
     /// Set the session timezone for TIMESTAMP conversion.

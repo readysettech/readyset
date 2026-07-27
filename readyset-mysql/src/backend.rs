@@ -634,6 +634,10 @@ where
         self.build_status_flags()
     }
 
+    fn client_encoding(&self) -> Encoding {
+        self.noria.connectors.noria.client_encoding()
+    }
+
     fn on_connect_attrs(&mut self, attrs: &HashMap<&str, &str>) {
         if attrs
             .get("_program_name")
@@ -869,6 +873,7 @@ where
         .increment(1);
         let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
         self.noria.connectors.noria.set_results_encoding(encoding);
+        self.noria.connectors.noria.set_client_encoding(encoding);
         Ok(())
     }
 

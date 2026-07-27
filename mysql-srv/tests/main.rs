@@ -23,6 +23,7 @@ use mysql_srv::{
     StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
+use readyset_data::encoding::Encoding;
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -42,6 +43,7 @@ struct TestingShim<Q, P, E, I, CU, W> {
     on_cu: CU,
     #[allow(clippy::type_complexity)]
     password_fn: Option<Box<dyn Fn(&str) -> Option<Vec<u8>> + Send>>,
+    client_encoding: Encoding,
     _phantom: PhantomData<W>,
 }
 
@@ -175,6 +177,10 @@ where
     fn version(&self) -> String {
         "8.0.26-readyset\0".to_string()
     }
+
+    fn client_encoding(&self) -> Encoding {
+        self.client_encoding
+    }
 }
 
 impl<Q, P, E, I, CU> TestingShim<Q, P, E, I, CU, TcpStream>
@@ -214,8 +220,14 @@ where
             on_i,
             on_cu,
             password_fn: None,
+            client_encoding: Encoding::Utf8,
             _phantom: PhantomData,
         }
+    }
+
+    fn with_client_encoding(mut self, encoding: Encoding) -> Self {
+        self.client_encoding = encoding;
+        self
     }
 
     fn with_params(mut self, p: Vec<Column>) -> Self {
@@ -241,6 +253,17 @@ where
     }
 
     async fn test_with_opts<C>(self, c: C, extra_opts: &str)
+    where
+        C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
+    {
+        self.test_with_opts_server_result(c, extra_opts)
+            .await
+            .unwrap();
+    }
+
+    /// Like [`TestingShim::test_with_opts`], but returns the server's result instead of
+    /// unwrapping it, for tests that expect the server to tear down the connection.
+    async fn test_with_opts_server_result<C>(self, c: C, extra_opts: &str) -> io::Result<()>
     where
         C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     {
@@ -292,7 +315,7 @@ where
 
         // Clean up
         drop(db);
-        server_handle.await.unwrap().unwrap();
+        server_handle.await.unwrap()
     }
 }
 
@@ -393,6 +416,133 @@ async fn it_inits_error() {
         })
     })
     .await;
+}
+
+#[tokio::test]
+async fn latin1_query_is_decoded() {
+    TestingShim::new(
+        |query, w| {
+            assert_eq!(query, "SELECT 'Não'");
+            Box::pin(async move { w.completed(0, 0, None).await })
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .with_client_encoding(Encoding::Latin1)
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected OK packet");
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn utf8_query_with_invalid_bytes_errors() {
+    let res = TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .test_with_opts_server_result(
+        |db| {
+            Box::pin(async move {
+                db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
+                    .await
+                    .unwrap();
+                let res = db.read_packet().await;
+                assert!(res.is_err());
+            })
+        },
+        "",
+    )
+    .await;
+    assert_eq!(res.unwrap_err().kind(), io::ErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn latin1_prepare_is_decoded() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |query| {
+            assert_eq!(query, "SELECT 'Não'");
+            41
+        },
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .with_client_encoding(Encoding::Latin1)
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_STMT_PREPARE, b"SELECT 'N\xE3o'")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected prepare OK packet");
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn latin1_init_db_is_decoded() {
+    TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |schema| {
+            assert_eq!(schema, "não");
+            Box::pin(async move { Ok(()) })
+        },
+        |_, _, _| unreachable!(),
+    )
+    .with_client_encoding(Encoding::Latin1)
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_INIT_DB, b"n\xE3o")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected OK packet");
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unsupported_encoding_query_falls_back_to_utf8() {
+    for encoding in [Encoding::Binary, Encoding::OtherMySql(999)] {
+        TestingShim::new(
+            |query, w| {
+                assert_eq!(query, "SELECT 'Não'");
+                Box::pin(async move { w.completed(0, 0, None).await })
+            },
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+        )
+        .with_client_encoding(encoding)
+        .test(|db| {
+            Box::pin(async move {
+                db.write_command_data(Command::COM_QUERY, "SELECT 'Não'")
+                    .await
+                    .unwrap();
+                let packet = db.read_packet().await.unwrap();
+                assert_eq!(packet[0], 0x00, "expected OK packet");
+            })
+        })
+        .await;
+    }
 }
 
 #[tokio::test]

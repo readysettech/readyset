@@ -204,8 +204,10 @@
 
 extern crate mysql_common as myc;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io;
+use std::str;
 use std::sync::Arc;
 
 use constants::{
@@ -216,6 +218,7 @@ use database_utils::TlsMode;
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
+use readyset_data::encoding::Encoding;
 use readyset_data::DfType;
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -421,6 +424,29 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// correct for a fresh connection with no transaction tracking.
     fn server_status_flags(&self) -> StatusFlags {
         StatusFlags::SERVER_STATUS_AUTOCOMMIT
+    }
+
+    /// Returns the encoding in which the client sends query text, i.e. the session's effective
+    /// `character_set_client`.
+    fn client_encoding(&self) -> Encoding {
+        Encoding::Utf8
+    }
+}
+
+/// Decode inbound client bytes to UTF-8 per the session's `character_set_client`.
+///
+/// Unsupported encodings fall back to a UTF-8 attempt so decoding is never less recoverable than
+/// treating all inbound text as UTF-8.
+fn decode_from_client(encoding: Encoding, bytes: &[u8]) -> io::Result<Cow<'_, str>> {
+    match encoding {
+        Encoding::Latin1 | Encoding::Cp850 => {
+            Ok(Cow::Owned(encoding.decode(bytes).map_err(|e| {
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?))
+        }
+        Encoding::Utf8 | Encoding::Binary | Encoding::OtherMySql(_) => str::from_utf8(bytes)
+            .map(Cow::Borrowed)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
     }
 }
 
@@ -953,15 +979,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     self.conn.flush().await?;
                 }
                 Command::Query(q) => {
+                    let query = decode_from_client(self.shim.client_encoding(), q)?;
                     let w = QueryResultWriter::new(&mut self.conn, false);
-                    let res = self
-                        .shim
-                        .on_query(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                        )
-                        .await;
+                    let res = self.shim.on_query(&query, w).await;
 
                     match res {
                         QueryResultsResponse::Command(cmd) => {
@@ -997,17 +1017,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     }
                 }
                 Command::Prepare(q) => {
+                    let query = decode_from_client(self.shim.client_encoding(), q)?;
                     let w = StatementMetaWriter {
                         conn: &mut self.conn,
                         stmts: &mut stmts,
                     };
                     self.shim
-                        .on_prepare(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                            &mut self.schema_cache,
-                        )
+                        .on_prepare(&query, w, &mut self.schema_cache)
                         .await?;
                 }
                 Command::ResetStmtData(stmt) => {
@@ -1073,9 +1089,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Init(schema) => {
                     debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
-                    let schema_str = ::std::str::from_utf8(schema)
-                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                    match self.shim.on_init(schema_str).await {
+                    let schema_str = decode_from_client(self.shim.client_encoding(), schema)?;
+                    match self.shim.on_init(&schema_str).await {
                         Ok(()) => {
                             writers::write_ok_packet(
                                 &mut self.conn,
