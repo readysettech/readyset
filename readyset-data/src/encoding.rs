@@ -87,6 +87,18 @@ impl Encoding {
         }
     }
 
+    /// The MySQL character set name for a supported encoding, used to mirror a session's charset
+    /// onto an upstream connection. A fixed mapping, never derived from client input.
+    pub fn mysql_character_set_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Utf8 => Some("utf8mb4"),
+            Self::Latin1 => Some("latin1"),
+            Self::Cp850 => Some("cp850"),
+            Self::Binary => Some("binary"),
+            Self::OtherMySql(_) => None,
+        }
+    }
+
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         match self {
             Self::Utf8 => core::str::from_utf8(bytes)

@@ -586,6 +586,13 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    async fn set_results_character_set(&mut self, charset: &str) -> Result<(), Self::Error> {
+        self.conn
+            .query_drop(format!("SET character_set_results = {charset}"))
+            .await?;
+        Ok(())
+    }
+
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter(query).await?;
         handle_query_result!(result)

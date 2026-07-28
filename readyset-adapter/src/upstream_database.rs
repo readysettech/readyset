@@ -259,6 +259,13 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Set the schema search path for future queries on the upstream database.
     async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error>;
 
+    /// Set the session's `character_set_results` on the upstream connection so proxied result
+    /// rows come back in the client's charset. The default implementation is a no-op for
+    /// upstreams without that concept (PostgreSQL).
+    async fn set_results_character_set(&mut self, _charset: &str) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
 
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
@@ -286,6 +293,9 @@ pub struct LazyUpstream<U> {
     username: Option<String>,
     password: Option<String>,
     interactive: bool,
+    /// The session's results charset, replayed onto the underlying connection whenever one is
+    /// established so reconnects keep returning proxied results in the client's charset.
+    pending_results_charset: Option<String>,
 }
 
 impl<U> From<UpstreamConfig> for LazyUpstream<U> {
@@ -296,6 +306,7 @@ impl<U> From<UpstreamConfig> for LazyUpstream<U> {
             username: None,
             password: None,
             interactive: false,
+            pending_results_charset: None,
         }
     }
 }
@@ -306,15 +317,17 @@ where
 {
     pub async fn connect(&mut self) -> Result<(), U::Error> {
         debug!("LazyUpstream connecting to upstream");
-        self.upstream = Some(
-            U::connect(
-                self.upstream_config.clone(),
-                self.username.clone(),
-                self.password.clone(),
-                self.interactive,
-            )
-            .await?,
-        );
+        let mut upstream = U::connect(
+            self.upstream_config.clone(),
+            self.username.clone(),
+            self.password.clone(),
+            self.interactive,
+        )
+        .await?;
+        if let Some(charset) = &self.pending_results_charset {
+            upstream.set_results_character_set(charset).await?;
+        }
+        self.upstream = Some(upstream);
         Ok(())
     }
 
@@ -358,6 +371,7 @@ where
             username,
             password,
             interactive,
+            pending_results_charset: None,
         })
     }
 
@@ -455,6 +469,14 @@ where
 
     async fn remove_statement(&mut self, statement_id: DeallocateId) -> Result<(), Self::Error> {
         self.upstream().await?.remove_statement(statement_id).await
+    }
+
+    async fn set_results_character_set(&mut self, charset: &str) -> Result<(), Self::Error> {
+        self.pending_results_charset = Some(charset.to_string());
+        if let Some(u) = &mut self.upstream {
+            u.set_results_character_set(charset).await?;
+        }
+        Ok(())
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Self::Error> {

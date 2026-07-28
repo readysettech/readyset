@@ -2164,6 +2164,18 @@ where
             .get_or_insert_with(|| readyset_schema.session()))
     }
 
+    /// Set the session's `character_set_results` on the upstream connection, if one exists, so
+    /// proxied result rows come back in the client's charset
+    pub async fn set_upstream_results_character_set(
+        &mut self,
+        charset: &str,
+    ) -> Result<(), DB::Error> {
+        if let Some(upstream) = self.connectors.upstream.as_mut() {
+            upstream.set_results_character_set(charset).await?;
+        }
+        Ok(())
+    }
+
     /// Send ping on the upstream connection, if it exists
     pub async fn ping(&mut self) -> Result<(), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;

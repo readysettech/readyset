@@ -872,8 +872,21 @@ where
         )
         .increment(1);
         let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
+        let prev = self.noria.connectors.noria.client_encoding();
         self.noria.connectors.noria.set_results_encoding(encoding);
         self.noria.connectors.noria.set_client_encoding(encoding);
+        // Mirror the client's charset to the upstream session's character_set_results so proxied
+        // result rows come back in the client's charset. Skip the common case where the charset
+        // stays at the utf8mb4 default. Unsupported charsets (no name) leave the upstream at
+        // utf8mb4 as before.
+        if encoding != Encoding::Utf8 || prev != Encoding::Utf8 {
+            if let Some(name) = encoding.mysql_character_set_name() {
+                self.noria
+                    .set_upstream_results_character_set(name)
+                    .await
+                    .map_err(io::Error::other)?;
+            }
+        }
         Ok(())
     }
 
