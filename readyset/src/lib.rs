@@ -616,12 +616,13 @@ pub struct Options {
     pub shallow_cache_allow_session_specific: bool,
 
     /// Allow shallow-caching queries that call any function, including
-    /// user-defined, non-deterministic, and side-effecting ones. This is the
-    /// broad escape hatch: side-effecting or blocking functions (`nextval`,
-    /// `set_config`, `pg_notify`, advisory locks, `dblink`, `sleep`, ...) have
-    /// no narrower opt-in because caching one fires the effect once at fill and
-    /// then never again. Non-function guards (system schema, session variables,
-    /// unseeded `TABLESAMPLE`) still apply. Off by default.
+    /// user-defined, non-deterministic, and ones with side effects. This is
+    /// the broad escape hatch: functions with side effects or that block
+    /// (`nextval`, `set_config`, `pg_notify`, advisory locks, `dblink`,
+    /// `sleep`, ...) have no narrower opt-in because caching one fires the
+    /// effect once at fill and then never again. Non-function guards (system
+    /// schema, session variables, unseeded `TABLESAMPLE`) still apply. Off by
+    /// default.
     #[arg(long, env = "SHALLOW_CACHE_ALLOW_ALL_FUNCTIONS")]
     pub shallow_cache_allow_all_functions: bool,
 
@@ -714,8 +715,8 @@ impl Options {
         if self.shallow_cache_allow_all {
             warn!(
                 "--shallow-cache-allow-all enables every eligibility opt-in, \
-                 including session/user variables and side-effecting functions; \
-                 caching those queries is incorrect, not merely stale"
+                 including session/user variables and functions with side \
+                 effects; caching those queries is incorrect, not merely stale"
             );
             self.shallow_cache_allow_nondeterministic = true;
             self.shallow_cache_allow_udf = true;

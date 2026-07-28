@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use clap::ValueEnum;
 use dashmap::DashMap;
-use dashmap::DashSet;
 use dashmap::mapref::entry::Entry;
 use lru::LruCache;
 use metrics::{counter, gauge};
@@ -29,12 +28,13 @@ use crate::table_extraction_visitor::extract_referenced_tables;
 pub const DEFAULT_QUERY_STATUS_CAPACITY: usize = 100_000;
 
 /// Soft cap on the number of [`QueryId`]s the in-request-path shallow auto-
-/// cache filter will remember.  When this is exceeded the set is bulk-cleared
+/// cache filter will remember.  When this is exceeded the map is bulk-cleared
 /// and the overflow counter increments.  A realistic workload's set of
 /// ineligible queries is on the order of hundreds; crossing this cap is a
 /// signal of pathological client behaviour rather than a normal condition.
-/// Memory footprint at the cap is roughly 18 MB (one `u64` per entry plus
-/// `hashbrown` slot + control-byte overhead).
+/// Memory footprint at the cap is on the order of 100 MB (a `u64` key and a
+/// short reason `String` per entry plus `hashbrown` slot + control-byte
+/// overhead).
 pub const SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP: usize = 1_000_000;
 
 /// A metadata cache for all queries that have been processed by this
@@ -63,17 +63,18 @@ pub struct QueryStatusCache {
     /// Currently unused.
     placeholder_inlining: bool,
 
-    /// Set of [`QueryId`]s the in-request-path shallow-cache eligibility
-    /// filter has rejected.  Consulted by `try_auto_create_shallow_cache` so
-    /// the AST walk only runs once per ineligible query.
+    /// Maps [`QueryId`]s the in-request-path shallow-cache eligibility filter
+    /// has rejected to the reason for the rejection.  Consulted by
+    /// `try_auto_create_shallow_cache` so the AST walk only runs once per
+    /// ineligible query; the reason surfaces in `SHOW PROXIED QUERIES`.
     ///
     /// Strictly an implementation detail of the implicit auto-create path:
     /// explicit `CREATE SHALLOW CACHE` DDL and `/*rs+ CREATE SHALLOW CACHE */`
     /// hint flows do not consult it, so a stuck entry never blocks a user
     /// from creating a cache deliberately.  Bounded by
-    /// [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`]; on overflow the set is bulk-
+    /// [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`]; on overflow the map is bulk-
     /// cleared and a warning is logged.
-    shallow_auto_create_skip: DashSet<QueryId, ahash::RandomState>,
+    shallow_auto_create_skip: DashMap<QueryId, String, ahash::RandomState>,
 
     /// Deep caches created with manual parameterization (`CREATE CACHE WITH (AUTOPARAM ...)`),
     /// keyed by the [`QueryId`] of the *standard* (fully autoparameterized) form of their query.
@@ -176,13 +177,19 @@ impl PersistentStatusCacheHandle {
             .collect::<Vec<_>>()
     }
 
-    fn proxied_list(&self, style: MigrationStyle, cache_type: CacheType) -> Vec<ProxiedQuery> {
+    fn proxied_list(
+        &self,
+        style: MigrationStyle,
+        cache_type: CacheType,
+        shallow_auto_create_skip: &DashMap<QueryId, String, ahash::RandomState>,
+    ) -> Vec<ProxiedQuery> {
         let statuses = self.statuses.read();
         statuses
             .iter()
             .filter_map(|(query_id, (query, status))| {
                 if matches!(style, MigrationStyle::Async | MigrationStyle::InRequestPath)
                     && !status.is_unsupported()
+                    && !(status.is_supported() && shallow_auto_create_skip.contains_key(query_id))
                 {
                     return None;
                 }
@@ -415,7 +422,14 @@ impl QueryStatusCache {
     /// previously rejected this query; the caller should skip auto-creation
     /// without re-walking the AST.
     pub fn is_shallow_auto_create_skipped(&self, id: QueryId) -> bool {
-        self.shallow_auto_create_skip.contains(&id)
+        self.shallow_auto_create_skip.contains_key(&id)
+    }
+
+    /// The reason the in-request-path filter rejected this query, if any.
+    pub fn shallow_auto_create_skip_reason(&self, id: QueryId) -> Option<String> {
+        self.shallow_auto_create_skip
+            .get(&id)
+            .map(|reason| reason.value().clone())
     }
 
     /// Forget all remembered auto-create rejections, so previously-skipped
@@ -430,13 +444,13 @@ impl QueryStatusCache {
             .set(self.shallow_auto_create_skip.len() as f64);
     }
 
-    /// Record that the in-request-path filter has rejected this query.  When
-    /// the set crosses [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`] it is bulk-
-    /// cleared, the overflow counter increments, and a warning is logged.
+    /// Record that the in-request-path filter has rejected this query, and
+    /// why.  When the map crosses [`SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP`] it is
+    /// bulk-cleared, the overflow counter increments, and a warning is logged.
     /// Reaching the cap indicates pathological client traffic (e.g. queries
     /// with literal-injected unique values) and warrants investigation.
-    pub fn record_shallow_auto_create_skip(&self, id: QueryId) {
-        self.shallow_auto_create_skip.insert(id);
+    pub fn record_shallow_auto_create_skip(&self, id: QueryId, reason: String) {
+        self.shallow_auto_create_skip.insert(id, reason);
         let len = self.shallow_auto_create_skip.len();
         if len >= SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP {
             // A small race here is benign: concurrent inserts that all
@@ -974,7 +988,8 @@ impl QueryStatusCache {
 
     /// Returns a list of queries that are proxied.
     pub fn proxied_list(&self, cache_type: CacheType) -> Vec<ProxiedQuery> {
-        self.persistent_handle.proxied_list(self.style, cache_type)
+        self.persistent_handle
+            .proxied_list(self.style, cache_type, &self.shallow_auto_create_skip)
     }
 
     /// Returns a query given a query hash
@@ -1299,6 +1314,51 @@ mod tests {
         assert!(statuses.put(id, (q1.into(), status.clone())).is_some());
 
         assert_eq!(statuses.get(&id).unwrap().1, status);
+    }
+
+    #[test]
+    fn shallow_auto_create_skip_is_proxied_with_reason() {
+        let cache = QueryStatusCache::new().style(MigrationStyle::InRequestPath);
+        let query = ShallowViewRequest::new(
+            readyset_sql::ast::ShallowCacheQuery::default(),
+            vec![],
+            None,
+        );
+
+        let (id, state) = cache.query_migration_state(&query);
+        assert_eq!(state, MigrationState::Pending);
+        assert!(cache.proxied_list(CacheType::Shallow).is_empty());
+
+        cache.record_shallow_auto_create_skip(id, "non-deterministic function: now".into());
+
+        // A decline leaves the query pending, and pending queries stay out of the
+        // listing whether or not they were declined. Running it upstream is what
+        // moves it to Supported, and only then does the decline surface.
+        assert!(cache.proxied_list(CacheType::Shallow).is_empty());
+        cache.update_query_migration_state(&query, MigrationState::Supported, None);
+
+        let proxied = cache.proxied_list(CacheType::Shallow);
+        assert_eq!(proxied.len(), 1, "declined query should be listed");
+        assert_eq!(proxied[0].id, id);
+        assert_eq!(
+            cache.shallow_auto_create_skip_reason(id).as_deref(),
+            Some("non-deterministic function: now")
+        );
+
+        // Creating the cache manually removes the listing.
+        cache.update_query_migration_state(
+            &query,
+            MigrationState::Successful(CacheType::Shallow),
+            None,
+        );
+        assert!(cache.proxied_list(CacheType::Shallow).is_empty());
+
+        // Re-allowing functions clears the decline, and the listing with it.
+        cache.update_query_migration_state(&query, MigrationState::Supported, None);
+        assert_eq!(cache.proxied_list(CacheType::Shallow).len(), 1);
+        cache.clear_shallow_auto_create_skips();
+        assert!(cache.proxied_list(CacheType::Shallow).is_empty());
+        assert_eq!(cache.shallow_auto_create_skip_reason(id), None);
     }
 
     #[test]
@@ -2022,8 +2082,12 @@ mod tests {
         let id = QueryId::from(&q);
 
         assert!(!cache.is_shallow_auto_create_skipped(id));
-        cache.record_shallow_auto_create_skip(id);
+        cache.record_shallow_auto_create_skip(id, "non-deterministic function".into());
         assert!(cache.is_shallow_auto_create_skipped(id));
+        assert_eq!(
+            cache.shallow_auto_create_skip_reason(id).as_deref(),
+            Some("non-deterministic function")
+        );
 
         // Distinct queries are tracked independently.
         let q2 = ViewCreateRequest::new(select_statement("SELECT * FROM users").unwrap(), vec![]);
@@ -2035,11 +2099,11 @@ mod tests {
     fn shallow_auto_create_skip_bulk_clears_at_soft_cap() {
         let cache = QueryStatusCache::new();
         // QueryId has no `From<u64>`, so synthesize ids via FromStr (`q_<hex>`).
-        // Insert directly into the DashSet to avoid driving each one through
+        // Insert directly into the DashMap to avoid driving each one through
         // `record_shallow_auto_create_skip` and tripping the cap mid-fill.
         for i in 0..SHALLOW_AUTO_CREATE_SKIP_SOFT_CAP as u64 - 1 {
             let id = QueryId::from_str(&format!("q_{i:x}")).unwrap();
-            cache.shallow_auto_create_skip.insert(id);
+            cache.shallow_auto_create_skip.insert(id, String::new());
         }
         assert_eq!(
             cache.shallow_auto_create_skip.len(),
@@ -2048,11 +2112,11 @@ mod tests {
 
         // Crossing the cap via the public API triggers a bulk clear.
         let trip = QueryId::from_str("q_ffffffffffffffff").unwrap();
-        cache.record_shallow_auto_create_skip(trip);
+        cache.record_shallow_auto_create_skip(trip, String::new());
         assert_eq!(
             cache.shallow_auto_create_skip.len(),
             0,
-            "skip set should be bulk-cleared after crossing the soft cap"
+            "skip map should be bulk-cleared after crossing the soft cap"
         );
     }
 }

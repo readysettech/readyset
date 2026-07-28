@@ -4920,11 +4920,18 @@ where
             create_dummy_schema!("query_id", "query", "readyset_supported")
         };
 
+        let query_status_cache = &state.query_status_cache;
         let mut data = queries
             .into_iter()
             .map(|ProxiedQuery { id, query, status }| {
                 let s = match status.migration_state {
-                    MigrationState::Supported | MigrationState::Successful(_) => "yes".to_string(),
+                    MigrationState::Successful(_) => "yes".to_string(),
+                    MigrationState::Supported => {
+                        match query_status_cache.shallow_auto_create_skip_reason(id) {
+                            Some(reason) => format!("skipped: {reason}"),
+                            None => "yes".to_string(),
+                        }
+                    }
                     MigrationState::Pending | MigrationState::Inlined(_) => "pending".to_string(),
                     MigrationState::Unsupported(reason) if reason.is_empty() => {
                         "unsupported: unknown reason".to_string()
@@ -4954,8 +4961,10 @@ where
                 // we sometimes provide the reason for unsupported queries
                 // like so "unsupported: xyz"
                 unsupported if unsupported.starts_with("unsupported") => 1,
-                "pending" => 2,
-                _ => 3,
+                // and the reason we declined to cache one automatically
+                skipped if skipped.starts_with("skipped") => 2,
+                "pending" => 3,
+                _ => 4,
             };
 
             let a_status = status_order(&a[2].to_string());
@@ -5989,9 +5998,14 @@ where
                 &state.shallow_cache_allowlists,
             );
             if !skip_reasons.is_empty() {
+                let reasons = skip_reasons
+                    .iter()
+                    .map(|reason| reason.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 state
                     .query_status_cache
-                    .record_shallow_auto_create_skip(query_id);
+                    .record_shallow_auto_create_skip(query_id, reasons);
                 for reason in &skip_reasons {
                     counter!(metric::SHALLOW_AUTO_CREATE_SKIPPED, "reason" => reason.reason)
                         .increment(1);

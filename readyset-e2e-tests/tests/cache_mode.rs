@@ -3,6 +3,7 @@ use std::assert_matches;
 use mysql_async::prelude::Queryable;
 use mysql_async::Row;
 use tokio::test;
+use tokio_postgres::SimpleQueryMessage;
 
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_client_metrics::QueryDestination;
@@ -271,8 +272,8 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
 
 // In-request-path shallow auto-create must SKIP queries that are not safe to
 // reuse. A plain SELECT auto-caches, but queries calling non-deterministic
-// (RAND, NOW) or side-effecting (SLEEP) functions stay on the upstream path no
-// matter how many times they are seen.
+// (RAND, NOW) functions or ones with side effects (SLEEP) stay on the upstream
+// path no matter how many times they are seen.
 #[test]
 #[tags(serial)]
 #[upstream(mysql)]
@@ -331,11 +332,41 @@ async fn cache_mode_shallow_auto_create_skips_ineligible() {
         }
     }
 
+    // Each decline is visible over SQL, naming the reason it was declined.
+    let proxied: Vec<(String, String)> = readyset
+        .query::<Row, _>("SHOW PROXIED QUERIES")
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(1).unwrap(), row.get(2).unwrap()))
+        .collect();
+    for (needle, reason) in [
+        ("rand", "skipped: non-deterministic function"),
+        ("now", "skipped: non-deterministic function"),
+        ("sleep", "skipped: function with side effects"),
+    ] {
+        let status = proxied
+            .iter()
+            .find(|(query, _)| query.to_lowercase().contains(needle))
+            .map(|(_, status)| status.as_str())
+            .unwrap_or_else(|| panic!("no proxied query matching {needle}, got: {proxied:?}"));
+        assert!(
+            status.starts_with(reason),
+            "expected {needle} decline to report {reason}, got: {status}"
+        );
+    }
+    assert!(
+        !proxied
+            .iter()
+            .any(|(query, _)| query.to_lowercase().contains("foo")),
+        "the eligible query auto-cached, so it is not proxied: {proxied:?}"
+    );
+
     shutdown_tx.shutdown().await;
 }
 
 // PostgreSQL counterpart: random()/now() (non-deterministic) and pg_sleep()
-// (side-effecting) must not be auto-cached in-request-path.
+// (side effects) must not be auto-cached in-request-path.
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]
@@ -377,6 +408,33 @@ async fn cache_mode_shallow_auto_create_skips_ineligible_pg() {
                 "ineligible query should never be auto-cached: {q}"
             );
         }
+    }
+
+    // Each decline is visible over SQL, naming the reason it was declined.
+    let proxied: Vec<(String, String)> = rs
+        .simple_query("SHOW PROXIED QUERIES")
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|message| match message {
+            SimpleQueryMessage::Row(row) => Some((row.get(1)?.to_string(), row.get(2)?.to_string())),
+            _ => None,
+        })
+        .collect();
+    for (needle, reason) in [
+        ("random", "skipped: non-deterministic function"),
+        ("now", "skipped: non-deterministic function"),
+        ("pg_sleep", "skipped: function with side effects"),
+    ] {
+        let status = proxied
+            .iter()
+            .find(|(query, _)| query.to_lowercase().contains(needle))
+            .map(|(_, status)| status.as_str())
+            .unwrap_or_else(|| panic!("no proxied query matching {needle}, got: {proxied:?}"));
+        assert!(
+            status.starts_with(reason),
+            "expected {needle} decline to report {reason}, got: {status}"
+        );
     }
 
     shutdown_tx.shutdown().await;
@@ -867,8 +925,8 @@ async fn create_cache_returns_shallow_type_on_fallback() {
 }
 
 // With `--shallow-cache-allow-nondeterministic`, a non-deterministic call such
-// as NOW() becomes eligible and auto-caches, while a side-effecting call such as
-// SLEEP() keeps proxying to upstream: the opt-in opens exactly one category, not
+// as NOW() becomes eligible and auto-caches, while a call with side effects such
+// as SLEEP() keeps proxying to upstream: the opt-in opens exactly one category, not
 // a blanket allow. This is the front-door counterpart to the per-flag unit
 // mapping test, proving a flag actually changes caching behavior.
 #[test]
@@ -920,7 +978,7 @@ async fn cache_mode_shallow_allow_nondeterministic_makes_eligible() {
         "NOW() should auto-cache once non-deterministic calls are allowed"
     );
 
-    // SLEEP() is side-effecting/blocking, which the non-determinism opt-in does
+    // SLEEP() has side effects and blocks, which the non-determinism opt-in does
     // not cover, so it keeps proxying to upstream.
     for _ in 0..3 {
         readyset.query_drop("SELECT SLEEP(0)").await.unwrap();

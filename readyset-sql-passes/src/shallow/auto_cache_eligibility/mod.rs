@@ -47,7 +47,7 @@ mod mysql_builtins;
 mod pg_builtins;
 
 const REASON_NON_DETERMINISTIC: &str = "non-deterministic function";
-const REASON_SIDE_EFFECT: &str = "side-effecting function";
+const REASON_SIDE_EFFECT: &str = "function with side effects";
 const REASON_WRITE_IN_CTE: &str = "write statement inside a CTE body";
 const REASON_SYSTEM_SCHEMA: &str = "system schema reference";
 const REASON_SESSION_SPECIFIC: &str = "session-specific function";
