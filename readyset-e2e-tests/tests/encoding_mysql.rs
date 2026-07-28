@@ -1,6 +1,8 @@
 use itertools::Itertools;
+use mysql_async::consts::Command;
 use mysql_async::prelude::Queryable;
 use pretty_assertions::assert_eq;
+use readyset_adapter::backend::MigrationMode;
 use readyset_client_test_helpers::{
     TestBuilder,
     mysql_helpers::{self, MySQLAdapter},
@@ -8,6 +10,8 @@ use readyset_client_test_helpers::{
 use readyset_util::eventually;
 use std::time::Duration;
 use test_utils::{tags, upstream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 macro_rules! check_rows {
     ($my_rows:expr_2021, $rs_rows:expr_2021, $($format_args:tt)*) => {
@@ -722,3 +726,223 @@ test_encoding_replication!(
     "binary",
     format_u32s(2, 0..=255)
 );
+
+/// A minimal raw MySQL client for exercising handshake charsets mysql_async cannot negotiate (it
+/// always sends utf8mb4) and statements containing non-UTF-8 bytes.
+struct RawConn {
+    stream: TcpStream,
+}
+
+impl RawConn {
+    async fn read_packet(&mut self) -> (u8, Vec<u8>) {
+        let mut header = [0u8; 4];
+        self.stream.read_exact(&mut header).await.unwrap();
+        let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        self.stream.read_exact(&mut payload).await.unwrap();
+        (header[3], payload)
+    }
+
+    async fn write_packet(&mut self, seq: u8, payload: &[u8]) {
+        let mut buf = Vec::with_capacity(4 + payload.len());
+        buf.extend_from_slice(&(payload.len() as u32).to_le_bytes()[..3]);
+        buf.push(seq);
+        buf.extend_from_slice(payload);
+        self.stream.write_all(&buf).await.unwrap();
+    }
+
+    /// Connect and complete a handshake advertising the given charset (a collation id).
+    async fn connect_with_charset(opts: &mysql_async::Opts, charset: u8) -> Self {
+        const CLIENT_CONNECT_WITH_DB: u32 = 0x0000_0008;
+        const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
+        const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
+        const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
+
+        let stream = TcpStream::connect((opts.ip_or_hostname(), opts.tcp_port()))
+            .await
+            .unwrap();
+        let mut conn = RawConn { stream };
+        let (seq, _server_handshake) = conn.read_packet().await;
+
+        let mut capabilities =
+            CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
+        if opts.db_name().is_some() {
+            capabilities |= CLIENT_CONNECT_WITH_DB;
+        }
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&capabilities.to_le_bytes());
+        payload.extend_from_slice(&(16u32 << 20).to_le_bytes()); // max packet size
+        payload.push(charset);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload.extend_from_slice(opts.user().unwrap_or("root").as_bytes());
+        payload.push(0);
+        // Authentication is disabled in the test harness; any non-empty scramble is accepted.
+        payload.push(20);
+        payload.extend_from_slice(&[1u8; 20]);
+        if let Some(db) = opts.db_name() {
+            payload.extend_from_slice(db.as_bytes());
+            payload.push(0);
+        }
+        payload.extend_from_slice(b"mysql_native_password\0");
+        conn.write_packet(seq + 1, &payload).await;
+
+        let (_, response) = conn.read_packet().await;
+        assert_eq!(
+            response.first(),
+            Some(&0x00),
+            "handshake should succeed: {response:?}"
+        );
+        conn
+    }
+
+    /// Send a COM_QUERY with the given raw statement bytes and return the raw payloads of any
+    /// result row packets (empty for an OK response).
+    async fn query_raw(&mut self, statement: &[u8]) -> Vec<Vec<u8>> {
+        let mut payload = Vec::with_capacity(statement.len() + 1);
+        payload.push(0x03); // COM_QUERY
+        payload.extend_from_slice(statement);
+        self.write_packet(0, &payload).await;
+
+        let (_, first) = self.read_packet().await;
+        match first.first() {
+            Some(0x00) => return Vec::new(),
+            Some(0xFF) => panic!("query failed: {}", String::from_utf8_lossy(&first[9..])),
+            _ => {}
+        }
+        // A result set: `first` holds the column count; column definitions follow, terminated by
+        // EOF, then row packets, terminated by EOF.
+        for _ in 0..first[0] {
+            self.read_packet().await;
+        }
+        let (_, eof) = self.read_packet().await;
+        assert_eq!(eof.first(), Some(&0xFE), "expected EOF after column defs");
+        let mut rows = Vec::new();
+        loop {
+            let (_, packet) = self.read_packet().await;
+            if packet.first() == Some(&0xFE) && packet.len() < 9 {
+                return rows;
+            }
+            rows.push(packet);
+        }
+    }
+}
+
+/// Extract the value of a single-column text-protocol row, assuming a value under 251 bytes.
+fn single_text_column(row: &[u8]) -> &[u8] {
+    let len = row[0] as usize;
+    assert_eq!(row.len(), len + 1, "expected a one-column row: {row:?}");
+    &row[1..]
+}
+
+/// The latin1_swedish_ci collation id, latin1's default.
+const LATIN1_COLLATION: u8 = 8;
+
+/// A latin1 handshake must make the adapter decode inbound query bytes as latin1 (instead of
+/// dropping the connection on invalid UTF-8) and return proxied result rows re-encoded as latin1
+/// via the upstream session's character_set_results.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn latin1_handshake_roundtrip() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut utf8_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    utf8_conn
+        .query_drop(
+            "CREATE TABLE charset_t (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET latin1)",
+        )
+        .await
+        .unwrap();
+
+    let mut raw = RawConn::connect_with_charset(&opts, LATIN1_COLLATION).await;
+    // 'Não' with the ã as the single latin1 byte 0xE3
+    raw.query_raw(b"INSERT INTO charset_t (id, t) VALUES (1, 'N\xE3o')")
+        .await;
+
+    // The inbound byte was decoded as latin1, so the upstream received well-formed UTF-8 and the
+    // latin1 column holds the single byte 0xE3.
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let hex: String = upstream_conn
+        .query_first("SELECT hex(t) FROM charset_t WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(hex, "4EE36F");
+
+    // Proxied result rows come back in the client's charset.
+    let rows = raw
+        .query_raw(b"SELECT t FROM charset_t WHERE id = 1")
+        .await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), b"N\xE3o");
+
+    // A utf8mb4 session reading the same row gets UTF-8 bytes.
+    let value: Vec<u8> = utf8_conn
+        .query_first("SELECT t FROM charset_t WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, "Não".as_bytes());
+
+    shutdown_tx.shutdown().await;
+}
+
+/// SET NAMES latin1 mid-session must make the adapter decode inbound query bytes as latin1 and
+/// return proxied result rows re-encoded as latin1.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn set_names_latin1_roundtrip() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE charset_names (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET latin1)",
+    )
+    .await
+    .unwrap();
+
+    conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    // mysql_async can't send non-UTF-8 statement text through its typed API, so write the
+    // COM_QUERY payload directly: 'Não' with the ã as the single latin1 byte 0xE3.
+    conn.write_command_data(
+        Command::COM_QUERY,
+        b"INSERT INTO charset_names (id, t) VALUES (1, 'N\xE3o')",
+    )
+    .await
+    .unwrap();
+    let ok = conn.read_packet().await.unwrap();
+    assert_eq!(ok[0], 0x00, "INSERT should return an OK packet");
+
+    // The inbound byte was decoded as latin1 and stored as the latin1 byte 0xE3.
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let hex: String = upstream_conn
+        .query_first("SELECT hex(t) FROM charset_names WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(hex, "4EE36F");
+
+    // Proxied result rows come back in the session's charset.
+    let value: Vec<u8> = conn
+        .query_first("SELECT t FROM charset_names WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, b"N\xE3o".to_vec());
+
+    shutdown_tx.shutdown().await;
+}
