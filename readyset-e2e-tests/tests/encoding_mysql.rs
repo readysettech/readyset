@@ -1183,6 +1183,61 @@ async fn shallow_refresh_in_entry_charset() {
     shutdown_tx.shutdown().await;
 }
 
+/// A latin1 session's string parameters over the binary protocol are transcoded to UTF-8 before
+/// reaching the utf8mb4 upstream session, storing the same bytes a native latin1 MySQL session
+/// stores.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn latin1_execute_string_param() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE charset_exec (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET latin1)",
+    )
+    .await
+    .unwrap();
+    conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    // 'Não' as latin1 bytes; mysql_async sends Value::Bytes parameters typed as VAR_STRING
+    let latin1_bytes = mysql_async::Value::Bytes(b"N\xE3o".to_vec());
+    conn.exec_drop(
+        "INSERT INTO charset_exec (id, t) VALUES (?, ?)",
+        (1, latin1_bytes.clone()),
+    )
+    .await
+    .unwrap();
+
+    // The same insert through a native latin1 MySQL session must store the same bytes
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn.query_drop("SET NAMES latin1").await.unwrap();
+    upstream_conn
+        .exec_drop(
+            "INSERT INTO charset_exec (id, t) VALUES (?, ?)",
+            (2, latin1_bytes),
+        )
+        .await
+        .unwrap();
+
+    let hexes: Vec<(i64, String)> = upstream_conn
+        .query("SELECT id, hex(t) FROM charset_exec ORDER BY id")
+        .await
+        .unwrap();
+    assert_eq!(
+        hexes,
+        vec![(1, "4EE36F".to_string()), (2, "4EE36F".to_string())]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// SET NAMES latin1 mid-session must make the adapter decode inbound query bytes as latin1 and
 /// return proxied result rows re-encoded as latin1.
 #[tokio::test(flavor = "multi_thread")]

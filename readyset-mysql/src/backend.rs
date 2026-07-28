@@ -34,7 +34,7 @@ use upstream::StatementMeta;
 use crate::constants::DEFAULT_CHARACTER_SET;
 use crate::schema::convert_column;
 use crate::upstream::{self, CacheEntry, MySqlUpstream};
-use crate::value::mysql_value_to_dataflow_value;
+use crate::value::mysql_param_to_dataflow_value;
 use crate::{Error, MySqlQueryHandler};
 
 /// Helper struct to correctly transform a binary type value into its correct [`String`]
@@ -787,10 +787,13 @@ where
     ) -> io::Result<()> {
         // TODO(DAN): Param conversions are unnecessary for fallback execution. Params should be
         // derived directly from ParamParser.
+        let client_encoding = self.noria.connectors.noria.client_encoding();
         let params_result = params
             .into_iter()
             .flat_map(|p| {
-                p.map(|pval| mysql_value_to_dataflow_value(pval.value).map_err(Error::from))
+                p.map(|pval| {
+                    mysql_param_to_dataflow_value(pval, client_encoding).map_err(Error::from)
+                })
             })
             .collect::<Result<Vec<DfValue>, Error>>();
 
