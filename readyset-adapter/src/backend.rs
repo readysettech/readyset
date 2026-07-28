@@ -6580,6 +6580,7 @@ where
             proxy: _, // Basically ignored, caller will proxy unless we return an error
             set_autocommit,
             set_search_path,
+            set_client_encoding,
             set_results_encoding,
             set_timezone,
         } = Handler::handle_set_statement(set);
@@ -6641,6 +6642,10 @@ where
         if let Some(search_path) = set_search_path {
             trace!(?search_path, "Setting search_path");
             connectors.noria.set_schema_search_path(search_path);
+        }
+        if let Some(encoding) = set_client_encoding {
+            trace!(?encoding, "Setting client_encoding");
+            connectors.noria.set_client_encoding(encoding);
         }
         if let Some(encoding) = set_results_encoding {
             trace!(?encoding, "Setting results_encoding");

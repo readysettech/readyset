@@ -630,6 +630,10 @@ impl<S> MySqlShim<S> for Backend
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    fn client_encoding(&self) -> Encoding {
+        self.noria.connectors.noria.client_encoding()
+    }
+
     fn server_status_flags(&self) -> StatusFlags {
         self.build_status_flags()
     }
@@ -868,6 +872,7 @@ where
         )
         .increment(1);
         let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
+        self.noria.connectors.noria.set_client_encoding(encoding);
         self.noria.connectors.noria.set_results_encoding(encoding);
         Ok(())
     }

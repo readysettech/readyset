@@ -993,8 +993,11 @@ impl QueryHandler for MySqlQueryHandler {
                             let encoding = get_encoding_for_charset(value, var_name);
                             behavior.set_results_encoding(encoding)
                         }
-                        "character_set_client" // TODO(mvzink): Remove and support reencoding queries before parsing
-                        | "character_set_connection" // TODO(mvzink): Remove and support plumbing collation through expression lowering
+                        "character_set_client" => {
+                            let encoding = get_encoding_for_charset(value, var_name);
+                            behavior.set_client_encoding(encoding)
+                        }
+                        "character_set_connection" // TODO(mvzink): Remove and support plumbing collation through expression lowering
                         | "character_set_server"
                         | "collation_connection"
                         | "collation_server" => {
@@ -1019,6 +1022,7 @@ impl QueryHandler for MySqlQueryHandler {
                 .increment(1);
 
                 behavior = behavior
+                    .set_client_encoding(encoding)
                     .set_results_encoding(encoding)
                     .unsupported(names.collation.is_some());
             }
@@ -1228,6 +1232,30 @@ mod tests {
     }
 
     #[test]
+    fn set_character_set_client_string_literal_supported() {
+        for (charset, encoding) in [
+            ("latin1", Encoding::Latin1),
+            ("utf8", Encoding::Utf8),
+            ("utf8mb4", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    Variable {
+                        scope: VariableScope::Session,
+                        name: "character_set_client".into(),
+                    },
+                    Expr::Literal(Literal::String(charset.into())),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().set_client_encoding(Some(encoding))
+            )
+        }
+    }
+
+    #[test]
     fn set_character_set_results_bare_name_supported() {
         for (charset, encoding) in [
             ("latin1", Encoding::Latin1),
@@ -1268,7 +1296,9 @@ mod tests {
             });
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
-                SetBehavior::default().set_results_encoding(Some(encoding))
+                SetBehavior::default()
+                    .set_client_encoding(Some(encoding))
+                    .set_results_encoding(Some(encoding))
             )
         }
     }

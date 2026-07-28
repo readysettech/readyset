@@ -216,7 +216,7 @@ use database_utils::TlsMode;
 use error::{other_error, OtherErrorKind};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
-use readyset_data::DfType;
+use readyset_data::{encoding::Encoding, DfType};
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
@@ -338,6 +338,14 @@ impl InitResult {
 // Only used internally
 #[allow(async_fn_in_trait)]
 pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
+    /// Returns the encoding used by the client for query text.
+    ///
+    /// Implementations that do not track the negotiated client character set retain the previous
+    /// strict UTF-8 behavior.
+    fn client_encoding(&self) -> Encoding {
+        Encoding::Utf8
+    }
+
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`] should be used to notify the client of the statement id
@@ -954,14 +962,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Query(q) => {
                     let w = QueryResultWriter::new(&mut self.conn, false);
-                    let res = self
-                        .shim
-                        .on_query(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                        )
-                        .await;
+                    let query = decode_query(self.shim.client_encoding(), q)?;
+                    let res = self.shim.on_query(&query, w).await;
 
                     match res {
                         QueryResultsResponse::Command(cmd) => {
@@ -1001,13 +1003,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         conn: &mut self.conn,
                         stmts: &mut stmts,
                     };
+                    let query = decode_query(self.shim.client_encoding(), q)?;
                     self.shim
-                        .on_prepare(
-                            ::std::str::from_utf8(q)
-                                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-                            w,
-                            &mut self.schema_cache,
-                        )
+                        .on_prepare(&query, w, &mut self.schema_cache)
                         .await?;
                 }
                 Command::ResetStmtData(stmt) => {
@@ -1126,5 +1124,30 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         }
 
         Ok(())
+    }
+}
+
+fn decode_query(encoding: Encoding, query: &[u8]) -> io::Result<String> {
+    encoding
+        .decode(query)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_query_with_client_encoding() {
+        assert_eq!(
+            decode_query(Encoding::Latin1, b"SELECT '\xE3'").unwrap(),
+            "SELECT 'ã'"
+        );
+    }
+
+    #[test]
+    fn default_utf8_query_decoding_remains_strict() {
+        let error = decode_query(Encoding::Utf8, b"SELECT '\xE3'").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }

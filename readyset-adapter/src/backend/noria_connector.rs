@@ -299,6 +299,10 @@ pub struct NoriaConnector {
     /// in MySQL can be thought of as a schema search path that only has one element.
     schema_search_path: Vec<SqlIdentifier>,
 
+    /// The encoding used to decode query text sent by the client. Corresponds to
+    /// `character_set_client` and `SET NAMES` in MySQL.
+    client_encoding: Encoding,
+
     /// The encoding in which to return text results. Corresponds to `character_set_results` in
     /// MySQL and `SET NAMES` in both MySQL and Postgres.
     results_encoding: Encoding,
@@ -405,6 +409,7 @@ impl NoriaConnector {
             dialect,
             parse_dialect,
             schema_search_path,
+            client_encoding: Encoding::Utf8,
             results_encoding: Encoding::Utf8,
             timezone: SessionTimezone::System,
         }
@@ -906,6 +911,16 @@ impl NoriaConnector {
     /// Returns a reference to the currently configured schema search path
     pub fn schema_search_path(&self) -> &[SqlIdentifier] {
         self.schema_search_path.as_ref()
+    }
+
+    /// Set the encoding used to decode query text sent by the client.
+    pub fn set_client_encoding(&mut self, encoding: Encoding) {
+        self.client_encoding = encoding;
+    }
+
+    /// Returns the encoding used to decode query text sent by the client.
+    pub fn client_encoding(&self) -> Encoding {
+        self.client_encoding
     }
 
     /// Set the encoding for result sets
