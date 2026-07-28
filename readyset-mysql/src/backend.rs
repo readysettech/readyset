@@ -500,9 +500,20 @@ where
     }
 }
 
+fn encode_text_value(s: &str, results_encoding: Encoding) -> io::Result<mysql_async::Value> {
+    let bytes = results_encoding.encode(s).map_err(|e| {
+        io::Error::new(
+            ErrorKind::InvalidData,
+            format!("failed encoding text value as {results_encoding}: {e}"),
+        )
+    })?;
+    Ok(mysql_async::Value::Bytes(bytes.into_owned()))
+}
+
 async fn handle_shallow_result<S>(
     result: readyset_shallow::QueryResult<CacheEntry>,
     writer: QueryResultWriter<'_, S>,
+    results_encoding: Encoding,
     status_flags: StatusFlags,
 ) -> io::Result<()>
 where
@@ -524,12 +535,18 @@ where
             CacheEntry::Text(values) | CacheEntry::Binary(values) => values,
         };
         for val in row.iter() {
-            let val: mysql_async::Value = val.try_into().map_err(|e| {
-                io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Failed to convert DfValue to mysql::Value: {val:?}, error: {e}"),
-                )
-            })?;
+            // Text values are stored charset-canonically as UTF-8; encode them in the session's
+            // results charset. Other values (including raw bytes of binary columns) pass through.
+            let val: mysql_async::Value = match val {
+                DfValue::Text(t) => encode_text_value(t.as_str(), results_encoding)?,
+                DfValue::TinyText(t) => encode_text_value(t.as_str(), results_encoding)?,
+                _ => val.try_into().map_err(|e| {
+                    io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!("Failed to convert DfValue to mysql::Value: {val:?}, error: {e}"),
+                    )
+                })?,
+            };
             rw.write_col(val)?;
         }
         rw.end_row().await?;
@@ -541,13 +558,14 @@ async fn handle_upstream_result<S>(
     result: upstream::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
     cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
+    results_encoding: Encoding,
     status_flags_override: Option<StatusFlags>,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     result
-        .process(Some(writer), cache, status_flags_override)
+        .process(Some(writer), cache, status_flags_override, results_encoding)
         .await
 }
 
@@ -585,10 +603,11 @@ where
             handle_readyset_result(result, writer, results_encoding, status_flags).await
         }
         Ok(QueryResult::Shallow(result)) => {
-            handle_shallow_result(result, writer, status_flags).await
+            handle_shallow_result(result, writer, results_encoding, status_flags).await
         }
         Ok(QueryResult::Upstream(result, cache, _)) => {
-            handle_upstream_result(result, writer, cache, Some(status_flags)).await
+            handle_upstream_result(result, writer, cache, results_encoding, Some(status_flags))
+                .await
         }
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(

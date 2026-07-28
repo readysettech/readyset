@@ -107,6 +107,7 @@ pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{
     EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
 };
+use readyset_data::encoding::Encoding;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
@@ -3158,6 +3159,7 @@ where
         query_params: &ShallowQueryParameters,
         refresh: Option<&Arc<ShallowRefreshPool<DB>>>,
         view_request: &ShallowViewRequest,
+        results_encoding: Encoding,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
         let params_key = query_params.make_keys_from_merged(&merged)?;
@@ -3190,6 +3192,7 @@ where
         let shallow_key = ShallowKey {
             params: params_key,
             session: session_values,
+            charset: results_encoding,
         };
 
         // An entry keyed on session state must not refresh through the
@@ -3468,6 +3471,7 @@ where
             self.state.write_tracker.mark_write();
         }
 
+        let results_encoding = self.connectors.noria.results_encoding();
         let upstream = &mut self.connectors.upstream;
         let noria = &mut self.connectors.noria;
 
@@ -3729,6 +3733,7 @@ where
                     query_params,
                     self.state.shallow_refresh_pool.as_ref(),
                     view_request,
+                    results_encoding,
                 )
                 .await
             }
@@ -6131,6 +6136,7 @@ where
         let shallow_key = ShallowKey {
             params: params_key,
             session: session_values,
+            charset: connectors.noria.results_encoding(),
         };
 
         // An entry keyed on session state does not refresh via the

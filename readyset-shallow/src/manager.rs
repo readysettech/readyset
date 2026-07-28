@@ -635,6 +635,11 @@ where
         self.results.as_mut().unwrap().push(row);
     }
 
+    /// The key this guard inserts under, if it has not yet been consumed.
+    pub fn key(&self) -> Option<&K> {
+        self.key.as_ref()
+    }
+
     /// Set the metadata for this result set.
     pub fn set_metadata(&mut self, metadata: QueryMetadata) {
         self.metadata = Some(metadata);

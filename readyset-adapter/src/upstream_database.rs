@@ -7,6 +7,7 @@ pub use database_utils::UpstreamConfig;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
+use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash};
 use readyset_sql::ast::SqlIdentifier;
@@ -22,10 +23,13 @@ pub trait Refresh {
     /// The type of value in the shallow cache.
     type Entry: Send + Sync + 'static;
 
-    /// Populate the cache with data from this query result
+    /// Populate the cache with data from this query result. `encoding` is the results charset
+    /// of the entry being refreshed, which the connection that produced this result had mirrored
+    /// upstream. Upstreams without a results charset concept ignore it.
     async fn refresh(
         self,
         cache: CacheInsertGuard<crate::shallow_key::ShallowKey, Self::Entry>,
+        encoding: Encoding,
     ) -> std::io::Result<()>;
 }
 

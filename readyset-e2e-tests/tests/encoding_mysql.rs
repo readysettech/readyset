@@ -3,10 +3,12 @@ use mysql_async::consts::Command;
 use mysql_async::prelude::Queryable;
 use pretty_assertions::assert_eq;
 use readyset_adapter::backend::MigrationMode;
+use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
     TestBuilder,
-    mysql_helpers::{self, MySQLAdapter},
+    mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
+use std::panic::AssertUnwindSafe;
 use readyset_util::eventually;
 use std::time::Duration;
 use test_utils::{tags, upstream};
@@ -889,6 +891,294 @@ async fn latin1_handshake_roundtrip() {
         .unwrap()
         .unwrap();
     assert_eq!(value, "Não".as_bytes());
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A shallow cache entry filled under a lossy results charset must not leak its conversion loss
+/// into other charsets. A latin1 session caching a row containing a character latin1 can't
+/// represent stores MySQL's '?' substitution under its own key. A utf8mb4 session then misses
+/// and fills its own entry with the original character.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_cache_lossy_charset_not_shared() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop(
+        "CREATE TABLE charset_lossy (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET utf8mb4)",
+    )
+    .await
+    .unwrap();
+    conn.query_drop("INSERT INTO charset_lossy (id, t) VALUES (1, '日')")
+        .await
+        .unwrap();
+    conn.query_drop("CREATE SHALLOW CACHE FROM SELECT t FROM charset_lossy WHERE id = ?")
+        .await
+        .unwrap();
+
+    conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    // The miss proxies to upstream, whose latin1 conversion substitutes '?' for 日.
+    let value: Vec<u8> = conn
+        .query_first("SELECT t FROM charset_lossy WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, b"?".to_vec());
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    // The latin1 entry serves the same substitution back, matching MySQL for a latin1 reader.
+    eventually!(run_test: {
+        let value: Vec<u8> = conn
+            .query_first("SELECT t FROM charset_lossy WHERE id = 1")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, b"?".to_vec());
+    });
+
+    conn.query_drop("SET NAMES utf8mb4").await.unwrap();
+
+    // The utf8mb4 session keys its own entry, so it misses and gets the original character.
+    let value: Vec<u8> = conn
+        .query_first("SELECT t FROM charset_lossy WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, "日".as_bytes());
+    assert_eq!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    eventually!(run_test: {
+        let value: Vec<u8> = conn
+            .query_first("SELECT t FROM charset_lossy WHERE id = 1")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, "日".as_bytes());
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Shallow cache entries are partitioned by the session's results charset. A latin1 session and
+/// a utf8mb4 session each fill and hit their own entry, and each receives bytes in its own
+/// charset.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_cache_cross_charset() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut utf8_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    utf8_conn
+        .query_drop(
+            "CREATE TABLE charset_shallow (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET latin1)",
+        )
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop("INSERT INTO charset_shallow (id, t) VALUES (1, 'Não'), (2, 'Sim ã')")
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT t FROM charset_shallow WHERE id = ?")
+        .await
+        .unwrap();
+
+    let mut latin1_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    latin1_conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    // The first execution misses, proxies to upstream (latin1 bytes for this session), and
+    // fills the cache with the canonical UTF-8 decoding.
+    let value: Vec<u8> = latin1_conn
+        .query_first("SELECT t FROM charset_shallow WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, b"N\xE3o".to_vec());
+    assert_eq!(
+        last_query_info(&mut latin1_conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    // A shallow hit in the latin1 session returns latin1 bytes.
+    eventually!(run_test: {
+        let value: Vec<u8> = latin1_conn
+            .query_first("SELECT t FROM charset_shallow WHERE id = 1")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut latin1_conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, b"N\xE3o".to_vec());
+    });
+
+    // The latin1 entry is not shared with the utf8mb4 session. Its first query for the same
+    // params misses and proxies to upstream in UTF-8.
+    let value: Vec<u8> = utf8_conn
+        .query_first("SELECT t FROM charset_shallow WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut utf8_conn).await.destination,
+        QueryDestination::Upstream
+    );
+    assert_eq!(value, "Não".as_bytes());
+
+    // A shallow hit in the utf8mb4 session returns UTF-8 bytes from its own entry.
+    eventually!(run_test: {
+        let value: Vec<u8> = utf8_conn
+            .query_first("SELECT t FROM charset_shallow WHERE id = 1")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut utf8_conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, "Não".as_bytes());
+    });
+
+    // The reverse direction partitions the same way. The utf8mb4 session fills id 2, and the
+    // latin1 session still misses on it before filling its own entry.
+    let value: Vec<u8> = utf8_conn
+        .query_first("SELECT t FROM charset_shallow WHERE id = 2")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, "Sim ã".as_bytes());
+    assert_eq!(
+        last_query_info(&mut utf8_conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    let value: Vec<u8> = latin1_conn
+        .query_first("SELECT t FROM charset_shallow WHERE id = 2")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut latin1_conn).await.destination,
+        QueryDestination::Upstream
+    );
+    assert_eq!(value, b"Sim \xE3".to_vec());
+
+    eventually!(run_test: {
+        let value: Vec<u8> = latin1_conn
+            .query_first("SELECT t FROM charset_shallow WHERE id = 2")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut latin1_conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, b"Sim \xE3".to_vec());
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A scheduled refresh runs in the entry's charset. An entry filled by a latin1 session keeps
+/// returning latin1 bytes after the refresh picks up a new value.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_refresh_in_entry_charset() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut utf8_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    utf8_conn
+        .query_drop(
+            "CREATE TABLE charset_refresh (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET latin1)",
+        )
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop("INSERT INTO charset_refresh (id, t) VALUES (1, 'Não')")
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop(
+            "CREATE SHALLOW CACHE
+               POLICY TTL 60 SECONDS
+               REFRESH EVERY 2 SECONDS
+               FROM SELECT t FROM charset_refresh WHERE id = ?",
+        )
+        .await
+        .unwrap();
+
+    let mut latin1_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    latin1_conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    // Fill the latin1 entry.
+    let value: Vec<u8> = latin1_conn
+        .query_first("SELECT t FROM charset_refresh WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, b"N\xE3o".to_vec());
+    assert_eq!(
+        last_query_info(&mut latin1_conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    // Update the row upstream so the scheduled refresh picks up a new value.
+    utf8_conn
+        .query_drop("UPDATE charset_refresh SET t = 'Sim ã' WHERE id = 1")
+        .await
+        .unwrap();
+
+    // The refreshed hit returns latin1 bytes for the new value.
+    eventually!(run_test: {
+        let value: Vec<u8> = latin1_conn
+            .query_first("SELECT t FROM charset_refresh WHERE id = 1")
+            .await
+            .unwrap()
+            .unwrap();
+        let info = last_query_info(&mut latin1_conn).await;
+        AssertUnwindSafe(move || (info, value))
+    }, then_assert: |result| {
+        let (info, value) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(value, b"Sim \xE3".to_vec());
+    });
 
     shutdown_tx.shutdown().await;
 }

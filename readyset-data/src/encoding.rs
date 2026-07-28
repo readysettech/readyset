@@ -23,7 +23,7 @@ macro_rules! encoding_err {
 }
 
 /// Supported character encodings for string data
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Encoding {
     /// UTF-8
     ///

@@ -22,6 +22,7 @@ use readyset_adapter::upstream_database::{Refresh, UpstreamDestination, Upstream
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
+use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
@@ -37,6 +38,9 @@ use crate::{handle_error, Error};
 
 type StatementID = u32;
 
+/// One row of a shallow cache entry. Entries are keyed per results charset and filled from
+/// results the upstream converted into that charset. Text values are stored as canonical UTF-8
+/// [`DfValue`]s and encoded back into the key's charset when served.
 #[derive(Debug)]
 pub enum CacheEntry {
     Text(Vec<DfValue>),
@@ -74,6 +78,30 @@ const MIN_UPSTREAM_MINOR_VERSION: u16 = 7;
 
 fn dt_to_value_params(dt: &[DfValue]) -> ReadySetResult<Vec<mysql_async::Value>> {
     dt.iter().map(|v| v.try_into()).collect()
+}
+
+/// Convert an upstream wire value to the [`DfValue`] stored in a shallow cache entry. Values of
+/// text columns are decoded from the column's charset to UTF-8, so entries store canonical text
+/// regardless of the charset the upstream converted the result into. Values of binary columns
+/// (charset 63) are kept as raw bytes.
+fn cache_df_value(col: &mysql_async::Value, column_charset: u16) -> io::Result<DfValue> {
+    if let mysql_async::Value::Bytes(bytes) = col {
+        let encoding = Encoding::from_mysql_collation_id(column_charset);
+        if !matches!(encoding, Encoding::Binary) {
+            return encoding.decode(bytes).map(DfValue::from).map_err(|e| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("failed decoding {col:?} as {encoding}: {e}"),
+                )
+            });
+        }
+    }
+    col.try_into().map_err(|_| {
+        io::Error::new(
+            ErrorKind::InvalidData,
+            format!("failed converting {col:?} to DfValue"),
+        )
+    })
 }
 
 #[pin_project(project = ReadResultStreamProj)]
@@ -138,11 +166,18 @@ impl<'a> QueryResult<'a> {
     /// When `status_flags_override` is `None`, the flags from mysql-async are
     /// forwarded verbatim (used only for cache-refresh paths that have no
     /// client writer).
+    ///
+    /// `results_encoding` is the results charset of the session (or, on a refresh, of the entry
+    /// being refreshed), which the upstream connection's `character_set_results` mirrors. Shallow
+    /// cache entries are keyed per results charset and filled from results the upstream converted
+    /// into that charset. Cached copies of text values are decoded to UTF-8 and encoded back into
+    /// the key's charset when served.
     pub async fn process<S>(
         self,
         writer: Option<QueryResultWriter<'_, S>>,
         mut cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
         status_flags_override: Option<StatusFlags>,
+        results_encoding: Encoding,
     ) -> io::Result<()>
     where
         S: AsyncRead + AsyncWrite + Unpin,
@@ -178,6 +213,21 @@ impl<'a> QueryResult<'a> {
             } => {
                 let is_binary = matches!(stream, ReadResultStream::Binary(_));
 
+                // Cache entries store text values as UTF-8 DfValues, decoded from the charset
+                // each column's metadata reports. Skip filling the cache when that isn't
+                // possible: a `binary` results charset suppresses the upstream's conversion to
+                // a known charset, and an unsupported column charset can't be decoded.
+                if matches!(results_encoding, Encoding::Binary | Encoding::OtherMySql(_))
+                    || columns.iter().any(|c| {
+                        matches!(
+                            Encoding::from_mysql_collation_id(c.character_set()),
+                            Encoding::OtherMySql(_)
+                        )
+                    })
+                {
+                    cache = None;
+                }
+
                 let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
                 let mut rw = if let Some(writer) = writer {
                     Some(writer.start(&formatted_cols).await?)
@@ -204,12 +254,7 @@ impl<'a> QueryResult<'a> {
                         let col = row.as_ref(i).expect("Must match column number");
 
                         if let Some(ref mut copy) = copy {
-                            copy.push(col.try_into().map_err(|_| {
-                                io::Error::new(
-                                    ErrorKind::InvalidData,
-                                    format!("failed converting {col:?} to DfValue"),
-                                )
-                            })?);
+                            copy.push(cache_df_value(col, row.columns_ref()[i].character_set())?);
                         }
 
                         if let Some(ref mut rw) = rw {
@@ -259,11 +304,13 @@ impl Refresh for QueryResult<'_> {
     async fn refresh(
         self,
         cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
+        encoding: Encoding,
     ) -> io::Result<()> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),
             None, // No status flags override for cache refresh (no client writer)
+            encoding,
         )
         .await
     }

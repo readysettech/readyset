@@ -9,6 +9,7 @@ use metric::{
 };
 use metrics::{Gauge, counter, gauge, histogram};
 use readyset_client::query::QueryId;
+use readyset_data::encoding::Encoding;
 use readyset_shallow::CacheInsertGuard;
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::logging::*;
@@ -272,6 +273,9 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         let mut reconnect = false;
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
+        // The connection's current results charset. A fresh connection starts at the upstream
+        // default.
+        let mut results_charset = Encoding::Utf8;
 
         loop {
             let request = match timeout(WORKER_TIMEOUT, rx.recv()).await {
@@ -293,7 +297,10 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 let mut connect_config = config.clone();
                 connect_config.program_name = Some(READYSET_SHALLOW_REFRESHER.to_string());
                 match DB::connect(connect_config, None, None, false).await {
-                    Ok(conn) => upstream = Some(conn),
+                    Ok(conn) => {
+                        upstream = Some(conn);
+                        results_charset = Encoding::Utf8;
+                    }
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
                             warn!(
@@ -319,6 +326,33 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 cache,
                 shallow_exec_meta,
             } = request;
+
+            // Refresh in the entry's charset, so the upstream applies the same conversion the
+            // fill saw. The fill path never caches under a binary or unsupported results
+            // charset, so no entry can exist under such a key and those requests are dropped.
+            let encoding = cache.key().map(|k| k.charset);
+            let charset_name = encoding.and_then(|e| e.mysql_character_set_name());
+            let (Some(encoding), Some(charset_name)) = (encoding, charset_name) else {
+                Self::mark_idle(&pool, &rx, idx).await;
+                continue;
+            };
+            if encoding != results_charset {
+                match conn.set_results_character_set(charset_name).await {
+                    Ok(()) => results_charset = encoding,
+                    Err(e) => {
+                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_CHARSET, || {
+                            warn!(
+                                error = %e,
+                                charset = charset_name,
+                                "Failed to set results charset for refresh",
+                            )
+                        });
+                        reconnect = true;
+                        Self::mark_idle(&pool, &rx, idx).await;
+                        continue;
+                    }
+                }
+            }
 
             match conn.set_schema_search_path(&path).await {
                 Ok(()) => {}
@@ -366,7 +400,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             };
 
-            if let Err(e) = result.refresh(cache).await {
+            if let Err(e) = result.refresh(cache, encoding).await {
                 rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
                     warn!(
                         error = %e,

@@ -6,8 +6,14 @@
 //! plus the session's identity and policy-read values, so each security context gets its own
 //! partition. Equality and hashing over this key keep one session's cached rows from being served
 //! to another.
+//!
+//! Entries are additionally partitioned by the session's results charset because the upstream
+//! converts result text into that charset before Readyset caches it. An entry filled under one
+//! charset reflects that charset's conversion (including its lossy substitutions) and must not be
+//! served to sessions using another.
 
 use readyset_data::DfValue;
+use readyset_data::encoding::Encoding;
 use readyset_rls::SessionInputType;
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::SizeOf;
@@ -63,6 +69,8 @@ impl SessionInputValues {
 pub struct ShallowKey {
     pub params: Vec<DfValue>,
     pub session: SessionInputValues,
+    /// The session's results charset, which the upstream converted the cached result text into.
+    pub charset: Encoding,
 }
 
 impl ShallowKey {
@@ -71,6 +79,7 @@ impl ShallowKey {
         Self {
             params,
             session: SessionInputValues::default(),
+            charset: Encoding::Utf8,
         }
     }
 }
@@ -174,13 +183,25 @@ mod tests {
         let ka = ShallowKey {
             params: vec![],
             session: values(&[rls_val("k", Some("a"))]),
+            charset: Encoding::Utf8,
         };
         let kb = ShallowKey {
             params: vec![],
             session: values(&[rls_val("k", Some("b"))]),
+            charset: Encoding::Utf8,
         };
         assert_ne!(ka, kb);
         assert_eq!(ka, ka.clone());
+    }
+
+    #[test]
+    fn shallow_keys_differ_by_charset() {
+        let utf8 = ShallowKey::plain(vec![DfValue::from(1)]);
+        let latin1 = ShallowKey {
+            charset: Encoding::Latin1,
+            ..utf8.clone()
+        };
+        assert_ne!(utf8, latin1);
     }
 
     #[test]

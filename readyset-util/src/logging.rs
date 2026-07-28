@@ -18,6 +18,8 @@ pub const SAMPLER_LOG_SAMPLER: &str = "SAMPLER";
 pub const ADAPTER_SHALLOW_REFRESH_OPEN: &str = "ADAPTER_SHALLOW_REFRESH_OPEN";
 /// Key for shallow cache set schema failure.
 pub const ADAPTER_SHALLOW_REFRESH_SET_SCHEMA: &str = "ADAPTER_SHALLOW_REFRESH_SET_SCHEMA";
+/// Key for shallow cache set results charset failure.
+pub const ADAPTER_SHALLOW_REFRESH_SET_CHARSET: &str = "ADAPTER_SHALLOW_REFRESH_SET_CHARSET";
 /// Key for shallow cache refresh execution failure.
 pub const ADAPTER_SHALLOW_REFRESH_RUN: &str = "ADAPTER_SHALLOW_REFRESH_RUN";
 /// Key for shallow cache refresh result set read failure.
