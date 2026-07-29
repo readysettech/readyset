@@ -280,20 +280,47 @@ pub struct Column {
     pub decimals: u8,
 }
 
-impl From<&mysql_async::Column> for Column {
-    fn from(c: &mysql_async::Column) -> Self {
+impl Column {
+    /// Convert column metadata received from an upstream MySQL server, whose text fields (names,
+    /// tables, schema) are encoded in the upstream session's `character_set_results`, into
+    /// canonical UTF-8 form. Bytes that can't be decoded are replaced lossily.
+    pub fn from_mysql(c: &mysql_async::Column, encoding: Encoding) -> Self {
+        let decode = |bytes: &[u8]| {
+            encoding
+                .decode(bytes)
+                .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned())
+        };
         Column {
-            schema: c.schema_str().to_string(),
-            table: c.table_str().to_string(),
-            org_table: c.org_table_str().to_string(),
-            column: c.name_str().to_string(),
-            org_name: c.org_name_str().to_string(),
+            schema: decode(c.schema_ref()),
+            table: decode(c.table_ref()),
+            org_table: decode(c.org_table_ref()),
+            column: decode(c.name_ref()),
+            org_name: decode(c.org_name_ref()),
             coltype: c.column_type(),
             column_length: c.column_length(),
             character_set: c.character_set(),
             colflags: c.flags(),
             decimals: c.decimals(),
         }
+    }
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+
+    #[test]
+    fn from_mysql_decodes_text_fields_per_results_encoding() {
+        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
+            .with_name(b"situa\xE7\xE3o");
+
+        let column = Column::from_mysql(&upstream, Encoding::Latin1);
+        assert_eq!(column.column, "situação");
+
+        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
+            .with_name("situação".as_bytes());
+        let column = Column::from_mysql(&upstream, Encoding::Utf8);
+        assert_eq!(column.column, "situação");
     }
 }
 
@@ -431,6 +458,12 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     fn client_encoding(&self) -> Encoding {
         Encoding::Utf8
     }
+
+    /// Returns the encoding in which the client expects result text, including column metadata,
+    /// i.e. the session's effective `character_set_results`.
+    fn results_encoding(&self) -> Encoding {
+        Encoding::Utf8
+    }
 }
 
 /// Decode inbound client bytes to UTF-8 per the session's `character_set_client`.
@@ -458,6 +491,9 @@ pub struct CachedSchema {
     pub column_types: Vec<DfType>,
     /// Preencoded schema as a byte dump
     pub preencoded_schema: Arc<[u8]>,
+    /// The results encoding `preencoded_schema` was built with; the bytes must be rebuilt if the
+    /// session's results encoding changes.
+    pub encoding: Encoding,
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -852,6 +888,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             {
                 info!(target: "client_statement", "{:?}", cmd);
             }
+            self.conn.results_encoding = self.shim.results_encoding();
             match cmd {
                 Command::ChangeUser(q) => {
                     let change_user =

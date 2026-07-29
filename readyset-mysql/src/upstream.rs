@@ -228,7 +228,10 @@ impl<'a> QueryResult<'a> {
                     cache = None;
                 }
 
-                let formatted_cols = columns.iter().map(|c| c.into()).collect::<Vec<_>>();
+                let formatted_cols = columns
+                    .iter()
+                    .map(|c| mysql_srv::Column::from_mysql(c, results_encoding))
+                    .collect::<Vec<_>>();
                 let mut rw = if let Some(writer) = writer {
                     Some(writer.start(&formatted_cols).await?)
                 } else {
@@ -287,6 +290,7 @@ impl<'a> QueryResult<'a> {
                 if let Some(ref mut cache) = cache {
                     cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
                         columns: Arc::clone(&columns),
+                        columns_encoding: results_encoding,
                     }));
                     drop(cache.filled());
                 }

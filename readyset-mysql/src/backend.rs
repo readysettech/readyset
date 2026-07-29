@@ -526,7 +526,7 @@ where
     let formatted_cols = metadata
         .columns
         .iter()
-        .map(|c| c.into())
+        .map(|c| Column::from_mysql(c, metadata.columns_encoding))
         .collect::<Vec<_>>();
     let mut rw = writer.start(&formatted_cols).await?;
 
@@ -657,6 +657,10 @@ where
         self.noria.connectors.noria.client_encoding()
     }
 
+    fn results_encoding(&self) -> Encoding {
+        self.noria.connectors.noria.results_encoding()
+    }
+
     fn on_connect_attrs(&mut self, attrs: &HashMap<&str, &str>) {
         if attrs
             .get("_program_name")
@@ -678,6 +682,7 @@ where
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
+        let results_encoding = self.noria.connectors.noria.results_encoding();
         let prepare_result = self
             .prepare(query, (), PreparedStatementType::Named)
             .await
@@ -731,8 +736,14 @@ where
                     ..
                 }),
             )) => {
-                let params = params.iter().map(|c| c.into()).collect::<Vec<_>>();
-                let schema = schema.iter().map(|c| c.into()).collect::<Vec<_>>();
+                let params = params
+                    .iter()
+                    .map(|c| Column::from_mysql(c, results_encoding))
+                    .collect::<Vec<_>>();
+                let schema = schema
+                    .iter()
+                    .map(|c| Column::from_mysql(c, results_encoding))
+                    .collect::<Vec<_>>();
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
@@ -828,9 +839,23 @@ where
                     mysql_schema,
                     column_types,
                     preencoded_schema,
+                    ..
                 } = match schema_cache.entry(id) {
                     // `or_insert_with` would be cleaner but we need an async closure here
-                    Entry::Occupied(schema) => schema.into_mut(),
+                    Entry::Occupied(entry) => {
+                        let cached = entry.into_mut();
+                        // A change in session character set invalidates previously encoded
+                        // metadata.
+                        if cached.encoding != results_encoding {
+                            cached.preencoded_schema = mysql_srv::prepare_column_definitions(
+                                &cached.mysql_schema,
+                                results_encoding,
+                            )
+                            .into();
+                            cached.encoding = results_encoding;
+                        }
+                        cached
+                    }
                     Entry::Vacant(entry) => {
                         let mysql_schema = convert_columns!(schema.schema, results);
                         let column_types = schema
@@ -840,12 +865,13 @@ where
                             .collect();
 
                         let preencoded_schema =
-                            mysql_srv::prepare_column_definitions(&mysql_schema);
+                            mysql_srv::prepare_column_definitions(&mysql_schema, results_encoding);
 
                         entry.insert(CachedSchema {
                             mysql_schema,
                             column_types,
                             preencoded_schema: preencoded_schema.into(),
+                            encoding: results_encoding,
                         })
                     }
                 };

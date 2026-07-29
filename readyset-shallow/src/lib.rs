@@ -5,6 +5,7 @@ use std::time::Duration;
 mod cache;
 mod manager;
 
+use readyset_data::encoding::Encoding;
 use readyset_util::SizeOf;
 
 pub use cache::{CacheEntryInfo, CacheInfo};
@@ -13,6 +14,9 @@ pub use manager::{CacheInsertGuard, CacheManager, CacheResult, RequestRefresh};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MySqlMetadata {
     pub columns: Arc<[mysql_async::Column]>,
+    /// The encoding of the text fields of `columns` (names, tables, schema): the
+    /// `character_set_results` of the session that captured the metadata.
+    pub columns_encoding: Encoding,
 }
 
 impl SizeOf for MySqlMetadata {

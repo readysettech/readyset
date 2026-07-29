@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BytesMut};
 use mysql_common::constants::CapabilityFlags;
+use readyset_data::encoding::Encoding;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::resultset::MAX_POOL_ROW_CAPACITY;
@@ -38,6 +39,10 @@ pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
 
     /// Capabilities negotiated by the client in the handshake.
     pub(crate) client_capabilities: CapabilityFlags,
+
+    /// The session's effective `character_set_results`, in which outbound text such as column
+    /// metadata is encoded.
+    pub results_encoding: Encoding,
 }
 
 /// Type for packets being enqueued in the packet writer.
@@ -150,6 +155,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             preallocated: Vec::new(),
             stream: SwitchableStream::new(s),
             client_capabilities: CapabilityFlags::empty(),
+            results_encoding: Encoding::Utf8,
         }
     }
 

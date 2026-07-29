@@ -797,9 +797,10 @@ impl RawConn {
         conn
     }
 
-    /// Send a COM_QUERY with the given raw statement bytes and return the raw payloads of any
-    /// result row packets (empty for an OK response).
-    async fn query_raw(&mut self, statement: &[u8]) -> Vec<Vec<u8>> {
+    /// Send a COM_QUERY with the given raw statement bytes and return the column names from the
+    /// result-set metadata along with the raw payloads of any row packets (both empty for an OK
+    /// response).
+    async fn query_with_metadata(&mut self, statement: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let mut payload = Vec::with_capacity(statement.len() + 1);
         payload.push(0x03); // COM_QUERY
         payload.extend_from_slice(statement);
@@ -807,14 +808,16 @@ impl RawConn {
 
         let (_, first) = self.read_packet().await;
         match first.first() {
-            Some(0x00) => return Vec::new(),
+            Some(0x00) => return (Vec::new(), Vec::new()),
             Some(0xFF) => panic!("query failed: {}", String::from_utf8_lossy(&first[9..])),
             _ => {}
         }
         // A result set: `first` holds the column count; column definitions follow, terminated by
         // EOF, then row packets, terminated by EOF.
+        let mut names = Vec::new();
         for _ in 0..first[0] {
-            self.read_packet().await;
+            let (_, def) = self.read_packet().await;
+            names.push(column_def_name(&def));
         }
         let (_, eof) = self.read_packet().await;
         assert_eq!(eof.first(), Some(&0xFE), "expected EOF after column defs");
@@ -822,11 +825,40 @@ impl RawConn {
         loop {
             let (_, packet) = self.read_packet().await;
             if packet.first() == Some(&0xFE) && packet.len() < 9 {
-                return rows;
+                return (names, rows);
             }
             rows.push(packet);
         }
     }
+
+    /// Send a COM_QUERY with the given raw statement bytes and return the raw payloads of any
+    /// result row packets (empty for an OK response).
+    async fn query_raw(&mut self, statement: &[u8]) -> Vec<Vec<u8>> {
+        self.query_with_metadata(statement).await.1
+    }
+
+    /// The Query_destination column of EXPLAIN LAST STATEMENT.
+    async fn last_destination(&mut self) -> String {
+        let (_, rows) = self.query_with_metadata(b"EXPLAIN LAST STATEMENT").await;
+        assert_eq!(rows.len(), 1, "expected a single row: {rows:?}");
+        String::from_utf8(first_text_column(&rows[0]).to_vec()).unwrap()
+    }
+}
+
+/// Extract the column name (alias) from a column definition payload, assuming its length-encoded
+/// strings are under 251 bytes.
+fn column_def_name(payload: &[u8]) -> Vec<u8> {
+    // The name is the fifth length-encoded string, after catalog, schema, table, and org_table.
+    let mut pos = 0;
+    for _ in 0..4 {
+        pos += 1 + payload[pos] as usize;
+    }
+    payload[pos + 1..][..payload[pos] as usize].to_vec()
+}
+
+/// Extract the first column's value from a text-protocol row, assuming a value under 251 bytes.
+fn first_text_column(row: &[u8]) -> &[u8] {
+    &row[1..1 + row[0] as usize]
 }
 
 /// Extract the value of a single-column text-protocol row, assuming a value under 251 bytes.
@@ -891,6 +923,83 @@ async fn latin1_handshake_roundtrip() {
         .unwrap()
         .unwrap();
     assert_eq!(value, "Não".as_bytes());
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Column names in result-set metadata arrive in the session's charset, matching MySQL: a latin1
+/// session gets latin1 name bytes for both proxied and readyset-cached results, while a utf8mb4
+/// session gets UTF-8 name bytes.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn latin1_column_names_roundtrip() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut utf8_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    utf8_conn
+        .query_drop("CREATE TABLE charset_colname (id INT PRIMARY KEY, x INT)")
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop("INSERT INTO charset_colname (id, x) VALUES (1, 42)")
+        .await
+        .unwrap();
+
+    let mut raw = RawConn::connect_with_charset(&opts, LATIN1_COLLATION).await;
+
+    // Proxied: 'situação' aliased with ç and ã as the latin1 bytes 0xE7 and 0xE3 comes back with
+    // the same latin1 name bytes.
+    let (names, rows) = raw
+        .query_with_metadata(b"SELECT 'x' AS `situa\xE7\xE3o`")
+        .await;
+    assert_eq!(raw.last_destination().await, "upstream");
+    assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
+    assert_eq!(rows.len(), 1);
+
+    // The same proxied query in a utf8mb4 session names the column in UTF-8.
+    let result = utf8_conn
+        .query_iter("SELECT 'x' AS `situação`")
+        .await
+        .unwrap();
+    assert_eq!(result.columns_ref()[0].name_ref(), "situação".as_bytes());
+    drop(result);
+
+    utf8_conn
+        .query_drop("CREATE CACHE FROM SELECT x AS `situação` FROM charset_colname WHERE id = ?")
+        .await
+        .unwrap();
+
+    // Readyset-cached results also name the column in the session's charset.
+    eventually!(run_test: {
+        let (names, rows) = raw
+            .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_colname WHERE id = 1")
+            .await;
+        let destination = raw.last_destination().await;
+        AssertUnwindSafe(move || (names, rows, destination))
+    }, then_assert: |result| {
+        let (names, rows, destination) = result();
+        // A readyset destination includes the cache name, e.g. "readyset(q_...)".
+        assert_eq!(destination.split('(').next().unwrap(), "readyset");
+        assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
+        assert_eq!(rows.len(), 1);
+    });
+
+    let result = utf8_conn
+        .query_iter("SELECT x AS `situação` FROM charset_colname WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(result.columns_ref()[0].name_ref(), "situação".as_bytes());
+    drop(result);
+    assert!(matches!(
+        last_query_info(&mut utf8_conn).await.destination,
+        QueryDestination::Readyset(_)
+    ));
 
     shutdown_tx.shutdown().await;
 }
@@ -1106,6 +1215,117 @@ async fn shallow_cache_cross_charset() {
         let (info, value) = result();
         assert_eq!(info.destination, QueryDestination::ReadysetShallow);
         assert_eq!(value, b"Sim \xE3".to_vec());
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Shallow-cache column names arrive in the session's charset. Entries are partitioned per
+/// results charset, so each session fills and hits its own entry with its own name bytes.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn shallow_cross_charset_column_names() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut utf8_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    utf8_conn
+        .query_drop("CREATE TABLE charset_shallow_name (id INT PRIMARY KEY, x INT)")
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop("INSERT INTO charset_shallow_name (id, x) VALUES (1, 1), (2, 2)")
+        .await
+        .unwrap();
+    utf8_conn
+        .query_drop(
+            "CREATE SHALLOW CACHE FROM SELECT x AS `situação` FROM charset_shallow_name WHERE id = ?",
+        )
+        .await
+        .unwrap();
+
+    let mut raw = RawConn::connect_with_charset(&opts, LATIN1_COLLATION).await;
+
+    // Fill the entry from the latin1 session: the miss proxies to upstream, whose mirrored
+    // charset names the column in latin1.
+    let (names, _) = raw
+        .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 1")
+        .await;
+    assert_eq!(raw.last_destination().await, "upstream");
+    assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
+
+    // A shallow hit in the latin1 session keeps the latin1 name bytes.
+    eventually!(run_test: {
+        let (names, _) = raw
+            .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 1")
+            .await;
+        let destination = raw.last_destination().await;
+        AssertUnwindSafe(move || (names, destination))
+    }, then_assert: |result| {
+        let (names, destination) = result();
+        assert_eq!(destination, "readyset_shallow");
+        assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
+    });
+
+    // The latin1 entry is not shared with the utf8mb4 session. Its first query misses, then its
+    // own entry serves the name in UTF-8.
+    let result = utf8_conn
+        .query_iter("SELECT x AS `situação` FROM charset_shallow_name WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(result.columns_ref()[0].name_ref(), "situação".as_bytes());
+    drop(result);
+    assert_eq!(
+        last_query_info(&mut utf8_conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    eventually!(run_test: {
+        let result = utf8_conn
+            .query_iter("SELECT x AS `situação` FROM charset_shallow_name WHERE id = 1")
+            .await
+            .unwrap();
+        let name = result.columns_ref()[0].name_ref().to_vec();
+        drop(result);
+        let info = last_query_info(&mut utf8_conn).await;
+        AssertUnwindSafe(move || (info, name))
+    }, then_assert: |result| {
+        let (info, name) = result();
+        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_eq!(name, "situação".as_bytes());
+    });
+
+    // The reverse direction partitions the same way. The utf8mb4 session fills id 2, the latin1
+    // session misses on it, and its own entry then serves latin1 name bytes.
+    utf8_conn
+        .query_drop("SELECT x AS `situação` FROM charset_shallow_name WHERE id = 2")
+        .await
+        .unwrap();
+    assert_eq!(
+        last_query_info(&mut utf8_conn).await.destination,
+        QueryDestination::Upstream
+    );
+
+    let (names, _) = raw
+        .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 2")
+        .await;
+    assert_eq!(raw.last_destination().await, "upstream");
+    assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
+
+    eventually!(run_test: {
+        let (names, _) = raw
+            .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 2")
+            .await;
+        let destination = raw.last_destination().await;
+        AssertUnwindSafe(move || (names, destination))
+    }, then_assert: |result| {
+        let (names, destination) = result();
+        assert_eq!(destination, "readyset_shallow");
+        assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
     });
 
     shutdown_tx.shutdown().await;

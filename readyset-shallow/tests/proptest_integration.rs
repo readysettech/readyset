@@ -15,6 +15,7 @@ use readyset_util::SizeOf;
 fn test_metadata() -> QueryMetadata {
     QueryMetadata::MySql(MySqlMetadata {
         columns: Arc::new([]),
+        columns_encoding: readyset_data::encoding::Encoding::Utf8,
     })
 }
 
