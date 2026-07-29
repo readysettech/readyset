@@ -23,8 +23,8 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported, 
 use readyset_sql::ast::{ItemPlaceholder, Literal, ShallowCacheQuery, SqlIdentifier};
 use readyset_sql::{AstConversionError, Dialect, DialectDisplay};
 use sqlparser::ast::{
-    Expr, GroupByExpr, Ident, ObjectName, ObjectNamePart, OrderBy, OrderByExpr, OrderByKind, Query,
-    SetExpr, Value, ValueWithSpan, Visit, VisitMut, Visitor, VisitorMut,
+    Expr, Ident, ObjectName, ObjectNamePart, Query, SetExpr, Value, ValueWithSpan, Visit, VisitMut,
+    Visitor, VisitorMut,
 };
 use sqlparser::tokenizer::Span;
 use tracing::{trace, trace_span};
@@ -258,41 +258,6 @@ impl Visitor for ReorderNumberedPlaceholdersVisitor {
     }
 }
 
-/// True for a bare non-negative integer literal, i.e. an ordinal column reference when it
-/// appears as a top-level `ORDER BY` / `GROUP BY` item. Integers nested inside expressions
-/// (`ORDER BY a + 1`) are not ordinals.
-fn is_ordinal(expr: &Expr) -> bool {
-    matches!(
-        expr,
-        Expr::Value(ValueWithSpan { value: Value::Number(n, false), .. })
-            if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
-    )
-}
-
-/// Drains the elements of `items` that satisfy `is_stash` into a stash of
-/// `(original_index, element)` pairs, leaving the rest in place.
-fn stash_items<T>(items: &mut Vec<T>, is_stash: impl Fn(&T) -> bool) -> Vec<(usize, T)> {
-    let mut stash = Vec::new();
-    let mut kept = Vec::with_capacity(items.len());
-    for (idx, item) in mem::take(items).into_iter().enumerate() {
-        if is_stash(&item) {
-            stash.push((idx, item));
-        } else {
-            kept.push(item);
-        }
-    }
-    *items = kept;
-    stash
-}
-
-/// Reinserts elements stashed by [`stash_items`] at their original positions. The stash is in
-/// ascending index order, so inserting front to back reconstructs the original list exactly.
-fn unstash_items<T>(items: &mut Vec<T>, stash: Vec<(usize, T)>) {
-    for (idx, item) in stash {
-        items.insert(idx.min(items.len()), item);
-    }
-}
-
 /// Replaces all literals with `?` placeholders, collapsing IN lists to single placeholders.
 ///
 /// Mirrors `autoparameterize::FullyParameterizeVisitor` for the Readyset AST.
@@ -305,60 +270,10 @@ struct FullyParameterizeVisitor {
     /// When post_visit_expr sees a placeholder, if this is > 0, we skip incrementing
     /// param_idx since we already accounted for it in pre_visit_expr.
     pending_auto_placeholders: usize,
-    /// Ordinal column references (`ORDER BY 2`, `GROUP BY 1`) detached from their clause item
-    /// lists while the clause's children are visited, so the generic literal replacement never
-    /// sees them. Ordinals are static query shape, not per-execution parameters: PostgreSQL
-    /// resolves them at parse time, and a bind parameter in their place changes the query's
-    /// meaning (`GROUP BY $1` groups by a constant) or is rejected at PREPARE
-    /// (`SELECT DISTINCT ... ORDER BY $1`). One stash entry per clause instance, LIFO to match
-    /// clause nesting; the post hooks reinsert each item at its original position.
-    stashed_order_by_ordinals: Vec<Vec<(usize, OrderByExpr)>>,
-    stashed_group_by_ordinals: Vec<Vec<(usize, Expr)>>,
 }
 
 impl VisitorMut for FullyParameterizeVisitor {
     type Break = ReadySetError;
-
-    // The clause hooks fire per query-level ORDER BY / GROUP BY, including in subqueries and
-    // compound branches. Ordinal items are detached before the clause's children are visited
-    // and reinserted afterward, so post_visit_expr never encounters them. Window and aggregate
-    // ORDER BY use `OrderByExpr` directly rather than an `OrderBy` clause, so these hooks don't
-    // fire there and their bare integers keep normal handling.
-    fn pre_visit_order_by(&mut self, order_by: &mut OrderBy) -> ControlFlow<Self::Break> {
-        let stash = match &mut order_by.kind {
-            OrderByKind::Expressions(exprs) => stash_items(exprs, |e| is_ordinal(&e.expr)),
-            OrderByKind::All(_) => Vec::new(),
-        };
-        self.stashed_order_by_ordinals.push(stash);
-        ControlFlow::Continue(())
-    }
-
-    fn post_visit_order_by(&mut self, order_by: &mut OrderBy) -> ControlFlow<Self::Break> {
-        let stash = self.stashed_order_by_ordinals.pop().unwrap_or_default();
-        if let OrderByKind::Expressions(exprs) = &mut order_by.kind {
-            unstash_items(exprs, stash);
-        }
-        ControlFlow::Continue(())
-    }
-
-    fn pre_visit_group_by(&mut self, group_by: &mut GroupByExpr) -> ControlFlow<Self::Break> {
-        // TODO We should go deeper into Rollup, Cube, GroupingSets, where a bare integer
-        // is treated as an ordinal.
-        let stash = match group_by {
-            GroupByExpr::Expressions(exprs, _) => stash_items(exprs, is_ordinal),
-            GroupByExpr::All(_) => Vec::new(),
-        };
-        self.stashed_group_by_ordinals.push(stash);
-        ControlFlow::Continue(())
-    }
-
-    fn post_visit_group_by(&mut self, group_by: &mut GroupByExpr) -> ControlFlow<Self::Break> {
-        let stash = self.stashed_group_by_ordinals.pop().unwrap_or_default();
-        if let GroupByExpr::Expressions(exprs, _) = group_by {
-            unstash_items(exprs, stash);
-        }
-        ControlFlow::Continue(())
-    }
 
     fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
         // Handle IN/NOT IN specially - collapse to single placeholder
@@ -918,193 +833,6 @@ mod tests {
         let query_str = format!("{query}");
         assert!(query_str.contains("$1"));
         assert!(query_str.contains("$2"));
-    }
-
-    #[test]
-    fn rewrite_preserves_order_by_ordinals() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT DISTINCT color, weight FROM t ORDER BY 2, 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert!(params.auto_parameters.is_empty());
-        assert_eq!(
-            format!("{query}"),
-            "SELECT DISTINCT color, weight FROM t ORDER BY 2, 1"
-        );
-    }
-
-    #[test]
-    fn rewrite_skips_ordinal_between_other_literals() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = 1 ORDER BY 2 LIMIT 3");
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(
-            params.auto_parameters,
-            vec![(0, Literal::Integer(1)), (1, Literal::Integer(3))]
-        );
-        assert_eq!(
-            format!("{query}"),
-            "SELECT * FROM t WHERE id = $1 ORDER BY 2 LIMIT $2"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_group_by_ordinals() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT color, count(*) FROM t WHERE weight = 5 GROUP BY 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(params.auto_parameters, vec![(0, Literal::Integer(5))]);
-        assert_eq!(
-            format!("{query}"),
-            "SELECT color, count(*) FROM t WHERE weight = $1 GROUP BY 1"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_ordinals_in_subquery() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT * FROM (SELECT a, b FROM t ORDER BY 2 LIMIT 10) AS sub WHERE a = 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(
-            params.auto_parameters,
-            vec![(0, Literal::Integer(10)), (1, Literal::Integer(1))]
-        );
-        assert_eq!(
-            format!("{query}"),
-            "SELECT * FROM (SELECT a, b FROM t ORDER BY 2 LIMIT $1) AS sub WHERE a = $2"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_group_by_ordinal_in_subquery() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT * FROM (SELECT color, count(*) FROM t WHERE weight = 5 GROUP BY 1) AS sub \
-             WHERE color = 'red'",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(
-            params.auto_parameters,
-            vec![(0, Literal::Integer(5)), (1, Literal::String("red".into()))]
-        );
-        assert_eq!(
-            format!("{query}"),
-            "SELECT * FROM (SELECT color, count(*) FROM t WHERE weight = $1 GROUP BY 1) AS sub \
-             WHERE color = $2"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_group_by_ordinal_in_union_branch() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT a, count(*) FROM t WHERE a = 1 GROUP BY 1 \
-             UNION SELECT b, count(*) FROM u WHERE b = 2 GROUP BY 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(
-            params.auto_parameters,
-            vec![(0, Literal::Integer(1)), (1, Literal::Integer(2))]
-        );
-        assert_eq!(
-            format!("{query}"),
-            "SELECT a, count(*) FROM t WHERE a = $1 GROUP BY 1 \
-             UNION SELECT b, count(*) FROM u WHERE b = $2 GROUP BY 1"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_ordinals_in_union() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT a FROM t WHERE a = 1 UNION SELECT b FROM u WHERE b = 2 ORDER BY 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(
-            params.auto_parameters,
-            vec![(0, Literal::Integer(1)), (1, Literal::Integer(2))]
-        );
-        assert_eq!(
-            format!("{query}"),
-            "SELECT a FROM t WHERE a = $1 UNION SELECT b FROM u WHERE b = $2 ORDER BY 1"
-        );
-    }
-
-    #[test]
-    fn rewrite_preserves_ordinal_positions_among_mixed_order_by_items() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(dialect, "SELECT a, b, c FROM t ORDER BY 2, a + 1, 1 DESC");
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(params.auto_parameters, vec![(0, Literal::Integer(1))]);
-        assert_eq!(
-            format!("{query}"),
-            "SELECT a, b, c FROM t ORDER BY 2, a + $1, 1 DESC"
-        );
-    }
-
-    #[test]
-    fn rewrite_parameterizes_non_ordinal_order_by_literals() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(dialect, "SELECT a FROM t ORDER BY a + 1");
-        let flags = AdapterRewriteParams::new(dialect);
-
-        let params = rewrite_shallow(&mut query, flags).unwrap();
-
-        assert_eq!(params.auto_parameters, vec![(0, Literal::Integer(1))]);
-        assert_eq!(format!("{query}"), "SELECT a FROM t ORDER BY a + $1");
-    }
-
-    #[test]
-    fn literalize_preserves_order_by_ordinals() {
-        let dialect = Dialect::PostgreSQL;
-        let mut query = parse_query(
-            dialect,
-            "SELECT DISTINCT a, b FROM t WHERE a = 1 ORDER BY 2, 1",
-        );
-        let flags = AdapterRewriteParams::new(dialect);
-        rewrite_shallow(&mut query, flags).unwrap();
-
-        let result = literalize_shallow_query(&query, &[DfValue::Int(1)], dialect).unwrap();
-
-        assert_eq!(
-            result,
-            "SELECT DISTINCT a, b FROM t WHERE a = 1 ORDER BY 2, 1"
-        );
     }
 
     #[test]

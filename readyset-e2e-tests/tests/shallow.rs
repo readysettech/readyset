@@ -3065,20 +3065,48 @@ async fn hint_creates_adaptive_shallow_cache() {
     shutdown_tx.shutdown().await;
 }
 
+/// A list of queries that are expected to fully-parameterize with parameters in locations not
+/// supported by prepared statements.
+const QUERIES_WITH_PARAMETERIZATION_BEYOND_PREPARE: &[&str] = &[
+    "SELECT CURRENT_TIME(4)",
+    "SELECT * FROM foo ORDER BY 2, 1",
+    "SELECT DISTINCT a, b FROM foo ORDER BY 2, 1",
+    "SELECT a, b, COUNT(*) FROM foo GROUP BY 1, 2",
+    "SELECT a, COUNT(*) FROM foo GROUP BY 1 ORDER BY 1",
+    "SELECT a, b FROM foo WHERE a = 1 ORDER BY 2",
+    "SELECT * FROM (SELECT a, b FROM foo ORDER BY 2 LIMIT 10) AS sub WHERE a = 1",
+    "SELECT a FROM foo UNION SELECT b FROM foo ORDER BY 1",
+];
+
 #[test]
 #[tags(serial)]
 #[upstream(mysql)]
 async fn shallow_cache_checks_support_without_excessive_parameterization_mysql() {
     init_test_logging();
 
-    let (readyset_opts, _readyset_handle, shutdown_tx) =
-        TestBuilder::default().fallback(true).build::<MySQLAdapter>().await;
-    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    let test_name = derive_test_name();
 
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .replicate(false)
+        .fallback_without_replication(&test_name)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
     readyset
-        .query_drop("CREATE SHALLOW CACHE FROM SELECT CURRENT_TIME(4)")
+        .query_drop(format!("USE {test_name}"))
         .await
-        .expect("CREATE SHALLOW CACHE should succeed by probing the original query");
+        .unwrap();
+    readyset
+        .query_drop("CREATE TABLE foo (a INT, b INT)")
+        .await
+        .unwrap();
+
+    for query in QUERIES_WITH_PARAMETERIZATION_BEYOND_PREPARE {
+        readyset
+            .query_drop(format!("CREATE SHALLOW CACHE FROM {query}"))
+            .await
+            .unwrap_or_else(|e| panic!("CREATE SHALLOW CACHE FROM {query}: {e}"));
+    }
 
     shutdown_tx.shutdown().await;
 }
@@ -3089,15 +3117,25 @@ async fn shallow_cache_checks_support_without_excessive_parameterization_mysql()
 async fn shallow_cache_checks_support_without_excessive_parameterization_psql() {
     init_test_logging();
 
+    let test_name = derive_test_name();
+
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-        .fallback(true)
+        .replicate(false)
+        .fallback_without_replication(&test_name)
         .build::<PostgreSQLAdapter>()
         .await;
-    let rs = psql_helpers::connect(rs_opts).await;
-
-    rs.simple_query("CREATE SHALLOW CACHE FROM SELECT CURRENT_TIME(4)")
+    let mut rs_cfg = rs_opts;
+    rs_cfg.dbname(&test_name);
+    let rs = psql_helpers::connect(rs_cfg).await;
+    rs.simple_query("CREATE TABLE foo (a INT, b INT)")
         .await
-        .expect("CREATE SHALLOW CACHE should succeed by probing the original query");
+        .expect("create table");
+
+    for query in QUERIES_WITH_PARAMETERIZATION_BEYOND_PREPARE {
+        rs.simple_query(&format!("CREATE SHALLOW CACHE FROM {query}"))
+            .await
+            .unwrap_or_else(|e| panic!("CREATE SHALLOW CACHE FROM {query}: {e}"));
+    }
 
     shutdown_tx.shutdown().await;
 }
