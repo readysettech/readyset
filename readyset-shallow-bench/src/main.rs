@@ -378,7 +378,10 @@ async fn latency_reader(
             .expect("timed read failed");
         let us = start.elapsed().as_micros() as u64;
         let shallow = classify
-            && last_query_info(&mut conn).await.destination == QueryDestination::ReadysetShallow;
+            && matches!(
+                last_query_info(&mut conn).await.destination,
+                QueryDestination::ReadysetShallow(..)
+            );
         samples.push((tier, shallow, us));
     }
     samples
@@ -408,7 +411,10 @@ async fn staleness_sampler(
         let Some((_, _, _, cached_ms)) = cached else {
             continue;
         };
-        if last_query_info(&mut rs).await.destination != QueryDestination::ReadysetShallow {
+        if !matches!(
+            last_query_info(&mut rs).await.destination,
+            QueryDestination::ReadysetShallow(..)
+        ) {
             continue;
         }
         let staleness = write_log
@@ -578,7 +584,10 @@ async fn trace_point_keys(
             let served_at = current_timestamp_ms();
             let mut staleness = 0;
             if let Some((_, _, _, cached_ms)) = cached
-                && last_query_info(&mut rs).await.destination == QueryDestination::ReadysetShallow
+                && matches!(
+                    last_query_info(&mut rs).await.destination,
+                    QueryDestination::ReadysetShallow(..)
+                )
                 && let Some(stale_since) = write_log.first_after(key.id, cached_ms)
             {
                 staleness = served_at.saturating_sub(stale_since);
