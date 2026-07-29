@@ -462,7 +462,7 @@ const PG_SIDE_EFFECTING_FUNCTIONS: &[&str] = &[
 ];
 
 /// PostgreSQL functions not explicitly marked immutable, but still considered safe for caching.
-const PG_ADDITIONAL_ALLOWED: &[&str] = &["inet_server_addr", "inet_server_port"];
+const PG_ADDITIONAL_ALLOWED: &[&str] = &["inet_server_addr", "inet_server_port", "row"];
 
 /// Bare identifiers (no parentheses) that some dialects parse as session
 /// references rather than function calls: session identity and current
@@ -2413,6 +2413,12 @@ mod tests {
     fn skip_reasons_are_empty_for_an_eligible_query() {
         assert!(skip_reasons(Dialect::MySQL, "SELECT a FROM foo").is_empty());
         assert!(skip_reasons(Dialect::PostgreSQL, "SELECT a FROM foo").is_empty());
+    }
+
+    #[test]
+    fn postgresql_row_constructors_auto_cache() {
+        assert!(skip_reasons(Dialect::PostgreSQL, "SELECT (1, 2, 3)").is_empty());
+        assert!(skip_reasons(Dialect::PostgreSQL, "SELECT ROW(1, 2, 3)").is_empty());
     }
 
     #[test]
