@@ -279,7 +279,9 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         DfType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
         DfType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),
         DfType::Array(_) => unsupported!("MySQL does not support arrays"),
-        DfType::Row => unsupported!("MySQL does not support rows"),
+        // MySQL rejects a row constructor used where a scalar is expected (error 1241, "Operand
+        // should contain 1 column(s)"); it has no projectable row type to map onto.
+        DfType::Row(_) => unsupported!("MySQL does not support rows in the select list"),
         DfType::Tsvector => unsupported!("MySQL does not support the tsvector type"),
 
         // Geometric types - point

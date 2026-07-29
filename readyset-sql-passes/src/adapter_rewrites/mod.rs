@@ -296,7 +296,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     let span = trace_span!("adapter_rewrites", part = "equivalent_deep").entered();
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
-    query.disallow_row()?;
+    query.disallow_row(flags.dialect)?;
     trace!(parent: &span, pass="disallow_row", query = %query.display(flags.dialect));
     query.validate_window_functions()?;
     trace!(parent: &span, pass="validate_window_functions", query = %query.display(flags.dialect));

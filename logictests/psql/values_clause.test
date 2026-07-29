@@ -336,14 +336,14 @@ SELECT * FROM (VALUES (1), (2), (3));
 
 # Double-paren VALUES: ((1,1), (1,2), ...) uses ROW constructors (composite types).
 # PostgreSQL errors because alias count (2) doesn't match column count (10).
-# Readyset errors because ROW/tuple expressions in VALUES are not supported.
+# Readyset errors because VALUES takes only constant expressions.
 statement error
 SELECT * FROM (VALUES((1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10))) AS Foo(C1, C2)
 JOIN categories ON Foo.C1 = categories.id;
 
-# Simple ROW constructor in VALUES — Readyset rejects ROW/tuple expressions
+# Simple ROW constructor in VALUES — Readyset takes only constant expressions
 onlyif readyset
-statement error: ROW/tuple expressions in VALUES clauses are not supported
+statement error: Only constant expressions are supported in VALUES clause
 SELECT v.c1, c.name
 FROM (VALUES ((1, 'x')), ((2, 'y'))) AS v(c1)
 LEFT JOIN categories c ON v.c1 = c.id;

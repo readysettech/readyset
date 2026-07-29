@@ -211,7 +211,7 @@ where
         | DfType::Uuid
         | DfType::VarBit(_)
         | DfType::Array(_)
-        | DfType::Row
+        | DfType::Row(_)
         | DfType::Point
         | DfType::PostgisPoint
         | DfType::PostgisPolygon

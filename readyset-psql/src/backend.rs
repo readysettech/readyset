@@ -275,6 +275,9 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::Json(v) | PsqlValue::Jsonb(v) => Ok(DfValue::from(v.to_string())),
             PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => Ok(DfValue::from(bits.clone())),
             PsqlValue::Array(arr, _) => Ok(DfValue::from(arr.clone())),
+            // Records are only ever built on the way out to a client; the decoder resolves an
+            // inbound `record` parameter to a passthrough instead.
+            PsqlValue::Row(_, ty) => Err(ps::Error::UnsupportedType(ty.clone())),
             PsqlValue::PassThrough(p) => Ok(DfValue::PassThrough(Arc::new(p.clone()))),
         }
     }

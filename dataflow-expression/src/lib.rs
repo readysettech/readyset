@@ -523,6 +523,7 @@ pub enum Expr {
 
     Row {
         elements: Vec<Expr>,
+        ty: DfType,
     },
 }
 
@@ -531,7 +532,7 @@ impl Display for Expr {
         use Expr::*;
 
         match self {
-            Row { elements } => write!(f, "({})", elements.iter().join(", ")),
+            Row { elements, .. } => write!(f, "({})", elements.iter().join(", ")),
             Column { index, .. } => write!(f, "{index}"),
             Literal { val, .. } => write!(f, "(lit: {val})"),
             Op {
@@ -596,8 +597,8 @@ impl Expr {
             | Expr::CaseWhen { ty, .. }
             | Expr::Cast { ty, .. }
             | Expr::Array { ty, .. }
+            | Expr::Row { ty, .. }
             | Expr::AtTimeZone { ty, .. } => ty,
-            Expr::Row { .. } => &DfType::Row,
         }
     }
 }

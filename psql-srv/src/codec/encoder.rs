@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
 use postgres::error::ErrorPosition;
-use postgres_types::{ToSql, Type};
+use postgres_types::{Kind, ToSql, Type};
 use readyset_util::fmt::FastEncode;
 use tokio_util::codec::Encoder;
 
@@ -345,7 +345,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_i32(LENGTH_PLACEHOLDER, dst);
             put_i16(i16::try_from(parameter_data_types.len())?, dst);
             for t in parameter_data_types {
-                put_type(t, dst)?;
+                put_type(&t, dst)?;
             }
         }
         ParameterStatus {
@@ -374,7 +374,7 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
                 put_str(&d.field_name, dst);
                 put_u32(d.table_id, dst);
                 put_i16(d.col_id, dst);
-                put_type(d.data_type, dst)?;
+                put_type(&d.data_type, dst)?;
                 put_i16(d.data_type_size, dst);
                 put_i32(d.type_modifier, dst);
                 put_format(d.transfer_format, dst);
@@ -478,7 +478,7 @@ fn put_format(val: TransferFormat, dst: &mut BytesMut) {
     put_i16(format_code, dst)
 }
 
-fn put_type(val: Type, dst: &mut BytesMut) -> Result<(), Error> {
+fn put_type(val: &Type, dst: &mut BytesMut) -> Result<(), Error> {
     let oid = i32::try_from(val.oid())?;
     put_i32(oid, dst);
     Ok(())
@@ -578,6 +578,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Array(arr, ty) => {
             arr.to_sql(ty, dst)?;
         }
+        PsqlValue::Row(fields, ty) => {
+            put_record_binary(fields, ty, dst)?;
+        }
         PsqlValue::PassThrough(p) => {
             dst.put(&p.data[..]);
         }
@@ -590,8 +593,6 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
 }
 
 fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
-    use std::fmt::Write;
-
     // A void type (OID 2278) indicates that the called function returns no value. This is handled
     // as a special case since we don't support PassThrough values in the Text protocol
     if val == &PsqlValue::Null || matches!(val, PsqlValue::PassThrough(ref p) if p.ty.oid() == 2278)
@@ -602,6 +603,19 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
 
     let start_ofs = dst.len();
     put_i32(LENGTH_PLACEHOLDER, dst);
+    put_text_payload(val, dst)?;
+    // Update the length field to match the recently serialized data length in `dst`. The 4 byte
+    // length field itself is excluded from the length calculation.
+    let value_len = dst.len() - start_ofs - 4;
+    set_i32(i32::try_from(value_len)?, dst, start_ofs)?;
+    Ok(())
+}
+
+/// Writes the text representation of `val` with no length framing, as needed both by `DataRow`
+/// fields and by the fields nested inside a `record`.
+fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
+    use std::fmt::Write;
+
     match val {
         #[allow(clippy::unreachable)]
         PsqlValue::Null => {
@@ -687,6 +701,7 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 .join("")
         )?,
         PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
+        PsqlValue::Row(fields, _) => put_record_text(fields, dst)?,
         PsqlValue::PassThrough(p) => {
             return Err(Error::InternalError(format!(
                 "Data of type {} unsupported in text mode",
@@ -694,10 +709,76 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             )));
         }
     };
-    // Update the length field to match the recently serialized data length in `dst`. The 4 byte
-    // length field itself is excluded from the length calculation.
-    let value_len = dst.len() - start_ofs - 4;
-    set_i32(i32::try_from(value_len)?, dst, start_ofs)?;
+    Ok(())
+}
+
+/// Writes a `record` in PostgreSQL's text format, following `record_out`: fields are comma
+/// separated inside parentheses, a NULL field contributes nothing, and a field is double-quoted if
+/// it is empty or contains a quote, a backslash, a parenthesis, a comma, or whitespace. Inside
+/// quotes, `"` and `\` are doubled.
+fn put_record_text(fields: &[PsqlValue], dst: &mut BytesMut) -> Result<(), Error> {
+    put_u8(b'(', dst);
+    for (i, field) in fields.iter().enumerate() {
+        if i > 0 {
+            put_u8(b',', dst);
+        }
+        if field == &PsqlValue::Null {
+            continue;
+        }
+
+        // Quoting depends on the rendered bytes, so render into `dst` first and re-write the field
+        // only in the less common case that it needs quotes.
+        let field_start = dst.len();
+        put_text_payload(field, dst)?;
+        if record_field_needs_quoting(&dst[field_start..]) {
+            let raw = dst[field_start..].to_vec();
+            dst.truncate(field_start);
+            put_u8(b'"', dst);
+            for &b in &raw {
+                if b == b'"' || b == b'\\' {
+                    put_u8(b, dst);
+                }
+                put_u8(b, dst);
+            }
+            put_u8(b'"', dst);
+        }
+    }
+    put_u8(b')', dst);
+    Ok(())
+}
+
+/// Whether `record_out` would wrap this rendered field in double quotes: it does so for an empty
+/// field, and for one holding a delimiter, a quote, a backslash, or whitespace.
+///
+/// `0x09..=0x0d` plus space is PostgreSQL's `isspace` set in the C locale.
+fn record_field_needs_quoting(field: &[u8]) -> bool {
+    field.is_empty()
+        || field
+            .iter()
+            .any(|b| matches!(b, b'"' | b'\\' | b'(' | b')' | b',' | b' ' | 0x09..=0x0d))
+}
+
+/// Writes a `record` in PostgreSQL's binary format, following `record_send`: a field count, then
+/// each field prefixed by its type OID.
+fn put_record_binary(fields: &[PsqlValue], ty: &Type, dst: &mut BytesMut) -> Result<(), Error> {
+    let Kind::Composite(field_types) = ty.kind() else {
+        return Err(Error::InternalError(format!(
+            "Expected a composite type for a record value, but got {ty}"
+        )));
+    };
+    if field_types.len() != fields.len() {
+        return Err(Error::InternalError(format!(
+            "Record value has {} fields, but its type describes {}",
+            fields.len(),
+            field_types.len()
+        )));
+    }
+
+    put_i32(i32::try_from(fields.len())?, dst);
+    for (field, field_ty) in fields.iter().zip(field_types) {
+        put_type(field_ty.type_(), dst)?;
+        put_binary_value(field, dst)?;
+    }
     Ok(())
 }
 
@@ -711,6 +792,7 @@ mod tests {
     use eui48::MacAddress;
     use postgres::SimpleQueryRow;
     use postgres_protocol::message::backend::DataRowBody;
+    use proptest::prelude::*;
     use readyset_decimal::Decimal;
     use tokio_postgres::OwnedField;
     use uuid::Uuid;
@@ -1723,5 +1805,362 @@ mod tests {
         let mut buf = BytesMut::new();
         put_text_value(&PsqlValue::Bit(bits), &mut buf).unwrap();
         assert_eq!(buf, exp);
+    }
+
+    use crate::util::record_type;
+
+    /// Asserts that a row encodes to `expected` in text format, matching what PostgreSQL's
+    /// `record_out` produces for the same value.
+    fn assert_record_text(fields: Vec<PsqlValue>, field_types: Vec<Type>, expected: &[u8]) {
+        let mut buf = BytesMut::new();
+        put_text_value(&PsqlValue::Row(fields, record_type(field_types)), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(i32::try_from(expected.len()).unwrap());
+        exp.extend_from_slice(expected);
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_record() {
+        assert_record_text(
+            vec![PsqlValue::Int(1), PsqlValue::Int(2), PsqlValue::Int(3)],
+            vec![Type::INT4, Type::INT4, Type::INT4],
+            b"(1,2,3)",
+        );
+    }
+
+    #[test]
+    fn test_encode_text_record_mixed_types() {
+        assert_record_text(
+            vec![
+                PsqlValue::SmallInt(1),
+                PsqlValue::BigInt(2),
+                PsqlValue::Double(3.5),
+                PsqlValue::Text("hi".into()),
+                PsqlValue::Bool(true),
+                PsqlValue::Null,
+            ],
+            vec![
+                Type::INT2,
+                Type::INT8,
+                Type::FLOAT8,
+                Type::TEXT,
+                Type::BOOL,
+                Type::INT4,
+            ],
+            b"(1,2,3.5,hi,t,)",
+        );
+    }
+
+    #[test]
+    fn test_encode_text_record_quotes_delimiters_and_whitespace() {
+        assert_record_text(
+            vec![
+                PsqlValue::Text("a,b".into()),
+                PsqlValue::Text("c\"d".into()),
+                PsqlValue::Text("".into()),
+                PsqlValue::Text(" pad ".into()),
+            ],
+            vec![Type::TEXT; 4],
+            br#"("a,b","c""d",""," pad ")"#,
+        );
+    }
+
+    #[test]
+    fn test_encode_text_record_quotes_backslashes_and_parens() {
+        assert_record_text(
+            vec![
+                PsqlValue::Text(r"back\\slash".into()),
+                PsqlValue::Text("a(b)c".into()),
+                PsqlValue::Text("tab\there".into()),
+            ],
+            vec![Type::TEXT; 3],
+            br#"("back\\\\slash","a(b)c","tab	here")"#,
+        );
+    }
+
+    #[test]
+    fn test_encode_text_record_nested() {
+        // A nested row's text representation contains parens and a comma, so it gets quoted.
+        let inner = PsqlValue::Row(
+            vec![PsqlValue::Int(2), PsqlValue::Int(3)],
+            record_type(vec![Type::INT4, Type::INT4]),
+        );
+        assert_record_text(
+            vec![PsqlValue::Int(1), inner],
+            vec![Type::INT4, record_type(vec![Type::INT4, Type::INT4])],
+            br#"(1,"(2,3)")"#,
+        );
+    }
+
+    #[test]
+    fn test_encode_text_record_null_and_empty_are_distinct() {
+        assert_record_text(
+            vec![PsqlValue::Text("".into()), PsqlValue::Null],
+            vec![Type::TEXT, Type::TEXT],
+            br#"("",)"#,
+        );
+    }
+
+    #[test]
+    fn test_encode_binary_record() {
+        // Byte-for-byte what PostgreSQL 14 returns for
+        // `SELECT ROW(1::int4, 'hi'::text, NULL::int8)`.
+        let mut buf = BytesMut::new();
+        put_binary_value(
+            &PsqlValue::Row(
+                vec![
+                    PsqlValue::Int(1),
+                    PsqlValue::Text("hi".into()),
+                    PsqlValue::Null,
+                ],
+                record_type(vec![Type::INT4, Type::TEXT, Type::INT8]),
+            ),
+            &mut buf,
+        )
+        .unwrap();
+
+        let expected =
+            hex::decode("000000030000001700000004000000010000001900000002686900000014ffffffff")
+                .unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(i32::try_from(expected.len()).unwrap());
+        exp.extend_from_slice(&expected);
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_record_rejects_arity_mismatch() {
+        let mut buf = BytesMut::new();
+        let res = put_binary_value(
+            &PsqlValue::Row(
+                vec![PsqlValue::Int(1)],
+                record_type(vec![Type::INT4, Type::INT4]),
+            ),
+            &mut buf,
+        );
+        assert!(res.is_err());
+    }
+
+    /// A generated record field: a scalar with the type it is declared as, or a nested record.
+    #[derive(Clone, Debug)]
+    enum FieldSpec {
+        Scalar(PsqlValue, Type),
+        Nested(Vec<FieldSpec>),
+    }
+
+    impl FieldSpec {
+        fn value(&self) -> PsqlValue {
+            match self {
+                FieldSpec::Scalar(v, _) => v.clone(),
+                FieldSpec::Nested(fields) => row_value(fields),
+            }
+        }
+
+        fn ty(&self) -> Type {
+            match self {
+                FieldSpec::Scalar(_, ty) => ty.clone(),
+                FieldSpec::Nested(fields) => record_type(fields.iter().map(|f| f.ty())),
+            }
+        }
+    }
+
+    fn row_value(fields: &[FieldSpec]) -> PsqlValue {
+        PsqlValue::Row(
+            fields.iter().map(|f| f.value()).collect(),
+            record_type(fields.iter().map(|f| f.ty())),
+        )
+    }
+
+    /// Text made of the characters that decide whether `record_out` quotes a field, so quoting is
+    /// hit far more often than it would be by arbitrary strings.
+    fn field_text() -> impl Strategy<Value = String> {
+        let chars = prop_oneof![
+            Just('a'),
+            Just('Z'),
+            Just('7'),
+            Just(' '),
+            Just('\t'),
+            Just('\n'),
+            Just('\r'),
+            Just('"'),
+            Just('\\'),
+            Just('('),
+            Just(')'),
+            Just(','),
+            Just('{'),
+            Just('}'),
+            any::<char>(),
+        ];
+        proptest::collection::vec(chars, 0..8).prop_map(|cs| cs.into_iter().collect())
+    }
+
+    /// Scalars whose own text rendering is unambiguous, keeping these properties about the record
+    /// framing rather than about float or numeric formatting. A NULL still carries the type it
+    /// would have had, which is what the binary format has to emit an OID for.
+    fn scalar_field() -> impl Strategy<Value = FieldSpec> {
+        prop_oneof![
+            any::<i16>().prop_map(|v| FieldSpec::Scalar(PsqlValue::SmallInt(v), Type::INT2)),
+            any::<i32>().prop_map(|v| FieldSpec::Scalar(PsqlValue::Int(v), Type::INT4)),
+            any::<i64>().prop_map(|v| FieldSpec::Scalar(PsqlValue::BigInt(v), Type::INT8)),
+            any::<bool>().prop_map(|v| FieldSpec::Scalar(PsqlValue::Bool(v), Type::BOOL)),
+            field_text()
+                .prop_map(|s| FieldSpec::Scalar(PsqlValue::Text(s.as_str().into()), Type::TEXT)),
+            prop_oneof![Just(Type::INT4), Just(Type::TEXT)]
+                .prop_map(|ty| FieldSpec::Scalar(PsqlValue::Null, ty)),
+        ]
+    }
+
+    /// A record of at least one field: `()` is both a fieldless record and a single NULL field, an
+    /// ambiguity PostgreSQL shares, and `ROW()` is not constructible anyway.
+    fn record_fields() -> impl Strategy<Value = Vec<FieldSpec>> {
+        let field = scalar_field().prop_recursive(3, 24, 3, |inner| {
+            proptest::collection::vec(inner, 1..4).prop_map(FieldSpec::Nested)
+        });
+        proptest::collection::vec(field, 1..6)
+    }
+
+    /// Reads back one `record_in` field, returning `None` for a NULL one. Unquoted runs have their
+    /// surrounding whitespace stripped, which is why the encoder has to quote a field that carries
+    /// its own.
+    fn parse_record_field(input: &[u8], pos: &mut usize) -> Option<Vec<u8>> {
+        let is_space = |b: u8| b == b' ' || (0x09..=0x0d).contains(&b);
+        let mut out = Vec::new();
+        let mut quoted = false;
+        // Length of `out` up to the last byte that survives whitespace stripping.
+        let mut kept = 0;
+
+        while *pos < input.len() && is_space(input[*pos]) {
+            *pos += 1;
+        }
+        while *pos < input.len() {
+            match input[*pos] {
+                b',' | b')' => break,
+                b'"' => {
+                    quoted = true;
+                    *pos += 1;
+                    while *pos < input.len() {
+                        match input[*pos] {
+                            b'"' if input.get(*pos + 1) == Some(&b'"') => {
+                                out.push(b'"');
+                                *pos += 2;
+                            }
+                            b'"' => {
+                                *pos += 1;
+                                break;
+                            }
+                            b'\\' => {
+                                out.push(*input.get(*pos + 1).expect("escape at end of record"));
+                                *pos += 2;
+                            }
+                            b => {
+                                out.push(b);
+                                *pos += 1;
+                            }
+                        }
+                    }
+                    kept = out.len();
+                }
+                b => {
+                    out.push(b);
+                    *pos += 1;
+                    if !is_space(b) {
+                        kept = out.len();
+                    }
+                }
+            }
+        }
+        out.truncate(kept);
+        (quoted || !out.is_empty()).then_some(out)
+    }
+
+    /// An independent `record_in`: the inverse of what the encoder writes, so a quoting bug shows
+    /// up as a field that reads back wrong.
+    fn parse_record(input: &[u8]) -> Vec<Option<Vec<u8>>> {
+        assert_eq!(input.first(), Some(&b'('), "a record starts with a paren");
+        let mut pos = 1;
+        let mut fields = vec![parse_record_field(input, &mut pos)];
+        while input.get(pos) == Some(&b',') {
+            pos += 1;
+            fields.push(parse_record_field(input, &mut pos));
+        }
+        assert_eq!(input.get(pos), Some(&b')'), "a record ends with a paren");
+        assert_eq!(pos + 1, input.len(), "trailing bytes after a record");
+        fields
+    }
+
+    fn text_payload(val: &PsqlValue) -> Vec<u8> {
+        let mut buf = BytesMut::new();
+        put_text_payload(val, &mut buf).unwrap();
+        buf.to_vec()
+    }
+
+    fn binary_value(val: &PsqlValue) -> Vec<u8> {
+        let mut buf = BytesMut::new();
+        put_binary_value(val, &mut buf).unwrap();
+        buf.to_vec()
+    }
+
+    /// Every field of a record, nested ones included, reads back as exactly the text that field
+    /// encodes to on its own, and a NULL field stays distinct from an empty one.
+    #[test_strategy::proptest]
+    fn record_text_round_trips(#[strategy(record_fields())] fields: Vec<FieldSpec>) {
+        let mut buf = BytesMut::new();
+        put_text_value(&row_value(&fields), &mut buf).unwrap();
+
+        let len = i32::from_be_bytes(buf[..4].try_into().unwrap());
+        prop_assert_eq!(usize::try_from(len).unwrap(), buf.len() - 4);
+
+        let parsed = parse_record(&buf[4..]);
+        prop_assert_eq!(parsed.len(), fields.len());
+        for (field, parsed) in fields.iter().zip(parsed) {
+            let value = field.value();
+            let expected = (value != PsqlValue::Null).then(|| text_payload(&value));
+            prop_assert_eq!(parsed, expected);
+        }
+    }
+
+    /// A binary record is a field count followed by each field's own type OID and its
+    /// length-prefixed encoding, NULL fields included, and nothing else.
+    #[test_strategy::proptest]
+    fn record_binary_is_field_wise(#[strategy(record_fields())] fields: Vec<FieldSpec>) {
+        let encoded = binary_value(&row_value(&fields));
+
+        let len = i32::from_be_bytes(encoded[..4].try_into().unwrap());
+        prop_assert_eq!(usize::try_from(len).unwrap(), encoded.len() - 4);
+
+        let mut rest = &encoded[4..];
+        let count = i32::from_be_bytes(rest[..4].try_into().unwrap());
+        prop_assert_eq!(usize::try_from(count).unwrap(), fields.len());
+        rest = &rest[4..];
+
+        for field in &fields {
+            prop_assert!(rest.len() >= 4);
+            let oid = u32::from_be_bytes(rest[..4].try_into().unwrap());
+            prop_assert_eq!(oid, field.ty().oid());
+            rest = &rest[4..];
+
+            let expected = binary_value(&field.value());
+            prop_assert!(rest.starts_with(&expected));
+            rest = &rest[expected.len()..];
+        }
+        prop_assert!(rest.is_empty());
+    }
+
+    /// A record whose type describes a different number of fields is refused rather than encoded
+    /// with fields dropped or OIDs shifted onto the wrong values.
+    #[test_strategy::proptest]
+    fn record_binary_rejects_any_arity_mismatch(
+        #[strategy(record_fields())] fields: Vec<FieldSpec>,
+        #[strategy(1usize..6)] declared_arity: usize,
+    ) {
+        prop_assume!(declared_arity != fields.len());
+
+        let value = PsqlValue::Row(
+            fields.iter().map(|f| f.value()).collect(),
+            record_type(vec![Type::INT4; declared_arity]),
+        );
+        let mut buf = BytesMut::new();
+        prop_assert!(put_binary_value(&value, &mut buf).is_err());
     }
 }

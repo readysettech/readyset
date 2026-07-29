@@ -40,6 +40,9 @@ pub enum PsqlValue {
     Bit(BitVec),
     VarBit(BitVec),
     Array(Array, Type),
+    /// An anonymous composite (`record`) value. The second element is the composite [`Type`], whose
+    /// [`Kind::Composite`] fields give the type of each field in the same order.
+    Row(Vec<PsqlValue>, Type),
     PassThrough(readyset_data::PassThrough),
 }
 

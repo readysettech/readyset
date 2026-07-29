@@ -211,7 +211,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         | DfType::Bit(_)
         | DfType::VarBit(_)
         | DfType::Array(_)
-        | DfType::Row
+        | DfType::Row(_)
         | DfType::Point
         | DfType::PostgisPoint
         | DfType::PostgisPolygon
@@ -349,7 +349,7 @@ pub(crate) fn coerce_decimal(
         | DfType::PostgisPoint
         | DfType::PostgisPolygon
         | DfType::Tsvector
-        | DfType::Row => Err(ReadySetError::DfValueConversionError {
+        | DfType::Row(_) => Err(ReadySetError::DfValueConversionError {
             src_type: "Decimal".to_string(),
             target_type: to_ty.to_string(),
             details: "Not allowed".to_string(),

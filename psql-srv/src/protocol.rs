@@ -1117,6 +1117,10 @@ async fn data_type_size<B: PsqlBackend>(
         Column::Column { col_type, .. } => match col_type.kind() {
             Kind::Array(_) => TYPLEN_VARLENA,
             Kind::Enum(_) => TYPLEN_VARLENA,
+            // An anonymous `record` is built with `Kind::Composite`, so it never compares equal to
+            // the built-in `Type::RECORD` below; matching on the kind keeps it off the
+            // extended-type lookup, which queries `pg_catalog.pg_type` upstream.
+            Kind::Composite(_) => TYPLEN_VARLENA,
             _ => match *col_type {
                 Type::BOOL => TYPLEN_1,
                 Type::BYTEA => TYPLEN_VARLENA,

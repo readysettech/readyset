@@ -2057,12 +2057,14 @@ impl Expr {
                     ty,
                 })
             }
-            AstExpr::Row { exprs, .. } => Ok(Self::Row {
-                elements: exprs
+            AstExpr::Row { exprs, .. } => {
+                let elements = exprs
                     .into_iter()
                     .map(|e| Self::lower(e, dialect, context))
-                    .collect::<ReadySetResult<Vec<_>>>()?,
-            }),
+                    .collect::<ReadySetResult<Vec<_>>>()?;
+                let ty = DfType::Row(elements.iter().map(|e| e.ty().clone()).collect());
+                Ok(Self::Row { elements, ty })
+            }
             AstExpr::Exists(_) => unsupported!("EXISTS not currently supported"),
             AstExpr::Variable(_) => unsupported!("Variables not currently supported"),
             AstExpr::ConvertUsing { .. } => {

@@ -122,8 +122,8 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
             }
             (&Type::BIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::Bit(b.as_ref().clone())),
             (&Type::VARBIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::VarBit(b.as_ref().clone())),
-            (t, DfValue::Array(ref arr)) => {
-                if let Kind::Array(member) = t.kind() {
+            (t, DfValue::Array(ref arr)) => match t.kind() {
+                Kind::Array(member) => {
                     let mut arr = (**arr).clone();
                     if let Kind::Enum(vs) = member.kind() {
                         for val in arr.values_mut() {
@@ -131,12 +131,34 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                         }
                     }
                     Ok(PsqlValue::Array(arr, t.clone()))
-                } else {
-                    Err(ps::Error::InternalError(format!(
-                        "Mismatched type for value: expected array type, but got {t}"
-                    )))
                 }
-            }
+                // A `ROW` constructor evaluates to a flat, heterogeneous array of its field
+                // values; the client expects it back as a composite, so pair each value up with
+                // its field type.
+                Kind::Composite(field_types) => {
+                    if arr.total_len() != field_types.len() {
+                        return Err(ps::Error::InternalError(format!(
+                            "Row value has {} fields, but its type {t} describes {}",
+                            arr.total_len(),
+                            field_types.len()
+                        )));
+                    }
+                    let fields = arr
+                        .values()
+                        .zip(field_types)
+                        .map(|(value, field_ty)| {
+                            PsqlValue::try_from(TypedDfValue {
+                                col_type: field_ty.type_(),
+                                value: value.clone(),
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+                    Ok(PsqlValue::Row(fields, t.clone()))
+                }
+                _ => Err(ps::Error::InternalError(format!(
+                    "Mismatched type for value: expected array or composite type, but got {t}"
+                ))),
+            },
             // WORKAROUND: PostgreSQL may send empty array parameters as the literal string '{}'
             // rather than a proper array value in certain client scenarios, particularly when
             // casting parameters like `$1::text[]` with the value '{}'. This converts the text

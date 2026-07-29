@@ -238,7 +238,7 @@ impl Rewrite for SelectStatement {
 
         self.rewrite_between();
         trace!(parent: &span, pass="rewrite_between", query = %self.display(sql_dialect));
-        self.disallow_row()?;
+        self.disallow_row(sql_dialect)?;
         trace!(parent: &span, pass="disallow_row", query = %self.display(sql_dialect));
         self.validate_window_functions()?;
         trace!(parent: &span, pass="validate_window_functions", query = %self.display(sql_dialect));

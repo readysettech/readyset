@@ -207,7 +207,7 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 // (e.g. int8[] and int8[][] both use INT8_ARRAY), so recursively
                 // unwrap to find the base scalar type.
                 DfType::Array(_) => type_to_pgsql(elem),
-                DfType::Row => unsupported_type!(),
+                DfType::Row(_) => unsupported_type!(),
                 // postgres built-in point type not supported, but postgis point is supported
                 DfType::Point => unsupported_type!(),
                 DfType::PostgisPoint => Ok(Type::BYTEA_ARRAY),
@@ -215,7 +215,14 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::Tsvector => Ok(Type::TS_VECTOR_ARRAY),
             }
         }
-        DfType::Row => Ok(Type::RECORD),
+        // An anonymous `ROW` is reported to the client as the `record` pseudo-type, but its wire
+        // encoding is field-wise, so the field types ride along in the `Kind` for the encoder.
+        DfType::Row(fields) => Ok(ps::util::record_type(
+            fields
+                .iter()
+                .map(type_to_pgsql)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
     }
 }
 

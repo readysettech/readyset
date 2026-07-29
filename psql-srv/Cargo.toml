@@ -65,6 +65,8 @@ database-utils = { path = "../database-utils" }
 readyset-tracing = { path = "../readyset-tracing" }
 postgres-native-tls = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
+proptest = { workspace = true }
+test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 
 [[bench]]

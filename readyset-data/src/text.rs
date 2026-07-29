@@ -713,7 +713,7 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
 
             DfType::Bit(_)
             | DfType::VarBit(_)
-            | DfType::Row
+            | DfType::Row(_)
             | DfType::Point
             | DfType::PostgisPoint
             | DfType::PostgisPolygon
