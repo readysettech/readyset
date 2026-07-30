@@ -582,38 +582,6 @@ pub fn auto_parameterize_query(
     Ok(visitor.out)
 }
 
-#[derive(Default)]
-struct FullyParameterizeVisitor {
-    param_idx: usize,
-    out: Vec<(usize, Literal)>,
-}
-
-impl<'ast> VisitorMut<'ast> for FullyParameterizeVisitor {
-    type Error = ReadySetError;
-
-    fn visit_literal(&mut self, literal: &mut Literal) -> Result<(), Self::Error> {
-        if *literal == Literal::Null {
-            return Ok(());
-        }
-        if !matches!(literal, Literal::Placeholder(..)) {
-            let val = mem::replace(literal, Literal::Placeholder(ItemPlaceholder::QuestionMark));
-            self.out.push((self.param_idx, val));
-        }
-        self.param_idx += 1;
-        Ok(())
-    }
-}
-
-/// Replace all literals with placeholders, extracting the literals as parameters in a parameter
-/// list of (placeholder position, value).
-pub fn fully_parameterize_query(
-    query: &mut SelectStatement,
-) -> ReadySetResult<Vec<(usize, Literal)>> {
-    let mut visitor = FullyParameterizeVisitor::default();
-    visitor.visit_select_statement(query)?;
-    Ok(visitor.out)
-}
-
 #[cfg(test)]
 mod tests {
     use readyset_sql::{Dialect, DialectDisplay};

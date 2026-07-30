@@ -172,9 +172,9 @@ pub struct AdapterRewriteParams {
     /// flag is true, both equals and range parameters in supported positions will be
     /// autoparameterized during the adapter rewrite passes.
     pub server_supports_mixed_comparisons: bool,
-    /// Whether to run the autoparameterization pass (`ParameterizeMode::Auto`). Defaults to `true`.
-    /// `CREATE CACHE WITH (AUTOPARAM OFF)` sets this to `false` so the cache is built with
-    /// exactly the placeholders the user wrote; explicit `?`/`$N` placeholders are still numbered.
+    /// Whether to run the autoparameterization pass. Defaults to `true`.
+    /// `CREATE CACHE WITH (AUTOPARAM OFF)` sets this to `false` so the cache is built with exactly
+    /// the placeholders the user wrote; explicit `?`/`$N` placeholders are still numbered.
     pub autoparameterize: bool,
 }
 
@@ -201,15 +201,6 @@ pub trait AdapterRewriteContext:
 
 impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {}
 
-/// How to handle parameterization.
-#[derive(Debug, Copy, Clone)]
-pub enum ParameterizeMode {
-    /// Readyset's original autoparameterization.
-    Auto,
-    /// Replace all literals with placeholders.
-    Full,
-}
-
 /// An initial rewrite pass mostly for autoparameterization, appropriate on its own for shallow
 /// caching.
 ///
@@ -220,11 +211,9 @@ pub enum ParameterizeMode {
 /// - Replaces literals with placeholders when they can be used as lookup indices in the noria
 ///   dataflow representation of the query. Note that this pass may not replace all literals and is
 ///   therefore cannot guarantee that the rewritten query is free of user PII.
-/// - If full parameterization is requested, all literals are replaced with placeholders.
 pub fn rewrite_equivalent_parameters(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
-    mode: ParameterizeMode,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
@@ -236,39 +225,28 @@ pub fn rewrite_equivalent_parameters(
         query = %query.display(flags.dialect),
         placeholders=?reordered_placeholders
     );
-    let auto_parameters = match mode {
-        ParameterizeMode::Auto if !flags.autoparameterize => {
-            // Autoparameterization explicitly disabled (CREATE CACHE WITH (AUTOPARAM OFF)).
-            // Leave any user-written placeholders in place; they're numbered below.
-            trace!(parent: &span, pass = "auto_parameterize_query", skipped = true);
-            Vec::new()
-        }
-        ParameterizeMode::Auto => {
-            let auto_parameters = autoparameterize::auto_parameterize_query(
-                query,
-                Vec::new(),
-                flags.server_supports_mixed_comparisons,
-                false,
-            )?;
-            trace!(
-                parent: &span,
-                pass="auto_parameterize_query",
-                query = %query.display(flags.dialect),
-                auto_parameters=?auto_parameters
-            );
-            auto_parameters
-        }
-        ParameterizeMode::Full => {
-            let auto_parameters = autoparameterize::fully_parameterize_query(query)?;
-            trace!(
-                parent: &span,
-                pass="fully_parameterize_query",
-                query = %query.display(flags.dialect),
-                auto_parameters=?auto_parameters
-            );
-            auto_parameters
-        }
+
+    let auto_parameters = if !flags.autoparameterize {
+        // Autoparameterization explicitly disabled (CREATE CACHE WITH (AUTOPARAM OFF)).
+        // Leave any user-written placeholders in place; they're numbered below.
+        trace!(parent: &span, pass = "auto_parameterize_query", skipped = true);
+        Vec::new()
+    } else {
+        let auto_parameters = autoparameterize::auto_parameterize_query(
+            query,
+            Vec::new(),
+            flags.server_supports_mixed_comparisons,
+            false,
+        )?;
+        trace!(
+            parent: &span,
+            pass="auto_parameterize_query",
+            query = %query.display(flags.dialect),
+            auto_parameters=?auto_parameters
+        );
+        auto_parameters
     };
+
     number_placeholders(query)?;
     trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect));
 
@@ -376,7 +354,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     query.order_limit_removal(&context)?;
     trace!(parent: &span, pass="order_limit_removal", query = %query.display(flags.dialect));
 
-    rewrite_equivalent_parameters(query, flags, ParameterizeMode::Auto)
+    rewrite_equivalent_parameters(query, flags)
 }
 
 /// Returns true if the query's WHERE clause will produce a range-based index
