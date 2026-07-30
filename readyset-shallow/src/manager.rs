@@ -29,6 +29,8 @@ use readyset_util::hash::hash;
 
 pub type RequestRefresh<K, V> = Arc<dyn Fn(CacheInsertGuard<K, V>) + Send + Sync>;
 
+/// Entry weight for size accounting. The deep byte size of key plus value is what counts
+/// against the store's configured memory capacity.
 fn weight<K, V>(k: &K, v: &V) -> u32
 where
     K: SizeOf,
@@ -39,8 +41,12 @@ where
         .unwrap_or(u32::MAX)
 }
 
+/// Entry cost for cost-aware TinyLFU admission. When the store is at capacity, a new entry is
+/// admitted only if its access frequency weighted by this cost beats that of the entries it
+/// would displace. Wiring the cost to upstream execution time biases retention toward results
+/// that are expensive to recompute, maximizing the upstream work the cache saves rather than
+/// the raw hit rate. Cost plays no part in size accounting, which is handled by [`weight`].
 fn cost<K, V>(_k: &(u64, K), v: &Arc<CacheEntry<V>>) -> u32 {
-    // Bias retention toward entries that were expensive to fetch upstream.
     match v.as_ref() {
         CacheEntry::Present(values) => values.execution_ms.try_into().unwrap_or(u32::MAX),
         CacheEntry::Loading(_) => 0,
