@@ -1724,6 +1724,13 @@ fn alter_table_add_column_position_after_special_chars() {
 }
 
 #[test]
+fn alter_table_replica_identity() {
+    for identity in ["DEFAULT", "FULL", "NOTHING", "USING INDEX some_index"] {
+        check_rt_both!(&format!("ALTER TABLE t REPLICA IDENTITY {identity}"));
+    }
+}
+
+#[test]
 fn table_alias_with_column_renaming() {
     for (query, expected_aliases) in &[
         (

@@ -74,12 +74,8 @@ impl fmt::Display for DropBehavior {
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum ReplicaIdentity {
     Default,
-    UsingIndex {
-        index_name: SqlIdentifier,
-    },
+    UsingIndex { index_name: SqlIdentifier },
     Full,
-    // FIXME(REA-5862): Not correctly parsed by sqlparser
-    #[weight(0)]
     Nothing,
 }
 
@@ -338,6 +334,16 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 equals,
                 algorithm: algorithm.into(),
             }),
+            ReplicaIdentity { identity, .. } => Ok(Self::ReplicaIdentity(match identity {
+                sqlparser::ast::ReplicaIdentity::Default => super::ReplicaIdentity::Default,
+                sqlparser::ast::ReplicaIdentity::Full => super::ReplicaIdentity::Full,
+                sqlparser::ast::ReplicaIdentity::Nothing => super::ReplicaIdentity::Nothing,
+                sqlparser::ast::ReplicaIdentity::Index(index_name) => {
+                    super::ReplicaIdentity::UsingIndex {
+                        index_name: index_name.into_dialect(dialect),
+                    }
+                }
+            })),
             _ => unsupported!("ALTER TABLE definition {value}"),
         }
     }
