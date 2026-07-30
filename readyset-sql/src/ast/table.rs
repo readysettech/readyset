@@ -239,10 +239,6 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
         use sqlparser::ast::{SetExpr, TableAlias, TableFactor};
         match value {
             TableFactor::Table {
-                alias: Some(TableAlias { columns, .. }),
-                ..
-            } if !columns.is_empty() => unsupported!("Table alias with column renaming")?,
-            TableFactor::Table {
                 name,
                 alias,
                 sample,
@@ -259,10 +255,20 @@ impl TryFromDialect<sqlparser::ast::TableFactor> for TableExpr {
                 if !partitions.is_empty() {
                     unsupported!("PARTITION clause")?;
                 }
+                let (table_alias, column_aliases) = match alias {
+                    Some(TableAlias { name, columns, .. }) => (
+                        Some(name.into_dialect(dialect)),
+                        columns
+                            .into_iter()
+                            .map(|c| c.name.into_dialect(dialect))
+                            .collect(),
+                    ),
+                    None => (None, Vec::new()),
+                };
                 Ok(Self {
                     inner: TableExprInner::Table(name.try_into_dialect(dialect)?),
-                    alias: alias.map(|table_alias| table_alias.name.into_dialect(dialect)),
-                    column_aliases: Vec::new(),
+                    alias: table_alias,
+                    column_aliases,
                 })
             }
             // VALUES clause: (VALUES ('a'), ('b')) AS t(col1)
