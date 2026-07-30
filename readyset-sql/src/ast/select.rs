@@ -310,21 +310,56 @@ pub enum LimitValue {
     All,
 }
 
+/// Extract a sqlparser unary expression of negated number into a [`Literal`].
+fn negated_number_into_literal(expr: &sqlparser::ast::Expr) -> Option<Literal> {
+    let sqlparser::ast::Expr::UnaryOp {
+        op: sqlparser::ast::UnaryOperator::Minus,
+        expr,
+    } = expr
+    else {
+        return None;
+    };
+    let sqlparser::ast::Expr::Value(value) = expr.as_ref() else {
+        return None;
+    };
+    let sqlparser::ast::Value::Number(n, _) = &value.value else {
+        return None;
+    };
+    Some(Literal::Number(format!("-{n}")))
+}
+
+/// Convert a value in either the LIMIT or the OFFSET position.
+///
+/// MySQL accepts a non-negative integer or a placeholder.  Postgres accepts any literal, coercing
+/// it to an integer when the query runs, so the literal is preserved for the rewrite pass.
+fn limit_offset_into_literal(
+    value: sqlparser::ast::Expr,
+    dialect: Dialect,
+    clause: &str,
+) -> Result<Literal, AstConversionError> {
+    if dialect == Dialect::PostgreSQL
+        && let Some(n) = negated_number_into_literal(&value)
+    {
+        return Ok(n);
+    }
+    // Delegate to Literal conversion which handles both Expr::Value and Expr::Identifier.
+    match Literal::try_from(value)? {
+        n @ (Literal::Integer(0..) | Literal::UnsignedInteger(_) | Literal::Placeholder(_)) => {
+            Ok(n)
+        }
+        n if dialect == Dialect::PostgreSQL => Ok(n),
+        v => unsupported!("unexpected {clause} {}", v.display(dialect)),
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::Expr> for LimitValue {
     fn try_from_dialect(
         value: sqlparser::ast::Expr,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
-        // Delegate to Literal conversion which handles both Expr::Value and Expr::Identifier
-        match Literal::try_from(value)? {
-            n @ Literal::Integer(i) if i >= 0 => Ok(Self::Literal(n)),
-            n @ Literal::UnsignedInteger(_) => Ok(Self::Literal(n)),
-            n @ Literal::Placeholder(_) => Ok(Self::Literal(n)),
-            v => unsupported!(
-                "unexpected LIMIT {} (not a non-negative integer or placeholder)",
-                v.display(dialect)
-            ),
-        }
+        Ok(Self::Literal(limit_offset_into_literal(
+            value, dialect, "LIMIT",
+        )?))
     }
 }
 
@@ -373,11 +408,13 @@ impl TryFromDialect<sqlparser::ast::LimitClause> for LimitClause {
                 limit_by: _,
             } => Ok(Self::LimitOffset {
                 limit: limit.try_into_dialect(dialect)?,
-                offset: offset.map(TryInto::try_into).transpose()?,
+                offset: offset
+                    .map(|o| limit_offset_into_literal(o.value, dialect, "OFFSET"))
+                    .transpose()?,
             }),
             sqlparser::ast::LimitClause::OffsetCommaLimit { offset, limit } => {
                 Ok(Self::OffsetCommaLimit {
-                    offset: offset.try_into()?,
+                    offset: limit_offset_into_literal(offset, dialect, "OFFSET")?,
                     limit: limit.try_into_dialect(dialect)?,
                 })
             }

@@ -227,6 +227,43 @@ fn mysql_create_table_with_mixed_functional_index() {
 }
 
 #[test]
+fn limit_offset_non_integer_bounds() {
+    for value in ["2.5", "-1.5", "0.0", "-0.0", "NULL"] {
+        for statement in [
+            format!("SELECT * FROM t LIMIT {value}"),
+            format!("SELECT * FROM t LIMIT 5 OFFSET {value}"),
+        ] {
+            check_parse_postgres!(&statement);
+            check_parse_fails!(Dialect::MySQL, &statement, "");
+        }
+        check_parse_fails!(
+            Dialect::MySQL,
+            &format!("SELECT * FROM t LIMIT {value}, 10"),
+            ""
+        );
+    }
+}
+
+#[test]
+fn limit_offset_quoted_bounds() {
+    for value in ["'5'", "'2.5'", "'-1.5'", "'0.0'", "'-0.0'"] {
+        for statement in [
+            format!("SELECT * FROM t LIMIT {value}"),
+            format!("SELECT * FROM t LIMIT 5 OFFSET {value}"),
+        ] {
+            parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, &statement)
+                .unwrap_or_else(|e| panic!("Failed to parse PostgreSQL query: {statement}: {e}"));
+            check_parse_fails!(Dialect::MySQL, &statement, "");
+        }
+        check_parse_fails!(
+            Dialect::MySQL,
+            &format!("SELECT * FROM t LIMIT {value}, 10"),
+            ""
+        );
+    }
+}
+
+#[test]
 fn union() {
     check_parse_both!("SELECT a FROM b UNION SELECT c FROM d;");
     check_parse_both!("SELECT a FROM b UNION DISTINCT SELECT c FROM d;");
