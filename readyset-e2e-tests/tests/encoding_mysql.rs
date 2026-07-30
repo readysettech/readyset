@@ -1,19 +1,22 @@
+use std::assert_matches;
+use std::panic::AssertUnwindSafe;
+use std::time::Duration;
+
 use itertools::Itertools;
 use mysql_async::consts::Command;
 use mysql_async::prelude::Queryable;
 use pretty_assertions::assert_eq;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+
 use readyset_adapter::backend::MigrationMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
     TestBuilder,
     mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
-use std::panic::AssertUnwindSafe;
 use readyset_util::eventually;
-use std::time::Duration;
 use test_utils::{tags, upstream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 macro_rules! check_rows {
     ($my_rows:expr_2021, $rs_rows:expr_2021, $($format_args:tt)*) => {
@@ -838,10 +841,11 @@ impl RawConn {
     }
 
     /// The Query_destination column of EXPLAIN LAST STATEMENT.
-    async fn last_destination(&mut self) -> String {
+    async fn last_destination(&mut self) -> QueryDestination {
         let (_, rows) = self.query_with_metadata(b"EXPLAIN LAST STATEMENT").await;
         assert_eq!(rows.len(), 1, "expected a single row: {rows:?}");
-        String::from_utf8(first_text_column(&rows[0]).to_vec()).unwrap()
+        let destination = String::from_utf8(first_text_column(&rows[0]).to_vec()).unwrap();
+        QueryDestination::try_from(destination).expect("a parseable query destination")
     }
 }
 
@@ -958,7 +962,7 @@ async fn latin1_column_names_roundtrip() {
     let (names, rows) = raw
         .query_with_metadata(b"SELECT 'x' AS `situa\xE7\xE3o`")
         .await;
-    assert_eq!(raw.last_destination().await, "upstream");
+    assert_eq!(raw.last_destination().await, QueryDestination::Upstream);
     assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
     assert_eq!(rows.len(), 1);
 
@@ -984,8 +988,7 @@ async fn latin1_column_names_roundtrip() {
         AssertUnwindSafe(move || (names, rows, destination))
     }, then_assert: |result| {
         let (names, rows, destination) = result();
-        // A readyset destination includes the cache name, e.g. "readyset(q_...)".
-        assert_eq!(destination.split('(').next().unwrap(), "readyset");
+        assert_matches!(destination, QueryDestination::Readyset(..));
         assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
         assert_eq!(rows.len(), 1);
     });
@@ -996,10 +999,10 @@ async fn latin1_column_names_roundtrip() {
         .unwrap();
     assert_eq!(result.columns_ref()[0].name_ref(), "situação".as_bytes());
     drop(result);
-    assert!(matches!(
+    assert_matches!(
         last_query_info(&mut utf8_conn).await.destination,
-        QueryDestination::Readyset(_)
-    ));
+        QueryDestination::Readyset(..)
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1040,9 +1043,9 @@ async fn shallow_cache_lossy_charset_not_shared() {
         .unwrap()
         .unwrap();
     assert_eq!(value, b"?".to_vec());
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     // The latin1 entry serves the same substitution back, matching MySQL for a latin1 reader.
@@ -1056,7 +1059,7 @@ async fn shallow_cache_lossy_charset_not_shared() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, b"?".to_vec());
     });
 
@@ -1069,9 +1072,9 @@ async fn shallow_cache_lossy_charset_not_shared() {
         .unwrap()
         .unwrap();
     assert_eq!(value, "日".as_bytes());
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     eventually!(run_test: {
@@ -1084,7 +1087,7 @@ async fn shallow_cache_lossy_charset_not_shared() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, "日".as_bytes());
     });
 
@@ -1131,9 +1134,9 @@ async fn shallow_cache_cross_charset() {
         .unwrap()
         .unwrap();
     assert_eq!(value, b"N\xE3o".to_vec());
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut latin1_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     // A shallow hit in the latin1 session returns latin1 bytes.
@@ -1147,7 +1150,7 @@ async fn shallow_cache_cross_charset() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, b"N\xE3o".to_vec());
     });
 
@@ -1158,9 +1161,9 @@ async fn shallow_cache_cross_charset() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut utf8_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
     assert_eq!(value, "Não".as_bytes());
 
@@ -1175,7 +1178,7 @@ async fn shallow_cache_cross_charset() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, "Não".as_bytes());
     });
 
@@ -1187,9 +1190,9 @@ async fn shallow_cache_cross_charset() {
         .unwrap()
         .unwrap();
     assert_eq!(value, "Sim ã".as_bytes());
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut utf8_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     let value: Vec<u8> = latin1_conn
@@ -1197,9 +1200,9 @@ async fn shallow_cache_cross_charset() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut latin1_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
     assert_eq!(value, b"Sim \xE3".to_vec());
 
@@ -1213,7 +1216,7 @@ async fn shallow_cache_cross_charset() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, b"Sim \xE3".to_vec());
     });
 
@@ -1255,7 +1258,10 @@ async fn shallow_cross_charset_column_names() {
     let (names, _) = raw
         .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 1")
         .await;
-    assert_eq!(raw.last_destination().await, "upstream");
+    assert_matches!(
+        raw.last_destination().await,
+        QueryDestination::ReadysetThenUpstream(..)
+    );
     assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
 
     // A shallow hit in the latin1 session keeps the latin1 name bytes.
@@ -1267,7 +1273,7 @@ async fn shallow_cross_charset_column_names() {
         AssertUnwindSafe(move || (names, destination))
     }, then_assert: |result| {
         let (names, destination) = result();
-        assert_eq!(destination, "readyset_shallow");
+        assert_matches!(destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
     });
 
@@ -1279,9 +1285,9 @@ async fn shallow_cross_charset_column_names() {
         .unwrap();
     assert_eq!(result.columns_ref()[0].name_ref(), "situação".as_bytes());
     drop(result);
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut utf8_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     eventually!(run_test: {
@@ -1295,7 +1301,7 @@ async fn shallow_cross_charset_column_names() {
         AssertUnwindSafe(move || (info, name))
     }, then_assert: |result| {
         let (info, name) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(name, "situação".as_bytes());
     });
 
@@ -1305,15 +1311,18 @@ async fn shallow_cross_charset_column_names() {
         .query_drop("SELECT x AS `situação` FROM charset_shallow_name WHERE id = 2")
         .await
         .unwrap();
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut utf8_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     let (names, _) = raw
         .query_with_metadata(b"SELECT x AS `situa\xE7\xE3o` FROM charset_shallow_name WHERE id = 2")
         .await;
-    assert_eq!(raw.last_destination().await, "upstream");
+    assert_matches!(
+        raw.last_destination().await,
+        QueryDestination::ReadysetThenUpstream(..)
+    );
     assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
 
     eventually!(run_test: {
@@ -1324,7 +1333,7 @@ async fn shallow_cross_charset_column_names() {
         AssertUnwindSafe(move || (names, destination))
     }, then_assert: |result| {
         let (names, destination) = result();
-        assert_eq!(destination, "readyset_shallow");
+        assert_matches!(destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(names, vec![b"situa\xE7\xE3o".to_vec()]);
     });
 
@@ -1374,9 +1383,9 @@ async fn shallow_refresh_in_entry_charset() {
         .unwrap()
         .unwrap();
     assert_eq!(value, b"N\xE3o".to_vec());
-    assert_eq!(
+    assert_matches!(
         last_query_info(&mut latin1_conn).await.destination,
-        QueryDestination::Upstream
+        QueryDestination::ReadysetThenUpstream(..)
     );
 
     // Update the row upstream so the scheduled refresh picks up a new value.
@@ -1396,7 +1405,7 @@ async fn shallow_refresh_in_entry_charset() {
         AssertUnwindSafe(move || (info, value))
     }, then_assert: |result| {
         let (info, value) = result();
-        assert_eq!(info.destination, QueryDestination::ReadysetShallow);
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
         assert_eq!(value, b"Sim \xE3".to_vec());
     });
 
