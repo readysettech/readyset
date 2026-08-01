@@ -937,11 +937,13 @@ impl DfQueryParameters {
                 Literal::UnsignedInteger(v) => Ok(*v as usize),
                 Literal::Null => Ok(0), // Invalid in MySQL but 0 for Postgres
                 Literal::String(_) | Literal::Number(_) => {
-                    // All of those are invalid in MySQL, but Postgres coerces to integer
+                    // All of these are invalid in MySQL, but PostgreSQL coerces to integer.  Round
+                    // through a signed type so a negative bound is rejected instead of wrapping.
                     match DfValue::try_from_dialect(lit, self.dialect)?
-                        .coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown)?
+                        .coerce_to(&DfType::BigInt, &DfType::Unknown)?
                     {
-                        DfValue::UnsignedInt(v) => Ok(v as usize),
+                        DfValue::Int(v) => usize::try_from(v)
+                            .map_err(|_| invalid_query_err!("Non negative integer expected")),
                         _ => unreachable!("Successfully coerced"),
                     }
                 }
@@ -3130,6 +3132,28 @@ mod tests {
 
             try_parse_select_statement("SELECT * FROM t WHERE x = ? LIMIT 1.5", Dialect::MySQL)
                 .unwrap_err();
+        }
+
+        #[test]
+        fn limit_negative_bound_is_rejected() {
+            let params = |bound: &str| {
+                let mut stmt = parse_select_statement(
+                    &format!("SELECT * FROM t WHERE x = $1 LIMIT {bound}"),
+                    Dialect::PostgreSQL,
+                );
+                let proc = rewrite_query(
+                    &mut stmt,
+                    rewrite_params(Dialect::PostgreSQL),
+                    rewrite_context(Dialect::PostgreSQL),
+                )
+                .unwrap();
+                proc.limit_offset_params(&[1.into()])
+            };
+
+            params("-1.5").unwrap_err();
+
+            // -0.1 rounds to 0 on PostgreSQL and is therefore accepted.
+            assert_eq!(params("-0.1").unwrap(), (Some(0), None));
         }
 
         /// A literal LIMIT (no OFFSET) is kept server-side to lower to a TopK node only when
