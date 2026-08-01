@@ -689,6 +689,30 @@ fn compound_select_cases() {
     check_parse_both!(
         "WITH cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;"
     );
+    check_parse_both!(
+        "WITH cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins ORDER BY id LIMIT 5;"
+    );
+    check_parse_both!(
+        "WITH cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM t2 UNION SELECT id FROM t3;"
+    );
+    check_parse_both!(
+        "WITH cte AS (SELECT id FROM users) SELECT id FROM cte INTERSECT SELECT id FROM admins;"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "WITH RECURSIVE cte AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;",
+        "WITH RECURSIVE in a compound SELECT"
+    );
+    check_parse_fails!(
+        Dialect::MySQL,
+        "WITH cte(id) AS (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;",
+        "CTE column list"
+    );
+    check_parse_fails!(
+        Dialect::PostgreSQL,
+        "WITH cte AS MATERIALIZED (SELECT id FROM users) SELECT id FROM cte UNION SELECT id FROM admins;",
+        "MATERIALIZED in a compound SELECT"
+    );
     check_parse_fails!(
         Dialect::PostgreSQL,
         "(SELECT a FROM t1 INTERSECT SELECT a FROM t2) ORDER BY a;",

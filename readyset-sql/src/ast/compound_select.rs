@@ -77,10 +77,6 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
         if !matches!(*body, sqlparser::ast::SetExpr::SetOperation { .. }) {
             return failed!("Expected a set operation");
         }
-        if with.is_some() {
-            // not supported at the moment
-            return unsupported!("WITH clause is not supported in compound SELECT statements");
-        }
 
         // FETCH clause (ANSI SQL pagination alternative to LIMIT)
         if fetch.is_some() {
@@ -96,7 +92,36 @@ impl TryFromDialect<sqlparser::ast::Query> for CompoundSelectStatement {
         if for_clause.is_some() {
             unsupported!("FOR XML/FOR JSON clause not supported")?;
         }
-        let selects = flatten_set_expr(body, dialect)?;
+        let mut selects = flatten_set_expr(body, dialect)?;
+        // A WITH clause applies to the whole compound select; the AST holds it on the first arm.
+        if let Some(sqlparser::ast::With {
+            with_token: _,
+            recursive,
+            cte_tables,
+        }) = with
+        {
+            if recursive {
+                return unsupported!("WITH RECURSIVE in a compound SELECT");
+            }
+            for sqlparser::ast::Cte {
+                alias,
+                query: _,
+                from,
+                materialized,
+                closing_paren_token: _,
+            } in &cte_tables
+            {
+                if !alias.columns.is_empty() || from.is_some() || materialized.is_some() {
+                    return unsupported!(
+                        "CTE column list, FROM, or MATERIALIZED in a compound SELECT"
+                    );
+                }
+            }
+            let Some((_, first)) = selects.first_mut() else {
+                return failed!("Compound select with no arms");
+            };
+            first.ctes = cte_tables.try_into_dialect(dialect)?;
+        }
         let order = order_by.try_into_dialect(dialect)?;
         let limit_clause: Option<LimitClause> = limit_clause.try_into_dialect(dialect)?;
         Ok(Self {
