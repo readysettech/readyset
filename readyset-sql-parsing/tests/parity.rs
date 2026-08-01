@@ -383,6 +383,15 @@ fn alter_drop_foreign_key() {
         }),
         check_parse_mysql!("ALTER TABLE `orderitem` DROP FOREIGN KEY `orderitem_ibfk_1`")
     );
+
+    let plain = check_parse_mysql!("ALTER TABLE orderitem DROP FOREIGN KEY orderitem_ibfk_1");
+    for sql in [
+        "ALTER TABLE orderitem DROP FOREIGN KEY orderitem_ibfk_1 CASCADE",
+        "ALTER TABLE orderitem DROP FOREIGN KEY orderitem_ibfk_1 RESTRICT",
+    ] {
+        let query = parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::MySQL, sql);
+        assert_eq!(query.unwrap(), plain, "{sql}");
+    }
 }
 
 #[test]

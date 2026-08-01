@@ -334,6 +334,9 @@ impl TryFromDialect<sqlparser::ast::AlterTableOperation> for AlterTableDefinitio
                 equals,
                 algorithm: algorithm.into(),
             }),
+            DropForeignKey { name, .. } => Ok(Self::DropForeignKey {
+                name: name.into_dialect(dialect),
+            }),
             ReplicaIdentity { identity, .. } => Ok(Self::ReplicaIdentity(match identity {
                 sqlparser::ast::ReplicaIdentity::Default => super::ReplicaIdentity::Default,
                 sqlparser::ast::ReplicaIdentity::Full => super::ReplicaIdentity::Full,
