@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use mysql_common::collations::{Collation, CollationId};
 use readyset_errors::ReadySetError;
 use readyset_errors::ReadySetResult;
 
@@ -109,17 +110,21 @@ impl Encoding {
     pub const LATIN1: Self = Self::SingleByte(SingleByteCharset::Latin1);
     pub const CP850: Self = Self::SingleByte(SingleByteCharset::Cp850);
 
-    /// For reference, see [`mysql_common::collations::CollationId`]
+    /// The encoding for a MySQL collation id, derived from the collation's character set as
+    /// known to `mysql_common`. Collation ids `mysql_common` doesn't know, and character sets
+    /// without a registered conversion table, are unsupported.
     pub fn from_mysql_collation_id(collation_id: u16) -> Self {
-        match collation_id {
-            // ascii, utf8mb3, utf8mb4
-            11 | 33 | 45 | 46 | 65 | 76 | 83 | 192..=247 | 255..=323 => Self::Utf8,
-            5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Self::LATIN1,
-            4 | 80 => Self::CP850,
-            63 => Self::Binary,
-
-            // Default to UTF-8 for other collations
-            _ => Self::OtherMySql(collation_id),
+        let collation = Collation::resolve(CollationId::from(collation_id));
+        if collation.id() == CollationId::UNKNOWN_COLLATION_ID {
+            return Self::OtherMySql(collation_id);
+        }
+        match collation.charset() {
+            // ascii is a strict subset of UTF-8, so treating ascii data as UTF-8 is exact.
+            "utf8mb3" | "utf8mb4" | "ascii" => Self::Utf8,
+            "binary" => Self::Binary,
+            name => SingleByteCharset::from_name(name)
+                .map(Self::SingleByte)
+                .unwrap_or(Self::OtherMySql(collation_id)),
         }
     }
 
@@ -293,6 +298,29 @@ mod tests {
         let utf8_str = "Hello 😊"; // Emoji is outside Latin1 range
         let result = Encoding::LATIN1.encode(utf8_str).unwrap();
         assert_eq!(*result, b"Hello ?"[..]);
+    }
+
+    /// The encoding for each supported collation id, spelled out explicitly. Guards against a
+    /// `mysql_common` bump changing collation ids or charset naming.
+    #[test]
+    fn test_collation_id_mapping() {
+        for id in 0u16..=1023 {
+            let expected = match id {
+                // Holes in the utf8 id ranges below that MySQL 8.4 does not assign
+                216..=222 | 272 | 276 | 295 | 299 | 301 | 302 => Encoding::OtherMySql(id),
+                // ascii, utf8mb3, utf8mb4
+                11 | 33 | 45 | 46 | 65 | 76 | 83 | 192..=247 | 255..=323 => Encoding::Utf8,
+                5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Encoding::LATIN1,
+                4 | 80 => Encoding::CP850,
+                63 => Encoding::Binary,
+                _ => continue,
+            };
+            assert_eq!(
+                Encoding::from_mysql_collation_id(id),
+                expected,
+                "collation id {id}"
+            );
+        }
     }
 
     /// The generated latin1 and cp850 tables agree with the yore code pages that previously
