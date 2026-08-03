@@ -504,6 +504,48 @@ impl<'session> SelectRouter<'session> {
         }
     }
 
+    /// Whether this session may serve a read from a cache with the given transaction policy,
+    /// recording the skip-cache metric under `cache_type` when it may not.
+    ///
+    /// The rule is a property of the session -- its [`ProxyState`] and write history -- not of
+    /// how a cache stores rows, so deep and shallow reads answer it the same way. Pairing the
+    /// decision with the metric here keeps `should_skip_cache_for` and `skip_reason_for` from
+    /// ever being asked about different inputs.
+    ///
+    /// `record_skip` says whether there is a cache here to bypass; `query_id` is only called
+    /// when the metric is actually recorded.
+    pub(super) fn may_serve_from_cache(
+        proxy_state: ProxyState,
+        write_tracker: &mut SessionWriteTracker,
+        trx_cache_policy: TrxCachePolicy,
+        cache_type: &'static str,
+        record_skip: bool,
+        query_id: impl FnOnce() -> String,
+    ) -> bool {
+        let had_write_in_txn = write_tracker.had_write_in_txn(proxy_state);
+        let opportunistic_ryw_active = write_tracker.opportunistic_ryw_active();
+        if proxy_state.should_skip_cache_for(
+            trx_cache_policy,
+            had_write_in_txn,
+            opportunistic_ryw_active,
+        ) {
+            if record_skip {
+                record_skip_cache(
+                    query_id(),
+                    cache_type,
+                    proxy_state.skip_reason_for(
+                        trx_cache_policy,
+                        had_write_in_txn,
+                        opportunistic_ryw_active,
+                    ),
+                );
+            }
+            false
+        } else {
+            true
+        }
+    }
+
     /// Helper function to process a query and determine if Readyset should handle it.
     fn process_and_check(
         &mut self,
@@ -526,28 +568,14 @@ impl<'session> SelectRouter<'session> {
                     }
                     false
                 } else {
-                    let had_write_in_txn = self.write_tracker.had_write_in_txn(self.proxy_state);
-                    let opportunistic_ryw_active = self.write_tracker.opportunistic_ryw_active();
-                    if self.proxy_state.should_skip_cache_for(
+                    Self::may_serve_from_cache(
+                        self.proxy_state,
+                        self.write_tracker,
                         status.trx_cache_policy,
-                        had_write_in_txn,
-                        opportunistic_ryw_active,
-                    ) {
-                        if has_deep_cache {
-                            record_skip_cache(
-                                QueryId::from(&*q).to_string(),
-                                "deep",
-                                self.proxy_state.skip_reason_for(
-                                    status.trx_cache_policy,
-                                    had_write_in_txn,
-                                    opportunistic_ryw_active,
-                                ),
-                            );
-                        }
-                        false
-                    } else {
-                        true
-                    }
+                        "deep",
+                        has_deep_cache,
+                        || QueryId::from(&*q).to_string(),
+                    )
                 };
                 if should_try {
                     ShouldTrySelect::Yes {
@@ -586,7 +614,68 @@ fn has_topk_literal_limit(statement: &SelectStatement) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+
+    /// The verdict tracks [`ProxyState::should_skip_cache_for`], and `query_id` is built only
+    /// when there is a bypassed cache to report.
+    #[test]
+    fn may_serve_from_cache_reports_the_skip_decision() {
+        let mut tracker = SessionWriteTracker::new(None);
+        let ids_built = Cell::new(0usize);
+        let query_id = || {
+            ids_built.set(ids_built.get() + 1);
+            "q1".to_string()
+        };
+
+        // Fallback outside a transaction serves from the cache under any policy.
+        assert!(SelectRouter::may_serve_from_cache(
+            ProxyState::Fallback,
+            &mut tracker,
+            TrxCachePolicy::Never,
+            "deep",
+            true,
+            query_id,
+        ));
+        assert_eq!(ids_built.get(), 0, "no metric on the hit path");
+
+        // ProxyAlways skips unless the cache is marked ALWAYS, and reports the skip.
+        assert!(!SelectRouter::may_serve_from_cache(
+            ProxyState::ProxyAlways,
+            &mut tracker,
+            TrxCachePolicy::Never,
+            "deep",
+            true,
+            query_id,
+        ));
+        assert_eq!(ids_built.get(), 1);
+
+        assert!(SelectRouter::may_serve_from_cache(
+            ProxyState::ProxyAlways,
+            &mut tracker,
+            TrxCachePolicy::Always,
+            "deep",
+            true,
+            query_id,
+        ));
+        assert_eq!(ids_built.get(), 1);
+
+        // Nothing to bypass: the read is routed upstream, but no metric is recorded.
+        assert!(!SelectRouter::may_serve_from_cache(
+            ProxyState::ProxyAlways,
+            &mut tracker,
+            TrxCachePolicy::Never,
+            "deep",
+            false,
+            query_id,
+        ));
+        assert_eq!(
+            ids_built.get(),
+            1,
+            "record_skip=false must not build the id"
+        );
+    }
 
     #[test]
     fn is_autocommit_by_proxy_state() {

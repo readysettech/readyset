@@ -3225,54 +3225,37 @@ where
                     self.settings.query_max_failure_duration,
                     self.settings.fallback_recovery_duration,
                 );
-                let had_write_in_txn = self
-                    .state
-                    .write_tracker
-                    .had_write_in_txn(self.state.proxy_state);
-                let opportunistic_ryw_active = self.state.write_tracker.opportunistic_ryw_active();
-                let should_skip = self.state.proxy_state.should_skip_cache_for(
-                    policy,
-                    had_write_in_txn,
-                    opportunistic_ryw_active,
+                let has_cache = matches!(
+                    &cached_statement.prep.inner,
+                    PrepareResultInner::Noria(_)
+                        | PrepareResultInner::NoriaAndUpstream(..)
+                        | PrepareResultInner::Shallow(_)
                 );
-
-                if cached_statement.is_unsupported_execute() {
-                    true
-                } else if !is_recovering && should_skip {
-                    let has_cache = matches!(
-                        &cached_statement.prep.inner,
-                        PrepareResultInner::Noria(_)
-                            | PrepareResultInner::NoriaAndUpstream(..)
-                            | PrepareResultInner::Shallow(_)
-                    );
-                    if has_cache {
-                        let query_id = cached_statement
+                let cache_type =
+                    if matches!(&cached_statement.prep.inner, PrepareResultInner::Shallow(_)) {
+                        "shallow"
+                    } else {
+                        "deep"
+                    };
+                // A bypassed cache is only worth reporting when the policy is why we fell back.
+                let record_skip =
+                    has_cache && !is_recovering && !cached_statement.is_unsupported_execute();
+                let should_skip = !SelectRouter::may_serve_from_cache(
+                    self.state.proxy_state,
+                    &mut self.state.write_tracker,
+                    policy,
+                    cache_type,
+                    record_skip,
+                    || {
+                        cached_statement
                             .query_id
                             .as_ref()
                             .map(|id| id.to_string())
-                            .unwrap_or_default();
-                        let cache_type = if matches!(
-                            &cached_statement.prep.inner,
-                            PrepareResultInner::Shallow(_)
-                        ) {
-                            "shallow"
-                        } else {
-                            "deep"
-                        };
-                        record_skip_cache(
-                            query_id,
-                            cache_type,
-                            self.state.proxy_state.skip_reason_for(
-                                policy,
-                                had_write_in_txn,
-                                opportunistic_ryw_active,
-                            ),
-                        );
-                    }
-                    true
-                } else {
-                    is_recovering || should_skip
-                }
+                            .unwrap_or_default()
+                    },
+                );
+
+                cached_statement.is_unsupported_execute() || is_recovering || should_skip
             }
         };
 
@@ -5590,22 +5573,14 @@ where
             .try_query_status(shallow)
             .map(|status| status.trx_cache_policy)
             .unwrap_or_default();
-        let had_write_in_txn = state.write_tracker.had_write_in_txn(state.proxy_state);
-        let opportunistic_ryw_active = state.write_tracker.opportunistic_ryw_active();
-        if state.proxy_state.should_skip_cache_for(
+        if !SelectRouter::may_serve_from_cache(
+            state.proxy_state,
+            &mut state.write_tracker,
             trx_cache_policy,
-            had_write_in_txn,
-            opportunistic_ryw_active,
+            "shallow",
+            true,
+            || query_id.to_string(),
         ) {
-            record_skip_cache(
-                query_id.to_string(),
-                "shallow",
-                state.proxy_state.skip_reason_for(
-                    trx_cache_policy,
-                    had_write_in_txn,
-                    opportunistic_ryw_active,
-                ),
-            );
             return None;
         }
         Some((query_id, trx_cache_policy))
