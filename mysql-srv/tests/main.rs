@@ -23,7 +23,7 @@ use mysql_srv::{
     StatementMetaWriter,
 };
 use readyset_adapter_types::DeallocateId;
-use readyset_data::encoding::Encoding;
+use readyset_data::encoding::{Encoding, SingleByteCharset};
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -136,7 +136,13 @@ where
         query: &str,
         results: QueryResultWriter<'_, W>,
     ) -> QueryResultsResponse {
-        if query.starts_with("SELECT @@") || query.starts_with("select @@") {
+        // The test client probes server variables at connection setup. Under a client encoding
+        // that remaps ASCII (e.g. swe7) the '@' bytes decode to other chars, so as a bit of a
+        // hack, also detect the probe by a variable name that survives the mangling.
+        if query.starts_with("SELECT @@")
+            || query.starts_with("select @@")
+            || query.contains("max_allowed_packet")
+        {
             let var = &query.get(b"SELECT @@".len()..);
             match var {
                 Some("max_allowed_packet") => {
@@ -418,29 +424,48 @@ async fn it_inits_error() {
     .await;
 }
 
-#[tokio::test]
-async fn latin1_query_is_decoded() {
-    TestingShim::new(
-        |query, w| {
-            assert_eq!(query, "SELECT 'Não'");
-            Box::pin(async move { w.completed(0, 0, None).await })
-        },
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-    )
-    .with_client_encoding(Encoding::LATIN1)
-    .test(|db| {
-        Box::pin(async move {
-            db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
-                .await
-                .unwrap();
-            let packet = db.read_packet().await.unwrap();
-            assert_eq!(packet[0], 0x00, "expected OK packet");
+/// Pick a byte whose decoded char is non-ASCII and encodes back to the same byte, proving a
+/// transcoding pass happened for this charset.
+fn non_ascii_roundtrip_probe(charset: SingleByteCharset) -> char {
+    let encoding = Encoding::SingleByte(charset);
+    (0u8..=255)
+        .find_map(|b| {
+            let s = encoding.decode(&[b]).unwrap();
+            let c = s.chars().next().unwrap();
+            (!c.is_ascii() && *encoding.encode(&s).unwrap() == [b]).then_some(c)
         })
-    })
-    .await;
+        .expect("charset has a non-ascii roundtripping byte")
+}
+
+#[tokio::test]
+async fn single_byte_query_is_decoded() {
+    for &charset in SingleByteCharset::ALL {
+        let encoding = Encoding::SingleByte(charset);
+        let expected = format!("SELECT '{}'", non_ascii_roundtrip_probe(charset));
+        let wire = encoding.encode(&expected).unwrap().into_owned();
+        let expected_query = expected.clone();
+        TestingShim::new(
+            move |query, w| {
+                assert_eq!(query, expected_query);
+                Box::pin(async move { w.completed(0, 0, None).await })
+            },
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+        )
+        .with_client_encoding(encoding)
+        .test(move |db| {
+            Box::pin(async move {
+                db.write_command_data(Command::COM_QUERY, &wire)
+                    .await
+                    .unwrap();
+                let packet = db.read_packet().await.unwrap();
+                assert_eq!(packet[0], 0x00, "expected OK packet for {encoding}");
+            })
+        })
+        .await;
+    }
 }
 
 #[tokio::test]
@@ -469,53 +494,65 @@ async fn utf8_query_with_invalid_bytes_errors() {
 }
 
 #[tokio::test]
-async fn latin1_prepare_is_decoded() {
-    TestingShim::new(
-        |_, _| unreachable!(),
-        |query| {
-            assert_eq!(query, "SELECT 'Não'");
-            41
-        },
-        |_, _, _| unreachable!(),
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-    )
-    .with_client_encoding(Encoding::LATIN1)
-    .test(|db| {
-        Box::pin(async move {
-            db.write_command_data(Command::COM_STMT_PREPARE, b"SELECT 'N\xE3o'")
-                .await
-                .unwrap();
-            let packet = db.read_packet().await.unwrap();
-            assert_eq!(packet[0], 0x00, "expected prepare OK packet");
+async fn single_byte_prepare_is_decoded() {
+    for &charset in SingleByteCharset::ALL {
+        let encoding = Encoding::SingleByte(charset);
+        let expected = format!("SELECT '{}'", non_ascii_roundtrip_probe(charset));
+        let wire = encoding.encode(&expected).unwrap().into_owned();
+        let expected_query = expected.clone();
+        TestingShim::new(
+            |_, _| unreachable!(),
+            move |query| {
+                assert_eq!(query, expected_query);
+                41
+            },
+            |_, _, _| unreachable!(),
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+        )
+        .with_client_encoding(encoding)
+        .test(move |db| {
+            Box::pin(async move {
+                db.write_command_data(Command::COM_STMT_PREPARE, &wire)
+                    .await
+                    .unwrap();
+                let packet = db.read_packet().await.unwrap();
+                assert_eq!(packet[0], 0x00, "expected prepare OK packet for {encoding}");
+            })
         })
-    })
-    .await;
+        .await;
+    }
 }
 
 #[tokio::test]
-async fn latin1_init_db_is_decoded() {
-    TestingShim::new(
-        |_, _| unreachable!(),
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-        |schema| {
-            assert_eq!(schema, "não");
-            Box::pin(async move { Ok(()) })
-        },
-        |_, _, _| unreachable!(),
-    )
-    .with_client_encoding(Encoding::LATIN1)
-    .test(|db| {
-        Box::pin(async move {
-            db.write_command_data(Command::COM_INIT_DB, b"n\xE3o")
-                .await
-                .unwrap();
-            let packet = db.read_packet().await.unwrap();
-            assert_eq!(packet[0], 0x00, "expected OK packet");
+async fn single_byte_init_db_is_decoded() {
+    for &charset in SingleByteCharset::ALL {
+        let encoding = Encoding::SingleByte(charset);
+        let expected = non_ascii_roundtrip_probe(charset).to_string();
+        let wire = encoding.encode(&expected).unwrap().into_owned();
+        let expected_schema = expected.clone();
+        TestingShim::new(
+            |_, _| unreachable!(),
+            |_| unreachable!(),
+            |_, _, _| unreachable!(),
+            move |schema| {
+                assert_eq!(schema, expected_schema);
+                Box::pin(async move { Ok(()) })
+            },
+            |_, _, _| unreachable!(),
+        )
+        .with_client_encoding(encoding)
+        .test(move |db| {
+            Box::pin(async move {
+                db.write_command_data(Command::COM_INIT_DB, &wire)
+                    .await
+                    .unwrap();
+                let packet = db.read_packet().await.unwrap();
+                assert_eq!(packet[0], 0x00, "expected OK packet for {encoding}");
+            })
         })
-    })
-    .await;
+        .await;
+    }
 }
 
 #[tokio::test]

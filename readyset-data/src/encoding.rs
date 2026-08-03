@@ -75,8 +75,30 @@ macro_rules! single_byte_charsets {
 }
 
 single_byte_charsets! {
-    (Latin1, "latin1", latin1),
+    (Armscii8, "armscii8", armscii8),
     (Cp850, "cp850", cp850),
+    (Cp852, "cp852", cp852),
+    (Cp866, "cp866", cp866),
+    (Cp1250, "cp1250", cp1250),
+    (Cp1251, "cp1251", cp1251),
+    (Cp1256, "cp1256", cp1256),
+    (Cp1257, "cp1257", cp1257),
+    (Dec8, "dec8", dec8),
+    (Geostd8, "geostd8", geostd8),
+    (Greek, "greek", greek),
+    (Hebrew, "hebrew", hebrew),
+    (Hp8, "hp8", hp8),
+    (Keybcs2, "keybcs2", keybcs2),
+    (Koi8r, "koi8r", koi8r),
+    (Koi8u, "koi8u", koi8u),
+    (Latin1, "latin1", latin1),
+    (Latin2, "latin2", latin2),
+    (Latin5, "latin5", latin5),
+    (Latin7, "latin7", latin7),
+    (Macce, "macce", macce),
+    (Macroman, "macroman", macroman),
+    (Swe7, "swe7", swe7),
+    (Tis620, "tis620", tis620),
 }
 
 /// Supported character encodings for string data
@@ -313,12 +335,115 @@ mod tests {
                 5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Encoding::LATIN1,
                 4 | 80 => Encoding::CP850,
                 63 => Encoding::Binary,
+                7 => Encoding::SingleByte(SingleByteCharset::Koi8r),
+                25 => Encoding::SingleByte(SingleByteCharset::Greek),
+                51 => Encoding::SingleByte(SingleByteCharset::Cp1251),
                 _ => continue,
             };
             assert_eq!(
                 Encoding::from_mysql_collation_id(id),
                 expected,
                 "collation id {id}"
+            );
+        }
+    }
+
+    /// Structural invariants of every generated charset table.
+    #[test]
+    fn test_single_byte_tables_consistent() {
+        for &charset in SingleByteCharset::ALL {
+            let spec = charset.spec();
+            // The encode table is strictly sorted by char, so binary search is valid.
+            for pair in spec.encode.windows(2) {
+                assert!(
+                    pair[0].0 < pair[1].0,
+                    "{} encode table out of order at {pair:?}",
+                    spec.name
+                );
+            }
+            // Every encode entry agrees with the decode table.
+            for &(c, b) in spec.encode {
+                assert_eq!(
+                    spec.decode[b as usize], c,
+                    "{} encode entry for byte {b:#04x}",
+                    spec.name
+                );
+            }
+            // The ascii_transparent flag matches the tables in both directions.
+            let transparent = (0u8..=127).all(|b| {
+                spec.decode[b as usize] == b as char
+                    && spec
+                        .encode
+                        .binary_search_by_key(&(b as char), |&(ec, _)| ec)
+                        .map(|i| spec.encode[i].1)
+                        == Ok(b)
+            });
+            assert_eq!(spec.ascii_transparent, transparent, "{}", spec.name);
+        }
+    }
+
+    /// Every encodable char roundtrips through its canonical byte.
+    #[test]
+    fn test_single_byte_roundtrip() {
+        for &charset in SingleByteCharset::ALL {
+            let encoding = Encoding::SingleByte(charset);
+            for &(c, b) in charset.spec().encode {
+                assert_eq!(
+                    *encoding.encode(&c.to_string()).unwrap(),
+                    [b],
+                    "{encoding} char {c:?}"
+                );
+                assert_eq!(
+                    encoding.decode(&[b]).unwrap(),
+                    c.to_string(),
+                    "{encoding} byte {b:#04x}"
+                );
+            }
+        }
+    }
+
+    /// Charset names agree across the generated spec, name lookup, Display, and the default
+    /// collation id registries.
+    #[test]
+    fn test_single_byte_names() {
+        for &charset in SingleByteCharset::ALL {
+            let name = charset.spec().name;
+            let encoding = Encoding::SingleByte(charset);
+            assert_eq!(SingleByteCharset::from_name(name), Some(charset));
+            assert_eq!(
+                Encoding::from_mysql_character_set_name(name),
+                Some(encoding)
+            );
+            assert_eq!(encoding.mysql_character_set_name(), Some(name));
+            assert_eq!(encoding.to_string(), name);
+            let id = mysql_character_set_name_to_collation_id(name);
+            assert_ne!(id, 0, "{name} has no default collation id");
+            assert_eq!(Encoding::from_mysql_collation_id(id), encoding, "{name}");
+        }
+    }
+
+    /// Known codepoints decode as expected.
+    #[test]
+    fn test_single_byte_spot_checks() {
+        for (charset, byte, expected) in [
+            // CYRILLIC SMALL LETTER A
+            (SingleByteCharset::Koi8r, 0xC1, '\u{0430}'),
+            // GREEK SMALL LETTER ALPHA
+            (SingleByteCharset::Greek, 0xE1, '\u{03b1}'),
+            // LATIN SMALL LETTER A WITH RING ABOVE
+            (SingleByteCharset::Swe7, 0x7D, '\u{00e5}'),
+            // HEBREW LETTER ALEF
+            (SingleByteCharset::Hebrew, 0xE0, '\u{05d0}'),
+            // THAI CHARACTER KO KAI
+            (SingleByteCharset::Tis620, 0xA1, '\u{0e01}'),
+            // CYRILLIC CAPITAL LETTER A
+            (SingleByteCharset::Cp866, 0x80, '\u{0410}'),
+        ] {
+            assert_eq!(
+                Encoding::SingleByte(charset).decode(&[byte]).unwrap(),
+                expected.to_string(),
+                "{} byte {byte:#04x}",
+                charset.spec().name
             );
         }
     }
