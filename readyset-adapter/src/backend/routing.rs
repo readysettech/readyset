@@ -515,7 +515,7 @@ impl<'session> SelectRouter<'session> {
     ) -> ShouldTrySelect {
         match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
             Ok(params) => {
-                let status = self.query_status_cache.query_status(q);
+                let status = self.query_status_cache.query_status(q, schema_generation);
                 let has_deep_cache = matches!(
                     status.migration_state,
                     MigrationState::Successful(CacheType::Deep)

@@ -2294,7 +2294,10 @@ where
             rewritten,
             self.connectors.noria.schema_search_path().to_owned(),
         );
-        let status = self.state.query_status_cache.query_status(&view_request);
+        let status = self
+            .state
+            .query_status_cache
+            .query_status(&view_request, rewrite_context.schema_generation());
         if self.state.proxy_state.is_proxy_always()
             && !matches!(status.trx_cache_policy, TrxCachePolicy::Always)
         {
@@ -2310,9 +2313,6 @@ where
                 status.migration_state
             };
             let should_do_readyset = !matches!(migration_state, MigrationState::Unsupported(_));
-            self.state
-                .query_status_cache
-                .update_schema_generation(&view_request, rewrite_context.schema_generation());
             Ok(PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 view_request,

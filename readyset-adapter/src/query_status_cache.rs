@@ -556,14 +556,22 @@ impl QueryStatusCache {
     /// This function returns the query status of a query. If the query does not exist
     /// within the query status cache, an entry is created and the query is set to
     /// PendingMigration.
-    pub fn query_status<Q>(&self, q: &Q) -> QueryStatus
+    ///
+    /// `schema_generation` is the generation the caller rewrote `q` under, and is recorded
+    /// alongside the entry. `CREATE CACHE FROM <query_id>` reads it back, so taking it as a
+    /// parameter here leaves no way to put a query into the cache without it.
+    pub fn query_status<Q>(&self, q: &Q, schema_generation: SchemaGeneration) -> QueryStatus
     where
         Q: QueryStatusKey,
     {
-        match q.with_status(self, |s| s.cloned()) {
+        let mut status = match q.with_status(self, |s| s.cloned()) {
             Some(s) => s,
             None => QueryStatus::with_migration_state(self.insert(q.clone()).1),
-        }
+        };
+        self.set_schema_generation(q, schema_generation);
+        // Callers write whole statuses back, so the returned copy carries the generation too.
+        status.schema_generation = Some(schema_generation);
+        status
     }
 
     /// Try to return the query status of a query.  Does not modify the query status cache.
@@ -698,7 +706,10 @@ impl QueryStatusCache {
     }
 
     /// Updates the stored schema generation for a query that already exists in the cache.
-    pub fn update_schema_generation<Q>(&self, q: &Q, schema_generation: SchemaGeneration)
+    ///
+    /// Private so that the generation cannot be stamped independently of the insert that
+    /// [`Self::query_status`] pairs it with.
+    fn set_schema_generation<Q>(&self, q: &Q, schema_generation: SchemaGeneration)
     where
         Q: QueryStatusKey,
     {
@@ -1674,7 +1685,9 @@ mod tests {
             epoch: 1,
         });
         cache.update_query_migration_state(&q, inlined_state.clone(), None);
-        let state = cache.query_status(&q).migration_state;
+        let state = cache
+            .query_status(&q, SchemaGeneration::INITIAL)
+            .migration_state;
         assert_eq!(state, inlined_state);
         assert_eq!(
             cache
@@ -2030,7 +2043,7 @@ mod tests {
 
         // Insert via query_migration_state, then update generation separately
         cache.query_migration_state(&q);
-        cache.update_schema_generation(&q, generation);
+        cache.set_schema_generation(&q, generation);
 
         // Retrieve via query_with_schema_generation
         let id = QueryId::from(&q);
@@ -2038,6 +2051,24 @@ mod tests {
         assert!(result.is_some());
         let (_query, stored_gen) = result.unwrap();
         assert_eq!(stored_gen, Some(generation));
+    }
+
+    /// Every query `query_status` puts into the cache carries the generation it was rewritten
+    /// under, so `CREATE CACHE FROM <query_id>` can read it back.
+    #[test]
+    fn query_status_records_the_generation() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let generation = SchemaGeneration::INITIAL.next();
+
+        let status = cache.query_status(&q, generation);
+        assert_eq!(status.schema_generation, Some(generation));
+
+        let id = QueryId::from(&q);
+        let (_, stored) = cache
+            .query_with_schema_generation(&id.to_string())
+            .expect("query_status must insert the query");
+        assert_eq!(stored, Some(generation));
     }
 
     #[test]
@@ -2063,7 +2094,7 @@ mod tests {
 
         // Store with generation 2
         cache.query_migration_state(&q);
-        cache.update_schema_generation(&q, generation);
+        cache.set_schema_generation(&q, generation);
 
         // Read with try_query_migration_state (should not mutate)
         let (_, state) = cache.try_query_migration_state(&q);
