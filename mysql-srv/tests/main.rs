@@ -425,23 +425,25 @@ async fn it_inits_error() {
 }
 
 /// Pick a byte whose decoded char is non-ASCII and encodes back to the same byte, proving a
-/// transcoding pass happened for this charset.
-fn non_ascii_roundtrip_probe(charset: SingleByteCharset) -> char {
+/// transcoding pass happened for this charset. Charsets whose decoded chars are all ASCII
+/// (ascii itself) have no such byte.
+fn non_ascii_roundtrip_probe(charset: SingleByteCharset) -> Option<char> {
     let encoding = Encoding::SingleByte(charset);
-    (0u8..=255)
-        .find_map(|b| {
-            let s = encoding.decode(&[b]).unwrap();
-            let c = s.chars().next().unwrap();
-            (!c.is_ascii() && *encoding.encode(&s).unwrap() == [b]).then_some(c)
-        })
-        .expect("charset has a non-ascii roundtripping byte")
+    (0u8..=255).find_map(|b| {
+        let s = encoding.decode(&[b]).unwrap();
+        let c = s.chars().next().unwrap();
+        (!c.is_ascii() && *encoding.encode(&s).unwrap() == [b]).then_some(c)
+    })
 }
 
 #[tokio::test]
 async fn single_byte_query_is_decoded() {
     for &charset in SingleByteCharset::ALL {
         let encoding = Encoding::SingleByte(charset);
-        let expected = format!("SELECT '{}'", non_ascii_roundtrip_probe(charset));
+        let Some(probe) = non_ascii_roundtrip_probe(charset) else {
+            continue;
+        };
+        let expected = format!("SELECT '{probe}'");
         let wire = encoding.encode(&expected).unwrap().into_owned();
         let expected_query = expected.clone();
         TestingShim::new(
@@ -497,7 +499,10 @@ async fn utf8_query_with_invalid_bytes_errors() {
 async fn single_byte_prepare_is_decoded() {
     for &charset in SingleByteCharset::ALL {
         let encoding = Encoding::SingleByte(charset);
-        let expected = format!("SELECT '{}'", non_ascii_roundtrip_probe(charset));
+        let Some(probe) = non_ascii_roundtrip_probe(charset) else {
+            continue;
+        };
+        let expected = format!("SELECT '{probe}'");
         let wire = encoding.encode(&expected).unwrap().into_owned();
         let expected_query = expected.clone();
         TestingShim::new(
@@ -528,7 +533,10 @@ async fn single_byte_prepare_is_decoded() {
 async fn single_byte_init_db_is_decoded() {
     for &charset in SingleByteCharset::ALL {
         let encoding = Encoding::SingleByte(charset);
-        let expected = non_ascii_roundtrip_probe(charset).to_string();
+        let Some(probe) = non_ascii_roundtrip_probe(charset) else {
+            continue;
+        };
+        let expected = probe.to_string();
         let wire = encoding.encode(&expected).unwrap().into_owned();
         let expected_schema = expected.clone();
         TestingShim::new(

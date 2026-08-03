@@ -192,11 +192,11 @@ async fn main() {
         .expect("no server version");
 
     let charsets: Vec<String> = if requested == ["--all"] {
-        // ascii and binary are single-byte but handled as dedicated Encoding variants, not as
-        // conversion tables.
+        // binary is single-byte but handled as a dedicated Encoding variant, not as a
+        // conversion table.
         conn.query(
             "SELECT CHARACTER_SET_NAME FROM information_schema.CHARACTER_SETS \
-             WHERE MAXLEN = 1 AND CHARACTER_SET_NAME NOT IN ('ascii', 'binary') \
+             WHERE MAXLEN = 1 AND CHARACTER_SET_NAME <> 'binary' \
              ORDER BY CHARACTER_SET_NAME",
         )
         .await

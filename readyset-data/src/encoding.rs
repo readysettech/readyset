@@ -76,6 +76,7 @@ macro_rules! single_byte_charsets {
 
 single_byte_charsets! {
     (Armscii8, "armscii8", armscii8),
+    (Ascii, "ascii", ascii),
     (Cp850, "cp850", cp850),
     (Cp852, "cp852", cp852),
     (Cp866, "cp866", cp866),
@@ -141,8 +142,7 @@ impl Encoding {
             return Self::OtherMySql(collation_id);
         }
         match collation.charset() {
-            // ascii is a strict subset of UTF-8, so treating ascii data as UTF-8 is exact.
-            "utf8mb3" | "utf8mb4" | "ascii" => Self::Utf8,
+            "utf8mb3" | "utf8mb4" => Self::Utf8,
             "binary" => Self::Binary,
             name => SingleByteCharset::from_name(name)
                 .map(Self::SingleByte)
@@ -330,8 +330,10 @@ mod tests {
             let expected = match id {
                 // Holes in the utf8 id ranges below that MySQL 8.4 does not assign
                 216..=222 | 272 | 276 | 295 | 299 | 301 | 302 => Encoding::OtherMySql(id),
-                // ascii, utf8mb3, utf8mb4
-                11 | 33 | 45 | 46 | 65 | 76 | 83 | 192..=247 | 255..=323 => Encoding::Utf8,
+                // utf8mb3, utf8mb4
+                33 | 45 | 46 | 76 | 83 | 192..=247 | 255..=323 => Encoding::Utf8,
+                // ascii_general_ci, ascii_bin
+                11 | 65 => Encoding::SingleByte(SingleByteCharset::Ascii),
                 5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Encoding::LATIN1,
                 4 | 80 => Encoding::CP850,
                 63 => Encoding::Binary,
@@ -426,6 +428,8 @@ mod tests {
     #[test]
     fn test_single_byte_spot_checks() {
         for (charset, byte, expected) in [
+            // ascii replaces bytes past 0x7F with the replacement char
+            (SingleByteCharset::Ascii, 0x80, '?'),
             // CYRILLIC SMALL LETTER A
             (SingleByteCharset::Koi8r, 0xC1, '\u{0430}'),
             // GREEK SMALL LETTER ALPHA
