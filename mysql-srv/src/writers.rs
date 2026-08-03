@@ -326,7 +326,7 @@ mod tests {
         let utf8 = prepare_column_definitions(std::slice::from_ref(&column), Encoding::Utf8);
         assert!(contains(&utf8, b"\x0asitua\xC3\xA7\xC3\xA3o"));
 
-        let latin1 = prepare_column_definitions(std::slice::from_ref(&column), Encoding::Latin1);
+        let latin1 = prepare_column_definitions(std::slice::from_ref(&column), Encoding::LATIN1);
         assert!(contains(&latin1, b"\x08situa\xE7\xE3o"));
         assert!(!contains(&latin1, b"situa\xC3\xA7\xC3\xA3o"));
     }

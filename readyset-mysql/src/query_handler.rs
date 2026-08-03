@@ -1250,7 +1250,7 @@ mod tests {
     #[test]
     fn set_character_set_results_string_literal_supported() {
         for (charset, encoding) in [
-            ("latin1", Encoding::Latin1),
+            ("latin1", Encoding::LATIN1),
             ("utf8", Encoding::Utf8),
             ("utf8mb4", Encoding::Utf8),
             ("utf8mb3", Encoding::Utf8),
@@ -1291,7 +1291,7 @@ mod tests {
     #[test]
     fn set_character_set_results_bare_name_supported() {
         for (charset, encoding) in [
-            ("latin1", Encoding::Latin1),
+            ("latin1", Encoding::LATIN1),
             ("utf8", Encoding::Utf8),
             ("utf8mb4", Encoding::Utf8),
             ("utf8mb3", Encoding::Utf8),
@@ -1341,7 +1341,7 @@ mod tests {
     #[test]
     fn set_names_supported() {
         for (charset, encoding) in [
-            ("latin1", Encoding::Latin1),
+            ("latin1", Encoding::LATIN1),
             ("utf8", Encoding::Utf8),
             ("utf8mb4", Encoding::Utf8),
             ("utf8mb3", Encoding::Utf8),
@@ -1369,8 +1369,8 @@ mod tests {
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default()
-                .set_results_encoding(Some(Encoding::Latin1))
-                .set_client_encoding(Some(Encoding::Latin1))
+                .set_results_encoding(Some(Encoding::LATIN1))
+                .set_client_encoding(Some(Encoding::LATIN1))
                 .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
                     SetVariables {
                         variables: vec![
@@ -1411,7 +1411,7 @@ mod tests {
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default()
-                .set_client_encoding(Some(Encoding::Latin1))
+                .set_client_encoding(Some(Encoding::LATIN1))
                 .upstream_rewrite(UpstreamSetRewrite::Skip)
         )
     }
@@ -1433,7 +1433,7 @@ mod tests {
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default()
-                .set_client_encoding(Some(Encoding::Latin1))
+                .set_client_encoding(Some(Encoding::LATIN1))
                 .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
                     SetVariables {
                         variables: vec![(session_var("sql_mode"), sql_mode)],

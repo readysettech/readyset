@@ -462,7 +462,7 @@ impl RandomCharsGenerator {
         let (low, high, encoding) = match charset_name {
             "ascii" => (0, 127, Encoding::Utf8),
             "utf8" => (0, 255, Encoding::Utf8),
-            "latin1" => (0, 255, Encoding::Latin1),
+            "latin1" => (0, 255, Encoding::LATIN1),
             "binary" => (0, 255, Encoding::Binary),
             _ => panic!("Invalid charset"),
         };

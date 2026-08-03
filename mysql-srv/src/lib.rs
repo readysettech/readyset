@@ -314,7 +314,7 @@ mod column_tests {
         let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
             .with_name(b"situa\xE7\xE3o");
 
-        let column = Column::from_mysql(&upstream, Encoding::Latin1);
+        let column = Column::from_mysql(&upstream, Encoding::LATIN1);
         assert_eq!(column.column, "situação");
 
         let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
@@ -472,7 +472,7 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
 /// treating all inbound text as UTF-8.
 fn decode_from_client(encoding: Encoding, bytes: &[u8]) -> io::Result<Cow<'_, str>> {
     match encoding {
-        Encoding::Latin1 | Encoding::Cp850 => {
+        Encoding::SingleByte(_) => {
             Ok(Cow::Owned(encoding.decode(bytes).map_err(|e| {
                 io::Error::new(io::ErrorKind::InvalidData, e)
             })?))

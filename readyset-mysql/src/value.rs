@@ -7,8 +7,8 @@ use readyset_data::{DfValue, TimestampTz};
 use readyset_errors::{ReadySetError, ReadySetResult};
 
 /// Convert a binary-protocol execute parameter to a [`DfValue`]. String parameters from a
-/// latin1 or cp850 client are transcoded to UTF-8, keeping the byte-array representation used
-/// for string parameters; parameters of other types keep their raw bytes.
+/// single-byte-charset client are transcoded to UTF-8, keeping the byte-array representation
+/// used for string parameters; parameters of other types keep their raw bytes.
 ///
 /// The type split mirrors MySQL's parameter conversion rules: STRING, VAR_STRING, and VARCHAR
 /// parameters are interpreted in character_set_client, while the BLOB family is binary and
@@ -17,7 +17,7 @@ pub(crate) fn mysql_param_to_dataflow_value(
     param: ParamValue<'_>,
     client_encoding: Encoding,
 ) -> ReadySetResult<DfValue> {
-    if matches!(client_encoding, Encoding::Latin1 | Encoding::Cp850)
+    if matches!(client_encoding, Encoding::SingleByte(_))
         && matches!(
             param.coltype,
             ColumnType::MYSQL_TYPE_STRING

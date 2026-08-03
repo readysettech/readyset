@@ -40,7 +40,6 @@ postgres-protocol = { workspace = true }
 cidr = { workspace = true }
 postgres-types = { workspace = true, features = ["with-cidr-0_3"] }
 vec1 = { workspace = true }
-yore = { workspace = true }
 log-once = { workspace = true }
 
 # Local dependencies
@@ -68,6 +67,7 @@ bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 tokio = { workspace = true, features = ["full"] }
 test-utils = { path = "../test-utils" }
+yore = { workspace = true }
 
 [[bench]]
 name = "serde"

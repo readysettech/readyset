@@ -430,7 +430,7 @@ async fn latin1_query_is_decoded() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
     )
-    .with_client_encoding(Encoding::Latin1)
+    .with_client_encoding(Encoding::LATIN1)
     .test(|db| {
         Box::pin(async move {
             db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
@@ -480,7 +480,7 @@ async fn latin1_prepare_is_decoded() {
         |_| unreachable!(),
         |_, _, _| unreachable!(),
     )
-    .with_client_encoding(Encoding::Latin1)
+    .with_client_encoding(Encoding::LATIN1)
     .test(|db| {
         Box::pin(async move {
             db.write_command_data(Command::COM_STMT_PREPARE, b"SELECT 'N\xE3o'")
@@ -505,7 +505,7 @@ async fn latin1_init_db_is_decoded() {
         },
         |_, _, _| unreachable!(),
     )
-    .with_client_encoding(Encoding::Latin1)
+    .with_client_encoding(Encoding::LATIN1)
     .test(|db| {
         Box::pin(async move {
             db.write_command_data(Command::COM_INIT_DB, b"n\xE3o")

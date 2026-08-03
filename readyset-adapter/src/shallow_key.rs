@@ -198,7 +198,7 @@ mod tests {
     fn shallow_keys_differ_by_charset() {
         let utf8 = ShallowKey::plain(vec![DfValue::from(1)]);
         let latin1 = ShallowKey {
-            charset: Encoding::Latin1,
+            charset: Encoding::LATIN1,
             ..utf8.clone()
         };
         assert_ne!(utf8, latin1);
