@@ -462,9 +462,11 @@ impl RandomCharsGenerator {
         let (low, high, encoding) = match charset_name {
             "ascii" => (0, 127, Encoding::Utf8),
             "utf8" => (0, 255, Encoding::Utf8),
-            "latin1" => (0, 255, Encoding::LATIN1),
             "binary" => (0, 255, Encoding::Binary),
-            _ => panic!("Invalid charset"),
+            name => match Encoding::from_mysql_character_set_name(name) {
+                Some(encoding @ Encoding::SingleByte(_)) => (0, 255, encoding),
+                _ => panic!("Invalid charset {name}"),
+            },
         };
         Self {
             min_length,

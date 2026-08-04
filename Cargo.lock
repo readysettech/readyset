@@ -6440,6 +6440,7 @@ dependencies = [
  "readyset-client",
  "readyset-client-metrics",
  "readyset-client-test-helpers",
+ "readyset-data",
  "readyset-mcp",
  "readyset-schema",
  "readyset-server",
