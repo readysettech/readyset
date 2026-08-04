@@ -1685,6 +1685,15 @@ impl<'a> NoriaAdapter<'a> {
         self.connector
             .deny_replication(schema.as_str(), name.as_str());
 
+        antithesis_sdk::assert_reachable!(
+            "Replication denied for a single table and continued",
+            &serde_json::json!({
+                "schema": schema.as_str(),
+                "table": name.as_str(),
+                "error": source.to_string(),
+            })
+        );
+
         Ok(())
     }
 }

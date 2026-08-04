@@ -130,16 +130,32 @@ macro_rules! handle_table_err {
             Ok(val) => val,
             Err(e) => {
                 let tme = $tme;
+                let source = Box::new(binlog_err!($connector, Some(tme), e));
+                note_table_error_scoped(tme, &source);
                 return Err(ReadySetError::TableError {
                     table: Relation {
                         schema: Some(tme.database_name().into()),
                         name: tme.table_name().into(),
                     },
-                    source: Box::new(binlog_err!($connector, Some(tme), e)),
+                    source,
                 });
             }
         }
     };
+}
+
+/// Marks for Antithesis coverage that a binlog row error was scoped to a single table's
+/// `TableError`. A helper rather than an expansion inside `handle_table_err!` so the assertion
+/// has exactly one callsite.
+fn note_table_error_scoped(tme: &binlog::events::TableMapEvent<'_>, source: &ReadySetError) {
+    antithesis_sdk::assert_reachable!(
+        "MySQL binlog row conversion error isolated to a table error",
+        &serde_json::json!({
+            "schema": tme.database_name(),
+            "table": tme.table_name(),
+            "error": source.to_string(),
+        })
+    );
 }
 
 type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);

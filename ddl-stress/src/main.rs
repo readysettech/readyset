@@ -93,6 +93,8 @@ enum Command {
     Query,
     /// Periodically activate SSE failpoints on Readyset to test recovery
     Chaos,
+    /// Binlog conversion errors deny one table without stopping replication
+    CharsetDenial,
 }
 
 #[derive(Args, Clone)]
@@ -158,6 +160,9 @@ fn main() -> Result<()> {
             Command::Ddl => run_ddl(&opts.mysql, opts.duration_secs).await,
             Command::Query => run_query(&opts.mysql, &opts.readyset, opts.duration_secs).await,
             Command::Chaos => run_chaos(&opts.readyset).await,
+            Command::CharsetDenial => {
+                run_charset_denial(&opts.mysql, &opts.readyset, opts.duration_secs).await
+            }
         }
     })
 }
@@ -653,6 +658,311 @@ async fn retry_on_schema_mismatch(pool: &Pool, sql: &str) -> Result<()> {
                 }
             }
         }
+    }
+}
+
+/// Multibyte charsets with no conversion table. A streamed binlog write to a column in any
+/// of these fails row conversion in the MySQL replicator.
+const DENIAL_CHARSETS: &[&str] = &[
+    "gbk", "sjis", "big5", "ujis", "euckr", "cp932", "eucjpms", "gb18030",
+];
+const DENIAL_TABLE: &str = "charset_denial_multibyte";
+const DENIAL_SIBLING: &str = "charset_denial_sibling";
+/// Polling budget for observing the denial or a replicated write. Under fault injection the
+/// budget can expire without the observation; that ends the pass without any assertion.
+const DENIAL_POLL_ATTEMPTS: u32 = 100;
+const DENIAL_POLL_SLEEP_MS: u64 = 200;
+/// The status and description SHOW READYSET ALL TABLES reports for a table removed through
+/// the replicator's per-table denial path. Snapshot or DDL failures under fault injection
+/// also mark tables not replicated but carry different descriptions, so matching on the
+/// pair distinguishes a denial from fault-induced degradation.
+const DENIAL_STATUS: &str = "Not replicated";
+const DENIAL_DESCRIPTION: &str = "Table has been dropped.";
+
+/// Exercises the binlog-conversion-error-isolates-table property. Each pass writes through
+/// the upstream to a table whose column charset the replicator cannot convert and to a
+/// utf8mb4 sibling, waits for SHOW READYSET ALL TABLES to report the denial, then checks
+/// that the denial is scoped to the one table, that reads of the denied table match the
+/// upstream, and that the sibling's writes still arrive through replication.
+async fn run_charset_denial(
+    mysql: &MysqlOpts,
+    readyset: &ReadysetOpts,
+    duration_secs: u64,
+) -> Result<()> {
+    info!(
+        host = %readyset.readyset_host,
+        port = readyset.readyset_port,
+        db = %mysql.mysql_db,
+        duration_secs,
+        "Starting charset denial driver"
+    );
+    let upstream_pool = Pool::new(mysql.to_mysql_opts());
+    let rs_pool = Pool::new(mysql.to_readyset_opts(readyset));
+    let start = Instant::now();
+    let mut rng = rand::rng();
+    let mut pass: u64 = 0;
+    let mut denials_observed: u64 = 0;
+
+    while !duration_expired(duration_secs, start) {
+        scheduler_potentially_yield!();
+        pass += 1;
+
+        // Menu axis: the unsupported charset for this pass's table, and the streamed batch
+        // size (single row plus small batches; the conversion error fires per row event, so
+        // larger batches add nothing).
+        let charset = DENIAL_CHARSETS[rng.random_range(0..DENIAL_CHARSETS.len())];
+        let batch = [1usize, 2, 16][rng.random_range(0..3)];
+
+        let mut upstream = match upstream_pool.get_conn().await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(%e, "Failed to acquire upstream MySQL connection");
+                continue;
+            }
+        };
+
+        // The denial persists in the replicator's in-memory table filter until Readyset
+        // restarts, so fresh denials come from fault-injected restarts followed by a
+        // re-snapshot. Occasionally drop the multibyte table so the upstream definition
+        // varies its charset for whichever re-snapshot happens next.
+        if rng.random_bool(0.3)
+            && let Err(e) = upstream
+                .query_drop(format!("DROP TABLE IF EXISTS `{DENIAL_TABLE}`"))
+                .await
+        {
+            info!(%e, "Dropping multibyte table failed");
+        }
+        for sql in [
+            format!(
+                "CREATE TABLE IF NOT EXISTS `{DENIAL_SIBLING}` \
+                 (id INT PRIMARY KEY, t VARCHAR(32)) CHARACTER SET utf8mb4"
+            ),
+            format!(
+                "CREATE TABLE IF NOT EXISTS `{DENIAL_TABLE}` \
+                 (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET {charset})"
+            ),
+        ] {
+            if let Err(e) = upstream.query_drop(&sql).await {
+                info!(%e, sql, "Charset denial setup DDL failed");
+            }
+        }
+
+        // Streamed writes through the upstream. REPLACE tolerates id collisions across
+        // passes. Values are pure ASCII; the conversion error fires regardless of content
+        // because the charset has no decode at all.
+        let base: u32 = rng.random_range(0..1_000_000);
+        for i in 0..batch {
+            let id = base.wrapping_add(i as u32);
+            for table in [DENIAL_TABLE, DENIAL_SIBLING] {
+                if let Err(e) = upstream
+                    .query_drop(format!(
+                        "REPLACE INTO `{table}` (id, t) VALUES ({id}, 'row-{id}')"
+                    ))
+                    .await
+                {
+                    info!(%e, table, id, "Streamed write failed");
+                }
+            }
+        }
+
+        // Wait for the denial to become visible through the adapter. Matching both the
+        // status and the denial-path description avoids counting fault-induced snapshot or
+        // DDL failures as denials. The workload's own DROP TABLE also produces this
+        // signature transiently until the following CREATE is processed, so require it on
+        // two consecutive polls; a real denial is stable until the replicator restarts.
+        let mut denied = false;
+        let mut sibling_state: Option<(String, String)> = None;
+        let mut seen_once = false;
+        for _ in 0..DENIAL_POLL_ATTEMPTS {
+            if let Some((multibyte, sibling)) = table_statuses(&rs_pool).await
+                && multibyte.as_ref().is_some_and(|(status, description)| {
+                    status == DENIAL_STATUS && description == DENIAL_DESCRIPTION
+                })
+            {
+                if seen_once {
+                    denied = true;
+                    sibling_state = sibling;
+                    break;
+                }
+                seen_once = true;
+            } else {
+                seen_once = false;
+            }
+            tokio::time::sleep(Duration::from_millis(DENIAL_POLL_SLEEP_MS)).await;
+        }
+
+        if !denied {
+            // Under faults the denial may not become observable within the budget. Not a
+            // bug, just an unexercised pass.
+            info!(pass, charset, "Denial not observed this pass");
+            continue;
+        }
+        denials_observed += 1;
+
+        info!(
+            pass,
+            charset,
+            ?sibling_state,
+            "Observed charset table denial"
+        );
+        assert_reachable!(
+            "Charset denial scenario saw table become not replicated",
+            &json!({"charset": charset, "pass": pass})
+        );
+
+        // Isolation: at the moment the denial is visible, the sibling must not have been
+        // denied through the same path. A sibling marked not replicated with a different
+        // description was degraded by fault injection (e.g. a snapshot failure), which is
+        // outside this property.
+        if let Some((status, description)) = &sibling_state {
+            let sibling_denied = status == DENIAL_STATUS && description == DENIAL_DESCRIPTION;
+            if status == DENIAL_STATUS && !sibling_denied {
+                info!(
+                    status,
+                    description, "Sibling not replicated for a non-denial reason; skipping"
+                );
+            } else {
+                assert_always_or_unreachable!(
+                    !sibling_denied,
+                    "Sibling table remains replicated after charset denial",
+                    &json!({
+                        "sibling_status": status,
+                        "sibling_description": description,
+                        "charset": charset,
+                    })
+                );
+            }
+        }
+
+        // Fallback correctness: reads of the denied table through Readyset must serve the
+        // upstream's rows, never the stale pre-denial snapshot. This driver is the only
+        // writer to these tables and runs serially, so back-to-back reads can't race a
+        // concurrent write.
+        let read_sql = format!("SELECT id, t FROM `{DENIAL_TABLE}` ORDER BY id");
+        let rs_rows: Option<Vec<(u32, String)>> = match rs_pool.get_conn().await {
+            Ok(mut c) => c.query(&read_sql).await.ok(),
+            Err(_) => None,
+        };
+        let upstream_rows: Option<Vec<(u32, String)>> = upstream.query(&read_sql).await.ok();
+        if let (Some(rs_rows), Some(upstream_rows)) = (rs_rows, upstream_rows) {
+            assert_always_or_unreachable!(
+                rs_rows == upstream_rows,
+                "Denied charset table reads match upstream",
+                &json!({
+                    "charset": charset,
+                    "readyset_rows": rs_rows.len(),
+                    "upstream_rows": upstream_rows.len(),
+                })
+            );
+        }
+
+        // Liveness: a fresh sibling write still arrives through replication. Require the
+        // read to be served by Readyset itself, since a proxied read would see the row
+        // whether or not replication made progress. The value carries the pass number so a
+        // row left by an id collision with an earlier pass doesn't count.
+        let live_id = base.wrapping_add(1_000_003);
+        let live_value = format!("live-{pass}-{live_id}");
+        if let Err(e) = upstream
+            .query_drop(format!(
+                "REPLACE INTO `{DENIAL_SIBLING}` (id, t) VALUES ({live_id}, '{live_value}')"
+            ))
+            .await
+        {
+            info!(%e, live_id, "Post-denial sibling write failed");
+            continue;
+        }
+        let mut sibling_visible = false;
+        for _ in 0..DENIAL_POLL_ATTEMPTS {
+            if sibling_row_served_by_readyset(&rs_pool, live_id, &live_value).await {
+                sibling_visible = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(DENIAL_POLL_SLEEP_MS)).await;
+        }
+        assert_sometimes!(
+            sibling_visible,
+            "Sibling write visible through Readyset after charset denial",
+            &json!({"charset": charset, "live_id": live_id})
+        );
+        info!(
+            pass,
+            charset, sibling_visible, "Charset denial pass complete"
+        );
+    }
+
+    assert_reachable!(
+        "Charset denial driver completed",
+        &json!({"passes": pass, "denials_observed": denials_observed})
+    );
+
+    info!(
+        passes = pass,
+        denials_observed,
+        elapsed_secs = start.elapsed().as_secs(),
+        "Charset denial driver finished"
+    );
+    upstream_pool.disconnect().await?;
+    rs_pool.disconnect().await?;
+    Ok(())
+}
+
+/// The SHOW READYSET ALL TABLES (status, description) of the two charset denial tables, as
+/// (multibyte, sibling). None means the statement itself failed; an inner None means the
+/// table is absent from the output.
+#[allow(clippy::type_complexity)]
+async fn table_statuses(
+    rs_pool: &Pool,
+) -> Option<(Option<(String, String)>, Option<(String, String)>)> {
+    let mut conn = match rs_pool.get_conn().await {
+        Ok(c) => c,
+        Err(e) => {
+            info!(%e, "Failed to acquire Readyset connection for table statuses");
+            return None;
+        }
+    };
+    let rows: Vec<(String, String, String)> = match conn.query("SHOW READYSET ALL TABLES").await {
+        Ok(rows) => rows,
+        Err(e) => {
+            info!(%e, "SHOW READYSET ALL TABLES failed");
+            return None;
+        }
+    };
+    let state_of = |name: &str| {
+        rows.iter()
+            .find(|(table, _, _)| table.contains(name))
+            .map(|(_, status, description)| (status.clone(), description.clone()))
+    };
+    Some((state_of(DENIAL_TABLE), state_of(DENIAL_SIBLING)))
+}
+
+/// Whether the sibling row is visible through Readyset with the expected value and the read
+/// was served by Readyset rather than proxied upstream.
+async fn sibling_row_served_by_readyset(rs_pool: &Pool, id: u32, value: &str) -> bool {
+    let mut conn = match rs_pool.get_conn().await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let row: Option<(u32, String)> = match conn
+        .query_first(format!(
+            "SELECT id, t FROM `{DENIAL_SIBLING}` WHERE id = {id}"
+        ))
+        .await
+    {
+        Ok(row) => row,
+        Err(_) => return false,
+    };
+    if row.is_none_or(|(_, t)| t != value) {
+        return false;
+    }
+    match conn
+        .query_first::<mysql_async::Row, _>("EXPLAIN LAST STATEMENT")
+        .await
+    {
+        Ok(Some(info)) => {
+            let destination: Option<String> = info.get("Query_destination");
+            destination.is_some_and(|d| d.starts_with("readyset") && !d.contains("upstream"))
+        }
+        _ => false,
     }
 }
 
