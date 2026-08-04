@@ -61,9 +61,6 @@ pub enum MsqlSrvError {
     /// Failed to encode a key to PEM format or convert PEM bytes to UTF-8.
     #[error("Key encoding failed: {0}")]
     EncodingError(String),
-    /// `AuthKeys::initialize()` was called more than once.
-    #[error("Auth keys already initialized")]
-    KeyAlreadyInitialized,
     /// An RSA key file on disk could not be read or parsed.
     #[error("Failed to load RSA key from file: {0}")]
     KeyLoadError(String),

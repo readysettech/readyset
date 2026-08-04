@@ -14,12 +14,10 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, RwLock};
 
-use failpoint_macros::set_failpoint;
 use getrandom::fill;
-#[cfg(feature = "failure_injection")]
-use readyset_util::failpoints;
+use once_cell::sync::OnceCell;
 use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPrivateKey};
 use rsa::pkcs8::EncodePublicKey;
 use rsa::{Oaep, RsaPrivateKey};
@@ -30,6 +28,10 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, error, warn};
+
+use failpoint_macros::set_failpoint;
+#[cfg(feature = "failure_injection")]
+use readyset_util::failpoints;
 
 use crate::error::MsqlSrvError;
 use crate::packet::PacketConn;
@@ -68,39 +70,36 @@ pub struct AuthKeys {
     pub_key_pem: String,
 }
 
-static AUTH_KEYS: OnceLock<AuthKeys> = OnceLock::new();
+static AUTH_KEYS: OnceCell<AuthKeys> = OnceCell::new();
 
 impl AuthKeys {
-    /// Initialize the global RSA keys. Must be called exactly once at startup.
+    /// Initialize the global RSA keys, if they are not already initialized.
     ///
-    /// If `deployment_dir` is `Some`, attempts to load an existing key pair
-    /// from `<dir>/caching_sha2_password_private_key.pem` and
-    /// `<dir>/caching_sha2_password_public_key.pem` (matching MySQL's
-    /// default file names). If the files do not exist, a new 2048-bit RSA
-    /// key pair is generated and saved there.
+    /// If `deployment_dir` is `Some`, attempts to load an existing key pair from
+    /// `<dir>/caching_sha2_password_private_key.pem` and
+    /// `<dir>/caching_sha2_password_public_key.pem` (matching MySQL's default file names). If the
+    /// files do not exist, a new 2048-bit RSA key pair is generated and saved there.
     ///
-    /// If `deployment_dir` is `None`, a new ephemeral key pair is generated
-    /// (not persisted).
+    /// If `deployment_dir` is `None`, a new ephemeral key pair is generated (not persisted).
     ///
     /// # Errors
     ///
-    /// * [`MsqlSrvError::KeyAlreadyInitialized`] if called more than once.
     /// * [`MsqlSrvError::KeyCreationError`] if RSA generation fails.
     /// * [`MsqlSrvError::KeyLoadError`] if a PEM file exists but cannot be parsed.
     /// * [`MsqlSrvError::EncodingError`] if PEM encoding fails.
     pub fn initialize(deployment_dir: Option<PathBuf>) -> Result<(), MsqlSrvError> {
-        let keys = if let Some(dir) = deployment_dir {
-            Self::load_or_create_keys(dir)?
-        } else {
-            let mut rng = rsa::rand_core::OsRng;
-            let private_key = RsaPrivateKey::new(&mut rng, 2048)
-                .map_err(|e| MsqlSrvError::KeyCreationError(e.to_string()))?;
-            Self::from_private_key(private_key)?
-        };
-
         AUTH_KEYS
-            .set(keys)
-            .map_err(|_| MsqlSrvError::KeyAlreadyInitialized)
+            .get_or_try_init(|| {
+                if let Some(dir) = deployment_dir {
+                    Self::load_or_create_keys(dir)
+                } else {
+                    let mut rng = rsa::rand_core::OsRng;
+                    let private_key = RsaPrivateKey::new(&mut rng, 2048)
+                        .map_err(|e| MsqlSrvError::KeyCreationError(e.to_string()))?;
+                    Self::from_private_key(private_key)
+                }
+            })
+            .map(|_| ())
     }
 
     /// Access the initialized keys.

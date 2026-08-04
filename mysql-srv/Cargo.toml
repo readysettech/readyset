@@ -21,6 +21,7 @@ itoa = { workspace = true }
 mysql-time = { path = "../mysql-time" }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["chrono"] }
+once_cell = { workspace = true }
 rsa = { workspace = true }
 sha-1 = { workspace = true }
 sha2 = { workspace = true }
