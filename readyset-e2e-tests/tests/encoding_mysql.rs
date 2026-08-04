@@ -1815,3 +1815,106 @@ async fn set_names_single_byte_roundtrip() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// A streamed write to a table whose column charset has no conversion table (multibyte gbk)
+/// fails row conversion and denies replication for just that table. A sibling table in a
+/// supported charset keeps replicating.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn unsupported_charset_write_denies_only_that_table() {
+    readyset_tracing::init_test_logging();
+    let db_name = "encoding_unsupported_denial";
+    mysql_helpers::recreate_database(db_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop(
+            r#"
+            CREATE TABLE supported_t (id INT PRIMARY KEY, t VARCHAR(16) CHARACTER SET latin1);
+            CREATE TABLE gbk_t (id INT PRIMARY KEY, t VARCHAR(16) CHARACTER SET gbk);
+            INSERT INTO supported_t VALUES (1, 'one');
+            INSERT INTO gbk_t VALUES (1, 'one');
+        "#,
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(db_name)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    // Both tables snapshot fine. The snapshot connection reads results converted to utf8mb4 by
+    // the server, so the gbk column only fails once its rows arrive through the binlog.
+    eventually!(attempts: 5, sleep: Duration::from_secs(5), {
+        let supported: usize = rs_conn
+            .query_first("SELECT count(*) FROM supported_t")
+            .await
+            .unwrap()
+            .unwrap();
+        let gbk: usize = rs_conn
+            .query_first("SELECT count(*) FROM gbk_t")
+            .await
+            .unwrap()
+            .unwrap();
+        supported == 1 && gbk == 1
+    });
+
+    // The gbk write fails row conversion and the sibling write lands after it in the binlog.
+    upstream_conn
+        .query_drop("INSERT INTO gbk_t VALUES (2, 'two')")
+        .await
+        .unwrap();
+    upstream_conn
+        .query_drop("INSERT INTO supported_t VALUES (2, 'two')")
+        .await
+        .unwrap();
+
+    // Replication keeps going for the supported table.
+    eventually!(sleep: Duration::from_millis(100), {
+        let supported: usize = rs_conn
+            .query_first("SELECT count(*) FROM supported_t")
+            .await
+            .unwrap()
+            .unwrap();
+        supported == 2
+    });
+
+    // The gbk table was removed from Readyset, so querying it now errors.
+    eventually!(sleep: Duration::from_millis(100), {
+        rs_conn
+            .query_first::<usize, _>("SELECT count(*) FROM gbk_t")
+            .await
+            .is_err()
+    });
+
+    // After the denial, the connector's table filter skips further gbk events, so continued
+    // writes to the denied table don't disturb the sibling's replication.
+    upstream_conn
+        .query_drop("INSERT INTO gbk_t VALUES (3, 'three')")
+        .await
+        .unwrap();
+    upstream_conn
+        .query_drop("INSERT INTO supported_t VALUES (3, 'three')")
+        .await
+        .unwrap();
+    eventually!(sleep: Duration::from_millis(100), {
+        let supported: usize = rs_conn
+            .query_first("SELECT count(*) FROM supported_t")
+            .await
+            .unwrap()
+            .unwrap();
+        supported == 3
+    });
+
+    shutdown_tx.shutdown().await;
+
+    upstream_conn
+        .query_drop(format!("DROP DATABASE {db_name}"))
+        .await
+        .unwrap();
+}

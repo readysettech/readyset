@@ -114,6 +114,10 @@ impl WalReader {
         }
     }
 
+    pub(crate) fn deny_replication(&mut self, schema: &str, table: &str) {
+        self.table_filter.deny_replication(schema, table);
+    }
+
     pub(crate) async fn next_event(&mut self) -> Result<WalEvent, ReadySetError> {
         loop {
             match self.next_event_inner().await {

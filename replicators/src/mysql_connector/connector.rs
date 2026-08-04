@@ -121,6 +121,27 @@ macro_rules! handle_err {
     };
 }
 
+/// Like `handle_err!`, but wraps the contextualized error as a `TableError` for the event's
+/// table, so the caller denies replication for just that table instead of failing replication
+/// entirely. Use for errors scoped to one table's data, e.g. row conversion failures.
+macro_rules! handle_table_err {
+    ($connector:expr, $tme:expr, $op:expr) => {
+        match $op {
+            Ok(val) => val,
+            Err(e) => {
+                let tme = $tme;
+                return Err(ReadySetError::TableError {
+                    table: Relation {
+                        schema: Some(tme.database_name().into()),
+                        name: tme.table_name().into(),
+                    },
+                    source: Box::new(binlog_err!($connector, Some(tme), e)),
+                });
+            }
+        }
+    };
+}
+
 type TableMetadata = (Vec<Option<u16>>, Vec<Option<bool>>);
 
 /// A connector that connects to a MySQL server and starts reading binlogs from a given position.
@@ -574,7 +595,7 @@ impl MySqlBinlogConnector {
         signedness_vec: &[Option<bool>],
     ) -> ReadySetResult<Vec<DfValue>> {
         let mut row = vec![DfValue::Default; tme.columns_count() as usize];
-        let mut binlog_iter = handle_err!(
+        let mut binlog_iter = handle_table_err!(
             self,
             tme,
             binlog_row_to_noria_row(row_data, tme, collation_vec, signedness_vec)
@@ -796,7 +817,7 @@ impl MySqlBinlogConnector {
                 .as_ref()
                 .ok_or("Missing UPDATE_ROWS_EVENT before image")
         );
-        let before_image = handle_err!(
+        let before_image = handle_table_err!(
             self,
             tme,
             binlog_row_to_noria_row(before_row, tme, collation_vec, signedness_vec)
@@ -809,7 +830,7 @@ impl MySqlBinlogConnector {
                 .as_ref()
                 .ok_or("Missing UPDATE_ROWS_EVENT after image")
         );
-        let after_image = handle_err!(
+        let after_image = handle_table_err!(
             self,
             tme,
             binlog_row_to_noria_row(after_row, tme, collation_vec, signedness_vec)
@@ -971,7 +992,7 @@ impl MySqlBinlogConnector {
             let row = handle_err!(self, tme, row);
             let before_row =
                 handle_err!(self, tme, row.0.ok_or("Missing data in DELETE_ROWS_EVENT"));
-            let before_row_image = handle_err!(
+            let before_row_image = handle_table_err!(
                 self,
                 tme,
                 binlog_row_to_noria_row(&before_row, tme, &collation_vec, &signedness_vec)
@@ -2500,6 +2521,10 @@ impl Connector for MySqlBinlogConnector {
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)> {
         self.next_action_inner(until).await
+    }
+
+    fn deny_replication(&mut self, schema: &str, table: &str) {
+        self.table_filter.deny_replication(schema, table);
     }
 }
 

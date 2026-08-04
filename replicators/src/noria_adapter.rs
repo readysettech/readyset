@@ -93,6 +93,10 @@ pub(crate) trait Connector {
         last_pos: &ReplicationOffset,
         until: Option<&ReplicationOffset>,
     ) -> ReadySetResult<(Vec<ReplicationAction>, ReplicationOffset)>;
+
+    /// Stop processing events for the given table. Call this when denying replication for
+    /// a table to keep the connector's table filter in sync with the adapter's.
+    fn deny_replication(&mut self, schema: &str, table: &str);
 }
 
 /// Cleans up replication related assets on the upstream database as supplied by the
@@ -1677,6 +1681,8 @@ impl<'a> NoriaAdapter<'a> {
         })?;
 
         self.table_filter
+            .deny_replication(schema.as_str(), name.as_str());
+        self.connector
             .deny_replication(schema.as_str(), name.as_str());
 
         Ok(())

@@ -1273,6 +1273,13 @@ impl Connector for PostgresWalConnector {
             }
         }
     }
+
+    fn deny_replication(&mut self, schema: &str, table: &str) {
+        self.table_filter.deny_replication(schema, table);
+        if let Some(reader) = self.reader.as_mut() {
+            reader.deny_replication(schema, table);
+        }
+    }
 }
 
 #[cfg(test)]
