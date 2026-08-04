@@ -31,7 +31,6 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_util::failpoints;
 use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidSet, ReplicationOffset, ReplicationOffsets};
-use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, info_span, warn};
@@ -1049,20 +1048,21 @@ fn mysql_row_to_noria_row(
                 _ => return Err(internal_err!("Expected a bytes value for decimal column")),
             },
             ColumnType::MYSQL_TYPE_JSON => {
-                let df_val = match val {
-                    mysql_common::value::Value::Bytes(b) => str::from_utf8(&b)
-                        .ok()
-                        .and_then(|s: &str| serde_json::from_str(s).ok())
-                        .map(|j: Value| DfValue::from(j))
-                        .ok_or_else(|| internal_err!("Failed to parse JSON value"))?,
-                    mysql_common::value::Value::NULL => DfValue::None,
-                    _ => {
-                        return Err(internal_err!(
-                            "Expected a bytes value for JSON column, got {:?}",
-                            val
-                        ));
-                    }
-                };
+                let df_val =
+                    match val {
+                        // Upstream renders JSON columns canonically, so its bytes are already the
+                        // representation we want to store.
+                        mysql_common::value::Value::Bytes(b) => str::from_utf8(&b)
+                            .map(DfValue::from)
+                            .map_err(|_| internal_err!("Invalid UTF-8 in JSON value"))?,
+                        mysql_common::value::Value::NULL => DfValue::None,
+                        _ => {
+                            return Err(internal_err!(
+                                "Expected a bytes value for JSON column, got {:?}",
+                                val
+                            ));
+                        }
+                    };
                 noria_row.push(df_val);
             }
             ColumnType::MYSQL_TYPE_VAR_STRING
