@@ -1652,6 +1652,37 @@ mod tests {
         Expr::lower(ast, expr_dialect, &numbered_columns()).unwrap()
     }
 
+    /// Postgres passes non-finite values through `round` unchanged.
+    #[test]
+    fn eval_call_round_non_finite() {
+        let round = parse_and_lower("round(c0)", PostgreSQL);
+        for val in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            assert_eq!(
+                round.eval(&[DfValue::Double(val)]).unwrap(),
+                DfValue::Double(val),
+                "round({val})"
+            );
+            assert_eq!(
+                round.eval(&[DfValue::Float(val as f32)]).unwrap(),
+                DfValue::Float(val as f32),
+                "round({val} as f32)"
+            );
+        }
+
+        let round_to_2 = parse_and_lower("round(c0, 2)", PostgreSQL);
+        for decimal in [
+            readyset_decimal::Decimal::Infinity,
+            readyset_decimal::Decimal::NegativeInfinity,
+            readyset_decimal::Decimal::NaN,
+        ] {
+            let value = DfValue::Numeric(std::sync::Arc::new(decimal));
+            assert_eq!(
+                round_to_2.eval(std::slice::from_ref(&value)).unwrap(),
+                value
+            );
+        }
+    }
+
     #[test]
     fn eval_call_convert_tz() {
         let expr = parse_and_lower("convert_tz(c0, c1, c2)", MySQL);

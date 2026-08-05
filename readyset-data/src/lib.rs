@@ -534,6 +534,26 @@ impl DfValue {
     /// );
     /// ```
     pub fn coerce_to(&self, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
+        self.coerce_to_inner(to_ty, from_ty, None)
+    }
+
+    /// Like [`DfValue::coerce_to`], but resolving coercions whose semantics differ between the
+    /// upstreams according to `dialect`.
+    pub fn coerce_to_with_dialect(
+        &self,
+        to_ty: &DfType,
+        from_ty: &DfType,
+        dialect: Dialect,
+    ) -> ReadySetResult<DfValue> {
+        self.coerce_to_inner(to_ty, from_ty, Some(dialect))
+    }
+
+    fn coerce_to_inner(
+        &self,
+        to_ty: &DfType,
+        from_ty: &DfType,
+        dialect: Option<Dialect>,
+    ) -> ReadySetResult<DfValue> {
         use crate::text::TextCoerce;
 
         let mk_err = || ReadySetError::DfValueConversionError {
@@ -585,8 +605,8 @@ impl DfValue {
                 _ => Err(mk_err()),
             },
             _ if is_clone_coercible() => Ok(self.clone()),
-            DfValue::Text(t) => t.coerce_to(to_ty, from_ty),
-            DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty),
+            DfValue::Text(t) => t.coerce_to(to_ty, from_ty, dialect),
+            DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty, dialect),
             DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
             DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
             DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
@@ -710,12 +730,12 @@ impl DfValue {
                 }
             }
             (DfValue::TinyText(v), int_types!()) => {
-                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown, None)? {
                     return_error_if_disallowed_float!(v);
                 }
             }
             (DfValue::Text(v), int_types!()) => {
-                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown)? {
+                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown, None)? {
                     return_error_if_disallowed_float!(v);
                 }
             }

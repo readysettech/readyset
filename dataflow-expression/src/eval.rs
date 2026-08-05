@@ -319,8 +319,11 @@ impl Expr {
                 expr,
                 ty,
                 null_on_failure,
+                dialect,
             } => {
-                let res = expr.eval(record)?.coerce_to(ty, expr.ty());
+                let res = expr
+                    .eval(record)?
+                    .coerce_to_with_dialect(ty, expr.ty(), *dialect);
                 if *null_on_failure {
                     Ok(res.unwrap_or(DfValue::None))
                 } else {
@@ -477,6 +480,7 @@ mod tests {
                 subsecond_digits: Dialect::DEFAULT_MYSQL.default_subsecond_digits(),
             },
             null_on_failure: true,
+            dialect: Dialect::DEFAULT_MYSQL,
         };
         assert_eq!(expr.eval::<DfValue>(&[]).unwrap(), DfValue::None);
     }
@@ -1107,6 +1111,7 @@ mod tests {
             expr: Box::new(make_column(0)),
             ty: DfType::Int,
             null_on_failure: false,
+            dialect: Dialect::DEFAULT_MYSQL,
         };
         assert_eq!(
             expr.eval::<DfValue>(&["1".into(), "2".into()]).unwrap(),

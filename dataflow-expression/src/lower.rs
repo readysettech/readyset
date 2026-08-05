@@ -257,6 +257,7 @@ impl BuiltinFunction {
                     expr: Box::new(expr),
                     ty,
                     null_on_failure: false,
+                    dialect,
                 }
             }
         };
@@ -264,6 +265,7 @@ impl BuiltinFunction {
             expr: Box::new(expr),
             ty,
             null_on_failure: true,
+            dialect,
         };
 
         let result = match name {
@@ -1637,6 +1639,7 @@ impl Expr {
                             expr: Box::new(expr),
                             ty: DfType::BigInt,
                             null_on_failure: false,
+                            dialect,
                         }
                     }
                 };
@@ -1745,6 +1748,7 @@ impl Expr {
                             expr: left,
                             ty,
                             null_on_failure: false,
+                            dialect,
                         });
                     }
                 }
@@ -1754,6 +1758,7 @@ impl Expr {
                             expr: right,
                             ty,
                             null_on_failure: false,
+                            dialect,
                         });
                     }
                 }
@@ -1844,6 +1849,7 @@ impl Expr {
                     expr: Box::new(Self::lower(*expr, dialect, context)?),
                     ty,
                     null_on_failure: false,
+                    dialect,
                 })
             }
             AstExpr::CaseWhen {
@@ -1913,6 +1919,7 @@ impl Expr {
                                 expr: left,
                                 ty,
                                 null_on_failure: false,
+                                dialect,
                             });
                         }
                         if let Some(ty) = right_coerce {
@@ -1920,6 +1927,7 @@ impl Expr {
                                 expr: right,
                                 ty,
                                 null_on_failure: false,
+                                dialect,
                             });
                         }
 
@@ -2131,6 +2139,7 @@ impl Expr {
                 expr: left,
                 ty,
                 null_on_failure: false,
+                dialect,
             })
         }
         if let Some(ty) = right_coerce_target {
@@ -2139,6 +2148,7 @@ impl Expr {
                 ty: DfType::Array(Box::new(ty)),
 
                 null_on_failure: false,
+                dialect,
             })
         } else if !right.ty().is_array() {
             // Even if we don't need to cast the right member type to a target type, we still need
@@ -2150,6 +2160,7 @@ impl Expr {
                     right_coerce_target.unwrap_or_else(|| left.ty().clone()),
                 )),
                 null_on_failure: false,
+                dialect,
             });
         }
 
@@ -2315,7 +2326,8 @@ pub(crate) mod tests {
                     ty: DfType::Unknown
                 }),
                 ty: enum_ty,
-                null_on_failure: false
+                null_on_failure: false,
+                dialect: Dialect::DEFAULT_POSTGRESQL,
             }
         );
     }
@@ -2790,7 +2802,8 @@ pub(crate) mod tests {
                             ty: DfType::Unknown
                         }),
                         ty: DfType::Int,
-                        null_on_failure: false
+                        null_on_failure: false,
+                        dialect: Dialect::DEFAULT_POSTGRESQL,
                     },
                     Expr::Literal {
                         val: 3u32.into(),
@@ -2826,7 +2839,8 @@ pub(crate) mod tests {
                         ty: DfType::Unknown
                     }),
                     ty: DfType::Array(Box::new(DfType::Int)),
-                    null_on_failure: false
+                    null_on_failure: false,
+                    dialect: Dialect::DEFAULT_POSTGRESQL,
                 }),
                 ty: DfType::Bool
             }
@@ -2852,7 +2866,8 @@ pub(crate) mod tests {
                         ty: DfType::Unknown
                     }),
                     ty: DfType::Array(Box::new(DfType::Int)),
-                    null_on_failure: false
+                    null_on_failure: false,
+                    dialect: Dialect::DEFAULT_POSTGRESQL,
                 }),
                 ty: DfType::Bool
             }
@@ -2887,6 +2902,7 @@ pub(crate) mod tests {
                         }),
                         ty: DfType::DEFAULT_TEXT,
                         null_on_failure: false,
+                        dialect: Dialect::DEFAULT_POSTGRESQL,
                     },
                     Some(Expr::Cast {
                         expr: Box::new(Expr::Literal {
@@ -2895,6 +2911,7 @@ pub(crate) mod tests {
                         }),
                         ty: DfType::DEFAULT_TEXT,
                         null_on_failure: false,
+                        dialect: Dialect::DEFAULT_POSTGRESQL,
                     }),
                 )),
                 ty: DfType::DEFAULT_TEXT

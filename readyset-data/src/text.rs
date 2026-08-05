@@ -12,7 +12,8 @@ use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use regex::Regex;
 
-use crate::{Array, Collation, DfType, DfValue};
+use crate::dialect::SqlEngine;
+use crate::{Array, Collation, DfType, DfValue, Dialect};
 
 pub(crate) const TINYTEXT_WIDTH: usize = 14;
 
@@ -454,12 +455,21 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
         }
     }
 
-    /// A convenience float parser that extracts a numeric prefix (like MySQL) and returns 0.0 for
-    /// non-numeric strings. Mirrors MySQL's implicit string-to-float coercion behavior.
-    fn parse_float<F>(str: &str) -> ReadySetResult<F>
+    /// Parses text as a float. Postgres parses the whole string, accepting `Infinity` and `NaN`
+    /// along with their `inf`/`nan` abbreviations, and rejects anything it cannot parse in full.
+    /// MySQL, and an unknown dialect, take the leading numeric prefix and yield zero when there is
+    /// none.
+    fn parse_float<F>(str: &str, ty: &DfType, dialect: Option<Dialect>) -> ReadySetResult<F>
     where
         F: FromStr + Default,
     {
+        if dialect.map(|d| d.engine()) == Some(SqlEngine::PostgreSQL) {
+            return str
+                .trim()
+                .parse::<F>()
+                .map_err(|_| Self::coerce_err(ty, "invalid input syntax"));
+        }
+
         lazy_static! {
             static ref FLOAT_PREFIX: Regex =
                 Regex::new(r"^[[:space:]]*([+-]?(\d+\.?\d*|\d*\.\d+)([eE][+-]?\d+)?)").unwrap();
@@ -496,7 +506,12 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     }
 
     /// Coerce this type to a different DfValue.
-    fn coerce_to(&self, to_ty: &DfType, _from_ty: &DfType) -> ReadySetResult<DfValue> {
+    fn coerce_to(
+        &self,
+        to_ty: &DfType,
+        _from_ty: &DfType,
+        dialect: Option<Dialect>,
+    ) -> ReadySetResult<DfValue> {
         let str = self.try_str()?;
 
         match *to_ty {
@@ -672,9 +687,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Err(e) => Err(Self::coerce_err(to_ty, e)),
             },
 
-            DfType::Float => Self::parse_float::<f32>(str)?.try_into(),
+            DfType::Float => Self::parse_float::<f32>(str, to_ty, dialect)?.try_into(),
 
-            DfType::Double => Self::parse_float::<f64>(str)?.try_into(),
+            DfType::Double => Self::parse_float::<f64>(str, to_ty, dialect)?.try_into(),
 
             DfType::Numeric { .. } => Ok(str
                 .parse::<Decimal>()
@@ -735,6 +750,80 @@ mod tests {
 
     use super::*;
     use crate::Collation;
+
+    fn coerce_double(text: &str, dialect: Dialect) -> ReadySetResult<DfValue> {
+        DfValue::from(text).coerce_to_with_dialect(&DfType::Double, &DfType::Unknown, dialect)
+    }
+
+    /// Verified against PostgreSQL 15.
+    #[test]
+    fn text_to_float_postgres_accepts_non_finite() {
+        for (text, expected) in [
+            ("NaN", f64::NAN),
+            ("nan", f64::NAN),
+            ("NAN", f64::NAN),
+            ("Infinity", f64::INFINITY),
+            ("infinity", f64::INFINITY),
+            ("INFINITY", f64::INFINITY),
+            ("inf", f64::INFINITY),
+            ("Inf", f64::INFINITY),
+            ("+inf", f64::INFINITY),
+            ("  inf  ", f64::INFINITY),
+            ("-inf", f64::NEG_INFINITY),
+            ("-Infinity", f64::NEG_INFINITY),
+        ] {
+            assert_eq!(
+                coerce_double(text, Dialect::DEFAULT_POSTGRESQL).unwrap(),
+                DfValue::Double(expected),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn text_to_float_postgres_rejects_unparseable() {
+        for text in ["hello", "12abc", "", "1.2.3"] {
+            assert!(
+                coerce_double(text, Dialect::DEFAULT_POSTGRESQL).is_err(),
+                "{text:?} should not parse"
+            );
+        }
+    }
+
+    /// Verified against MySQL 8.0.46.
+    #[test]
+    fn text_to_float_mysql_takes_numeric_prefix() {
+        for (text, expected) in [
+            ("12abc", 12.0),
+            ("hello", 0.0),
+            ("", 0.0),
+            ("NaN", 0.0),
+            ("Infinity", 0.0),
+            ("1.5", 1.5),
+        ] {
+            assert_eq!(
+                coerce_double(text, Dialect::DEFAULT_MYSQL).unwrap(),
+                DfValue::Double(expected),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn text_to_float_without_dialect_is_lenient() {
+        assert_eq!(
+            DfValue::from("hello")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(0.0)
+        );
+        assert_eq!(
+            DfValue::from("12abc")
+                .coerce_to(&DfType::Double, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Double(12.0)
+        );
+    }
 
     mod len_and_collation {
         use super::*;

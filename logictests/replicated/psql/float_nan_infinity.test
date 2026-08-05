@@ -105,3 +105,15 @@ query R nosort
 SELECT max(d) FROM nf;
 ----
 NaN
+
+# Casting text to a float parses the whole string in Postgres, so the non-finite spellings work.
+# Anchored to a base table because Readyset cannot cache a query without one.
+query R nosort
+SELECT 'Infinity'::double precision FROM nf WHERE id = 4;
+----
+Infinity
+
+query R nosort
+SELECT 'nan'::double precision FROM nf WHERE id = 4;
+----
+NaN

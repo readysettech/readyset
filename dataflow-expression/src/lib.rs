@@ -491,6 +491,9 @@ pub enum Expr {
         /// If `true`, this expression will evaluate to `NULL` if the cast fails. If `false`, cast
         /// failure will return an error
         null_on_failure: bool,
+        /// The dialect whose semantics to apply where the upstreams disagree on how a value
+        /// converts, such as parsing text as a float
+        dialect: Dialect,
     },
 
     /// expr `AT TIME ZONE`
@@ -549,6 +552,7 @@ impl Display for Expr {
                 expr,
                 ty,
                 null_on_failure,
+                dialect: _,
             } => {
                 if *null_on_failure {
                     write!(f, "try_")?;
