@@ -3,6 +3,7 @@ pub(crate) mod mysql_connector;
 pub(crate) mod noria_adapter;
 pub(crate) mod postgres_connector;
 pub mod replication_lag_reporter;
+pub(crate) mod row_diagnostics;
 pub mod table_filter;
 
 use std::time::{Duration, Instant};

@@ -54,6 +54,18 @@ pub(crate) enum SnapshotType {
 }
 
 impl SnapshotType {
+    /// Positions of the columns that identify a row, for reporting which row failed to convert.
+    /// Empty for [`SnapshotType::FullTableScan`], where callers report every column instead.
+    ///
+    /// These are positions in the snapshot's select list, which is built from the same
+    /// `CreateTableBody::fields` ordering that the indices were resolved against.
+    pub(crate) fn identifier_columns(&self) -> &[usize] {
+        match self {
+            SnapshotType::KeyBased { column_indices, .. } => column_indices,
+            SnapshotType::FullTableScan => &[],
+        }
+    }
+
     pub fn new(table: &readyset_client::Table) -> ReadySetResult<Self> {
         let cts = match table.schema() {
             Some(cts) => cts,
@@ -276,6 +288,21 @@ impl SnapshotType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn identifier_columns_are_the_key_positions() {
+        let snapshot_type = SnapshotType::KeyBased {
+            name: Some(SqlIdentifier::from("PRIMARY")),
+            keys: vec![Column::from(SqlIdentifier::from("b"))],
+            column_indices: vec![2, 0],
+        };
+        assert_eq!(snapshot_type.identifier_columns(), &[2, 0]);
+    }
+
+    #[test]
+    fn identifier_columns_empty_for_full_table_scan() {
+        assert!(SnapshotType::FullTableScan.identifier_columns().is_empty());
+    }
 
     #[test]
     fn snapshot_query_no_comment() {

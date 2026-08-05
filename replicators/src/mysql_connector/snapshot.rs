@@ -40,6 +40,9 @@ use tracing_futures::Instrument;
 use super::utils::{get_mysql_version, mysql_pad_binary_column, mysql_pad_char_column};
 use crate::db_util::DatabaseSchemas;
 use crate::mysql_connector::snapshot_type::SnapshotType;
+use readyset_util::redacted::Sensitive;
+
+use crate::row_diagnostics;
 use crate::table_filter::TableFilter;
 use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 use std::collections::HashSet;
@@ -566,15 +569,55 @@ impl MySqlReplicator<'_> {
                 row = row_stream.next().await.map_err(log_err)?;
             }
 
+            let mut df_row = Vec::with_capacity(collations.len());
             let df_row = match row
                 .as_ref()
-                .map(|r| mysql_row_to_noria_row(r, &collations))
+                .map(|r| mysql_row_to_noria_row(r, &collations, &mut df_row))
                 .transpose()
             {
-                Ok(Some(df_row)) => df_row,
+                Ok(Some(())) => df_row,
                 Ok(None) => break,
                 Err(err) => {
-                    return Err(log_err(err));
+                    let idx = df_row.len();
+                    let failed_row = row.as_ref().expect("conversion only runs on a row");
+                    let describe = |indices: &[usize]| {
+                        row_diagnostics::describe_columns(indices.iter().map(|&i| {
+                            let name = failed_row
+                                .columns_ref()
+                                .get(i)
+                                .map(|c| c.name_str().to_string())
+                                .unwrap_or_else(|| format!("index {i}"));
+                            let mut decoded = Vec::with_capacity(1);
+                            let value = mysql_value_to_noria_value(
+                                failed_row,
+                                i,
+                                collations[i],
+                                &mut decoded,
+                            )
+                            .ok()
+                            .and_then(|()| decoded.pop());
+                            (name, value)
+                        }))
+                    };
+                    let identifier = row_diagnostics::describe_identifier(
+                        snapshot_type.identifier_columns(),
+                        failed_row.len(),
+                        describe,
+                    );
+                    let column = failed_row
+                        .columns_ref()
+                        .get(idx)
+                        .map(|c| format!("{} {:?}", c.name_str(), c.column_type()))
+                        .unwrap_or_else(|| format!("index {idx}"));
+                    return Err(row_diagnostics::conversion_failed(
+                        table_mutator
+                            .table_name()
+                            .display(readyset_sql::Dialect::MySQL),
+                        progress,
+                        column,
+                        &identifier,
+                        &err,
+                    ));
                 }
             };
             prev_row = row;
@@ -929,12 +972,27 @@ impl MySqlReplicator<'_> {
 }
 
 /// Convert each entry in a row to a ReadySet type that can be inserted into the base tables
+/// Converts a row into `noria_row`. Converting one column at a time means that on failure the
+/// length of `noria_row` is the position of the column that failed, which callers use to name it.
 fn mysql_row_to_noria_row(
     row: &mysql::Row,
     collations: &[u16],
-) -> ReadySetResult<Vec<readyset_data::DfValue>> {
-    let mut noria_row = Vec::with_capacity(row.len());
+    noria_row: &mut Vec<readyset_data::DfValue>,
+) -> ReadySetResult<()> {
     for (idx, collation) in collations.iter().enumerate().take(row.len()) {
+        mysql_value_to_noria_value(row, idx, *collation, noria_row)?;
+    }
+    Ok(())
+}
+
+fn mysql_value_to_noria_value(
+    row: &mysql::Row,
+    idx: usize,
+    collation: u16,
+    noria_row: &mut Vec<readyset_data::DfValue>,
+) -> ReadySetResult<()> {
+    let collation = &collation;
+    {
         let val = value_to_value(row.as_ref(idx).unwrap());
         let col = row.columns_ref().get(idx).unwrap();
         let flags = col.flags();
@@ -956,12 +1014,12 @@ fn mysql_row_to_noria_row(
                     mysql_common::value::Value::Bytes(b) => b.clone(),
                     mysql_common::value::Value::NULL => {
                         noria_row.push(DfValue::None);
-                        continue;
+                        return Ok(());
                     }
                     _ => {
                         return Err(internal_err!(
                             "Expected MYSQL_TYPE_STRING column to be of value Bytes, got {:?}",
-                            val
+                            Sensitive(&val)
                         ));
                     }
                 };
@@ -1016,7 +1074,7 @@ fn mysql_row_to_noria_row(
                         DfValue::None => Ok(DfValue::None), //NULL
                         _ => Err(internal_err!(
                             "Expected datetime/timestamp column to be of type TimestampTz, got {:?}",
-                            val
+                            Sensitive(&val)
                         )),
                     })?;
                 noria_row.push(df_val);
@@ -1032,7 +1090,7 @@ fn mysql_row_to_noria_row(
                         DfValue::None => Ok(DfValue::None), //NULL
                         _ => Err(internal_err!(
                             "Expected date column to be of type TimestampTz, got {:?}",
-                            val
+                            Sensitive(&val)
                         )),
                     })?;
                 noria_row.push(df_val);
@@ -1050,16 +1108,18 @@ fn mysql_row_to_noria_row(
             },
             ColumnType::MYSQL_TYPE_JSON => {
                 let df_val = match val {
-                    mysql_common::value::Value::Bytes(b) => str::from_utf8(&b)
-                        .ok()
-                        .and_then(|s: &str| serde_json::from_str(s).ok())
-                        .map(|j: Value| DfValue::from(j))
-                        .ok_or_else(|| internal_err!("Failed to parse JSON value"))?,
+                    mysql_common::value::Value::Bytes(b) => {
+                        let s = str::from_utf8(&b)
+                            .map_err(|e| internal_err!("Failed to parse JSON value: {e}"))?;
+                        let json: Value = serde_json::from_str(s)
+                            .map_err(|e| internal_err!("Failed to parse JSON value: {e}"))?;
+                        DfValue::from(json)
+                    }
                     mysql_common::value::Value::NULL => DfValue::None,
                     _ => {
                         return Err(internal_err!(
                             "Expected a bytes value for JSON column, got {:?}",
-                            val
+                            Sensitive(&val)
                         ));
                     }
                 };
@@ -1090,7 +1150,7 @@ fn mysql_row_to_noria_row(
                     _ => {
                         return Err(internal_err!(
                             "Expected a bytes value for VAR_STRING column, got {:?}",
-                            val
+                            Sensitive(&val)
                         ));
                     }
                 };
@@ -1102,7 +1162,7 @@ fn mysql_row_to_noria_row(
             _ => noria_row.push(readyset_data::DfValue::try_from(val)?),
         }
     }
-    Ok(noria_row)
+    Ok(())
 }
 
 /// Although both are of the exact same type, there is a conflict between reexported versions

@@ -32,6 +32,7 @@ use tracing::{debug, info, info_span, trace, warn, Instrument};
 use super::connector::CreatedSlot;
 use super::pg_column_constraints;
 use crate::db_util::CreateSchema;
+use crate::row_diagnostics;
 use crate::table_filter::TableFilter;
 use crate::{report_snapshot_progress, TablesSnapshottingGaugeGuard};
 
@@ -557,6 +558,53 @@ impl TableDescription {
         })
     }
 
+    /// Indices into [`Self::columns`] of the columns that identify a row for diagnostics: the
+    /// primary key if usable, otherwise the first usable unique key. A key is usable when every
+    /// part is a plain column we know about, so expression indexes are not. Empty when no key is
+    /// usable, in which case callers report the whole row instead.
+    fn identifier_columns(&self) -> Vec<usize> {
+        let column_index = |name: &SqlIdentifier| {
+            self.columns
+                .iter()
+                .position(|c| c.name.as_str() == name.as_str())
+        };
+        let key_columns = |columns: &[readyset_sql::ast::IndexKeyPart]| {
+            columns
+                .iter()
+                .map(|part| part.as_column().and_then(|c| column_index(&c.name)))
+                .collect::<Option<Vec<_>>>()
+        };
+
+        let mut unique = None;
+        for constraint in &self.constraints {
+            match &constraint.definition {
+                TableKey::PrimaryKey { columns, .. } => {
+                    if let Some(indices) = key_columns(columns) {
+                        return indices;
+                    }
+                }
+                TableKey::UniqueKey { columns, .. } if unique.is_none() => {
+                    unique = key_columns(columns);
+                }
+                _ => {}
+            }
+        }
+        unique.unwrap_or_default()
+    }
+
+    /// Decodes `indices` out of `row` and describes them for an error message.
+    fn describe_columns(
+        &self,
+        row: &pgsql::binary_copy::BinaryCopyOutRow,
+        indices: &[usize],
+    ) -> String {
+        row_diagnostics::describe_columns(indices.iter().filter_map(|&i| {
+            self.columns
+                .get(i)
+                .map(|column| (column.name.clone(), row.try_get::<DfValue>(i).ok()))
+        }))
+    }
+
     /// Copy a table's contents from PostgreSQL to ReadySet
     async fn dump<'a>(
         &self,
@@ -593,6 +641,7 @@ impl TableDescription {
         let rows = transaction.copy_out(query.as_str()).await?;
 
         let type_map: Vec<_> = self.columns.iter().map(|c| c.pg_type.clone()).collect();
+        let identifier_columns = self.identifier_columns();
         let binary_row_batches =
             pgsql::binary_copy::BinaryCopyOutStream::new(rows, &type_map).chunks(BATCH_SIZE);
 
@@ -612,17 +661,31 @@ impl TableDescription {
                 .enumerate()
                 .map(|(index_within_batch, row)| {
                     row.map_err(ReadySetError::from).and_then(|row| {
-                        (0..type_map.len())
-                            .map(|i| row.try_get::<DfValue>(i))
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(|err| {
-                                ReadySetError::ReplicationFailed(format!(
-                                    "Failed converting to DfValue, table: {}, row: {}, err: {}",
-                                    noria_table.table_name().display(Dialect::PostgreSQL),
-                                    progress_copy + index_within_batch,
-                                    err
-                                ))
-                            })
+                        let mut values = Vec::with_capacity(type_map.len());
+                        for i in 0..type_map.len() {
+                            match row.try_get::<DfValue>(i) {
+                                Ok(value) => values.push(value),
+                                Err(err) => {
+                                    let column = match self.columns.get(i) {
+                                        Some(c) => format!("{} {}", c.name, c.sql_type),
+                                        None => format!("index {i}"),
+                                    };
+                                    let identifier = row_diagnostics::describe_identifier(
+                                        &identifier_columns,
+                                        type_map.len(),
+                                        |indices| self.describe_columns(&row, indices),
+                                    );
+                                    return Err(row_diagnostics::conversion_failed(
+                                        noria_table.table_name().display(Dialect::PostgreSQL),
+                                        progress_copy + index_within_batch,
+                                        column,
+                                        &identifier,
+                                        &err,
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(values)
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1266,6 +1329,152 @@ mod tests {
     use readyset_sql_parsing::parse_query;
 
     use super::*;
+
+    fn column(name: &str) -> ColumnEntry {
+        ColumnEntry {
+            attnum: 0,
+            name: name.into(),
+            sql_type: "integer".into(),
+            not_null: false,
+            pg_type: Type::INT4,
+            collation_name: None,
+            collation_provider: None,
+        }
+    }
+
+    fn key_parts(names: &[&str]) -> Vec<IndexKeyPart> {
+        names
+            .iter()
+            .map(|name| {
+                IndexKeyPart::Column(Column {
+                    name: (*name).into(),
+                    table: None,
+                })
+            })
+            .collect()
+    }
+
+    fn description_with_constraints(
+        column_names: &[&str],
+        constraints: Vec<ConstraintEntry>,
+    ) -> TableDescription {
+        TableDescription {
+            oid: 1,
+            name: Relation {
+                schema: Some("public".into()),
+                name: "t".into(),
+            },
+            columns: column_names.iter().map(|name| column(name)).collect(),
+            constraints,
+        }
+    }
+
+    fn primary_key(columns: &[&str]) -> ConstraintEntry {
+        ConstraintEntry {
+            name: "t_pkey".into(),
+            definition: TableKey::PrimaryKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: key_parts(columns),
+            },
+            kind: Some(ConstraintKind::PrimaryKey),
+        }
+    }
+
+    fn unique_key(name: &str, columns: &[&str]) -> ConstraintEntry {
+        ConstraintEntry {
+            name: name.into(),
+            definition: TableKey::UniqueKey {
+                constraint_name: None,
+                constraint_timing: None,
+                index_name: None,
+                columns: key_parts(columns),
+                index_type: None,
+                nulls_distinct: None,
+            },
+            kind: Some(ConstraintKind::UniqueKey),
+        }
+    }
+
+    #[test]
+    fn identifier_columns_prefers_primary_key() {
+        let desc = description_with_constraints(
+            &["a", "b", "c"],
+            vec![unique_key("t_b_key", &["b"]), primary_key(&["c", "a"])],
+        );
+        assert_eq!(desc.identifier_columns(), vec![2, 0]);
+    }
+
+    #[test]
+    fn identifier_columns_falls_back_to_first_unique_key() {
+        let desc = description_with_constraints(
+            &["a", "b", "c"],
+            vec![unique_key("t_b_key", &["b"]), unique_key("t_c_key", &["c"])],
+        );
+        assert_eq!(desc.identifier_columns(), vec![1]);
+    }
+
+    #[test]
+    fn identifier_columns_empty_without_keys() {
+        let desc = description_with_constraints(&["a", "b"], vec![]);
+        assert!(desc.identifier_columns().is_empty());
+    }
+
+    #[test]
+    fn identifier_columns_ignores_foreign_keys() {
+        let foreign_key = ConstraintEntry {
+            name: "t_a_fkey".into(),
+            definition: TableKey::ForeignKey {
+                constraint_name: None,
+                index_name: None,
+                columns: vec![Column {
+                    name: "a".into(),
+                    table: None,
+                }],
+                target_table: Relation {
+                    schema: None,
+                    name: "other".into(),
+                },
+                target_columns: vec![Column {
+                    name: "id".into(),
+                    table: None,
+                }],
+                on_delete: None,
+                on_update: None,
+            },
+            kind: Some(ConstraintKind::ForeignKey),
+        };
+        let desc = description_with_constraints(&["a", "b"], vec![foreign_key]);
+        assert!(desc.identifier_columns().is_empty());
+    }
+
+    #[test]
+    fn identifier_columns_skips_keys_on_unknown_columns() {
+        // A functional index (`IndexKeyPart::Expr`) has no column to report, so the key is unusable
+        // and we fall back to reporting the whole row.
+        let desc = description_with_constraints(
+            &["a"],
+            vec![ConstraintEntry {
+                name: "t_expr_key".into(),
+                definition: TableKey::UniqueKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: vec![IndexKeyPart::Expr(Box::new(
+                        readyset_sql::ast::Expr::Column(Column {
+                            name: "a".into(),
+                            table: None,
+                        }),
+                    ))],
+                    index_type: None,
+                    nulls_distinct: None,
+                },
+                kind: Some(ConstraintKind::UniqueKey),
+            }],
+        );
+        assert!(desc.identifier_columns().is_empty());
+    }
 
     #[test]
     fn table_description_with_reserved_keywords_to_string_parses() {
