@@ -3,13 +3,12 @@
 `dante` produces random SQL queries from a registry of declarative
 **patterns**. A pattern is a set of `Constraint`s over shared variables;
 the resolver binds variables to concrete tables, columns, and parameters
-and emits a `ResolverOutput { query, ddl, params, examples }`. The
-[`readyset-dante-oracle`](../readyset-dante-oracle/) harness consumes the
-output and diffs Readyset against an upstream reference engine.
+and emits a `ResolverOutput { query, ddl, params, examples }`. The maintained
+[`glutton`](../../crates/glutton/) harness consumes the output and diffs either
+Readyset or a transparent proxy against an upstream reference engine.
 
-This document is the **pattern-authoring guide**. If you are running the
-oracle (and not writing patterns), read
-[`public/readyset-dante-oracle/README.md`](../readyset-dante-oracle/README.md).
+This document is the **pattern-authoring guide**. Glutton's workload design and
+run profiles are documented under [`aidoc/projects/glutton/`](../../aidoc/projects/glutton/).
 
 ## Contents
 
@@ -408,28 +407,27 @@ mod tests` block that asserts:
   examples (use the `Generator::generate_with_ddl` path and inspect
   `out.examples`).
 
-For SQL-level invariants that span many shapes (e.g. an op-coercion
-property), drive many generated shapes through `readyset-dante-oracle`
-against both engines and inspect the divergence report.
+For SQL-level invariants that span many shapes (e.g. an op-coercion property),
+drive many generated shapes through `glutton fuzz` and inspect its Antithesis
+assertion output.
 
 ## Running a pattern end-to-end
 
-Once the pattern resolves and tests pass, exercise it against a live
-Readyset using the oracle harness. The targeted-testing combo is:
+Once the pattern resolves and tests pass, exercise it against a live Readyset
+using Glutton's Readyset profile:
 
 ```bash
-target/debug/readyset-dante-oracle \
-  --readyset-mode \
-  --compare-to mysql://root:noria@127.0.0.1:3306/cfuzz \
-  --readyset-url mysql://root:noria@127.0.0.1:3307/cfuzz \
-  --seed 42 -n 50 \
-  --required-tags <your-pattern-tag> \
-  --single-pattern
+UPSTREAM_DB_URL=mysql://root:noria@127.0.0.1:3306/cfuzz \
+READYSET_URL=mysql://root:noria@127.0.0.1:3307/cfuzz \
+READYSET_HTTP_URL=http://127.0.0.1:6033 \
+GLUTTON_DANTE_TARGET=readyset \
+GLUTTON_DANTE_SELECTION=general \
+cargo run --manifest-path crates/Cargo.toml -p glutton -- fuzz
 ```
 
-For complete setup (fresh database, Readyset start, dialect-specific
-recipes, repro capture, multi-seed orchestration), see
-[`public/readyset-dante-oracle/README.md`](../readyset-dante-oracle/README.md).
+The retired standalone harness's per-tag, single-pattern, seeded CLI is not
+ported. Keep a precise pattern regression in this crate, then use Glutton's
+`general` or `hoisting` campaign profile for whole-system exercise.
 
 ## Best practices
 
