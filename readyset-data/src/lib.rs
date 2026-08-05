@@ -1324,19 +1324,33 @@ macro_rules! unsigned_integer_into_value {
 signed_integer_into_value!(isize, i64, i32, i16, i8);
 unsigned_integer_into_value!(usize, u64, u32, u16, u8);
 
+/// Normalizes NaN to a single bit pattern. PostgreSQL treats all NaNs as one value which compares
+/// equal to itself, whereas [`DfValue`]'s `Eq` and `Hash` compare float bit patterns, so NaNs
+/// originating from different operations would otherwise be unequal to each other.
+#[inline]
+pub(crate) fn canonicalize_nan_f32(f: f32) -> f32 {
+    if f.is_nan() {
+        f32::NAN
+    } else {
+        f
+    }
+}
+
+/// See [`canonicalize_nan_f32`].
+#[inline]
+pub(crate) fn canonicalize_nan_f64(f: f64) -> f64 {
+    if f.is_nan() {
+        f64::NAN
+    } else {
+        f
+    }
+}
+
 impl TryFrom<f32> for DfValue {
     type Error = ReadySetError;
 
     fn try_from(f: f32) -> Result<Self, Self::Error> {
-        if !f.is_finite() {
-            return Err(Self::Error::DfValueConversionError {
-                src_type: "f32".to_string(),
-                target_type: "DfValue".to_string(),
-                details: "".to_string(),
-            });
-        }
-
-        Ok(DfValue::Float(f))
+        Ok(DfValue::Float(canonicalize_nan_f32(f)))
     }
 }
 
@@ -1344,15 +1358,7 @@ impl TryFrom<f64> for DfValue {
     type Error = ReadySetError;
 
     fn try_from(f: f64) -> Result<Self, Self::Error> {
-        if !f.is_finite() {
-            return Err(Self::Error::DfValueConversionError {
-                src_type: "f64".to_string(),
-                target_type: "DfValue".to_string(),
-                details: "".to_string(),
-            });
-        }
-
-        Ok(DfValue::Double(f))
+        Ok(DfValue::Double(canonicalize_nan_f64(f)))
     }
 }
 
@@ -2181,6 +2187,34 @@ impl TryFrom<&DfValue> for mysql_common::value::Value {
     }
 }
 
+/// Rejects a non-finite result computed from finite operands, which both upstreams raise an
+/// out-of-range error for. Operands that are already non-finite propagate, per IEEE 754.
+///
+/// Division by zero is not dialect-aware yet: Postgres errors, MySQL evaluates to NULL, and the
+/// integer path already yields NULL through `checked_div`.
+fn float_arithmetic_result_f32(a: f32, b: f32, result: f32) -> Result<DfValue, ReadySetError> {
+    if a.is_finite() && b.is_finite() && !result.is_finite() {
+        return Err(ReadySetError::DfValueConversionError {
+            src_type: "f32".to_string(),
+            target_type: "DfValue".to_string(),
+            details: "arithmetic overflow".to_string(),
+        });
+    }
+    DfValue::try_from(result)
+}
+
+/// See [`float_arithmetic_result_f32`].
+fn float_arithmetic_result_f64(a: f64, b: f64, result: f64) -> Result<DfValue, ReadySetError> {
+    if a.is_finite() && b.is_finite() && !result.is_finite() {
+        return Err(ReadySetError::DfValueConversionError {
+            src_type: "f64".to_string(),
+            target_type: "DfValue".to_string(),
+            details: "arithmetic overflow".to_string(),
+        });
+    }
+    DfValue::try_from(result)
+}
+
 // Performs an arithmetic operation on two numeric DfValues,
 // returning a new DfValue as the result.
 //
@@ -2205,7 +2239,7 @@ macro_rules! arithmetic_operation (
             (first @ &DfValue::Float(..), second @ &DfValue::Numeric(..)) => {
                 let a: f32 = f32::try_from(first)?;
                 let b: f32 = f32::try_from(second)?;
-                DfValue::try_from(a $op b)?
+                float_arithmetic_result_f32(a, b, a $op b)?
             }
 
             (first @ &DfValue::Int(..), second @ &DfValue::Double(..)) |
@@ -2218,7 +2252,7 @@ macro_rules! arithmetic_operation (
             (first @ &DfValue::Double(..), second @ &DfValue::Numeric(..)) => {
                 let a: f64 = f64::try_from(first)?;
                 let b: f64 = f64::try_from(second)?;
-                DfValue::try_from(a $op b)?
+                float_arithmetic_result_f64(a, b, a $op b)?
             }
 
             (first @ &DfValue::Int(..), second @ &DfValue::Numeric(..)) |
@@ -3522,6 +3556,109 @@ mod tests {
         Ok(())
     }
 
+    /// Postgres sorts NaN above every number, including Infinity.
+    #[test]
+    fn non_finite_float_ordering_matches_postgres() {
+        assert!(DfValue::Double(f64::NEG_INFINITY) < DfValue::Double(42.0));
+        assert!(DfValue::Double(42.0) < DfValue::Double(f64::INFINITY));
+        assert!(DfValue::Double(f64::INFINITY) < DfValue::Double(f64::NAN));
+
+        assert!(DfValue::Float(f32::NEG_INFINITY) < DfValue::Float(42.0));
+        assert!(DfValue::Float(42.0) < DfValue::Float(f32::INFINITY));
+        assert!(DfValue::Float(f32::INFINITY) < DfValue::Float(f32::NAN));
+    }
+
+    /// Postgres treats all NaNs as one value equal to itself, and `Eq`/`Hash` compare bit patterns.
+    #[test]
+    fn nan_is_canonicalized_on_construction() {
+        fn hash_of(value: &DfValue) -> u64 {
+            use std::hash::{DefaultHasher, Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            hasher.finish()
+        }
+
+        // A negative NaN and a NaN with a non-default payload are the same value as f64::NAN.
+        let nans = [
+            f64::NAN,
+            -f64::NAN,
+            f64::from_bits(0x7FF8_0000_0000_0001),
+            f64::from_bits(0xFFF8_0000_0000_0001),
+        ]
+        .map(|f| DfValue::try_from(f).unwrap());
+
+        for nan in &nans {
+            assert_eq!(*nan, nans[0]);
+            assert_eq!(hash_of(nan), hash_of(&nans[0]));
+        }
+
+        let float_nans = [f32::NAN, -f32::NAN].map(|f| DfValue::try_from(f).unwrap());
+        assert_eq!(float_nans[0], float_nans[1]);
+        assert_eq!(hash_of(&float_nans[0]), hash_of(&float_nans[1]));
+    }
+
+    #[test]
+    fn non_finite_float_serde_round_trip() {
+        use bincode::Options;
+
+        let test_cases = vec![
+            DfValue::Float(f32::NAN),
+            DfValue::Float(f32::INFINITY),
+            DfValue::Float(f32::NEG_INFINITY),
+            DfValue::Double(f64::NAN),
+            DfValue::Double(f64::INFINITY),
+            DfValue::Double(f64::NEG_INFINITY),
+        ];
+        for value in test_cases {
+            let serialized = bincode::options().serialize(&value).unwrap();
+            let deserialized: DfValue = bincode::options().deserialize(&serialized).unwrap();
+            assert_eq!(value, deserialized);
+        }
+    }
+
+    #[test]
+    fn non_finite_float_and_numeric_compare_equal() {
+        for (float, decimal) in [
+            (f64::INFINITY, Decimal::Infinity),
+            (f64::NEG_INFINITY, Decimal::NegativeInfinity),
+            (f64::NAN, Decimal::NaN),
+        ] {
+            assert_eq!(
+                DfValue::try_from(float).unwrap(),
+                DfValue::Numeric(Arc::new(decimal))
+            );
+        }
+    }
+
+    /// Postgres raises "value out of range: overflow" and "division by zero" for these.
+    #[test]
+    fn float_arithmetic_rejects_overflow_and_division_by_zero() {
+        let max = DfValue::Double(f64::MAX);
+        assert!((&max + &max).is_err());
+        assert!((&max * &DfValue::Double(2.0)).is_err());
+        assert!((&DfValue::Double(-f64::MAX) - &max).is_err());
+        assert!((&DfValue::Double(1.0) / &DfValue::Double(0.0)).is_err());
+    }
+
+    #[test]
+    fn float_arithmetic_propagates_non_finite() {
+        let inf = DfValue::Double(f64::INFINITY);
+        let neg_inf = DfValue::Double(f64::NEG_INFINITY);
+        let nan = DfValue::Double(f64::NAN);
+        let one = DfValue::Double(1.0);
+        let zero = DfValue::Double(0.0);
+
+        assert_eq!((&inf + &one).unwrap(), inf);
+        assert_eq!((&inf - &one).unwrap(), inf);
+        assert_eq!((&nan + &one).unwrap(), nan);
+
+        // Postgres: inf - inf, inf / inf and inf * 0 are all NaN.
+        assert_eq!((&inf - &inf).unwrap(), nan);
+        assert_eq!((&inf / &inf).unwrap(), nan);
+        assert_eq!((&inf * &zero).unwrap(), nan);
+        assert_eq!((&inf + &neg_inf).unwrap(), nan);
+    }
+
     #[test]
     fn deeply_nested_json_roundtrip() -> Result<(), Box<dyn Error + Sync + Send>> {
         let nesting_level = 1_000_000;
@@ -4028,12 +4165,21 @@ mod tests {
                                 .unwrap(),
                             DfValue::try_from(source as $to).unwrap()
                         );
-                    } else {
+                    } else if source.is_finite() {
+                        // Narrowing a finite value into a non-finite one is an overflow.
                         assert!(DfValue::try_from(source)
                             .unwrap()
                             .coerce_to(&$df_type, &DfType::Unknown)
                             .is_err());
-                        assert!(DfValue::try_from(source as $to).is_err());
+                    } else {
+                        // A source that is already non-finite converts to the same value.
+                        assert_eq!(
+                            DfValue::try_from(source)
+                                .unwrap()
+                                .coerce_to(&$df_type, &DfType::Unknown)
+                                .unwrap(),
+                            DfValue::try_from(source as $to).unwrap()
+                        );
                     }
                 }
             };

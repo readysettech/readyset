@@ -2223,7 +2223,10 @@ mod failure_injection_tests {
     async fn caches_recreated_using_rewritten_query() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
-            ("CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;", true),
+            (
+                "CREATE CACHE test_query FROM SELECT * FROM users WHERE id = 1;",
+                true,
+            ),
         ];
         let (config, mut handle, _authority, shutdown_tx) =
             setup_reload_controller_state_test("caches_recreated_rewritten", &queries).await;
@@ -2246,7 +2249,10 @@ mod failure_injection_tests {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
             ("CREATE CACHE dropped_query FROM SELECT * FROM users;", true),
-            ("CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;", true),
+            (
+                "CREATE CACHE cached_query FROM SELECT * FROM users where id = 1;",
+                true,
+            ),
             ("DROP CACHE dropped_query", false),
         ];
         let (config, mut handle, _authority, shutdown_tx) =
@@ -2334,7 +2340,10 @@ mod failure_injection_tests {
     async fn create_cache_not_added_if_extend_recipe_fails() {
         let queries = [
             ("CREATE TABLE users (id INT PRIMARY KEY, name TEXT);", false),
-            ("CREATE CACHE test_query FROM SELECT * FROM idontexist;", false),
+            (
+                "CREATE CACHE test_query FROM SELECT * FROM idontexist;",
+                false,
+            ),
         ];
 
         let (_config, mut handle, authority, shutdown_tx) =
@@ -2513,16 +2522,20 @@ async fn drop_and_recreate_demo_cache() {
            endyear integer,
            runtimeminutes integer,
            genres text
-         )"
-    ).await.unwrap();
+         )",
+    )
+    .await
+    .unwrap();
 
     conn.simple_query(
         "CREATE TABLE public.title_ratings (
            tconst text NOT NULL,
            averagerating numeric,
            numvotes integer
-         )"
-    ).await.unwrap();
+         )",
+    )
+    .await
+    .unwrap();
 
     eventually! {
         conn.simple_query(
@@ -2536,7 +2549,9 @@ async fn drop_and_recreate_demo_cache() {
         ).await.is_ok()
     };
 
-    conn.simple_query("DROP CACHE q_bccd97aea07c545f").await.unwrap();
+    conn.simple_query("DROP CACHE q_bccd97aea07c545f")
+        .await
+        .unwrap();
 
     eventually! {
         conn.simple_query(
@@ -2617,7 +2632,7 @@ async fn drop_all_proxied_queries() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres, 15)]
-async fn numeric_inf_nan() {
+async fn numeric_inf_nan_is_cached() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = setup().await;
     let conn = connect(opts).await;
@@ -2646,10 +2661,10 @@ async fn numeric_inf_nan() {
         .next_back()
         .unwrap();
 
-    assert_last_statement_matches!("numer", "upstream", "view destroyed|ok", &conn);
+    // NaN and +/-Infinity replicate, so the table is still cached and the query is served by
+    // Readyset rather than proxied.
+    assert_last_statement_matches!("numer", "readyset", "ok", &conn);
 
-    // We expect to see all rows because the table was dropped since we don't support NaN/Infinity
-    // and the query should be proxied
     assert_matches!(
         command,
         SimpleQueryMessage::CommandComplete(CommandCompleteContents { rows: 4, .. })

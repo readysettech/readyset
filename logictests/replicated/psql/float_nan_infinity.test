@@ -1,0 +1,107 @@
+# Non-finite float and numeric values must replicate and read back with
+# PostgreSQL's spelling and ordering.
+#
+# PostgreSQL stores NaN and +/-Infinity in real, double precision and numeric
+# (numeric infinities since PG 14). It spells them Infinity, -Infinity and NaN,
+# where Rust renders inf and -inf, and it sorts NaN above every number
+# including Infinity, unlike IEEE 754 where NaN compares unordered. It also
+# defines NaN = NaN as true, so NaN groups with itself.
+
+statement ok
+CREATE TABLE nf (id INT PRIMARY KEY, f REAL, d DOUBLE PRECISION, n NUMERIC);
+
+statement ok
+INSERT INTO nf VALUES
+  (1, 'Infinity', 'Infinity', 'Infinity'),
+  (2, '-Infinity', '-Infinity', '-Infinity'),
+  (3, 'NaN', 'NaN', 'NaN'),
+  (4, 1.5, 1.5, 1.5);
+
+query R nosort
+SELECT d FROM nf WHERE id = 1;
+----
+Infinity
+
+query R nosort
+SELECT d FROM nf WHERE id = 2;
+----
+-Infinity
+
+query R nosort
+SELECT d FROM nf WHERE id = 3;
+----
+NaN
+
+query R nosort
+SELECT f FROM nf WHERE id = 1;
+----
+Infinity
+
+query R nosort
+SELECT n FROM nf WHERE id = 3;
+----
+NaN
+
+# NaN sorts above Infinity, which sorts above every finite value.
+query I nosort
+SELECT id FROM nf ORDER BY d ASC;
+----
+2
+4
+1
+3
+
+# NaN equals itself, unlike IEEE 754, so no row is unequal to itself. Asserted without a 'NaN'
+# text literal because coercing text to a float parses a leading numeric prefix and yields 0
+# otherwise, so 'NaN' would coerce to 0 rather than to NaN.
+query I nosort
+SELECT count(*) FROM nf WHERE d <> d;
+----
+0
+
+# A REAL and a DOUBLE PRECISION holding the same value are equal across widths, non-finite
+# included.
+query I nosort
+SELECT id FROM nf WHERE d = f;
+----
+1
+2
+3
+4
+
+# A non-finite operand propagates rather than erroring.
+query R nosort
+SELECT d + 1 FROM nf WHERE id = 1;
+----
+Infinity
+
+query R nosort
+SELECT d * 2 FROM nf WHERE id = 3;
+----
+NaN
+
+# A double and a numeric holding the same value are equal, non-finite included.
+query I nosort
+SELECT id FROM nf WHERE d::numeric = n;
+----
+1
+2
+3
+4
+
+# Aggregates follow the same ordering and propagation: summing across Infinity and -Infinity
+# yields NaN, and NaN is the maximum.
+query R nosort
+SELECT sum(d) FROM nf;
+----
+NaN
+
+query R nosort
+SELECT min(d) FROM nf;
+----
+-Infinity
+
+query R nosort
+SELECT max(d) FROM nf;
+----
+NaN

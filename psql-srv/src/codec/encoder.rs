@@ -408,6 +408,26 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
+/// Writes a float in PostgreSQL's text format, which spells non-finite values `Infinity`,
+/// `-Infinity` and `NaN`, where Rust's `Display` produces `inf` and `-inf`.
+fn write_float<T>(val: T, dst: &mut BytesMut) -> Result<(), Error>
+where
+    T: Copy + std::fmt::Display + Into<f64>,
+{
+    let as_f64 = val.into();
+    if as_f64.is_nan() {
+        dst.put_slice(b"NaN");
+    } else if as_f64 == f64::INFINITY {
+        dst.put_slice(b"Infinity");
+    } else if as_f64 == f64::NEG_INFINITY {
+        dst.put_slice(b"-Infinity");
+    } else {
+        use std::fmt::Write;
+        write!(dst, "{val}")?;
+    }
+    Ok(())
+}
+
 fn put_u8(val: u8, dst: &mut BytesMut) {
     dst.put_u8(val);
 }
@@ -617,12 +637,12 @@ fn put_text_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             write!(dst, "{}", *v)?;
         }
         PsqlValue::Double(v) => {
-            // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
-            write!(dst, "{}", *v)?;
+            // TODO: Ensure all values are properly serialized, including +/-0.
+            write_float(*v, dst)?;
         }
         PsqlValue::Float(v) => {
-            // TODO: Ensure all values are properly serialized, including +/-0 and +/-inf.
-            write!(dst, "{}", *v)?;
+            // TODO: Ensure all values are properly serialized, including +/-0.
+            write_float(*v, dst)?;
         }
         PsqlValue::Numeric(v) => {
             write!(dst, "{}", *v)?;

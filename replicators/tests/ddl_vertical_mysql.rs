@@ -94,7 +94,7 @@ impl Arbitrary for ColumnSpec {
             (
                 SqlType::Real,
                 any::<f32>()
-                    // unwrap is fine because the f32 Arbitrary impl only yields finite values
+                    // unwrap is fine because converting an f32 is infallible
                     .prop_map(|f| DfValue::try_from(f).unwrap())
                     .boxed(),
             ),

@@ -35,6 +35,20 @@ where
     (val.round() as u64).try_into().ok()
 }
 
+/// PostgreSQL renders non-finite floats as `Infinity`, `-Infinity` and `NaN`, where Rust's
+/// `Display` produces `inf` and `-inf`.
+fn float_to_text(val: f64) -> String {
+    if val.is_nan() {
+        "NaN".to_string()
+    } else if val == f64::INFINITY {
+        "Infinity".to_string()
+    } else if val == f64::NEG_INFINITY {
+        "-Infinity".to_string()
+    } else {
+        val.to_string()
+    }
+}
+
 pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySetResult<DfValue> {
     let err = |deets: &str| ReadySetError::DfValueConversionError {
         src_type: "Double".to_string(),
@@ -44,25 +58,39 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
 
     let bounds_err = || err("out of bounds");
 
-    if val.is_infinite() {
-        return Err(err("±inf not allowed"));
-    }
-
-    if val.is_nan() {
-        return Err(err("Nan not allowed"));
+    // Only floats and numerics hold NaN and ±inf as values; the text types render them. Every other
+    // target type has no conversion for them.
+    if !val.is_finite()
+        && !matches!(
+            to_ty,
+            DfType::Double
+                | DfType::Float
+                | DfType::Numeric { .. }
+                | DfType::Text(_)
+                | DfType::VarChar(..)
+                | DfType::Char(..)
+        )
+    {
+        return Err(err(if val.is_nan() {
+            "Nan not allowed"
+        } else {
+            "±inf not allowed"
+        }));
     }
 
     match *to_ty {
         DfType::Bool => Ok(DfValue::from(val != 0.0)),
 
-        DfType::Double => Ok(DfValue::Double(val)),
+        DfType::Double => Ok(DfValue::Double(crate::canonicalize_nan_f64(val))),
 
         DfType::Float => {
-            let val = val as f32;
-            if val.is_infinite() {
+            let narrowed = crate::canonicalize_nan_f32(val as f32);
+            // Narrowing a finite f64 to an infinite f32 is an overflow, whereas an f64 that was
+            // already infinite narrows to the same value.
+            if narrowed.is_infinite() && val.is_finite() {
                 return Err(bounds_err());
             }
-            Ok(DfValue::Float(val))
+            Ok(DfValue::Float(narrowed))
         }
 
         DfType::Numeric { .. } => Decimal::try_from(val)
@@ -107,16 +135,19 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             Ok(r#enum::apply_enum_limits(val as usize, variants).into())
         }
 
-        DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
+        DfType::Text(collation) => Ok(DfValue::from_str_and_collation(
+            &float_to_text(val),
+            collation,
+        )),
 
         DfType::VarChar(l, ..) => {
-            let mut val = val.to_string();
+            let mut val = float_to_text(val);
             val.truncate(l as usize);
             Ok(val.to_string().into())
         }
 
         DfType::Char(l, ..) => {
-            let mut val = val.to_string();
+            let mut val = float_to_text(val);
             val.truncate(l as usize);
             val.extend(std::iter::repeat_n(
                 ' ',
@@ -333,6 +364,66 @@ mod tests {
 
     use super::*;
     use crate::Collation;
+
+    /// Postgres carries non-finite values through to float, numeric and text, and raises
+    /// "out of range" for the integers.
+    #[test]
+    fn coerce_non_finite() {
+        for val in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let value = DfValue::Double(val);
+            for ty in [
+                DfType::Double,
+                DfType::Float,
+                DfType::DEFAULT_NUMERIC,
+                DfType::Text(Collation::Utf8),
+            ] {
+                assert!(
+                    value.coerce_to(&ty, &DfType::Unknown).is_ok(),
+                    "{val} should coerce to {ty}"
+                );
+            }
+            for ty in [
+                DfType::TinyInt,
+                DfType::SmallInt,
+                DfType::Int,
+                DfType::BigInt,
+                DfType::UnsignedBigInt,
+                DfType::Bool,
+            ] {
+                assert!(
+                    value.coerce_to(&ty, &DfType::Unknown).is_err(),
+                    "{val} should not coerce to {ty}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_finite_to_text() {
+        for (val, expected) in [
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+        ] {
+            let text = DfValue::Double(val)
+                .coerce_to(&DfType::Text(Collation::Utf8), &DfType::Unknown)
+                .unwrap();
+            assert_eq!(<&str>::try_from(&text).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn narrowing_to_float_distinguishes_overflow_from_infinity() {
+        assert_eq!(
+            DfValue::Double(f64::INFINITY)
+                .coerce_to(&DfType::Float, &DfType::Unknown)
+                .unwrap(),
+            DfValue::Float(f32::INFINITY)
+        );
+        assert!(DfValue::Double(f64::MAX)
+            .coerce_to(&DfType::Float, &DfType::Unknown)
+            .is_err());
+    }
 
     #[tags(no_retry)]
     #[proptest]
