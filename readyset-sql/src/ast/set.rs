@@ -240,6 +240,16 @@ impl TryFromDialect<sqlparser::ast::Expr> for PostgresParameterValueInner {
             sqlparser::ast::Expr::Identifier(ident) => {
                 Ok(Self::Identifier(ident.into_dialect(dialect)))
             }
+            sqlparser::ast::Expr::UnaryOp {
+                op: sqlparser::ast::UnaryOperator::Minus,
+                expr,
+            } => match Literal::try_from(*expr)? {
+                Literal::Integer(i) => Ok(Self::Literal(Literal::Integer(-i))),
+                Literal::Number(n) => Ok(Self::Literal(Literal::Number(format!("-{n}")))),
+                literal => {
+                    unsupported!("unsupported negative Postgres parameter value {literal:?}")
+                }
+            },
             _ => unsupported!("unsupported Postgres parameter value {value:?}"),
         }
     }

@@ -340,6 +340,14 @@ fn postgres_variable_scope() {
 }
 
 #[test]
+fn postgres_negative_parameter_value() {
+    for value in ["-8", "-0.0", "-0.5", "-99.5"] {
+        check_parse_postgres!(&format!("SET timezone = {value}"));
+        check_parse_postgres!(&format!("SET timezone TO {value}"));
+    }
+}
+
+#[test]
 fn on_update_current_timestamp() {
     check_parse_mysql!(
         r#"CREATE TABLE users (
