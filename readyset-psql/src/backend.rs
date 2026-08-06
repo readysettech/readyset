@@ -149,7 +149,12 @@ impl ps::PsqlBackend for Backend {
         Ok(())
     }
 
-    async fn on_init(&mut self, _database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
+    async fn on_init(&mut self, database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
+        // The readyset schema is selectable as the session's database; any other name keeps
+        // binding the session to the upstream URL's database.
+        if self.inner.readyset_schema_name() == Some(database) {
+            self.inner.set_database(database).await?;
+        }
         if self.does_require_authentication() {
             match self.authentication_method {
                 AuthenticationMethod::Cleartext => Ok(ps::CredentialsNeeded::Cleartext),

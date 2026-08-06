@@ -6,7 +6,7 @@ mod create_table_columns;
 mod derived_tables_rewrite;
 mod detect_bucket_functions;
 mod detect_problematic_self_joins;
-pub mod detect_schema_references;
+pub mod detect_references;
 pub mod detect_unsupported_placeholders;
 mod disallow_row;
 mod drop_redundant_join;

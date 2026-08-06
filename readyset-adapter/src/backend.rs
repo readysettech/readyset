@@ -111,7 +111,7 @@ use readyset_sql::ast::{
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, ShallowQueryParameters};
-use readyset_sql_passes::detect_schema_references;
+use readyset_sql_passes::detect_references::{references_schema, references_variables};
 use readyset_sql_passes::shallow::{
     ShallowCacheAllowlists, ShallowCacheEligibility, rewrite_shallow,
 };
@@ -1342,10 +1342,10 @@ where
         self.readyset_schema_route_all
     }
 
-    fn should_query_readyset_schema(
+    fn select_should_query_readyset_schema(
         &self,
         settings: &BackendSettings,
-        query: &ReadySetResult<ShallowCacheQuery>,
+        query: &ShallowCacheQuery,
     ) -> bool {
         if !settings.allow_cache_ddl {
             return false;
@@ -1353,11 +1353,40 @@ where
         let Some(readyset_schema) = &self.readyset_schema else {
             return false;
         };
-        let Ok(query) = query else {
-            return self.readyset_schema_route_all;
-        };
-        if detect_schema_references::references_schema(query, readyset_schema.name()) {
+        if references_schema(query, readyset_schema.name()) {
             return true;
+        }
+        self.readyset_schema_route_all && !references_variables(query)
+    }
+
+    fn non_select_should_query_readyset_schema(
+        &self,
+        settings: &BackendSettings,
+        query: &ReadySetResult<SqlQuery>,
+    ) -> bool {
+        if !settings.allow_cache_ddl {
+            return false;
+        }
+        if self.readyset_schema.is_none() {
+            return false;
+        }
+        if let Ok(query) = query
+            && query.is_readyset_extension()
+        {
+            return false;
+        }
+        if let Ok(
+            SqlQuery::Select(_)
+            | SqlQuery::CompoundSelect(_)
+            | SqlQuery::Set(_)
+            | SqlQuery::StartTransaction(_)
+            | SqlQuery::Commit(_)
+            | SqlQuery::Rollback(_)
+            | SqlQuery::Comment(_)
+            | SqlQuery::Discard(_),
+        ) = query
+        {
+            return false;
         }
         self.readyset_schema_route_all
     }
@@ -1660,6 +1689,14 @@ where
     DB::CacheEntry: SizeOf,
     Handler: 'static + QueryHandler,
 {
+    /// The name of the Readyset schema, when one is configured.
+    pub fn readyset_schema_name(&self) -> Option<&str> {
+        self.state
+            .readyset_schema
+            .as_ref()
+            .map(|schema| schema.name())
+    }
+
     pub fn version(&self) -> String {
         if let Some(version) = &self.state.db_version
             && !version.is_empty()

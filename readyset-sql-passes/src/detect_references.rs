@@ -1,13 +1,11 @@
-//! Detection of schema-qualified table references in sqlparser ASTs.
-//!
-//! This module provides a function to check whether a sqlparser [`Query`] AST contains any table
-//! references that are qualified with a specific schema/database name. This is used to detect
-//! queries like `SELECT * FROM readyset.test` that should be routed to the readyset-schema
-//! (DataFusion) engine, even when the user hasn't issued a `USE readyset` statement.
+//! Detection of references to specific names in sqlparser ASTs.
 
 use std::ops::ControlFlow;
 
-use sqlparser::ast::{ObjectName, ObjectNamePart, Query, Visit, Visitor};
+use sqlparser::ast::{
+    Expr, Ident, ObjectName, ObjectNamePart, Query, Value, ValueWithSpan, Visit, Visitor,
+    visit_expressions,
+};
 
 /// Returns `true` if any table reference in the query uses the given schema qualifier.
 ///
@@ -57,15 +55,32 @@ fn has_schema_prefix(name: &ObjectName, schema: &str) -> bool {
     }
 }
 
+/// Returns `true` if the query references variables of any scope (`@var`, `@@var`).
+pub fn references_variables(query: &Query) -> bool {
+    let is_variable = |ident: &Ident| ident.quote_style.is_none() && ident.value.starts_with('@');
+    visit_expressions(query, |expr| match expr {
+        Expr::Identifier(ident) if is_variable(ident) => ControlFlow::Break(()),
+        Expr::CompoundIdentifier(idents) if idents.first().is_some_and(is_variable) => {
+            ControlFlow::Break(())
+        }
+        Expr::Value(ValueWithSpan {
+            value: Value::Placeholder(name),
+            ..
+        }) if name.starts_with('@') => ControlFlow::Break(()),
+        _ => ControlFlow::Continue(()),
+    })
+    .is_break()
+}
+
 #[cfg(test)]
 mod tests {
-    use sqlparser::dialect::GenericDialect;
+    use sqlparser::dialect::MySqlDialect;
     use sqlparser::parser::Parser;
 
     use super::*;
 
     fn parse_query(sql: &str) -> Query {
-        let stmts = Parser::parse_sql(&GenericDialect {}, sql).expect("failed to parse SQL");
+        let stmts = Parser::parse_sql(&MySqlDialect {}, sql).expect("failed to parse SQL");
         match stmts.into_iter().next().expect("no statements") {
             sqlparser::ast::Statement::Query(q) => *q,
             other => panic!("expected Query, got {other:?}"),
@@ -129,5 +144,23 @@ mod tests {
             "SELECT * FROM readyset.a JOIN readyset.b ON readyset.a.id = readyset.b.id",
         );
         assert!(references_schema(&q, "readyset"));
+    }
+
+    #[test]
+    fn variable_in_projection() {
+        let q = parse_query("SELECT @@version_comment LIMIT 1");
+        assert!(references_variables(&q));
+    }
+
+    #[test]
+    fn variable_in_where_clause() {
+        let q = parse_query("SELECT a FROM t WHERE b = @x");
+        assert!(references_variables(&q));
+    }
+
+    #[test]
+    fn no_variables() {
+        let q = parse_query("SELECT a FROM t WHERE b = 1");
+        assert!(!references_variables(&q));
     }
 }

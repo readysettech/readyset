@@ -17,10 +17,10 @@ use readyset_client_metrics::{
     EventType, QueryDestination, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
-use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported};
+use readyset_errors::{ReadySetError, internal_err, unsupported};
 use readyset_sql::ast::{
-    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement,
-    ShallowCacheQuery, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
+    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement, SqlQuery,
+    StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql_passes::adapter_rewrites::{self, DfQueryParameters, QueryParameters};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent};
@@ -499,46 +499,39 @@ where
         // `check_readyset_schema_routing` cannot apply: route and serve the query on the
         // shallow parse alone, deferring the cost of the full parse to the fall-through path.
         let mut deep_ast = None;
-        let shallow_parsed: Option<ReadySetResult<ShallowCacheQuery>> = match shallow_parsed {
-            Ok(shallow_query) => {
-                // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so
-                // the fall-through below can derive the Readyset AST without a second text
-                // parse.
-                if settings.retain_shallow_ast() {
-                    deep_ast = Some((*shallow_query).clone());
-                }
-                let shallow_parsed = Ok(shallow_query);
-                if state.should_query_readyset_schema(settings, &shallow_parsed) {
-                    let session = Self::readyset_schema_session(connectors, state)?;
-                    let result = session.query(query).await?;
-                    return Ok(QueryResult::ReadysetSchema(result));
-                }
+        if let Ok(shallow_query) = shallow_parsed {
+            // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so
+            // the fall-through below can derive the Readyset AST without a second text
+            // parse.
+            if settings.retain_shallow_ast() {
+                deep_ast = Some((*shallow_query).clone());
+            }
+            if state.select_should_query_readyset_schema(settings, &shallow_query) {
+                let session = Self::readyset_schema_session(connectors, state)?;
+                let result = session.query(query).await?;
+                return Ok(QueryResult::ReadysetSchema(result));
+            }
+            if let Some((shallow, params)) = connectors.prepare_shallow_query(Ok(shallow_query)) {
+                if let Some((query_id, _)) =
+                    Self::should_query_shallow(connectors, settings, state, &shallow, query, hint)
+                        .await
+                    && !Self::acl_declines_serve(connectors, settings, state, query_id)
+                {
+                    let result =
+                        Self::query_shallow(connectors, state, query, query_id, event, params)
+                            .await;
 
-                if let Some((shallow, params)) = connectors.prepare_shallow_query(shallow_parsed) {
-                    if let Some((query_id, _)) = Self::should_query_shallow(
-                        connectors, settings, state, &shallow, query, hint,
-                    )
-                    .await
-                        && !Self::acl_declines_serve(connectors, settings, state, query_id)
-                    {
-                        let result =
-                            Self::query_shallow(connectors, state, query, query_id, event, params)
-                                .await;
-
-                        event.sql_type = SqlQueryType::Read;
-                        event.query_id = Some(query_id);
-                        if let Err(e) = &result {
-                            event.set_noria_error(&internal_err!("{e}"));
-                        }
-                        *query_shallow = Some(shallow);
-                        return result;
+                    event.sql_type = SqlQueryType::Read;
+                    event.query_id = Some(query_id);
+                    if let Err(e) = &result {
+                        event.set_noria_error(&internal_err!("{e}"));
                     }
                     *query_shallow = Some(shallow);
+                    return result;
                 }
-                None
+                *query_shallow = Some(shallow);
             }
-            Err(e) => Some(Err(e)),
-        };
+        }
 
         let parsed = {
             let _t = event.start_parse_timer();
@@ -578,12 +571,9 @@ where
             return Ok(result);
         }
 
-        // Statements that don't parse as a shallow SELECT still route to the readyset schema
-        // when the session's search path points at it (`readyset_schema_route_all`). This must
-        // stay after `check_readyset_schema_routing` so a SET/USE can first switch routing off.
-        if let Some(shallow_parsed) = shallow_parsed
-            && state.should_query_readyset_schema(settings, &shallow_parsed)
-        {
+        // This must stay after `check_readyset_schema_routing` so a SET/USE can first switch
+        // routing off.
+        if state.non_select_should_query_readyset_schema(settings, &parsed) {
             let session = Self::readyset_schema_session(connectors, state)?;
             let result = session.query(query).await?;
             return Ok(QueryResult::ReadysetSchema(result));
@@ -693,7 +683,10 @@ where
                 .await
             }
             Ok(ref parsed_query) if Handler::requires_fallback(parsed_query) => {
-                if !Handler::return_default_response(parsed_query) && connectors.has_fallback() {
+                if !Handler::return_default_response(parsed_query)
+                    && !state.readyset_schema_route_all
+                    && connectors.has_fallback()
+                {
                     if let SqlQuery::Select(stmt) = parsed_query {
                         event.sql_type = SqlQueryType::Read;
                         event.query = Some(Arc::new(parsed_query.clone()));
