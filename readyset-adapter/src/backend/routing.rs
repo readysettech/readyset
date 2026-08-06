@@ -124,20 +124,8 @@ impl ProxyState {
 
     /// Returns true when the proxy state is set to always proxy upstream,
     /// typically due to an unsupported SET statement.
-    pub fn is_proxy_always(&self) -> bool {
+    pub(super) fn is_proxy_always(&self) -> bool {
         *self == ProxyState::ProxyAlways
-    }
-
-    /// Returns a reason tag for the skip-cache metric describing why queries
-    /// are being proxied upstream.
-    pub fn skip_reason(&self) -> &'static str {
-        if self.in_transaction_or_implicit() {
-            "trx"
-        } else if self.is_proxy_always() {
-            "unsupported_set"
-        } else {
-            "unknown"
-        }
     }
 
     /// Returns true when a cache hit must be skipped given the cache's transaction policy,
@@ -159,7 +147,7 @@ impl ProxyState {
     ///    has not expired, or a row Readyset has not yet refreshed), and reads can flip
     ///    back to a stale cached result. With the window inactive, only `ProxyAlways`
     ///    forces a skip.
-    pub fn should_skip_cache_for(
+    fn should_skip_cache_for(
         &self,
         trx_cache_policy: TrxCachePolicy,
         had_write_in_txn: bool,
@@ -187,7 +175,7 @@ impl ProxyState {
     /// (`UntilWrite` cache that observed a write earlier in the transaction), and
     /// `"opportunistic_ryw"` (opportunistic read-your-writes window active outside any
     /// transaction).
-    pub fn skip_reason_for(
+    fn skip_reason_for(
         &self,
         trx_cache_policy: TrxCachePolicy,
         had_write_in_txn: bool,

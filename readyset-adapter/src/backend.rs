@@ -157,7 +157,7 @@ pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
 
 /// Reserved program/application name reported by the shallow cache refresher on its upstream
 /// connections so they are identifiable on the upstream database.
-pub const READYSET_SHALLOW_REFRESHER: &str = "READYSET_SHALLOW_REFRESHER";
+pub(crate) const READYSET_SHALLOW_REFRESHER: &str = "READYSET_SHALLOW_REFRESHER";
 
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
@@ -169,7 +169,7 @@ const UNAUTHENTICATED_USER: &str = "unauthenticated";
 const SHALLOW_CACHE_MISS: &str = "shallow cache miss";
 
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
-pub type StatementId = u32;
+type StatementId = u32;
 
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::shallow_refresh_pool::ShallowRefreshPool;
@@ -261,7 +261,7 @@ impl AllowedUsers {
     /// Look up `user`'s plaintext password, cloning it out so the read lock isn't held by the
     /// caller. A poisoned lock is recovered rather than propagated so a single panic elsewhere
     /// cannot turn into a blanket authentication outage.
-    pub fn password_for(&self, user: &str) -> Option<String> {
+    fn password_for(&self, user: &str) -> Option<String> {
         self.map
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -297,7 +297,7 @@ impl AllowedUsers {
 
     /// Acquire the mutation guard. Callers hold the returned guard across the whole
     /// snapshot -> persist -> replace sequence of a single `ALTER READYSET ... USER`.
-    pub async fn lock_mutations(&self) -> tokio::sync::MutexGuard<'_, ()> {
+    async fn lock_mutations(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.mutation_guard.lock().await
     }
 }
@@ -771,7 +771,7 @@ where
     DB: UpstreamDatabase,
 {
     /// Whether or not we have fallback enabled.
-    pub fn has_fallback(&self) -> bool {
+    fn has_fallback(&self) -> bool {
         self.upstream.is_some()
     }
 
@@ -1409,7 +1409,7 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
         }
     }
 
-    pub fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
+    fn into_upstream(self) -> Option<UpstreamPrepare<DB>> {
         match self.inner {
             PrepareResultInner::Upstream(ur)
             | PrepareResultInner::NoriaAndUpstream(_, ur)
@@ -1420,7 +1420,7 @@ impl<DB: UpstreamDatabase> PrepareResult<DB> {
 
     /// If this [`PrepareResult`] is a [`PrepareResult::NoriaAndUpstream`], convert it into only a
     /// [`PrepareResult::Upstream`]
-    pub fn make_upstream_only(&mut self) {
+    fn make_upstream_only(&mut self) {
         match &mut self.inner {
             PrepareResultInner::Noria(_)
             | PrepareResultInner::Upstream(_)
@@ -1760,7 +1760,7 @@ where
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.
     /// Returns the query result, or an error if fallback is not configured
-    pub async fn query_fallback<'a>(
+    async fn query_fallback<'a>(
         upstream: Option<&'a mut DB>,
         query: &'a str,
         event: &mut QueryExecutionEvent,
@@ -1803,7 +1803,7 @@ where
 
     /// Prepares query on the upstream database, if present, when it cannot be parsed or prepared by
     /// noria.
-    pub async fn prepare_fallback(
+    async fn prepare_fallback(
         &mut self,
         query: &str,
         data: DB::PrepareData<'_>,
@@ -3393,7 +3393,7 @@ fn resolve_coalesce(coalesce: Option<Duration>, default_coalesce_ms: u64) -> Opt
 
 /// Outcome of a single DDL's recovery attempt.
 #[derive(Debug)]
-pub enum RecoveryOutcome {
+enum RecoveryOutcome {
     /// The cache was recreated.
     Done,
     /// Recovery couldn't complete: one or more referenced relations
