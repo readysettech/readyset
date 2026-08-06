@@ -15,8 +15,9 @@ use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SetVariables, ShowStatement,
-    SqlIdentifier, SqlQuery, Variable, VariableScope,
+    SqlIdentifier, SqlQuery,
 };
+use readyset_sql::{Dialect, DialectDisplay};
 use tracing::warn;
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
@@ -1024,9 +1025,13 @@ impl QueryHandler for MySqlQueryHandler {
                     behavior = behavior.upstream_rewrite(if upstream_vars.is_empty() {
                         UpstreamSetRewrite::Skip
                     } else {
-                        UpstreamSetRewrite::Rewrite(SetStatement::Variable(SetVariables {
-                            variables: upstream_vars,
-                        }))
+                        UpstreamSetRewrite::Rewrite(
+                            SetStatement::Variable(SetVariables {
+                                variables: upstream_vars,
+                            })
+                            .display(Dialect::MySQL)
+                            .to_string(),
+                        )
                     });
                 }
             }
@@ -1039,7 +1044,7 @@ impl QueryHandler for MySqlQueryHandler {
                 counter!(
                     metric::CHARACTER_SET_USAGE,
                     "type" => "names",
-                    "charset" => encoding_name.clone(),
+                    "charset" => encoding_name,
                 )
                 .increment(1);
 
@@ -1047,40 +1052,26 @@ impl QueryHandler for MySqlQueryHandler {
                     .set_results_encoding(encoding)
                     .set_client_encoding(encoding);
 
-                // SET NAMES sets character_set_client, character_set_connection,
-                // character_set_results, and (with a COLLATE clause) collation_connection.
-                // Readyset decodes client bytes and sends UTF-8 text upstream, so the upstream's
-                // character_set_client must stay utf8mb4; the others apply after the upstream
-                // decodes our text, so they are forwarded to keep literal semantics and proxied
-                // result bytes in the client's charset. Setting collation_connection also sets
-                // character_set_connection to the collation's charset, so a COLLATE clause
-                // replaces the charset assignment.
+                // MySQL derives result-set metadata collation ids from a statement-level SET
+                // NAMES, so forward the statement itself rather than variable assignments.
+                // Readyset decodes client bytes and sends UTF-8 statement text upstream, so
+                // the upstream's character_set_client must stay utf8mb4. SET options apply
+                // left to right, which lets a trailing assignment restore it within the same
+                // statement.
                 if encoding.is_some() {
-                    let session_var = |name: &str| Variable {
-                        scope: VariableScope::Session,
-                        name: name.into(),
-                    };
-                    let connection_var = match &names.collation {
-                        Some(collation) => (
-                            session_var("collation_connection"),
-                            Expr::Literal(Literal::String(collation.to_ascii_lowercase())),
-                        ),
-                        None => (
-                            session_var("character_set_connection"),
-                            Expr::Literal(Literal::String(encoding_name.clone())),
-                        ),
-                    };
-                    behavior = behavior.upstream_rewrite(UpstreamSetRewrite::Rewrite(
-                        SetStatement::Variable(SetVariables {
-                            variables: vec![
-                                connection_var,
-                                (
-                                    session_var("character_set_results"),
-                                    Expr::Literal(Literal::String(encoding_name)),
-                                ),
-                            ],
-                        }),
-                    ));
+                    // The collation name is spliced into the rewritten statement unescaped,
+                    // so only forward names that are plain identifiers. MySQL rejects
+                    // anything else anyway.
+                    let valid_collation = names.collation.as_ref().is_none_or(|c| {
+                        !c.is_empty() && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    });
+                    if valid_collation {
+                        behavior = behavior.upstream_rewrite(UpstreamSetRewrite::Rewrite(format!(
+                            "SET {names}, @@SESSION.character_set_client = 'utf8mb4'"
+                        )));
+                    } else {
+                        behavior = behavior.unsupported(true);
+                    }
                 }
             }
             SetStatement::PostgresParameter(_) | SetStatement::SessionAuthorization(_) => {
@@ -1324,18 +1315,9 @@ mod tests {
 
     /// The upstream rewrite produced for a supported `SET NAMES <charset>`.
     fn names_rewrite(charset: &str) -> UpstreamSetRewrite {
-        UpstreamSetRewrite::Rewrite(SetStatement::Variable(SetVariables {
-            variables: vec![
-                (
-                    session_var("character_set_connection"),
-                    Expr::Literal(Literal::String(charset.into())),
-                ),
-                (
-                    session_var("character_set_results"),
-                    Expr::Literal(Literal::String(charset.into())),
-                ),
-            ],
-        }))
+        UpstreamSetRewrite::Rewrite(format!(
+            "SET NAMES '{charset}', @@SESSION.character_set_client = 'utf8mb4'"
+        ))
     }
 
     #[test]
@@ -1362,30 +1344,34 @@ mod tests {
 
     #[test]
     fn set_names_with_collation_forwards_collation() {
+        for (charset, collation, encoding) in [
+            ("latin1", "latin1_bin", Encoding::LATIN1),
+            ("utf8mb4", "utf8mb4_bin", Encoding::Utf8),
+        ] {
+            let stmt = SetStatement::Names(SetNames {
+                charset: charset.to_owned(),
+                collation: Some(collation.to_owned()),
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default()
+                    .set_results_encoding(Some(encoding))
+                    .set_client_encoding(Some(encoding))
+                    .upstream_rewrite(UpstreamSetRewrite::Rewrite(format!(
+                        "SET NAMES '{charset}' COLLATE '{collation}', \
+                         @@SESSION.character_set_client = 'utf8mb4'"
+                    )))
+            )
+        }
+    }
+
+    #[test]
+    fn set_names_with_malformed_collation_unsupported() {
         let stmt = SetStatement::Names(SetNames {
-            charset: "latin1".to_owned(),
-            collation: Some("latin1_bin".to_owned()),
+            charset: "utf8mb4".to_owned(),
+            collation: Some("utf8mb4_bin' or '".to_owned()),
         });
-        assert_eq!(
-            MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default()
-                .set_results_encoding(Some(Encoding::LATIN1))
-                .set_client_encoding(Some(Encoding::LATIN1))
-                .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
-                    SetVariables {
-                        variables: vec![
-                            (
-                                session_var("collation_connection"),
-                                Expr::Literal(Literal::String("latin1_bin".into())),
-                            ),
-                            (
-                                session_var("character_set_results"),
-                                Expr::Literal(Literal::String("latin1".into())),
-                            ),
-                        ],
-                    }
-                )))
-        )
+        assert!(MySqlQueryHandler::handle_set_statement(&stmt).unsupported);
     }
 
     #[test]
@@ -1434,11 +1420,13 @@ mod tests {
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default()
                 .set_client_encoding(Some(Encoding::LATIN1))
-                .upstream_rewrite(UpstreamSetRewrite::Rewrite(SetStatement::Variable(
-                    SetVariables {
+                .upstream_rewrite(UpstreamSetRewrite::Rewrite(
+                    SetStatement::Variable(SetVariables {
                         variables: vec![(session_var("sql_mode"), sql_mode)],
-                    }
-                )))
+                    })
+                    .display(Dialect::MySQL)
+                    .to_string()
+                ))
         )
     }
 

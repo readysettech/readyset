@@ -527,7 +527,7 @@ where
         // if `handle_set()` returns an error, we aren't supposed to process
         // the SET anyway, so propagating the error is expected.
         // Then we need to determine if we're actually going to proxy to the upstream.
-        let upstream_set_rewrite = Self::handle_set(
+        let (upstream_set_rewrite, pending_set_state) = Self::handle_set(
             &mut self.connectors,
             &self.settings,
             &mut self.state,
@@ -548,7 +548,6 @@ where
                 PrepareResultInner::Upstream(prep)
             }
             (Some(upstream), UpstreamSetRewrite::Rewrite(rewritten)) => {
-                let rewritten = rewritten.display(self.settings.dialect).to_string();
                 let prep = upstream.prepare(rewritten, data, statement_type).await?;
                 PrepareResultInner::Upstream(prep)
             }
@@ -558,6 +557,8 @@ where
                 })
             }
         };
+        // Mirror session state only if the upstream accepted the statement.
+        pending_set_state.apply(&mut self.connectors.noria);
 
         Ok(res)
     }

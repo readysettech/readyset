@@ -10,17 +10,40 @@ use std::sync::Arc;
 
 use metrics::counter;
 use readyset_client_metrics::QueryExecutionEvent;
+use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{SessionAuthorizationValue, SetSessionAuthorization, SetStatement};
 use readyset_util::SizeOf;
 use tracing::{debug, error, trace, warn};
 
+use super::noria_connector::NoriaConnector;
 use super::routing::ProxyState;
 use super::{Backend, BackendConnectors, BackendSettings, BackendState, UnsupportedSetMode};
 use crate::query_handler::{SetBehavior, UpstreamSetRewrite};
 use crate::session_context::SessionContext;
 use crate::{QueryHandler, UpstreamDatabase};
+
+/// Readyset-side session state from a `SET` that mirrors state the upstream session owns, so
+/// it must be applied only once the upstream accepts the statement.
+#[derive(Debug, Default)]
+pub(super) struct PendingSetState {
+    results_encoding: Option<Encoding>,
+    client_encoding: Option<Encoding>,
+}
+
+impl PendingSetState {
+    pub(super) fn apply(self, noria: &mut NoriaConnector) {
+        if let Some(encoding) = self.results_encoding {
+            trace!(?encoding, "Setting results_encoding");
+            noria.set_results_encoding(encoding);
+        }
+        if let Some(encoding) = self.client_encoding {
+            trace!(?encoding, "Setting client_encoding");
+            noria.set_client_encoding(encoding);
+        }
+    }
+}
 
 impl<DB, Handler> Backend<DB, Handler>
 where
@@ -36,6 +59,8 @@ where
     /// - If upstream exists, valid set statements are forwarded to it.
     /// - If no upstream is present, statements are typically ignored.
     /// - Disallowed set statements always produce an error.
+    ///
+    /// The returned [`PendingSetState`] is applied by the caller after the statement succeeds.
     pub(super) fn handle_set(
         connectors: &mut BackendConnectors<DB>,
         settings: &BackendSettings,
@@ -43,7 +68,7 @@ where
         query: &str,
         set: &SetStatement,
         event: &mut QueryExecutionEvent,
-    ) -> Result<UpstreamSetRewrite, DB::Error> {
+    ) -> Result<(UpstreamSetRewrite, PendingSetState), DB::Error> {
         let SetBehavior {
             unsupported,
             proxy: _, // Basically ignored, caller will proxy unless we return an error
@@ -113,14 +138,6 @@ where
             trace!(?search_path, "Setting search_path");
             connectors.noria.set_schema_search_path(search_path);
         }
-        if let Some(encoding) = set_results_encoding {
-            trace!(?encoding, "Setting results_encoding");
-            connectors.noria.set_results_encoding(encoding);
-        }
-        if let Some(encoding) = set_client_encoding {
-            trace!(?encoding, "Setting client_encoding");
-            connectors.noria.set_client_encoding(encoding);
-        }
         // The handler records `set_timezone` even for non-UTC values so a
         // future eval-side fix can read it unchanged; only apply it here when
         // the SET resolved to a UTC-equivalent zone — otherwise cached
@@ -143,7 +160,13 @@ where
             let _ = session.apply_set_statement(set);
         }
 
-        Ok(upstream_rewrite)
+        Ok((
+            upstream_rewrite,
+            PendingSetState {
+                results_encoding: set_results_encoding,
+                client_encoding: set_client_encoding,
+            },
+        ))
     }
 
     /// Mirror `SET [LOCAL] ROLE <role>` into the session context, called only after upstream

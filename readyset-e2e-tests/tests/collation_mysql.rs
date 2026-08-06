@@ -587,6 +587,88 @@ async fn test_column_def_collation_ids_proxied_and_shallow_match_upstream() {
     shutdown_tx.shutdown().await;
 }
 
+/// After SET NAMES with a COLLATE clause, a native MySQL session reports result-set metadata
+/// in the named collation. The adapter must mirror that for proxied results, including for a
+/// non-utf8mb4 charset, where the forwarded statement restores the upstream's
+/// character_set_client to utf8mb4.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_column_def_collation_ids_proxied_after_set_names_collate() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop(COLL_META_DDL).await.unwrap();
+    conn.query_drop("INSERT INTO coll_meta VALUES (1, 'a', 'b', 'c', 'd')")
+        .await
+        .unwrap();
+
+    for set_names in [
+        "SET NAMES utf8mb4 COLLATE utf8mb4_bin",
+        "SET NAMES latin1 COLLATE latin1_bin",
+    ] {
+        let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        conn.query_drop(set_names).await.unwrap();
+
+        let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+        let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+        upstream_conn.query_drop(set_names).await.unwrap();
+        let expected = column_charsets(&mut upstream_conn, COLL_META_QUERY).await;
+
+        let proxied = column_charsets(&mut conn, COLL_META_QUERY).await;
+        assert_matches!(
+            last_query_info(&mut conn).await.destination,
+            QueryDestination::Upstream
+        );
+        assert_eq!(proxied, expected, "{set_names}");
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A SET NAMES the upstream rejects must leave the session unchanged. The collation name
+/// parses locally but does not exist upstream, so the forwarded statement fails and the
+/// session must keep matching a native session that established latin1 and never attempted
+/// the rejected statement.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_set_names_rejected_upstream_leaves_encodings_unchanged() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn.query_drop("SET NAMES latin1").await.unwrap();
+
+    conn.query_drop("SET NAMES latin1").await.unwrap();
+    conn.query_drop("SET NAMES utf8mb4 COLLATE utf8mb4_nonexistent")
+        .await
+        .unwrap_err();
+
+    // 0xE1 is latin1 'a acute' and is not valid UTF-8, so this statement only decodes in a
+    // session still at latin1.
+    let probe: &[u8] = b"SELECT '\xE1' AS s";
+    let expected: Option<Vec<u8>> = upstream_conn.query_first(probe).await.unwrap();
+    let proxied: Option<Vec<u8>> = conn.query_first(probe).await.unwrap();
+    assert_matches!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Upstream
+    );
+    assert_eq!(proxied, expected);
+
+    shutdown_tx.shutdown().await;
+}
+
 /// SET NAMES with a COLLATE clause is forwarded so the upstream session reports the requested
 /// collation_connection, and a cached point lookup on a case-insensitive column keeps matching
 /// the upstream because the column's collation wins coercibility on both sides.

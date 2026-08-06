@@ -18,7 +18,6 @@ use readyset_client_metrics::{
     SqlQueryType,
 };
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported};
-use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
     CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement,
     ShallowCacheQuery, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
@@ -31,6 +30,7 @@ use tracing::{error, trace, warn};
 
 use super::noria_connector::{self, ExecuteSelectContext};
 use super::routing::{ProxyState, SelectRouter, ShouldTrySelect};
+use super::set_handler::PendingSetState;
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode, QueryInfo,
     QueryResult, convert_or_parse_query, log_query, parse_shallow_query,
@@ -285,9 +285,10 @@ where
         query: SqlQuery,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let mut upstream_set_rewrite = UpstreamSetRewrite::ProxyVerbatim;
+        let mut pending_set_state = PendingSetState::default();
         match &query {
             SqlQuery::Set(s) => {
-                upstream_set_rewrite =
+                (upstream_set_rewrite, pending_set_state) =
                     Self::handle_set(connectors, settings, state, raw_query, s, event)?
             }
             SqlQuery::Use(UseStatement { database }) => connectors
@@ -341,26 +342,21 @@ where
                     }
                     SqlQuery::Set(set) => {
                         event.sql_type = SqlQueryType::Other;
-                        match upstream_set_rewrite {
-                            UpstreamSetRewrite::ProxyVerbatim => {}
-                            UpstreamSetRewrite::Rewrite(stmt) => {
+                        let result = match upstream_set_rewrite {
+                            UpstreamSetRewrite::ProxyVerbatim => {
+                                Some(upstream.query(raw_query).await?)
+                            }
+                            UpstreamSetRewrite::Rewrite(rewritten) => {
                                 // The trait ties the result's lifetime to the query text, so a
-                                // rewritten statement's result can't be returned; a SET only
+                                // rewritten statement's result can't be returned. A SET only
                                 // produces an OK, so respond as the no-upstream branch does.
-                                let rewritten = stmt.display(settings.dialect).to_string();
                                 upstream.query(&rewritten).await?;
-                                return Ok(QueryResult::Noria(noria_connector::QueryResult::Empty));
+                                None
                             }
-                            UpstreamSetRewrite::Skip => {
-                                return Ok(QueryResult::Noria(noria_connector::QueryResult::Empty));
-                            }
-                        }
-                        let result = upstream.query(raw_query).await?;
-                        // Mirror an identity change only now that upstream has accepted it: a
-                        // rejected statement must not leave the session mirror pointing at an
-                        // identity upstream never adopted. `SET ROLE` is an authorization boundary
-                        // (role membership), so mirroring it before the forward would let a client
-                        // assume a role upstream refused it.
+                            UpstreamSetRewrite::Skip => None,
+                        };
+                        // Mirror session state only if the upstream accepted the statement.
+                        pending_set_state.apply(&mut connectors.noria);
                         if let Some(session) = connectors.session.as_ref() {
                             match &set {
                                 SetStatement::SessionAuthorization(auth) => {
@@ -377,7 +373,10 @@ where
                                 ),
                             }
                         }
-                        Ok(QueryResult::Upstream(result, None, None))
+                        match result {
+                            Some(result) => Ok(QueryResult::Upstream(result, None, None)),
+                            None => Ok(QueryResult::Noria(noria_connector::QueryResult::Empty)),
+                        }
                     }
                     SqlQuery::CompoundSelect(_)
                     | SqlQuery::Show(_)
@@ -448,10 +447,13 @@ where
                     // messages are dropped - we do not support transactions in noria standalone.
                     // We return an empty result set instead of an error to support test
                     // applications.
-                    SqlQuery::Set(_)
-                    | SqlQuery::Commit(_)
-                    | SqlQuery::Use(_)
-                    | SqlQuery::Comment(_) => Ok(noria_connector::QueryResult::Empty),
+                    SqlQuery::Set(_) => {
+                        pending_set_state.apply(&mut connectors.noria);
+                        Ok(noria_connector::QueryResult::Empty)
+                    }
+                    SqlQuery::Commit(_) | SqlQuery::Use(_) | SqlQuery::Comment(_) => {
+                        Ok(noria_connector::QueryResult::Empty)
+                    }
                     q => {
                         error!(query = ?q, "unsupported query");
                         unsupported!("query type unsupported: {q:?}");

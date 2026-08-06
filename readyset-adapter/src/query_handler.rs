@@ -108,8 +108,10 @@ pub enum UpstreamSetRewrite {
     /// Forward the client's `SET` statement to the upstream unchanged.
     #[default]
     ProxyVerbatim,
-    /// Forward this statement to the upstream in place of the client's.
-    Rewrite(SetStatement),
+    /// Forward this SQL text to the upstream in place of the client's statement. A string
+    /// rather than an AST because MySQL allows `SET` option forms the AST cannot represent,
+    /// such as `NAMES` combined with variable assignments in one statement.
+    Rewrite(String),
     /// Don't send anything upstream; Readyset handles the statement entirely.
     Skip,
 }
