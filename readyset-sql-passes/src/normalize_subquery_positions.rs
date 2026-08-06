@@ -174,6 +174,7 @@ struct WrapVisitor {
     reserved_aliases: HashSet<SqlIdentifier>,
     next_alias_id: usize,
     emitted_aliases: HashSet<SqlIdentifier>,
+    depth: usize,
 }
 
 impl WrapVisitor {
@@ -184,6 +185,7 @@ impl WrapVisitor {
             reserved_aliases,
             next_alias_id: 0,
             emitted_aliases: HashSet::new(),
+            depth: 0,
         }
     }
 
@@ -213,7 +215,10 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
         stmt: &'ast mut SelectStatement,
     ) -> Result<(), Self::Error> {
         // Bottom-up: descend first.
+        self.depth += 1;
         walk_select_statement(self, stmt)?;
+        self.depth -= 1;
+        let is_top_level = self.depth == 0;
 
         // Promote spuriously-outer LEFT joins whose ON carries a subquery to
         // INNER before the move/wrap below.  A promotable such join is then
@@ -335,7 +340,7 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
             // to reach a shape downstream can handle.  Falling through
             // preserves pre-change behavior for that class.
             let outer_is_aggregating = is_aggregation_or_grouped(stmt)?;
-            if !having_has_subq && !order_by_trigger && outer_is_aggregating {
+            if is_top_level && !having_has_subq && !order_by_trigger && outer_is_aggregating {
                 return Ok(());
             }
 
@@ -344,7 +349,12 @@ impl<'ast> VisitorMut<'ast> for WrapVisitor {
             if wrapped {
                 let (inner_stmt, _) = expect_only_subquery_from_with_alias_mut(stmt)?;
                 normalize_having_and_group_by_for_statement(inner_stmt)?;
-            } else {
+            } else if is_top_level {
+                // No wrap fired, so this restores what the denormalize above changed.  Only the
+                // top-level statement keeps the alias form: its select list is the query's own
+                // output and no later pass prunes it.  A nested statement is a hoist candidate --
+                // an inliner keeps only the columns its consumer needs -- so an alias left in
+                // HAVING there would outlive the item it names.
                 normalize_having_and_group_by_for_statement(stmt)?;
             }
         }

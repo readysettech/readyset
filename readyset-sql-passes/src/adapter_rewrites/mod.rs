@@ -3911,6 +3911,142 @@ mod tests {
             }
         }
 
+        /// A HAVING alias the query itself wrote must survive inlining too.
+        ///
+        /// The aliased item here is a subquery, so it cannot be substituted back into HAVING --
+        /// that position does not admit subqueries. Wrapping the nested statement instead turns the
+        /// reference into one over a derived table, which the inliners carry correctly, and the
+        /// subquery decorrelates into a join.
+        #[test]
+        fn user_written_having_alias_over_a_subquery_survives_inlining() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT agg.pn FROM (SELECT qa.p.pn, (SELECT COUNT(*) FROM s) AS c \
+                 FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn HAVING c = 1) agg \
+                 WHERE agg.pn = 'P11111'",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            // Every column HAVING names must be qualified by a relation that is still there.  An
+            // unqualified one is an alias, and nothing projects it any more.
+            let dangling: Vec<_> = query
+                .having
+                .iter()
+                .flat_map(|expr| readyset_sql::analysis::ReferredColumns::referred_columns(expr))
+                .filter(|col| col.table.is_none())
+                .map(|col| col.name.to_string())
+                .collect();
+            assert!(
+                dangling.is_empty(),
+                "HAVING names {dangling:?}, which nothing projects: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// An ORDER BY alias naming a select-list subquery keeps naming it after decorrelation.
+        ///
+        /// Expanding such a reference back into its expression would put the raw subquery into
+        /// ORDER BY, so restoring HAVING must not touch the other clauses.
+        #[test]
+        fn order_by_alias_to_a_subquery_survives_having_restoration() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT t.a, (SELECT MAX(u.x) FROM u) AS m FROM t GROUP BY t.a \
+                 HAVING COUNT(*) = 3 ORDER BY m",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let order = query
+                .order
+                .as_ref()
+                .expect("ORDER BY should survive")
+                .display(Dialect::PostgreSQL)
+                .to_string();
+            assert!(
+                !order.contains("SELECT"),
+                "ORDER BY should not carry a subquery: {order}"
+            );
+        }
+
+        /// A HAVING subquery that also appears in the select list is resolved by rewriting HAVING
+        /// to reference that item's alias, which lets the select-list decorrelation handle it.
+        ///
+        /// The alias form is what makes that work, so it has to survive: restoring the expression
+        /// here would put the subquery back into HAVING, where it is not supported.
+        #[test]
+        fn having_subquery_matched_in_the_select_list_stays_decorrelated() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT t.a, (SELECT MAX(u.x) FROM u) AS m FROM t GROUP BY t.a \
+                 HAVING COUNT(*) > (SELECT MAX(u.x) FROM u)",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("the subquery should decorrelate rather than be refused");
+
+            let having = query
+                .having
+                .as_ref()
+                .expect("HAVING should survive")
+                .display(Dialect::PostgreSQL)
+                .to_string();
+            assert!(
+                !having.contains("SELECT"),
+                "HAVING should not carry a subquery: {having}"
+            );
+        }
+
+        /// A HAVING alias reference must not outlive the select-list item that defines it.
+        ///
+        /// `normalize_subquery_positions` rewrites an aggregate in HAVING into a reference to the
+        /// matching select-list alias while the derived table still projects it, then
+        /// `inline_leading_derived_table` keeps only the columns the outer query needs. The
+        /// reference has to become the expression again, or it names a column that is gone.
+        #[test]
+        fn having_keeps_no_alias_whose_select_item_the_pipeline_dropped() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT agg.pn FROM (SELECT qa.p.pn, COUNT(*) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn HAVING COUNT(*) = 3) agg \
+                 WHERE agg.pn = 'P11111'",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let projected: Vec<_> = query
+                .fields
+                .iter()
+                .filter_map(|f| match f {
+                    readyset_sql::ast::FieldDefinitionExpr::Expr { alias, .. } => alias.clone(),
+                    _ => None,
+                })
+                .collect();
+            let having = query
+                .having
+                .as_ref()
+                .expect("the aggregate filter should survive as HAVING")
+                .display(Dialect::PostgreSQL)
+                .to_string();
+
+            assert!(
+                !having.contains("\"c\""),
+                "HAVING still names the dropped alias: {having} (projected aliases: {projected:?})"
+            );
+            assert!(
+                having.contains("count(*)"),
+                "HAVING should carry the aggregate itself: {having}"
+            );
+        }
+
         #[test]
         fn resolve_schemas_qualifies_table_from_search_path() {
             let context = SchemaAwareTestContext::new(Dialect::PostgreSQL)
