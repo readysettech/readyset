@@ -50,8 +50,8 @@ use vec1::Vec1;
 
 use super::noria_connector::{self, MetaVariable};
 use super::{
-    Backend, BackendConnectors, BackendSettings, BackendState, PreparedStatement,
-    UNSUPPORTED_CACHE_DDL_MSG, readyset_version, resolve_coalesce, resolve_eviction_policy,
+    Backend, BackendConnectors, BackendSettings, BackendState, UNSUPPORTED_CACHE_DDL_MSG,
+    readyset_version, resolve_coalesce, resolve_eviction_policy,
 };
 use crate::query_status_cache::ManualCacheEntry;
 use crate::utils::create_dummy_column;
@@ -925,23 +925,7 @@ where
             }
         }
         state.query_status_cache.clear(cache_type);
-        state.prepared_statements.iter_mut().for_each(
-            |(
-                _,
-                PreparedStatement {
-                    prep,
-                    migration_state,
-                    ..
-                },
-            )| {
-                if matches!(*migration_state,
-                    MigrationState::Successful(t) if cache_type == Some(t) || cache_type.is_none())
-                {
-                    *migration_state = MigrationState::Pending;
-                }
-                prep.make_upstream_only();
-            },
-        );
+        state.prepared.invalidate_all(cache_type);
         Ok(noria_connector::QueryResult::Empty)
     }
 

@@ -499,9 +499,7 @@ impl BackendBuilder {
                 ),
                 last_query: None,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
-                prepared_statements: Default::default(),
-                session_mutations: HashMap::new(),
-                unnamed_prepared_statements: Default::default(),
+                prepared: Default::default(),
                 query_status_cache,
                 schema_handle,
                 users: self.users,
@@ -815,6 +813,169 @@ where
     }
 }
 
+/// The prepared statements of one connection, keyed by statement id.
+///
+/// All three fields are keyed by that id and [`Self::remove`] clears all three, so they live
+/// behind one type and only it touches them.
+struct PreparedStatements<DB>
+where
+    DB: UpstreamDatabase,
+{
+    /// The slab position is the statement id.
+    statements: Slab<PreparedStatement<DB>>,
+    /// Memoized unnamed statements: `query text -> (search_path, statement_id, reusable)`.
+    ///
+    /// The text alone does not identify a plan, since an unqualified name resolves against the
+    /// session `search_path`. `reusable` is false for a plan that resolved upstream-only, which
+    /// a transient cache bypass may have forced, so it is re-planned on the next Parse.
+    unnamed: HashMap<String, (Vec<SqlIdentifier>, StatementId, bool)>,
+    /// Session mutations recognised at prepare time, for the execute-time applier. Held here
+    /// because the shallow and proxy paths null out [`PreparedStatement::parsed_query`], so the
+    /// AST is gone by execute time.
+    session_mutations: HashMap<StatementId, SessionMutationTemplate>,
+}
+
+impl<DB> Default for PreparedStatements<DB>
+where
+    DB: UpstreamDatabase,
+{
+    fn default() -> Self {
+        Self {
+            statements: Slab::new(),
+            unnamed: HashMap::new(),
+            session_mutations: HashMap::new(),
+        }
+    }
+}
+
+impl<DB> PreparedStatements<DB>
+where
+    DB: UpstreamDatabase,
+{
+    /// The id the next [`Self::insert`] will use. Callers need it to build the statement, which
+    /// embeds its own id.
+    fn vacant_id(&self) -> StatementId {
+        self.statements
+            .vacant_key()
+            .try_into()
+            .expect("Cannot prepare more than u32::MAX statements with a single connection")
+    }
+
+    fn insert(
+        &mut self,
+        statement: PreparedStatement<DB>,
+        session_mutation: Option<SessionMutationTemplate>,
+    ) -> StatementId {
+        let id = self.statements.insert(statement) as StatementId;
+        if let Some(template) = session_mutation {
+            self.session_mutations.insert(id, template);
+        }
+        id
+    }
+
+    fn get(&self, id: StatementId) -> Option<&PreparedStatement<DB>> {
+        self.statements.get(id as usize)
+    }
+
+    fn get_mut(&mut self, id: StatementId) -> Option<&mut PreparedStatement<DB>> {
+        self.statements.get_mut(id as usize)
+    }
+
+    /// Forgets `id` entirely: the slab slot and any session-mutation template keyed by it.
+    fn remove(&mut self, id: StatementId) -> Option<PreparedStatement<DB>> {
+        self.session_mutations.remove(&id);
+        self.statements.try_remove(id as usize)
+    }
+
+    fn clear(&mut self) {
+        self.statements.clear();
+        self.unnamed.clear();
+        self.session_mutations.clear();
+    }
+
+    fn session_mutation(&self, id: StatementId) -> Option<&SessionMutationTemplate> {
+        self.session_mutations.get(&id)
+    }
+
+    /// The id memoized for an unnamed `query` resolved against `search_path`, if that plan is
+    /// reusable across transaction-state changes.
+    fn reuse_unnamed(&self, query: &str, search_path: &[SqlIdentifier]) -> Option<StatementId> {
+        self.unnamed
+            .get(query)
+            .filter(|(path, _, reusable)| *reusable && path.as_slice() == search_path)
+            .map(|(_, id, _)| *id)
+    }
+
+    /// Memoizes `id` as the unnamed slot for `query`, dropping whatever it supersedes. The
+    /// unnamed slot holds one statement per query text, so a changed search path or a
+    /// re-planned non-reusable slot leaves a slab slot to reclaim.
+    fn record_unnamed(
+        &mut self,
+        query: &str,
+        search_path: Vec<SqlIdentifier>,
+        id: StatementId,
+        reusable: bool,
+    ) {
+        if let Some((_, superseded, _)) = self
+            .unnamed
+            .insert(query.to_string(), (search_path, id, reusable))
+        {
+            self.remove(superseded);
+        }
+    }
+
+    /// Forces every statement upstream, marking those backed by a cache of `cache_type` (or any
+    /// type, when `None`) as pending. Used when caches are dropped wholesale.
+    pub(super) fn invalidate_all(&mut self, cache_type: Option<CacheType>) {
+        self.statements.iter_mut().for_each(
+            |(
+                _,
+                PreparedStatement {
+                    prep,
+                    migration_state,
+                    ..
+                },
+            )| {
+                if matches!(*migration_state,
+                    MigrationState::Successful(t) if cache_type == Some(t) || cache_type.is_none())
+                {
+                    *migration_state = MigrationState::Pending;
+                }
+                prep.make_upstream_only();
+            },
+        );
+    }
+
+    /// Marks every statement backed by `stmt` as pending and forces it upstream, so a dropped
+    /// or re-migrated cache is not served from a stale plan.
+    fn invalidate(&mut self, stmt: &ViewCreateRequest) {
+        // Linear scan, but we shouldn't be doing it often, right?
+        self.statements
+            .iter_mut()
+            .filter_map(
+                |(
+                    _,
+                    PreparedStatement {
+                        prep,
+                        migration_state,
+                        view_request,
+                        ..
+                    },
+                )| {
+                    if matches!(*migration_state, MigrationState::Successful(_))
+                        && view_request.as_ref() == Some(stmt)
+                    {
+                        *migration_state = MigrationState::Pending;
+                        Some(prep)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .for_each(|ps| ps.make_upstream_only());
+    }
+}
+
 fn parse_query(settings: &BackendSettings, query: &str) -> ReadySetResult<SqlQuery> {
     trace!(query = %Sensitive(&query), "Parsing query");
     readyset_sql_parsing::parse_query_with_config(
@@ -1013,35 +1174,8 @@ where
     query_status_cache: &'static QueryStatusCache,
     /// A cache of all previously parsed queries
     parsed_query_cache: LruCache<String, SqlQuery>,
-    /// All queries previously prepared on noria or upstream. The position in the slab is the id to
-    /// retrieve the prepared statement.
-    prepared_statements: Slab<PreparedStatement<DB>>,
-    /// Recognised session-mutating templates indexed by prepared
-    /// statement id. The shallow-cache and proxy prepare paths null
-    /// out [`PreparedStatement::parsed_query`], so a hook that wanted
-    /// to peek at the AST at execute time would miss them. Recognise
-    /// the shape at prepare time (where the AST is still in hand)
-    /// and stash the typed template here for the execute-time
-    /// applier to consume.
-    session_mutations: HashMap<u32, SessionMutationTemplate>,
-    /// For unnamed prepared statements, we need to prepare the statement on the upstream in
-    /// order to get the types for the query. We store that metadata in `prepared_statements`,
-    /// just like regular prepared statements. The difference is that the clients are not
-    /// "reusing" that prepared statement, so we only have the query string to identify
-    /// any metadata we've previously prepared and cached. Thus this map is a link from the query
-    /// to the index of the prepared statement in `prepared_statements`.
-    ///
-    /// The query text alone does not identify a plan: an unqualified name resolves against the
-    /// session `search_path`, so the same text under a different path is a different query. Each
-    /// entry stores `(search_path, statement_id, reusable)`: the path captured at prepare time,
-    /// the memoized slot, and whether that slot is safe to reuse regardless of the connection's
-    /// current transaction state. We take the reuse fast path only for a `reusable` entry whose
-    /// path still matches; otherwise we re-plan and overwrite, mirroring how Postgres re-plans the
-    /// unnamed statement on every Parse. A plan that resolved to upstream-only may have been forced
-    /// there by a transient cache bypass (an open transaction, opportunistic read-your-writes), so
-    /// it is marked non-reusable and re-planned on the next Parse; cache-backed plans re-evaluate
-    /// the bypass at execute time and stay correct in any state.
-    unnamed_prepared_statements: HashMap<String, (Vec<SqlIdentifier>, StatementId, bool)>,
+    /// Statements this connection has prepared on noria or upstream.
+    prepared: PreparedStatements<DB>,
     /// Handle to access the cached schema catalog
     schema_handle: SchemaCatalogHandle,
     /// Process-wide allowed-users handle. Owns the map and (optionally) a sync hook that keeps
@@ -1145,7 +1279,7 @@ where
         );
         self.query_status_cache
             .set_trx_cache_policy(view_request, TrxCachePolicy::Never);
-        self.invalidate_prepared_statements_cache(view_request);
+        self.prepared.invalidate(view_request);
     }
 
     fn drop_shallow_view_request(&self, shallow: &ShallowViewRequest) {
@@ -1207,35 +1341,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Iterate over the cache of the prepared statements, and invalidate those that are
-    /// equal to the one provided
-    fn invalidate_prepared_statements_cache(&mut self, stmt: &ViewCreateRequest) {
-        // Linear scan, but we shouldn't be doing it often, right?
-        self.prepared_statements
-            .iter_mut()
-            .filter_map(
-                |(
-                    _,
-                    PreparedStatement {
-                        prep,
-                        migration_state,
-                        view_request,
-                        ..
-                    },
-                )| {
-                    if matches!(*migration_state, MigrationState::Successful(_))
-                        && view_request.as_ref() == Some(stmt)
-                    {
-                        *migration_state = MigrationState::Pending;
-                        Some(prep)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .for_each(|ps| ps.make_upstream_only());
     }
 
     fn readyset_adapter_status(&self) -> ReadySetResult<noria_connector::QueryResult<'static>> {
@@ -2602,11 +2707,12 @@ where
         event: &mut QueryExecutionEvent,
     ) -> Result<StatementId, DB::Error> {
         if matches!(statement_type, PreparedStatementType::Unnamed)
-            && let Some((path, id, reusable)) = self.state.unnamed_prepared_statements.get(query)
-            && *reusable
-            && path.as_slice() == self.connectors.noria.schema_search_path()
+            && let Some(id) = self
+                .state
+                .prepared
+                .reuse_unnamed(query, self.connectors.noria.schema_search_path())
         {
-            return Ok(*id);
+            return Ok(id);
         }
 
         let (meta, is_skip_cache) = self.plan_prepare(query, query_shallow, event).await?;
@@ -2620,45 +2726,27 @@ where
         // Postgres.
         let reusable = !matches!(prep, PrepareResultInner::Upstream(_));
 
-        let next_id = self
-            .state
-            .prepared_statements
-            .vacant_key()
-            .try_into()
-            .expect("Cannot prepare more than u32::MAX statements with a single connection");
+        let next_id = self.state.prepared.vacant_id();
         // Recognise session-mutating shapes (PostgREST's set_config
         // batch today; SET LOCAL / SET ROLE via Parse/Bind in future
         // variants) at prepare time, while the parsed AST is still
         // available -- it gets nulled out on the shallow-cache and
         // proxy paths inside `create_prepared_statement`.
-        if let Some(parsed) = parse_query(&self.settings, query).ok().as_ref()
-            && let Some(template) = session_mutation::recognize(parsed)
-        {
-            self.state.session_mutations.insert(next_id, template);
-        }
+        let session_mutation = parse_query(&self.settings, query)
+            .ok()
+            .as_ref()
+            .and_then(session_mutation::recognize);
         let prepared_statement = self.create_prepared_statement(meta, prep, next_id, is_skip_cache);
-        let statement_id = self.state.prepared_statements.insert(prepared_statement) as StatementId;
-        assert_eq!(next_id, statement_id);
+        let statement_id = self
+            .state
+            .prepared
+            .insert(prepared_statement, session_mutation);
 
         if matches!(statement_type, PreparedStatementType::Unnamed) {
-            // Key the memoized statement on the query text plus the search_path it was resolved
-            // against, and record whether the plan is reusable across transaction-state changes.
             let path = self.connectors.noria.schema_search_path().to_vec();
-            if let Some((_, superseded, _)) = self
-                .state
-                .unnamed_prepared_statements
-                .insert(query.to_string(), (path, statement_id, reusable))
-            {
-                // The unnamed slot holds one statement per query text; drop everything this Parse
-                // supersedes (a changed search_path, or a re-planned non-reusable slot) -- both the
-                // slab slot and any session-mutation template keyed by that id, mirroring
-                // `remove_statement` -- so we neither leak slab slots nor misapply a stale template
-                // to a later reused id.
-                self.state.session_mutations.remove(&superseded);
-                self.state
-                    .prepared_statements
-                    .try_remove(superseded as usize);
-            }
+            self.state
+                .prepared
+                .record_unnamed(query, path, statement_id, reusable);
         }
 
         Ok(statement_id)
@@ -2684,7 +2772,11 @@ where
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         let statement_id = result?;
-        let prepared_statement = &self.state.prepared_statements[statement_id as usize];
+        let prepared_statement = self
+            .state
+            .prepared
+            .get(statement_id)
+            .expect("prepare_inner returns a live statement id");
 
         if let Some(QueryLogMode::Verbose) = self.state.query_log_mode {
             // We only use the full query in verbose mode, so avoid cloning if we don't need to
@@ -3080,10 +3172,14 @@ where
         Self::check_routing(&self.connectors, &mut self.state).await?;
         self.state.last_query = None;
         let schema_search_path = self.connectors.noria.schema_search_path().to_vec();
+        // Taken before the statement is borrowed, since that borrow spans the dispatch below and
+        // the template is only applied afterwards. `None` for everything but the recognised
+        // session-mutating shapes.
+        let session_mutation = self.state.prepared.session_mutation(id).cloned();
         let cached_statement = self
             .state
-            .prepared_statements
-            .get_mut(id as _)
+            .prepared
+            .get_mut(id)
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
@@ -3365,7 +3461,7 @@ where
         if result.is_ok()
             && let Some(registry) = self.state.policy_registry.as_ref()
             && let Some(session) = self.connectors.session.as_ref()
-            && let Some(template) = self.state.session_mutations.get(&id)
+            && let Some(template) = session_mutation.as_ref()
         {
             session_mutation::apply(template, params, session, registry);
         }
@@ -3434,13 +3530,12 @@ where
 
     pub async fn remove_statement(&mut self, deallocate_id: DeallocateId) -> Result<(), DB::Error> {
         // in all cases, we need to call upstream.remove_statement(), but in the case
-        // of a Numeric id and it's in self.state.prepared_statements, we need to use
+        // of a Numeric id and it's in the prepared-statement registry, we need to use
         // that id instead when we call upstream.remove_statement().
         let mut dealloc_id = deallocate_id.clone();
         match deallocate_id {
             DeallocateId::Numeric(id) => {
-                self.state.session_mutations.remove(&id);
-                if let Some(statement) = self.state.prepared_statements.try_remove(id as usize) {
+                if let Some(statement) = self.state.prepared.remove(id) {
                     match statement.prep.into_upstream() {
                         Some(ur) => {
                             dealloc_id = DeallocateId::Numeric(ur.statement_id);
@@ -3454,9 +3549,7 @@ where
                 }
             }
             DeallocateId::All => {
-                self.state.prepared_statements.clear();
-                self.state.session_mutations.clear();
-                self.state.unnamed_prepared_statements.clear();
+                self.state.prepared.clear();
             }
             DeallocateId::Named(_) => {}
         }
