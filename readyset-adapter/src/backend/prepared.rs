@@ -5,7 +5,6 @@
 //! that id back, re-checks the cache bypass, and dispatches. The simple-query path shares the
 //! routing and session decisions but never enters here -- it has no handle to keep.
 
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,10 +18,8 @@ use readyset_client_metrics::{
     SqlQueryType,
 };
 use readyset_data::DfValue;
-use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
-use readyset_shallow::{CacheInsertGuard, CacheManager, CacheResult};
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
     CacheType, DiscardObject, DiscardStatement, ReadysetHintDirective, SelectStatement,
@@ -38,17 +35,12 @@ use tracing::{debug, error, warn};
 use super::noria_connector::{self, ExecuteSelectContext, NoriaConnector, PreparedSelectTypes};
 use super::routing::{ProxyState, SelectRouter, record_skip_cache};
 use super::{
-    Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult,
-    SHALLOW_CACHE_MISS, StatementId, convert_or_parse_query, log_query, parse_query,
-    parse_shallow_query,
+    Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
+    convert_or_parse_query, log_query, parse_query, parse_shallow_query,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::ManualCacheEntry;
-use crate::rls_coordinator::RlsCoordinator;
-use crate::session_context::SessionContext;
 use crate::session_mutation::{self, SessionMutationTemplate};
-use crate::shallow_key::{SessionInputValues, ShallowKey};
-use crate::shallow_refresh_pool::{ShallowRefreshPool, ShallowRefreshRequest};
 use crate::upstream_database::UpstreamPrepare;
 use crate::{QueryHandler, UpstreamDatabase};
 
@@ -1073,181 +1065,6 @@ where
         }
 
         res
-    }
-
-    /// Execute a prepared statement on upstream using the statement ID
-    #[allow(clippy::too_many_arguments)]
-    async fn execute_upstream<'a>(
-        upstream: &'a mut DB,
-        prep: &UpstreamPrepare<DB>,
-        params: &[DfValue],
-        exec_meta: &'a DB::ExecMeta,
-        shallow_exec_meta: Option<&DB::ShallowExecMeta>,
-        event: &mut QueryExecutionEvent,
-        is_fallback: bool,
-        cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
-    ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        if is_fallback {
-            event.destination = Some(QueryDestination::ReadysetThenUpstream(None));
-        } else if let Some(cache) = &cache {
-            event.reason = Some(SHALLOW_CACHE_MISS.to_string());
-            event.destination = Some(QueryDestination::ReadysetThenUpstream(
-                cache.cache_display_name(),
-            ));
-        } else {
-            event.destination = Some(QueryDestination::Upstream);
-        }
-
-        let _t = event.start_upstream_timer();
-
-        let meta = shallow_exec_meta.map_or(exec_meta, |m| m.borrow());
-        let result = upstream.execute(&prep.statement_id, params, meta).await?;
-
-        let client_exec_meta = if cache.is_some() && shallow_exec_meta.is_some() {
-            Some(exec_meta)
-        } else {
-            None
-        };
-
-        Ok(QueryResult::Upstream(result, cache, client_exec_meta))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn execute_shallow<'a>(
-        upstream: &'a mut DB,
-        shallow: &Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
-        coordinator: Option<&Arc<RlsCoordinator<DB::CacheEntry>>>,
-        session: Option<&Arc<SessionContext>>,
-        prep: &UpstreamPrepare<DB>,
-        params: &[DfValue],
-        exec_meta: &'a DB::ExecMeta,
-        event: &mut QueryExecutionEvent,
-        query_id: &QueryId,
-        query_params: &ShallowQueryParameters,
-        refresh: Option<&Arc<ShallowRefreshPool<DB>>>,
-        view_request: &ShallowViewRequest,
-        results_encoding: Encoding,
-    ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let merged = query_params.merge_params(params)?.unwrap_or_default();
-        let params_key = query_params.make_keys_from_merged(&merged)?;
-        let start = Instant::now();
-
-        // Assemble the key's session half. With no coordinator (RLS
-        // disabled) it stays empty and every cache is plain. A scoped
-        // cache whose session values cannot be resolved safely refuses;
-        // we then serve from upstream uncached rather than risk a
-        // cross-tenant entry.
-        let mut session_values = SessionInputValues::default();
-        if let Some(coordinator) = coordinator
-            && coordinator
-                .fill_rls_session_inputs(query_id, session.map(|s| s.as_ref()), &mut session_values)
-                .is_err()
-        {
-            let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
-            return Self::execute_upstream(
-                upstream,
-                prep,
-                params,
-                exec_meta,
-                Some(&shallow_exec_meta),
-                event,
-                false,
-                None,
-            )
-            .await;
-        }
-        let shallow_key = ShallowKey {
-            params: params_key,
-            session: session_values,
-            charset: results_encoding,
-        };
-
-        // An entry keyed on session state must not refresh through the
-        // session-less pool: a refresh worker has no session to resolve
-        // those values, so it would refill under a stale or bypass key.
-        // Serve such a hit without scheduling a refresh.
-        let session_keyed = !shallow_key.session.is_empty();
-
-        let res = shallow
-            .get_or_start_insert(query_id, shallow_key, DB::is_meta_compatible)
-            .await;
-
-        let cache_name = shallow
-            .get(None, Some(query_id))
-            .and_then(|cache| cache.display_name());
-
-        match res {
-            CacheResult::Hit(values) => {
-                event.readyset_event = Some(ReadysetExecutionEvent::Other {
-                    duration: start.elapsed(),
-                });
-                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
-                Ok(QueryResult::Shallow(values))
-            }
-            CacheResult::HitAndRefresh(values, cache) => {
-                event.readyset_event = Some(ReadysetExecutionEvent::Other {
-                    duration: start.elapsed(),
-                });
-                if let (false, Some(refresh)) = (session_keyed, refresh) {
-                    let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
-                    let query =
-                        query_params.literalize_from_merged(&view_request.query, &merged)?;
-
-                    let request = ShallowRefreshRequest {
-                        query_id: *query_id,
-                        path: view_request.schema_search_path.clone(),
-                        query,
-                        cache,
-                        shallow_exec_meta,
-                    };
-                    refresh.send(request).await;
-                }
-
-                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
-                Ok(QueryResult::Shallow(values))
-            }
-            CacheResult::Miss(mut cache) => {
-                let query = query_params.literalize_from_merged(&view_request.query, &merged)?;
-                let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
-
-                if let (false, Some(refresh)) = (session_keyed, refresh)
-                    && cache.is_scheduled()
-                {
-                    let callback = {
-                        let query_id = *query_id;
-                        let path = view_request.schema_search_path.clone();
-                        let query = query.clone();
-                        let shallow_exec_meta = shallow_exec_meta.clone();
-                        let refresh = refresh.clone();
-
-                        Arc::new(move |cache| {
-                            let request = ShallowRefreshRequest {
-                                query_id,
-                                path: path.clone(),
-                                query: query.clone(),
-                                cache,
-                                shallow_exec_meta: Some(shallow_exec_meta.clone()),
-                            };
-                            refresh.spawn_send(request);
-                        })
-                    };
-                    cache.schedule_refresh(callback).await;
-                }
-
-                Self::execute_upstream(
-                    upstream,
-                    prep,
-                    params,
-                    exec_meta,
-                    Some(&shallow_exec_meta),
-                    event,
-                    false,
-                    Some(cache),
-                )
-                .await
-            }
-            CacheResult::NotCached => Err(ReadySetError::NoCacheForQuery.into()),
-        }
     }
 
     /// Execute on ReadySet, and if fails execute on upstream

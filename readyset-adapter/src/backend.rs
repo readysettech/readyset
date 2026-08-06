@@ -68,7 +68,7 @@
 //! only trigger on networking related errors specifically to try to prevent this feature from
 //! being too heavy handed.
 
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
@@ -80,7 +80,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::rls_coordinator::RlsCoordinator;
 use crate::session_context::SessionContext;
-use crate::shallow_key::{SessionInputValues, ShallowKey};
+use crate::shallow_key::ShallowKey;
 use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
@@ -104,7 +104,7 @@ use readyset_errors::ReadySetError;
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
-use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, CacheResult, ContentHash};
+use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, ContentHash};
 use readyset_sql::ast::{
     self, CacheInner, CacheType, CreateCacheOptions, CreateCacheStatement, DeallocateStatement,
     DiscardObject, ReadysetHintDirective, Relation, SessionAuthorizationValue,
@@ -117,7 +117,7 @@ use readyset_sql_passes::adapter_rewrites::{
     AdapterRewriteParams, DfQueryParameters, QueryParameters, ShallowQueryParameters,
 };
 use readyset_sql_passes::shallow::{
-    ShallowCacheAllowlists, ShallowCacheEligibility, auto_cache_skip_reasons, rewrite_shallow,
+    ShallowCacheAllowlists, ShallowCacheEligibility, rewrite_shallow,
 };
 use readyset_sql_passes::{adapter_rewrites, detect_schema_references};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -145,12 +145,13 @@ mod extensions;
 pub mod noria_connector;
 mod prepared;
 mod routing;
+mod shallow;
 
 use self::noria_connector::MetaVariable;
 pub use self::noria_connector::NoriaConnector;
 use self::prepared::PreparedStatements;
 pub use self::routing::ProxyState;
-use self::routing::{SelectRouter, SessionWriteTracker, ShouldTrySelect, record_skip_cache};
+use self::routing::{SelectRouter, SessionWriteTracker, ShouldTrySelect};
 
 /// Reserved program/application name used by ReadySet components to identify internal connections
 pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
@@ -1786,6 +1787,43 @@ where
         result.map(|r| QueryResult::Upstream(r, cache, None))
     }
 
+    /// Execute a prepared statement on upstream using the statement ID
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_upstream<'a>(
+        upstream: &'a mut DB,
+        prep: &UpstreamPrepare<DB>,
+        params: &[DfValue],
+        exec_meta: &'a DB::ExecMeta,
+        shallow_exec_meta: Option<&DB::ShallowExecMeta>,
+        event: &mut QueryExecutionEvent,
+        is_fallback: bool,
+        cache: Option<CacheInsertGuard<ShallowKey, DB::CacheEntry>>,
+    ) -> Result<QueryResult<'a, DB>, DB::Error> {
+        if is_fallback {
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(None));
+        } else if let Some(cache) = &cache {
+            event.reason = Some(SHALLOW_CACHE_MISS.to_string());
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(
+                cache.cache_display_name(),
+            ));
+        } else {
+            event.destination = Some(QueryDestination::Upstream);
+        }
+
+        let _t = event.start_upstream_timer();
+
+        let meta = shallow_exec_meta.map_or(exec_meta, |m| m.borrow());
+        let result = upstream.execute(&prep.statement_id, params, meta).await?;
+
+        let client_exec_meta = if cache.is_some() && shallow_exec_meta.is_some() {
+            Some(exec_meta)
+        } else {
+            None
+        };
+
+        Ok(QueryResult::Upstream(result, cache, client_exec_meta))
+    }
+
     /// Executes query on the upstream database using the "simple query" protocol, which buffers
     /// results in memory before returning. Note that this only applies to PostgreSQL backends, and
     /// for MySQL will return an error.
@@ -1955,315 +1993,6 @@ where
                 value: cache_type.to_string(),
             },
         ])
-    }
-
-    /// Check whether a shallow cache exists for this query and should be used for routing.  If no
-    /// cache exists and a `CreateCache` hint directive is present, attempt to create one first.
-    /// Returns `(query_id, always)` when the query should be served from the shallow cache, `None`
-    /// otherwise.
-    ///
-    /// If we haven't seen this query before, add it as pending to the query status cache.
-    async fn should_query_shallow(
-        connectors: &mut BackendConnectors<DB>,
-        settings: &BackendSettings,
-        state: &mut BackendState<DB>,
-        shallow: &ShallowViewRequest,
-        shallow_orig: &str,
-        hint_directive: Option<ReadysetHintDirective>,
-    ) -> Option<(QueryId, TrxCachePolicy)> {
-        let (query_id, migration) =
-            match state.query_status_cache.try_query_migration_state(shallow) {
-                (id, Some(migration)) => (id, migration),
-                (_, None) => state.query_status_cache.insert(ShallowViewRequest::new(
-                    shallow.query.clone(),
-                    shallow.schema_search_path.clone(),
-                    Some(shallow_orig.to_string()),
-                )),
-            };
-
-        if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
-            if migration == MigrationState::Successful(CacheType::Shallow) {
-                record_skip_cache(query_id.to_string(), "shallow", "hint");
-            }
-            return None;
-        }
-        if migration != MigrationState::Successful(CacheType::Shallow) {
-            // No cache yet — try auto-creation (hint-driven or in-request-path).
-            let migration = Self::try_auto_create_shallow_cache(
-                connectors,
-                settings,
-                state,
-                shallow,
-                shallow_orig,
-                hint_directive,
-            )
-            .await;
-            if migration != Some(MigrationState::Successful(CacheType::Shallow)) {
-                return None;
-            }
-        }
-        let trx_cache_policy = state
-            .query_status_cache
-            .try_query_status(shallow)
-            .map(|status| status.trx_cache_policy)
-            .unwrap_or_default();
-        if !SelectRouter::may_serve_from_cache(
-            state.proxy_state,
-            &mut state.write_tracker,
-            trx_cache_policy,
-            "shallow",
-            true,
-            || query_id.to_string(),
-        ) {
-            return None;
-        }
-        Some((query_id, trx_cache_policy))
-    }
-
-    /// Attempt to auto-create a shallow cache via [`create_shallow_cache_core`]
-    /// and return the resulting migration state. Two triggers are supported:
-    ///
-    /// 1. An explicit `/*rs+ CREATE SHALLOW CACHE */` hint directive.
-    /// 2. Implicit in-request-path auto-creation when the adapter runs with
-    ///    `--query-caching=inrequestpath` and `--cache-mode=shallow`, mirroring
-    ///    the `create_if_missing` behaviour on the deep side.
-    async fn try_auto_create_shallow_cache(
-        connectors: &mut BackendConnectors<DB>,
-        settings: &BackendSettings,
-        state: &BackendState<DB>,
-        shallow: &ShallowViewRequest,
-        shallow_orig: &str,
-        hint_directive: Option<ReadysetHintDirective>,
-    ) -> Option<MigrationState> {
-        let (mut opts, trigger) = match hint_directive {
-            Some(ReadysetHintDirective::CreateCache(opts)) => {
-                let wants_shallow = match opts.cache_type {
-                    Some(CacheType::Shallow) => true,
-                    Some(CacheType::Deep) => false,
-                    None => settings.cache_mode.is_shallow(),
-                };
-                if !wants_shallow {
-                    return None;
-                }
-                (opts, AutoCreateTrigger::Hint)
-            }
-            None if settings.migration_mode == MigrationMode::InRequestPath
-                && settings.cache_mode.is_shallow() =>
-            {
-                (
-                    CreateCacheOptions::default(),
-                    AutoCreateTrigger::InRequestPath,
-                )
-            }
-            _ => return None,
-        };
-
-        // Filter implicit in-request-path attempts to prevent driver/ORM
-        // bootstrap traffic (system-schema introspection, session variables,
-        // non-deterministic functions) from polluting the cache.  Explicit
-        // hints opt the user in deliberately and bypass the filter.
-        //
-        // The skip set in `query_status_cache` is consulted only here, so a
-        // remembered rejection cannot block an explicit `CREATE SHALLOW
-        // CACHE` DDL or a `/*rs+ CREATE SHALLOW CACHE */` hint.
-        let query_id = QueryId::from(shallow);
-        if matches!(trigger, AutoCreateTrigger::InRequestPath) {
-            if state
-                .query_status_cache
-                .is_shallow_auto_create_skipped(query_id)
-            {
-                debug!(
-                    "Shallow cache auto-creation skipped: previously rejected by eligibility filter"
-                );
-                return None;
-            }
-            let skip_reasons = auto_cache_skip_reasons(
-                &shallow.query,
-                settings.dialect,
-                &settings.shallow_cache_eligibility,
-                &state.shallow_cache_allowlists,
-            );
-            if !skip_reasons.is_empty() {
-                let reasons = skip_reasons
-                    .iter()
-                    .map(|reason| reason.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                state
-                    .query_status_cache
-                    .record_shallow_auto_create_skip(query_id, reasons);
-                for reason in &skip_reasons {
-                    counter!(metric::SHALLOW_AUTO_CREATE_SKIPPED, "reason" => reason.reason)
-                        .increment(1);
-                }
-                debug!(
-                    ?skip_reasons,
-                    "Shallow cache auto-creation skipped: query not eligible"
-                );
-                return None;
-            }
-        }
-
-        // Caches created automatically (in-request-path or hint with no policy keyword)
-        // default to `UntilWrite` so that read-only-so-far transactions can still serve from
-        // cache. Hints that explicitly set `ALWAYS` or `UNTIL WRITE` are respected.
-        if matches!(opts.trx_cache_policy, TrxCachePolicy::Never) {
-            opts.trx_cache_policy = TrxCachePolicy::UntilWrite;
-        }
-
-        // Implicit auto-cache creation turns on adaptive refresh; hints configure it
-        // explicitly.
-        if matches!(trigger, AutoCreateTrigger::InRequestPath) {
-            opts.adaptive = true;
-        }
-
-        if !settings.allow_cache_ddl {
-            warn!(
-                trigger = trigger.as_str(),
-                "Shallow cache auto-creation skipped: cache DDL is disabled"
-            );
-            return None;
-        }
-
-        if let Err(error) = connectors.upstream_supports(shallow_orig).await {
-            warn!(
-                trigger = trigger.as_str(),
-                %error,
-                "Shallow cache auto-creation failed: upstream unsupported"
-            );
-            return None;
-        }
-
-        let (query_id, name) = Self::resolve_id_and_name(None, query_id);
-        let query_text = shallow.query.display(DB::SQL_DIALECT).to_string();
-        let ddl_stmt = build_hint_ddl_string(DB::SQL_DIALECT, &opts, &query_text);
-        let ddl_req = CacheDDLRequest {
-            unparsed_stmt: ddl_stmt,
-            schema_search_path: connectors.noria.schema_search_path().to_owned(),
-            dialect: settings.dialect.into(),
-            cache_name: None,
-        };
-
-        match Self::create_shallow_cache_core(
-            settings,
-            state,
-            query_id,
-            name,
-            shallow,
-            opts.policy,
-            opts.trx_cache_policy,
-            opts.coalesce_ms,
-            opts.adaptive,
-            ddl_req,
-            true,
-        )
-        .await
-        {
-            Ok(()) | Err(ReadySetError::ViewAlreadyExists(_)) => {}
-            Err(e) => {
-                warn!(trigger = trigger.as_str(), error = %e, "Shallow cache auto-creation failed");
-            }
-        }
-
-        state
-            .query_status_cache
-            .try_query_migration_state(shallow)
-            .1
-    }
-
-    async fn query_shallow<'a>(
-        connectors: &'a mut BackendConnectors<DB>,
-        state: &BackendState<DB>,
-        query: &'a str,
-        query_id: QueryId,
-        event: &mut QueryExecutionEvent,
-        params: ShallowQueryParameters,
-    ) -> Result<QueryResult<'a, DB>, DB::Error> {
-        let params_key = params.make_keys(&[])?;
-        let start = Instant::now();
-
-        let mut session_values = SessionInputValues::default();
-        if let Some(coordinator) = state.rls_coordinator.as_ref()
-            && coordinator
-                .fill_rls_session_inputs(
-                    &query_id,
-                    connectors.session.as_ref().map(|s| s.as_ref()),
-                    &mut session_values,
-                )
-                .is_err()
-        {
-            return Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await;
-        }
-        let shallow_key = ShallowKey {
-            params: params_key,
-            session: session_values,
-            charset: connectors.noria.results_encoding(),
-        };
-
-        // An entry keyed on session state does not refresh via the
-        // session-less pool, which has no session to resolve those values.
-        let session_keyed = !shallow_key.session.is_empty();
-
-        let res = state
-            .shallow
-            .get_or_start_insert(&query_id, shallow_key, |_| true)
-            .await;
-
-        let cache_name = state
-            .shallow
-            .get(None, Some(&query_id))
-            .and_then(|cache| cache.display_name());
-
-        match res {
-            CacheResult::Hit(values) => {
-                event.readyset_event = Some(ReadysetExecutionEvent::Other {
-                    duration: start.elapsed(),
-                });
-                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
-                Ok(QueryResult::Shallow(values))
-            }
-            CacheResult::HitAndRefresh(values, cache) => {
-                if let (false, Some(refresh)) = (session_keyed, state.shallow_refresh_pool.as_ref())
-                {
-                    let request = ShallowRefreshRequest {
-                        query_id,
-                        path: connectors.noria.schema_search_path().to_vec(),
-                        query: query.to_string(),
-                        cache,
-                        shallow_exec_meta: None,
-                    };
-                    refresh.send(request).await;
-                }
-
-                event.readyset_event = Some(ReadysetExecutionEvent::Other {
-                    duration: start.elapsed(),
-                });
-                event.destination = Some(QueryDestination::ReadysetShallow(cache_name));
-                Ok(QueryResult::Shallow(values))
-            }
-            CacheResult::Miss(mut cache) => {
-                if let (false, Some(refresh)) = (session_keyed, state.shallow_refresh_pool.as_ref())
-                    && cache.is_scheduled()
-                {
-                    let refresh = refresh.clone();
-                    let path = connectors.noria.schema_search_path().to_vec();
-                    let q = query.to_string();
-                    let callback = Arc::new(move |cache| {
-                        let req = ShallowRefreshRequest::<DB::CacheEntry, DB::ShallowExecMeta> {
-                            query_id,
-                            path: path.clone(),
-                            query: q.clone(),
-                            cache,
-                            shallow_exec_meta: None,
-                        };
-                        refresh.spawn_send(req);
-                    });
-                    cache.schedule_refresh(callback).await;
-                };
-                Self::query_fallback(connectors.upstream.as_mut(), query, event, Some(cache)).await
-            }
-            CacheResult::NotCached => Err(ReadySetError::NoCacheForQuery.into()),
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3158,25 +2887,6 @@ where
                 }
                 result
             }
-        }
-    }
-
-    fn update_shallow_support(
-        state: &BackendState<DB>,
-        shallow: &Option<ShallowViewRequest>,
-        error: Option<&DB::Error>,
-    ) {
-        if let Some(shallow) = shallow {
-            state
-                .query_status_cache
-                .with_mut_migration_state(shallow, |state| {
-                    if state.is_proxied() {
-                        *state = match error {
-                            None => MigrationState::Supported,
-                            Some(e) => MigrationState::Unsupported(e.to_string()),
-                        }
-                    }
-                });
         }
     }
 
