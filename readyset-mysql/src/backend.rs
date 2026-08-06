@@ -8,6 +8,7 @@ use std::ops::{Deref, DerefMut};
 use itertools::{izip, Itertools};
 use metrics::counter;
 use mysql_async::consts::StatusFlags;
+use mysql_common::collations::{Collation, CollationId};
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, MsqlSrvError, MySqlShim, QueryResultWriter,
     QueryResultsResponse, RowWriter, StatementMetaWriter,
@@ -329,6 +330,16 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
         writer.end_row().await?;
     }
     writer.set_status_flags(status_flags).finish().await
+}
+
+/// Map a client handshake collation id to the upstream session charset and collation names it
+/// implies under MySQL's SET NAMES semantics. The names come from the mysql_common collation
+/// registry, never from client input. Return `None` for unknown ids and unsupported charsets,
+/// which leave the upstream session at its defaults.
+fn handshake_connection_charset(collation_id: u16) -> Option<(&'static str, &'static str)> {
+    Encoding::from_mysql_collation_id(collation_id).mysql_character_set_name()?;
+    let collation = Collation::resolve(CollationId::from(collation_id));
+    Some((collation.charset, collation.collation))
 }
 
 pub struct Backend {
@@ -932,22 +943,18 @@ where
             "charset" => charset.to_string(),
         )
         .increment(1);
-        let encoding = readyset_data::encoding::Encoding::from_mysql_collation_id(charset);
-        let prev = self.noria.connectors.noria.client_encoding();
+        let encoding = Encoding::from_mysql_collation_id(charset);
+        // The collation id a client advertises has SET NAMES semantics in MySQL, so forward
+        // the charset and collation it names to the upstream session. Adopt the encodings
+        // locally only if the upstream accepted them.
+        if let Some((charset, collation)) = handshake_connection_charset(charset) {
+            self.noria
+                .set_upstream_connection_charset(charset, collation)
+                .await
+                .map_err(io::Error::other)?;
+        }
         self.noria.connectors.noria.set_results_encoding(encoding);
         self.noria.connectors.noria.set_client_encoding(encoding);
-        // Mirror the client's charset to the upstream session's character_set_results so proxied
-        // result rows come back in the client's charset. Skip the common case where the charset
-        // stays at the utf8mb4 default. Unsupported charsets (no name) leave the upstream at
-        // utf8mb4 as before.
-        if encoding != Encoding::Utf8 || prev != Encoding::Utf8 {
-            if let Some(name) = encoding.mysql_character_set_name() {
-                self.noria
-                    .set_upstream_results_character_set(name)
-                    .await
-                    .map_err(io::Error::other)?;
-            }
-        }
         Ok(())
     }
 
@@ -1085,5 +1092,23 @@ mod tests {
             Backend::flags_from_proxy_state(ProxyState::AutocommitOff),
             tx
         );
+    }
+
+    #[test]
+    fn handshake_connection_charset_by_collation_id() {
+        for (id, expected) in [
+            (8, Some(("latin1", "latin1_swedish_ci"))),
+            (33, Some(("utf8mb3", "utf8mb3_general_ci"))),
+            (45, Some(("utf8mb4", "utf8mb4_general_ci"))),
+            (46, Some(("utf8mb4", "utf8mb4_bin"))),
+            (63, Some(("binary", "binary"))),
+            (255, Some(("utf8mb4", "utf8mb4_0900_ai_ci"))),
+            // An id unknown to mysql_common.
+            (1042, None),
+            // A charset without a registered conversion table (gbk_chinese_ci).
+            (28, None),
+        ] {
+            assert_eq!(super::handshake_connection_charset(id), expected, "{id}");
+        }
     }
 }

@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use mysql_async::prelude::{FromRow, Queryable};
 use pretty_assertions::assert_eq;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 use readyset_adapter::backend::MigrationMode;
 use readyset_client_metrics::QueryDestination;
@@ -784,6 +786,137 @@ async fn test_set_collation_connection_proxied_and_still_cached() {
         QueryDestination::Readyset(..)
     );
     assert_eq!(rows, vec![(1, "abc".to_string())]);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A minimal raw MySQL client for advertising a handshake collation byte mysql_async cannot
+/// send (it always negotiates utf8mb4). Trimmed from the copy in encoding_mysql.rs; a third
+/// copy should trigger extraction into readyset-client-test-helpers.
+struct RawConn {
+    stream: TcpStream,
+}
+
+impl RawConn {
+    async fn read_packet(&mut self) -> (u8, Vec<u8>) {
+        let mut header = [0u8; 4];
+        self.stream.read_exact(&mut header).await.unwrap();
+        let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+        let mut payload = vec![0u8; len];
+        self.stream.read_exact(&mut payload).await.unwrap();
+        (header[3], payload)
+    }
+
+    async fn write_packet(&mut self, seq: u8, payload: &[u8]) {
+        let mut buf = Vec::with_capacity(4 + payload.len());
+        buf.extend_from_slice(&(payload.len() as u32).to_le_bytes()[..3]);
+        buf.push(seq);
+        buf.extend_from_slice(payload);
+        self.stream.write_all(&buf).await.unwrap();
+    }
+
+    /// Connect and complete a handshake advertising the given charset (a collation id).
+    async fn connect_with_charset(opts: &mysql_async::Opts, charset: u8) -> Self {
+        const CLIENT_CONNECT_WITH_DB: u32 = 0x0000_0008;
+        const CLIENT_PROTOCOL_41: u32 = 0x0000_0200;
+        const CLIENT_SECURE_CONNECTION: u32 = 0x0000_8000;
+        const CLIENT_PLUGIN_AUTH: u32 = 0x0008_0000;
+
+        let stream = TcpStream::connect((opts.ip_or_hostname(), opts.tcp_port()))
+            .await
+            .unwrap();
+        let mut conn = RawConn { stream };
+        let (seq, _server_handshake) = conn.read_packet().await;
+
+        let mut capabilities = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
+        if opts.db_name().is_some() {
+            capabilities |= CLIENT_CONNECT_WITH_DB;
+        }
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&capabilities.to_le_bytes());
+        payload.extend_from_slice(&(16u32 << 20).to_le_bytes()); // max packet size
+        payload.push(charset);
+        payload.extend_from_slice(&[0u8; 23]);
+        payload.extend_from_slice(opts.user().unwrap_or("root").as_bytes());
+        payload.push(0);
+        // Authentication is disabled in the test harness; any non-empty scramble is accepted.
+        payload.push(20);
+        payload.extend_from_slice(&[1u8; 20]);
+        if let Some(db) = opts.db_name() {
+            payload.extend_from_slice(db.as_bytes());
+            payload.push(0);
+        }
+        payload.extend_from_slice(b"mysql_native_password\0");
+        conn.write_packet(seq + 1, &payload).await;
+
+        let (_, response) = conn.read_packet().await;
+        assert_eq!(
+            response.first(),
+            Some(&0x00),
+            "handshake should succeed: {response:?}"
+        );
+        conn
+    }
+
+    /// Send a COM_QUERY with the given raw statement bytes and return the raw payloads of any
+    /// result row packets (empty for an OK response).
+    async fn query_raw(&mut self, statement: &[u8]) -> Vec<Vec<u8>> {
+        let mut payload = Vec::with_capacity(statement.len() + 1);
+        payload.push(0x03); // COM_QUERY
+        payload.extend_from_slice(statement);
+        self.write_packet(0, &payload).await;
+
+        let (_, first) = self.read_packet().await;
+        match first.first() {
+            Some(0x00) => return Vec::new(),
+            Some(0xFF) => panic!("query failed: {}", String::from_utf8_lossy(&first[9..])),
+            _ => {}
+        }
+        // A result set: `first` holds the column count; column definitions follow, terminated
+        // by EOF, then row packets, terminated by EOF.
+        for _ in 0..first[0] {
+            self.read_packet().await;
+        }
+        let (_, eof) = self.read_packet().await;
+        assert_eq!(eof.first(), Some(&0xFE), "expected EOF after column defs");
+        let mut rows = Vec::new();
+        loop {
+            let (_, packet) = self.read_packet().await;
+            if packet.first() == Some(&0xFE) && packet.len() < 9 {
+                return rows;
+            }
+            rows.push(packet);
+        }
+    }
+}
+
+/// Extract the value of a single-column text-protocol row, assuming a value under 251 bytes.
+fn single_text_column(row: &[u8]) -> &[u8] {
+    let len = row[0] as usize;
+    assert_eq!(row.len(), len + 1, "expected a one-column row: {row:?}");
+    &row[1..]
+}
+
+/// The utf8mb4_bin collation id.
+const UTF8MB4_BIN_COLLATION: u8 = 46;
+
+/// A handshake advertising utf8mb4_bin must reach the upstream session, so a proxied
+/// SELECT @@collation_connection reports it, matching a direct MySQL connection.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_handshake_collation_byte_upstream_fidelity() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8MB4_BIN_COLLATION).await;
+    let rows = raw.query_raw(b"SELECT @@collation_connection").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), b"utf8mb4_bin");
 
     shutdown_tx.shutdown().await;
 }

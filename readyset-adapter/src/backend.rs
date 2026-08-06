@@ -1739,14 +1739,16 @@ where
             .get_or_insert_with(|| readyset_schema.session()))
     }
 
-    /// Set the session's `character_set_results` on the upstream connection, if one exists, so
-    /// proxied result rows come back in the client's charset
-    pub async fn set_upstream_results_character_set(
+    /// Set the session's connection charset and collation on the upstream connection, if one
+    /// exists, so proxied literal semantics, result metadata, and result rows follow the
+    /// client's charset
+    pub async fn set_upstream_connection_charset(
         &mut self,
         charset: &str,
+        collation: &str,
     ) -> Result<(), DB::Error> {
         if let Some(upstream) = self.connectors.upstream.as_mut() {
-            upstream.set_results_character_set(charset).await?;
+            upstream.set_connection_charset(charset, collation).await?;
         }
         Ok(())
     }

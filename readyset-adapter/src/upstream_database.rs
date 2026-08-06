@@ -321,6 +321,18 @@ pub trait UpstreamDatabase: Sized + Send {
         Ok(())
     }
 
+    /// Set the session's connection charset and collation on the upstream connection so
+    /// proxied literal semantics, result metadata, and result rows follow the client's
+    /// charset. The default implementation is a no-op for upstreams without that concept
+    /// (PostgreSQL).
+    async fn set_connection_charset(
+        &mut self,
+        _charset: &str,
+        _collation: &str,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;
 
     async fn lower_case_database_names(&mut self) -> Result<bool, Self::Error>;
@@ -351,6 +363,9 @@ pub struct LazyUpstream<U> {
     /// The session's results charset, replayed onto the underlying connection whenever one is
     /// established so reconnects keep returning proxied results in the client's charset.
     pending_results_charset: Option<String>,
+    /// The session's connection charset and collation, replayed onto the underlying connection
+    /// whenever one is established so reconnects keep the client's charset semantics.
+    pending_connection_charset: Option<(String, String)>,
 }
 
 impl<U> From<UpstreamConfig> for LazyUpstream<U> {
@@ -362,6 +377,7 @@ impl<U> From<UpstreamConfig> for LazyUpstream<U> {
             password: None,
             interactive: false,
             pending_results_charset: None,
+            pending_connection_charset: None,
         }
     }
 }
@@ -379,6 +395,9 @@ where
             self.interactive,
         )
         .await?;
+        if let Some((charset, collation)) = &self.pending_connection_charset {
+            upstream.set_connection_charset(charset, collation).await?;
+        }
         if let Some(charset) = &self.pending_results_charset {
             upstream.set_results_character_set(charset).await?;
         }
@@ -427,6 +446,7 @@ where
             password,
             interactive,
             pending_results_charset: None,
+            pending_connection_charset: None,
         })
     }
 
@@ -453,7 +473,12 @@ where
         self.upstream()
             .await?
             .change_user(user, password, database)
-            .await
+            .await?;
+        // COM_CHANGE_USER resets the upstream session's charset state to its connection
+        // defaults. The client's post-change-user charset re-forwards through set_charset.
+        self.pending_results_charset = None;
+        self.pending_connection_charset = None;
+        Ok(())
     }
 
     async fn ping(&mut self) -> Result<(), Self::Error> {
@@ -465,7 +490,12 @@ where
     }
 
     async fn reset(&mut self) -> Result<(), Self::Error> {
-        self.upstream().await?.reset().await
+        self.upstream().await?.reset().await?;
+        // COM_RESET_CONNECTION resets the upstream session's charset state to its connection
+        // defaults.
+        self.pending_results_charset = None;
+        self.pending_connection_charset = None;
+        Ok(())
     }
 
     fn database(&self) -> Option<&str> {
@@ -561,6 +591,22 @@ where
         self.pending_results_charset = Some(charset.to_string());
         if let Some(u) = &mut self.upstream {
             u.set_results_character_set(charset).await?;
+        }
+        Ok(())
+    }
+
+    async fn set_connection_charset(
+        &mut self,
+        charset: &str,
+        collation: &str,
+    ) -> Result<(), Self::Error> {
+        let pending = (charset.to_string(), collation.to_string());
+        if self.pending_connection_charset.as_ref() == Some(&pending) {
+            return Ok(());
+        }
+        self.pending_connection_charset = Some(pending);
+        if let Some(u) = &mut self.upstream {
+            u.set_connection_charset(charset, collation).await?;
         }
         Ok(())
     }

@@ -725,6 +725,25 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
+    async fn set_connection_charset(
+        &mut self,
+        charset: &str,
+        collation: &str,
+    ) -> Result<(), Self::Error> {
+        // The names come from the mysql_common collation registry, never from client input, so
+        // splicing them into the statement is safe. Readyset decodes client bytes and sends
+        // UTF-8 statement text upstream, so the upstream's character_set_client must stay
+        // utf8mb4. SET options apply left to right, which lets a trailing assignment restore
+        // it within the same statement.
+        self.conn
+            .query_drop(format!(
+                "SET NAMES '{charset}' COLLATE '{collation}', \
+                 @@SESSION.character_set_client = 'utf8mb4'"
+            ))
+            .await?;
+        Ok(())
+    }
+
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
         let result = self.conn.query_iter(query).await?;
         handle_query_result!(result)
