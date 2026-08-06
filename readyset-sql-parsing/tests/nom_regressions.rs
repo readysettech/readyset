@@ -1817,6 +1817,7 @@ fn types() {
     check_parse_type_both!("character varying(20)");
     check_parse_type_both!("character(16)");
     check_parse_type_both!("time without time zone");
+    check_parse_type_postgres!("regclass");
     check_parse_type_postgres!("unsupportedtype");
     check_parse_type_postgres!("foo.custom");
     check_parse_type_postgres!("int[]");

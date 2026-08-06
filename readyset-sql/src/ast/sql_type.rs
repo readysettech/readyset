@@ -259,7 +259,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             }),
             JSON => Ok(Self::Json),
             JSONB => Ok(Self::Jsonb),
-            Regclass => unsupported!("REGCLASS type"),
+            Regclass => Ok(Self::Other("regclass".into())),
             String(_) => not_yet_implemented!("STRING type"),
             Collate(..) => unsupported!("COLLATE in a data type"),
             FixedString(_) => unsupported!("FIXEDSTRING type"),
