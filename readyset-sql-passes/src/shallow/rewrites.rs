@@ -1424,4 +1424,72 @@ mod tests {
             );
         }
     }
+
+    mod key_recollation {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        use test_strategy::proptest;
+        use test_utils::tags;
+
+        use super::*;
+
+        fn keys_for(sql: &str) -> Vec<DfValue> {
+            let dialect = Dialect::MySQL;
+            let mut query = parse_query(dialect, sql);
+            let flags = AdapterRewriteParams::new(dialect);
+            let processed = rewrite_shallow(&mut query, flags).unwrap();
+            processed.make_keys(&[]).unwrap()
+        }
+
+        fn hash_of(keys: &[DfValue]) -> u64 {
+            let mut h = DefaultHasher::new();
+            keys.hash(&mut h);
+            h.finish()
+        }
+
+        #[test]
+        fn case_distinct_literals_key_distinctly() {
+            let lower = keys_for("SELECT * FROM t WHERE x = 'abc'");
+            let upper = keys_for("SELECT * FROM t WHERE x = 'ABC'");
+            assert_ne!(lower, upper);
+            assert_ne!(hash_of(&lower), hash_of(&upper));
+        }
+
+        #[test]
+        fn byte_identical_literals_key_equally() {
+            let a = keys_for("SELECT * FROM t WHERE x = 'abc'");
+            let b = keys_for("SELECT * FROM t WHERE x = 'abc'");
+            assert_eq!(a, b);
+            assert_eq!(hash_of(&a), hash_of(&b));
+        }
+
+        #[test]
+        fn case_distinct_in_values_not_deduped() {
+            let keys = keys_for("SELECT * FROM t WHERE x IN ('abc', 'ABC')");
+            assert_eq!(keys.len(), 1);
+            assert_eq!(
+                keys[0],
+                DfValue::from(vec![DfValue::from("ABC"), DfValue::from("abc")])
+            );
+        }
+
+        #[tags(no_retry)]
+        #[proptest]
+        fn keys_equal_iff_strings_byte_equal(a: String, b: String) {
+            let keys_for = |s: &str| {
+                ShallowQueryParameters::new(
+                    Dialect::MySQL,
+                    None,
+                    vec![(0, Literal::String(s.into()))],
+                    vec![],
+                )
+                .make_keys(&[])
+                .unwrap()
+            };
+            for other in [b, a.to_uppercase(), a.clone()] {
+                assert_eq!(keys_for(&a) == keys_for(&other), a == other);
+            }
+        }
+    }
 }

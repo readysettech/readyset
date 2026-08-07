@@ -11,7 +11,7 @@ use std::{iter, mem};
 pub use autoparam_exclusions::{derive_frozen, wrap_autoparam_exclusions};
 pub use autoparameterize::auto_parameterize_query;
 use itertools::{Either, Itertools, repeat_n};
-use readyset_data::{DfType, DfValue};
+use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal, internal_err, invalid_query_err, unsupported,
 };
@@ -610,6 +610,41 @@ where
     }
 }
 
+/// True if [`recollate_binary`] would change the value, i.e. it is or contains text whose
+/// collation is not already [`Collation::Binary`].
+fn needs_binary_recollation(value: &DfValue) -> bool {
+    match value {
+        DfValue::Text(..) | DfValue::TinyText(..) => value.collation() != Some(Collation::Binary),
+        DfValue::Array(array) => array.values().any(needs_binary_recollation),
+        _ => false,
+    }
+}
+
+/// Re-collate text values to [`Collation::Binary`], recursing into arrays, so that shallow cache
+/// key equality and hashing are byte-exact under `DfValue`'s collation-aware `Eq` and `Hash`.
+///
+/// Values already at the target collation are cloned cheaply without rebuilding.
+fn recollate_binary(value: &DfValue) -> DfValue {
+    if !needs_binary_recollation(value) {
+        return value.clone();
+    }
+    match value {
+        DfValue::Text(..) | DfValue::TinyText(..) => {
+            let s = <&str>::try_from(value).expect("text variants convert to &str");
+            DfValue::from_str_and_collation(s, Collation::Binary)
+        }
+        DfValue::Array(array) => {
+            let mut array = array.as_ref().clone();
+            for v in array.values_mut() {
+                let recollated = recollate_binary(v);
+                *v = recollated;
+            }
+            DfValue::from(array)
+        }
+        _ => value.clone(),
+    }
+}
+
 impl ShallowQueryParameters {
     /// Creates a new `ShallowQueryParameters` instance.
     pub fn new(
@@ -660,13 +695,19 @@ impl ShallowQueryParameters {
     ///
     /// Collects IN clause values into `DfValue::Array` parameters and sorts them for
     /// consistent cache keys.
+    ///
+    /// Text values are re-collated to [`Collation::Binary`] so key equality and hashing are
+    /// byte-exact. Auto-parameterized literals get the dialect's default collation, whose
+    /// equivalence classes (such as case insensitivity) must not merge distinct cache keys.
     pub fn make_keys_from_merged(&self, merged: &[DfValue]) -> ReadySetResult<Vec<DfValue>> {
         if merged.is_empty() {
             return Ok(vec![]);
         }
 
+        let merged: Vec<DfValue> = merged.iter().map(recollate_binary).collect();
+
         if self.in_array_params.is_empty() {
-            return Ok(merged.to_vec());
+            return Ok(merged);
         }
 
         debug_assert!(

@@ -1085,61 +1085,51 @@ async fn setup_shallow(
     (conn, upstream_conn, handle, shutdown_tx)
 }
 
-/// On a case-insensitive column, case-distinct literals sharing one shallow entry is correct
-/// dedup. The second literal hits the entry filled by the first and matches the upstream.
+/// Text-protocol literals on a case-sensitive column must key distinct shallow entries.
+/// After `WHERE t = 'abc'` fills, `WHERE t = 'ABC'` must return row 2 as the upstream does.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql, modern)]
-async fn test_shallow_case_distinct_literals_shared_on_ai_ci_column() {
+async fn test_shallow_case_distinct_literals_not_shared_on_cs_column() {
     let (mut conn, mut upstream_conn, _handle, shutdown_tx) =
-        setup_shallow("utf8mb4_0900_ai_ci").await;
+        setup_shallow("utf8mb4_0900_as_cs").await;
 
-    // Fill and confirm the 'abc' entry. Under ai_ci both rows match.
-    let mut expected: Vec<(i64, String)> = upstream_conn
+    // Fill and confirm the 'abc' entry.
+    let rows: Vec<(i64, String)> = conn
         .query("SELECT id, t FROM coll_shallow WHERE t = 'abc'")
         .await
         .unwrap();
-    expected.sort();
-    let mut rows: Vec<(i64, String)> = conn
-        .query("SELECT id, t FROM coll_shallow WHERE t = 'abc'")
-        .await
-        .unwrap();
-    rows.sort();
-    assert_eq!(rows, expected);
+    assert_eq!(rows, vec![(1, "abc".to_string())]);
     assert_matches!(
         last_query_info(&mut conn).await.destination,
         QueryDestination::ReadysetThenUpstream(..)
     );
     eventually!(run_test: {
-        let mut rows: Vec<(i64, String)> = conn
+        let rows: Vec<(i64, String)> = conn
             .query("SELECT id, t FROM coll_shallow WHERE t = 'abc'")
             .await
             .unwrap();
-        rows.sort();
         let info = last_query_info(&mut conn).await;
         AssertUnwindSafe(move || (info, rows))
     }, then_assert: |result| {
         let (info, rows) = result();
         assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
-        assert_eq!(rows, expected);
+        assert_eq!(rows, vec![(1, "abc".to_string())]);
     });
 
-    // 'ABC' is collation-equal to 'abc', so it hits the same entry with the same (correct)
-    // rows the upstream returns.
+    // On the case-sensitive column the upstream returns only row 2. Whether Readyset serves
+    // this as a miss or from a collation-aware entry is immaterial; the rows must match.
     let mut expected: Vec<(i64, String)> = upstream_conn
         .query("SELECT id, t FROM coll_shallow WHERE t = 'ABC'")
         .await
         .unwrap();
     expected.sort();
+    assert_eq!(expected, vec![(2, "ABC".to_string())]);
     let mut rows: Vec<(i64, String)> = conn
         .query("SELECT id, t FROM coll_shallow WHERE t = 'ABC'")
         .await
         .unwrap();
     rows.sort();
-    assert_matches!(
-        last_query_info(&mut conn).await.destination,
-        QueryDestination::ReadysetShallow(..)
-    );
     assert_eq!(rows, expected);
 
     shutdown_tx.shutdown().await;

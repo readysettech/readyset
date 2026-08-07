@@ -28,7 +28,10 @@ sqlparser = { workspace = true, features = ["visitor"] }
 [dev-dependencies]
 criterion = { workspace = true }
 pretty_assertions = { workspace = true }
+proptest = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
+test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [[bench]]
 name = "adapter_rewrites"
