@@ -978,6 +978,10 @@ const CHAOS_FAILPOINTS: &[(&str, &str)] = &[
         "1*return(1000)",
     ),
     (
+        failpoints::CONTROLLER_EVENTS_SUBSCRIBE_WINDOW,
+        "1*sleep(50)",
+    ),
+    (
         failpoints::SCHEMA_CATALOG_SYNCHRONIZER_DELAY,
         "1*sleep(2000)",
     ),

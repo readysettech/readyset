@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 
+use failpoint_macros::set_failpoint;
 use readyset_client::events::ControllerEvent;
 use readyset_errors::ReadySetResult;
 use schema_catalog::{SchemaCatalog, SchemaCatalogUpdate};
@@ -7,72 +8,40 @@ use tokio::{
     select,
     sync::broadcast::{self, error::RecvError},
 };
-use tracing::warn;
 
 /// Default interval in seconds between heartbeat events sent to keep SSE connections alive.
 const DEFAULT_HEARTBEAT_INTERVAL_SECS: &str = "5";
 
 /// Handle for broadcasting controller events and providing schema catalog snapshots to new
 /// SSE subscribers.
-///
-/// ## Lock ordering
-///
-/// `events_tx` and `latest_catalog` are independent [`std::sync::RwLock`]s. To prevent deadlocks:
-///
-/// - Never hold write locks on both simultaneously.
-/// - [`Self::subscribe_with_snapshot`] acquires `events_tx` read, then `latest_catalog` read
-///   (both are read locks, so no deadlock risk with each other or with writers on either lock
-///   individually).
-/// - [`Self::send_schema_catalog_update`] acquires `events_tx` read, then `latest_catalog` write
-///   in a scoped block, then sends on the channel (all while holding the `events_tx` read guard,
-///   so [`Self::stop`] cannot interleave).
-/// - [`Self::stop`] acquires `events_tx` write, drops it, then acquires `latest_catalog` write.
 #[derive(Debug, Clone)]
 pub(crate) struct EventsHandle {
-    /// A broadcast channel for sending events to all connected clients.
+    /// The broadcast channel for sending events to all connected clients, paired with the most
+    /// recent complete [`SchemaCatalog`]. One lock covers both, so a subscriber's snapshot is
+    /// never newer than the updates queued behind it.
     ///
-    /// [`None`] if this node is not the leader, or there is no leader.
-    events_tx: Arc<RwLock<Option<broadcast::Sender<ControllerEvent>>>>,
-    /// The most recent complete [`SchemaCatalog`], or [`None`] if this node is not the leader.
-    /// Stored as the full catalog (not as an update event) so the type system guarantees we never
-    /// accidentally store a delta. Provided as a snapshot to new SSE subscribers so they don't
-    /// miss events that were broadcast before they connected.
-    ///
-    /// The inner [`Arc`] allows [`Self::subscribe_with_snapshot`] to hand out a reference without
-    /// deep-cloning the catalog under the lock.
-    ///
-    /// Set to [`Some`] by [`Self::start`] with the catalog from the current dataflow state, kept
-    /// up to date by [`Self::send_schema_catalog_update`], and cleared by [`Self::stop`].
-    latest_catalog: Arc<RwLock<Option<Arc<SchemaCatalog>>>>,
+    /// [`None`] if this node is not the leader, or there is no leader. Set by [`Self::start`],
+    /// kept up to date by [`Self::send_schema_catalog_update`], and cleared by [`Self::stop`].
+    inner: Arc<RwLock<Option<(broadcast::Sender<ControllerEvent>, Arc<SchemaCatalog>)>>>,
 }
 
 impl EventsHandle {
     pub fn new() -> Self {
         Self {
-            events_tx: Arc::new(RwLock::new(None)),
-            latest_catalog: Arc::new(RwLock::new(None)),
+            inner: Arc::new(RwLock::new(None)),
         }
     }
 
     /// Initialize the events handle with a broadcast channel and the current schema catalog.
     /// Should only be called by the leader, and only once per election.
     pub(super) fn start(&self, initial_catalog: SchemaCatalog) {
-        debug_assert!(self
-            .events_tx
-            .read()
-            .expect("events_tx lock poisoned")
-            .is_none());
-        let initial_catalog = Arc::new(initial_catalog);
-        {
-            let mut guard = self
-                .latest_catalog
-                .write()
-                .expect("latest_catalog lock poisoned");
-            *guard = Some(initial_catalog);
-        }
         let (events_tx, mut events_rx) =
             broadcast::channel(readyset_client::events::BROADCAST_CHANNEL_CAPACITY);
-        *self.events_tx.write().expect("events_tx lock poisoned") = Some(events_tx);
+        {
+            let mut inner = self.inner.write().expect("events lock poisoned");
+            debug_assert!(inner.is_none());
+            *inner = Some((events_tx, Arc::new(initial_catalog)));
+        }
         // Spawn a heartbeat task to keep HTTP connections alive (arguably should live in the HTTP
         // server, not here, but I like that code not knowing anything about particular events)
         let heartbeat_interval = std::time::Duration::from_secs(
@@ -103,53 +72,23 @@ impl EventsHandle {
     /// subscribers and removing the inner [`broadcast::Sender`]. Clears the catalog snapshot to
     /// free memory; it will be re-initialized on the next [`Self::start`].
     pub(super) fn stop(&self) {
-        let mut events_tx = self.events_tx.write().expect("events_tx lock poisoned");
-        if let Some(tx) = events_tx.take() {
+        if let Some((events_tx, _)) = self.inner.write().expect("events lock poisoned").take() {
             // This can only be an error if there are no active receivers; we don't care about that,
             // so ignore it.
-            let _ = tx.send(ControllerEvent::LeaderLost);
+            let _ = events_tx.send(ControllerEvent::LeaderLost);
         }
-        drop(events_tx);
-        *self
-            .latest_catalog
-            .write()
-            .expect("latest_catalog lock poisoned") = None;
     }
 
     /// Subscribe to controller events, if we are the leader. Otherwise, return `None`.
     ///
-    /// Returns a `(receiver, catalog)` pair. The catalog is the most recent complete
-    /// [`SchemaCatalog`]. The receiver is subscribed **before** reading the catalog, so for any
-    /// schema catalog update E:
-    ///
-    /// - If E was sent before subscribe: E (or a later value) is in the catalog.
-    /// - If E was sent after subscribe: the receiver captures it.
-    /// - Overlap (E in both): deduplicated by the adapter's `apply_update()`.
-    ///
-    /// Holding the `events_tx` read guard across both the subscribe and the catalog read
-    /// prevents [`Self::stop`] from clearing the catalog between the two operations, because
-    /// `stop` needs a write lock on `events_tx` which is blocked by the active read guard.
+    /// Returns a receiver and latest [`SchemaCatalog`]; each catalog update reaches exactly one.
     pub fn subscribe_with_snapshot(
         &self,
     ) -> Option<(broadcast::Receiver<ControllerEvent>, Arc<SchemaCatalog>)> {
-        let events_tx = self.events_tx.read().expect("events_tx lock poisoned");
-        let receiver = events_tx.as_ref().map(|tx| tx.subscribe())?;
-        let catalog = match self
-            .latest_catalog
-            .read()
-            .expect("latest_catalog lock poisoned")
-            .clone()
-        {
-            Some(c) => c,
-            None => {
-                warn!(
-                    "events_tx is Some but latest_catalog is None; \
-                     bug in start/stop lifecycle"
-                );
-                return None;
-            }
-        };
-        Some((receiver, catalog))
+        let inner = self.inner.read().expect("events lock poisoned");
+        let (events_tx, catalog) = inner.as_ref()?;
+        set_failpoint!(readyset_util::failpoints::CONTROLLER_EVENTS_SUBSCRIBE_WINDOW);
+        Some((events_tx.subscribe(), Arc::clone(catalog)))
     }
 
     /// Send a non-catalog event to all active subscribers. Does nothing if we are not the leader.
@@ -167,27 +106,16 @@ impl EventsHandle {
     /// Serialize `catalog` into a [`SchemaCatalogUpdate`], store the full catalog as the snapshot
     /// for new subscribers, and broadcast the update event. Does nothing if we are not the leader.
     pub(super) fn send_schema_catalog_update(&self, catalog: SchemaCatalog) -> ReadySetResult<()> {
-        // Serialize before acquiring the lock — serialization is pure and doesn't need events_tx,
-        // so keeping it outside the critical section avoids blocking stop() during bincode+base64.
+        // Serialize before taking the lock: it's the slow part and touches no shared state.
         let update = SchemaCatalogUpdate::try_from(&catalog)?;
-        let events_tx = self.events_tx.read().expect("events_tx lock poisoned");
-        let Some(tx) = events_tx.as_ref() else {
+        let mut inner = self.inner.write().expect("events lock poisoned");
+        let Some((events_tx, latest_catalog)) = inner.as_mut() else {
             return Ok(());
         };
-        // Store the snapshot *before* broadcasting so that any subscriber created after the
-        // broadcast but before the next update still sees this catalog via
-        // `subscribe_with_snapshot()`.
-        let catalog = Arc::new(catalog);
-        {
-            let mut guard = self
-                .latest_catalog
-                .write()
-                .expect("latest_catalog lock poisoned");
-            *guard = Some(catalog);
-        }
+        *latest_catalog = Arc::new(catalog);
         // This can only be an error if there are no active receivers; we don't care about that,
         // so ignore it.
-        let _ = tx.send(ControllerEvent::SchemaCatalogUpdate(update));
+        let _ = events_tx.send(ControllerEvent::SchemaCatalogUpdate(update));
         Ok(())
     }
 
@@ -195,7 +123,7 @@ impl EventsHandle {
     fn broadcast(&self, event: ControllerEvent) {
         // Use fail::eval instead of set_failpoint! so we can sleep *outside* the lock scope.
         // The fail crate's built-in sleep action uses std::thread::sleep, which would block the
-        // tokio worker thread while holding the events_tx read lock.
+        // tokio worker thread while holding the events read lock.
         // Configure with "return(delay_ms)" to trigger, e.g. "1*return(3000)".
         #[cfg(feature = "failure_injection")]
         if let Some(delay_ms) = fail::eval(
@@ -208,11 +136,11 @@ impl EventsHandle {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
 
-        let events_tx = self.events_tx.read().expect("events_tx lock poisoned");
-        if let Some(tx) = events_tx.as_ref() {
+        let inner = self.inner.read().expect("events lock poisoned");
+        if let Some((events_tx, _)) = inner.as_ref() {
             // This can only be an error if there are no active receivers; we don't care about
             // that, so ignore it.
-            let _ = tx.send(event);
+            let _ = events_tx.send(event);
         }
     }
 }
@@ -236,7 +164,7 @@ mod tests {
         let events_handle = EventsHandle::new();
 
         // There should be no events transmitter before start
-        assert!(events_handle.events_tx.read().unwrap().is_none());
+        assert!(events_handle.inner.read().unwrap().is_none());
 
         // Subscribe should return None when not started
         assert!(events_handle.subscribe_with_snapshot().is_none());
@@ -251,7 +179,7 @@ mod tests {
 
         events_handle.start(test_catalog(1));
 
-        assert!(events_handle.events_tx.read().unwrap().is_some());
+        assert!(events_handle.inner.read().unwrap().is_some());
 
         let (receiver, _) = events_handle
             .subscribe_with_snapshot()
@@ -354,14 +282,14 @@ mod tests {
         let cloned_handle = events_handle.clone();
 
         // Both should refer to the same underlying channel
-        assert!(events_handle.events_tx.read().unwrap().is_none());
-        assert!(cloned_handle.events_tx.read().unwrap().is_none());
+        assert!(events_handle.inner.read().unwrap().is_none());
+        assert!(cloned_handle.inner.read().unwrap().is_none());
 
         events_handle.start(test_catalog(1));
 
         // Both should have a channel after starting on one handle
-        assert!(events_handle.events_tx.read().unwrap().is_some());
-        assert!(cloned_handle.events_tx.read().unwrap().is_some());
+        assert!(events_handle.inner.read().unwrap().is_some());
+        assert!(cloned_handle.inner.read().unwrap().is_some());
     }
 
     #[tokio::test]
@@ -467,6 +395,55 @@ mod tests {
         ));
     }
 
+    /// Sends during a subscribe reach the receiver, not the snapshot.
+    #[cfg(feature = "failure_injection")]
+    #[test]
+    fn catalog_send_excluded_from_subscribe_window() {
+        use std::sync::Barrier;
+
+        let events_handle = EventsHandle::new();
+        // Not start(): its heartbeat task needs a runtime and adds events.
+        let (tx, _) = broadcast::channel(readyset_client::events::BROADCAST_CHANNEL_CAPACITY);
+        *events_handle.inner.write().unwrap() = Some((tx, Arc::new(test_catalog(1))));
+
+        // Park the subscriber mid-subscribe long enough for racing sends to land.
+        let entered = Arc::new(Barrier::new(2));
+        fail::cfg_callback(
+            readyset_util::failpoints::CONTROLLER_EVENTS_SUBSCRIBE_WINDOW,
+            {
+                let entered = Arc::clone(&entered);
+                move || {
+                    entered.wait();
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            },
+        )
+        .unwrap();
+        let subscriber = std::thread::spawn({
+            let handle = events_handle.clone();
+            move || handle.subscribe_with_snapshot().unwrap()
+        });
+        entered.wait();
+        for generation in [2, 3] {
+            events_handle
+                .send_schema_catalog_update(test_catalog(generation))
+                .unwrap();
+        }
+
+        let (mut receiver, snapshot) = subscriber.join().unwrap();
+        fail::remove(readyset_util::failpoints::CONTROLLER_EVENTS_SUBSCRIBE_WINDOW);
+        assert_eq!(snapshot.generation.get(), 1);
+        let streamed: Vec<_> = std::iter::from_fn(|| receiver.try_recv().ok())
+            .map(|event| match event {
+                ControllerEvent::SchemaCatalogUpdate(update) => {
+                    SchemaCatalog::try_from(update).unwrap().generation.get()
+                }
+                other => panic!("unexpected event: {other:?}"),
+            })
+            .collect();
+        assert_eq!(streamed, [2, 3]);
+    }
+
     #[tokio::test]
     async fn test_stop_clears_catalog_and_prevents_subscribe() {
         let events_handle = EventsHandle::new();
@@ -485,8 +462,8 @@ mod tests {
 
         // Catalog should be cleared
         assert!(
-            events_handle.latest_catalog.read().unwrap().is_none(),
-            "stop() should clear latest_catalog"
+            events_handle.inner.read().unwrap().is_none(),
+            "stop() should clear the catalog snapshot"
         );
     }
 }
