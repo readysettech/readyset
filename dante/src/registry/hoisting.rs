@@ -359,6 +359,47 @@ mod tests {
     }
 
     #[test]
+    fn from_aggregated_subquery_join_inner_select_carries_outer_alias() {
+        // The FromSubquery resolver path computes a fallback name
+        // (`col{idx}`) for the subquery's unaliased aggregate projection and
+        // references it from the outer query, but must also apply that name
+        // as a real alias on the inner SELECT field -- otherwise Postgres
+        // names the column after the aggregate function (e.g. "sum") and the
+        // outer reference to "col1" is undefined (42703).
+        let p = from_aggregated_subquery_join();
+        let sql = resolve_pattern(&p, Dialect::PostgreSQL);
+
+        let open = sql
+            .find("(SELECT")
+            .unwrap_or_else(|| panic!("expected inner subquery in sql: {sql}"));
+        // Balanced-paren scan for the subquery's closing paren: a naive
+        // search for the first `)` (or `) AS`) would stop early at the
+        // closing paren of the inner `sum(...)` call instead.
+        let mut depth = 0i32;
+        let close = sql[open..]
+            .char_indices()
+            .find_map(|(i, ch)| match ch {
+                '(' => {
+                    depth += 1;
+                    None
+                }
+                ')' => {
+                    depth -= 1;
+                    (depth == 0).then_some(open + i)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("expected balanced subquery parens in sql: {sql}"));
+        let inner = &sql[open..close];
+
+        assert!(
+            inner.contains("col1"),
+            "inner SELECT list must alias the aggregate field as col1 (the fallback name \
+             the outer query references): {sql}"
+        );
+    }
+
+    #[test]
     fn from_aggregated_subquery_join_resolves() {
         let p = from_aggregated_subquery_join();
         let sql = resolve_pattern(&p, Dialect::MySQL);

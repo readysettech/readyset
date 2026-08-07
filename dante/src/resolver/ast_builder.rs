@@ -836,7 +836,7 @@ fn build_select_inner(
                         alias: None,
                     },
                 );
-                let (inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
+                let (mut inner_query, inner_params, inner_ddl) = resolve_cte_inner_subquery(
                     inner_constraints,
                     env,
                     var_kinds,
@@ -850,7 +850,7 @@ fn build_select_inner(
                 )?;
                 params.extend(inner_params);
                 env.ddl_steps.extend(inner_ddl);
-                for (idx, inner_field) in inner_query.fields.iter().enumerate() {
+                for (idx, inner_field) in inner_query.fields.iter_mut().enumerate() {
                     // FieldDefinitionExpr::All / AllInTable used to hit
                     // `let-else continue` and silently disappear from the
                     // outer projection. Reject them so the generator
@@ -866,10 +866,18 @@ fn build_select_inner(
                     };
                     // Index-based fallback name (col0, col1, ...) so multiple
                     // non-Column projections don't collide on a single `"col"`.
-                    let name = match (alias, expr) {
+                    let name = match (alias.as_ref(), &*expr) {
                         (Some(a), _) => a.clone(),
                         (None, Expr::Column(c)) => c.name.clone(),
-                        _ => SqlIdentifier::from(format!("col{idx}")),
+                        (None, _) => {
+                            // The fallback name only exists in the outer reference; apply it
+                            // as a real alias on the inner SELECT field too, or the database
+                            // names the column after the expression (e.g. "sum") while the
+                            // outer query looks up "col{idx}", which doesn't exist.
+                            let fallback = SqlIdentifier::from(format!("col{idx}"));
+                            *alias = Some(fallback.clone());
+                            fallback
+                        }
                     };
                     fields.push(FieldDefinitionExpr::Expr {
                         expr: Expr::Column(Column {
