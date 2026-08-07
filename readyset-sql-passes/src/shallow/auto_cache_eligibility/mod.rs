@@ -462,7 +462,12 @@ const PG_SIDE_EFFECTING_FUNCTIONS: &[&str] = &[
 ];
 
 /// PostgreSQL functions not explicitly marked immutable, but still considered safe for caching.
-const PG_ADDITIONAL_ALLOWED: &[&str] = &["inet_server_addr", "inet_server_port", "row"];
+const PG_ADDITIONAL_ALLOWED: &[&str] = &[
+    "inet_server_addr",
+    "inet_server_port",
+    "length", // 2 arg version depends on database encoding, which does not change
+    "row",
+];
 
 /// Bare identifiers (no parentheses) that some dialects parse as session
 /// references rather than function calls: session identity and current
