@@ -29,6 +29,7 @@ use crate::{QueryHandler, UpstreamDatabase};
 #[derive(Debug, Default)]
 pub(super) struct PendingSetState {
     results_encoding: Option<Encoding>,
+    results_collation: Option<u16>,
     client_encoding: Option<Encoding>,
 }
 
@@ -37,6 +38,10 @@ impl PendingSetState {
         if let Some(encoding) = self.results_encoding {
             trace!(?encoding, "Setting results_encoding");
             noria.set_results_encoding(encoding);
+        }
+        if let Some(collation) = self.results_collation {
+            trace!(collation, "Setting results_collation");
+            noria.set_results_collation(collation);
         }
         if let Some(encoding) = self.client_encoding {
             trace!(?encoding, "Setting client_encoding");
@@ -75,6 +80,7 @@ where
             set_autocommit,
             set_search_path,
             set_results_encoding,
+            set_results_collation,
             set_client_encoding,
             upstream_rewrite,
             set_timezone,
@@ -164,6 +170,7 @@ where
             upstream_rewrite,
             PendingSetState {
                 results_encoding: set_results_encoding,
+                results_collation: set_results_collation,
                 client_encoding: set_client_encoding,
             },
         ))

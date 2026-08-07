@@ -303,6 +303,11 @@ pub struct NoriaConnector {
     /// MySQL and `SET NAMES` in both MySQL and Postgres.
     results_encoding: Encoding,
 
+    /// The MySQL collation id to report in result-set metadata for text columns, following the
+    /// session collation named by the handshake, `SET NAMES`, or `SET character_set_results`.
+    /// Unset until the MySQL handshake provides one; unused for Postgres.
+    results_collation: Option<u16>,
+
     /// The encoding in which the client sends query text. Corresponds to `character_set_client`
     /// in MySQL.
     client_encoding: Encoding,
@@ -410,6 +415,7 @@ impl NoriaConnector {
             parse_dialect,
             schema_search_path,
             results_encoding: Encoding::Utf8,
+            results_collation: None,
             client_encoding: Encoding::Utf8,
             timezone: SessionTimezone::System,
         }
@@ -921,6 +927,16 @@ impl NoriaConnector {
     /// Returns the encoding for result sets
     pub fn results_encoding(&self) -> Encoding {
         self.results_encoding
+    }
+
+    /// Set the collation id to report in result-set metadata for text columns
+    pub fn set_results_collation(&mut self, collation: u16) {
+        self.results_collation = Some(collation);
+    }
+
+    /// Returns the collation id to report in result-set metadata for text columns
+    pub fn results_collation(&self) -> Option<u16> {
+        self.results_collation
     }
 
     /// Set the encoding in which the client sends query text

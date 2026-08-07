@@ -671,6 +671,57 @@ async fn test_set_names_rejected_upstream_leaves_encodings_unchanged() {
     shutdown_tx.shutdown().await;
 }
 
+/// Noria-cached result metadata must report the columns' collation ids the way the upstream
+/// does for the same session. Both sessions SET NAMES to a non-default collation so the ids
+/// cannot coincide by accident with a default mysql_async session's collation.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_column_def_collation_ids_cached_match_upstream() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop(COLL_META_DDL).await.unwrap();
+    conn.query_drop("INSERT INTO coll_meta VALUES (1, 'a', 'b', 'c', 'd')")
+        .await
+        .unwrap();
+    conn.query_drop("SET NAMES utf8mb4 COLLATE utf8mb4_bin")
+        .await
+        .unwrap();
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop("SET NAMES utf8mb4 COLLATE utf8mb4_bin")
+        .await
+        .unwrap();
+    let expected = column_charsets(&mut upstream_conn, COLL_META_QUERY).await;
+
+    eventually! {
+        conn.query_drop(
+            "CREATE CACHE FROM SELECT id, lat, bin_c, txt, vb FROM coll_meta WHERE id = ?",
+        )
+        .await
+        .is_ok()
+    }
+
+    eventually!(run_test: {
+        let charsets = column_charsets(&mut conn, COLL_META_QUERY).await;
+        let info = last_query_info(&mut conn).await;
+        AssertUnwindSafe(move || (info, charsets))
+    }, then_assert: |result| {
+        let (info, charsets) = result();
+        assert_matches!(info.destination, QueryDestination::Readyset(..));
+        assert_eq!(charsets, expected);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
 /// SET NAMES with a COLLATE clause is forwarded so the upstream session reports the requested
 /// collation_connection, and a cached point lookup on a case-insensitive column keeps matching
 /// the upstream because the column's collation wins coercibility on both sides.

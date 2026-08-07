@@ -506,6 +506,9 @@ pub struct CachedSchema {
     /// The results encoding `preencoded_schema` was built with; the bytes must be rebuilt if the
     /// session's results encoding changes.
     pub encoding: Encoding,
+    /// The results collation id the column packets were built with; text columns' collation must
+    /// be updated and the bytes rebuilt if the session's results collation changes.
+    pub collation: u16,
 }
 
 /// A server that speaks the MySQL/MariaDB protocol, and can delegate client commands to a backend
@@ -573,6 +576,11 @@ struct StatementData {
     bound_types: Vec<(myc::constants::ColumnType, bool)>,
     params: u16,
 }
+
+/// The collation id the server advertises in its HandshakeV10 greeting, matching the
+/// utf8mb4 default of stock MySQL 8. A handshake response with collation id 0 leaves the
+/// session at this default.
+pub const DEFAULT_HANDSHAKE_COLLATION: u8 = myc::collations::CollationId::UTF8MB4_0900_AI_CI as u8;
 
 const CAPABILITIES: u32 = PROTOCOL_41
     | LONG_PASSWORD
@@ -685,7 +693,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         }
         init_packet.extend_from_slice(&capabilities.to_le_bytes()[..2]);
 
-        init_packet.extend_from_slice(&[0x21]); // UTF8_GENERAL_CI
+        init_packet.push(DEFAULT_HANDSHAKE_COLLATION);
 
         // Status flags: fresh connections always have autocommit on, matching real MySQL behavior.
         init_packet.extend_from_slice(&StatusFlags::SERVER_STATUS_AUTOCOMMIT.bits().to_le_bytes());

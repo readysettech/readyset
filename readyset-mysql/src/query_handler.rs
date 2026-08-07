@@ -11,6 +11,7 @@ use readyset_adapter::SessionTimezone;
 use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior, UpstreamSetRewrite};
 use readyset_client::post_processing::Results;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
+use readyset_data::encoding::mysql_character_set_name_to_collation_id;
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -994,7 +995,16 @@ impl QueryHandler for MySqlQueryHandler {
                         }
                         "character_set_results" => {
                             let encoding = get_encoding_for_charset(value, var_name);
-                            behavior.set_results_encoding(encoding)
+                            behavior = behavior.set_results_encoding(encoding);
+                            // MySQL reports the charset's default collation in result-set
+                            // metadata once results convert to a charset set this way.
+                            if encoding.is_some() {
+                                let collation = charset_name_from_expr(value)
+                                    .map(|name| mysql_character_set_name_to_collation_id(&name))
+                                    .filter(|&id| id != 0);
+                                behavior = behavior.set_results_collation(collation);
+                            }
+                            behavior
                         }
                         // character_set_client describes the bytes the client sends, but
                         // Readyset decodes those and sends UTF-8 text upstream, so the upstream
@@ -1041,6 +1051,14 @@ impl QueryHandler for MySqlQueryHandler {
                 let encoding = readyset_data::encoding::Encoding::from_mysql_character_set_name(
                     encoding_name.as_str(),
                 );
+                // MySQL resolves a bare SET NAMES to the charset's default collation; a COLLATE
+                // clause names the session collation directly. Zero means unresolvable.
+                let collation = match &names.collation {
+                    Some(name) => mysql_common::collations::CollationId::from(
+                        name.to_ascii_lowercase().as_str(),
+                    ) as u16,
+                    None => mysql_character_set_name_to_collation_id(&encoding_name),
+                };
                 counter!(
                     metric::CHARACTER_SET_USAGE,
                     "type" => "names",
@@ -1051,6 +1069,10 @@ impl QueryHandler for MySqlQueryHandler {
                 behavior = behavior
                     .set_results_encoding(encoding)
                     .set_client_encoding(encoding);
+                if encoding.is_some() {
+                    behavior =
+                        behavior.set_results_collation((collation != 0).then_some(collation));
+                }
 
                 // MySQL derives result-set metadata collation ids from a statement-level SET
                 // NAMES, so forward the statement itself rather than variable assignments.
@@ -1082,17 +1104,22 @@ impl QueryHandler for MySqlQueryHandler {
     }
 }
 
-fn get_encoding_for_charset(
-    value: &Expr,
-    var_name: String,
-) -> Option<readyset_data::encoding::Encoding> {
-    let encoding_name = match value {
+/// The lowercased character set name a `SET` assignment's value expression names, if any.
+fn charset_name_from_expr(value: &Expr) -> Option<String> {
+    match value {
         Expr::Literal(Literal::String(ref s)) => Some(s.as_str()),
         Expr::Column(Column { name, .. }) => Some(name.as_str()),
         Expr::Literal(Literal::Null) => Some("null"),
         _ => None,
-    };
-    let encoding_name = encoding_name.map(|s| s.to_ascii_lowercase());
+    }
+    .map(|s| s.to_ascii_lowercase())
+}
+
+fn get_encoding_for_charset(
+    value: &Expr,
+    var_name: String,
+) -> Option<readyset_data::encoding::Encoding> {
+    let encoding_name = charset_name_from_expr(value);
     let encoding = encoding_name
         .as_ref()
         .and_then(|s| readyset_data::encoding::Encoding::from_mysql_character_set_name(s.as_str()));
@@ -1240,11 +1267,11 @@ mod tests {
 
     #[test]
     fn set_character_set_results_string_literal_supported() {
-        for (charset, encoding) in [
-            ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8Mb3),
-            ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8Mb3),
+        for (charset, encoding, collation) in [
+            ("latin1", Encoding::LATIN1, 8),
+            ("utf8", Encoding::Utf8Mb3, 33),
+            ("utf8mb4", Encoding::Utf8, 255),
+            ("utf8mb3", Encoding::Utf8Mb3, 33),
         ] {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
@@ -1257,7 +1284,9 @@ mod tests {
             });
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
-                SetBehavior::default().set_results_encoding(Some(encoding))
+                SetBehavior::default()
+                    .set_results_encoding(Some(encoding))
+                    .set_results_collation(Some(collation))
             )
         }
     }
@@ -1281,11 +1310,11 @@ mod tests {
 
     #[test]
     fn set_character_set_results_bare_name_supported() {
-        for (charset, encoding) in [
-            ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8Mb3),
-            ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8Mb3),
+        for (charset, encoding, collation) in [
+            ("latin1", Encoding::LATIN1, 8),
+            ("utf8", Encoding::Utf8Mb3, 33),
+            ("utf8mb4", Encoding::Utf8, 255),
+            ("utf8mb3", Encoding::Utf8Mb3, 33),
         ] {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
@@ -1301,7 +1330,9 @@ mod tests {
             });
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
-                SetBehavior::default().set_results_encoding(Some(encoding))
+                SetBehavior::default()
+                    .set_results_encoding(Some(encoding))
+                    .set_results_collation(Some(collation))
             )
         }
     }
@@ -1322,11 +1353,11 @@ mod tests {
 
     #[test]
     fn set_names_supported() {
-        for (charset, encoding) in [
-            ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8Mb3),
-            ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8Mb3),
+        for (charset, encoding, collation) in [
+            ("latin1", Encoding::LATIN1, 8),
+            ("utf8", Encoding::Utf8Mb3, 33),
+            ("utf8mb4", Encoding::Utf8, 255),
+            ("utf8mb3", Encoding::Utf8Mb3, 33),
         ] {
             let stmt = SetStatement::Names(SetNames {
                 charset: charset.to_owned(),
@@ -1337,6 +1368,7 @@ mod tests {
                 SetBehavior::default()
                     .set_results_encoding(Some(encoding))
                     .set_client_encoding(Some(encoding))
+                    .set_results_collation(Some(collation))
                     .upstream_rewrite(names_rewrite(charset))
             )
         }
@@ -1344,9 +1376,9 @@ mod tests {
 
     #[test]
     fn set_names_with_collation_forwards_collation() {
-        for (charset, collation, encoding) in [
-            ("latin1", "latin1_bin", Encoding::LATIN1),
-            ("utf8mb4", "utf8mb4_bin", Encoding::Utf8),
+        for (charset, collation, encoding, collation_id) in [
+            ("latin1", "latin1_bin", Encoding::LATIN1, 47),
+            ("utf8mb4", "utf8mb4_bin", Encoding::Utf8, 46),
         ] {
             let stmt = SetStatement::Names(SetNames {
                 charset: charset.to_owned(),
@@ -1357,6 +1389,7 @@ mod tests {
                 SetBehavior::default()
                     .set_results_encoding(Some(encoding))
                     .set_client_encoding(Some(encoding))
+                    .set_results_collation(Some(collation_id))
                     .upstream_rewrite(UpstreamSetRewrite::Rewrite(format!(
                         "SET NAMES '{charset}' COLLATE '{collation}', \
                          @@SESSION.character_set_client = 'utf8mb4'"

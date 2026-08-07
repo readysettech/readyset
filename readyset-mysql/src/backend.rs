@@ -29,10 +29,10 @@ use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncRead, AsyncWrite};
-use tracing::{error, info, trace};
+use tracing::{error, info, trace, warn};
 use upstream::StatementMeta;
 
-use crate::constants::DEFAULT_CHARACTER_SET;
+use crate::constants::DEFAULT_COLLATION;
 use crate::schema::convert_column;
 use crate::upstream::{self, CacheEntry, MySqlUpstream};
 use crate::value::mysql_param_to_dataflow_value;
@@ -231,7 +231,7 @@ async fn write_meta_table<S: AsyncRead + AsyncWrite + Unpin>(
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
-            character_set: DEFAULT_CHARACTER_SET,
+            character_set: DEFAULT_COLLATION,
             decimals: 0,
         })
         .collect::<Vec<_>>();
@@ -264,7 +264,7 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
-            character_set: DEFAULT_CHARACTER_SET,
+            character_set: DEFAULT_COLLATION,
             decimals: 0,
         },
         Column {
@@ -276,7 +276,7 @@ async fn write_meta_variables<S: AsyncRead + AsyncWrite + Unpin>(
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
-            character_set: DEFAULT_CHARACTER_SET,
+            character_set: DEFAULT_COLLATION,
             decimals: 0,
         },
     ];
@@ -307,7 +307,7 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
-            character_set: DEFAULT_CHARACTER_SET,
+            character_set: DEFAULT_COLLATION,
             decimals: 0,
         },
         Column {
@@ -319,7 +319,7 @@ async fn write_meta_with_header<S: AsyncRead + AsyncWrite + Unpin>(
             coltype: ColumnType::MYSQL_TYPE_STRING,
             column_length: 1024,
             colflags: ColumnFlags::empty(),
-            character_set: DEFAULT_CHARACTER_SET,
+            character_set: DEFAULT_COLLATION,
             decimals: 0,
         },
     ];
@@ -340,6 +340,17 @@ fn handshake_connection_charset(collation_id: u16) -> Option<(&'static str, &'st
     Encoding::from_mysql_collation_id(collation_id).mysql_character_set_name()?;
     let collation = Collation::resolve(CollationId::from(collation_id));
     Some((collation.charset, collation.collation))
+}
+
+/// The session collation a client handshake or COM_CHANGE_USER collation id implies. Collation
+/// id 0 means "use the server default" per MySQL protocol semantics, i.e. the collation we
+/// advertise in our greeting.
+fn handshake_collation(collation_id: u16) -> u16 {
+    if collation_id == 0 {
+        mysql_srv::DEFAULT_HANDSHAKE_COLLATION.into()
+    } else {
+        collation_id
+    }
 }
 
 pub struct Backend {
@@ -382,13 +393,23 @@ impl Backend {
     fn build_status_flags(&self) -> StatusFlags {
         Self::flags_from_proxy_state(self.noria.proxy_state())
     }
+
+    /// The collation id to report in result-set metadata for text columns, falling back to the
+    /// greeting default until the handshake names one.
+    fn session_results_collation(&self) -> u16 {
+        self.noria
+            .connectors
+            .noria
+            .results_collation()
+            .unwrap_or(DEFAULT_COLLATION)
+    }
 }
 
 macro_rules! convert_columns {
-    ($columns: expr, $results: expr) => {{
+    ($columns: expr, $results: expr, $collation: expr) => {{
         match $columns
             .into_iter()
-            .map(|c| convert_column(&c))
+            .map(|c| convert_column(&c, $collation))
             .collect::<Result<Vec<_>, _>>()
         {
             Ok(res) => res,
@@ -456,6 +477,7 @@ async fn handle_readyset_result<S>(
     result: noria_connector::QueryResult<'_>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    results_collation: u16,
     status_flags: StatusFlags,
 ) -> io::Result<()>
 where
@@ -485,7 +507,7 @@ where
             write_meta_with_header(vars, writer, status_flags).await
         }
         noria_connector::QueryResult::Select { mut rows, schema } => {
-            let mysql_schema = convert_columns!(schema.schema, writer);
+            let mysql_schema = convert_columns!(schema.schema, writer, results_collation);
             let mut rw = writer.start(&mysql_schema).await?;
             while let Some(row) = rows.next() {
                 // make sure we have at least as many row columns as schema types.
@@ -617,6 +639,7 @@ async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    results_collation: u16,
     status_flags: StatusFlags,
 ) -> io::Result<()>
 where
@@ -624,7 +647,14 @@ where
 {
     match result {
         Ok(QueryResult::Noria(result)) => {
-            handle_readyset_result(result, writer, results_encoding, status_flags).await
+            handle_readyset_result(
+                result,
+                writer,
+                results_encoding,
+                results_collation,
+                status_flags,
+            )
+            .await
         }
         Ok(QueryResult::Shallow(result)) => {
             handle_shallow_result(result, writer, results_encoding, status_flags).await
@@ -656,6 +686,7 @@ async fn handle_query_result<S>(
     result: Result<QueryResult<'_, LazyUpstream<MySqlUpstream>>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
+    results_collation: u16,
     status_flags: StatusFlags,
 ) -> QueryResultsResponse
 where
@@ -664,7 +695,14 @@ where
     match result {
         Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
         res => QueryResultsResponse::IoResult(
-            handle_execute_result(res, writer, results_encoding, status_flags).await,
+            handle_execute_result(
+                res,
+                writer,
+                results_encoding,
+                results_collation,
+                status_flags,
+            )
+            .await,
         ),
     }
 }
@@ -707,6 +745,7 @@ where
 
         trace!("delegate");
         let results_encoding = self.noria.connectors.noria.results_encoding();
+        let results_collation = self.session_results_collation();
         let prepare_result = self
             .prepare(query, (), PreparedStatementType::Named)
             .await
@@ -723,8 +762,8 @@ where
                     | Insert { params, schema, .. },
                 ),
             )) => {
-                let params = convert_columns!(params, info);
-                let schema = convert_columns!(schema, info);
+                let params = convert_columns!(params, info, results_collation);
+                let schema = convert_columns!(schema, info, results_collation);
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &schema).await
             }
@@ -745,7 +784,7 @@ where
                 statement_id,
                 SinglePrepareResult::Noria(Update { params, .. } | Delete { params, .. }),
             )) => {
-                let params = convert_columns!(params, info);
+                let params = convert_columns!(params, info, results_collation);
                 schema_cache.remove(&statement_id);
                 info.reply(statement_id, &params, &[]).await
             }
@@ -847,6 +886,7 @@ where
         }
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
+        let results_collation = self.session_results_collation();
         let pre_flags = self.build_status_flags();
 
         let (execute_result, post_state) = match self.execute(id, &value_params, &()).await {
@@ -868,20 +908,31 @@ where
                     // `or_insert_with` would be cleaner but we need an async closure here
                     Entry::Occupied(entry) => {
                         let cached = entry.into_mut();
-                        // A change in session character set invalidates previously encoded
-                        // metadata.
-                        if cached.encoding != results_encoding {
+                        // A change in session character set or collation invalidates previously
+                        // encoded metadata.
+                        if cached.encoding != results_encoding
+                            || cached.collation != results_collation
+                        {
+                            for (c, ty) in
+                                izip!(cached.mysql_schema.iter_mut(), cached.column_types.iter())
+                            {
+                                if crate::schema::uses_results_collation(ty) {
+                                    c.character_set = results_collation;
+                                }
+                            }
                             cached.preencoded_schema = mysql_srv::prepare_column_definitions(
                                 &cached.mysql_schema,
                                 results_encoding,
                             )
                             .into();
                             cached.encoding = results_encoding;
+                            cached.collation = results_collation;
                         }
                         cached
                     }
                     Entry::Vacant(entry) => {
-                        let mysql_schema = convert_columns!(schema.schema, results);
+                        let mysql_schema =
+                            convert_columns!(schema.schema, results, results_collation);
                         let column_types = schema
                             .schema
                             .iter()
@@ -896,6 +947,7 @@ where
                             column_types,
                             preencoded_schema: preencoded_schema.into(),
                             encoding: results_encoding,
+                            collation: results_collation,
                         })
                     }
                 };
@@ -915,7 +967,14 @@ where
                 rw.set_status_flags(status_flags).finish().await
             }
             execute_result => {
-                handle_execute_result(execute_result, results, results_encoding, status_flags).await
+                handle_execute_result(
+                    execute_result,
+                    results,
+                    results_encoding,
+                    results_collation,
+                    status_flags,
+                )
+                .await
             }
         }
     }
@@ -943,7 +1002,14 @@ where
             "charset" => charset.to_string(),
         )
         .increment(1);
-        let encoding = Encoding::from_mysql_collation_id(charset);
+        let collation = handshake_collation(charset);
+        let encoding = Encoding::from_mysql_collation_id(collation);
+        if let Encoding::OtherMySql(id) = encoding {
+            warn!(
+                collation_id = id,
+                "client requested an unsupported character set; decoding statements as UTF-8"
+            );
+        }
         // The collation id a client advertises has SET NAMES semantics in MySQL, so forward
         // the charset and collation it names to the upstream session. Adopt the encodings
         // locally only if the upstream accepted them.
@@ -955,6 +1021,7 @@ where
         }
         self.noria.connectors.noria.set_results_encoding(encoding);
         self.noria.connectors.noria.set_client_encoding(encoding);
+        self.noria.connectors.noria.set_results_collation(collation);
         Ok(())
     }
 
@@ -1003,12 +1070,20 @@ where
         }
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
+        let results_collation = self.session_results_collation();
         let pre_flags = self.build_status_flags();
         let (query_result, status_flags) = match self.query(query).await {
             Ok((result, state)) => (Ok(result), Self::flags_from_proxy_state(state)),
             Err(e) => (Err(e), pre_flags),
         };
-        handle_query_result(query_result, results, results_encoding, status_flags).await
+        handle_query_result(
+            query_result,
+            results,
+            results_encoding,
+            results_collation,
+            status_flags,
+        )
+        .await
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
@@ -1096,19 +1171,50 @@ mod tests {
 
     #[test]
     fn handshake_connection_charset_by_collation_id() {
-        for (id, expected) in [
-            (8, Some(("latin1", "latin1_swedish_ci"))),
-            (33, Some(("utf8mb3", "utf8mb3_general_ci"))),
-            (45, Some(("utf8mb4", "utf8mb4_general_ci"))),
-            (46, Some(("utf8mb4", "utf8mb4_bin"))),
-            (63, Some(("binary", "binary"))),
-            (255, Some(("utf8mb4", "utf8mb4_0900_ai_ci"))),
+        use readyset_data::encoding::Encoding;
+
+        for (id, upstream, collation, encoding) in [
+            (
+                8,
+                Some(("latin1", "latin1_swedish_ci")),
+                8,
+                Encoding::LATIN1,
+            ),
+            (
+                33,
+                Some(("utf8mb3", "utf8mb3_general_ci")),
+                33,
+                Encoding::Utf8Mb3,
+            ),
+            (
+                45,
+                Some(("utf8mb4", "utf8mb4_general_ci")),
+                45,
+                Encoding::Utf8,
+            ),
+            (46, Some(("utf8mb4", "utf8mb4_bin")), 46, Encoding::Utf8),
+            (63, Some(("binary", "binary")), 63, Encoding::Binary),
+            (
+                255,
+                Some(("utf8mb4", "utf8mb4_0900_ai_ci")),
+                255,
+                Encoding::Utf8,
+            ),
             // An id unknown to mysql_common.
-            (1042, None),
+            (1042, None, 1042, Encoding::OtherMySql(1042)),
             // A charset without a registered conversion table (gbk_chinese_ci).
-            (28, None),
+            (28, None, 28, Encoding::OtherMySql(28)),
+            // Unspecified, so the session collation is the server default and the upstream
+            // session stays at its default.
+            (0, None, 255, Encoding::Utf8),
         ] {
-            assert_eq!(super::handshake_connection_charset(id), expected, "{id}");
+            assert_eq!(super::handshake_connection_charset(id), upstream, "{id}");
+            assert_eq!(super::handshake_collation(id), collation, "{id}");
+            assert_eq!(
+                Encoding::from_mysql_collation_id(super::handshake_collation(id)),
+                encoding,
+                "{id}"
+            );
         }
     }
 }

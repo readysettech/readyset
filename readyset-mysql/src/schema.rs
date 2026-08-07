@@ -6,7 +6,7 @@ use readyset_errors::{unsupported, ReadySetResult};
 use readyset_sql::ast::{ColumnConstraint, Relation, SqlType};
 use readyset_sql::DialectDisplay;
 
-use crate::constants::{DEFAULT_CHARACTER_SET, DEFAULT_CHARACTER_SET_NUMERIC};
+use crate::constants::DEFAULT_COLLATION_NUMERIC;
 
 // Create a helper function to get default ColumnBase
 fn default_column_base(col: &ColumnSchema, sql_type: SqlType) -> ColumnBase {
@@ -30,7 +30,23 @@ fn get_sql_type(col: &ColumnSchema, default_type: SqlType) -> SqlType {
         .unwrap_or_else(|| default_column_base(col, default_type).sql_type)
 }
 
-pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Column> {
+/// Whether a column of this type reports the session's results collation in its column
+/// definition packet, the way MySQL reports text results.
+pub(crate) fn uses_results_collation(ty: &DfType) -> bool {
+    matches!(
+        ty,
+        DfType::Char(..)
+            | DfType::VarChar(..)
+            | DfType::Text(_)
+            | DfType::Enum { .. }
+            | DfType::Unknown
+    )
+}
+
+pub(crate) fn convert_column(
+    col: &ColumnSchema,
+    results_collation: u16,
+) -> ReadySetResult<mysql_srv::Column> {
     let mut colflags = mysql_srv::ColumnFlags::empty();
     use mysql_srv::ColumnType::*;
 
@@ -45,12 +61,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
                 SqlType::TinyInt(l) => l.unwrap_or(4),
                 _ => unreachable!("TinyInt should be a tinyint type"),
             };
-            (
-                MYSQL_TYPE_TINY,
-                DEFAULT_CHARACTER_SET_NUMERIC,
-                0,
-                length as u32,
-            )
+            (MYSQL_TYPE_TINY, DEFAULT_COLLATION_NUMERIC, 0, length as u32)
         }
 
         // Combine unsigned types pattern
@@ -61,35 +72,31 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         | DfType::UnsignedBigInt) => {
             colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
             match t {
-                DfType::UnsignedTinyInt => (MYSQL_TYPE_TINY, DEFAULT_CHARACTER_SET_NUMERIC, 0, 3),
-                DfType::UnsignedSmallInt => (MYSQL_TYPE_SHORT, DEFAULT_CHARACTER_SET_NUMERIC, 0, 5),
-                DfType::UnsignedMediumInt => {
-                    (MYSQL_TYPE_INT24, DEFAULT_CHARACTER_SET_NUMERIC, 0, 8)
-                }
-                DfType::UnsignedInt => (MYSQL_TYPE_LONG, DEFAULT_CHARACTER_SET_NUMERIC, 0, 10),
-                DfType::UnsignedBigInt => {
-                    (MYSQL_TYPE_LONGLONG, DEFAULT_CHARACTER_SET_NUMERIC, 0, 20)
-                }
+                DfType::UnsignedTinyInt => (MYSQL_TYPE_TINY, DEFAULT_COLLATION_NUMERIC, 0, 3),
+                DfType::UnsignedSmallInt => (MYSQL_TYPE_SHORT, DEFAULT_COLLATION_NUMERIC, 0, 5),
+                DfType::UnsignedMediumInt => (MYSQL_TYPE_INT24, DEFAULT_COLLATION_NUMERIC, 0, 8),
+                DfType::UnsignedInt => (MYSQL_TYPE_LONG, DEFAULT_COLLATION_NUMERIC, 0, 10),
+                DfType::UnsignedBigInt => (MYSQL_TYPE_LONGLONG, DEFAULT_COLLATION_NUMERIC, 0, 20),
                 _ => unreachable!(),
             }
         }
 
         // SMALLINT
-        DfType::SmallInt => (MYSQL_TYPE_SHORT, DEFAULT_CHARACTER_SET_NUMERIC, 0, 6),
+        DfType::SmallInt => (MYSQL_TYPE_SHORT, DEFAULT_COLLATION_NUMERIC, 0, 6),
 
         // MEDIUMINT
-        DfType::MediumInt => (MYSQL_TYPE_INT24, DEFAULT_CHARACTER_SET_NUMERIC, 0, 9),
+        DfType::MediumInt => (MYSQL_TYPE_INT24, DEFAULT_COLLATION_NUMERIC, 0, 9),
 
         // INT
-        DfType::Int => (MYSQL_TYPE_LONG, DEFAULT_CHARACTER_SET_NUMERIC, 0, 11),
+        DfType::Int => (MYSQL_TYPE_LONG, DEFAULT_COLLATION_NUMERIC, 0, 11),
 
         // BIGINT
-        DfType::BigInt => (MYSQL_TYPE_LONGLONG, DEFAULT_CHARACTER_SET_NUMERIC, 0, 20),
+        DfType::BigInt => (MYSQL_TYPE_LONGLONG, DEFAULT_COLLATION_NUMERIC, 0, 20),
 
         // DECIMAL / NUMERIC
         DfType::Numeric { prec, scale } => (
             MYSQL_TYPE_NEWDECIMAL,
-            DEFAULT_CHARACTER_SET_NUMERIC,
+            DEFAULT_COLLATION_NUMERIC,
             scale,
             (prec + scale as u16) as u32,
         ),
@@ -97,22 +104,17 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         // FLOAT / DOUBLE / REAL
         DfType::Float => (
             MYSQL_TYPE_FLOAT,
-            DEFAULT_CHARACTER_SET_NUMERIC,
+            DEFAULT_COLLATION_NUMERIC,
             31, // MySQL default
             12,
         ),
-        DfType::Double => (MYSQL_TYPE_DOUBLE, DEFAULT_CHARACTER_SET_NUMERIC, 31, 22),
+        DfType::Double => (MYSQL_TYPE_DOUBLE, DEFAULT_COLLATION_NUMERIC, 31, 22),
 
         // BIT
         DfType::Bit(size) => {
             if size <= 64 {
                 colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG;
-                (
-                    MYSQL_TYPE_BIT,
-                    DEFAULT_CHARACTER_SET_NUMERIC,
-                    0,
-                    size as u32,
-                )
+                (MYSQL_TYPE_BIT, DEFAULT_COLLATION_NUMERIC, 0, size as u32)
             } else {
                 unsupported!("MySQL bit type cannot have a size bigger than 64")
             }
@@ -121,7 +123,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         // DATE & TIME
         DfType::Date => {
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
-            (MYSQL_TYPE_DATE, DEFAULT_CHARACTER_SET_NUMERIC, 0, 10)
+            (MYSQL_TYPE_DATE, DEFAULT_COLLATION_NUMERIC, 0, 10)
         }
         DfType::DateTime { subsecond_digits } => {
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
@@ -132,7 +134,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             };
             (
                 MYSQL_TYPE_DATETIME,
-                DEFAULT_CHARACTER_SET_NUMERIC,
+                DEFAULT_COLLATION_NUMERIC,
                 subsecond_digits as u8,
                 length as u32,
             )
@@ -146,7 +148,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             };
             (
                 MYSQL_TYPE_TIMESTAMP,
-                DEFAULT_CHARACTER_SET_NUMERIC,
+                DEFAULT_COLLATION_NUMERIC,
                 subsecond_digits as u8,
                 length as u32,
             )
@@ -160,7 +162,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             };
             (
                 MYSQL_TYPE_TIME,
-                DEFAULT_CHARACTER_SET_NUMERIC,
+                DEFAULT_COLLATION_NUMERIC,
                 subsecond_digits as u8,
                 length as u32,
             )
@@ -173,7 +175,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             );
             (
                 MYSQL_TYPE_STRING,
-                DEFAULT_CHARACTER_SET,
+                results_collation,
                 0,
                 (l as u32 * charset.max_len as u32),
             )
@@ -184,7 +186,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             );
             (
                 MYSQL_TYPE_VAR_STRING,
-                DEFAULT_CHARACTER_SET,
+                results_collation,
                 0,
                 (l as u32 * charset.max_len as u32),
             )
@@ -205,7 +207,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
                 _ => unreachable!("Text should be a string type"),
             };
             colflags |= mysql_srv::ColumnFlags::BLOB_FLAG;
-            (MYSQL_TYPE_BLOB, DEFAULT_CHARACTER_SET, 0, length)
+            (MYSQL_TYPE_BLOB, results_collation, 0, length)
         }
 
         // BLOB types
@@ -220,7 +222,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             };
             colflags |= mysql_srv::ColumnFlags::BLOB_FLAG;
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
-            (MYSQL_TYPE_BLOB, DEFAULT_CHARACTER_SET_NUMERIC, 0, length)
+            (MYSQL_TYPE_BLOB, DEFAULT_COLLATION_NUMERIC, 0, length)
         }
 
         // ENUM
@@ -233,7 +235,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             colflags |= mysql_srv::ColumnFlags::ENUM_FLAG;
             (
                 MYSQL_TYPE_STRING,
-                DEFAULT_CHARACTER_SET,
+                results_collation,
                 0,
                 length as u32 * charset.max_len as u32,
             )
@@ -243,27 +245,22 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         DfType::Json => {
             colflags |= mysql_srv::ColumnFlags::BLOB_FLAG;
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
-            (MYSQL_TYPE_JSON, DEFAULT_CHARACTER_SET_NUMERIC, 0, u32::MAX)
+            (MYSQL_TYPE_JSON, DEFAULT_COLLATION_NUMERIC, 0, u32::MAX)
         }
 
         // BOOL
-        DfType::Bool => (MYSQL_TYPE_TINY, DEFAULT_CHARACTER_SET_NUMERIC, 0, 1),
+        DfType::Bool => (MYSQL_TYPE_TINY, DEFAULT_COLLATION_NUMERIC, 0, 1),
 
         // Binary
         DfType::Binary(l) => {
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
-            (
-                MYSQL_TYPE_STRING,
-                DEFAULT_CHARACTER_SET_NUMERIC,
-                0,
-                l as u32,
-            )
+            (MYSQL_TYPE_STRING, DEFAULT_COLLATION_NUMERIC, 0, l as u32)
         }
         DfType::VarBinary(l) => {
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
             (
                 MYSQL_TYPE_VAR_STRING,
-                DEFAULT_CHARACTER_SET_NUMERIC,
+                DEFAULT_COLLATION_NUMERIC,
                 0,
                 l as u32,
             )
@@ -290,12 +287,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
             let length = 4294967295;
             colflags |= mysql_srv::ColumnFlags::BLOB_FLAG;
             colflags |= mysql_srv::ColumnFlags::BINARY_FLAG;
-            (
-                MYSQL_TYPE_GEOMETRY,
-                DEFAULT_CHARACTER_SET_NUMERIC,
-                0,
-                length,
-            )
+            (MYSQL_TYPE_GEOMETRY, DEFAULT_COLLATION_NUMERIC, 0, length)
         }
         DfType::PostgisPoint => {
             unsupported!("MySQL does not support the postgres/postgis point type")
@@ -305,7 +297,7 @@ pub(crate) fn convert_column(col: &ColumnSchema) -> ReadySetResult<mysql_srv::Co
         }
 
         // Fallback
-        DfType::Unknown => (MYSQL_TYPE_UNKNOWN, DEFAULT_CHARACTER_SET, 0, 1024),
+        DfType::Unknown => (MYSQL_TYPE_UNKNOWN, results_collation, 0, 1024),
     };
 
     // Process constraints

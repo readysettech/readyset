@@ -2002,6 +2002,51 @@ async fn gbk_handshake_invalid_utf8_statement_errors() {
     shutdown_tx.shutdown().await;
 }
 
+/// A handshake advertising collation id 0 means "use the server default" and gets a utf8
+/// session, so non-ASCII UTF-8 text roundtrips.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn handshake_collation_zero_roundtrips_utf8() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, 0).await;
+    let rows = raw.query_raw("SELECT 'café'".as_bytes()).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), "café".as_bytes());
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A collation-0 session is utf8, so a query with a non-UTF-8 byte gets a statement-level
+/// error and the connection stays usable.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn handshake_collation_zero_invalid_utf8_statement_errors() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, 0).await;
+    let (code, message) = raw.query_expect_err(b"SELECT 'a\xE9b'").await;
+    assert_eq!(code, ER_INVALID_CHARACTER_STRING);
+    assert!(message.contains("E9"), "unexpected message: {message}");
+
+    let rows = raw.query_raw(b"SELECT 1").await;
+    assert_eq!(rows.len(), 1);
+
+    shutdown_tx.shutdown().await;
+}
+
 /// COM_STMT_PREPARE with undecodable statement bytes gets the same statement-level error and
 /// leaves the connection usable.
 #[tokio::test(flavor = "multi_thread")]
