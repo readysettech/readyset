@@ -111,6 +111,26 @@ fn build_select_inner(
         .cloned()
         .collect();
 
+    // With no GROUP BY, any aggregate in the SELECT list collapses the whole
+    // table to a single row. An ORDER BY on the aggregated column must then
+    // reference the aggregate expression, not the bare column: Postgres
+    // rejects a bare column reference in ORDER BY/GROUP BY position when the
+    // SELECT list contains an ungrouped aggregate (42803).
+    let has_group_by = constraints
+        .iter()
+        .any(|c| matches!(c, Constraint::GroupBy { .. }));
+    let ungrouped_aggregate_targets: HashMap<VarId, &AggregateFn> = if has_group_by {
+        HashMap::new()
+    } else {
+        constraints
+            .iter()
+            .filter_map(|c| match c {
+                Constraint::ProjectAggregate { function, col, .. } => Some((*col, function)),
+                _ => None,
+            })
+            .collect()
+    };
+
     for c in constraints {
         match c {
             Constraint::From(t) => {
@@ -597,8 +617,13 @@ fn build_select_inner(
                 if order_tiebreak_table.is_none() {
                     order_tiebreak_table = Some(*table);
                 }
+                let col_expr = make_column_expr(&col_name, &table_name);
+                let order_field = match ungrouped_aggregate_targets.get(col) {
+                    Some(function) => Expr::Call(make_aggregate_expr(function, col_expr)),
+                    None => col_expr,
+                };
                 order_bys.push(OrderBy {
-                    field: FieldReference::Expr(make_column_expr(&col_name, &table_name)),
+                    field: FieldReference::Expr(order_field),
                     order_type: Some(*direction),
                     null_order: null_order.unwrap_or(readyset_sql::ast::NullOrder::NullsLast),
                 });
@@ -1050,8 +1075,11 @@ fn build_select_inner(
     // the primary key or the table has no resolvable base-table PK (e.g. a derived relation).
     // Also skipped under GROUP BY: the PK is not a grouped column, so appending it makes MySQL
     // reject the query under only_full_group_by (ERROR 1055); the grouped columns already give a
-    // total order over the one-row-per-group result.
+    // total order over the one-row-per-group result. Same reasoning applies to an ungrouped
+    // aggregate: it already collapses the table to a single row, so a tiebreaker is both
+    // unnecessary and itself a bare-column reference the aggregate makes invalid.
     if group_by.is_none()
+        && ungrouped_aggregate_targets.is_empty()
         && let Some(tb_table) = order_tiebreak_table
         && let Ok(physical) = get_physical_table_name(env, tb_table)
         && let Some(pk) = state.table(&physical).and_then(|s| s.primary_key.clone())

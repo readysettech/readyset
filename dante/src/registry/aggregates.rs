@@ -1260,6 +1260,33 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_no_group_by_with_topk_order_by_wraps_aggregate() {
+        // With no GROUP BY, the aggregate collapses the table to a single
+        // row; ORDER BY on the aggregated column must reference the
+        // aggregate expression (`ORDER BY count(t.c1)`, per the pattern's
+        // doc comment), not the bare column. Postgres rejects the bare form
+        // with 42803 ("column must appear in the GROUP BY clause or be used
+        // in an aggregate function") -- and so does any extra tiebreaker
+        // column appended after it, since a single-row aggregate result
+        // needs no tiebreaker at all.
+        let p = aggregate_no_group_by_with_topk();
+        let sql = resolve_pattern(&p, Dialect::PostgreSQL);
+        let order_by_clause = sql
+            .split("ORDER BY")
+            .nth(1)
+            .unwrap_or_else(|| panic!("expected ORDER BY in sql: {sql}"));
+        assert!(
+            order_by_clause.to_lowercase().contains("count("),
+            "ORDER BY must reference the aggregate expression, not the bare column: {sql}"
+        );
+        assert_eq!(
+            order_by_clause.matches(',').count(),
+            0,
+            "no extra ORDER BY keys expected for a single-row aggregate result: {sql}"
+        );
+    }
+
+    #[test]
     fn array_to_string_agg_builds() {
         let p = array_to_string_agg();
         assert_eq!(p.name, "array_to_string_agg");
