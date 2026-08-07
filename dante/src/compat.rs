@@ -93,6 +93,19 @@ pub fn has_constraint(constraints: &[Constraint], pred: fn(&Constraint) -> bool)
     constraints.iter().any(pred)
 }
 
+/// True for any projection constraint that collapses the whole input to one
+/// row per group (or one row overall, absent a `GroupBy`): `ProjectAggregate`
+/// and `ProjectArrayToStringAgg` (`array_to_string(array_agg(...), ...)`).
+/// Aggregate-awareness rules must treat both alike, or the ones that only
+/// check for `ProjectAggregate` let `ProjectArrayToStringAgg` compose with
+/// ungrouped projections that Postgres rejects (42803).
+fn is_aggregate_projection(c: &Constraint) -> bool {
+    matches!(
+        c,
+        Constraint::ProjectAggregate { .. } | Constraint::ProjectArrayToStringAgg { .. }
+    )
+}
+
 /// True for any constraint that the compound-SELECT outer scope can't host.
 /// `CompoundSelect` is a complete query shape; only `OrderBy` / `Limit` and
 /// schema/unification metadata are valid alongside it at the outer level.
@@ -216,9 +229,7 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                 if !has_distinct {
                     return false;
                 }
-                let has_aggregate = has_constraint(constraints, |c| {
-                    matches!(c, Constraint::ProjectAggregate { .. })
-                });
+                let has_aggregate = has_constraint(constraints, is_aggregate_projection);
                 if !has_aggregate {
                     return false;
                 }
@@ -257,9 +268,7 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                 // plain column projections. This catches composed queries like
                 // SELECT COUNT(c1), c2 FROM t (without GROUP BY c2) which
                 // are non-deterministic in MySQL and errors in Postgres.
-                let has_aggregate = has_constraint(constraints, |c| {
-                    matches!(c, Constraint::ProjectAggregate { .. })
-                });
+                let has_aggregate = has_constraint(constraints, is_aggregate_projection);
                 if !has_aggregate {
                     return false;
                 }
@@ -300,8 +309,9 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
         // `ProjectColumn` constraints. This means the
         // "ungrouped projection with aggregate" rule above can't see the
         // exposed columns and won't catch a partner pattern that adds
-        // aggregate constraints (`ProjectAggregate`, `GroupBy`, `Having`,
-        // `HavingKeyFilter`). MySQL then rejects the resolved query with
+        // aggregate constraints (`ProjectAggregate`, `ProjectArrayToStringAgg`,
+        // `GroupBy`, `Having`, `HavingKeyFilter`). MySQL then rejects the
+        // resolved query with
         // ERROR 42000 (1055): "Expression #N of SELECT list is not in GROUP BY"
         // or 1140: "In aggregated query without GROUP BY...".
         //
@@ -321,13 +331,13 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
                     return false;
                 }
                 constraints.iter().any(|c| {
-                    matches!(
-                        c,
-                        Constraint::ProjectAggregate { .. }
-                            | Constraint::GroupBy { .. }
-                            | Constraint::Having { .. }
-                            | Constraint::HavingKeyFilter { .. }
-                    )
+                    is_aggregate_projection(c)
+                        || matches!(
+                            c,
+                            Constraint::GroupBy { .. }
+                                | Constraint::Having { .. }
+                                | Constraint::HavingKeyFilter { .. }
+                        )
                 })
             }),
             reason: "derived-relation source (CTE / FROM-subquery alias) auto-exposes inner \
@@ -847,6 +857,86 @@ mod tests {
         assert!(
             check_rules(&rules, &constraints, &[]).is_none(),
             "FROM-subquery without aggregate constraints must be allowed"
+        );
+    }
+
+    #[test]
+    fn array_to_string_agg_with_ungrouped_projection_rejected() {
+        // `array_to_string_agg`'s ProjectArrayToStringAgg is an
+        // aggregate-class projection just like ProjectAggregate: composing
+        // it with a plain ungrouped column projection collapses the whole
+        // table to one row for the aggregate while still asking for a
+        // per-row value for the plain column. Postgres rejects with 42803
+        // ("column must appear in the GROUP BY clause or be used in an
+        // aggregate function").
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::ProjectArrayToStringAgg {
+                col: VarId(1),
+                table: VarId(0),
+            },
+            Constraint::ProjectColumn {
+                col: VarId(2),
+                table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "ProjectArrayToStringAgg + ungrouped ProjectColumn must be rejected, \
+             same as ProjectAggregate"
+        );
+    }
+
+    #[test]
+    fn distinct_with_array_to_string_agg_rejected() {
+        // Sibling of `distinct_with_bare_aggregate_tag_never_fires`: DISTINCT
+        // over a bare ProjectArrayToStringAgg (no GROUP BY) is the same
+        // semantically-dubious composition as DISTINCT + ProjectAggregate.
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::Distinct,
+            Constraint::ProjectArrayToStringAgg {
+                col: VarId(1),
+                table: VarId(0),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "DISTINCT + bare ProjectArrayToStringAgg (no GroupBy) must be rejected"
+        );
+    }
+
+    #[test]
+    fn derived_relation_source_with_array_to_string_agg_rejected() {
+        // Sibling of `derived_relation_source_with_aggregate_rejected`: a
+        // derived-relation source (CTE / FROM-subquery alias) auto-exposes
+        // its inner projections, which the outer GROUP BY can't track --
+        // composing with ProjectArrayToStringAgg has the same
+        // untracked-column problem as ProjectAggregate.
+        use crate::constraint::SubqueryRelationKind;
+        let rules = default_rules();
+        let constraints = vec![
+            Constraint::SubqueryRelation {
+                kind: SubqueryRelationKind::FromSubquery,
+                alias: VarId(0),
+                constraints: vec![
+                    Constraint::From(VarId(1)),
+                    Constraint::ProjectColumn {
+                        col: VarId(2),
+                        table: VarId(1),
+                    },
+                ],
+                shared_vars: vec![],
+            },
+            Constraint::ProjectArrayToStringAgg {
+                col: VarId(3),
+                table: VarId(4),
+            },
+        ];
+        assert!(
+            check_rules(&rules, &constraints, &[]).is_some(),
+            "FROM-subquery + ProjectArrayToStringAgg must be rejected (same reason as \
+             ProjectAggregate)"
         );
     }
 
