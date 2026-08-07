@@ -3911,6 +3911,59 @@ mod tests {
             }
         }
 
+        /// A predicate over an inlined statement's non-aggregate output belongs in WHERE.
+        ///
+        /// Inlining an aggregated derived table moves predicates that reference only it into
+        /// HAVING, because a predicate over an aggregate cannot be evaluated before the
+        /// aggregation.  That reasoning does not extend to its other outputs: decorrelating a
+        /// select-list subquery leaves a joined column that is neither grouped nor aggregated, and
+        /// HAVING cannot reference one.
+        #[test]
+        fn predicate_over_a_decorrelated_column_stays_in_where_via_ildt() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT agg.pn FROM (SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn) agg WHERE agg.c = 1",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.having.is_none(),
+                "the predicate is not over an aggregate, so nothing belongs in HAVING: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// The same, reached through `derived_tables_rewrite` rather than the leading-derived-table
+        /// pass: both share the classifier that decides the destination, so both misplace it.
+        #[test]
+        fn predicate_over_a_decorrelated_column_stays_in_where_via_dtr() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT agg.pn FROM (SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn) agg WHERE agg.c = 1",
+                Dialect::PostgreSQL,
+            );
+            let flags = rewrite_params(Dialect::PostgreSQL);
+            let uniq = UniqueColumnsSchemaImpl::from(&context);
+            let nonnull = NonNullSchemaImpl::from(&context);
+
+            // Drive the passes directly, skipping the leading-derived-table pass, so the inline is
+            // performed by derived_tables_rewrite.
+            query.normalize_subquery_positions().unwrap();
+            query.unnest_subqueries(&nonnull, &uniq).unwrap();
+            query.derived_tables_rewrite(flags.dialect, &uniq).unwrap();
+
+            assert!(
+                query.having.is_none(),
+                "the predicate is not over an aggregate, so nothing belongs in HAVING: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
         /// A HAVING alias the query itself wrote must survive inlining too.
         ///
         /// The aliased item here is a subquery, so it cannot be substituted back into HAVING --

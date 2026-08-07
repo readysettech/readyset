@@ -273,9 +273,21 @@ pub(crate) fn classify_where_conjuncts(
 /// internal — relying on that downstream relocation keeps the
 /// partition simple (one rule: inlinable-only → HAVING) without
 /// losing the efficient WHERE placement at the boundary.
+/// Does `expr` read an output of the inlined statement that is an aggregate?
+///
+/// Only such a predicate has to wait for the aggregation.  A predicate over any other output --
+/// a grouping key, or a column a decorrelated select-list subquery left behind -- reads a value
+/// the row already carries, so it stays in WHERE, where it is also legal: HAVING may only name
+/// grouped or aggregated columns.
+fn references_aggregate_output(expr: &Expr, ext_to_int: &HashMap<Column, Expr>) -> bool {
+    readyset_sql::analysis::ReferredColumns::referred_columns(expr)
+        .any(|col| ext_to_int.get(col).is_some_and(contains_aggregate))
+}
+
 pub(crate) fn partition_inlinable_only_where_to_having(
     stmt: &mut SelectStatement,
     inl_rel: &Relation,
+    ext_to_int: &HashMap<Column, Expr>,
 ) -> ReadySetResult<()> {
     let Some(where_expr) = stmt.where_clause.take() else {
         return Ok(());
@@ -283,7 +295,8 @@ pub(crate) fn partition_inlinable_only_where_to_having(
     let classified = classify_where_conjuncts(stmt, &where_expr, inl_rel)?;
     let mut kept_where: Option<Expr> = None;
     for (e, scope) in classified {
-        if scope == WhereConjunctScope::InlinableOnly {
+        if scope == WhereConjunctScope::InlinableOnly && references_aggregate_output(&e, ext_to_int)
+        {
             stmt.having = and_predicates_skip_true(stmt.having.take(), e);
         } else {
             kept_where = and_predicates_skip_true(kept_where, e);
@@ -2616,7 +2629,7 @@ pub(crate) fn apply_inline(
     // reference the hoistable relation (lhs) and *no other base relations* into HAVING.
     if is_lhs_stmt_aggregation_or_grouped {
         let lhs_rel: Relation = prepared.alias.clone().into();
-        partition_inlinable_only_where_to_having(base_stmt, &lhs_rel)?;
+        partition_inlinable_only_where_to_having(base_stmt, &lhs_rel, &prepared.ext_to_int)?;
     }
 
     replace_columns_with_inlinable_expr(

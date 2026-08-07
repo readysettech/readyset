@@ -679,7 +679,7 @@ fn inline_from_item(
         // contract.
         let inl_rel: Relation = candidate.alias.clone().into();
         if is_inl_aggregated {
-            partition_inlinable_only_where_to_having(base_stmt, &inl_rel)?;
+            partition_inlinable_only_where_to_having(base_stmt, &inl_rel, &candidate.ext_to_int)?;
         }
         crate::inline_subquery::replace_columns_with_inlinable_expr(
             base_stmt,

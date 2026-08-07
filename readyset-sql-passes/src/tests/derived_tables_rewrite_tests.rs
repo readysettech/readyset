@@ -498,8 +498,9 @@ where
         INNER JOIN "j" ON ("p"."sn" = "j"."sn")
         INNER JOIN "s" ON ("j"."sn" = "s"."sn")
         INNER JOIN "spj" ON ("s"."sn" = "spj"."sn")
-        WHERE (((((("spj"."sn" < 'S44444') AND ("p"."sn" < 'P55555')) AND ("spj"."sn" > 'S33333')) AND ("j"."sn" < 'S55555'))
-        AND ((("spj"."pn" = 'P11111') AND ("s"."jn" = 'J11111')) AND ("p"."pn" = 'P11111'))) AND "s"."sn" IN ('S44444', 'S55555'))
+        WHERE (("s"."sn" IN ('S44444', 'S55555')
+        AND (((("spj"."sn" < 'S44444') AND ("p"."sn" < 'P55555')) AND ("spj"."sn" > 'S33333')) AND ("j"."sn" < 'S55555')))
+        AND ((("spj"."pn" = 'P11111') AND ("s"."jn" = 'J11111')) AND ("p"."pn" = 'P11111')))
         GROUP BY "s"."sn"
         HAVING (max("spj"."pn") > 'P33333')"#,
     );
