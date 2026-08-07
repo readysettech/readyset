@@ -203,12 +203,22 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
                         "new_generation": catalog.generation.get(),
                     })
                 );
+                antithesis_sdk::assert_sometimes!(
+                    catalog.generation > current.generation.next(),
+                    "Schema catalog caught up across a generation gap",
+                    &serde_json::json!({
+                        "current_generation": current.generation.get(),
+                        "new_generation": catalog.generation.get(),
+                    })
+                );
                 if !generation_advanced {
                     counter!(metric::SCHEMA_CATALOG_UNEXPECTED_GENERATION).increment(1);
                     warn!(
+                        current_generation = %current.generation,
                         generation = %catalog.generation,
-                        "Schema catalog content changed without generation advancing"
+                        "Ignoring schema catalog update that does not advance the generation"
                     );
+                    return;
                 }
             }
 
@@ -737,5 +747,40 @@ mod tests {
         shutdown_tx.shutdown().await;
         // The synchronizer task itself should complete without hanging
         join.await.expect("synchronizer task should not panic");
+    }
+
+    fn catalog_with(generation: u64, relation: &str) -> SchemaCatalog {
+        let mut catalog = SchemaCatalog::new();
+        catalog.generation = SchemaGeneration::new(generation).expect("valid generation");
+        catalog
+            .view_schemas
+            .insert(readyset_sql::ast::Relation::from(relation), vec![]);
+        catalog
+    }
+
+    #[tokio::test]
+    async fn update_without_generation_advance_is_ignored() {
+        let (synchronizer, handle) = SchemaCatalogSynchronizer::new(EmptyStreamProvider);
+
+        synchronizer
+            .apply_update(catalog_with(7, "current"), None)
+            .await;
+        // Older generation: a stale delivery, e.g. an update queued before a reconnect.
+        synchronizer
+            .apply_update(catalog_with(5, "stale"), None)
+            .await;
+        // Same generation, different content: the publisher failed to bump the generation.
+        synchronizer
+            .apply_update(catalog_with(7, "unbumped"), None)
+            .await;
+
+        let cached = handle.get_catalog().await.expect("catalog was applied");
+        assert_eq!(cached.generation, SchemaGeneration::new(7).unwrap());
+        assert!(
+            cached
+                .view_schemas
+                .contains_key(&readyset_sql::ast::Relation::from("current")),
+            "cache should still hold the generation 7 catalog it applied first"
+        );
     }
 }
