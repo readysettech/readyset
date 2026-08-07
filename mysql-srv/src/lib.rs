@@ -478,9 +478,19 @@ fn decode_from_client(encoding: Encoding, bytes: &[u8]) -> io::Result<Cow<'_, st
             })?))
         }
         Encoding::Utf8 | Encoding::Utf8Mb3 | Encoding::Binary | Encoding::OtherMySql(_) => {
-            str::from_utf8(bytes)
-                .map(Cow::Borrowed)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            str::from_utf8(bytes).map(Cow::Borrowed).map_err(|e| {
+                // Mirror MySQL's ER_INVALID_CHARACTER_STRING message, which quotes the first
+                // offending bytes as hex.
+                let offending: String = bytes[e.valid_up_to()..]
+                    .iter()
+                    .take(6)
+                    .map(|b| format!("{b:02X}"))
+                    .collect();
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid character string: '{offending}'"),
+                )
+            })
         }
     }
 }
@@ -867,6 +877,29 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         })
     }
 
+    /// Decode inbound statement bytes per the session's client charset. On failure, reply with a
+    /// statement-level ER_INVALID_CHARACTER_STRING as MySQL does. The statement is rejected but
+    /// the connection stays open. Returns `None` when the statement was rejected.
+    async fn decode_or_reply_err<'a>(
+        &mut self,
+        bytes: &'a [u8],
+    ) -> io::Result<Option<Cow<'a, str>>> {
+        match decode_from_client(self.shim.client_encoding(), bytes) {
+            Ok(s) => Ok(Some(s)),
+            Err(e) => {
+                debug!(error = %e, "rejecting statement that cannot be decoded");
+                write_err(
+                    ErrorKind::ER_INVALID_CHARACTER_STRING,
+                    e.to_string().as_bytes(),
+                    &mut self.conn,
+                )
+                .await?;
+                self.conn.flush().await?;
+                Ok(None)
+            }
+        }
+    }
+
     async fn run(mut self) -> Result<(), io::Error> {
         use crate::commands::Command;
 
@@ -1018,7 +1051,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     self.conn.flush().await?;
                 }
                 Command::Query(q) => {
-                    let query = decode_from_client(self.shim.client_encoding(), q)?;
+                    let Some(query) = self.decode_or_reply_err(q).await? else {
+                        continue;
+                    };
                     let w = QueryResultWriter::new(&mut self.conn, false);
                     let res = self.shim.on_query(&query, w).await;
 
@@ -1056,7 +1091,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     }
                 }
                 Command::Prepare(q) => {
-                    let query = decode_from_client(self.shim.client_encoding(), q)?;
+                    let Some(query) = self.decode_or_reply_err(q).await? else {
+                        continue;
+                    };
                     let w = StatementMetaWriter {
                         conn: &mut self.conn,
                         stmts: &mut stmts,
@@ -1128,7 +1165,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Init(schema) => {
                     debug!(schema = %String::from_utf8_lossy(schema), "Handling COM_INIT_DB");
-                    let schema_str = decode_from_client(self.shim.client_encoding(), schema)?;
+                    let Some(schema_str) = self.decode_or_reply_err(schema).await? else {
+                        continue;
+                    };
                     match self.shim.on_init(&schema_str).await {
                         Ok(()) => {
                             writers::write_ok_packet(

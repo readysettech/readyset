@@ -1040,6 +1040,32 @@ impl RawConn {
         self.query_with_metadata(statement).await.1
     }
 
+    /// Send a command and expect an ERR packet; return its error code and message.
+    async fn command_expect_err(&mut self, command: u8, statement: &[u8]) -> (u16, String) {
+        let mut payload = Vec::with_capacity(statement.len() + 1);
+        payload.push(command);
+        payload.extend_from_slice(statement);
+        self.write_packet(0, &payload).await;
+        let (_, packet) = self.read_packet().await;
+        assert_eq!(packet.first(), Some(&0xFF), "expected ERR packet: {packet:?}");
+        // The payload is 0xFF, a little-endian u16 error code, '#', a 5-byte sqlstate, and the
+        // message.
+        (
+            u16::from_le_bytes([packet[1], packet[2]]),
+            String::from_utf8_lossy(&packet[9..]).into_owned(),
+        )
+    }
+
+    /// Send a COM_QUERY and expect an ERR packet; return its error code and message.
+    async fn query_expect_err(&mut self, statement: &[u8]) -> (u16, String) {
+        self.command_expect_err(0x03, statement).await
+    }
+
+    /// Send a COM_STMT_PREPARE and expect an ERR packet; return its error code and message.
+    async fn prepare_expect_err(&mut self, statement: &[u8]) -> (u16, String) {
+        self.command_expect_err(0x16, statement).await
+    }
+
     /// The Query_destination column of EXPLAIN LAST STATEMENT.
     async fn last_destination(&mut self) -> QueryDestination {
         let (_, rows) = self.query_with_metadata(b"EXPLAIN LAST STATEMENT").await;
@@ -1917,4 +1943,84 @@ async fn unsupported_charset_write_denies_only_that_table() {
         .query_drop(format!("DROP DATABASE {db_name}"))
         .await
         .unwrap();
+}
+
+/// The utf8_general_ci collation id, sent by clients whose charset is utf8mb3.
+const UTF8_COLLATION: u8 = 33;
+
+/// The gbk_chinese_ci collation id, gbk's default. Readyset has no conversion table for gbk.
+const GBK_COLLATION: u8 = 28;
+
+/// MySQL's ER_INVALID_CHARACTER_STRING error code.
+const ER_INVALID_CHARACTER_STRING: u16 = 1300;
+
+/// A query with malformed UTF-8 from a utf8 client gets a statement-level
+/// ER_INVALID_CHARACTER_STRING, matching MySQL, and the connection stays usable.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn utf8_handshake_malformed_utf8_statement_errors() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8_COLLATION).await;
+    let (code, message) = raw.query_expect_err(b"SELECT 'a\xE9b'").await;
+    assert_eq!(code, ER_INVALID_CHARACTER_STRING);
+    assert!(message.contains("E9"), "unexpected message: {message}");
+
+    let rows = raw.query_raw(b"SELECT 1").await;
+    assert_eq!(rows.len(), 1);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A client on an unsupported multibyte charset (gbk) whose statement bytes are not valid UTF-8
+/// gets a statement-level error, not a dropped connection.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn gbk_handshake_invalid_utf8_statement_errors() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, GBK_COLLATION).await;
+    // The gbk encoding of U+4F60, not valid UTF-8.
+    let (code, _) = raw.query_expect_err(b"SELECT '\xC4\xE3'").await;
+    assert_eq!(code, ER_INVALID_CHARACTER_STRING);
+
+    let rows = raw.query_raw(b"SELECT 1").await;
+    assert_eq!(rows.len(), 1);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// COM_STMT_PREPARE with undecodable statement bytes gets the same statement-level error and
+/// leaves the connection usable.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn prepare_with_invalid_utf8_errors() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8_COLLATION).await;
+    let (code, _) = raw.prepare_expect_err(b"SELECT 'a\xE9'").await;
+    assert_eq!(code, ER_INVALID_CHARACTER_STRING);
+
+    let rows = raw.query_raw(b"SELECT 1").await;
+    assert_eq!(rows.len(), 1);
+
+    shutdown_tx.shutdown().await;
 }

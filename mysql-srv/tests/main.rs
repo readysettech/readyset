@@ -470,29 +470,105 @@ async fn single_byte_query_is_decoded() {
     }
 }
 
+/// Assert that a client-side read error is an ER_INVALID_CHARACTER_STRING (1300) ERR packet.
+fn assert_invalid_character_string(err: mysql::Error) {
+    let mysql::Error::Server(err) = err else {
+        panic!("expected server error: {err:?}");
+    };
+    assert_eq!(err.code, 1300);
+    assert!(
+        err.message.starts_with("Invalid character string: '"),
+        "unexpected message: {}",
+        err.message
+    );
+}
+
 #[tokio::test]
-async fn utf8_query_with_invalid_bytes_errors() {
-    let res = TestingShim::new(
-        |_, _| unreachable!(),
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-        |_| unreachable!(),
-        |_, _, _| unreachable!(),
-    )
-    .test_with_opts_server_result(
-        |db| {
-            Box::pin(async move {
-                db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
-                    .await
-                    .unwrap();
-                let res = db.read_packet().await;
-                assert!(res.is_err());
-            })
+async fn invalid_utf8_query_statement_errors() {
+    TestingShim::new(
+        |query, w| {
+            assert_eq!(query, "SELECT 1");
+            Box::pin(async move { w.completed(0, 0, None).await })
         },
-        "",
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
     )
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_QUERY, b"SELECT 'N\xE3o'")
+                .await
+                .unwrap();
+            let err = db.read_packet().await.unwrap_err();
+            assert_invalid_character_string(err);
+            // The connection survives the rejected statement.
+            db.write_command_data(Command::COM_QUERY, b"SELECT 1")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected OK packet: {packet:?}");
+        })
+    })
     .await;
-    assert_eq!(res.unwrap_err().kind(), io::ErrorKind::InvalidData);
+}
+
+#[tokio::test]
+async fn invalid_utf8_prepare_statement_errors() {
+    TestingShim::new(
+        |query, w| {
+            assert_eq!(query, "SELECT 1");
+            Box::pin(async move { w.completed(0, 0, None).await })
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_STMT_PREPARE, b"SELECT 'N\xE3o'")
+                .await
+                .unwrap();
+            let err = db.read_packet().await.unwrap_err();
+            assert_invalid_character_string(err);
+            db.write_command_data(Command::COM_QUERY, b"SELECT 1")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected OK packet: {packet:?}");
+        })
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn invalid_utf8_init_statement_errors() {
+    TestingShim::new(
+        |query, w| {
+            assert_eq!(query, "SELECT 1");
+            Box::pin(async move { w.completed(0, 0, None).await })
+        },
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .test(|db| {
+        Box::pin(async move {
+            db.write_command_data(Command::COM_INIT_DB, b"caf\xE9")
+                .await
+                .unwrap();
+            let err = db.read_packet().await.unwrap_err();
+            assert_invalid_character_string(err);
+            db.write_command_data(Command::COM_QUERY, b"SELECT 1")
+                .await
+                .unwrap();
+            let packet = db.read_packet().await.unwrap();
+            assert_eq!(packet[0], 0x00, "expected OK packet: {packet:?}");
+        })
+    })
+    .await;
 }
 
 #[tokio::test]
