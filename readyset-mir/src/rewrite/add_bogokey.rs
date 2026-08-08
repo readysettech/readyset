@@ -20,9 +20,10 @@ use crate::{Column, NodeIndex};
 /// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
 /// the bogokey to their `group_by`
 ///
-/// Consider a join node without a join condition (i.e. a cross-join); however, all join nodes
+/// Consider a join node without a join condition — a cross join, or the LEFT JOIN that
+/// subquery decorrelation produces for an uncorrelated subquery; however, all join nodes
 /// require a join condition, so we add a bogokey projection to both of the join's parents and
-/// use that as a filter condition..
+/// use that as a filter condition.
 pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     add_bogokey_leaf(query)?;
     add_bogokey_topk(query)?;
@@ -133,13 +134,13 @@ fn add_bogokey_leaf(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
 }
 
 fn add_bogokey_join(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    let cross_joins = query
+    let keyless_joins = query
         .node_references()
         .filter(|(_, node)| {
             matches!(
                 node,
                 MirNode {
-                    inner: MirNodeInner::Join { on, .. },
+                    inner: MirNodeInner::Join { on, .. } | MirNodeInner::LeftJoin { on, .. },
                     ..
                 } if on.is_empty()
             )
@@ -147,10 +148,10 @@ fn add_bogokey_join(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
         .map(|(idx, _)| idx)
         .collect::<Vec<_>>();
 
-    cross_joins
+    keyless_joins
         .iter()
         .try_for_each(|idx| -> ReadySetResult<()> {
-            trace!(?idx, "Adding bogokey to cross join");
+            trace!(?idx, "Adding bogokey to keyless join");
 
             let ancestors = query.ancestors(*idx).unwrap();
             for (i, ancestor) in ancestors.into_iter().enumerate() {
@@ -175,7 +176,7 @@ fn add_bogokey_join(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
             }
 
             match &mut query.get_node_mut(*idx).unwrap().inner {
-                MirNodeInner::Join { on, project } => {
+                MirNodeInner::Join { on, project } | MirNodeInner::LeftJoin { on, project, .. } => {
                     on.push((Column::named("bogokey"), Column::named("bogokey")));
                     project.push(Column::named("bogokey"));
                 }
@@ -507,5 +508,61 @@ mod tests {
 
         check_projection_node(format!("{}_bogo_project_0", query_name.display_unquoted()).as_str());
         check_projection_node(format!("{}_bogo_project_1", query_name.display_unquoted()).as_str());
+    }
+
+    /// Decorrelating an uncorrelated select-list subquery produces a LEFT JOIN with no ON
+    /// clause. Like a cross join, it needs a bogokey to give the join operator something to
+    /// match on.
+    #[test]
+    fn test_add_bogokey_to_keyless_left_join() {
+        let query_name = Relation::from("query_needing_bogokey");
+        let mut mir_graph = MirGraph::new();
+
+        let mut base = |name: &str, col: &str| {
+            let idx = mir_graph.add_node(MirNode::new(
+                name.into(),
+                MirNodeInner::Base {
+                    column_specs: vec![ColumnSpecification {
+                        column: ast::Column::from(col),
+                        sql_type: SqlType::Int(None),
+                        generated: None,
+                        constraints: vec![],
+                        comment: None,
+                        invisible: false,
+                    }],
+                    primary_key: Some([Column::from(col)].into()),
+                    unique_keys: Default::default(),
+                },
+            ));
+            mir_graph[idx].add_owner(query_name.clone());
+            idx
+        };
+        let left = base("left_base", "a");
+        let right = base("right_base", "b");
+
+        let join_node = mir_graph.add_node(MirNode::new(
+            "join_node".into(),
+            MirNodeInner::LeftJoin {
+                on: vec![],
+                project: vec![Column::named("a"), Column::named("b")],
+                left_local_preds: vec![],
+            },
+        ));
+        mir_graph[join_node].add_owner(query_name.clone());
+        mir_graph.add_edge(left, join_node, 0);
+        mir_graph.add_edge(right, join_node, 1);
+
+        let mut query = MirQuery::new(query_name.clone(), join_node, &mut mir_graph);
+
+        add_bogokey_if_necessary(&mut query).unwrap();
+
+        match &query.get_node(join_node).unwrap().inner {
+            MirNodeInner::LeftJoin { on, .. } => {
+                assert_eq!(on.len(), 1, "Expected a bogo key to be added");
+                assert_eq!(on[0].0.name, "bogokey");
+                assert_eq!(on[0].1.name, "bogokey");
+            }
+            _ => panic!("Leaf node is not a LeftJoin node"),
+        }
     }
 }
