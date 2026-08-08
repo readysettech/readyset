@@ -2431,8 +2431,10 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
     let mut rewrite_status = RewriteStatus::default();
 
     let mut stmt_fields = Vec::new();
+    let mut fields_needing_group_by_key = Vec::new();
 
     for mut current_field in mem::take(&mut stmt.fields).into_iter() {
+        let mut needs_group_by_key = false;
         let (field_expr, _) = expect_field_as_expr_mut(&mut current_field);
 
         for subquery_predicate in collect_outermost_subquery_predicates_mut(field_expr)? {
@@ -2493,6 +2495,7 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
             };
 
             let local_from_items = collect_local_from_items(stmt)?;
+            let subquery_was_correlated = is_correlated(&subquery_desc.stmt);
 
             let (derived_table, join_on) = as_joinable_derived_table(
                 subquery_desc.ctx,
@@ -2504,6 +2507,21 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
             if let Some(join_on_expr) = &join_on {
                 assert_local_columns_are_grouped(join_on_expr, stmt, &local_from_items)?;
             }
+
+            // Once the subquery becomes a reference to the joined derived table, a grouped outer
+            // statement projects a value that is neither grouped nor aggregated: valid before the
+            // rewrite, invalid after.  Record that this field needs its value as a grouping key.
+            //
+            // Adding it preserves the result only when the value cannot split or merge groups.
+            // An uncorrelated subquery yields one value for the whole relation.  Supported
+            // correlation is equality pairs in WHERE, which always yield a join condition, so it
+            // is the correlation whose outer columns the assertion above has established are
+            // themselves grouping keys.  Correlation elsewhere reaches here only in transit --
+            // `unnest_lateral_subqueries` rejects it -- and has no join condition to vouch for
+            // it, so it must not become a grouping key.
+            let correlation_without_join_condition = subquery_was_correlated && join_on.is_none();
+            let field_needs_group_by_key =
+                stmt.group_by.is_some() && !correlation_without_join_condition;
 
             let (subquery_stmt, subquery_stmt_alias) = expect_sub_query_with_alias(&derived_table);
 
@@ -2606,15 +2624,40 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
                     },
                 );
                 rewrite_status.rewrite();
+                needs_group_by_key |= field_needs_group_by_key;
             } else {
                 rewrite_status.rollback();
             }
+        }
+
+        if needs_group_by_key {
+            fields_needing_group_by_key.push(stmt_fields.len());
         }
 
         stmt_fields.push(current_field);
     }
 
     stmt.fields = stmt_fields;
+
+    // Group by the projected expression, whatever wraps the subquery, once the field list is back
+    // in place: a GROUP BY here may reference an item by alias or by position, and
+    // `find_group_by_key` recognizes every form against the projection.  Positional references
+    // survive this far because `remove_numeric_field_references` runs server-side, after this
+    // pipeline.  The emitted form is not ours to pick -- `derived_tables_rewrite` and
+    // `hoist_parametrizable_filters` rewrite grouping expressions that match an aliased select
+    // item into alias references -- so a key added here only has to name the same value.
+    if let Some(group_by) = &mut stmt.group_by {
+        // Stands in for an unaliased item: no grouping key can name the empty identifier, so
+        // matching falls to the expression and position forms.
+        let unaliased = SqlIdentifier::default();
+        for field_idx in fields_needing_group_by_key {
+            let (expr, alias) = expect_field_as_expr(&stmt.fields[field_idx]);
+            let alias = alias.as_ref().unwrap_or(&unaliased);
+            if find_group_by_key(&stmt.fields, &group_by.fields, expr, alias)?.is_none() {
+                group_by.fields.push(FieldReference::Expr(expr.clone()));
+            }
+        }
+    }
 
     Ok(rewrite_status)
 }

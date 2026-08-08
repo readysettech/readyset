@@ -767,7 +767,7 @@ group by spj.qty, spj.pn;"#;
         (SELECT DISTINCT 1 AS "present_", "p"."jn" AS "jn" FROM "p" WHERE ("p"."weight" = 12)) AS "GNL"
         ON ("GNL"."jn" = "spj"."jn") LEFT OUTER JOIN (SELECT avg("p"."weight") AS "avg(weight)", "p"."pn" AS "pn"
         FROM "p" WHERE ("p"."sn" = 'S33333') GROUP BY "p"."pn") AS "GNL1" ON ("GNL1"."pn" = "spj"."pn")
-        GROUP BY "spj"."qty", "spj"."pn""#;
+        GROUP BY "spj"."qty", "spj"."pn", ("spj"."qty" = "GNL1"."avg(weight)")"#;
     test_it("test17", original_text, expected_text);
 }
 
@@ -797,7 +797,7 @@ group by spj.qty, spj.pn;"#;
         (SELECT DISTINCT 1 AS "present_", "p"."jn" AS "jn" FROM "p" WHERE ("p"."weight" = 12)) AS "GNL"
         ON ("GNL"."jn" = "spj"."jn") LEFT OUTER JOIN (SELECT count(*) AS "count(*)", "p"."pn" AS "pn" FROM "p"
         WHERE ("p"."sn" = 'S33333') GROUP BY "p"."pn") AS "GNL1" ON ("GNL1"."pn" = "spj"."pn")
-        GROUP BY "spj"."qty", "spj"."pn""#;
+        GROUP BY "spj"."qty", "spj"."pn", ("spj"."qty" = "GNL1"."count(*)")"#;
     test_it("test18", original_text, expected_text);
 }
 

@@ -4339,6 +4339,126 @@ mod tests {
             );
         }
 
+        /// GROUP BY may name the subquery item by position: `remove_numeric_field_references`
+        /// is a server-side pass, so positional references are still present here. The key must
+        /// be recognized as already there, or it is added a second time.
+        #[test]
+        fn group_by_repair_recognizes_a_positional_reference() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY 1, 2",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.group_by.is_none() && query.distinct,
+                "positional reference was not recognized: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// The repair keys on the projected expression, so a subquery wrapped in one -- an
+        /// arithmetic operand, a CASE arm -- is grouped like a bare one. Whether the item carries
+        /// an alias must not decide it.
+        #[test]
+        fn group_by_repair_covers_a_subquery_inside_an_expression() {
+            for sql in [
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) + 1 AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) + 1 FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect("rewrite should succeed");
+
+                assert!(
+                    query.group_by.is_none() && query.distinct,
+                    "wrapped subquery was not grouped: {}",
+                    query.display(Dialect::PostgreSQL)
+                );
+            }
+        }
+
+        /// Decorrelating a select-list subquery into a joined derived table replaces a
+        /// group-invariant value with a reference to that table. In a grouped statement the
+        /// projection would then be neither grouped nor aggregated -- a statement Postgres
+        /// rejects, and one the server refuses with "group by without aggregates". The value
+        /// has to become a grouping key.
+        #[test]
+        fn decorrelated_select_list_subquery_becomes_a_grouping_key() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.group_by.is_none() && query.distinct,
+                "grouping every projected item collapses to DISTINCT: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// The same repair when the statement aggregates: the GROUP BY has to survive, so the
+        /// decorrelated column joins it as a key rather than collapsing to DISTINCT.
+        #[test]
+        fn decorrelated_column_joins_group_by_alongside_an_aggregate() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let group_by = query
+                .group_by
+                .as_ref()
+                .expect("the aggregate keeps the GROUP BY")
+                .fields
+                .iter()
+                .map(|f| f.display(Dialect::PostgreSQL).to_string())
+                .collect::<Vec<_>>();
+
+            assert!(
+                group_by.iter().any(|f| f.contains("GNL")),
+                "decorrelated column is not a grouping key: {group_by:?}"
+            );
+        }
+
+        /// A statement with no GROUP BY has nothing to repair, and must not acquire one.
+        #[test]
+        fn ungrouped_statement_gains_no_group_by_from_decorrelation() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED'",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.group_by.is_none() && !query.distinct,
+                "ungrouped statement was given a grouping: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
         /// A HAVING alias reference must not outlive the select-list item that defines it.
         ///
         /// `normalize_subquery_positions` rewrites an aggregate in HAVING into a reference to the
