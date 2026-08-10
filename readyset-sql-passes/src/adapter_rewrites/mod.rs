@@ -4716,6 +4716,64 @@ mod tests {
             );
         }
 
+        /// A correlated select-list subquery is only decorrelatable when its correlation keys
+        /// are grouping keys, and GROUP BY may name those keys by expression, by position, or by
+        /// the alias the projection gives them. All three say the same thing.
+        #[test]
+        fn correlation_keys_are_recognized_in_every_group_by_form() {
+            for (form, sql) in [
+                (
+                    "expression",
+                    "SELECT qa.p.pn, qa.p.sn, \
+                  (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = qa.p.sn) AS c \
+                  FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn, qa.p.sn",
+                ),
+                (
+                    "position",
+                    "SELECT qa.p.pn, qa.p.sn, \
+                  (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = qa.p.sn) AS c \
+                  FROM qa.p WHERE qa.p.color = 'RED' GROUP BY 1, 2",
+                ),
+                (
+                    "alias",
+                    "SELECT qa.p.pn, qa.p.sn AS s, \
+                  (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = qa.p.sn) AS c \
+                  FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn, s",
+                ),
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .unwrap_or_else(|e| panic!("{form} form rejected: {e}"));
+            }
+        }
+
+        /// The relaxation must not admit a correlation key that is genuinely ungrouped: the
+        /// joined value would vary within the group.
+        #[test]
+        fn an_ungrouped_correlation_key_is_still_turned_away() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, MAX(qa.p.weight) AS w, \
+                 (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = qa.p.sn) AS c \
+                 FROM qa.p WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+                Dialect::PostgreSQL,
+            );
+
+            let err =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("an ungrouped correlation key must not be decorrelated");
+
+            // Unsupported rather than invalid: the check is syntactic, so the query goes
+            // upstream instead of being called wrong on our authority.
+            assert!(
+                err.to_string().contains("unsupported")
+                    && err.to_string().contains("ungrouped column"),
+                "rejected for the wrong reason: {err}"
+            );
+        }
+
         /// GROUP BY may name the subquery item by position: `remove_numeric_field_references`
         /// is a server-side pass, so positional references are still present here. The key must
         /// be recognized as already there, or it is added a second time.

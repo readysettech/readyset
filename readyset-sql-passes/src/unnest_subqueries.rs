@@ -19,7 +19,8 @@ use crate::rewrite_utils::{
     is_literal_positive, is_literal_zero, make_first_field_ref_name,
     move_correlated_constraints_from_join_to_where, partition_correlated_predicates,
     preserve_uncorrelated_top_k, project_statement_columns_if, resolve_field_expr_by_alias,
-    rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition, split_expr_mut,
+    resolve_group_by_exprs, rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition,
+    split_expr_mut,
 };
 use crate::unnest_subqueries_3vl::{
     ProbeRegistry, RhsContext, SelectList3vlFlags, SelectList3vlInput,
@@ -2038,25 +2039,17 @@ pub(crate) fn collect_subquery_predicates(
 
 fn find_local_column_not_group_by_key<'a>(
     expr: &'a Expr,
-    select_fields: &[FieldDefinitionExpr],
-    group_by_fields: &[FieldReference],
+    grouping_keys: &[Expr],
     local_from_items: &HashSet<Relation>,
-) -> ReadySetResult<Option<&'a Column>> {
-    for col in columns_iter(expr) {
-        if let Some(table) = &col.table
-            && local_from_items.contains(table)
-            && find_group_by_key(
-                select_fields,
-                group_by_fields,
-                &Expr::Column((*col).clone()),
-                &"".into(),
-            )?
-            .is_none()
-        {
-            return Ok(Some(col));
-        }
-    }
-    Ok(None)
+) -> Option<&'a Column> {
+    columns_iter(expr).find(|col| {
+        col.table
+            .as_ref()
+            .is_some_and(|table| local_from_items.contains(table))
+            && !grouping_keys
+                .iter()
+                .any(|key| matches!(key, Expr::Column(key_col) if key_col == *col))
+    })
 }
 
 fn turn_into_not_eq_scalar(subquery_desc: &mut SubqueryPredicateDesc) {
@@ -2349,20 +2342,22 @@ fn collect_outermost_subquery_predicates_mut(expr: &mut Expr) -> ReadySetResult<
     Ok(visitor.subquery_predicates)
 }
 
+/// Takes the grouping keys already resolved to expressions.  A key written as a position or an
+/// alias can only be read against the projection, which a caller partway through rewriting the
+/// select list no longer has.
+///
+/// Reports `unsupported` rather than an invalid query: the comparison is syntactic, so it cannot
+/// see a column that Postgres accepts as functionally dependent on the grouping keys.  Sending
+/// the query upstream serves those, and lets Postgres raise the error on the rest.
 fn assert_local_columns_are_grouped(
     expr: &Expr,
-    stmt: &SelectStatement,
+    grouping_keys: &[Expr],
     local_from_items: &HashSet<Relation>,
 ) -> ReadySetResult<()> {
-    if let Some(group_by) = &stmt.group_by
-        && let Some(col) = find_local_column_not_group_by_key(
-            expr,
-            &stmt.fields,
-            &group_by.fields,
-            local_from_items,
-        )?
+    if !grouping_keys.is_empty()
+        && let Some(col) = find_local_column_not_group_by_key(expr, grouping_keys, local_from_items)
     {
-        invalid_query!(
+        unsupported!(
             "Subquery uses ungrouped column {} from outer query",
             col.display(Dialect::PostgreSQL)
         )
@@ -2378,6 +2373,9 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
 
     let mut stmt_fields = Vec::new();
     let mut fields_needing_group_by_key = Vec::new();
+    // Grouping keys may be written as positions or aliases, and only the projection can say what
+    // they name -- so resolve them here, before the loop moves the field list out of `stmt`.
+    let grouping_keys = resolve_group_by_exprs(stmt)?;
 
     for mut current_field in mem::take(&mut stmt.fields).into_iter() {
         let mut needs_group_by_key = false;
@@ -2451,7 +2449,7 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
             )?;
 
             if let Some(join_on_expr) = &join_on {
-                assert_local_columns_are_grouped(join_on_expr, stmt, &local_from_items)?;
+                assert_local_columns_are_grouped(join_on_expr, &grouping_keys, &local_from_items)?;
             }
 
             // Once the subquery becomes a reference to the joined derived table, a grouped outer
