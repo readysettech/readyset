@@ -16,9 +16,9 @@ use crate::{Column, NodeIndex};
 /// node to the query that projects out a constant literal value (a "bogokey", from "bogus key") and
 /// making that the key for the query.
 ///
-/// This pass will also handle ensuring that any topk or paginate nodes in leaf position in such
-/// queries have `group_by` columns, by lifting the bogokey project node over those nodes and adding
-/// the bogokey to their `group_by`
+/// This pass will also handle ensuring that any topk or paginate nodes in such queries have
+/// `group_by` columns, by lifting the bogokey project node over those nodes and adding the
+/// bogokey to their `group_by`
 ///
 /// Consider a join node without a join condition — a cross join, or the LEFT JOIN that
 /// subquery decorrelation produces for an uncorrelated subquery; however, all join nodes
@@ -32,7 +32,7 @@ use crate::{Column, NodeIndex};
 /// ancestors still missing one get a projection.
 pub(crate) fn add_bogokey_if_necessary(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
     add_bogokey_leaf(query)?;
-    add_bogokey_topk(query)?;
+    add_bogokey_per_group_limit(query)?;
     add_bogokey_join(query)?;
     add_bogokey_join_aggregates(query)?;
 
@@ -70,14 +70,15 @@ fn insert_bogokey_project_above(
     Ok(bogo_project)
 }
 
-fn add_bogokey_topk(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
-    let topk_nodes = query
+fn add_bogokey_per_group_limit(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
+    let ungrouped = query
         .node_references()
         .filter(|(_, node)| {
             matches!(
                 node,
                 MirNode {
-                    inner: MirNodeInner::TopK { group_by, .. },
+                    inner: MirNodeInner::TopK { group_by, .. }
+                        | MirNodeInner::Paginate { group_by, .. },
                     ..
                 } if group_by.is_empty()
             )
@@ -85,18 +86,16 @@ fn add_bogokey_topk(query: &mut MirQuery<'_>) -> ReadySetResult<()> {
         .map(|(idx, _)| idx)
         .collect::<Vec<_>>();
 
-    topk_nodes
-        .iter()
-        .try_for_each(|idx| -> ReadySetResult<()> {
-            invariant_eq!(query.ancestors(*idx)?.len(), 1);
-            insert_bogokey_project_above(query, *idx)?;
-            if let MirNodeInner::TopK { group_by, .. } =
-                &mut query.get_node_mut(*idx).unwrap().inner
-            {
-                group_by.push(Column::named("bogokey"));
-            }
-            Ok(())
-        })?;
+    ungrouped.iter().try_for_each(|idx| -> ReadySetResult<()> {
+        invariant_eq!(query.ancestors(*idx)?.len(), 1);
+        insert_bogokey_project_above(query, *idx)?;
+        if let MirNodeInner::TopK { group_by, .. } | MirNodeInner::Paginate { group_by, .. } =
+            &mut query.get_node_mut(*idx).unwrap().inner
+        {
+            group_by.push(Column::named("bogokey"));
+        }
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -270,7 +269,7 @@ mod tests {
     use petgraph::Direction;
     use readyset_client::ViewPlaceholder;
     use readyset_sql::ast::{
-        self, BinaryOperator, ColumnSpecification, Literal, Relation, SqlType,
+        self, BinaryOperator, ColumnSpecification, Literal, NullOrder, OrderType, Relation, SqlType,
     };
 
     use super::*;
@@ -582,6 +581,58 @@ mod tests {
 
         check_projection_node(format!("{}_bogo_project_0", query_name.display_unquoted()).as_str());
         check_projection_node(format!("{}_bogo_project_1", query_name.display_unquoted()).as_str());
+    }
+
+    /// A Paginate with no grouping columns needs a bogokey for the same reason a TopK does:
+    /// lowering asserts on `group_by` being populated.
+    #[test]
+    fn test_add_bogokey_to_paginate_without_group_columns() {
+        let query_name = Relation::from("query_needing_bogokey");
+        let mut mir_graph = MirGraph::new();
+
+        let base = mir_graph.add_node(MirNode::new(
+            "base".into(),
+            MirNodeInner::Base {
+                column_specs: vec![ColumnSpecification {
+                    column: ast::Column::from("a"),
+                    sql_type: SqlType::Int(None),
+                    generated: None,
+                    constraints: vec![],
+                    comment: None,
+                    invisible: false,
+                }],
+                primary_key: Some([Column::from("a")].into()),
+                unique_keys: Default::default(),
+            },
+        ));
+        mir_graph[base].add_owner(query_name.clone());
+
+        let paginate = mir_graph.add_node(MirNode::new(
+            "paginate".into(),
+            MirNodeInner::Paginate {
+                order: vec![(
+                    Column::named("a"),
+                    OrderType::OrderAscending,
+                    NullOrder::NullsLast,
+                )],
+                group_by: vec![],
+                limit: 10,
+            },
+        ));
+        mir_graph[paginate].add_owner(query_name.clone());
+        mir_graph.add_edge(base, paginate, 0);
+
+        let mut query = MirQuery::new(query_name.clone(), paginate, &mut mir_graph);
+
+        add_bogokey_if_necessary(&mut query).unwrap();
+
+        match &query.get_node(paginate).unwrap().inner {
+            MirNodeInner::Paginate { group_by, .. } => {
+                assert_eq!(group_by.len(), 1, "Expected a bogo key to be added");
+                assert_eq!(group_by[0].name, "bogokey");
+            }
+            _ => panic!("Leaf node is not a Paginate node"),
+        }
     }
 
     /// Decorrelating an uncorrelated select-list subquery produces a LEFT JOIN with no ON
