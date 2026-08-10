@@ -282,8 +282,8 @@ impl Collation {
         let mut s = s.as_ref();
         let len = match self {
             Self::Utf8 | Self::Utf8Binary => s.len() * 4,
-            Self::Utf8Ci | Self::Utf8AiCiPad => s.len() * 2,
-            Self::Utf8AiCi | Self::Binary | Self::Latin1SwedishCi => s.len(),
+            Self::Utf8Ci => s.len() * 2,
+            Self::Utf8AiCi | Self::Utf8AiCiPad | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
 
         if *self == Self::Utf8AiCiPad {
@@ -294,8 +294,8 @@ impl Collation {
         let make = |c: &CollatorBorrowed| c.write_sort_key_to(s.as_ref(), &mut out);
         let Ok(()) = match self {
             Self::Utf8 => UTF8.with(make),
-            Self::Utf8Ci | Self::Utf8AiCiPad => UTF8_CI.with(make),
-            Self::Utf8AiCi => UTF8_AI_CI.with(make),
+            Self::Utf8Ci => UTF8_CI.with(make),
+            Self::Utf8AiCi | Self::Utf8AiCiPad => UTF8_AI_CI.with(make),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
                 Ok(())
@@ -469,6 +469,17 @@ mod tests {
         assert_eq!(col.key("A "), col.key("a"));
         assert_eq!(col.compare("a", "b "), Ordering::Less);
         assert_eq!(col.compare("b", "a "), Ordering::Greater);
+    }
+
+    #[test]
+    fn utf8_ai_ci_pad_accents() {
+        let col = Collation::Utf8AiCiPad;
+        assert_eq!(col.compare("e", "é"), Ordering::Equal);
+        assert_eq!(col.key("e"), col.key("é"));
+        assert_eq!(col.compare("RÉSUMÉ ", "resume"), Ordering::Equal);
+        assert_eq!(col.key("RÉSUMÉ "), col.key("resume"));
+        assert_eq!(col.compare("é", "f "), Ordering::Less);
+        assert!(col.key("é").lt(&col.key("f ")));
     }
 
     #[test]

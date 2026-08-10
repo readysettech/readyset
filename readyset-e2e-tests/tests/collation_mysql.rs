@@ -383,6 +383,22 @@ collation_test!(
     false,
     [mysql]
 );
+collation_test!(
+    test_utf8mb4_general_ci_accents,
+    compare_accent_ops,
+    "VARCHAR(32) COLLATE 'utf8mb4_general_ci'",
+    ACCENT_ROWS,
+    false,
+    [mysql]
+);
+collation_test!(
+    test_utf8mb4_unicode_ci_accents,
+    compare_accent_ops,
+    "VARCHAR(32) COLLATE 'utf8mb4_unicode_ci'",
+    ACCENT_ROWS,
+    false,
+    [mysql]
+);
 // latin1_general_ci falls through the suffix heuristic (readyset-data/src/collation.rs) to
 // Utf8Ci, but both are case-insensitive and accent-sensitive, so these operations agree.
 collation_test!(
