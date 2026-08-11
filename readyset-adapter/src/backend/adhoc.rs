@@ -526,7 +526,6 @@ where
                     if let Err(e) = &result {
                         event.set_noria_error(&internal_err!("{e}"));
                     }
-                    *query_shallow = Some(shallow);
                     return result;
                 }
                 *query_shallow = Some(shallow);

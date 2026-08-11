@@ -681,7 +681,6 @@ where
         };
 
         if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
-            *query_shallow = Some(shallow.clone());
             if let Some((query_id, trx_cache_policy)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
@@ -702,6 +701,7 @@ where
                     is_skip_cache,
                 ));
             }
+            *query_shallow = Some(shallow);
         }
 
         // The full parse or AST conversion runs only when the shallow path declines.
