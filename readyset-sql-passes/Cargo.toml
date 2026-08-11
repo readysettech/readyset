@@ -33,6 +33,8 @@ proptest = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
+tokio = { workspace = true, features = ["full"] }
+tokio-postgres = { workspace = true }
 
 [[bench]]
 name = "adapter_rewrites"

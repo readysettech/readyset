@@ -7227,6 +7227,7 @@ dependencies = [
  "test-strategy",
  "test-utils",
  "tokio",
+ "tokio-postgres",
  "tracing",
  "vec1",
 ]
