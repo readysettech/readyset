@@ -12,7 +12,7 @@ use std::io::Read;
 use std::marker::Send;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use std::{io, process};
@@ -691,6 +691,31 @@ pub struct Options {
     /// Make sure this database/schema does not exist on your upstream.
     #[arg(long, env = "READYSET_SCHEMA", default_value = "readyset")]
     readyset_schema: String,
+
+    /// Number of separate tokio runtimes to spread client connections across. 0 (the default) runs
+    /// every connection on the main runtime.
+    ///
+    /// A tokio runtime has exactly one I/O driver, held under an exclusive lock, so readiness
+    /// discovery for every connection on it is serialized through one thread at a time regardless
+    /// of how many workers are idle. On read-heavy workloads that single driver saturates and
+    /// becomes the throughput ceiling well before the CPU does. Tokio offers no way to add drivers
+    /// to one runtime, so connections are spread over several runtimes instead, each one going to
+    /// the runtime carrying the fewest live connections.
+    ///
+    /// Worth raising when reads are the bottleneck and the process is not CPU-bound. Each shard is
+    /// an additional runtime with its own worker threads (see `--shard-worker-threads`), and work
+    /// cannot be stolen across shards, so a shard that draws unusually expensive connections cannot
+    /// borrow capacity from an idle one.
+    #[arg(long, env = "RUNTIME_SHARDS", default_value = "0")]
+    pub runtime_shards: usize,
+
+    /// Worker threads per connection shard runtime.
+    ///
+    /// Defaults to the available parallelism divided by `--runtime-shards`, so that the shards
+    /// together cover the machine rather than each sizing itself to every core. Has no effect
+    /// unless `--runtime-shards` is set.
+    #[arg(long, env = "SHARD_WORKER_THREADS")]
+    pub shard_worker_threads: Option<usize>,
 }
 
 impl Options {
@@ -1050,12 +1075,154 @@ where
     }
 }
 
-pub fn init_adapter_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
-    Ok(tokio::runtime::Builder::new_multi_thread()
+/// Resolves worker threads per connection shard, defaulting to `available_parallelism / shards` so
+/// that the shards together cover the machine without each one sizing itself to every core.
+fn shard_worker_threads(shards: usize, configured: Option<usize>) -> usize {
+    if let Some(n) = configured.filter(|n| *n > 0) {
+        return n;
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    (cores / shards.max(1)).max(1)
+}
+
+fn build_adapter_runtime(
+    thread_name: String,
+    worker_threads: Option<usize>,
+) -> anyhow::Result<tokio::runtime::Runtime> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder
         .with_sys_hooks()
         .enable_all()
-        .thread_name("Adapter Runtime")
-        .build()?)
+        .thread_name(thread_name);
+
+    if let Some(worker_threads) = worker_threads {
+        builder.worker_threads(worker_threads);
+    }
+
+    Ok(builder.build()?)
+}
+
+/// Builds the runtime that accepts connections and runs the adapter's background tasks.
+pub fn init_adapter_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    build_adapter_runtime("Adapter Runtime".into(), None)
+}
+
+/// Builds the runtimes that client connections are spread across, per `--runtime-shards`, or an
+/// empty `Vec` when sharding is disabled.
+///
+/// Only *client connection* tasks are moved onto these; the main runtime keeps the accept loop and
+/// every background task. That split is deliberate -- anything spawned once per process (the query
+/// logger, metrics reporters, replication, the schema catalog synchronizer) would become one copy
+/// per shard if the shards were peers rather than connection pools.
+fn init_connection_shard_runtimes(
+    shards: usize,
+    worker_threads: Option<usize>,
+) -> anyhow::Result<Vec<tokio::runtime::Runtime>> {
+    if shards == 0 {
+        return Ok(Vec::new());
+    }
+
+    let worker_threads = shard_worker_threads(shards, worker_threads);
+    (0..shards)
+        .map(|i| build_adapter_runtime(format!("Conn Shard {i}"), Some(worker_threads)))
+        .collect()
+}
+
+/// One connection shard: where its connections are spawned, and how many are live.
+///
+/// The [`Runtime`](tokio::runtime::Runtime) itself stays out of here because shutting one down
+/// consumes it, and these are shared with every connection task for the life of the process.
+struct ConnectionShard {
+    handle: tokio::runtime::Handle,
+    live: AtomicUsize,
+}
+
+/// The shards client connections are spread across, empty unless `--runtime-shards` is set.
+///
+/// Placement follows the live connection count, so clients that connect and disconnect without
+/// staying -- health probes, authentication retries, a driver reconnecting on upstream errors --
+/// leave the balance of the surviving connections untouched.
+#[derive(Clone)]
+struct ConnectionShards(Arc<[ConnectionShard]>);
+
+impl ConnectionShards {
+    fn new(runtimes: &[tokio::runtime::Runtime]) -> Self {
+        ConnectionShards(
+            runtimes
+                .iter()
+                .map(|rt| ConnectionShard {
+                    handle: rt.handle().clone(),
+                    live: AtomicUsize::new(0),
+                })
+                .collect(),
+        )
+    }
+
+    /// Claims the least loaded shard, or `None` when sharding is off. The claim holds the shard
+    /// until dropped.
+    ///
+    /// The counts are read one at a time, so the winner may be stale by the time it is claimed.
+    /// That only ever costs a slightly uneven split, which the next claim corrects.
+    fn claim(&self) -> Option<ShardClaim> {
+        let shard = self
+            .0
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, shard)| shard.live.load(Ordering::Relaxed))
+            .map(|(shard, _)| shard)?;
+        self.0[shard].live.fetch_add(1, Ordering::Relaxed);
+        Some(ShardClaim {
+            shards: self.clone(),
+            shard,
+        })
+    }
+}
+
+/// One connection's hold on a shard, released however the connection ends.
+struct ShardClaim {
+    shards: ConnectionShards,
+    shard: usize,
+}
+
+impl ShardClaim {
+    fn handle(&self) -> &tokio::runtime::Handle {
+        &self.shards.0[self.shard].handle
+    }
+}
+
+impl Drop for ShardClaim {
+    fn drop(&mut self) {
+        self.shards.0[self.shard]
+            .live
+            .fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// A freshly accepted client socket on its way to the task that will serve it.
+///
+/// A [`net::TcpStream`] is registered with the I/O driver of the runtime it was created in, and
+/// moving the *task* to another runtime does not move that registration -- readiness for the socket
+/// would still be discovered by the accepting runtime's driver, which is the exact serialization
+/// sharding exists to break. So when a connection is handed to a shard, the socket crosses the
+/// boundary unregistered and the shard registers it itself.
+enum ClientSocket {
+    /// Already registered with the runtime that will poll it.
+    Registered(net::TcpStream),
+    /// Deregistered, to be re-registered by the shard runtime that receives it.
+    Unregistered(std::net::TcpStream),
+}
+
+impl ClientSocket {
+    /// Registers the socket with the current runtime's I/O driver. Must be called from within the
+    /// runtime that will poll it.
+    fn register(self) -> io::Result<net::TcpStream> {
+        match self {
+            ClientSocket::Registered(stream) => Ok(stream),
+            ClientSocket::Unregistered(stream) => net::TcpStream::from_std(stream),
+        }
+    }
 }
 
 pub fn init_adapter_tracing(
@@ -1934,11 +2101,34 @@ where
                 None
             };
 
+        // Runtimes that client connections are spread across, so that readiness discovery is not
+        // serialized through a single I/O driver. Empty unless `--runtime-shards` is set.
+        let shard_runtimes =
+            init_connection_shard_runtimes(options.runtime_shards, options.shard_worker_threads)?;
+        if let Some(first) = shard_runtimes.first() {
+            rs_connect.in_scope(|| {
+                info!(
+                    shards = shard_runtimes.len(),
+                    worker_threads_per_shard = first.metrics().num_workers(),
+                    "Spreading client connections across dedicated runtimes"
+                )
+            });
+        }
+        let connection_shards = ConnectionShards::new(&shard_runtimes);
+
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
             let connection = info_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
             s.set_nodelay(true)?;
+
+            // These connections are long-lived, so placement tracks live connection count: a
+            // shard that draws more than its share stays skewed for the life of the process.
+            let shard_claim = connection_shards.claim();
+            let connection_handle = match &shard_claim {
+                None => rt.handle().clone(),
+                Some(claim) => claim.handle().clone(),
+            };
 
             // bunch of stuff to move into the async block below
             let rh = rh.clone();
@@ -1954,6 +2144,12 @@ where
             let cache_acl = cache_acl.clone();
             // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
+            // Last use of the registered stream: hand the socket to its shard unregistered so the
+            // shard's own I/O driver takes over readiness for it. See [`ClientSocket`].
+            let s = match &shard_claim {
+                None => ClientSocket::Registered(s),
+                Some(_) => ClientSocket::Unregistered(s.into_std()?),
+            };
             let allow_cache_ddl = options
                 .cache_ddl_address
                 .as_ref()
@@ -1998,13 +2194,27 @@ where
                     BlockingRead,
                     tokio::sync::oneshot::Sender<Reply>,
                 )>();
-                rt.handle().spawn(retry_misses(rx));
+                connection_handle.spawn(retry_misses(rx));
                 ReadRequestHandler::new(readers.clone(), tx, upquery_timeout)
             });
 
             let status_reporter_clone = status_reporter.clone();
             let schema_catalog_clone = schema_catalog.clone();
             let fut = async move {
+                // Held for as long as the connection runs, so the shard's count falls however
+                // this ends.
+                let _shard_claim = shard_claim;
+
+                // Runs on the runtime that will poll this connection, which is what makes the
+                // socket register with *that* runtime's I/O driver.
+                let s = match s.register() {
+                    Ok(s) => s,
+                    Err(error) => {
+                        error!(%error, "Failed to register client socket with its runtime");
+                        return;
+                    }
+                };
+
                 let sys_props = system_props();
                 let noria = NoriaConnector::new_with_local_reads(
                     rh.clone(),
@@ -2043,7 +2253,7 @@ where
             }
             .instrument(connection);
 
-            rt.handle().spawn(fut);
+            connection_handle.spawn(fut);
         }
 
         let rs_shutdown = span!(Level::INFO, "RS server Shutting down");
@@ -2090,6 +2300,30 @@ where
             }
         });
 
+        // Client connection tasks live on the shard runtimes when sharding is enabled, so they need
+        // draining too. This sits here, on the main thread, because `shutdown_timeout` panics if
+        // called from within a runtime.
+        //
+        // The shards drain concurrently, on a thread each: shutdown then costs one timeout rather
+        // than one per shard, and no shard outlives another still holding RPC workers they share.
+        if !shard_runtimes.is_empty() {
+            rs_shutdown.in_scope(|| {
+                info!(
+                    shards = shard_runtimes.len(),
+                    "Waiting up to 5s for connection runtimes to shut down"
+                )
+            });
+            let drains: Vec<_> = shard_runtimes
+                .into_iter()
+                .map(|shard| {
+                    std::thread::spawn(move || shard.shutdown_timeout(Duration::from_secs(5)))
+                })
+                .collect();
+            for drain in drains {
+                let _ = drain.join();
+            }
+        }
+
         // We use `shutdown_timeout` instead of `shutdown_background` in case any
         // blocking IO is ongoing.
         rs_shutdown.in_scope(|| info!("Waiting up to 20s for tasks to complete shutdown"));
@@ -2120,6 +2354,52 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds shards without runtimes behind them: placement only reads the live counts.
+    fn shards(n: usize) -> ConnectionShards {
+        ConnectionShards(
+            (0..n)
+                .map(|_| ConnectionShard {
+                    handle: tokio::runtime::Handle::current(),
+                    live: AtomicUsize::new(0),
+                })
+                .collect(),
+        )
+    }
+
+    fn live(shards: &ConnectionShards) -> Vec<usize> {
+        shards
+            .0
+            .iter()
+            .map(|shard| shard.live.load(Ordering::Relaxed))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn claims_spread_across_shards() {
+        let shards = shards(3);
+        let _claims: Vec<_> = (0..6).map(|_| shards.claim().unwrap()).collect();
+        assert_eq!(live(&shards), vec![2, 2, 2]);
+    }
+
+    /// A released claim frees its slot, so connections that come and go leave the next claim
+    /// balanced.
+    #[tokio::test]
+    async fn released_shards_are_reused() {
+        let shards = shards(2);
+        let held = shards.claim().unwrap();
+        for _ in 0..10 {
+            drop(shards.claim().unwrap());
+        }
+        let next = shards.claim().unwrap();
+        assert_ne!(next.shard, held.shard);
+        assert_eq!(live(&shards), vec![1, 1]);
+    }
+
+    #[tokio::test]
+    async fn claim_without_shards_is_none() {
+        assert!(shards(0).claim().is_none());
+    }
 
     // Certain clap things, like `requires`, only ever throw an error at runtime, not at
     // compile-time - this tests that none of those happen
