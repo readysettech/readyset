@@ -38,6 +38,7 @@ use readyset_tracing::propagation::Instrumented;
 use readyset_util::intervals::cmp_start_end;
 use readyset_util::redacted::Sensitive;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use tokio::sync::Mutex;
 use tower::balance::p2c::Balance;
 use tower::buffer::Buffer;
@@ -1493,7 +1494,11 @@ struct KeyComparisonBuilder<'a> {
     mixed_binops: bool,
     filters: Vec<DfExpr>,
     key_map: &'a [(ViewPlaceholder, KeyColumnIdx)],
-    key_types: HashMap<usize, &'a DfType>,
+    /// Key column index -> type, in `key_map` order.
+    ///
+    /// Rebuilt on every query execution and holds one entry per key column (nearly always 1-2),
+    /// so a linear scan beats hashing the `usize` keys. See [`Self::key_type`].
+    key_types: SmallVec<[(usize, &'a DfType); 4]>,
     key_remap: Option<&'a HashMap<PlaceholderIdx, Literal>>,
     binop_to_use: BinaryOperator,
     dialect: Dialect,
@@ -1536,7 +1541,7 @@ impl<'a> KeyComparisonBuilder<'a> {
         // The binary operator we will use to build our key if we do not have a mixed comparison
         let binop_to_use = current_binop.unwrap_or(BinaryOperator::Equal);
 
-        let key_types: HashMap<usize, &DfType> = reader_handle
+        let key_types: SmallVec<[(usize, &DfType); 4]> = reader_handle
             .key_map()
             .iter()
             .zip(key_types)
@@ -1552,6 +1557,17 @@ impl<'a> KeyComparisonBuilder<'a> {
             key_map: reader_handle.key_map(),
             filters: Vec::new(),
         })
+    }
+
+    /// Look up the type of the key column at `key_column_idx`.
+    ///
+    /// A key column can appear in `key_map` more than once. Every occurrence names the same
+    /// projected column, so they all carry the same type and any match will do.
+    fn key_type(&self, key_column_idx: usize) -> Option<&'a DfType> {
+        self.key_types
+            .iter()
+            .find(|(idx, _)| *idx == key_column_idx)
+            .map(|(_, key_type)| *key_type)
     }
 
     // parameter numbering is 1-based, but vecs are 0-based, so subtract 1
@@ -1604,9 +1620,8 @@ impl<'a> KeyComparisonBuilder<'a> {
             match view_placeholder {
                 ViewPlaceholder::Generated => continue,
                 ViewPlaceholder::OneToOne(idx, binop) => {
-                    let key_type = *self
-                        .key_types
-                        .get(key_column_idx)
+                    let key_type = self
+                        .key_type(*key_column_idx)
                         .ok_or_else(|| internal_err!("No key_type for key"))?;
 
                     let value = self.remap_key(raw_key.as_ref(), idx, key_type)?;
@@ -1704,7 +1719,9 @@ impl<'a> KeyComparisonBuilder<'a> {
                     }
                 }
                 ViewPlaceholder::Between(lower_idx, upper_idx) => {
-                    let key_type = self.key_types[key_column_idx];
+                    let key_type = self
+                        .key_type(*key_column_idx)
+                        .ok_or_else(|| internal_err!("No key_type for key"))?;
 
                     let lower_value = self.remap_key(raw_key.as_ref(), lower_idx, key_type)?;
                     let upper_value = self.remap_key(raw_key.as_ref(), upper_idx, key_type)?;
