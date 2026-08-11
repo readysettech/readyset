@@ -280,7 +280,11 @@ pub struct NoriaConnector {
     /// Set of views that have failed on previous requests. Separate from the backend
     /// to allow returning references to schemas from views all the way to mysql-srv,
     /// but on subsequent requests, do not use a failed view.
-    failed_views: HashSet<Relation>,
+    ///
+    /// Hashed with `ahash`: this is probed on every query execution and `Relation`'s hash walks
+    /// two string identifiers, which profiled as the largest single contributor to the time the
+    /// adapter spends hashing.
+    failed_views: HashSet<Relation, ahash::RandomState>,
 
     /// A read request handler that may be used to service reads from readers
     /// on the same server.
@@ -409,7 +413,7 @@ impl NoriaConnector {
             inner,
             auto_increments,
             view_name_cache,
-            failed_views: HashSet::new(),
+            failed_views: HashSet::default(),
             read_request_handler: request_handler::LocalReadHandler::new(read_request_handler),
             dialect,
             parse_dialect,
