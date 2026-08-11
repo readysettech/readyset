@@ -207,6 +207,11 @@ impl QueryLogger {
         self.record_query_metrics(event, query_string, query_id);
     }
 
+    /// Number of events drained per wakeup. Bursts are processed in batches, letting new
+    /// events queue up without waking the logger again, while bounding the time spent
+    /// between shutdown checks.
+    const EVENT_BATCH_SIZE: usize = 128;
+
     /// Async task that logs query stats.
     pub async fn run(
         &mut self,
@@ -215,6 +220,7 @@ impl QueryLogger {
     ) {
         let backlog_size = gauge!(metric::QUERY_LOG_BACKLOG_SIZE);
         let processed_events = counter!(metric::QUERY_LOG_PROCESSED_EVENTS);
+        let mut events = Vec::with_capacity(Self::EVENT_BATCH_SIZE);
         loop {
             select! {
                 // We use `biased` here to ensure that our shutdown signal will be received and
@@ -227,19 +233,16 @@ impl QueryLogger {
                     info!("Metrics task shutting down after signal received.");
                     break;
                 }
-                event = receiver.recv() => {
+                n = receiver.recv_many(&mut events, Self::EVENT_BATCH_SIZE) => {
+                    if n == 0 {
+                        info!("Metrics task shutting down after request handle dropped.");
+                        break;
+                    }
                     backlog_size.set(receiver.len() as f64);
-                    match event {
-                        Some(event) => {
-                            self.handle_event(&event).await;
-                            processed_events.increment(1);
-                        }
-                        None => {
-                            info!("Metrics task shutting down after request handle dropped.");
-                            break;
-                        }
-                    };
-
+                    for event in events.drain(..) {
+                        self.handle_event(&event).await;
+                    }
+                    processed_events.increment(n as u64);
                 }
             }
         }

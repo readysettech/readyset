@@ -1448,8 +1448,10 @@ where
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
             let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
 
+            // Deliberately built without io/time drivers: the logger only awaits channels
+            // and locks, so none are needed, and a driverless runtime parks on a condvar,
+            // making the per-event wakeup from log_query a cheap futex wake.
             let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
                 .max_blocking_threads(1)
                 .build()
                 .unwrap();
