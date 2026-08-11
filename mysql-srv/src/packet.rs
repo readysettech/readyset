@@ -32,8 +32,8 @@ pub struct PacketConn<S: AsyncRead + AsyncWrite + Unpin> {
     // write variables
     pub seq: u8,
     queue: Vec<QueuedPacket>,
-    /// Reusable packets. We sort the elements from smallest capacity to largest.
-    preallocated: Vec<QueuedPacket>,
+    /// Reusable byte buffers, kept sorted from smallest capacity to largest.
+    preallocated: Vec<Vec<u8>>,
 
     pub(crate) stream: SwitchableStream<S>,
 
@@ -64,20 +64,13 @@ enum QueuedPacket {
 }
 
 impl QueuedPacket {
-    // Should this packet be reused
-    fn poolable(&self) -> bool {
-        !matches!(self, QueuedPacket::Raw(_))
-    }
-
-    fn capacity(&self) -> usize {
+    /// The reusable byte buffer of this packet, if it has one.
+    fn into_buffer(self) -> Option<Vec<u8>> {
         match self {
-            QueuedPacket::Raw(r) => r.len(),
-            QueuedPacket::Plain(p) => p.capacity(),
-            QueuedPacket::WithHeader(_, p) => p.capacity(),
-            QueuedPacket::LargePacket {
-                headers: _,
-                data: p,
-            } => p.capacity(),
+            QueuedPacket::Raw(_) => None,
+            QueuedPacket::Plain(vec)
+            | QueuedPacket::WithHeader(_, vec)
+            | QueuedPacket::LargePacket { data: vec, .. } => Some(vec),
         }
     }
 }
@@ -269,77 +262,45 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
         Ok(())
     }
 
-    /// Clear the queued packets and return them to the pool of preallocated packets
+    /// Clear the queued packets and return their buffers to the pool of preallocated buffers,
+    /// keeping the pool sorted by capacity. When the pool is full, the largest buffers are
+    /// dropped, retaining the smallest ones to minimize held memory.
     fn return_queued_to_pool(&mut self) {
-        // filter out any packets we don't want to reuse (i.e. Raw).
-        self.queue.retain(|p| p.poolable());
-
-        // Shrink large buffers before adding to the pool to avoid wasting memory.
-        // This would occur if the buffer was reused, and the previous use was
-        // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than `MAX_POOL_ROW_CAPACITY`.
-        for packet in &mut self.queue {
-            match packet {
-                QueuedPacket::WithHeader(_, vec)
-                | QueuedPacket::Plain(vec)
-                | QueuedPacket::LargePacket {
-                    headers: _,
-                    data: vec,
-                } => {
-                    vec.shrink_to(MAX_POOL_ROW_CAPACITY);
-                }
-                QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
-            }
+        for packet in self.queue.drain(..) {
+            let Some(mut vec) = packet.into_buffer() else {
+                continue;
+            };
+            // Shrink large buffers before adding to the pool to avoid wasting memory.
+            // This would occur if the buffer was reused, and the previous use was
+            // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than
+            // `MAX_POOL_ROW_CAPACITY`.
+            vec.shrink_to(MAX_POOL_ROW_CAPACITY);
+            let idx = self
+                .preallocated
+                .partition_point(|x| x.capacity() < vec.capacity());
+            self.preallocated.insert(idx, vec);
         }
-
-        self.preallocated.append(&mut self.queue);
-        self.preallocated.sort_by_key(|p| p.capacity());
         self.preallocated.truncate(MAX_POOL_BUFFERS);
     }
 
-    /// Get a buffer from the pool, with a size hint for capacity.
-    /// If no suitable buffer is found in the pool with the requested size,
-    /// a new buffer with that capacity will be allocated.
+    /// Get a buffer from the pool, with a size hint for capacity: the smallest pooled buffer
+    /// with at least the requested capacity, or failing that, the largest pooled buffer grown
+    /// to the requested capacity. If the pool is empty, a new buffer is allocated.
     pub fn get_buffer(&mut self, size_hint: usize) -> Vec<u8> {
-        // We search forward (smallest first) since preallocated is sorted by capacity
-        if size_hint > 0 && !self.preallocated.is_empty() {
-            let idx = self
-                .preallocated
-                .partition_point(|x| x.capacity() >= size_hint);
+        let idx = self
+            .preallocated
+            .partition_point(|x| x.capacity() < size_hint);
 
-            if idx < self.preallocated.len() {
-                let p = self.preallocated.remove(idx);
-                match p {
-                    QueuedPacket::WithHeader(_, mut vec)
-                    | QueuedPacket::Plain(mut vec)
-                    | QueuedPacket::LargePacket {
-                        headers: _,
-                        data: mut vec,
-                    } => {
-                        vec.clear();
-                        return vec;
-                    }
-                    QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
-                }
-            }
-        }
+        let buffer = if idx < self.preallocated.len() {
+            Some(self.preallocated.remove(idx))
+        } else {
+            self.preallocated.pop()
+        };
 
-        // No suitable buffer found, try to get *any* buffer from the pool
-        if let Some(p) = self.preallocated.pop() {
-            match p {
-                QueuedPacket::WithHeader(_, mut vec)
-                | QueuedPacket::Plain(mut vec)
-                | QueuedPacket::LargePacket {
-                    headers: _,
-                    data: mut vec,
-                } => {
-                    vec.clear();
-                    if size_hint > 0 && vec.capacity() < size_hint {
-                        vec.reserve(size_hint - vec.capacity());
-                    }
-                    return vec;
-                }
-                QueuedPacket::Raw(_) => unreachable!("Raw packets should be filtered out"),
-            }
+        if let Some(mut vec) = buffer {
+            vec.clear();
+            vec.reserve(size_hint);
+            return vec;
         }
 
         // No buffer in pool, allocate a new one with the requested capacity
@@ -695,5 +656,70 @@ mod tests {
         assert_next_seq(MAX_PACKET_CHUNK_SIZE, 2, 2).await;
         // 2x MAX_PACKET_CHUNK_SIZE: 2 full chunks + empty terminator = 3 segments
         assert_next_seq(MAX_PACKET_CHUNK_SIZE * 2, 3, 3).await;
+    }
+
+    #[tokio::test]
+    async fn test_buffer_pool_best_fit() {
+        let (u_out, _u_in) = tokio::net::UnixStream::pair().unwrap();
+        let mut conn = PacketConn::new(u_out);
+
+        // `Vec::with_capacity` may hand back more than asked for, so assert against the
+        // capacities the buffers actually got rather than the requested ones.
+        let mut queued = Vec::new();
+        for cap in [512, 8, 64] {
+            let vec = Vec::with_capacity(cap);
+            queued.push(vec.capacity());
+            conn.queue.push(QueuedPacket::Plain(vec));
+        }
+        queued.sort_unstable();
+        conn.queue.push(QueuedPacket::Raw(Arc::from(&[0u8][..])));
+        conn.return_queued_to_pool();
+
+        // Raw packets are not pooled; the rest are sorted by capacity.
+        let caps: Vec<_> = conn.preallocated.iter().map(Vec::capacity).collect();
+        assert_eq!(caps, queued);
+
+        // Best fit: the smallest pooled buffer that satisfies the hint.
+        let best_fit = queued.iter().copied().find(|&c| c >= 32).unwrap();
+        assert_eq!(conn.get_buffer(32).capacity(), best_fit);
+
+        // Hint larger than any pooled buffer: the largest is taken and grown.
+        let buf = conn.get_buffer(1024);
+        assert!(buf.capacity() >= 1024);
+
+        // A zero hint takes the smallest buffer.
+        assert_eq!(conn.get_buffer(0).capacity(), queued[0]);
+
+        // Pool exhausted: a fresh buffer is allocated with the requested capacity.
+        assert!(conn.preallocated.is_empty());
+        assert!(conn.get_buffer(16).capacity() >= 16);
+    }
+
+    #[tokio::test]
+    async fn test_buffer_pool_bounds() {
+        let (u_out, _u_in) = tokio::net::UnixStream::pair().unwrap();
+        let mut conn = PacketConn::new(u_out);
+
+        // Oversized buffers are shrunk before pooling. `shrink_to` is best effort: it never
+        // goes below the requested capacity and may stop short of it.
+        let vec: Vec<u8> = Vec::with_capacity(MAX_POOL_ROW_CAPACITY * 2);
+        let before = vec.capacity();
+        conn.queue.push(QueuedPacket::Plain(vec));
+        conn.return_queued_to_pool();
+        let shrunk = conn.preallocated[0].capacity();
+        assert!((MAX_POOL_ROW_CAPACITY..=before).contains(&shrunk));
+
+        // When the pool overflows, the smallest buffers are retained.
+        let mut expected = vec![shrunk];
+        for n in 1..=MAX_POOL_BUFFERS + 10 {
+            let vec = Vec::with_capacity(16 * n);
+            expected.push(vec.capacity());
+            conn.queue.push(QueuedPacket::Plain(vec));
+        }
+        conn.return_queued_to_pool();
+        expected.sort_unstable();
+        expected.truncate(MAX_POOL_BUFFERS);
+        let caps: Vec<_> = conn.preallocated.iter().map(Vec::capacity).collect();
+        assert_eq!(caps, expected);
     }
 }
