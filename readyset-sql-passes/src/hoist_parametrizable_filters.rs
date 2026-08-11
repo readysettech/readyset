@@ -3,9 +3,9 @@ use crate::rewrite_utils::{
     collect_local_from_items, columns_iter, conjoin_all_dedup, denormalize_having_and_group_by,
     expect_field_as_expr, find_rhs_join_clause, fix_groupby_without_aggregates,
     for_each_window_function, hoist_parametrizable_join_filters_to_where, is_aggregated_expr,
-    is_aggregation_or_grouped, is_parametrizable_filter_candidate, is_simple_parametrizable_filter,
-    normalize_having_and_group_by, predicate_caps_row_number, preserve_row_number_caps,
-    project_columns, project_columns_if_not_exist_fix_duplicate_aliases,
+    is_aggregated_select, is_aggregation_or_grouped, is_parametrizable_filter_candidate,
+    is_simple_parametrizable_filter, normalize_having_and_group_by, predicate_caps_row_number,
+    preserve_row_number_caps, project_columns, project_columns_if_not_exist_fix_duplicate_aliases,
     project_statement_columns_if, resolve_group_by_exprs, split_expr, split_expr_mut,
 };
 use crate::{
@@ -297,7 +297,15 @@ fn extract_filters_from_aggregated_subquery_stmt(
     // is a literal.  Only equalities are safe here — the extracted column may
     // not be a GROUP BY key and needs promotion, which requires a single value.
     // (GROUP BY key filters were already moved to HAVING above.)
-    if let Some(where_expr) = stmt.where_clause.take() {
+    //
+    // Promotion projects the column and adds it as a grouping key, which is equivalent only
+    // where groups already exist: the aggregate for the promoted value covers exactly the rows
+    // the filter kept, so applying the filter outside selects the same rows.  An aggregate with
+    // no GROUP BY has no groups to select among -- it yields one row whatever the filter
+    // matches, `COUNT(*)` of zero included -- and giving it a grouping key turns that row into
+    // no row at all when nothing matches.  Leave the filter where it is.
+    let promotion_would_impose_grouping = is_aggregated_select(stmt)? && stmt.group_by.is_none();
+    if !promotion_would_impose_grouping && let Some(where_expr) = stmt.where_clause.take() {
         let mut expressions_from_where = Vec::new();
         let mut extracted_filters = Vec::new();
 

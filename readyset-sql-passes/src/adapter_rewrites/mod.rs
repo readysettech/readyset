@@ -4774,6 +4774,60 @@ mod tests {
             );
         }
 
+        /// An aggregate with no GROUP BY yields one row whatever its filter matches, so its
+        /// filter must not be hoisted out: promotion would impose a grouping key, and the
+        /// no-match case would go from one row to none.
+        #[test]
+        fn a_filter_stays_inside_an_aggregate_without_grouping() {
+            for sql in [
+                "SELECT a.k, s.n FROM rev.a CROSS JOIN \
+                 (SELECT COUNT(*) AS n FROM rev.b WHERE b.k = 99) s",
+                "SELECT a.k, s.n FROM rev.a CROSS JOIN \
+                 (SELECT SUM(b.w) AS n FROM rev.b WHERE b.k = 99) s",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect("rewrite should succeed");
+
+                let rewritten = query.display(Dialect::PostgreSQL).to_string();
+                assert!(
+                    query.where_clause.is_none(),
+                    "filter was hoisted out of an ungrouped aggregate: {rewritten}"
+                );
+                assert!(
+                    !rewritten.contains("GROUP BY"),
+                    "promotion imposed a grouping key: {rewritten}"
+                );
+            }
+        }
+
+        /// The same hoist stays available where promotion is legitimate: a subquery that
+        /// already groups, and one that only deduplicates.
+        #[test]
+        fn a_filter_still_hoists_where_promotion_is_sound() {
+            for sql in [
+                "SELECT a.k, s.n FROM rev.a JOIN \
+                 (SELECT COUNT(*) AS n, b.k FROM rev.b WHERE b.w = 100 GROUP BY b.k) s \
+                 ON a.k = s.k",
+                "SELECT a.k, s.k2 FROM rev.a JOIN \
+                 (SELECT DISTINCT b.k AS k2 FROM rev.b WHERE b.w = 100) s ON a.k = s.k2",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect("rewrite should succeed");
+
+                assert!(
+                    query.where_clause.is_some(),
+                    "filter was not hoisted: {}",
+                    query.display(Dialect::PostgreSQL)
+                );
+            }
+        }
+
         /// GROUP BY may name the subquery item by position: `remove_numeric_field_references`
         /// is a server-side pass, so positional references are still present here. The key must
         /// be recognized as already there, or it is added a second time.
