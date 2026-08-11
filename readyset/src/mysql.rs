@@ -61,6 +61,9 @@ impl ConnectionHandler for MySqlHandler {
         stream: TcpStream,
         backend: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
     ) {
+        // The enclosing connection span is DEBUG, so name the client here to keep the address on
+        // this error under the default filter.
+        let addr = stream.peer_addr().ok();
         if let Err(e) = MySqlIntermediary::run_on_tcp(
             readyset_mysql::Backend {
                 noria: backend,
@@ -78,7 +81,7 @@ impl ConnectionHandler for MySqlHandler {
             if e.kind() == io::ErrorKind::Other {
                 debug!(err = %e, "connection lost, error ignored")
             } else {
-                error!(err = %e, "connection lost");
+                error!(err = %e, ?addr, "connection lost");
             }
         }
     }

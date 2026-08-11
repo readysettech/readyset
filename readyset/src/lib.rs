@@ -33,7 +33,7 @@ use tokio::sync::RwLock;
 use tokio::time::{sleep, timeout};
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tokio_stream::wrappers::TcpListenerStream;
-use tracing::{debug, debug_span, error, info, info_span, span, warn, Level};
+use tracing::{debug, debug_span, error, info, span, warn, Level};
 use tracing_futures::Instrument;
 
 use readyset_adapter::backend::noria_connector::NoriaConnector;
@@ -2118,7 +2118,7 @@ where
 
         while let Some(Ok(s)) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
-            let connection = info_span!("connection", addr = %client_addr);
+            let connection = debug_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
             s.set_nodelay(true)?;
 
@@ -2210,7 +2210,11 @@ where
                 let s = match s.register() {
                     Ok(s) => s,
                     Err(error) => {
-                        error!(%error, "Failed to register client socket with its runtime");
+                        error!(
+                            %error,
+                            addr = %client_addr,
+                            "Failed to register client socket with its runtime"
+                        );
                         return;
                     }
                 };
