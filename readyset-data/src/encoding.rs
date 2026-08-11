@@ -106,10 +106,11 @@ single_byte_charsets! {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Encoding {
     /// UTF-8
-    ///
-    /// Note, we don't distinguish between MySQL's default utf8mb4 and deprecated utf8mb3 (which
-    /// only supports the BMP).
     Utf8,
+    /// MySQL's deprecated utf8mb3, which only covers the Basic Multilingual Plane. Decoding is
+    /// identical to [`Encoding::Utf8`]. Encoding replaces supplementary characters with `?`,
+    /// matching MySQL's conversion of results to a utf8mb3 session charset.
+    Utf8Mb3,
     /// A MySQL single-byte character set, e.g. latin1 or koi8r.
     SingleByte(SingleByteCharset),
     /// Binary data (not interpreted as text)
@@ -121,7 +122,8 @@ pub enum Encoding {
 impl fmt::Display for Encoding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Encoding::Utf8 => write!(f, "utf8"),
+            Encoding::Utf8 => write!(f, "utf8mb4"),
+            Encoding::Utf8Mb3 => write!(f, "utf8mb3"),
             Encoding::SingleByte(charset) => write!(f, "{}", charset.spec().name),
             Encoding::Binary => write!(f, "binary"),
             Encoding::OtherMySql(id) => write!(f, "unsupported MySQL collation {id}"),
@@ -142,7 +144,8 @@ impl Encoding {
             return Self::OtherMySql(collation_id);
         }
         match collation.charset() {
-            "utf8mb3" | "utf8mb4" => Self::Utf8,
+            "utf8mb3" => Self::Utf8Mb3,
+            "utf8mb4" => Self::Utf8,
             "binary" => Self::Binary,
             name => SingleByteCharset::from_name(name)
                 .map(Self::SingleByte)
@@ -162,7 +165,9 @@ impl Encoding {
             "character set names should be lowercase ascii, got {character_set_name:?}"
         );
         match character_set_name {
-            "utf8" | "utf8mb3" | "utf8mb4" => Some(Self::Utf8),
+            // MySQL treats utf8 as an alias for utf8mb3
+            "utf8" | "utf8mb3" => Some(Self::Utf8Mb3),
+            "utf8mb4" => Some(Self::Utf8),
             "binary" => Some(Self::Binary),
             name => SingleByteCharset::from_name(name).map(Self::SingleByte),
         }
@@ -173,6 +178,7 @@ impl Encoding {
     pub fn mysql_character_set_name(&self) -> Option<&'static str> {
         match self {
             Self::Utf8 => Some("utf8mb4"),
+            Self::Utf8Mb3 => Some("utf8mb3"),
             Self::SingleByte(charset) => Some(charset.spec().name),
             Self::Binary => Some("binary"),
             Self::OtherMySql(_) => None,
@@ -181,7 +187,7 @@ impl Encoding {
 
     pub fn decode(&self, bytes: &[u8]) -> ReadySetResult<String> {
         match self {
-            Self::Utf8 => core::str::from_utf8(bytes)
+            Self::Utf8 | Self::Utf8Mb3 => core::str::from_utf8(bytes)
                 .map(|s| s.to_string())
                 .map_err(|e| decoding_err!(self, "Invalid bytes: {e}")),
             Self::SingleByte(charset) => {
@@ -195,6 +201,20 @@ impl Encoding {
     pub fn encode<'a>(&self, string: &'a str) -> ReadySetResult<Cow<'a, [u8]>> {
         match self {
             Self::Utf8 => Ok(string.as_bytes().into()),
+            Self::Utf8Mb3 => {
+                // A char above U+FFFF is encoded as a 4-byte UTF-8 sequence whose lead byte
+                // is at least 0xF0.
+                if !string.bytes().any(|b| b >= 0xF0) {
+                    return Ok(Cow::Borrowed(string.as_bytes()));
+                }
+                Ok(Cow::Owned(
+                    string
+                        .chars()
+                        .map(|c| if c > '\u{FFFF}' { '?' } else { c })
+                        .collect::<String>()
+                        .into_bytes(),
+                ))
+            }
             Self::SingleByte(charset) => {
                 let spec = charset.spec();
                 if spec.ascii_transparent && string.is_ascii() {
@@ -322,6 +342,21 @@ mod tests {
         assert_eq!(*result, b"Hello ?"[..]);
     }
 
+    /// utf8mb3 replaces supplementary characters with `?` when encoding, like MySQL converting
+    /// results to a utf8mb3 session charset. Decoding is permissive UTF-8 passthrough. It does
+    /// not validate that the input stays within utf8mb3's range.
+    #[test]
+    fn test_utf8mb3_encode_decode() {
+        let bmp = "Hello \u{FFFF} é";
+        assert!(matches!(
+            Encoding::Utf8Mb3.encode(bmp).unwrap(),
+            Cow::Borrowed(_)
+        ));
+        assert_eq!(*Encoding::Utf8Mb3.encode(bmp).unwrap(), *bmp.as_bytes());
+        assert_eq!(*Encoding::Utf8Mb3.encode("a😀b").unwrap(), b"a?b"[..]);
+        assert_eq!(Encoding::Utf8Mb3.decode("a😀b".as_bytes()).unwrap(), "a😀b");
+    }
+
     /// The encoding for each supported collation id, spelled out explicitly. Guards against a
     /// `mysql_common` bump changing collation ids or charset naming.
     #[test]
@@ -330,8 +365,10 @@ mod tests {
             let expected = match id {
                 // Holes in the utf8 id ranges below that MySQL 8.4 does not assign
                 216..=222 | 272 | 276 | 295 | 299 | 301 | 302 => Encoding::OtherMySql(id),
-                // utf8mb3, utf8mb4
-                33 | 45 | 46 | 76 | 83 | 192..=247 | 255..=323 => Encoding::Utf8,
+                // utf8mb3
+                33 | 76 | 83 | 192..=215 | 223 => Encoding::Utf8Mb3,
+                // utf8mb4
+                45 | 46 | 224..=247 | 255..=323 => Encoding::Utf8,
                 // ascii_general_ci, ascii_bin
                 11 | 65 => Encoding::SingleByte(SingleByteCharset::Ascii),
                 5 | 8 | 15 | 31 | 47 | 48 | 49 | 94 => Encoding::LATIN1,
@@ -483,7 +520,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             ReadySetError::DecodingError { encoding, message } => {
-                assert_eq!(encoding, "utf8");
+                assert_eq!(encoding, "utf8mb4");
                 assert!(
                     message.contains("index 6"),
                     "expected utf8 error message to mention index 6. Message '{message}'"

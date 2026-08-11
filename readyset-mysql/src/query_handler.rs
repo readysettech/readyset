@@ -1242,9 +1242,9 @@ mod tests {
     fn set_character_set_results_string_literal_supported() {
         for (charset, encoding) in [
             ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8),
+            ("utf8", Encoding::Utf8Mb3),
             ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8Mb3),
         ] {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
@@ -1283,9 +1283,9 @@ mod tests {
     fn set_character_set_results_bare_name_supported() {
         for (charset, encoding) in [
             ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8),
+            ("utf8", Encoding::Utf8Mb3),
             ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8Mb3),
         ] {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
@@ -1324,9 +1324,9 @@ mod tests {
     fn set_names_supported() {
         for (charset, encoding) in [
             ("latin1", Encoding::LATIN1),
-            ("utf8", Encoding::Utf8),
+            ("utf8", Encoding::Utf8Mb3),
             ("utf8mb4", Encoding::Utf8),
-            ("utf8mb3", Encoding::Utf8),
+            ("utf8mb3", Encoding::Utf8Mb3),
         ] {
             let stmt = SetStatement::Names(SetNames {
                 charset: charset.to_owned(),

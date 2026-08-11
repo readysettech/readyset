@@ -897,6 +897,12 @@ fn single_text_column(row: &[u8]) -> &[u8] {
     &row[1..]
 }
 
+/// Extract the first column of a text-protocol row, assuming a value under 251 bytes.
+fn first_text_column(row: &[u8]) -> &[u8] {
+    let len = row[0] as usize;
+    &row[1..1 + len]
+}
+
 /// The utf8mb4_bin collation id.
 const UTF8MB4_BIN_COLLATION: u8 = 46;
 
@@ -917,6 +923,132 @@ async fn test_handshake_collation_byte_upstream_fidelity() {
     let rows = raw.query_raw(b"SELECT @@collation_connection").await;
     assert_eq!(rows.len(), 1);
     assert_eq!(single_text_column(&rows[0]), b"utf8mb4_bin");
+
+    shutdown_tx.shutdown().await;
+}
+
+/// The utf8mb3_general_ci collation id.
+const UTF8MB3_GENERAL_CI_COLLATION: u8 = 33;
+
+/// A handshake collation byte of utf8mb3_general_ci converts supplementary characters in
+/// results to '?' on both the cached and proxied paths, matching a direct MySQL connection.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_handshake_utf8mb3_converts_results_on_both_paths() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop("CREATE TABLE mb3_handshake (id INT PRIMARY KEY, t VARCHAR(32))")
+        .await
+        .unwrap();
+    // U+1F600 GRINNING FACE, a supplementary character utf8mb3 cannot represent.
+    conn.query_drop("INSERT INTO mb3_handshake (id, t) VALUES (1, 'a\u{1F600}b')")
+        .await
+        .unwrap();
+
+    // A direct connection with utf8mb3 results gets the supplementary character replaced
+    // by '?'.
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop("SET character_set_results = utf8mb3")
+        .await
+        .unwrap();
+    let expected: Vec<u8> = upstream_conn
+        .query_first("SELECT t FROM mb3_handshake WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(expected, b"a?b");
+
+    eventually! {
+        conn.query_drop("CREATE CACHE FROM SELECT t FROM mb3_handshake WHERE id = ?")
+            .await
+            .is_ok()
+    }
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8MB3_GENERAL_CI_COLLATION).await;
+
+    // An uncached query proxies upstream, where the session results charset follows the
+    // handshake.
+    let rows = raw.query_raw(b"SELECT t FROM mb3_handshake").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), expected);
+
+    // The cached query converts the same way once it serves from Readyset.
+    const CACHED_QUERY: &[u8] = b"SELECT t FROM mb3_handshake WHERE id = 1";
+    eventually!(run_test: {
+        let rows = raw.query_raw(CACHED_QUERY).await;
+        let explain = raw.query_raw(b"EXPLAIN LAST STATEMENT").await;
+        let destination = first_text_column(&explain[0]).to_vec();
+        AssertUnwindSafe(move || (destination, rows))
+    }, then_assert: |result| {
+        let (destination, rows) = result();
+        assert!(
+            destination.starts_with(b"readyset"),
+            "expected a cached read, got {}",
+            String::from_utf8_lossy(&destination)
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(single_text_column(&rows[0]), expected);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// SET NAMES utf8mb3 converts supplementary characters in cached results to '?', matching a
+/// direct MySQL connection.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_set_names_utf8mb3_converts_cached_results() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop("CREATE TABLE mb3_names (id INT PRIMARY KEY, t VARCHAR(32))")
+        .await
+        .unwrap();
+    // U+1F600 GRINNING FACE, inserted while the session is still utf8mb4.
+    conn.query_drop("INSERT INTO mb3_names (id, t) VALUES (1, 'a\u{1F600}b')")
+        .await
+        .unwrap();
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn.query_drop("SET NAMES utf8mb3").await.unwrap();
+    let expected: Vec<u8> = upstream_conn
+        .query_first("SELECT t FROM mb3_names WHERE id = 1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(expected, b"a?b");
+
+    conn.query_drop("SET NAMES utf8mb3").await.unwrap();
+
+    eventually! {
+        conn.query_drop("CREATE CACHE FROM SELECT t FROM mb3_names WHERE id = ?")
+            .await
+            .is_ok()
+    }
+
+    eventually!(run_test: {
+        let rows: Vec<Vec<u8>> = conn.query("SELECT t FROM mb3_names WHERE id = 1").await.unwrap();
+        let info = last_query_info(&mut conn).await;
+        AssertUnwindSafe(move || (info, rows))
+    }, then_assert: |result| {
+        let (info, rows) = result();
+        assert_matches!(info.destination, QueryDestination::Readyset(..));
+        assert_eq!(rows, vec![expected.clone()]);
+    });
 
     shutdown_tx.shutdown().await;
 }

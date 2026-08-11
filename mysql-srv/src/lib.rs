@@ -477,9 +477,11 @@ fn decode_from_client(encoding: Encoding, bytes: &[u8]) -> io::Result<Cow<'_, st
                 io::Error::new(io::ErrorKind::InvalidData, e)
             })?))
         }
-        Encoding::Utf8 | Encoding::Binary | Encoding::OtherMySql(_) => str::from_utf8(bytes)
-            .map(Cow::Borrowed)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
+        Encoding::Utf8 | Encoding::Utf8Mb3 | Encoding::Binary | Encoding::OtherMySql(_) => {
+            str::from_utf8(bytes)
+                .map(Cow::Borrowed)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        }
     }
 }
 
