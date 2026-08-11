@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::{Range, RangeInclusive};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -51,6 +51,7 @@ use tracing_futures::Instrument;
 use vec1::{vec1, Vec1};
 
 use crate::post_processing::{PostLookupPlan, ReadReplyStats, ResultIterator, Results};
+use crate::query::QueryId;
 use crate::schema::{ColumnSchema, SchemaType, ViewSchema};
 use crate::{ReaderAddress, Tagged, Tagger};
 
@@ -121,6 +122,11 @@ pub struct ShallowViewRequest {
     /// fully-parameterized form may have put placeholders in positions not valid in a prepared
     /// statement, which could lead us to falsely report a query as unsupported.
     query_orig: Option<String>,
+    /// Memoized [`QueryId`] for this request; computing it renders the query AST to a string,
+    /// which is too expensive to repeat on every status-cache access. Not part of the request's
+    /// identity: excluded from serialization, `PartialEq`, and `Hash`.
+    #[serde(skip)]
+    query_id: OnceLock<QueryId>,
 }
 
 impl PartialEq for ShallowViewRequest {
@@ -152,6 +158,7 @@ impl ShallowViewRequest {
             query,
             schema_search_path,
             query_orig,
+            query_id: OnceLock::new(),
         }
     }
 
@@ -174,6 +181,14 @@ impl ShallowViewRequest {
                 }
             },
         }
+    }
+
+    /// The [`QueryId`] identifying this request, computed on first use.
+    /// `query` and `schema_search_path` must not be mutated after calling this.
+    pub fn query_id(&self) -> QueryId {
+        *self
+            .query_id
+            .get_or_init(|| QueryId::from_shallow_query(&self.query, &self.schema_search_path))
     }
 }
 

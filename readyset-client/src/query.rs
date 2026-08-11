@@ -71,7 +71,7 @@ impl From<&ViewCreateRequest> for QueryId {
 
 impl From<&ShallowViewRequest> for QueryId {
     fn from(value: &ShallowViewRequest) -> Self {
-        QueryId::from_shallow_query(&value.query, &value.schema_search_path)
+        value.query_id()
     }
 }
 
