@@ -7,6 +7,7 @@ edition = "2021"
 description = "Extensions to the Rust standard library"
 
 [dependencies]
+ahash = { workspace = true }
 async-stream = { workspace = true }
 bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }

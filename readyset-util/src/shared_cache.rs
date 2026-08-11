@@ -1,10 +1,13 @@
 //! Data structures providing a shared cache with thread-local memoization
 
 use std::borrow::Borrow;
-use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
+
+// These caches are looked up on every query execution (see `NoriaConnector::get_noria_view`),
+// keyed by `Relation`, whose hash walks two string identifiers, so they default to `ahash`.
+use ahash::RandomState;
 
 use futures::Future;
 use tokio::sync::RwLock;
