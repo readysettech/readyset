@@ -1254,12 +1254,14 @@ async fn single_byte_column_names_roundtrip() {
             continue;
         }
 
-        utf8_conn
-            .query_drop(format!(
-                "CREATE CACHE FROM SELECT x AS `{alias}` FROM charset_colname WHERE id = ?"
-            ))
-            .await
-            .unwrap();
+        eventually! {
+            utf8_conn
+                .query_drop(format!(
+                    "CREATE CACHE FROM SELECT x AS `{alias}` FROM charset_colname WHERE id = ?"
+                ))
+                .await
+                .is_ok()
+        }
 
         // Cached results also name the column in the session's charset.
         let mut cached_select = b"SELECT x AS `".to_vec();

@@ -994,7 +994,9 @@ async fn test_handshake_utf8mb3_converts_results_on_both_paths() {
         .build::<MySQLAdapter>()
         .await;
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    conn.query_drop("CREATE TABLE mb3_handshake (id INT PRIMARY KEY, t VARCHAR(32))")
+    conn.query_drop(
+        "CREATE TABLE mb3_handshake (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET utf8mb4)",
+    )
         .await
         .unwrap();
     // U+1F600 GRINNING FACE, a supplementary character utf8mb3 cannot represent.
@@ -1040,11 +1042,9 @@ async fn test_handshake_utf8mb3_converts_results_on_both_paths() {
         AssertUnwindSafe(move || (destination, rows))
     }, then_assert: |result| {
         let (destination, rows) = result();
-        assert!(
-            destination.starts_with(b"readyset"),
-            "expected a cached read, got {}",
-            String::from_utf8_lossy(&destination)
-        );
+        let destination = QueryDestination::try_from(String::from_utf8(destination).unwrap())
+            .expect("a parseable query destination");
+        assert_matches!(destination, QueryDestination::Readyset(..));
         assert_eq!(rows.len(), 1);
         assert_eq!(single_text_column(&rows[0]), expected);
     });
@@ -1065,7 +1065,9 @@ async fn test_set_names_utf8mb3_converts_cached_results() {
         .build::<MySQLAdapter>()
         .await;
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    conn.query_drop("CREATE TABLE mb3_names (id INT PRIMARY KEY, t VARCHAR(32))")
+    conn.query_drop(
+        "CREATE TABLE mb3_names (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET utf8mb4)",
+    )
         .await
         .unwrap();
     // U+1F600 GRINNING FACE, inserted while the session is still utf8mb4.
