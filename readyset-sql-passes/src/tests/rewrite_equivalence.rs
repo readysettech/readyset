@@ -58,7 +58,7 @@ const FIXTURES: &[&str] = &[
 /// Cases the pipeline is expected to refuse.  A case outside this list that stops rewriting is
 /// the pipeline losing a shape it used to handle; a case inside it that starts rewriting is a
 /// rewrite appearing where none is correct.  Both fail.
-const DECLINED: &[&str] = &[];
+const DECLINED: &[&str] = &["subquery_projected_beside_ungrouped_aggregate"];
 
 /// Every case runs twice: as written, and as the pipeline rewrites it.  Both must answer the
 /// same.
@@ -104,6 +104,14 @@ const CASES: &[(&str, &str)] = &[
         "ungrouped_aggregate_filter_matches_nothing",
         "SELECT a.k, s.n FROM rw_equiv.a CROSS JOIN \
          (SELECT COUNT(*) AS n FROM rw_equiv.b WHERE b.k = 99) s",
+    ),
+    // Declined today, and named in `DECLINED` so the loop expects that.  It earns its place as a
+    // tripwire: the shape has no correct rewrite through a join under the aggregate, so a later
+    // change that starts emitting one fails this test rather than quietly passing.
+    (
+        "subquery_projected_beside_ungrouped_aggregate",
+        "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM rw_equiv.b) AS c \
+         FROM rw_equiv.a WHERE a.s = 'nope'",
     ),
     (
         "grouped_subquery_filter_hoistable",

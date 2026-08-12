@@ -2376,10 +2376,16 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
     // Grouping keys may be written as positions or aliases, and only the projection can say what
     // they name -- so resolve them here, before the loop moves the field list out of `stmt`.
     let grouping_keys = resolve_group_by_exprs(stmt)?;
+    // Read for the same reason: once the loop takes the field list, a statement whose only
+    // aggregates live in the projection reads as having none.
+    let outer_is_ungrouped_aggregate = is_aggregate_only_without_group_by(stmt)?;
 
     for mut current_field in mem::take(&mut stmt.fields).into_iter() {
         let mut needs_group_by_key = false;
         let (field_expr, _) = expect_field_as_expr_mut(&mut current_field);
+        // A field that aggregates the subquery's value reads it inside the aggregate, where an
+        // empty relation yields NULL in Postgres too, so such a field needs no guarding below.
+        let field_is_aggregated = is_aggregated_expr(field_expr)?;
 
         for subquery_predicate in collect_outermost_subquery_predicates_mut(field_expr)? {
             let mut subquery_desc = as_supported_subquery_predicate(subquery_predicate)?;
@@ -2430,6 +2436,28 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
             if unnest_all_subqueries(&mut subquery_desc.stmt, ctx)?.has_rollbacks() {
                 rewrite_status.rollback();
                 continue;
+            }
+
+            // An aggregate without a GROUP BY returns exactly one row whatever its filter matches,
+            // so the derived-table reference this rewrite would project beside it has no row to be
+            // read from when nothing matches, and yields NULL instead of the subquery's value.  The
+            // grouping key added further down cannot stand in: a grouped statement returns no row
+            // at all for a filter that matches nothing.  Both readings answer a different question
+            // than the statement being rewritten, so decline it and let the query proxy.
+            //
+            // Correlation is deliberately not consulted.  Correlation to a local column makes an
+            // outer column ungrouped, which is a statement Postgres rejects -- declining sends it
+            // upstream to say so.  Correlation to an enclosing scope is legal here and is affected
+            // in exactly the same way, so admitting it on the strength of being correlated would
+            // keep the defect.
+            //
+            // Both operands are known before the loop above, but this is the earliest sound place
+            // for the check: every fold before the `continue` above replaces a subquery with a
+            // literal, and a literal has no row to be read from, so those shapes stay correct and
+            // must keep their rewrite.  Placing it here, rather than after the derived table is
+            // built, also reports this reason instead of whatever that construction objects to.
+            if outer_is_ungrouped_aggregate && !field_is_aggregated {
+                unsupported!("select-list subquery projected beside an ungrouped aggregate");
             }
 
             let preserved_subquery_stmt = if matches!(subquery_desc.ctx, SubqueryContext::In) {

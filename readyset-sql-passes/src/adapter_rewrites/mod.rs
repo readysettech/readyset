@@ -4948,6 +4948,60 @@ mod tests {
             );
         }
 
+        /// An aggregate without a GROUP BY returns one row whatever its filter matches, so a
+        /// decorrelated value projected beside it reads as NULL when nothing matches, and the
+        /// grouping key that repairs the grouped case would drop the row instead.  Neither answers
+        /// the original statement, so the shape is declined.
+        #[test]
+        fn ungrouped_aggregate_declines_a_select_list_subquery() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'NOPE'",
+                Dialect::PostgreSQL,
+            );
+
+            let err =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("ungrouped aggregate must not be admitted");
+
+            assert!(
+                err.to_string().contains("ungrouped aggregate"),
+                "declined for an unrelated reason: {err}"
+            );
+        }
+
+        /// A subquery that folds to a constant never becomes a reference to a joined derived table,
+        /// so it has no row to be missing and stays admitted.  This pins where the decline sits:
+        /// moving it above the folds in `unnest_subqueries_in_fields` would refuse this shape.
+        #[test]
+        fn ungrouped_aggregate_admits_a_subquery_folded_to_a_constant() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, (SELECT qa.s.status FROM qa.s LIMIT 0) AS c FROM qa.p \
+                 WHERE qa.p.color = 'NOPE'",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("a subquery folded to a constant should still rewrite");
+        }
+
+        /// Aggregating the value reads it inside the aggregate, where an empty relation yields NULL
+        /// upstream as well, so this shape stays admitted.
+        #[test]
+        fn ungrouped_aggregate_admits_an_aggregated_select_list_subquery() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, SUM((SELECT COUNT(*) FROM qa.s)) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED'",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("an aggregated field should still rewrite");
+        }
+
         /// A HAVING alias reference must not outlive the select-list item that defines it.
         ///
         /// `normalize_subquery_positions` rewrites an aggregate in HAVING into a reference to the
