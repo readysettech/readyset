@@ -513,17 +513,33 @@ pub(crate) fn json_strip_nulls(json: &mut JsonValue) {
     }
 }
 
+/// Renders a JSON value the way PostgreSQL's text-returning extraction operators (`->>`, `#>>`,
+/// `json_extract_path_text`) do: a JSON string yields its unescaped contents, JSON null yields SQL
+/// NULL, and every other value keeps its JSON text.
+///
+/// Scalars match PostgreSQL exactly. Containers keep the compact rendering used throughout this
+/// module, which is narrower than PostgreSQL: it echoes `json` byte for byte and separates `jsonb`
+/// members with `", "`/`": "`.
+pub(crate) fn json_to_text(json: &JsonValue) -> DfValue {
+    match json {
+        JsonValue::Null => DfValue::None,
+        JsonValue::String(s) => s.as_str().into(),
+        _ => json.to_string().into(),
+    }
+}
+
 /// Extracts the JSON value from a path of key/index strings and returns a textual [`DfValue`] on
 /// success.
 ///
 /// Returns [`DfValue::None`] if the lookup fails or
 /// [`ReadySetError`](readyset_errors::ReadySetError) for non-string keys.
 ///
-/// All key/index path extraction operations behave the same in PostgreSQL except for the return
-/// type, which is handled during expression lowering.
+/// `text` selects between the JSON-returning operations (`#>`, `json_extract_path`) and the
+/// text-returning ones (`#>>`, `json_extract_path_text`); see [`json_to_text`].
 pub(crate) fn json_extract_key_path<'k>(
     mut json: &JsonValue,
     keys: impl IntoIterator<Item = &'k DfValue>,
+    text: bool,
 ) -> ReadySetResult<DfValue> {
     // `json` is reassigned to inner fields while looping through keys.
 
@@ -551,7 +567,11 @@ pub(crate) fn json_extract_key_path<'k>(
         }
     }
 
-    Ok(json.to_string().into())
+    Ok(if text {
+        json_to_text(json)
+    } else {
+        json.to_string().into()
+    })
 }
 
 pub(crate) fn json_insert<'k>(

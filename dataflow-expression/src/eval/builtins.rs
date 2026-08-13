@@ -1090,7 +1090,7 @@ impl BuiltinFunction {
             BuiltinFunction::JsonDepth(expr) => non_null!(expr.eval(record)?)
                 .to_json()
                 .map(|json| crate::eval::json::json_depth(&json).into()),
-            BuiltinFunction::JsonExtractPath { json, keys } => {
+            BuiltinFunction::JsonExtractPath { json, keys, text } => {
                 let json = json.eval(record)?.to_json()?;
 
                 let keys = keys
@@ -1098,7 +1098,7 @@ impl BuiltinFunction {
                     .map(|key| key.eval(record))
                     .collect::<ReadySetResult<Vec<_>>>()?;
 
-                crate::eval::json::json_extract_key_path(&json, &keys)
+                crate::eval::json::json_extract_key_path(&json, &keys, *text)
             }
             BuiltinFunction::JsonbInsert(target_json, key_path, inserted_json, insert_after) => {
                 let mut target_json = non_null!(target_json.eval(record)?).to_json()?;
@@ -2874,12 +2874,18 @@ mod tests {
         #[test]
         fn json_extract_path() {
             #[track_caller]
-            fn test(object: &str, keys: &str, expected: Option<&str>) {
-                for f in [
-                    "json_extract_path",
-                    "jsonb_extract_path",
-                    "json_extract_path_text",
-                    "jsonb_extract_path_text",
+            fn test(
+                object: &str,
+                keys: &str,
+                expected_json: Option<&str>,
+                expected_text: Option<&str>,
+            ) {
+                // The `_text` forms locate the same value but render strings unquoted.
+                for (f, expected) in [
+                    ("json_extract_path", expected_json),
+                    ("jsonb_extract_path", expected_json),
+                    ("json_extract_path_text", expected_text),
+                    ("jsonb_extract_path_text", expected_text),
                 ] {
                     let expr = format!("{f}('{object}', {keys})");
                     assert_eq!(
@@ -2892,25 +2898,25 @@ mod tests {
 
             let array = "[[\"world\", 123]]";
 
-            test(array, "'1'", None);
-            test(array, "null::text", None);
+            test(array, "'1'", None, None);
+            test(array, "null::text", None, None);
 
-            test(array, "'0', '0'", Some("\"world\""));
-            test(array, "'0', '1'", Some("123"));
-            test(array, "'0', '2'", None);
-            test(array, "'0', null::text", None);
+            test(array, "'0', '0'", Some("\"world\""), Some("world"));
+            test(array, "'0', '1'", Some("123"), Some("123"));
+            test(array, "'0', '2'", None, None);
+            test(array, "'0', null::text", None, None);
 
             let object = r#"{ "hello": ["world"], "abc": [123] }"#;
 
-            test(object, "null::text", None);
-            test(object, "'world'", None);
+            test(object, "null::text", None, None);
+            test(object, "'world'", None, None);
 
-            test(object, "'hello', '0'", Some("\"world\""));
-            test(object, "'hello', '1'", None);
-            test(object, "'hello', null::text", None);
+            test(object, "'hello', '0'", Some("\"world\""), Some("world"));
+            test(object, "'hello', '1'", None, None);
+            test(object, "'hello', null::text", None, None);
 
-            test(object, "'abc'::char(3), '0'", Some("123"));
-            test(object, "'abc'::char(3), null::text", None);
+            test(object, "'abc'::char(3), '0'", Some("123"), Some("123"));
+            test(object, "'abc'::char(3), null::text", None, None);
         }
 
         mod json_overlaps {

@@ -539,6 +539,7 @@ impl BuiltinFunction {
                         json: next_arg()?,
                         keys: Vec1::try_from_vec(args.by_ref().collect())
                             .map_err(|_| arity_error())?,
+                        text: false,
                     },
                     DfType::Json,
                 )
@@ -552,6 +553,7 @@ impl BuiltinFunction {
                         json: next_arg()?,
                         keys: Vec1::try_from_vec(args.by_ref().collect())
                             .map_err(|_| arity_error())?,
+                        text: false,
                     },
                     DfType::Jsonb,
                 )
@@ -565,6 +567,7 @@ impl BuiltinFunction {
                         json: next_arg()?,
                         keys: Vec1::try_from_vec(args.by_ref().collect())
                             .map_err(|_| arity_error())?,
+                        text: true,
                     },
                     DfType::DEFAULT_TEXT,
                 )

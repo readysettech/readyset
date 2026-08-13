@@ -77,9 +77,13 @@ pub enum BuiltinFunction {
     /// [`json[b]_strip_nulls`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonStripNulls(Expr),
     /// [`json[b]_extract_path[_text]`](https://www.postgresql.org/docs/current/functions-json.html)
+    ///
+    /// `text` selects the `_text` form, which renders the extracted value as text rather than as
+    /// JSON.
     JsonExtractPath {
         json: Expr,
         keys: Vec1<Expr>,
+        text: bool,
     },
     /// [`jsonb_insert`](https://www.postgresql.org/docs/current/functions-json.html)
     JsonbInsert(Expr, Expr, Expr, Option<Expr>),
@@ -216,7 +220,8 @@ impl BuiltinFunction {
             JsonArrayLength { .. } => "json_array_length",
             JsonBuildArray { .. } => "json_build_array",
             JsonStripNulls { .. } => "json_strip_nulls",
-            JsonExtractPath { .. } => "json_extract_path",
+            JsonExtractPath { text: false, .. } => "json_extract_path",
+            JsonExtractPath { text: true, .. } => "json_extract_path_text",
             JsonbInsert { .. } => "jsonb_insert",
             JsonbSet { .. } => "jsonb_set",
             JsonbPretty { .. } => "jsonb_pretty",
@@ -289,7 +294,7 @@ impl Display for BuiltinFunction {
                 }
                 write!(f, ")")
             }
-            JsonExtractPath { json, keys } => {
+            JsonExtractPath { json, keys, .. } => {
                 write!(f, "({}, {})", json, keys.iter().join(", "))
             }
             JsonbInsert(arg1, arg2, arg3, arg4) => {

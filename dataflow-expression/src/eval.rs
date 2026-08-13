@@ -105,8 +105,8 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         }
 
         JsonKeyExtract | JsonKeyExtractText => {
-            // Both extraction operations behave the same in PostgreSQL except for the
-            // return type, which is handled during expression lowering.
+            // The two operators locate the same value; they differ in how it is rendered, which
+            // `json::json_to_text` handles for the `->>` form.
 
             let json = left.to_json()?;
 
@@ -120,20 +120,24 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             };
 
             Ok(json_inner
-                .map(|inner| inner.to_string().into())
+                .map(|inner| {
+                    if matches!(op, JsonKeyExtractText) {
+                        json::json_to_text(inner)
+                    } else {
+                        inner.to_string().into()
+                    }
+                })
                 .unwrap_or_default())
         }
 
         JsonKeyPathExtract | JsonKeyPathExtractText => {
-            // Both extraction operations behave the same in PostgreSQL except for the
-            // return type, which is handled during expression lowering.
-            //
-            // Type errors are also handled during expression lowering.
+            // Type errors are handled during expression lowering.
             json::json_extract_key_path(
                 &left.to_json()?,
                 // PostgreSQL docs state `text[]` but in practice it allows using
                 // multi-dimensional arrays here.
                 right.as_array()?.values(),
+                matches!(op, JsonKeyPathExtractText),
             )
         }
 
@@ -1355,12 +1359,11 @@ mod tests {
 
     /// Tests evaluation of `JsonKeyExtract` and `JsonKeyExtractText` binary ops.
     #[test]
-    #[ignore = "REA-4099"]
     fn eval_json_key_extract() {
         #[track_caller]
-        fn test(json: &str, key: &str, expected: &str) {
-            // Both ops behave the same except for their return type.
-            for op in ["->", "->>"] {
+        fn test(json: &str, key: &str, expected_json: &str, expected_text: &str) {
+            // The ops locate the same value; `->>` renders strings unquoted.
+            for (op, expected) in [("->", expected_json), ("->>", expected_text)] {
                 for json_type in ["json", "jsonb"] {
                     let expr = format!("'{json}'::{json_type} {op} {key}");
                     assert_eq!(
@@ -1373,22 +1376,53 @@ mod tests {
         }
 
         let array = "[\"world\", 123]";
-        test(array, "0", "\"world\"");
-        test(array, "1", "123");
+        test(array, "0", "\"world\"", "world");
+        test(array, "1", "123", "123");
 
         let object = r#"{ "hello": "world", "abc": 123 }"#;
-        test(object, "'hello'::text", "\"world\"");
-        test(object, "'abc'::char(3)", "123");
+        test(object, "'hello'::text", "\"world\"", "world");
+        test(object, "'abc'::char(3)", "123", "123");
+
+        // Strings are unescaped rather than merely unwrapped.
+        test(
+            r#"{ "k": "a\"b\nc" }"#,
+            "'k'::text",
+            r#""a\"b\nc""#,
+            "a\"b\nc",
+        );
+
+        // Nested containers keep their JSON text under both operators, re-rendered compactly.
+        // PostgreSQL instead echoes `json` byte for byte, so it agrees only when the input is
+        // already compact, and re-renders `jsonb` as `{"a": 1}`, which it always disagrees with.
+        // Container rendering is a separate concern from the text extraction under test here.
+        test(r#"{"k":{"a":1}}"#, "'k'::text", r#"{"a":1}"#, r#"{"a":1}"#);
+
+        // A JSON null extracts as JSON `null` but as SQL NULL in the text form.
+        for json_type in ["json", "jsonb"] {
+            assert_eq!(
+                eval_expr(
+                    &format!(r#"'{{"k": null}}'::{json_type} -> 'k'::text"#),
+                    PostgreSQL
+                ),
+                "null".into()
+            );
+            assert_eq!(
+                eval_expr(
+                    &format!(r#"'{{"k": null}}'::{json_type} ->> 'k'::text"#),
+                    PostgreSQL
+                ),
+                DfValue::None
+            );
+        }
     }
 
     /// Tests evaluation of `JsonKeyPathExtract` and `JsonKeyPathExtractText` binary ops.
     #[test]
-    #[ignore = "REA-4099"]
     fn eval_json_key_path_extract() {
         #[track_caller]
-        fn test(json: &str, key: &str, expected: Option<&str>) {
-            // Both ops behave the same except for their return type.
-            for op in ["#>", "#>>"] {
+        fn test(json: &str, key: &str, expected_json: Option<&str>, expected_text: Option<&str>) {
+            // The ops locate the same value; `#>>` renders strings unquoted.
+            for (op, expected) in [("#>", expected_json), ("#>>", expected_text)] {
                 for json_type in ["json", "jsonb"] {
                     let expr = format!("'{json}'::{json_type} {op} {key}");
                     assert_eq!(
@@ -1402,31 +1436,40 @@ mod tests {
 
         let array = "[[\"world\", 123]]";
 
-        test(array, "array['1']", None);
-        test(array, "array[null::text]", None);
+        test(array, "array['1']", None, None);
+        test(array, "array[null::text]", None, None);
 
-        test(array, "array['0', '0']", Some("\"world\""));
-        test(array, "array['0', '1']", Some("123"));
-        test(array, "array['0', '   1']", Some("123"));
-        test(array, "array['0', '2']", None);
-        test(array, "array['0', null::text]", None);
+        test(array, "array['0', '0']", Some("\"world\""), Some("world"));
+        test(array, "array['0', '1']", Some("123"), Some("123"));
+        test(array, "array['0', '   1']", Some("123"), Some("123"));
+        test(array, "array['0', '2']", None, None);
+        test(array, "array['0', null::text]", None, None);
 
         let object = r#"{ "hello": ["world"], "abc": [123] }"#;
 
-        test(object, "array[null::text]", None);
-        test(object, "array['world']", None);
+        test(object, "array[null::text]", None, None);
+        test(object, "array['world']", None, None);
 
-        test(object, "array['hello', '0']", Some("\"world\""));
-        test(object, "array['hello', '1']", None);
-        test(object, "array['hello', null::text]", None);
+        test(
+            object,
+            "array['hello', '0']",
+            Some("\"world\""),
+            Some("world"),
+        );
+        test(object, "array['hello', '1']", None, None);
+        test(object, "array['hello', null::text]", None, None);
 
-        test(object, "array['abc'::char(3), '0']", Some("123"));
-        test(object, "array['abc'::char(3), null::text]", None);
+        test(
+            object,
+            "array['abc'::char(3), '0']",
+            Some("123"),
+            Some("123"),
+        );
+        test(object, "array['abc'::char(3), null::text]", None, None);
     }
 
     /// Tests evaluation of `JsonSubtractPath` binary ops.
     #[test]
-    #[ignore = "REA-4099"]
     fn eval_json_subtract_path() {
         #[track_caller]
         fn test(json: &str, key: &str, expected: &str) {
@@ -1492,7 +1535,6 @@ mod tests {
         use super::*;
 
         #[track_caller]
-        #[ignore = "REA-4099"]
         fn test(parent: &str, child: &str, expected: bool) {
             for expr in [
                 format!("'{parent}'::jsonb @> '{child}'::jsonb"),
@@ -1507,7 +1549,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "REA-4099"]
         fn postgresql_docs_examples() {
             // Examples in https://www.postgresql.org/docs/current/datatype-json.html#JSON-CONTAINMENT
             test("\"foo\"", "\"foo\"", true);
@@ -1533,7 +1574,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "REA-4099"]
         fn edge_cases() {
             test("[]", "[]", true);
             test("{}", "{}", true);
@@ -1546,7 +1586,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "REA-4099"]
         fn float_semantics() {
             // `JsonNumber` does not handle -0.0 when `arbitrary_precision` is enabled.
             test("0.0", "-0.0", true);

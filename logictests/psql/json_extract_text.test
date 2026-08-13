@@ -1,0 +1,90 @@
+# Text-returning JSON extraction: `->>` and `#>>` yield text, not JSON. A JSON string comes back
+# unquoted and a JSON null comes back as SQL NULL, whereas `->` and `#>` keep the JSON rendering.
+
+statement ok
+create table j (id int, props json);
+
+statement ok
+insert into j values
+  (1, '{"flag": true}'),
+  (2, '{"flag": false}'),
+  (3, '{"flag": null}'),
+  (4, '{"other": 1}'),
+  (5, '{"flag": "hello"}'),
+  (6, '{"flag": 42}'),
+  (7, '{"flag": {"nested":1}}');
+
+# A JSON string extracts without its quotes.
+query T
+select props ->> 'flag' from j where id = 5;
+----
+hello
+
+# Non-string scalars keep their JSON text.
+query T
+select props ->> 'flag' from j where id = 6;
+----
+42
+
+# A nested object keeps its JSON text rather than being unwrapped.
+#
+# The stored text deliberately carries no interior spaces: PostgreSQL's `json` is byte-preserving
+# and would echo whatever spacing was inserted, whereas extraction here round-trips through a
+# JSON parser and re-renders in normalized form. That divergence is independent of unquoting.
+query T
+select props ->> 'flag' from j where id = 7;
+----
+{"nested":1}
+
+# A JSON boolean extracts as its text spelling, which is what makes a `::boolean` cast over the
+# extracted value meaningful.
+query T rowsort
+select props ->> 'flag' from j where id in (1, 2);
+----
+false
+true
+
+# JSON null extracts as SQL NULL, as does a missing key.
+query I rowsort
+select id from j where props ->> 'flag' is null;
+----
+3
+4
+
+# `->` keeps the JSON rendering, including the quotes and the JSON null.
+query T
+select props -> 'flag' from j where id = 5;
+----
+"hello"
+
+query T
+select props -> 'flag' from j where id = 3;
+----
+null
+
+# The path form behaves the same way.
+query T
+select props #>> '{flag}' from j where id = 5;
+----
+hello
+
+query T
+select props #> '{flag}' from j where id = 5;
+----
+"hello"
+
+statement ok
+create table jb (id int, props jsonb);
+
+statement ok
+insert into jb values (1, '{"flag": "hello"}'), (2, '{"flag": null}');
+
+query T
+select props ->> 'flag' from jb where id = 1;
+----
+hello
+
+query I
+select id from jb where props ->> 'flag' is null;
+----
+2
