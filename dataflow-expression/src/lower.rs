@@ -52,6 +52,7 @@ fn resolve_collation(args: &[&Expr], dialect: Dialect) -> Collation {
     for arg in args {
         let collation = match arg.ty() {
             DfType::Text(c) | DfType::Char(_, c) | DfType::VarChar(_, c) => *c,
+            DfType::Blob | DfType::Binary(_) | DfType::VarBinary(_) => Collation::Binary,
             _ => continue,
         };
 
@@ -3383,6 +3384,17 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(l, None);
             assert_eq!(r, Some(DfType::Text(Collation::Utf8AiCi)));
+        }
+
+        #[test]
+        fn like_on_binary_column_compares_binary() {
+            let left = column_expr(DfType::VarBinary(32));
+            let right = text_lit_expr(Collation::Utf8AiCi);
+            let (l, r) = BinaryOperator::Like
+                .argument_type_coercions(&left, &right, Dialect::DEFAULT_MYSQL)
+                .unwrap();
+            assert_eq!(l, Some(DfType::Text(Collation::Binary)));
+            assert_eq!(r, Some(DfType::Text(Collation::Binary)));
         }
 
         #[test]

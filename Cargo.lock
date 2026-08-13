@@ -1505,6 +1505,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "smallvec",
  "strum",
  "test-discovery",
  "test-strategy",

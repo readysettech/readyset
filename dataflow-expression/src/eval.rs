@@ -2,13 +2,13 @@ use std::borrow::Borrow;
 use std::sync::Arc;
 
 use cached::cached;
-use readyset_data::{Array, ArrayD, DfValue, IxDyn, TimestampTz};
+use readyset_data::{Array, ArrayD, Collation, DfValue, IxDyn, TimestampTz};
 use readyset_errors::{
     internal_err, invalid_query_err, unsupported, ReadySetError, ReadySetResult,
 };
 use serde_json::Value as JsonValue;
 
-use crate::like::{CaseInsensitive, CaseSensitive, CaseSensitivityMode, LikePattern};
+use crate::like::LikePattern;
 use crate::{utils, BinaryOperator, CaseWhenBranch, Expr};
 
 macro_rules! non_null {
@@ -24,20 +24,24 @@ pub(crate) mod builtins;
 pub mod json;
 
 #[cached(max_size = 1000)]
-fn like_pattern(pattern: String, case_sensitivity: CaseSensitivityMode) -> Arc<LikePattern> {
-    Arc::new(LikePattern::new(&pattern, case_sensitivity))
+fn like_pattern(pattern: String, collation: Collation) -> Arc<LikePattern> {
+    Arc::new(LikePattern::new(&pattern, collation))
 }
 
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
 
-    let like = |case_sensitivity| -> ReadySetResult<DfValue> {
-        let (Some(left), Some(right)) = (non_null!(left).as_str(), non_null!(right).as_str())
-        else {
+    // Lowering coerces both operands of a LIKE to a single shared collation, so the left
+    // operand's collation governs the match.
+    let like = |to_collation: fn(Collation) -> Collation| -> ReadySetResult<DfValue> {
+        let (Some((left, collation)), Some(right)) = (
+            non_null!(left).as_str_and_collation(),
+            non_null!(right).as_str(),
+        ) else {
             return Ok(false.into());
         };
 
-        let pat = like_pattern(right.to_string(), case_sensitivity);
+        let pat = like_pattern(right.to_string(), to_collation(collation));
 
         Ok(pat.matches(left).into())
     };
@@ -56,8 +60,8 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         Less => Ok((non_null!(left) < non_null!(right)).into()),
         LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
         Is => Ok((left == right).into()),
-        Like => like(CaseSensitive),
-        ILike => like(CaseInsensitive),
+        Like => like(std::convert::identity),
+        ILike => like(Collation::to_insensitive),
 
         AtTimeZone => Err(internal_err!(
             "AT TIME ZONE has not been lowered to expression"

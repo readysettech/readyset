@@ -24,12 +24,11 @@ cached = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 chrono-tz = { workspace = true, features = ["serde"] }
 itertools = { workspace = true }
-lazy_static = { workspace = true }
 num-traits = { workspace = true }
 proptest = { workspace = true }
-regex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+smallvec = { workspace = true }
 strum = { workspace = true }
 test-strategy = { workspace = true }
 tracing = { workspace = true }
@@ -48,6 +47,7 @@ readyset-spatial = { path = "../readyset-spatial" }
 criterion = { workspace = true }
 anyhow = { workspace = true }
 bytes = { workspace = true }
+lazy_static = { workspace = true }
 mysql_async = { workspace = true }
 nom-sql = { path = "../nom-sql" }
 postgres = { workspace = true, features = [

@@ -43,7 +43,18 @@ thread_local! {
 /// [mysql]: https://dev.mysql.com/doc/refman/8.0/en/charset-mysql.html
 /// [postgres]: https://www.postgresql.org/docs/current/collation.html
 #[derive(
-    Clone, Copy, Hash, Serialize, Deserialize, Debug, PartialEq, Eq, EnumCount, FromRepr, Arbitrary,
+    Clone,
+    Copy,
+    Hash,
+    Serialize,
+    Deserialize,
+    Debug,
+    PartialEq,
+    Eq,
+    EnumCount,
+    EnumIter,
+    FromRepr,
+    Arbitrary,
 )]
 #[repr(u8)]
 pub enum Collation {
@@ -224,7 +235,7 @@ impl Display for Collation {
 
 impl Collation {
     /// Compare the given strings according to this collation.
-    pub(crate) fn compare<A, B>(&self, a: A, b: B) -> Ordering
+    pub fn compare<A, B>(&self, a: A, b: B) -> Ordering
     where
         A: AsRef<str>,
         B: AsRef<str>,
@@ -366,6 +377,15 @@ impl Collation {
         collation.unwrap_or_else(|| Self::default_for(dialect))
     }
 
+    /// The nearest case-insensitive collation to this one. Matching LIKE under the returned
+    /// collation gives ILIKE semantics.
+    pub fn to_insensitive(self) -> Self {
+        match self {
+            Self::Utf8 | Self::Binary | Self::Utf8Binary => Self::Utf8Ci,
+            Self::Utf8Ci | Self::Utf8AiCi | Self::Latin1SwedishCi | Self::Utf8AiCiPad => self,
+        }
+    }
+
     /// Returns the character set family for this collation.
     pub fn charset_family(&self) -> CharsetFamily {
         match self {
@@ -500,6 +520,15 @@ mod tests {
             Collation::get_or_default(pg, "en_US.UTF-8"),
             Collation::Utf8
         );
+    }
+
+    #[test]
+    fn to_insensitive_is_insensitive() {
+        for col in Collation::iter() {
+            let ci = col.to_insensitive();
+            assert_eq!(ci.compare("a", "A"), Ordering::Equal, "{col} -> {ci}");
+            assert_eq!(ci, ci.to_insensitive(), "{col} -> {ci}");
+        }
     }
 
     #[test]

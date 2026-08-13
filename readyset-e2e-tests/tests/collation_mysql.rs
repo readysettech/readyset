@@ -490,6 +490,30 @@ collation_test!(
     false,
     [mysql]
 );
+collation_test!(
+    test_utf8mb4_0900_ai_ci_like,
+    compare_like_ops,
+    "VARCHAR(32) COLLATE 'utf8mb4_0900_ai_ci'",
+    LIKE_ROWS,
+    false,
+    [mysql, modern]
+);
+collation_test!(
+    test_utf8mb4_general_ci_like,
+    compare_like_ops,
+    "VARCHAR(32) COLLATE 'utf8mb4_general_ci'",
+    LIKE_ROWS,
+    false,
+    [mysql]
+);
+collation_test!(
+    test_latin1_swedish_ci_like,
+    compare_like_ops,
+    "VARCHAR(32) COLLATE 'latin1_swedish_ci'",
+    LIKE_ROWS,
+    false,
+    [mysql]
+);
 
 /// A COLLATE expression in the filter is not supported by the query graph, so the query cannot
 /// be cached and proxies to the upstream, whose rows it returns. Uses the production parsing

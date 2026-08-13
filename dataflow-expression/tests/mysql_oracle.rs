@@ -43,11 +43,10 @@ async fn connect() -> Conn {
 }
 
 async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
-    // We currently don't properly support the default mysql case-insensitive collation, so make
-    // sure we change the collation of the database to be case-sensitive and respect padding
-    conn.query_drop("SET NAMES 'utf8mb4' COLLATE 'utf8mb4_bin'")
-        .await
-        .unwrap();
+    // Normalize the connection charset across server versions. The server default collation
+    // for utf8mb4 applies, matching the case- and accent-insensitive default our MySQL
+    // dialect uses.
+    conn.query_drop("SET NAMES 'utf8mb4'").await.unwrap();
 
     // Because mysql is much more weakly typed than postgres, it returns results for queries using
     // values of different types than the actual results of expressions; eg, `1 = 1` returns
