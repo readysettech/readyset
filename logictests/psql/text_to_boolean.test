@@ -1,0 +1,64 @@
+# Casting text to boolean under PostgreSQL rules.
+#
+# The coercion is dialect-sensitive: MySQL treats any non-empty string as true, which under
+# PostgreSQL would make 'false', 'f' and '0' all read as true. These check the spellings
+# PostgreSQL's boolean input function actually accepts.
+
+# A value PostgreSQL's boolean input function rejects, such as `"hello"`, raises there but fails
+# expression evaluation here, which a filter reports by excluding the row. That divergence is
+# tracked by REA-2964 and is why no such value appears below.
+statement ok
+create table jf (id int, props json);
+
+statement ok
+insert into jf values
+  (1, '{"flag": true}'),
+  (2, '{"flag": false}'),
+  (3, '{"flag": null}'),
+  (4, '{"other": 1}');
+
+query I rowsort
+select id from jf where (props ->> 'flag')::boolean;
+----
+1
+
+query I rowsort
+select id from jf where not (props ->> 'flag')::boolean;
+----
+2
+
+# Absent and JSON-null keys yield SQL NULL, so neither branch above returns them.
+query I rowsort
+select id from jf where (props ->> 'flag')::boolean is null;
+----
+3
+4
+
+statement ok
+create table b (id int, v text);
+
+statement ok
+insert into b values
+  (1, 'true'), (2, 't'), (3, 'TRUE'), (4, 'yes'), (5, 'on'), (6, '1'),
+  (7, 'false'), (8, 'f'), (9, 'FALSE'), (10, 'no'), (11, 'off'), (12, '0');
+
+# Every spelling PostgreSQL accepts, including prefixes and mixed case.
+query I rowsort
+select id from b where v::boolean;
+----
+1
+2
+3
+4
+5
+6
+
+query I rowsort
+select id from b where not v::boolean;
+----
+10
+11
+12
+7
+8
+9

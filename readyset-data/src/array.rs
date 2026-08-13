@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql};
 
-use crate::{DfType, DfValue, DfValueKind};
+use crate::{DfType, DfValue, DfValueKind, Dialect};
 
 /// Internal representation of PostgreSQL arrays
 ///
@@ -440,7 +440,13 @@ impl Array {
 
         for value in res.values_mut() {
             if !value.is_none() {
-                *value = value.coerce_to(ty, &DfType::Unknown)?;
+                // Arrays are a PostgreSQL-only type, so elements parse under PostgreSQL rules --
+                // notably `t`/`f` for booleans, which MySQL's truthiness would read as all-true.
+                *value = value.coerce_to_with_dialect(
+                    ty,
+                    &DfType::Unknown,
+                    Dialect::DEFAULT_POSTGRESQL,
+                )?;
             }
         }
 

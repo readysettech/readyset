@@ -437,8 +437,11 @@ where
                         i,
                         // Coercing from a literal, so no "from" type to pass to coerce_to
                         Modification::Set(
-                            DfValue::try_from_dialect(v, dialect.into())?
-                                .coerce_to(&target_type, &DfType::Unknown)?,
+                            DfValue::try_from_dialect(v, dialect.into())?.coerce_to_with_dialect(
+                                &target_type,
+                                &DfType::Unknown,
+                                dialect,
+                            )?,
                         ),
                     ));
                 }
@@ -564,10 +567,11 @@ pub(crate) fn extract_insert(
                         .map(|name| Collation::get_or_default(dialect, name));
                     let target_type =
                         DfType::from_sql_type(&field.sql_type, dialect, |_| None, collation)?;
-                    val.coerce_to(
+                    val.coerce_to_with_dialect(
                         &target_type,
                         // Coercing from the raw parameters, so no prior type to use.
                         &DfType::Unknown,
+                        dialect,
                     )
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?;

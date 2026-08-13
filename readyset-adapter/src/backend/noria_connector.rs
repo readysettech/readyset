@@ -1387,7 +1387,7 @@ impl NoriaConnector {
                             "Row returned from readyset-server had the wrong number of columns",
                         )
                     })?
-                    .coerce_to(&target_type, &DfType::Unknown)?; // No from_ty, we're inserting literals
+                    .coerce_to_with_dialect(&target_type, &DfType::Unknown, self.dialect)?; // No from_ty, we're inserting literals
                 buf[ri][idx] = value;
             }
         }

@@ -17,6 +17,51 @@ use crate::{Array, Collation, DfType, DfValue, Dialect};
 
 pub(crate) const TINYTEXT_WIDTH: usize = 14;
 
+/// Parses a string the way PostgreSQL's `boolean` input function does: surrounding whitespace is
+/// ignored, matching is case-insensitive, and any prefix of an accepted spelling is allowed, so
+/// `t`, `tr`, `tru` and `true` all parse as true. A prefix has to single one spelling out, so a
+/// bare `o` is invalid where `on` and `off` are not, and `1` and `0` are accepted only on their
+/// own. Returns `None` for input PostgreSQL would reject.
+fn parse_pg_bool(str: &str) -> Option<bool> {
+    /// Every spelling PostgreSQL accepts, with the value it carries.
+    const SPELLINGS: [(&str, bool); 6] = [
+        ("true", true),
+        ("false", false),
+        ("yes", true),
+        ("no", false),
+        ("on", true),
+        ("off", false),
+    ];
+
+    // PostgreSQL trims the C locale's whitespace, which is narrower than `str::trim`'s Unicode
+    // definition: a non-breaking space is part of the value and makes it invalid.
+    let trimmed = str.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\u{b}' | '\u{c}' | '\r'));
+
+    match trimmed {
+        "1" => Some(true),
+        "0" => Some(false),
+        // Anything else names a spelling by prefix, and only an unambiguous prefix names one:
+        // sharing it with a second spelling is what rejects a bare `o` between `on` and `off`,
+        // and empty input between all six.
+        _ => {
+            let mut named = None;
+            for (spelling, value) in SPELLINGS {
+                let matches_prefix = spelling
+                    .as_bytes()
+                    .get(..trimmed.len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case(trimmed.as_bytes()));
+                if matches_prefix {
+                    if named.is_some() {
+                        return None;
+                    }
+                    named = Some(value);
+                }
+            }
+            named
+        }
+    }
+}
+
 /// A nibble of [`Collation`], and a nibble of length (since length can never be greater than
 /// [`TINYTEXT_WIDTH`])
 #[repr(transparent)]
@@ -516,7 +561,17 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
 
         match *to_ty {
             DfType::Unknown => Ok(DfValue::from(str)),
-            DfType::Bool => Ok(DfValue::from(!str.is_empty())),
+            DfType::Bool => match dialect.map(|d| d.engine()) {
+                Some(SqlEngine::PostgreSQL) => {
+                    parse_pg_bool(str).map(DfValue::from).ok_or_else(|| {
+                        Self::coerce_err(
+                            to_ty,
+                            format!("invalid input syntax for type boolean: {str:?}"),
+                        )
+                    })
+                }
+                _ => Ok(DfValue::from(!str.is_empty())),
+            },
 
             DfType::Text(collation) => {
                 Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
@@ -753,6 +808,72 @@ mod tests {
 
     fn coerce_double(text: &str, dialect: Dialect) -> ReadySetResult<DfValue> {
         DfValue::from(text).coerce_to_with_dialect(&DfType::Double, &DfType::Unknown, dialect)
+    }
+
+    fn coerce_bool(text: &str, dialect: Dialect) -> ReadySetResult<DfValue> {
+        DfValue::from(text).coerce_to_with_dialect(&DfType::Bool, &DfType::Unknown, dialect)
+    }
+
+    /// Verified against PostgreSQL 15.
+    #[test]
+    fn text_to_bool_postgres() {
+        for text in [
+            "t", "tr", "tru", "true", "TRUE", "True", "y", "ye", "yes", "YES", "on", "ON", "1",
+            " true ", "\ttrue\n",
+        ] {
+            assert_eq!(
+                coerce_bool(text, Dialect::DEFAULT_POSTGRESQL).unwrap(),
+                DfValue::from(true),
+                "{text:?} should parse as true"
+            );
+        }
+
+        for text in [
+            "f", "fa", "fal", "fals", "false", "FALSE", "False", "n", "no", "NO", "of", "off",
+            "OFF", "0", " false ",
+        ] {
+            assert_eq!(
+                coerce_bool(text, Dialect::DEFAULT_POSTGRESQL).unwrap(),
+                DfValue::from(false),
+                "{text:?} should parse as false"
+            );
+        }
+
+        // A bare `o` is ambiguous between `on` and `off`, and a non-breaking space is part of the
+        // value rather than trimmed, so both are invalid input.
+        for text in [
+            "",
+            " ",
+            "banana",
+            "truex",
+            "2",
+            "01",
+            "tt",
+            "yesno",
+            "o",
+            "O",
+            "\u{a0}true",
+        ] {
+            assert!(
+                coerce_bool(text, Dialect::DEFAULT_POSTGRESQL).is_err(),
+                "{text:?} should be rejected"
+            );
+        }
+    }
+
+    /// Pins MySQL's existing behavior, where any non-empty string is true, so that the PostgreSQL
+    /// parsing above is visibly scoped to PostgreSQL. MySQL itself converts a string in boolean
+    /// context numerically, making `'0'` and `'banana'` both false, so the values below record a
+    /// divergence rather than fidelity; a MySQL-side fix should expect to change them.
+    #[test]
+    fn text_to_bool_mysql() {
+        for (text, expected) in [("", false), ("false", true), ("0", true), ("banana", true)] {
+            assert_eq!(
+                coerce_bool(text, Dialect::DEFAULT_MYSQL).unwrap(),
+                DfValue::from(expected),
+                "incorrect result for {text:?}"
+            );
+        }
     }
 
     /// Verified against PostgreSQL 15.
