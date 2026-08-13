@@ -380,6 +380,18 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 OptimizationStrategy::HoistParametrizableFilters,
             )?;
             trace!(parent: &span, pass="query_optimization_rewrite", query = %query.display(flags.dialect));
+            // Ask the entry validator whether the rewrites emitted something it would have
+            // rejected on the way in.  The rewrites reshape the projection, the grouping keys
+            // and the join tree, so the statement leaving this block is not the one the
+            // validator admitted -- most sharply for the rule that every column outside an
+            // aggregate belongs to the GROUP BY, which decorrelation and predicate routing
+            // both have to maintain by hand.
+            //
+            // Refusing here applies the same contract as the entry check above: a statement
+            // this validator rejects is one the pipeline has no agreed reading of, so the
+            // rewrite is declined rather than handed on.
+            query.validate_query_semantics(flags.dialect)?;
+            trace!(parent: &span, pass="validate_query_semantics_on_exit", query = %query.display(flags.dialect));
         }
         Err(e) => {
             warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
@@ -5000,6 +5012,48 @@ mod tests {
 
             rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
                 .expect("an aggregated field should still rewrite");
+        }
+
+        /// The pipeline's output satisfies the validator that admitted its input.
+        ///
+        /// `rewrite_equivalent_deep` declines a rewrite its own validator rejects, so a shape that
+        /// starts failing that check stops being cached.  Each shape below rewriting is what says
+        /// the check refuses nothing it should admit.
+        ///
+        /// The shapes are the ones whose emitted form the rewrites reshape most: a decorrelated
+        /// select-list subquery, whose value has to reach the outer GROUP BY; the same with the
+        /// grouping key written positionally and as an alias; a HAVING predicate that gets routed
+        /// between WHERE and HAVING; and a filter over an aggregated derived table, where hoisting
+        /// has to keep the projection and the grouping list in agreement.
+        #[test]
+        fn rewritten_queries_pass_the_validator_that_admitted_them() {
+            for sql in [
+                "SELECT qa.p.pn, COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED' GROUP BY qa.p.pn",
+                "SELECT qa.p.color, COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 GROUP BY 1, 3",
+                "SELECT qa.p.color AS col, COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p GROUP BY col",
+                "SELECT qa.p.color, COUNT(*) AS n FROM qa.p GROUP BY qa.p.color \
+                 HAVING COUNT(*) > (SELECT COUNT(*) FROM qa.s)",
+                "SELECT agg.pn FROM (SELECT qa.p.pn, COUNT(*) AS c FROM qa.p \
+                 GROUP BY qa.p.pn HAVING COUNT(*) = 3) agg WHERE agg.pn = 'P11111'",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+                let rewritten = rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(Dialect::PostgreSQL),
+                    context,
+                );
+                if let Err(e) = rewritten {
+                    panic!(
+                        "rewriting `{sql}` was declined: {e}\n  emitted: {}",
+                        query.display(Dialect::PostgreSQL)
+                    );
+                }
+            }
         }
 
         /// A HAVING alias reference must not outlive the select-list item that defines it.
