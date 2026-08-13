@@ -4359,10 +4359,21 @@ mod tests {
         use std::collections::HashMap;
 
         use pretty_assertions::assert_eq;
-        use readyset_sql::ast::{Relation, SqlIdentifier};
+        use readyset_sql::ast::{
+            JoinConstraint, JoinOperator, Relation, SqlIdentifier, TableExprInner,
+        };
 
         use super::*;
         use crate::CanQuery;
+        use crate::rewrite_utils::expect_field_as_expr;
+
+        /// The names a statement answers with, in order.
+        fn output_aliases(stmt: &SelectStatement) -> Vec<Option<SqlIdentifier>> {
+            stmt.fields
+                .iter()
+                .map(|fe| expect_field_as_expr(fe).1.clone())
+                .collect()
+        }
 
         fn rewrite_params(dialect: Dialect) -> AdapterRewriteParams {
             AdapterRewriteParams {
@@ -4960,12 +4971,10 @@ mod tests {
             );
         }
 
-        /// An aggregate without a GROUP BY returns one row whatever its filter matches, so a
-        /// decorrelated value projected beside it reads as NULL when nothing matches, and the
-        /// grouping key that repairs the grouped case would drop the row instead.  Neither answers
-        /// the original statement, so the shape is declined.
+        /// The hoist puts the join above the aggregate, whose one guaranteed row is then the
+        /// join's preserved side.
         #[test]
-        fn ungrouped_aggregate_declines_a_select_list_subquery() {
+        fn ungrouped_aggregate_hoists_a_select_list_subquery_above_the_aggregate() {
             let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
             let mut query = parse_select_statement(
                 "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
@@ -4973,12 +4982,523 @@ mod tests {
                 Dialect::PostgreSQL,
             );
 
-            let err =
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("the shape should be admitted by hoisting");
+
+            let rewritten = query.display(Dialect::PostgreSQL).to_string();
+
+            // The aggregate moved into a derived table, so the join below is above it.
+            let [wrap] = query.tables.as_slice() else {
+                panic!("expected the aggregate to be wrapped in a single FROM item: {rewritten}");
+            };
+            let TableExprInner::Subquery(inner) = &wrap.inner else {
+                panic!("expected the aggregate to be wrapped in a derived table: {rewritten}");
+            };
+            assert!(
+                inner.join.is_empty() && inner.contains_aggregate_select(),
+                "the aggregate did not stay alone inside the wrapper: {rewritten}"
+            );
+
+            // A non-aggregated scalar subquery may yield no row, which SQL reads as NULL, so the
+            // aggregate has to be the preserved side.
+            let [join] = query.join.as_slice() else {
+                panic!("expected the decorrelating join above the wrapper: {rewritten}");
+            };
+            assert!(
+                matches!(join.operator, JoinOperator::LeftOuterJoin)
+                    && matches!(join.constraint, JoinConstraint::Empty),
+                "the join above the aggregate is not a keyless LEFT OUTER: {rewritten}"
+            );
+
+            // The wrapper answers the same statement: same columns, same order, same names.
+            let aliases = output_aliases(&query);
+            assert_eq!(
+                aliases,
+                vec![Some("n".into()), Some("c".into())],
+                "the wrapper changed the projection: {rewritten}"
+            );
+        }
+
+        /// Ordering a single row cannot change the answer, and the items no longer resolve once
+        /// the projection is split, so the ordering goes.
+        #[test]
+        fn ordered_ungrouped_aggregate_hoists_and_drops_the_ordering() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p ORDER BY c",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("an ordered statement should be admitted by dropping the ordering");
+
+            let rewritten = query.display(Dialect::PostgreSQL).to_string();
+            let [wrap] = query.tables.as_slice() else {
+                panic!("expected a single FROM item: {rewritten}");
+            };
+            let TableExprInner::Subquery(inner) = &wrap.inner else {
+                panic!("expected the aggregate to be wrapped in a derived table: {rewritten}");
+            };
+            assert!(
+                query.order.is_none() && inner.order.is_none(),
+                "the ordering outlived the hoist: {rewritten}"
+            );
+
+            let aliases = output_aliases(&query);
+            assert_eq!(
+                aliases,
+                vec![Some("n".into()), Some("c".into())],
+                "dropping the ordering disturbed the projection: {rewritten}"
+            );
+        }
+
+        /// A reference reaching past the statement being hoisted out of, to a relation an
+        /// enclosing scope declares, is correlation the hoist cannot carry either.  A LATERAL
+        /// body is processed with its parent's relations live, so the reference is legal and
+        /// still not separable here.
+        #[test]
+        fn ungrouped_aggregate_declines_correlation_to_an_enclosing_scope() {
+            let sql = "SELECT g.pn, l.n, l.c FROM qa.p g, LATERAL ( \
+                       SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s \
+                       WHERE qa.s.sn IN (SELECT qa.spj.sn FROM qa.spj \
+                       WHERE qa.spj.pn = g.pn)) AS c FROM qa.j) l";
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+
+            let error =
                 rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
-                    .expect_err("ungrouped aggregate must not be admitted");
+                    .expect_err("a reference to an enclosing scope must not be hoisted");
 
             assert!(
-                err.to_string().contains("ungrouped aggregate"),
+                error
+                    .to_string()
+                    .contains("correlated select-list subquery"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// Fields the statement left unaliased are read with the relation they come from, which
+        /// tells two of them apart even where the rewrite gives both the same name.  This is the
+        /// shape the hoist exists for, so it must survive the collision rule above.
+        #[test]
+        fn ungrouped_aggregate_hoist_keeps_unaliased_fields_sharing_a_derived_name() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*), (SELECT COUNT(*) FROM qa.s) FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("unaliased fields sharing a derived name still hoist");
+        }
+
+        /// A subquery the folds answer never needs placing: it is replaced by a literal, and a
+        /// literal has no row to be read from.  So a field reading one beside its aggregate keeps
+        /// its rewrite, and the refusal below applies only to a subquery that survives the folds.
+        #[test]
+        fn ungrouped_aggregate_admits_a_folded_subquery_beside_an_aggregate() {
+            for sql in [
+                // LIMIT 0 folds to NULL.
+                "SELECT COUNT(*) + (SELECT qa.s.sn FROM qa.s LIMIT 0) AS c FROM qa.p",
+                // EXISTS over a one-row aggregate folds to TRUE.
+                "SELECT COUNT(*) + (CASE WHEN EXISTS (SELECT COUNT(*) FROM qa.s) \
+                 THEN 1 ELSE 0 END) AS c FROM qa.p",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .unwrap_or_else(|e| panic!("a folded subquery keeps its rewrite: {sql}: {e}"));
+            }
+        }
+
+        /// The folds answer a subquery with a literal, leaving nothing to place.  Whether a
+        /// field reads a subquery beside its aggregate is therefore a question about each
+        /// subquery, not about the field: one the folds removed must not refuse the one that
+        /// remains, which this field reads inside its aggregate.
+        #[test]
+        fn ungrouped_aggregate_admits_an_aggregated_subquery_beside_a_folded_one() {
+            let sql = "SELECT SUM((SELECT COUNT(*) FROM qa.s)) \
+                       + COALESCE((SELECT qa.s.sn FROM qa.s LIMIT 0), 0) AS c FROM qa.p";
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .unwrap_or_else(|e| panic!("a folded subquery must not refuse its sibling: {e}"));
+        }
+
+        /// Correlation is a question about each subquery the field projects, not about whichever
+        /// one is written first.  An uncorrelated subquery ahead of a correlated one must not
+        /// carry the field past the refusal.
+        #[test]
+        fn ungrouped_aggregate_declines_correlation_behind_an_uncorrelated_subquery() {
+            let sql = "SELECT g.pn, l.c FROM qa.p g, LATERAL ( \
+                       SELECT COUNT(*) AS n, ((SELECT COUNT(*) FROM qa.j) \
+                       + (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = g.pn)) AS c \
+                       FROM qa.j) l";
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+            let error =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("a correlated subquery must be refused wherever it is written");
+            assert!(
+                error
+                    .to_string()
+                    .contains("correlated select-list subquery"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// A statement an OFFSET skips past emits no row, so there is nothing for a hoisted
+        /// field to be read on.  Refused here rather than in the controller, where the clause
+        /// that says so is no longer visible.
+        #[test]
+        fn ungrouped_aggregate_declines_a_statement_that_emits_no_row() {
+            for sql in [
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p OFFSET 1",
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p LIMIT 1 OFFSET 1",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                let error = rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(Dialect::PostgreSQL),
+                    context,
+                )
+                .expect_err(sql);
+                assert!(
+                    error
+                        .to_string()
+                        .contains("cannot prove emits exactly one row"),
+                    "{sql}: {error}"
+                );
+            }
+        }
+
+        /// Correlation written bare in a hoisted field, outside any subquery it projects.  The
+        /// fields are taken out of the statement before the wrap, so asking the statement alone
+        /// would not see it.  Driven through the pass directly: the entry validator refuses this
+        /// shape for an unrelated reason today, and the gate must not depend on that.
+        #[test]
+        fn ungrouped_aggregate_declines_correlation_bare_in_a_hoisted_field() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT g.pn, l.n, l.c FROM qa.p g, LATERAL ( \
+                 SELECT COUNT(*) AS n, ((SELECT COUNT(*) FROM qa.s) + g.pn) AS c \
+                 FROM qa.j) l",
+                Dialect::PostgreSQL,
+            );
+            let uniq = UniqueColumnsSchemaImpl::from(&context);
+            let nonnull = NonNullSchemaImpl::from(&context);
+
+            query.normalize_subquery_positions().unwrap();
+            let error = query
+                .unnest_subqueries(&nonnull, &uniq)
+                .expect_err("a reference out of the statement must not be wrapped");
+            assert!(
+                error.to_string().contains("correlated statement"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// Two fields the wrap keeps, both deriving one output name.  They read one relation --
+        /// the derived table -- so nothing tells them apart, which is the same reason an aliased
+        /// pair is refused.  Without this the wrap renames one, and the statement answers under a
+        /// name no spelling of it produces.
+        #[test]
+        fn ungrouped_aggregate_declines_kept_fields_sharing_an_output_name() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*), COUNT(*), (SELECT COUNT(*) FROM qa.s) FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+            let error =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("two kept fields under one name must not be answered");
+            assert!(
+                error.to_string().contains("fields sharing the output name"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// The statement being hoisted out of can itself be correlated -- a LATERAL body is.
+        /// The lateral step runs after this one and decorrelates such a body by turning its
+        /// leading FROM item into a join, and after wrapping that item is the wrapper's only
+        /// one, so the statement would be left with joins and nothing to join from.  Refused
+        /// here, where the reason can be stated.
+        #[test]
+        fn ungrouped_aggregate_declines_a_correlated_statement() {
+            let sql = "SELECT g.pn, l.n, l.c FROM qa.p g, LATERAL ( \
+                       SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                       FROM qa.j WHERE qa.j.jn = g.pn) l";
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+            let error =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("a correlated statement must not be wrapped");
+            assert!(
+                error.to_string().contains("correlated statement"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// The guard above reads the statement, not the field, so a LATERAL that merely sits in
+        /// the FROM of an uncorrelated statement still hoists: the relation it reads is local to
+        /// that statement, which is the scope correlation is read against.
+        #[test]
+        fn ungrouped_aggregate_hoists_over_a_lateral_in_its_own_from() {
+            let sql = "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                       FROM qa.p, LATERAL (SELECT qa.j.jn FROM qa.j WHERE qa.j.jn = qa.p.pn) l";
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("a lateral local to the statement does not make it correlated");
+        }
+
+        /// A field writing an aggregate and reading a subquery beside it asks for two placements
+        /// at once: the aggregate has to stay below, where it reads this statement's rows, and
+        /// the subquery has to be read above, on the one row the aggregate emits.  Neither
+        /// placement serves both, so the field is refused here, where that can be said, rather
+        /// than below as a statement that does not group what it projects.
+        #[test]
+        fn ungrouped_aggregate_declines_a_field_reading_a_subquery_beside_its_aggregate() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) + (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'NOPE'",
+                Dialect::PostgreSQL,
+            );
+
+            let error =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("a field reading a subquery beside its aggregate is declined");
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("beside an aggregate in one field"),
+                "declined for an unrelated reason: {error}"
+            );
+        }
+
+        /// Two outputs sharing a name are declined, whichever half of the split they fall in.
+        /// Below MIR a name resolves to one column, so a statement answering twice under one name
+        /// reads that column twice.  Wrapping hides the collision from the engine's own refusal:
+        /// the derived table's columns are uniquified, so the shape lowers where the unwrapped
+        /// statement would not, and answers wrongly instead.
+        #[test]
+        fn ungrouped_aggregate_hoist_declines_a_colliding_output_name() {
+            for sql in [
+                // The hoisted field collides with one that stays, in either order.
+                "SELECT COUNT(*) AS c, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p",
+                "SELECT (SELECT COUNT(*) FROM qa.s) AS c, COUNT(*) AS c FROM qa.p",
+                // Two fields that stay collide with each other, and the hoist is what would
+                // carry them past the engine's refusal.
+                "SELECT COUNT(*) AS n, MAX(qa.p.pn) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p",
+                // The name a hoisted field answers with is the one the rewrite gives it, which
+                // is not the one it is written with.  Here it collides with an alias the
+                // statement wrote on a field that stays.
+                "SELECT (SELECT MIN(qa.s.sn) FROM qa.s), COUNT(*) AS \"min(sn)\" FROM qa.p",
+                "SELECT COUNT(*) AS \"min(sn)\", (SELECT MIN(qa.s.sn) FROM qa.s) FROM qa.p",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                let error = rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(Dialect::PostgreSQL),
+                    context,
+                )
+                .expect_err(sql);
+                assert!(
+                    error.to_string().contains("sharing the output name"),
+                    "{sql}: {error}"
+                );
+            }
+        }
+
+        /// Hoisting answers the field by joining it in above the aggregate, so a field the
+        /// rewrite below cannot turn into a join is one hoisting cannot answer: the wrapper is
+        /// left standing for nothing and the leading-derived-table inliner folds it back, putting
+        /// the field beside the aggregate again.  An `IN` whose right side needs a probe join is
+        /// such a field; one reading an aggregate is not, and still hoists.
+        #[test]
+        fn ungrouped_aggregate_hoist_declines_a_field_it_cannot_move() {
+            let hoist = |sql: &str| {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .map(|_| ())
+            };
+
+            let error =
+                hoist("SELECT COUNT(*) AS n, (5 IN (SELECT qa.s.sn FROM qa.s)) AS i FROM qa.p")
+                    .expect_err("a field hoisting cannot move is declined");
+            assert!(
+                error.to_string().contains("hoisting cannot move"),
+                "declined for an unrelated reason: {error}"
+            );
+
+            hoist("SELECT COUNT(*) AS n, (6 IN (SELECT COUNT(*) FROM qa.s)) AS i FROM qa.p")
+                .expect("an `IN` reading an aggregate still hoists");
+        }
+
+        /// A client parameter anywhere the rewrite encloses is declined.  The key it becomes has
+        /// to be pulled up to the leaf, and the hoist puts a LEFT JOIN in the way: `pull_keys`
+        /// pushes a key through neither side of one.  The statement goes under that join's left
+        /// side and the hoisted subquery under its right, so both are refused.  A literal in the
+        /// same position is kept, specialising the cache to it.
+        #[test]
+        fn ungrouped_aggregate_hoist_declines_a_client_parameter() {
+            let hoist = |sql: &str| {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .map(|_| ())
+            };
+
+            for sql in [
+                // In the filter the wrapper encloses.
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = $1",
+                // In a join's ON, beside an equality that holds it there: an earlier pass moves a
+                // lone filter to the WHERE above, but one sharing its ON with a join condition
+                // stays until after this pass.
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p JOIN qa.j ON qa.p.pn = qa.j.jn AND qa.j.jn = $1",
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c \
+                 FROM qa.p JOIN qa.j ON qa.j.jn = $1",
+                // In the subquery being hoisted, which lands on the join's right side.
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = $1) AS c \
+                 FROM qa.p",
+                // In the LIMIT the wrapper encloses.
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p LIMIT $1",
+            ] {
+                let error = hoist(sql).expect_err(sql);
+                assert!(
+                    error.to_string().contains("client parameter"),
+                    "{sql}: {error}"
+                );
+            }
+
+            hoist(
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p \
+                 WHERE qa.p.color = 'RED'",
+            )
+            .expect("a literal filter still hoists");
+        }
+
+        /// A statement that aggregates only in its ORDER BY is declined: the ordering is all that
+        /// holds it to one row, and inside an `IN` a later pass drops it and the rows come back
+        /// wrong.
+        #[test]
+        fn ungrouped_aggregate_established_only_by_the_ordering_is_declined() {
+            for sql in [
+                "SELECT (SELECT COUNT(*) FROM qa.s) AS c FROM qa.p ORDER BY COUNT(*)",
+                "SELECT (SELECT COUNT(*) FROM qa.s) AS c, 42 AS lit FROM qa.p \
+                 ORDER BY COUNT(*), lit",
+            ] {
+                let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+                let mut query = parse_select_statement(sql, Dialect::PostgreSQL);
+                let error = rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(Dialect::PostgreSQL),
+                    context,
+                )
+                .expect_err(sql);
+                assert!(
+                    error
+                        .to_string()
+                        .contains("select-list subquery beside an aggregate written only"),
+                    "{sql}: {error}"
+                );
+            }
+        }
+
+        /// A correlated reference cannot follow the field up, so the shape stays declined.
+        #[test]
+        fn correlated_ungrouped_aggregate_declines_a_select_list_subquery() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn = qa.p.pn) AS c \
+                 FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            let err =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("a correlated subquery must not be hoisted");
+
+            assert!(
+                err.to_string().contains("correlated select-list subquery"),
+                "declined for an unrelated reason: {err}"
+            );
+        }
+
+        /// The wrapper puts hoisted fields back where they were.
+        #[test]
+        fn ungrouped_aggregate_hoist_keeps_the_projection_in_order() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT (SELECT COUNT(*) FROM qa.s) AS c, COUNT(*) AS n, \
+                 (SELECT COUNT(*) FROM qa.j) AS d FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let aliases = output_aliases(&query);
+            assert_eq!(
+                aliases,
+                vec![Some("c".into()), Some("n".into()), Some("d".into())],
+                "hoisted fields did not return to their positions: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// An aggregated field decorrelates in place while a plain one is hoisted past it.
+        #[test]
+        fn ungrouped_aggregate_hoists_beside_an_aggregated_subquery_field() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT SUM((SELECT COUNT(*) FROM qa.s)) AS a, (SELECT COUNT(*) FROM qa.j) AS d \
+                 FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let rewritten = query.display(Dialect::PostgreSQL).to_string();
+            let [wrap] = query.tables.as_slice() else {
+                panic!("expected a single FROM item: {rewritten}");
+            };
+            let TableExprInner::Subquery(inner) = &wrap.inner else {
+                panic!("expected the aggregate to be wrapped in a derived table: {rewritten}");
+            };
+            assert!(
+                inner.join.len() == 1 && query.join.len() == 1,
+                "the aggregated field's join did not stay with the aggregate: {rewritten}"
+            );
+        }
+
+        /// A reference written inside a nested subquery is invisible to the parser's notion of
+        /// correlation, which reads the outermost level alone.  Reading it relative to the
+        /// subquery, at every depth, is what sees it.
+        #[test]
+        fn ungrouped_aggregate_declines_correlation_lifted_from_a_nested_subquery() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn IN \
+                 (SELECT qa.spj.sn FROM qa.spj WHERE qa.spj.pn = qa.p.pn)) AS c FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            let err =
+                rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                    .expect_err("correlation lifted from a nested subquery must not be hoisted");
+
+            assert!(
+                err.to_string().contains("correlated select-list subquery"),
                 "declined for an unrelated reason: {err}"
             );
         }

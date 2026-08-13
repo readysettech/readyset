@@ -9,12 +9,13 @@ use crate::rewrite_utils::{
     as_sub_query_with_alias_mut, bubble_alias_to_anchor_top, classify_on_atom,
     collect_local_from_items, columns_iter, conjoin_all_dedup, construct_null_check_expr,
     construct_projecting_wrapper, construct_scalar_expr, contains_nested_select, contains_select,
-    decompose_conjuncts, default_alias_for_select_item_expression, ensure_first_field_alias,
-    expect_field_as_expr, expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
-    expect_only_subquery_from_with_alias_mut, expect_sub_query_with_alias,
-    expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr, extract_correlation_keys,
-    find_group_by_key, find_rhs_join_clause, for_each_window_function,
-    get_from_item_reference_name, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
+    correlated_relations, decompose_conjuncts, default_alias_for_select_item_expression,
+    ensure_first_field_alias, expect_field_as_expr, expect_field_as_expr_mut,
+    expect_only_subquery_from_with_alias, expect_only_subquery_from_with_alias_mut,
+    expect_sub_query_with_alias, expect_sub_query_with_alias_mut,
+    extract_aggregate_fallback_for_expr, extract_correlation_keys, find_group_by_key,
+    find_rhs_join_clause, for_each_window_function, get_from_item_reference_name,
+    get_select_item_alias, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
     is_aggregated_expr, is_aggregated_select, is_aggregation_or_grouped, is_literal_one,
     is_literal_positive, is_literal_zero, make_first_field_ref_name,
     move_correlated_constraints_from_join_to_where, partition_correlated_predicates,
@@ -33,11 +34,14 @@ use crate::{
 };
 use itertools::{Either, Itertools};
 use readyset_errors::{
-    ReadySetError, ReadySetResult, internal, invalid_query, invalid_query_err, invariant,
-    unsupported,
+    ReadySetError, ReadySetResult, internal, invalid_query_err, invariant, unsupported,
 };
 
-use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
+use readyset_sql::analysis::{
+    is_aggregate,
+    visit::Visitor,
+    visit_mut::{VisitorMut, walk_expr},
+};
 use readyset_sql::ast::JoinOperator::{InnerJoin, LeftOuterJoin};
 use readyset_sql::ast::{
     BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
@@ -162,6 +166,13 @@ pub(crate) struct UnnestContext<'a, U: UniqueColumnsSchema> {
 }
 
 pub trait UnnestSubqueries: Sized {
+    /// Rewrites the subqueries in FROM, WHERE and the select list into joins.
+    ///
+    /// On `Err` the statement may be left in an unspecified state rather than as it was given:
+    /// a refusal reached before the first mutation leaves it untouched, but the pass
+    /// takes the select list apart and splices each join in as it goes, and a refusal reached
+    /// after the statement has been moved into a wrapper leaves it empty -- no fields, no FROM.
+    /// A caller that needs the original on a refusal keeps its own copy.
     fn unnest_subqueries<U: UniqueColumnsSchema>(
         &mut self,
         schema: &dyn NonNullSchema,
@@ -336,6 +347,100 @@ fn contains_duplicate_sensitive_window_function(stmt: &SelectStatement) -> Ready
             }
         })?;
         if found {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The outermost subquery predicates of `expr`, each paired with whether no aggregate encloses
+/// it.  A subquery an aggregate encloses is read by that aggregate, where an empty relation
+/// yields NULL upstream too; one beside it is read on the row the aggregate emits.  A window
+/// function's own call is not an enclosing aggregate, which is the reading `is_aggregated_expr`
+/// takes of the same question.
+fn collect_subquery_predicates_with_placement_mut(
+    expr: &mut Expr,
+) -> ReadySetResult<Vec<(bool, &mut Expr)>> {
+    struct PlacementVisitor<'a> {
+        enclosing_aggregates: usize,
+        found: Vec<(bool, &'a mut Expr)>,
+    }
+
+    impl<'a> VisitorMut<'a> for PlacementVisitor<'a> {
+        type Error = ReadySetError;
+
+        fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
+            if is_supported_subquery_predicate(expr) {
+                self.found.push((self.enclosing_aggregates == 0, expr));
+                return Ok(());
+            }
+            let encloses = matches!(expr, Expr::Call(function) if is_aggregate(function));
+            if encloses {
+                self.enclosing_aggregates += 1;
+            }
+            let walked = walk_expr(self, expr);
+            if encloses {
+                self.enclosing_aggregates -= 1;
+            }
+            walked
+        }
+
+        fn visit_select_statement(
+            &mut self,
+            _: &'a mut SelectStatement,
+        ) -> Result<(), Self::Error> {
+            // Predicates written inside a subquery belong to it, not to the statement
+            // projecting it, and an aggregate out here does not enclose them.
+            Ok(())
+        }
+    }
+
+    let mut vis = PlacementVisitor {
+        enclosing_aggregates: 0,
+        found: Vec::new(),
+    };
+    vis.visit_expr(expr)?;
+    Ok(vis.found)
+}
+
+/// Whether a client parameter is bound anywhere hoisting would enclose: in `stmt`, which becomes
+/// the derived table the wrapper selects from, or in the `hoisted` fields it lifts out above it.
+fn hoist_encloses_a_parameter(
+    stmt: &SelectStatement,
+    hoisted: &[(usize, FieldDefinitionExpr)],
+) -> bool {
+    struct FindPlaceholder;
+    // The walk answers by stopping: one placeholder settles the question, and `Err` is the only
+    // way a visitor says so.
+    impl<'ast> Visitor<'ast> for FindPlaceholder {
+        type Error = ();
+
+        fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
+            if literal.is_placeholder() {
+                Err(())
+            } else {
+                Ok(())
+            }
+        }
+    }
+    FindPlaceholder.visit_select_statement(stmt).is_err()
+        || hoisted.iter().any(|(_, field)| {
+            FindPlaceholder
+                .visit_expr(expect_field_as_expr(field).0)
+                .is_err()
+        })
+}
+
+/// Whether anything but the ORDER BY aggregates.  A statement whose only aggregate is written in
+/// its ordering is held to one row by that ordering alone, so the ordering cannot be dropped.
+fn aggregates_outside_order_by(stmt: &SelectStatement) -> ReadySetResult<bool> {
+    if let Some(having) = &stmt.having
+        && is_aggregated_expr(having)?
+    {
+        return Ok(true);
+    }
+    for field in &stmt.fields {
+        if is_aggregated_expr(expect_field_as_expr(field).0)? {
             return Ok(true);
         }
     }
@@ -585,24 +690,38 @@ fn scrub_empty_agg_no_gby(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
     )
 }
 
-/// If this SELECT is aggregate-only without GROUP BY and produces at most one row
-/// (ExactlyOne or AtMostOne), LIMIT and ORDER BY are redundant — you can't order or
-/// limit a single row.  Strip them to prevent unnecessary TOP-K (ROW_NUMBER)
+/// If this SELECT is aggregate-only without GROUP BY for a reason other than its ordering, and
+/// produces at most one row (ExactlyOne or AtMostOne), LIMIT and ORDER BY are redundant -- you
+/// can't order or limit a single row.  Strip them to prevent unnecessary TOP-K (ROW_NUMBER)
 /// materialization and to avoid blocking downstream optimizations (e.g., DISTINCT
 /// normalization checks `order.is_some()` as a TOP-K signal).
 ///
-/// Returns `true` if LIMIT or ORDER BY were stripped.
+/// Returns `true` if LIMIT or ORDER BY were stripped.  Refuses the statement instead where the
+/// ordering is what holds it to one row, which stripping would make false.
 fn strip_redundant_limit_for_agg_no_gby(stmt: &mut SelectStatement) -> ReadySetResult<bool> {
+    let holds_one_row = |card: AggNoGbyCardinality| {
+        matches!(
+            card,
+            AggNoGbyCardinality::ExactlyOne | AggNoGbyCardinality::AtMostOne
+        )
+    };
     if (!stmt.limit_clause.is_empty() || stmt.order.is_some())
-        && agg_only_no_gby_cardinality(stmt)?.is_some_and(|card| {
-            matches!(
-                card,
-                AggNoGbyCardinality::ExactlyOne | AggNoGbyCardinality::AtMostOne
-            )
-        })
+        && agg_only_no_gby_cardinality(stmt)?.is_some_and(holds_one_row)
     {
+        // The one row can be the ordering's own doing: an aggregate written only there is what
+        // holds the statement to it, and stripping the ordering would leave a plain scan behind.
+        // Read the shape again without the ordering rather than assume it survives.  Only worth
+        // asking when there is an ordering to remove: with none, the shape is the one the
+        // classification above already read.
+        if let Some(ordering) = stmt.order.take() {
+            let without_ordering = agg_only_no_gby_cardinality(stmt);
+            if !matches!(&without_ordering, Ok(card) if card.is_some_and(holds_one_row)) {
+                stmt.order = Some(ordering);
+                without_ordering?;
+                unsupported!("subquery held to one row by an aggregate written only in ORDER BY");
+            }
+        }
         stmt.limit_clause = Default::default();
-        stmt.order = None;
         Ok(true)
     } else {
         Ok(false)
@@ -1234,7 +1353,11 @@ pub(crate) fn as_joinable_derived_table_with_opts<U: UniqueColumnsSchema>(
                     && !may_be_single_via_corr
                     && !is_single_by_unique_key
                 {
-                    invalid_query!("Subquery should be aggregated or have LIMIT 1");
+                    // Not a statement the client wrote wrongly: a subquery that yields one row
+                    // is legal, and this pass cannot prove that it does not.  Refusing as
+                    // unsupported lets the query fall back and be parked, where calling it
+                    // invalid is both untrue and re-attempted on every eligible read.
+                    unsupported!("Subquery should be aggregated or have LIMIT 1");
                 }
                 if !stmt.limit_clause.is_empty()
                     && !has_limit_one
@@ -1242,7 +1365,7 @@ pub(crate) fn as_joinable_derived_table_with_opts<U: UniqueColumnsSchema>(
                     && !may_be_single_via_corr
                     && !is_single_by_unique_key
                 {
-                    invalid_query!("Subquery returns more than 1 row");
+                    unsupported!("Subquery returns more than 1 row");
                 }
             }
             if contains_outer_columns(field_expr, &local_from_items) {
@@ -1264,7 +1387,7 @@ pub(crate) fn as_joinable_derived_table_with_opts<U: UniqueColumnsSchema>(
 
         let check_for_local_cols_eq_group_keys = |are_local_columns_eq_grouping_keys: bool| {
             if is_scalar_ctx && !are_local_columns_eq_grouping_keys && !has_limit_one {
-                invalid_query!("Subquery returns more than 1 row")
+                unsupported!("Subquery returns more than 1 row")
             } else {
                 Ok(())
             }
@@ -1273,7 +1396,7 @@ pub(crate) fn as_joinable_derived_table_with_opts<U: UniqueColumnsSchema>(
         let check_for_uncorrelated_where = |stmt: &mut SelectStatement| {
             if is_scalar_ctx {
                 if stmt.group_by.is_some() && !has_limit_one {
-                    invalid_query!("Subquery returns more than 1 row")
+                    unsupported!("Subquery returns more than 1 row")
                 }
                 if !has_limit_one {
                     // Only when not LIMIT 1: safe to drop
@@ -2310,38 +2433,6 @@ fn unnest_subqueries_in_where<U: UniqueColumnsSchema>(
     Ok(rewrite_status)
 }
 
-fn collect_outermost_subquery_predicates_mut(expr: &mut Expr) -> ReadySetResult<Vec<&mut Expr>> {
-    #[derive(Default)]
-    struct SPVisitor<'a> {
-        subquery_predicates: Vec<&'a mut Expr>,
-    }
-
-    impl<'a> VisitorMut<'a> for SPVisitor<'a> {
-        type Error = ReadySetError;
-
-        fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
-            if is_supported_subquery_predicate(expr) {
-                self.subquery_predicates.push(expr);
-                Ok(())
-            } else {
-                walk_expr(self, expr)
-            }
-        }
-
-        fn visit_select_statement(
-            &mut self,
-            _: &'a mut SelectStatement,
-        ) -> Result<(), Self::Error> {
-            Ok(())
-        }
-    }
-
-    let mut visitor = SPVisitor::default();
-    visitor.visit_expr(expr)?;
-
-    Ok(visitor.subquery_predicates)
-}
-
 /// Takes the grouping keys already resolved to expressions.  A key written as a position or an
 /// alias can only be read against the projection, which a caller partway through rewriting the
 /// select list no longer has.
@@ -2373,22 +2464,48 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
 
     let mut stmt_fields = Vec::new();
     let mut fields_needing_group_by_key = Vec::new();
+    // Fields to move into a wrapper, paired with the position they hold in the projection.
+    let mut fields_to_hoist: Vec<(usize, FieldDefinitionExpr)> = Vec::new();
     // Grouping keys may be written as positions or aliases, and only the projection can say what
     // they name -- so resolve them here, before the loop moves the field list out of `stmt`.
     let grouping_keys = resolve_group_by_exprs(stmt)?;
     // Read for the same reason: once the loop takes the field list, a statement whose only
     // aggregates live in the projection reads as having none.
     let outer_is_ungrouped_aggregate = is_aggregate_only_without_group_by(stmt)?;
+    // Read before the loop takes the field list, which would leave the projection's aggregates
+    // unreadable.
+    let outer_aggregates_outside_order_by =
+        outer_is_ungrouped_aggregate && aggregates_outside_order_by(stmt)?;
+    // A statement an OFFSET or a LIMIT 0 skips past emits no row, so there is no row for a
+    // hoisted field to be read on.  Hoisting would bury the clause that says so inside the
+    // derived table, where the passes that answer it no longer see it, and the server then
+    // refuses an OFFSET it cannot read (`query_graph.rs`, "OFFSET without LIMIT") after a round
+    // trip.  The cardinality is already settled here, so ask it here.
+    let outer_may_lack_a_row = outer_is_ungrouped_aggregate
+        && !matches!(
+            agg_only_no_gby_cardinality(stmt)?,
+            Some(AggNoGbyCardinality::ExactlyOne)
+        );
 
-    for mut current_field in mem::take(&mut stmt.fields).into_iter() {
+    for (field_index, mut current_field) in mem::take(&mut stmt.fields).into_iter().enumerate() {
         let mut needs_group_by_key = false;
+        let mut hoist_field = false;
         let (field_expr, _) = expect_field_as_expr_mut(&mut current_field);
-        // A field that aggregates the subquery's value reads it inside the aggregate, where an
-        // empty relation yields NULL in Postgres too, so such a field needs no guarding below.
+        // Whether an aggregate is written anywhere in the field.  One enclosing the subquery
+        // reads its value, where an empty relation yields NULL upstream too, so the rewrite
+        // below needs no guarding; one written beside it is refused just under this.
         let field_is_aggregated = is_aggregated_expr(field_expr)?;
 
-        for subquery_predicate in collect_outermost_subquery_predicates_mut(field_expr)? {
-            let mut subquery_desc = as_supported_subquery_predicate(subquery_predicate)?;
+        // Collect what the field projects once, and answer every question below from that one
+        // set.  A second walk would have to agree with this one about which subqueries the
+        // rewrite places, and nothing would hold them in step.
+        let collected = collect_subquery_predicates_with_placement_mut(field_expr)?;
+
+        // The folds answer a subquery with a literal, which places nothing.  Run them first, so
+        // what remains is exactly the set the rewrite below has to serve.
+        let mut placed = Vec::with_capacity(collected.len());
+        for (subquery_is_beside_aggregate, subquery_predicate) in collected {
+            let subquery_desc = as_supported_subquery_predicate(subquery_predicate)?;
 
             // EARLY SHORT-CIRCUIT for **definite emptiness** in SELECT-list:
             //   • LIMIT 0 detected through wrappers, OR
@@ -2407,57 +2524,112 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
                 continue;
             }
 
-            // Shape-level cardinality for aggregate-only/no-GBY: safe per outer row even if correlated.
+            // Shape-level cardinality for aggregate-only/no-GBY: safe per outer row even if
+            // correlated.  EXISTS over a one-row aggregate is the second fold.
             let agg_card_shape = agg_only_no_gby_cardinality(&subquery_desc.stmt)?;
-            match agg_card_shape {
-                Some(AggNoGbyCardinality::ExactlyOne) => {
-                    if matches!(subquery_desc.ctx, SubqueryContext::Exists) {
-                        let _ = mem::replace(
-                            subquery_predicate,
-                            Expr::Literal((!subquery_desc.negated).into()),
-                        );
-                        rewrite_status.rewrite();
-                        continue;
-                    }
-                    if matches!(subquery_desc.ctx, SubqueryContext::In if subquery_desc.negated) {
-                        // NOT IN(one-row) ≡ != (3VL-correct)
-                        turn_into_not_eq_scalar(&mut subquery_desc);
-                    }
+            if matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne))
+                && matches!(subquery_desc.ctx, SubqueryContext::Exists)
+            {
+                let _ = mem::replace(
+                    subquery_predicate,
+                    Expr::Literal((!subquery_desc.negated).into()),
+                );
+                rewrite_status.rewrite();
+                continue;
+            }
+
+            placed.push((
+                subquery_is_beside_aggregate,
+                subquery_predicate,
+                subquery_desc,
+                agg_card_shape,
+            ));
+        }
+
+        // Hoisting moves every subquery the field places together, so one correlated among them
+        // refuses the field.  Asked of the placed set: a subquery the folds answered carries no
+        // correlation into a hoist it takes no part in.
+        let mut field_subquery_is_correlated = false;
+        if outer_is_ungrouped_aggregate && !field_is_aggregated {
+            for (_, _, subquery_desc, _) in &placed {
+                if !correlated_relations(&subquery_desc.stmt)?.is_empty() {
+                    field_subquery_is_correlated = true;
+                    break;
                 }
-                Some(AggNoGbyCardinality::AtMostOne) => { /* no single-row constant transforms */ }
-                Some(AggNoGbyCardinality::ExactlyZero) => {
-                    /* handled earlier by emptiness short-circuit */
-                }
-                None => { /* not aggregate-only/no-GBY: no shape-based folds here */ }
+            }
+        }
+
+        for (subquery_is_beside_aggregate, subquery_predicate, mut subquery_desc, agg_card_shape) in
+            placed
+        {
+            if matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne))
+                && matches!(subquery_desc.ctx, SubqueryContext::In if subquery_desc.negated)
+            {
+                // NOT IN(one-row) is equivalent to != (3VL-correct)
+                turn_into_not_eq_scalar(&mut subquery_desc);
             }
 
             let is_exactly_one = matches!(agg_card_shape, Some(AggNoGbyCardinality::ExactlyOne));
 
+            // A field writing an aggregate and reading a subquery beside it wants two
+            // placements at once: the aggregate below, reading this statement's rows, and the
+            // subquery above, on the one row the aggregate emits.  Answering it beside the
+            // aggregate projects a column the statement does not group, which an exit check
+            // refuses as a statement the client wrote wrongly.  Refuse it here as a shape this
+            // does not serve.  Reached only by a subquery the folds above left standing.
+            if outer_is_ungrouped_aggregate && field_is_aggregated && subquery_is_beside_aggregate {
+                unsupported!("select-list subquery read beside an aggregate in one field");
+            }
+
+            // This pass answers a select-list subquery by joining it into the FROM, where each
+            // outer row carries the joined value.  An ungrouped aggregate has no such row: it
+            // emits its one row even when its filter matches nothing, while the join sits below
+            // it.
+            //
+            //     SELECT COUNT(*), (SELECT COUNT(*) FROM b) FROM a WHERE a.s = 'nope'
+            //
+            // must answer with a count of `b`; joined below the aggregate it answers NULL.  The
+            // value is absent from that row rather than wrong in it, so only the placement can
+            // change -- hoisting the field into a wrapper puts the join above the aggregate,
+            // whose one guaranteed row is then the join's preserved side.  The subquery's own
+            // shape is not consulted: one that yields no row is what the outer join above the
+            // aggregate null-extends.  Checked after the folds above, which leave a literal with
+            // no row to read and so keep their rewrite, and before the rewrite below, which a
+            // hoisted field never reaches: the wrapper rewrites the field where it lands.
+            if outer_is_ungrouped_aggregate && !field_is_aggregated {
+                if outer_may_lack_a_row {
+                    unsupported!(
+                        "ungrouped aggregate this pass cannot prove emits exactly one row"
+                    );
+                }
+                // A statement that aggregates only in its ORDER BY holds itself to one row by
+                // that ordering alone, and hoisting drops the ordering, which is written against
+                // a projection this splits in two.  Dropping it would leave a plain scan
+                // answering with every row.  Inside an `IN` a later pass drops it too, which is
+                // the same loss reached another way.
+                if !outer_aggregates_outside_order_by {
+                    unsupported!(
+                        "select-list subquery beside an aggregate written only in ORDER BY"
+                    );
+                }
+                // Hoisting is the only correct rewrite here, and a reference out of the
+                // subquery cannot take it: one to a column of this statement presumes a
+                // particular outer row, which a group-less aggregate does not have, and one to
+                // a scope enclosing this statement is legal but not separable from it here.
+                // Both are correlation read relative to the subquery, which is what this
+                // answers, at every depth and accounting for what each level shadows.
+                if field_subquery_is_correlated {
+                    unsupported!(
+                        "correlated select-list subquery projected beside an ungrouped aggregate"
+                    );
+                }
+                hoist_field = true;
+                break;
+            }
+
             if unnest_all_subqueries(&mut subquery_desc.stmt, ctx)?.has_rollbacks() {
                 rewrite_status.rollback();
                 continue;
-            }
-
-            // An aggregate without a GROUP BY returns exactly one row whatever its filter matches,
-            // so the derived-table reference this rewrite would project beside it has no row to be
-            // read from when nothing matches, and yields NULL instead of the subquery's value.  The
-            // grouping key added further down cannot stand in: a grouped statement returns no row
-            // at all for a filter that matches nothing.  Both readings answer a different question
-            // than the statement being rewritten, so decline it and let the query proxy.
-            //
-            // Correlation is deliberately not consulted.  Correlation to a local column makes an
-            // outer column ungrouped, which is a statement Postgres rejects -- declining sends it
-            // upstream to say so.  Correlation to an enclosing scope is legal here and is affected
-            // in exactly the same way, so admitting it on the strength of being correlated would
-            // keep the defect.
-            //
-            // Both operands are known before the loop above, but this is the earliest sound place
-            // for the check: every fold before the `continue` above replaces a subquery with a
-            // literal, and a literal has no row to be read from, so those shapes stay correct and
-            // must keep their rewrite.  Placing it here, rather than after the derived table is
-            // built, also reports this reason instead of whatever that construction objects to.
-            if outer_is_ungrouped_aggregate && !field_is_aggregated {
-                unsupported!("select-list subquery projected beside an ungrouped aggregate");
             }
 
             let preserved_subquery_stmt = if matches!(subquery_desc.ctx, SubqueryContext::In) {
@@ -2602,6 +2774,11 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
             }
         }
 
+        if hoist_field {
+            fields_to_hoist.push((field_index, current_field));
+            continue;
+        }
+
         if needs_group_by_key {
             fields_needing_group_by_key.push(stmt_fields.len());
         }
@@ -2631,7 +2808,191 @@ fn unnest_subqueries_in_fields<U: UniqueColumnsSchema>(
         }
     }
 
+    if !fields_to_hoist.is_empty() {
+        rewrite_status =
+            rewrite_status.combine(hoist_fields_above_aggregate(stmt, fields_to_hoist, ctx)?);
+    }
+
     Ok(rewrite_status)
+}
+
+/// Moves `hoisted` into a wrapper that selects from `stmt` and decorrelates them there, so the
+/// joins replacing their subqueries sit above `stmt`'s aggregate.  Each field carries the position
+/// it held, which the wrapper restores, so the statement answers with the same columns in the
+/// same order.  A field the statement named keeps that name; one it left unnamed is named after
+/// the column it ends up reading.
+///
+/// Recursion terminates because the wrapper projects no aggregate of its own, so the gate that
+/// hoists cannot fire again.
+fn hoist_fields_above_aggregate<U: UniqueColumnsSchema>(
+    stmt: &mut SelectStatement,
+    hoisted: Vec<(usize, FieldDefinitionExpr)>,
+    ctx: &mut UnnestContext<U>,
+) -> ReadySetResult<RewriteStatus> {
+    // A parameter anywhere this encloses is one the client cannot bind: the view key it becomes
+    // has to reach the leaf, and `pull_keys` pushes a key through neither side of the LEFT JOIN
+    // the hoist introduces.  `stmt` goes under its left side and the hoisted fields under its
+    // right, so read both -- including a filter still sitting in a join's ON.
+    if hoist_encloses_a_parameter(stmt, &hoisted) {
+        unsupported!("client parameter in a statement hoisted above an ungrouped aggregate");
+    }
+
+    // The statement being wrapped can itself read an enclosing scope -- a LATERAL body does, and
+    // the lateral step answers such a reference by turning the body's leading FROM item into a
+    // join, which after wrapping is the wrapper's only one, leaving joins with nothing to join
+    // from.  Read with the hoisted fields moved back on and taken off again: a reference written
+    // bare in one of them is in neither the statement that is left nor the subqueries already
+    // checked.
+    let (hoisted_indices, hoisted_fields): (Vec<usize>, Vec<FieldDefinitionExpr>) =
+        hoisted.into_iter().unzip();
+    let kept_fields = stmt.fields.len();
+    stmt.fields.extend(hoisted_fields);
+    let correlated = correlated_relations(stmt);
+    let hoisted_fields = stmt.fields.split_off(kept_fields);
+    if !correlated?.is_empty() {
+        unsupported!("correlated statement hoisted above an ungrouped aggregate");
+    }
+
+    // A statement projecting nothing is not a statement.  Reaching it needs every field hoisted,
+    // which the rules above and at entry already prevent; stated rather than inherited, so
+    // relaxing either of those reaches the client as a refusal rather than as a bug.
+    if stmt.fields.is_empty() {
+        unsupported!("every field of an ungrouped aggregate hoisted out of it");
+    }
+
+    // The ordering is written against a projection this splits in two and cannot change a single
+    // row's answer.  One ordered by its only aggregate is declined before here, so none is
+    // load-bearing.
+    stmt.order = None;
+    // An `OFFSET 0` skips no row, but the normalization that erases it reads the top level only,
+    // which this is about to empty.  Erase it here, or the server is handed an OFFSET with no
+    // LIMIT, which it refuses -- a round trip this pass exists to save.
+    stmt.limit_clause.strip_zero_offset();
+
+    // What the statement answers with.  The wrapper stands in for the statement rather than
+    // becoming a table someone selects from, so it answers with these names -- read back below,
+    // since uniquification renames the second of two fields deriving one name.
+    let answered = stmt
+        .fields
+        .iter()
+        .map(|fe| {
+            (
+                expect_field_as_expr(fe).1.clone(),
+                get_select_item_alias(fe),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let wrap_alias = get_unique_alias(&collect_local_from_items(stmt)?, "W");
+    let wrapper = construct_projecting_wrapper(TableExpr {
+        inner: TableExprInner::Subquery(Box::new(mem::take(stmt))),
+        alias: Some(wrap_alias),
+        column_aliases: vec![],
+    })?;
+    let TableExprInner::Subquery(mut wrapper) = wrapper.inner else {
+        internal!("a projecting wrapper is a subquery");
+    };
+    // The name each field answers under.  A kept field answers under the name it had before the
+    // wrap, not the one uniquification gave it inside the derived table.
+    let mut answers = Vec::with_capacity(wrapper.fields.len());
+    for (fe, (alias, named)) in wrapper.fields.iter_mut().zip(answered) {
+        *expect_field_as_expr_mut(fe).1 = alias;
+        answers.push(Some(named));
+    }
+
+    for (field_index, field) in hoisted_indices.into_iter().zip(hoisted_fields) {
+        // The indices are the positions the fields held in a projection the wrapper now carries
+        // one entry of per field left behind, so each lands back where it was.  Said rather than
+        // assumed: `Vec::insert` panics past the end, and a pass that synthesized a field would
+        // make it reachable.
+        if field_index > wrapper.fields.len() {
+            internal!("hoisted field index {field_index} is past the wrapper's projection");
+        }
+        wrapper.fields.insert(field_index, field);
+        // A hoisted field is re-pointed by the rewrite below, so the name it answers under is
+        // the one its result carries rather than one read here.
+        answers.insert(field_index, None);
+    }
+
+    // Only the select list needs rewriting: the wrapper has no filter, grouping, ordering or
+    // join of its own, and what it encloses was rewritten before it was built.
+    // A probe is remembered by the shape it probes and answered with the alias of a join the
+    // asking statement carries.  The wrapper is a different statement carrying different joins,
+    // so it must not be offered the ones this statement built -- the rule REA-6843 states for
+    // every statement, which this call site does not inherit because it reaches a pass directly
+    // rather than through the entry that keeps it.  Put back afterwards for the lateral step,
+    // which descends into the derived table the wrap just built, where those joins still are.
+    //
+    // No shape is known that answers differently either way: the probe a wrapper field asks for
+    // keys on an ON predicate the enclosed statement's probes do not share, so the lookup misses
+    // rather than hits.  Kept because the rule holds whether or not a shape reaches it.
+    let outer_probes = mem::replace(&mut ctx.probes, ProbeRegistry::new());
+    let rewrite_status = unnest_subqueries_in_fields(&mut wrapper, ctx);
+    ctx.probes = outer_probes;
+    let rewrite_status = rewrite_status?;
+
+    // Hoisting answers the field by joining it in above the aggregate, so a field left holding a
+    // subquery is one the rewrite could not move.  The wrapper then projects the aggregate
+    // without adding anything, which the leading derived table inliner folds away, putting the
+    // field back beside the aggregate -- the placement this exists to avoid.  The wrapper also
+    // has to leave the aggregate's one row alone: it stands above it, so a filter it carries can
+    // delete the row the hoist exists to carry a value onto.  A wrapper that filters nothing and
+    // projects no subquery is one where every hoisted field became a join.  Its FROM and joins
+    // are excluded, the derived tables there being what the rewrite produces.
+    //
+    // This reads the wrapper as it stands here, which is the only state it can speak for.  A
+    // LIMIT or an ordering a hoisted subquery carries is still inside its own derived table at
+    // this point; the inliner flattens that later and lifts the clause to the top, above the
+    // aggregate.  Asking about them here would answer about a statement that does not exist yet.
+    if wrapper.where_clause.is_some() || wrapper.having.is_some() {
+        unsupported!("filter above an ungrouped aggregate the hoist must not drop a row from");
+    }
+    if wrapper
+        .fields
+        .iter()
+        .any(|fe| contains_select(expect_field_as_expr(fe).0))
+    {
+        unsupported!(
+            "select-list subquery beside an ungrouped aggregate that hoisting cannot move"
+        );
+    }
+
+    // Two outputs may answer under one name only where each is read together with a different
+    // relation: below MIR an alias is read by name alone, so it leaves nothing to tell a pair
+    // apart, while an unaliased field is read with its relation.  The hoist produces both cases
+    // -- a hoisted field named after the column it reads, and kept fields that all read the
+    // derived table.
+    let mut answered: HashMap<SqlIdentifier, (bool, HashSet<Option<Relation>>)> = HashMap::new();
+    for (fe, answer) in wrapper.fields.iter().zip(&answers) {
+        let (expr, alias) = expect_field_as_expr(fe);
+        let read_with = match expr {
+            Expr::Column(column) => column.table.clone(),
+            _ => None,
+        };
+        let name = match answer {
+            Some(kept) => kept.clone(),
+            None => get_select_item_alias(fe),
+        };
+        // Reaching an entry means another field already answers under this name, so the pair is
+        // the question; the first of a name has nothing to collide with.
+        match answered.get_mut(&name) {
+            Some((any_aliased, relations)) => {
+                *any_aliased |= alias.is_some();
+                if *any_aliased || !relations.insert(read_with) {
+                    unsupported!(
+                        "fields sharing the output name {name} beside an ungrouped aggregate"
+                    );
+                }
+            }
+            None => {
+                answered.insert(name, (alias.is_some(), HashSet::from([read_with])));
+            }
+        }
+    }
+
+    *stmt = *wrapper;
+
+    Ok(rewrite_status.combine(SINGLE_REWRITE_STATUS))
 }
 
 // **NOTE**: The order of unnesting is important:

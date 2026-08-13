@@ -1,0 +1,215 @@
+# This file runs in the default lane, which is MySQL.  The same cases run under PostgreSQL from
+# `psql/subquery_beside_ungrouped_aggregate.test`; a change here belongs in both.
+#
+# A subquery projected in the select list beside an aggregate that has no GROUP BY: the
+# aggregate emits one row whatever its filter matches, so the subquery's value has to reach that
+# row, which needs the decorrelating join above the aggregate.
+#
+# Lowering is what this file covers -- the join carries no key and sits above an aggregate.
+# Whether the emitted SQL means the right thing is the differential tests' job.
+
+statement ok
+create table p (pn int, color text);
+
+statement ok
+insert into p values (1, 'RED'), (2, 'RED'), (3, 'BLUE');
+
+statement ok
+create table s (sn int);
+
+statement ok
+insert into s values (1), (2), (3), (4), (5), (6);
+
+# The filter matches nothing.  The aggregate still emits its row, and the subquery still counts
+# every row of s.
+query II nosort
+select count(*) as n, (select count(*) from s) as c from p where p.color = 'NOPE';
+----
+0
+6
+
+# The same shape with a filter that matches, so the row is not the empty-aggregate one.
+query II nosort
+select count(*) as n, (select count(*) from s) as c from p where p.color = 'RED';
+----
+2
+6
+
+# Two subqueries either side of the aggregate: the projection has to come back in the order the
+# statement declares it.
+query III nosort
+select (select count(*) from s) as c, count(*) as n, (select min(sn) from s) as m from p;
+----
+6
+3
+1
+
+# A subquery that is not an aggregate and matches nothing yields no row at all, which reads as
+# NULL.  An inner join here would drop the row the aggregate is obliged to emit.
+query II nosort
+select count(*) as n, (select sn from s where sn = 999 limit 1) as c from p;
+----
+3
+NULL
+
+# The shape has to follow writes, not answer once.  A row the filter now matches takes the
+# aggregate off its empty-row case, and the subquery's value is unchanged by that write.
+statement ok
+insert into p values (4, 'NOPE');
+
+query II nosort
+select count(*) as n, (select count(*) from s) as c from p where p.color = 'NOPE';
+----
+1
+6
+
+# A write to the subquery's own relation moves the value the join carries above the aggregate.
+statement ok
+insert into s values (7);
+
+query II nosort
+select count(*) as n, (select count(*) from s) as c from p where p.color = 'NOPE';
+----
+1
+7
+
+# Neither field is aliased, so both outputs derive the name `count(*)` and the collision rule
+# admits them: an unaliased field is read together with the relation it comes from.  This is the
+# spelling a user writes by default, and it is the one branch of that rule which tolerates a
+# collision rather than refusing it, so the answer is pinned rather than argued.
+query II nosort
+select count(*), (select count(*) from s) from p;
+----
+4
+7
+
+# The same with three relations answering three outputs of one derived name.
+query III nosort
+select count(*), (select count(*) from s), (select count(*) from s) from p;
+----
+4
+7
+7
+
+# A LATERAL in the FROM sits at the same level as the hoisted field, so the wrapper encloses it
+# along with the rest of the statement.  It still resolves there, and still follows writes to the
+# relation it reads.
+statement ok
+create table j (jn int);
+
+statement ok
+insert into j values (1), (2);
+
+query II nosort
+select count(*) as n, (select count(*) from s) as c
+from p, lateral (select j.jn from j where j.jn = p.pn) l;
+----
+2
+7
+
+statement ok
+insert into j values (3);
+
+query II nosort
+select count(*) as n, (select count(*) from s) as c
+from p, lateral (select j.jn from j where j.jn = p.pn) l;
+----
+3
+7
+
+# The write cases above only add rows.  Removing them is the direction that matters here: the
+# aggregate owes its one row whether or not anything is left to count, and the join above it has
+# to keep carrying the subquery's value onto that row.  These need their own tables, because a
+# DELETE is only supported with a WHERE on a primary key.
+statement ok
+create table pk (pn int primary key, color text);
+
+statement ok
+insert into pk values (1, 'RED'), (2, 'NOPE');
+
+statement ok
+create table sk (sn int primary key);
+
+statement ok
+insert into sk values (1), (2), (3);
+
+query II nosort
+select count(*) as n, (select count(*) from sk) as c from pk where pk.color = 'NOPE';
+----
+1
+3
+
+# An UPDATE moves a row across the filter rather than adding or removing one, so the aggregate
+# has to follow a row leaving its group as well as one joining it, and the subquery's value has
+# to stay on the row either way.
+statement ok
+update pk set color = 'NOPE' where pn = 1;
+
+query II nosort
+select count(*) as n, (select count(*) from sk) as c from pk where pk.color = 'NOPE';
+----
+2
+3
+
+statement ok
+update pk set color = 'RED' where pn = 1;
+
+query II nosort
+select count(*) as n, (select count(*) from sk) as c from pk where pk.color = 'NOPE';
+----
+1
+3
+
+# The only row the filter matched goes away, returning the aggregate to its empty-row case.
+statement ok
+delete from pk where pn = 2;
+
+query II nosort
+select count(*) as n, (select count(*) from sk) as c from pk where pk.color = 'NOPE';
+----
+0
+3
+
+# And the subquery's own relation shrinking has to reach that row too.
+statement ok
+delete from sk where sn = 1;
+
+query II nosort
+select count(*) as n, (select count(*) from sk) as c from pk where pk.color = 'NOPE';
+----
+0
+2
+
+# Both sides of the join can read one base relation: nothing in the admission path requires them
+# to differ.  The self-join rule admits that here rather than missing it -- a keyless join is given
+# a literal-carrying projection above each input, which keeps state of its own, so a lookup stops
+# there instead of resolving where the other input's delta passes.  This pins the answer the
+# reasoning predicts.  The insert is batched, because a single row answers correctly
+# even where a shape is wrong; the removals are written one at a time, a multi-row DELETE being
+# unsupported here.
+query II nosort
+select count(*) as n, (select count(*) from pk) as c from pk where pk.color = 'NOPE';
+----
+0
+1
+
+statement ok
+insert into pk values (5, 'NOPE'), (6, 'NOPE'), (7, 'RED');
+
+query II nosort
+select count(*) as n, (select count(*) from pk) as c from pk where pk.color = 'NOPE';
+----
+2
+4
+
+statement ok
+delete from pk where pn = 5;
+
+statement ok
+delete from pk where pn = 6;
+
+query II nosort
+select count(*) as n, (select count(*) from pk) as c from pk where pk.color = 'NOPE';
+----
+0
+2

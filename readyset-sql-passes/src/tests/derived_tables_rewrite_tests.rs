@@ -5,7 +5,7 @@ use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::hoist_parametrizable_filters::hoist_parametrizable_filters;
 use crate::rewrite_joins::normalize_joins_shape;
 use crate::unnest_subqueries::UnusedUniqueColumnsSchema;
-use readyset_sql::ast::{Column, Relation};
+use readyset_sql::ast::{Column, Relation, TableExprInner};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
 use std::collections::HashSet;
@@ -4732,4 +4732,37 @@ fn join_normalization_skips_a_statement_without_joins() {
     let original = stmt.clone();
     assert!(!normalize_joins_shape(&mut stmt, Dialect::PostgreSQL).unwrap());
     assert_eq!(stmt, original);
+}
+
+/// The shape `unnest_subqueries` emits when it hoists a select-list subquery above an ungrouped
+/// aggregate.  Inlining the wrapper would put the reference back beside the aggregate, which is
+/// the defect the hoist exists to avoid; `check_grouping_imposed_on_ungrouped_aggregate` refuses
+/// that inline, and this pins the rule.
+///
+/// Asserted structurally: the join the hoist emits carries no constraint, which the parser has
+/// no syntax for, so the fixture writes `ON TRUE` and this pass canonicalizes it away.
+#[test]
+fn dtr_leaves_a_hoisted_ungrouped_aggregate_wrapper_intact() {
+    let original_text = r#"
+        SELECT "W"."n" AS "n", "GNL"."count(*)" AS "c"
+        FROM (SELECT count(*) AS "n" FROM "qa"."p" WHERE ("qa"."p"."color" = 'NOPE')) AS "W"
+        LEFT OUTER JOIN (SELECT count(*) AS "count(*)" FROM "qa"."s") AS "GNL" ON TRUE
+    "#;
+
+    let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, original_text)
+        .expect("the emitted shape should parse");
+    derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL, &UnusedUniqueColumnsSchema)
+        .expect("rewrite should succeed");
+
+    let rewritten = stmt.display(Dialect::PostgreSQL).to_string();
+    let [wrap] = stmt.tables.as_slice() else {
+        panic!("the wrapper stopped being the only FROM item: {rewritten}");
+    };
+    let TableExprInner::Subquery(inner) = &wrap.inner else {
+        panic!("the wrapper was inlined, putting the reference beside the aggregate: {rewritten}");
+    };
+    assert!(
+        inner.contains_aggregate_select() && stmt.join.len() == 1,
+        "the join no longer sits above the aggregate: {rewritten}"
+    );
 }

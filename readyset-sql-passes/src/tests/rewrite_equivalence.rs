@@ -58,7 +58,17 @@ const FIXTURES: &[&str] = &[
 /// Cases the pipeline is expected to refuse.  A case outside this list that stops rewriting is
 /// the pipeline losing a shape it used to handle; a case inside it that starts rewriting is a
 /// rewrite appearing where none is correct.  Both fail.
-const DECLINED: &[&str] = &["subquery_projected_beside_ungrouped_aggregate"];
+const DECLINED: &[&str] = &[
+    // An aggregate written only in ORDER BY holds the statement to one row by that ordering
+    // alone.  Inside an `IN` the ordering is dropped further down and the rows come back wrong,
+    // so it is refused where that happens:
+    "in_subquery_no_hoist_ordered_only_by_an_aggregate",
+    "in_subquery_ordered_only_by_an_aggregate",
+    // and at the top level the hoist refuses it rather than split a projection the ordering is
+    // written against:
+    "ungrouped_aggregate_established_only_by_the_ordering",
+    "ungrouped_aggregate_ordering_mixes_aggregate_and_plain_items",
+];
 
 /// Every case runs twice: as written, and as the pipeline rewrites it.  Both must answer the
 /// same.
@@ -105,13 +115,61 @@ const CASES: &[(&str, &str)] = &[
         "SELECT a.k, s.n FROM rw_equiv.a CROSS JOIN \
          (SELECT COUNT(*) AS n FROM rw_equiv.b WHERE b.k = 99) s",
     ),
-    // Declined today, and named in `DECLINED` so the loop expects that.  It earns its place as a
-    // tripwire: the shape has no correct rewrite through a join under the aggregate, so a later
-    // change that starts emitting one fails this test rather than quietly passing.
+    // The aggregate yields its one row whatever the filter matches, and the subquery's value does
+    // not depend on that filter, so `c` has to read the same either way.  Reaching that answer
+    // needs the join above the aggregate: beside it, the row the aggregate emits for a filter
+    // matching nothing has no joined row to read `c` from.
     (
         "subquery_projected_beside_ungrouped_aggregate",
         "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM rw_equiv.b) AS c \
          FROM rw_equiv.a WHERE a.s = 'nope'",
+    ),
+    (
+        "subquery_projected_beside_ungrouped_aggregate_filter_matches",
+        "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM rw_equiv.b) AS c \
+         FROM rw_equiv.a WHERE a.s = 'x'",
+    ),
+    (
+        "two_subqueries_projected_beside_ungrouped_aggregate",
+        "SELECT (SELECT COUNT(*) FROM rw_equiv.b) AS c, COUNT(*) AS n, \
+         (SELECT COUNT(*) FROM rw_equiv.empty) AS e FROM rw_equiv.a WHERE a.s = 'nope'",
+    ),
+    // The ordering is dropped as part of hoisting, on the grounds that one row is already in
+    // order.  This is what checks that claim against an upstream that applies both.
+    (
+        "ordered_subquery_projected_beside_ungrouped_aggregate",
+        "SELECT COUNT(*) AS n, (SELECT COUNT(*) FROM rw_equiv.b) AS c \
+         FROM rw_equiv.a WHERE a.s = 'nope' ORDER BY c",
+    ),
+    // The aggregate lives only in the ORDER BY, which is therefore what makes the statement answer
+    // with one row rather than one per input row.  Both spellings are refused; the cases pin that
+    // the refusal happens rather than the ordering being dropped out from under them.
+    (
+        "in_subquery_no_hoist_ordered_only_by_an_aggregate",
+        "SELECT a.k FROM rw_equiv.a WHERE a.k IN \
+         (SELECT 3 FROM rw_equiv.empty ORDER BY COUNT(*))",
+    ),
+    (
+        "in_subquery_ordered_only_by_an_aggregate",
+        "SELECT a.k FROM rw_equiv.a WHERE a.k IN \
+         (SELECT (SELECT COUNT(*) FROM rw_equiv.keyed) FROM rw_equiv.empty ORDER BY COUNT(*))",
+    ),
+    (
+        "ungrouped_aggregate_established_only_by_the_ordering",
+        "SELECT (SELECT COUNT(*) FROM rw_equiv.b) AS c FROM rw_equiv.a ORDER BY COUNT(*)",
+    ),
+    (
+        "ungrouped_aggregate_ordering_mixes_aggregate_and_plain_items",
+        "SELECT (SELECT COUNT(*) FROM rw_equiv.b) AS c, 42 AS lit FROM rw_equiv.a \
+         ORDER BY COUNT(*), lit",
+    ),
+    // A subquery that is not an aggregate can yield no row at all, which SQL reads as NULL.  Only
+    // an outer join above the aggregate answers that: an inner one would drop the row the
+    // aggregate is obliged to emit.  Not statically empty, so it is not folded to a literal first.
+    (
+        "empty_scalar_subquery_projected_beside_ungrouped_aggregate",
+        "SELECT COUNT(*) AS n, (SELECT b.w FROM rw_equiv.b WHERE b.w = 999 LIMIT 1) AS c \
+         FROM rw_equiv.a",
     ),
     (
         "grouped_subquery_filter_hoistable",
