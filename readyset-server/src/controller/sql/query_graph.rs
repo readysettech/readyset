@@ -494,6 +494,25 @@ where
     new_ces
 }
 
+/// Whether either operand of a binary predicate is a placeholder, looking inside a `Row` so that
+/// row-wise comparisons are covered too.
+fn contains_placeholder(lhs: &Expr, rhs: &Expr) -> bool {
+    fn is_placeholder(expr: &Expr) -> bool {
+        match expr {
+            Expr::Literal(Literal::Placeholder(_)) => true,
+            Expr::Row { exprs, .. } => exprs.iter().any(is_placeholder),
+            _ => false,
+        }
+    }
+    is_placeholder(lhs) || is_placeholder(rhs)
+}
+
+/// Whether an operand is a NULL literal, which is what separates `IS [NOT] NULL` from a null-safe
+/// comparison written with the same operators.
+fn is_null_literal(expr: &Expr) -> bool {
+    matches!(expr, Expr::Literal(Literal::Null))
+}
+
 // 1. Extract any predicates with placeholder parameters. We push these down to the edge nodes,
 //    since we cannot instantiate the parameters inside the data flow graph (except for
 //    non-materialized nodes).
@@ -602,6 +621,21 @@ fn classify_conditionals(
 
                 params.extend(new_params);
             } else if is_predicate(op) {
+                // A null-safe equality against a placeholder cannot become a view key: reader
+                // lookups drop a NULL key rather than matching NULL, so `IS NOT DISTINCT FROM $1`
+                // bound to NULL would return no rows where it should return the NULL ones --
+                // which is the entire reason to write the predicate that way. Proxy instead.
+                //
+                // `IS [NOT] NULL` reaches here under the same two operators, and stays supported:
+                // it compares against a literal rather than a bound value, and `x IS NOT DISTINCT
+                // FROM NULL` says exactly what `x IS NULL` says.
+                if matches!(op, BinaryOperator::Is | BinaryOperator::IsNot)
+                    && contains_placeholder(lhs.as_ref(), rhs.as_ref())
+                    && !is_null_literal(lhs.as_ref())
+                    && !is_null_literal(rhs.as_ref())
+                {
+                    unsupported!("IS [NOT] DISTINCT FROM against a placeholder");
+                }
                 match (&**lhs, &**rhs) {
                     // Atomic selection predicate: Column compared to a Placeholder
                     (Expr::Column(lf), Expr::Literal(Literal::Placeholder(placeholder))) => {
@@ -1841,8 +1875,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
 mod tests {
     use readyset_sql::ast::{FunctionExpr, SqlQuery};
     use readyset_sql::Dialect;
-    use readyset_sql_parsing::parse_query;
-    use readyset_sql_parsing::parse_select;
+    use readyset_sql_parsing::{parse_query, parse_query_with_config, parse_select, ParsingPreset};
 
     use super::*;
 
@@ -1853,6 +1886,102 @@ mod tests {
         };
 
         to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL).unwrap()
+    }
+
+    /// Parses under `OnlySqlparser` rather than the default both-parser test preset, so it can be
+    /// used for syntax nom does not accept.
+    fn parse_select_postgres(sql: &str) -> SelectStatement {
+        let parsed =
+            parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap();
+        match parsed {
+            SqlQuery::Select(stmt) => stmt,
+            q => panic!("Unexpected query type; expected SelectStatement but got {q:?}"),
+        }
+    }
+
+    fn query_graph_postgres(sql: &str) -> ReadySetResult<QueryGraph> {
+        to_query_graph(
+            parse_select_postgres(sql),
+            readyset_data::Dialect::DEFAULT_POSTGRESQL,
+        )
+    }
+
+    fn make_query_graph_postgres(sql: &str) -> QueryGraph {
+        query_graph_postgres(sql).unwrap()
+    }
+
+    /// A null-safe equality against a placeholder cannot become a view key, since reader lookups
+    /// drop a NULL key instead of matching NULL. Binding NULL is the whole point of writing
+    /// `IS NOT DISTINCT FROM $1`, so the query has to be rejected rather than answered from a key
+    /// that silently omits those rows.
+    ///
+    /// The guard's own error is matched rather than any error: an `IS DISTINCT FROM $1` the guard
+    /// misses is still refused further down, with a message about an unresolvable placeholder
+    /// column, so asserting only that the query fails lets the guard stop covering it unnoticed.
+    #[test]
+    fn is_distinct_from_placeholder_is_unsupported() {
+        for sql in [
+            "SELECT id FROM listings WHERE listing_id IS NOT DISTINCT FROM $1",
+            "SELECT id FROM listings WHERE listing_id IS DISTINCT FROM $1",
+        ] {
+            let err = query_graph_postgres(sql)
+                .expect_err("should be unsupported rather than keyed on a NULL-dropping lookup");
+            assert!(
+                err.to_string()
+                    .contains("IS [NOT] DISTINCT FROM against a placeholder"),
+                "`{sql}` should be refused by the placeholder guard, got: {err}"
+            );
+        }
+    }
+
+    /// `IS [NOT] NULL` against a placeholder reaches the guard above under the same operators the
+    /// `DISTINCT FROM` family lowers onto, and stays supported: it resolves against a literal
+    /// rather than a bound value, so no view key is involved.
+    #[test]
+    fn placeholder_is_null_is_supported() {
+        for sql in [
+            "SELECT id FROM listings WHERE $1 IS NULL",
+            "SELECT id FROM listings WHERE $1 IS NOT NULL",
+            "SELECT id FROM listings WHERE $1 IS NULL AND listing_id = 5",
+        ] {
+            let result = query_graph_postgres(sql);
+            assert!(
+                result.is_ok(),
+                "`{sql}` should stay supported, got: {:?}",
+                result.err()
+            );
+        }
+    }
+
+    /// `IS DISTINCT FROM` is a predicate rather than arithmetic, so a filter built over one
+    /// resolves to the single relation it references and is pushed down to that relation instead
+    /// of landing above the join.
+    #[test]
+    fn is_distinct_from_pushes_down_to_its_relation() {
+        let qg = make_query_graph_postgres(
+            "SELECT listings.id FROM listings \
+             JOIN live_listings ON live_listings.listing_id = listings.id \
+             WHERE live_listings.live_uuid = $1 \
+               AND (listings.transaction_props->>'is_break')::boolean IS DISTINCT FROM true",
+        );
+
+        assert!(
+            qg.global_predicates.is_empty(),
+            "expected nothing above the join, got {:?}",
+            qg.global_predicates
+        );
+        let predicates = &qg.relations[&"listings".into()].predicates;
+        assert!(
+            matches!(
+                predicates.as_slice(),
+                [Expr::BinaryOp {
+                    op: BinaryOperator::IsNot,
+                    ..
+                }]
+            ),
+            "expected the null-safe inequality on `listings`, got {predicates:?}"
+        );
     }
 
     #[test]

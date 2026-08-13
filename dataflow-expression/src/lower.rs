@@ -1226,7 +1226,7 @@ impl BinaryOperator {
 
         use BinaryOperator::*;
         let (left_coerce, right_coerce) = match self {
-            Add | Subtract | Multiply | Divide | Modulo | And | Or | Is => match dialect.engine() {
+            Add | Subtract | Multiply | Divide | Modulo | And | Or => match dialect.engine() {
                 SqlEngine::PostgreSQL => (None, None),
                 SqlEngine::MySQL => {
                     let ty = mysql_type_conversion(left_type, right_type);
@@ -1262,7 +1262,11 @@ impl BinaryOperator {
                 None,
             ),
 
-            Equal => match dialect.engine() {
+            // `Is` shares `Equal`'s coercions because it is null-safe equality: `IS [NOT]
+            // DISTINCT FROM` lowers onto it, so its operands need the same type reconciliation
+            // that `=` performs. A NULL right operand coerces to itself, leaving `IS [NOT]
+            // NULL` unaffected.
+            Equal | Is => match dialect.engine() {
                 SqlEngine::PostgreSQL => {
                     let (l, r) = pg_array_coercion(left_type, right_type);
                     if l.is_some() || r.is_some() {
@@ -3229,8 +3233,11 @@ pub(crate) mod tests {
         }
 
         #[test]
-        fn is_does_not_coerce_arrays() {
-            // Is (IS/IS NOT) should not trigger array coercion
+        fn is_coerces_arrays_like_equal() {
+            // `IS [NOT] DISTINCT FROM` lowers onto `Is`, and PostgreSQL reconciles an array
+            // against a bare literal there just as it does for `=`:
+            // `'{1,2}'::int[] IS DISTINCT FROM '{1,2}'` is false. A NULL right operand coerces to
+            // itself, so `IS NULL` is unaffected by this.
             let (left, right) = BinaryOperator::Is
                 .argument_type_coercions(
                     &lit_expr(int_array_type()),
@@ -3239,7 +3246,7 @@ pub(crate) mod tests {
                 )
                 .unwrap();
             assert_eq!(left, None);
-            assert_eq!(right, None);
+            assert_eq!(right, Some(int_array_type()));
         }
 
         #[test]

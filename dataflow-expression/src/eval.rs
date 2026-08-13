@@ -414,7 +414,7 @@ mod tests {
     use readyset_data::{ArrayD, Collation, DfType, Dialect, IxDyn, PgEnumMetadata};
     use readyset_errors::internal;
     use readyset_sql::Dialect::*;
-    use readyset_sql_parsing::parse_expr;
+    use readyset_sql_parsing::{parse_expr, parse_expr_with_config, ParsingPreset};
     use serde_json::json;
     use Expr::*;
 
@@ -431,7 +431,16 @@ mod tests {
         expr: &str,
         dialect: readyset_sql::Dialect,
     ) -> ReadySetResult<DfValue> {
-        let ast = expr_unwrap(parse_expr(dialect, expr), expr);
+        try_eval_expr_with_preset(expr, dialect, ParsingPreset::for_tests())
+    }
+
+    /// Evaluate under an explicit parsing preset, for syntax only one parser understands.
+    pub(crate) fn try_eval_expr_with_preset(
+        expr: &str,
+        dialect: readyset_sql::Dialect,
+        preset: ParsingPreset,
+    ) -> ReadySetResult<DfValue> {
+        let ast = expr_unwrap(parse_expr_with_config(preset, dialect, expr), expr);
 
         let expr_dialect = match dialect {
             PostgreSQL => crate::Dialect::DEFAULT_POSTGRESQL,
@@ -1355,6 +1364,108 @@ mod tests {
                 .unwrap()
             )
         )
+    }
+
+    /// Only sqlparser parses `DISTINCT FROM`, so these evaluate under `OnlySqlparser` rather
+    /// than the default both-parser preset.
+    #[test]
+    fn eval_is_distinct_from() {
+        #[track_caller]
+        fn eval(expr: &str) -> DfValue {
+            expr_unwrap(
+                try_eval_expr_with_preset(expr, PostgreSQL, ParsingPreset::OnlySqlparser),
+                expr,
+            )
+        }
+
+        #[track_caller]
+        fn test(lhs: &str, rhs: &str, distinct: bool) {
+            let expr = format!("{lhs} IS DISTINCT FROM {rhs}");
+            assert_eq!(
+                eval(&expr),
+                distinct.into(),
+                "incorrect result for `{expr}`"
+            );
+
+            let expr = format!("{lhs} IS NOT DISTINCT FROM {rhs}");
+            assert_eq!(
+                eval(&expr),
+                (!distinct).into(),
+                "incorrect result for `{expr}`"
+            );
+        }
+
+        test("1", "1", false);
+        test("1", "2", true);
+        test("'a'", "'a'", false);
+        test("'a'", "'b'", true);
+
+        // Unlike `=`, the comparison is null-safe on both sides.
+        test("null", "null", false);
+        test("null", "1", true);
+        test("1", "null", true);
+
+        // Operands are reconciled the way `=` reconciles them, so values that compare equal across
+        // types are not distinct. Verified against PostgreSQL 15.
+        test("1.0::double precision", "1", false);
+        test("1::int", "'1'", false);
+        test("2.5::numeric", "2.5::double precision", false);
+        test("1::bigint", "1::smallint", false);
+        // Sharing `=`'s coercions also means sharing its gaps: a boolean against a text literal
+        // compares unequal here where PostgreSQL reconciles the two, so `true::boolean` is
+        // distinct from `'true'` under both operators alike.
+        test("true::boolean", "'true'", true);
+    }
+
+    /// sqlparser binds the right operand of `IS DISTINCT FROM` at its lowest precedence, so an
+    /// unbracketed conjunction is swallowed into the operand, where PostgreSQL binds the operator
+    /// tighter and leaves the conjunction on the outside. Answering from the swallowed parse would
+    /// disagree with upstream, so the conversion is refused and the query falls back.
+    #[test]
+    fn eval_is_distinct_from_unbracketed_conjunction_unsupported() {
+        for expr in [
+            "true IS DISTINCT FROM false AND false",
+            "true IS DISTINCT FROM false OR true",
+            "true IS NOT DISTINCT FROM false AND false",
+        ] {
+            assert!(
+                parse_expr_with_config(ParsingPreset::OnlySqlparser, PostgreSQL, expr).is_err(),
+                "`{expr}` should be unsupported rather than answered from the swallowed parse"
+            );
+        }
+
+        // Bracketing expresses PostgreSQL's own grouping, and still evaluates.
+        let expr = "(true IS DISTINCT FROM false) AND false";
+        assert_eq!(
+            expr_unwrap(
+                try_eval_expr_with_preset(expr, PostgreSQL, ParsingPreset::OnlySqlparser),
+                expr
+            ),
+            false.into(),
+            "incorrect result for `{expr}`"
+        );
+    }
+
+    /// The customer-shaped predicate that motivates unquoting `->>`, parsing PostgreSQL booleans
+    /// and supporting `IS DISTINCT FROM`: a row carrying an explicit `false` must survive.
+    #[test]
+    fn eval_json_bool_is_distinct_from() {
+        #[track_caller]
+        fn test(props: &str, expected: bool) {
+            let expr = format!("('{props}'::json ->> 'is_break')::boolean IS DISTINCT FROM true");
+            assert_eq!(
+                expr_unwrap(
+                    try_eval_expr_with_preset(&expr, PostgreSQL, ParsingPreset::OnlySqlparser),
+                    &expr
+                ),
+                expected.into(),
+                "incorrect result for `{expr}`"
+            );
+        }
+
+        test(r#"{"is_break": false}"#, true);
+        test(r#"{"is_break": true}"#, false);
+        test(r#"{"other": 1}"#, true);
     }
 
     /// Tests evaluation of `JsonKeyExtract` and `JsonKeyExtractText` binary ops.
