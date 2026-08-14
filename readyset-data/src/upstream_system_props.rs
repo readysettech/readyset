@@ -11,6 +11,14 @@ pub const DEFAULT_GROUP_CONCAT_MAX_LEN: usize = 1024;
 
 pub const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";
 
+/// A database server's default collation and its associated character set.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpstreamCollation {
+    pub id: u16,
+    pub character_set_name: String,
+    pub collation_name: String,
+}
+
 /// Properties read once from the upstream database at startup and shared process-wide via
 /// [`system_props`].  Per-session changes on the upstream are not reflected here.
 #[derive(Clone, Debug)]
@@ -21,6 +29,7 @@ pub struct UpstreamSystemProperties {
     pub lower_case_table_names: bool,
     pub db_version: String,
     pub group_concat_max_len: usize,
+    pub server_default_collation: Option<UpstreamCollation>,
 }
 
 impl Default for UpstreamSystemProperties {
@@ -32,6 +41,7 @@ impl Default for UpstreamSystemProperties {
             lower_case_table_names: false,
             db_version: String::new(),
             group_concat_max_len: DEFAULT_GROUP_CONCAT_MAX_LEN,
+            server_default_collation: None,
         }
     }
 }

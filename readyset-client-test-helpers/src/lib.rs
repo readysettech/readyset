@@ -849,6 +849,10 @@ impl TestBuilder {
                                 .group_concat_max_len()
                                 .await
                                 .unwrap(),
+                            server_default_collation: cdc_upstream
+                                .server_default_collation()
+                                .await
+                                .unwrap(),
                         }
                     } else {
                         UpstreamSystemProperties {

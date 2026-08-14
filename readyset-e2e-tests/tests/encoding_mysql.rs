@@ -936,6 +936,13 @@ test_encoding_replication!(
 /// always sends utf8mb4) and statements containing non-UTF-8 bytes.
 struct RawConn {
     stream: TcpStream,
+    server_handshake_collation: u8,
+}
+
+#[derive(Default)]
+struct RawQueryResult {
+    column_definitions: Vec<Vec<u8>>,
+    rows: Vec<Vec<u8>>,
 }
 
 impl RawConn {
@@ -966,8 +973,12 @@ impl RawConn {
         let stream = TcpStream::connect((opts.ip_or_hostname(), opts.tcp_port()))
             .await
             .unwrap();
-        let mut conn = RawConn { stream };
-        let (seq, _server_handshake) = conn.read_packet().await;
+        let mut conn = RawConn {
+            stream,
+            server_handshake_collation: 0,
+        };
+        let (seq, server_handshake) = conn.read_packet().await;
+        conn.server_handshake_collation = handshake_v10_collation(&server_handshake);
 
         let mut capabilities =
             CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
@@ -1000,10 +1011,8 @@ impl RawConn {
         conn
     }
 
-    /// Send a COM_QUERY with the given raw statement bytes and return the column names from the
-    /// result-set metadata along with the raw payloads of any row packets (both empty for an OK
-    /// response).
-    async fn query_with_metadata(&mut self, statement: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    /// Send a COM_QUERY and return the raw ColumnDefinition41 and row packets.
+    async fn query_result(&mut self, statement: &[u8]) -> RawQueryResult {
         let mut payload = Vec::with_capacity(statement.len() + 1);
         payload.push(0x03); // COM_QUERY
         payload.extend_from_slice(statement);
@@ -1011,16 +1020,16 @@ impl RawConn {
 
         let (_, first) = self.read_packet().await;
         match first.first() {
-            Some(0x00) => return (Vec::new(), Vec::new()),
+            Some(0x00) => return RawQueryResult::default(),
             Some(0xFF) => panic!("query failed: {}", String::from_utf8_lossy(&first[9..])),
             _ => {}
         }
         // A result set: `first` holds the column count; column definitions follow, terminated by
         // EOF, then row packets, terminated by EOF.
-        let mut names = Vec::new();
+        let mut column_definitions = Vec::new();
         for _ in 0..first[0] {
             let (_, def) = self.read_packet().await;
-            names.push(column_def_name(&def));
+            column_definitions.push(def);
         }
         let (_, eof) = self.read_packet().await;
         assert_eq!(eof.first(), Some(&0xFE), "expected EOF after column defs");
@@ -1028,16 +1037,41 @@ impl RawConn {
         loop {
             let (_, packet) = self.read_packet().await;
             if packet.first() == Some(&0xFE) && packet.len() < 9 {
-                return (names, rows);
+                return RawQueryResult {
+                    column_definitions,
+                    rows,
+                };
             }
             rows.push(packet);
         }
     }
 
+    /// Send a COM_QUERY and return the column names and row packets.
+    async fn query_with_metadata(&mut self, statement: &[u8]) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+        let result = self.query_result(statement).await;
+        let names = result
+            .column_definitions
+            .iter()
+            .map(|definition| column_def_name(definition))
+            .collect();
+        (names, result.rows)
+    }
+
     /// Send a COM_QUERY with the given raw statement bytes and return the raw payloads of any
     /// result row packets (empty for an OK response).
     async fn query_raw(&mut self, statement: &[u8]) -> Vec<Vec<u8>> {
-        self.query_with_metadata(statement).await.1
+        self.query_result(statement).await.rows
+    }
+
+    /// Send a COM_QUERY and return each result column's collation id and the row packets.
+    async fn query_with_collations(&mut self, statement: &[u8]) -> (Vec<u16>, Vec<Vec<u8>>) {
+        let result = self.query_result(statement).await;
+        let collations = result
+            .column_definitions
+            .iter()
+            .map(|definition| column_def_collation(definition))
+            .collect();
+        (collations, result.rows)
     }
 
     /// Send a command and expect an ERR packet; return its error code and message.
@@ -1075,6 +1109,17 @@ impl RawConn {
     }
 }
 
+/// Extract the one-byte character-set/collation field from a HandshakeV10 packet.
+fn handshake_v10_collation(payload: &[u8]) -> u8 {
+    assert_eq!(payload.first(), Some(&10), "expected HandshakeV10 packet");
+    let version_end = payload[1..]
+        .iter()
+        .position(|byte| *byte == 0)
+        .map(|position| position + 1)
+        .expect("NUL-terminated server version");
+    payload[version_end + 16]
+}
+
 /// Extract the column name (alias) from a column definition payload, assuming its length-encoded
 /// strings are under 251 bytes.
 fn column_def_name(payload: &[u8]) -> Vec<u8> {
@@ -1084,6 +1129,16 @@ fn column_def_name(payload: &[u8]) -> Vec<u8> {
         pos += 1 + payload[pos] as usize;
     }
     payload[pos + 1..][..payload[pos] as usize].to_vec()
+}
+
+/// Extract the two-byte character-set/collation id from a ColumnDefinition41 packet.
+fn column_def_collation(payload: &[u8]) -> u16 {
+    let mut pos = 0;
+    for _ in 0..6 {
+        pos += 1 + payload[pos] as usize;
+    }
+    assert_eq!(payload[pos], 0x0c, "expected ColumnDefinition41 payload");
+    u16::from_le_bytes([payload[pos + 1], payload[pos + 2]])
 }
 
 /// Extract the first column's value from a text-protocol row, assuming a value under 251 bytes.
@@ -2004,12 +2059,12 @@ async fn gbk_handshake_invalid_utf8_statement_errors() {
     shutdown_tx.shutdown().await;
 }
 
-/// A handshake advertising collation id 0 means "use the server default" and gets a utf8
-/// session, so non-ASCII UTF-8 text roundtrips.
+/// A handshake advertising collation id 0 uses the upstream server default for both Readyset
+/// and proxied queries.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
-async fn handshake_collation_zero_roundtrips_utf8() {
+async fn handshake_collation_zero_uses_server_default_encoding() {
     readyset_tracing::init_test_logging();
     let (opts, _handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
@@ -2017,16 +2072,58 @@ async fn handshake_collation_zero_roundtrips_utf8() {
         .build::<MySQLAdapter>()
         .await;
 
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let server_charset: String = upstream_conn
+        .query_first("SELECT @@character_set_server")
+        .await
+        .unwrap()
+        .unwrap();
+    let server_collation_id: u16 = upstream_conn
+        .query_first(
+            "SELECT ID FROM information_schema.COLLATIONS \
+             WHERE COLLATION_NAME = @@collation_server",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let encoding = Encoding::from_mysql_character_set_name(&server_charset);
+    let value = match encoding {
+        Some(Encoding::SingleByte(_)) => {
+            let (c1, c2) = sample_chars(&server_charset);
+            format!("N{c1}{c2}o")
+        }
+        Some(Encoding::Utf8 | Encoding::Utf8Mb3) => "café".to_string(),
+        _ => "server-default".to_string(),
+    };
+    let statement = format!("SELECT '{value}'");
+    let statement = encoding
+        .and_then(|encoding| encoding.encode(&statement).ok())
+        .map_or_else(|| statement.as_bytes().to_vec(), |bytes| bytes.into_owned());
+    let expected = encoding
+        .and_then(|encoding| encoding.encode(&value).ok())
+        .map_or_else(|| value.as_bytes().to_vec(), |bytes| bytes.into_owned());
+
     let mut raw = RawConn::connect_with_charset(&opts, 0).await;
-    let rows = raw.query_raw("SELECT 'café'".as_bytes()).await;
+    assert_eq!(
+        raw.server_handshake_collation,
+        u8::try_from(server_collation_id).unwrap_or(mysql_srv::DEFAULT_HANDSHAKE_COLLATION)
+    );
+    let rows = raw
+        .query_raw(b"SELECT @@collation_connection = @@collation_server")
+        .await;
     assert_eq!(rows.len(), 1);
-    assert_eq!(single_text_column(&rows[0]), "café".as_bytes());
+    assert_eq!(single_text_column(&rows[0]), b"1");
+
+    let rows = raw.query_raw(&statement).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), expected);
 
     shutdown_tx.shutdown().await;
 }
 
-/// A collation-0 session is utf8, so a query with a non-UTF-8 byte gets a statement-level
-/// error and the connection stays usable.
+/// A collation-0 session using a UTF-8 server default rejects a non-UTF-8 statement without
+/// dropping the connection. Single-byte server defaults accept the same byte in their encoding.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
@@ -2038,13 +2135,84 @@ async fn handshake_collation_zero_invalid_utf8_statement_errors() {
         .build::<MySQLAdapter>()
         .await;
 
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let server_charset: String = upstream_conn
+        .query_first("SELECT @@character_set_server")
+        .await
+        .unwrap()
+        .unwrap();
+
     let mut raw = RawConn::connect_with_charset(&opts, 0).await;
-    let (code, message) = raw.query_expect_err(b"SELECT 'a\xE9b'").await;
-    assert_eq!(code, ER_INVALID_CHARACTER_STRING);
-    assert!(message.contains("E9"), "unexpected message: {message}");
+    match Encoding::from_mysql_character_set_name(&server_charset) {
+        Some(Encoding::SingleByte(_)) => {
+            let rows = raw.query_raw(b"SELECT 'a\xE9b'").await;
+            assert_eq!(rows.len(), 1);
+        }
+        _ => {
+            // Unsupported local encodings retain Readyset's best-effort UTF-8 validation.
+            let (code, message) = raw.query_expect_err(b"SELECT 'a\xE9b'").await;
+            assert_eq!(code, ER_INVALID_CHARACTER_STRING);
+            assert!(message.contains("E9"), "unexpected message: {message}");
+        }
+    }
 
     let rows = raw.query_raw(b"SELECT 1").await;
     assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), b"1");
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Cached text metadata for a collation-0 session uses the numeric collation ID of the upstream
+/// server's `@@collation_server`.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn handshake_collation_zero_cached_metadata_uses_server_default() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    conn.query_drop("CREATE TABLE coll_zero_meta (id INT PRIMARY KEY, txt TEXT)")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO coll_zero_meta VALUES (1, 'value')")
+        .await
+        .unwrap();
+    eventually! {
+        conn.query_drop("CREATE CACHE FROM SELECT txt FROM coll_zero_meta WHERE id = ?")
+            .await
+            .is_ok()
+    }
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let expected_server_collation_id: u16 = upstream_conn
+        .query_first(
+            "SELECT ID FROM information_schema.COLLATIONS \
+             WHERE COLLATION_NAME = @@collation_server",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut raw = RawConn::connect_with_charset(&opts, 0).await;
+    eventually!(run_test: {
+        let (collations, rows) = raw
+            .query_with_collations(b"SELECT txt FROM coll_zero_meta WHERE id = 1")
+            .await;
+        let destination = raw.last_destination().await;
+        AssertUnwindSafe(move || (collations, rows, destination))
+    }, then_assert: |result| {
+        let (collations, rows, destination) = result();
+        assert_matches!(destination, QueryDestination::Readyset(..));
+        assert_eq!(collations, vec![expected_server_collation_id]);
+        assert_eq!(rows.len(), 1);
+    });
 
     shutdown_tx.shutdown().await;
 }

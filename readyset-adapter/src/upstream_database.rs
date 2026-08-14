@@ -8,6 +8,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
+use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash};
 use readyset_sql::ast::{Relation, SqlIdentifier};
@@ -332,6 +333,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Defaults to MySQL's default of 1024.
     async fn group_concat_max_len(&mut self) -> Result<usize, Self::Error> {
         Ok(readyset_data::upstream_system_props::DEFAULT_GROUP_CONCAT_MAX_LEN)
+    }
+
+    /// Discover the database server's default collation, if available.
+    async fn server_default_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
+        Ok(None)
     }
 
     /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.

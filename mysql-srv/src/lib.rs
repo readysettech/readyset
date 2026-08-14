@@ -388,6 +388,11 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Provides the server's version information along with Readyset indications
     fn version(&self) -> String;
 
+    /// The collation ID advertised in the HandshakeV10 packet's one-byte character-set field.
+    fn default_handshake_collation(&self) -> u8 {
+        DEFAULT_HANDSHAKE_COLLATION
+    }
+
     /// Called when the client executes a previously prepared statement.
     ///
     /// Any parameters included with the client's command is given in `params`. A response to the
@@ -583,9 +588,7 @@ struct StatementData {
     params: u16,
 }
 
-/// The collation id the server advertises in its HandshakeV10 greeting, matching the
-/// utf8mb4 default of stock MySQL 8. A handshake response with collation id 0 leaves the
-/// session at this default.
+/// Fallback collation ID for the HandshakeV10 greeting, matching stock MySQL 8's utf8mb4 default.
 pub const DEFAULT_HANDSHAKE_COLLATION: u8 = myc::collations::CollationId::UTF8MB4_0900_AI_CI as u8;
 
 const CAPABILITIES: u32 = PROTOCOL_41
@@ -698,7 +701,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         }
         init_packet.extend_from_slice(&capabilities.to_le_bytes()[..2]);
 
-        init_packet.push(DEFAULT_HANDSHAKE_COLLATION);
+        init_packet.push(self.shim.default_handshake_collation());
 
         // Status flags: fresh connections always have autocommit on, matching real MySQL behavior.
         init_packet.extend_from_slice(&StatusFlags::SERVER_STATUS_AUTOCOMMIT.bits().to_le_bytes());

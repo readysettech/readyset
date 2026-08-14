@@ -25,7 +25,7 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
-use readyset_data::upstream_system_props::DEFAULT_TIMEZONE_NAME;
+use readyset_data::upstream_system_props::{UpstreamCollation, DEFAULT_TIMEZONE_NAME};
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata};
@@ -721,11 +721,12 @@ impl UpstreamDatabase for MySqlUpstream {
         charset: &str,
         collation: &str,
     ) -> Result<(), Self::Error> {
-        // The names come from the mysql_common collation registry, never from client input, so
-        // splicing them into the statement is safe. Readyset decodes client bytes and sends
-        // UTF-8 statement text upstream, so the upstream's character_set_client must stay
-        // utf8mb4. SET options apply left to right, which lets a trailing assignment restore
-        // it within the same statement.
+        if !valid_mysql_name(charset) || !valid_mysql_name(collation) {
+            internal!("invalid MySQL charset or collation name")
+        }
+        // Readyset decodes client bytes and sends UTF-8 statement text upstream, so the
+        // upstream's character_set_client must stay utf8mb4. SET options apply left to right,
+        // which lets a trailing assignment restore it within the same statement.
         self.conn
             .query_drop(format!(
                 "SET NAMES '{charset}' COLLATE '{collation}', \
@@ -830,6 +831,28 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(*v as usize)
     }
 
+    async fn server_default_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
+        let result: Option<(u16, String, String)> = self
+            .conn
+            .query_first(
+                "SELECT ID, CHARACTER_SET_NAME, COLLATION_NAME \
+                 FROM information_schema.COLLATIONS \
+                 WHERE COLLATION_NAME = @@collation_server",
+            )
+            .await?;
+        let Some((id, character_set_name, collation_name)) = result else {
+            internal!("upstream server collation is missing from information_schema.COLLATIONS")
+        };
+        if !valid_mysql_name(&character_set_name) || !valid_mysql_name(&collation_name) {
+            internal!("upstream returned an invalid charset or collation name")
+        }
+        Ok(Some(UpstreamCollation {
+            id,
+            character_set_name,
+            collation_name,
+        }))
+    }
+
     async fn shallow_exec_meta(
         &mut self,
         _meta: &Self::ExecMeta,
@@ -840,6 +863,13 @@ impl UpstreamDatabase for MySqlUpstream {
     fn is_meta_compatible(cache: &Self::CacheEntry) -> bool {
         matches!(cache, CacheEntry::Binary(_))
     }
+}
+
+fn valid_mysql_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 impl Drop for MySqlUpstream {
@@ -897,5 +927,13 @@ mod tests {
         for code in [1045, 1049, 1064, 2006] {
             assert!(!is_privilege_error(code));
         }
+    }
+
+    #[test]
+    fn mysql_names_must_be_plain_identifiers() {
+        assert!(valid_mysql_name("utf8mb4_0900_ai_ci"));
+        assert!(!valid_mysql_name(""));
+        assert!(!valid_mysql_name("utf8mb4'"));
+        assert!(!valid_mysql_name("utf8mb4; SELECT 1"));
     }
 }

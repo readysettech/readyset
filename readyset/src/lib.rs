@@ -1020,6 +1020,7 @@ where
         let lower_case_table_names = upstream.lower_case_table_names().await?;
         let db_version = upstream.version();
         let group_concat_max_len = upstream.group_concat_max_len().await?;
+        let server_default_collation = upstream.server_default_collation().await?;
 
         Ok::<_, U::Error>(UpstreamSystemProperties {
             search_path,
@@ -1028,6 +1029,7 @@ where
             lower_case_table_names,
             db_version,
             group_concat_max_len,
+            server_default_collation,
         })
     };
 

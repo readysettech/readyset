@@ -21,6 +21,7 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::encoding::Encoding;
+use readyset_data::upstream_system_props::{system_props, UpstreamCollation};
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
 use readyset_shallow::{CacheInsertGuard, QueryMetadata};
@@ -342,11 +343,14 @@ fn handshake_connection_charset(collation_id: u16) -> Option<(&'static str, &'st
 }
 
 /// The session collation a client handshake or COM_CHANGE_USER collation id implies. Collation
-/// id 0 means "use the server default" per MySQL protocol semantics, i.e. the collation we
-/// advertise in our greeting.
-fn handshake_collation(collation_id: u16) -> u16 {
+/// id 0 means "use the server default" per MySQL protocol semantics. With an upstream, that is
+/// the server default discovered at startup; without one, use the greeting collation.
+fn handshake_collation(collation_id: u16, server_default: Option<&UpstreamCollation>) -> u16 {
     if collation_id == 0 {
-        mysql_srv::DEFAULT_HANDSHAKE_COLLATION.into()
+        server_default.map_or_else(
+            || mysql_srv::DEFAULT_HANDSHAKE_COLLATION.into(),
+            |collation| collation.id,
+        )
     } else {
         collation_id
     }
@@ -705,6 +709,14 @@ impl<S> MySqlShim<S> for Backend
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    fn default_handshake_collation(&self) -> u8 {
+        system_props()
+            .server_default_collation
+            .as_ref()
+            .and_then(|collation| u8::try_from(collation.id).ok())
+            .unwrap_or(mysql_srv::DEFAULT_HANDSHAKE_COLLATION)
+    }
+
     fn server_status_flags(&self) -> StatusFlags {
         self.build_status_flags()
     }
@@ -988,7 +1000,8 @@ where
             "charset" => charset.to_string(),
         )
         .increment(1);
-        let collation = handshake_collation(charset);
+        let server_default = system_props().server_default_collation.as_ref();
+        let collation = handshake_collation(charset, server_default);
         let encoding = Encoding::from_mysql_collation_id(collation);
         if let Encoding::OtherMySql(id) = encoding {
             warn!(
@@ -999,7 +1012,17 @@ where
         // The collation id a client advertises has SET NAMES semantics in MySQL, so forward
         // the charset and collation it names to the upstream session. Adopt the encodings
         // locally only if the upstream accepted them.
-        if let Some((charset, collation)) = handshake_connection_charset(charset) {
+        let upstream_charset = if charset == 0 {
+            server_default.map(|collation| {
+                (
+                    collation.character_set_name.as_str(),
+                    collation.collation_name.as_str(),
+                )
+            })
+        } else {
+            handshake_connection_charset(charset)
+        };
+        if let Some((charset, collation)) = upstream_charset {
             self.noria
                 .set_upstream_connection_charset(charset, collation)
                 .await
@@ -1189,17 +1212,31 @@ mod tests {
             (1042, None, 1042, Encoding::OtherMySql(1042)),
             // A charset without a registered conversion table (gbk_chinese_ci).
             (28, None, 28, Encoding::OtherMySql(28)),
-            // Unspecified, so the session collation is the server default and the upstream
-            // session stays at its default.
+            // Without discovered upstream properties, unspecified uses Readyset's fallback.
             (0, None, 255, Encoding::Utf8),
         ] {
             assert_eq!(super::handshake_connection_charset(id), upstream, "{id}");
-            assert_eq!(super::handshake_collation(id), collation, "{id}");
+            assert_eq!(super::handshake_collation(id, None), collation, "{id}");
             assert_eq!(
-                Encoding::from_mysql_collation_id(super::handshake_collation(id)),
+                Encoding::from_mysql_collation_id(super::handshake_collation(id, None)),
                 encoding,
                 "{id}"
             );
         }
+    }
+
+    #[test]
+    fn zero_handshake_collation_uses_upstream_server_default() {
+        let server_default = readyset_data::upstream_system_props::UpstreamCollation {
+            id: 8,
+            character_set_name: "latin1".into(),
+            collation_name: "latin1_swedish_ci".into(),
+        };
+        assert_eq!(super::handshake_collation(0, Some(&server_default)), 8);
+        assert_eq!(super::handshake_collation(46, Some(&server_default)), 46);
+        assert_eq!(
+            super::handshake_collation(0, None),
+            u16::from(mysql_srv::DEFAULT_HANDSHAKE_COLLATION)
+        );
     }
 }
