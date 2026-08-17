@@ -645,3 +645,57 @@ fn derive_not_in_value_list_proves_non_null() {
         "NOT IN (value-list) rejects a NULL LHS"
     );
 }
+
+// ---- `IS` / `IS NOT` beyond the NULL literal --------------------------------
+//
+// `Is`/`IsNot` are not only `IS [NOT] NULL`: `x IS [NOT] TRUE` and `x IS [NOT] FALSE` parse to the
+// same operators with a boolean literal on the right, and `x IS [NOT] DISTINCT FROM y` joins them
+// with an arbitrary right operand.  Every member of the family is *total* -- none can evaluate to
+// NULL, since `NULL IS TRUE` is FALSE rather than NULL.
+
+#[test]
+fn is_true_over_a_nullable_operand_is_itself_non_null() {
+    // `t.n > 5` is NULL when `t.n` is, but testing it with IS TRUE answers FALSE rather than NULL,
+    // so the projected value cannot be NULL whatever the operand does.
+    let sql = "SELECT ((t.n > 5) IS TRUE) AS b FROM t";
+    assert_nullability(sql, true, &TestSchema::new());
+}
+
+#[test]
+fn is_not_false_over_a_nullable_operand_is_itself_non_null() {
+    let sql = "SELECT ((t.n > 5) IS NOT FALSE) AS b FROM t";
+    assert_nullability(sql, true, &TestSchema::new());
+}
+
+#[test]
+fn derive_is_true_proves_non_null() {
+    // `flag IS TRUE` holds only when flag is TRUE, so a surviving row has a non-NULL flag.
+    let sql = "SELECT t.flag FROM t WHERE t.flag IS TRUE";
+    assert!(
+        derives_non_null(sql, "t", "flag", &TestSchema::new()),
+        "`IS TRUE` must prove its operand non-NULL"
+    );
+}
+
+#[test]
+fn derive_is_null_does_not_prove_non_null() {
+    // The inverse of the rule above, and the reason it cannot be expressed by adding `Is` to
+    // `is_null_rejecting_binary_op`: that list is consulted by an arm which recurses into both
+    // operands unconditionally, so `Is` there would read `flag IS NULL` as proving `flag` non-NULL.
+    // Getting this backwards drops 3VL probes and makes `NOT IN` answer wrong rows.
+    let sql = "SELECT t.flag FROM t WHERE t.flag IS NULL";
+    assert!(
+        !derives_non_null(sql, "t", "flag", &TestSchema::new()),
+        "`IS NULL` must never prove its operand non-NULL"
+    );
+}
+
+#[test]
+fn derive_is_not_true_does_not_prove_non_null() {
+    // `flag IS NOT TRUE` is TRUE for both FALSE and NULL, so a NULL flag survives.
+    let sql = "SELECT t.flag FROM t WHERE t.flag IS NOT TRUE";
+    assert!(
+        !derives_non_null(sql, "t", "flag", &TestSchema::new()),
+        "`IS NOT TRUE` admits a NULL operand"
+    );
+}

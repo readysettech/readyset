@@ -230,6 +230,30 @@ fn derive_from_expr(predicate: &Expr, non_null_columns: &mut HashSet<Column>) {
         } if matches!(rhs.as_ref(), Expr::Literal(Literal::Null)) => {
             derive_from_expr(lhs.as_ref(), non_null_columns);
         }
+        // `x IS <non-NULL literal>` -> null rejecting.  Null-safe equality against a value that is
+        // not NULL excludes the both-NULL case, so a surviving row has a non-NULL left operand.
+        // Covers `x IS TRUE`, `x IS FALSE`, and `x IS NOT DISTINCT FROM <non-NULL>`.
+        //
+        // The mirror image does not hold, and the asymmetry is the whole point: `IsNot` rejects
+        // NULLs only against the NULL literal (the arm above), because `x IS DISTINCT FROM
+        // <non-NULL>` and `x IS NOT TRUE` are each TRUE *precisely* when x is NULL.
+        //
+        // This cannot be expressed by listing `Is` in `is_null_rejecting_binary_op`: that list is
+        // read by the first arm, which recurses into both operands unconditionally, so `Is` there
+        // would read `x IS NULL` as proving x non-NULL -- inverted, and silently answering `NOT IN`
+        // with wrong rows once the 3VL probes it feeds are dropped.  Hence a dedicated arm that
+        // inspects the right operand.
+        //
+        // Restricted to literals on purpose: proving an arbitrary right operand non-NULL would mean
+        // consulting `non_null_columns` while it is still being built, making the result depend on
+        // traversal order.
+        Expr::BinaryOp {
+            op: BinaryOperator::Is,
+            lhs,
+            rhs,
+        } if matches!(rhs.as_ref(), Expr::Literal(lit) if !matches!(lit, Literal::Null)) => {
+            derive_from_expr(lhs.as_ref(), non_null_columns);
+        }
         // NOT (x IS NULL) -> null rejecting
         Expr::UnaryOp {
             op: UnaryOperator::Not,
@@ -553,11 +577,13 @@ fn infer_expr_nullability(expr: &Expr, non_null_columns: &HashSet<Column>) -> Re
         Expr::Literal(Literal::Null) => Ok(false),
         Expr::Literal(_) => Ok(true),
         Expr::Column(column) => Ok(non_null_columns.contains(column)),
+        // Every member of the `IS` family is total, so its own value is never NULL whatever its
+        // operands do: `x IS [NOT] NULL`, `x IS [NOT] TRUE`, `x IS [NOT] FALSE` and
+        // `x IS [NOT] DISTINCT FROM y` all answer TRUE or FALSE.  `NULL IS TRUE` is FALSE, not NULL.
         Expr::BinaryOp {
             op: BinaryOperator::Is | BinaryOperator::IsNot,
-            rhs,
             ..
-        } if matches!(rhs.as_ref(), Expr::Literal(Literal::Null)) => Ok(true),
+        } => Ok(true),
         Expr::BinaryOp {
             op: BinaryOperator::And | BinaryOperator::Or,
             lhs,
