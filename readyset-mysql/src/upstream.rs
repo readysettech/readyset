@@ -47,6 +47,17 @@ fn is_privilege_error(code: u16) -> bool {
     matches!(code, 1044 | 1142 | 1143 | 1227 | 1370)
 }
 
+const ER_UNKNOWN_CHARACTER_SET: u16 = 1115;
+const ER_UNKNOWN_COLLATION: u16 = 1273;
+
+/// Extract the server error code from a raw mysql_async error, if it is a server error.
+fn server_error_code(error: &mysql_async::Error) -> Option<u16> {
+    match error {
+        mysql_async::Error::Server(e) => Some(e.code),
+        _ => None,
+    }
+}
+
 /// Extract the granted roles from `SHOW GRANTS` output. Role grants are the
 /// rows without an ON clause, e.g. ``GRANT `r1`@`%`,`r2`@`%` TO `u`@`h` ``.
 fn granted_roles(grants: &[String]) -> Vec<String> {
@@ -494,6 +505,43 @@ impl MySqlUpstream {
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements))
     }
+
+    /// Look up the given session variable's collation in the upstream's
+    /// information_schema.COLLATIONS.
+    async fn collation_for(&mut self, variable: &str) -> Result<UpstreamCollation, Error> {
+        let result: Option<(u16, String, String)> = self
+            .conn
+            .query_first(format!(
+                "SELECT ID, CHARACTER_SET_NAME, COLLATION_NAME \
+                 FROM information_schema.COLLATIONS \
+                 WHERE COLLATION_NAME = @@{variable}"
+            ))
+            .await?;
+        let Some((id, character_set_name, collation_name)) = result else {
+            internal!("@@{variable} value is missing from information_schema.COLLATIONS")
+        };
+        if !valid_mysql_name(&character_set_name) || !valid_mysql_name(&collation_name) {
+            internal!("upstream returned an invalid charset or collation name")
+        }
+        Ok(UpstreamCollation {
+            id,
+            character_set_name,
+            collation_name,
+        })
+    }
+
+    /// Set the session to the upstream's server default charset and collation and return
+    /// what was applied.
+    async fn set_server_default_charset(&mut self) -> Result<UpstreamCollation, Error> {
+        let default = self.collation_for("collation_server").await?;
+        self.conn
+            .query_drop(format!(
+                "SET NAMES '{}' COLLATE '{}', @@SESSION.character_set_client = 'utf8mb4'",
+                default.character_set_name, default.collation_name
+            ))
+            .await?;
+        Ok(default)
+    }
 }
 
 #[async_trait]
@@ -720,20 +768,55 @@ impl UpstreamDatabase for MySqlUpstream {
         &mut self,
         charset: &str,
         collation: &str,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<Option<UpstreamCollation>, Self::Error> {
         if !valid_mysql_name(charset) || !valid_mysql_name(collation) {
             internal!("invalid MySQL charset or collation name")
         }
         // Readyset decodes client bytes and sends UTF-8 statement text upstream, so the
         // upstream's character_set_client must stay utf8mb4. SET options apply left to right,
         // which lets a trailing assignment restore it within the same statement.
-        self.conn
+        let result = self
+            .conn
             .query_drop(format!(
                 "SET NAMES '{charset}' COLLATE '{collation}', \
                  @@SESSION.character_set_client = 'utf8mb4'"
             ))
-            .await?;
-        Ok(())
+            .await;
+        match result {
+            Ok(()) => Ok(None),
+            Err(e) if server_error_code(&e) == Some(ER_UNKNOWN_COLLATION) => {
+                debug!(
+                    charset,
+                    collation, "upstream rejected collation, using charset default"
+                );
+                let retry = self
+                    .conn
+                    .query_drop(format!(
+                        "SET NAMES '{charset}', @@SESSION.character_set_client = 'utf8mb4'"
+                    ))
+                    .await;
+                match retry {
+                    Ok(()) => Ok(Some(self.collation_for("collation_connection").await?)),
+                    Err(e)
+                        if matches!(
+                            server_error_code(&e),
+                            Some(ER_UNKNOWN_COLLATION | ER_UNKNOWN_CHARACTER_SET)
+                        ) =>
+                    {
+                        self.set_server_default_charset().await.map(Some)
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+            Err(e) if server_error_code(&e) == Some(ER_UNKNOWN_CHARACTER_SET) => {
+                debug!(
+                    charset,
+                    collation, "upstream rejected charset, using server default"
+                );
+                self.set_server_default_charset().await.map(Some)
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
@@ -832,25 +915,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn server_default_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
-        let result: Option<(u16, String, String)> = self
-            .conn
-            .query_first(
-                "SELECT ID, CHARACTER_SET_NAME, COLLATION_NAME \
-                 FROM information_schema.COLLATIONS \
-                 WHERE COLLATION_NAME = @@collation_server",
-            )
-            .await?;
-        let Some((id, character_set_name, collation_name)) = result else {
-            internal!("upstream server collation is missing from information_schema.COLLATIONS")
-        };
-        if !valid_mysql_name(&character_set_name) || !valid_mysql_name(&collation_name) {
-            internal!("upstream returned an invalid charset or collation name")
-        }
-        Ok(Some(UpstreamCollation {
-            id,
-            character_set_name,
-            collation_name,
-        }))
+        Ok(Some(self.collation_for("collation_server").await?))
     }
 
     async fn shallow_exec_meta(

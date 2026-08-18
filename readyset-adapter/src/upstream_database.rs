@@ -314,14 +314,15 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Set the session's connection charset and collation on the upstream connection so
     /// proxied literal semantics, result metadata, and result rows follow the client's
-    /// charset. The default implementation is a no-op for upstreams without that concept
-    /// (PostgreSQL).
+    /// charset. Return `None` when the request was applied verbatim, or the collation the
+    /// upstream fell back to when it does not support the requested one. The default
+    /// implementation is a no-op for upstreams without that concept.
     async fn set_connection_charset(
         &mut self,
         _charset: &str,
         _collation: &str,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> Result<Option<UpstreamCollation>, Self::Error> {
+        Ok(None)
     }
 
     async fn timezone_name(&mut self) -> Result<SqlIdentifier, Self::Error>;

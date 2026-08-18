@@ -98,6 +98,7 @@ use readyset_client::{CacheMode, ViewCreateRequest};
 use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{QueryExecutionEvent, QueryLogMode};
+use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError;
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported};
@@ -1789,16 +1790,18 @@ where
 
     /// Set the session's connection charset and collation on the upstream connection, if one
     /// exists, so proxied literal semantics, result metadata, and result rows follow the
-    /// client's charset
+    /// client's charset. Return the collation the upstream fell back to when it does not
+    /// support the requested one.
     pub async fn set_upstream_connection_charset(
         &mut self,
         charset: &str,
         collation: &str,
-    ) -> Result<(), DB::Error> {
+    ) -> Result<Option<UpstreamCollation>, DB::Error> {
         if let Some(upstream) = self.connectors.upstream.as_mut() {
-            upstream.set_connection_charset(charset, collation).await?;
+            upstream.set_connection_charset(charset, collation).await
+        } else {
+            Ok(None)
         }
-        Ok(())
     }
 
     /// Send ping on the upstream connection, if it exists

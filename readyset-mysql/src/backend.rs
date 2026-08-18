@@ -1001,17 +1001,17 @@ where
         )
         .increment(1);
         let server_default = system_props().server_default_collation.as_ref();
-        let collation = handshake_collation(charset, server_default);
-        let encoding = Encoding::from_mysql_collation_id(collation);
+        let mut collation = handshake_collation(charset, server_default);
+        let mut encoding = Encoding::from_mysql_collation_id(collation);
         if let Encoding::OtherMySql(id) = encoding {
             warn!(
                 collation_id = id,
                 "client requested an unsupported character set; decoding statements as UTF-8"
             );
         }
-        // The collation id a client advertises has SET NAMES semantics in MySQL, so forward
-        // the charset and collation it names to the upstream session. Adopt the encodings
-        // locally only if the upstream accepted them.
+        // A client's handshake collation id has SET NAMES semantics in MySQL, so forward its
+        // charset and collation to the upstream session. If the upstream rejects the requested
+        // collation, adopt the fallback the upstream session actually applied.
         let upstream_charset = if charset == 0 {
             server_default.map(|collation| {
                 (
@@ -1022,11 +1022,16 @@ where
         } else {
             handshake_connection_charset(charset)
         };
-        if let Some((charset, collation)) = upstream_charset {
-            self.noria
-                .set_upstream_connection_charset(charset, collation)
+        if let Some((charset_name, collation_name)) = upstream_charset {
+            if let Some(applied) = self
+                .noria
+                .set_upstream_connection_charset(charset_name, collation_name)
                 .await
-                .map_err(io::Error::other)?;
+                .map_err(io::Error::other)?
+            {
+                collation = applied.id;
+                encoding = Encoding::from_mysql_collation_id(applied.id);
+            }
         }
         self.noria.connectors.noria.set_results_encoding(encoding);
         self.noria.connectors.noria.set_client_encoding(encoding);

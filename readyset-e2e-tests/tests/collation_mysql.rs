@@ -1018,6 +1018,53 @@ async fn test_handshake_collation_byte_upstream_fidelity() {
     shutdown_tx.shutdown().await;
 }
 
+/// The utf8mb4_0900_ai_ci collation id. Upstreams older than MySQL 8.0 reject it.
+const UTF8MB4_0900_AI_CI_COLLATION: u8 = 255;
+
+/// A handshake collation the upstream rejects must still produce a working session that uses
+/// the upstream's default collation for the requested charset. A collation the upstream
+/// supports applies verbatim. The expected collation comes from the upstream itself, so the
+/// assertion does not depend on the upstream version.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_handshake_collation_unknown_upstream_survives() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let supported: Option<String> = upstream_conn
+        .query_first(format!(
+            "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+             WHERE ID = {UTF8MB4_0900_AI_CI_COLLATION}"
+        ))
+        .await
+        .unwrap();
+    let expected = match supported {
+        Some(name) => name,
+        None => upstream_conn
+            .query_first(
+                "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+                 WHERE CHARACTER_SET_NAME = 'utf8mb4' AND IS_DEFAULT = 'Yes'",
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+    };
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8MB4_0900_AI_CI_COLLATION).await;
+    let rows = raw.query_raw(b"SELECT @@collation_connection").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(single_text_column(&rows[0]), expected.as_bytes());
+
+    shutdown_tx.shutdown().await;
+}
+
 /// The utf8mb3_general_ci collation id.
 const UTF8MB3_GENERAL_CI_COLLATION: u8 = 33;
 
