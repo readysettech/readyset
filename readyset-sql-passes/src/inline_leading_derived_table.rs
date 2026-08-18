@@ -97,7 +97,7 @@ use crate::inline_subquery::{
 use crate::rewrite_joins::normalize_comma_separated_lhs;
 use crate::rewrite_utils::{
     as_sub_query_with_alias, as_sub_query_with_alias_mut, build_ext_to_int_fields_map,
-    expect_sub_query_with_alias_mut, get_from_item_reference_name,
+    expect_sub_query_with_alias_mut, fix_groupby_without_aggregates, get_from_item_reference_name,
     hoist_parametrizable_join_filters_to_where, is_aggregation_or_grouped,
     make_aliases_distinct_from_base_statement,
 };
@@ -132,6 +132,28 @@ pub trait InlineLeadingDerivedTable: Sized {
         unique_cols_schema: &U,
         opaque_aliases: &HashSet<SqlIdentifier>,
     ) -> ReadySetResult<&mut Self>;
+
+    /// Inline the leading derived table once unnesting has finished, normalizing what unnesting
+    /// leaves behind so that it can be.
+    ///
+    /// Decorrelation synthesizes a wrapper that groups by every column it projects, which is a
+    /// grouped statement computing no aggregate.  Eligibility refuses to lift a GROUP BY whose keys
+    /// the outer query does not all project, because the conversion to DISTINCT that keeps the
+    /// result engine-valid needs keys and projection to match -- which they no longer do once split
+    /// across two statements.  Converting first removes the question instead of answering it.
+    ///
+    /// **The conversion must run over the whole statement, not the candidate alone.** Normalizing
+    /// only the leading FROM item hides its GROUP BY from the eligibility check while leaving the
+    /// grouping keys the outer needs for its other FROM items in play, which emits a statement
+    /// grouped by some of what it projects -- invalid, and past the point any later pass can repair
+    /// it.  Keeping both steps here is what makes that ordering un-separable by a later edit.
+    ///
+    /// No aliases are opaque by this point: the wraps `normalize_subquery_positions` produced have
+    /// been consumed, so anything still standing is a candidate.
+    fn inline_leading_derived_table_after_unnest<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self>;
 }
 
 impl InlineLeadingDerivedTable for SelectStatement {
@@ -163,6 +185,14 @@ impl InlineLeadingDerivedTable for SelectStatement {
         }
 
         Ok(self)
+    }
+
+    fn inline_leading_derived_table_after_unnest<U: UniqueColumnsSchema>(
+        &mut self,
+        unique_cols_schema: &U,
+    ) -> ReadySetResult<&mut Self> {
+        fix_groupby_without_aggregates(self)?;
+        self.inline_leading_derived_table(unique_cols_schema, &HashSet::new())
     }
 }
 

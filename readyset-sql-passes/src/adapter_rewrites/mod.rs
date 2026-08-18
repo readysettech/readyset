@@ -3,7 +3,6 @@ mod autoparameterize;
 pub mod post_lookup_decomposition;
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
@@ -331,16 +330,12 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
                 trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
                 query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?;
                 trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
-                // Post-unnest re-invocation of ILDT inlines the wrapper
-                // derived table before derived_tables_rewrite, which skips
-                // inlining while any subquery predicate remains.  Gated on a
-                // wrap having fired: without one, derived_tables_rewrite
-                // inlines the leading derived table itself, so the extra pass
-                // would be redundant here.
-                if !wrap_aliases.is_empty() {
-                    query.inline_leading_derived_table(&unique_cols_schema, &HashSet::new())?;
-                    trace!(parent: &span, pass="inline_leading_derived_table_post_unnest", query = %query.display(flags.dialect));
-                }
+                // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
+                // derived_tables_rewrite brings the predicate into the same statement as the join
+                // while the LEFT-join promotion step can still see it, which is what a decorrelated
+                // query needs to reach the plan its own emitted text already produces.
+                query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?;
+                trace!(parent: &span, pass="inline_leading_derived_table_after_unnest", query = %query.display(flags.dialect));
                 query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
                 trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
                 query.query_optimization_rewrite(
@@ -3934,6 +3929,37 @@ mod tests {
                 query.having.is_none(),
                 "the predicate is not over an aggregate, so nothing belongs in HAVING: {}",
                 query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// Decorrelating a select-list subquery leaves a wrapper derived table and a LEFT OUTER
+        /// JOIN.  Nothing used to flatten that wrapper, so the null-rejecting predicate stayed one
+        /// level above the join and `promote_null_rejecting_outer_joins_where`, which reads a
+        /// single statement, could not relate the two.  The same query re-submitted in its emitted
+        /// form was flattened and promoted, because it arrived with the derived table already
+        /// present.
+        #[test]
+        fn decorrelated_wrapper_is_inlined_so_the_left_join_is_promoted() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT x.pn FROM (SELECT qa.p.pn AS pn, \
+                 (SELECT SUM(qa.spj.qty) FROM qa.spj WHERE qa.spj.pn = qa.p.pn) AS q \
+                 FROM qa.p GROUP BY qa.p.pn) x WHERE x.q > 1200",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            let emitted = query.display(Dialect::PostgreSQL).to_string();
+            assert!(
+                query.tables.len() == 1 && !emitted.contains("AS \"x\""),
+                "the wrapper should be inlined: {emitted}"
+            );
+            assert!(
+                query.join.len() == 1
+                    && query.join[0].operator == readyset_sql::ast::JoinOperator::InnerJoin,
+                "the predicate reaches the join, so it should be promoted to INNER: {emitted}"
             );
         }
 
