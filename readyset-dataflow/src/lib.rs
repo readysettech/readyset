@@ -51,9 +51,13 @@ pub use crate::processing::LookupIndex;
 
 /// A [`ReaderMap`] maps a [`ReaderAddress`] to the [`SingleReadHandle`] to access the reader at
 /// that address.
+///
+/// Hashed with `ahash`: probed on every read, by both the worker's shared map and each read
+/// handler's local cache, and hashing a [`ReaderAddress`] walks a node index plus `Relation`'s
+/// two string identifiers.
 #[repr(transparent)]
 #[derive(Default, Clone)]
-pub struct ReaderMap(HashMap<ReaderAddress, SingleReadHandle>);
+pub struct ReaderMap(HashMap<ReaderAddress, SingleReadHandle, ahash::RandomState>);
 pub type Readers = Arc<Mutex<ReaderMap>>;
 
 pub type DomainConfig = domain::Config;
@@ -143,7 +147,7 @@ impl Display for EvictionKind {
 }
 
 impl Deref for ReaderMap {
-    type Target = HashMap<ReaderAddress, SingleReadHandle>;
+    type Target = HashMap<ReaderAddress, SingleReadHandle, ahash::RandomState>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
