@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dataflow::{PostLookupAggregate, PostLookupAggregateFunction, PostLookupAggregates};
+use itertools::Itertools;
 use mir::node::node_inner::MirNodeInner;
 use mir::node::ProjectExpr;
 use mir::{Column, NodeIndex};
@@ -399,7 +400,7 @@ pub(super) fn post_lookup_aggregates(
     }
 
     let mut aggregates = vec![];
-    for (function, alias) in &query_graph.aggregates {
+    for (function, alias) in query_graph.aggregates.iter().sorted_by_key(|(a, _)| *a) {
         record_reachable(function);
         aggregates.push(PostLookupAggregate {
             column: Column::named(alias.clone()).aliased_as_table(query_name.clone()),
