@@ -1402,6 +1402,62 @@ mod tests {
         test_it("self_join_bail_out", original, original);
     }
 
+    // Bail: the inlinable aggregates without grouping, and the outer reads a column from its
+    // join partner, so inlining would give the aggregate its first grouping key.  An aggregate
+    // with no GROUP BY answers one row whatever its filter matches; a grouped one answers none
+    // when nothing matches.  Same invariant `hoist_parametrizable_filters` keeps by declining to
+    // promote a filter out of an ungrouped aggregate.
+    #[test]
+    fn ungrouped_aggregate_inline_would_impose_grouping_bails() {
+        let original = r#"
+            SELECT "w"."n", "g"."c"
+            FROM (SELECT COUNT(*) AS "n" FROM "p" WHERE "p"."color" = 'nope') AS "w",
+                 (SELECT COUNT(*) AS "c" FROM "s") AS "g"
+        "#;
+        test_it(
+            "ungrouped_aggregate_inline_would_impose_grouping_bails",
+            original,
+            original,
+        );
+    }
+
+    // The bail above is conditional on grouping actually being imposed: an inlinable that already
+    // groups has groups to select among, so lifting its keys preserves what it answered.
+    #[test]
+    fn grouped_inlinable_still_inlines_beside_a_partner() {
+        let original = r#"
+            SELECT "w"."n", "g"."c"
+            FROM (SELECT COUNT(*) AS "n", "p"."color" AS "color" FROM "p" GROUP BY "p"."color") AS "w",
+                 (SELECT COUNT(*) AS "c" FROM "s") AS "g"
+        "#;
+        let expected = r#"
+            SELECT count(*) AS "n", "g"."c"
+            FROM "p" CROSS JOIN (SELECT count(*) AS "c" FROM "s") AS "g"
+            GROUP BY "p"."color", "g"."c"
+        "#;
+        test_it(
+            "grouped_inlinable_still_inlines_beside_a_partner",
+            original,
+            expected,
+        );
+    }
+
+    // And on there being a partner at all: with nothing downstream to group by, an ungrouped
+    // aggregate inlines into an outer that stays ungrouped, which answers the same.
+    #[test]
+    fn ungrouped_aggregate_alone_still_inlines() {
+        let original = r#"
+            SELECT "w"."n"
+            FROM (SELECT COUNT(*) AS "n" FROM "p" WHERE "p"."color" = 'nope') AS "w"
+        "#;
+        let expected = r#"SELECT count(*) AS "n" FROM "p" WHERE ("p"."color" = 'nope')"#;
+        test_it(
+            "ungrouped_aggregate_alone_still_inlines",
+            original,
+            expected,
+        );
+    }
+
     // ─── Coverage gap tests ────────────────────────────────────────────────
 
     // Expression-based GROUP BY with aggregate output — verify hoisting works

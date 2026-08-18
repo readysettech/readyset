@@ -38,7 +38,7 @@ use crate::rewrite_utils::{
     deep_columns_visitor, deep_columns_visitor_mut, expect_field_as_expr, expect_field_as_expr_mut,
     expect_only_subquery_from_with_alias, expect_sub_query_with_alias_mut,
     extract_correlation_keys, find_rhs_join_clause, for_each_window_function,
-    get_from_item_reference_name, get_select_item_alias, is_aggregated_expr,
+    get_from_item_reference_name, get_select_item_alias, is_aggregated_expr, is_aggregated_select,
     is_aggregation_or_grouped, is_always_true_filter, is_column_eq_column,
     is_simple_parametrizable_filter, literal_as_number, outermost_expression,
     partition_correlated_predicates, resolve_field_reference, resolve_group_by_exprs, split_expr,
@@ -2452,6 +2452,33 @@ fn check_on_to_where_safety<U: UniqueColumnsSchema>(
 // Eligibility orchestration (entry points)
 // ---------------------------------------------------------------------------
 
+/// Grouping imposed on an ungrouped aggregate.  Reject if the inlinable aggregates without
+/// grouping and the inline would hand it its first grouping key.
+///
+/// An aggregate with no `GROUP BY` answers one row whatever its filter matches -- a `COUNT(*)` of
+/// zero is still a row.  Inlining lifts such a statement into an outer that must then group by the
+/// columns the outer reads from its other FROM items, and a grouped aggregate over an input
+/// matching nothing produces no group at all, so the row the query owes disappears.
+///
+/// `hoist_parametrizable_filters` keeps the same invariant where it declines to promote a filter out
+/// of an ungrouped aggregate; this is the inlining side of it.  Neither subsumes the other:
+/// promotion grants a grouping key to the *filtered* column of the statement it hoists from, while
+/// inlining grants one to the columns the *outer* reads from the inlinable's join partners.
+///
+/// Only the ungrouped case is at risk.  A statement that already groups has groups to select among,
+/// so lifting its keys preserves what it answered -- `check_grouped_engine_validation` governs that
+/// case.  Emptiness is a runtime property, so a filter that matches nothing and a table that is
+/// empty are indistinguishable here and both are refused.
+fn check_grouping_imposed_on_ungrouped_aggregate<U: UniqueColumnsSchema>(
+    ctx: &InliningContext<U>,
+    downstream_group_by_additions: &[Expr],
+) -> ReadySetResult<bool> {
+    if downstream_group_by_additions.is_empty() || ctx.inner_stmt.group_by.is_some() {
+        return Ok(true);
+    }
+    Ok(!is_aggregated_select(ctx.inner_stmt)?)
+}
+
 /// Canonical eligibility entry point for subquery inlining.
 ///
 /// Composes the eligibility checks in canonical order.  Returns
@@ -2474,6 +2501,9 @@ pub(crate) fn can_inline_subquery<U: UniqueColumnsSchema>(
         return Ok(None);
     };
     if !check_grouped_engine_validation(ctx, &downstream_group_by_additions)? {
+        return Ok(None);
+    }
+    if !check_grouping_imposed_on_ungrouped_aggregate(ctx, &downstream_group_by_additions)? {
         return Ok(None);
     }
     if !check_cardinality_barrier(ctx)? {
