@@ -1399,6 +1399,20 @@ mod tests {
             );
         }
 
+        #[track_caller]
+        fn test_stmt(unbracketed: &str, bracketed: &str, expected: bool) {
+            assert_eq!(
+                eval(unbracketed),
+                expected.into(),
+                "incorrect result for `{unbracketed}`"
+            );
+            assert_eq!(
+                eval(unbracketed),
+                eval(bracketed),
+                "`{unbracketed}` should read as `{bracketed}`"
+            );
+        }
+
         test("1", "1", false);
         test("1", "2", true);
         test("'a'", "'a'", false);
@@ -1419,38 +1433,42 @@ mod tests {
         // compares unequal here where PostgreSQL reconciles the two, so `true::boolean` is
         // distinct from `'true'` under both operators alike.
         test("true::boolean", "'true'", true);
-    }
 
-    /// sqlparser binds the right operand of `IS DISTINCT FROM` at its lowest precedence, so an
-    /// unbracketed conjunction is swallowed into the operand, where PostgreSQL binds the operator
-    /// tighter and leaves the conjunction on the outside. Answering from the swallowed parse would
-    /// disagree with upstream, so the conversion is refused and the query falls back.
-    #[test]
-    fn eval_is_distinct_from_unbracketed_conjunction_unsupported() {
-        for expr in [
+        // `IS [NOT] DISTINCT FROM` binds tighter than `AND` and `OR`, so a following conjunct stays
+        // outside the right operand and keeps filtering.
+        //
+        // Each case is chosen so that grouping the conjunct into the operand instead would yield the
+        // opposite value, making the assertion sensitive to the precedence rather than to the
+        // operands alone. Every unbracketed form is checked against its explicitly bracketed
+        // counterpart, which is how PostgreSQL reads it.
+        test_stmt(
             "true IS DISTINCT FROM false AND false",
+            "(true IS DISTINCT FROM false) AND false",
+            false,
+        );
+        test_stmt(
+            "true IS DISTINCT FROM false AND false",
+            "true IS DISTINCT FROM (false) AND false",
+            false,
+        );
+        test_stmt(
             "true IS DISTINCT FROM false OR true",
-            "true IS NOT DISTINCT FROM false AND false",
-        ] {
-            assert!(
-                parse_expr_with_config(ParsingPreset::OnlySqlparser, PostgreSQL, expr).is_err(),
-                "`{expr}` should be unsupported rather than answered from the swallowed parse"
-            );
-        }
-
-        // Bracketing expresses PostgreSQL's own grouping, and still evaluates.
-        let expr = "(true IS DISTINCT FROM false) AND false";
-        assert_eq!(
-            expr_unwrap(
-                try_eval_expr_with_preset(expr, PostgreSQL, ParsingPreset::OnlySqlparser),
-                expr
-            ),
-            false.into(),
-            "incorrect result for `{expr}`"
+            "(true IS DISTINCT FROM false) OR true",
+            true,
+        );
+        test_stmt(
+            "false IS NOT DISTINCT FROM true AND false",
+            "(false IS NOT DISTINCT FROM true) AND false",
+            false,
+        );
+        test_stmt(
+            "false IS NOT DISTINCT FROM true OR true",
+            "(false IS NOT DISTINCT FROM true) OR true",
+            true,
         );
     }
 
-    /// The customer-shaped predicate that motivates unquoting `->>`, parsing PostgreSQL booleans
+    /// The predicate that motivates unquoting `->>`, parsing PostgreSQL booleans
     /// and supporting `IS DISTINCT FROM`: a row carrying an explicit `false` must survive.
     #[test]
     fn eval_json_bool_is_distinct_from() {

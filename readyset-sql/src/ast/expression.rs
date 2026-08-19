@@ -2257,28 +2257,6 @@ impl Expr {
     }
 }
 
-/// Guards the right operand of the `DISTINCT FROM` family.
-///
-/// sqlparser binds that operand with `parse_expr`, its lowest precedence, so an unbracketed
-/// `x IS DISTINCT FROM true AND y` parses as `x IS DISTINCT FROM (true AND y)` -- the following
-/// conjunct is swallowed and stops filtering. Accepting that shape would cache a predicate whose
-/// meaning differs from the same SQL run upstream, which is worse than not supporting it: a
-/// rejected query falls back and still answers correctly.
-///
-/// Bracketing the predicate expresses the intended grouping and passes this guard.
-fn distinct_from_rhs(rhs: Box<Expr>) -> Result<Box<Expr>, AstConversionError> {
-    if matches!(
-        rhs.as_ref(),
-        Expr::BinaryOp {
-            op: BinaryOperator::And | BinaryOperator::Or,
-            ..
-        }
-    ) {
-        return unsupported!("IS [NOT] DISTINCT FROM with an unbracketed right operand");
-    }
-    Ok(rhs)
-}
-
 impl TryFromDialect<sqlparser::ast::Expr> for Expr {
     fn try_from_dialect(
         value: sqlparser::ast::Expr,
@@ -2552,12 +2530,12 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
             IsDistinctFrom(lhs, rhs) => Ok(Self::BinaryOp {
                 lhs: lhs.try_into_dialect(dialect)?,
                 op: BinaryOperator::IsNot,
-                rhs: distinct_from_rhs(rhs.try_into_dialect(dialect)?)?,
+                rhs: rhs.try_into_dialect(dialect)?,
             }),
             IsNotDistinctFrom(lhs, rhs) => Ok(Self::BinaryOp {
                 lhs: lhs.try_into_dialect(dialect)?,
                 op: BinaryOperator::Is,
-                rhs: distinct_from_rhs(rhs.try_into_dialect(dialect)?)?,
+                rhs: rhs.try_into_dialect(dialect)?,
             }),
             IsJson { .. } => not_yet_implemented!("IS JSON"),
             IsUnknown(_expr) => not_yet_implemented!("IS UNKNOWN"),

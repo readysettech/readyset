@@ -4577,7 +4577,7 @@ dependencies = [
  "proptest",
  "readyset-sql",
  "readyset-util",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "test-strategy",
  "test-utils",
 ]
@@ -6059,7 +6059,7 @@ dependencies = [
  "slab",
  "smallvec",
  "sqlformat",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "streaming-iterator",
  "test-strategy",
  "tokio",
@@ -6944,7 +6944,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-util",
  "serde",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "stacker",
  "strum",
  "test-strategy",
@@ -6967,7 +6967,7 @@ dependencies = [
  "readyset-sql",
  "readyset-util",
  "serde",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "test-discovery",
  "test-strategy",
  "test-utils",
@@ -6994,7 +6994,7 @@ dependencies = [
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "strum",
  "test-strategy",
  "test-utils",
@@ -8131,12 +8131,12 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.62.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987#30d0836b673d2198262f0662596ac8dbb7379987"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935#5b879bfe90ef06a627079fd0f2b9828255f99935"
 dependencies = [
  "log",
  "recursive",
  "serde",
- "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987)",
+ "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
 ]
 
 [[package]]
@@ -8153,7 +8153,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.5.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=30d0836b673d2198262f0662596ac8dbb7379987#30d0836b673d2198262f0662596ac8dbb7379987"
+source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935#5b879bfe90ef06a627079fd0f2b9828255f99935"
 dependencies = [
  "proc-macro2",
  "quote",
