@@ -1,0 +1,36 @@
+# Aggregates are computed separately and joined back together, and that join takes its keys from
+# the group columns they share -- none at all, when no aggregate groups.  The empty key becomes
+# reachable once a join above looks up by an aggregate output and a filter on another aggregate
+# leaves the inputs partially materialized.
+
+statement ok
+create table t1 (id int primary key, v int);
+
+statement ok
+create table t2 (id int primary key, v int);
+
+statement ok
+insert into t1 values (1, 10), (2, 20), (3, 30);
+
+statement ok
+insert into t2 values (2, 200), (3, 300), (4, 400);
+
+query II valuesort
+select i.mx, t2.v from (select max(id) as mx, count(id) as c from t1) i join t2 on t2.id = i.mx where i.c > 0;
+----
+3
+300
+
+query II valuesort
+select i.mx, t2.v from (select max(id) as mx, count(id) as c from t1) i left join t2 on t2.id = i.mx where i.c > 0;
+----
+3
+300
+
+# Three aggregates chain two such joins, and the first one's key already covers the second.
+
+query II valuesort
+select i.mx, t2.v from (select max(id) as mx, min(id) as mn, count(id) as c from t1) i join t2 on t2.id = i.mx where i.c > 0;
+----
+3
+300
