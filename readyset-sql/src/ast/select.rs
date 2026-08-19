@@ -147,6 +147,77 @@ impl FromClause {
     }
 }
 
+/// The constraint a sqlparser join operator carries, where its shape has one.
+fn join_constraint_of(
+    op: &sqlparser::ast::JoinOperator,
+) -> Option<&sqlparser::ast::JoinConstraint> {
+    use sqlparser::ast::JoinOperator as JoinOp;
+    match op {
+        JoinOp::Join(c)
+        | JoinOp::Inner(c)
+        | JoinOp::Left(c)
+        | JoinOp::LeftOuter(c)
+        | JoinOp::Right(c)
+        | JoinOp::RightOuter(c)
+        | JoinOp::FullOuter(c)
+        | JoinOp::LeftSemi(c)
+        | JoinOp::RightSemi(c)
+        | JoinOp::LeftAnti(c)
+        | JoinOp::RightAnti(c)
+        | JoinOp::Semi(c)
+        | JoinOp::Anti(c)
+        | JoinOp::StraightJoin(c)
+        | JoinOp::CrossJoin(c)
+        | JoinOp::AsOf { constraint: c, .. } => Some(c),
+        JoinOp::CrossApply
+        | JoinOp::OuterApply
+        | JoinOp::ArrayJoin
+        | JoinOp::LeftArrayJoin
+        | JoinOp::InnerArrayJoin => None,
+    }
+}
+
+/// PostgreSQL reads `a JOIN b JOIN c ON x` as the right-deep `a JOIN (b JOIN c ON x)`, so
+/// sqlparser nests a join whose constraint is still pending. A join left without any constraint
+/// has nothing to defer to, and the nesting carries no meaning: unwrap it so the chain converts
+/// as the flat list it was written as. A nested join that does carry a constraint is a real
+/// right-deep chain, which [`FromClause`] cannot express, and stays unsupported.
+fn flatten_constraintless_nested_join(join: sqlparser::ast::Join) -> Vec<sqlparser::ast::Join> {
+    let sqlparser::ast::Join {
+        relation,
+        global,
+        join_operator,
+    } = join;
+    match relation {
+        sqlparser::ast::TableFactor::NestedJoin {
+            table_with_joins,
+            alias: None,
+        } if matches!(
+            join_constraint_of(&join_operator),
+            Some(sqlparser::ast::JoinConstraint::None)
+        ) =>
+        {
+            let sqlparser::ast::TableWithJoins { relation, joins } = *table_with_joins;
+            std::iter::once(sqlparser::ast::Join {
+                relation,
+                global,
+                join_operator,
+            })
+            .chain(
+                joins
+                    .into_iter()
+                    .flat_map(flatten_constraintless_nested_join),
+            )
+            .collect()
+        }
+        relation => vec![sqlparser::ast::Join {
+            relation,
+            global,
+            join_operator,
+        }],
+    }
+}
+
 impl TryFromDialect<sqlparser::ast::TableWithJoins> for FromClause {
     fn try_from_dialect(
         value: sqlparser::ast::TableWithJoins,
@@ -168,7 +239,10 @@ impl TryFromDialect<sqlparser::ast::TableWithJoins> for FromClause {
             }
             _ => FromClause::Tables(vec![relation.try_into_dialect(dialect)?]),
         };
-        for join in joins {
+        for join in joins
+            .into_iter()
+            .flat_map(flatten_constraintless_nested_join)
+        {
             let join_clause = join.try_into_dialect(dialect)?;
             from_clause = FromClause::Join {
                 lhs: Box::new(from_clause),
@@ -786,6 +860,58 @@ impl DialectDisplay for SelectStatement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn from_clause_of(sql: &str) -> Result<FromClause, AstConversionError> {
+        let dialect = sqlparser::dialect::PostgreSqlDialect {};
+        let statements = sqlparser::parser::Parser::new(&dialect)
+            .try_with_sql(sql)
+            .expect("failed to build parser")
+            .parse_statements()
+            .expect("failed to parse");
+        let Some(sqlparser::ast::Statement::Query(query)) = statements.into_iter().next() else {
+            panic!("expected a query for {sql}");
+        };
+        let sqlparser::ast::SetExpr::Select(select) = *query.body else {
+            panic!("expected a SELECT for {sql}");
+        };
+        let mut from = select.from;
+        assert_eq!(from.len(), 1, "expected a single FROM item for {sql}");
+        from.pop()
+            .expect("just checked the length")
+            .try_into_dialect(Dialect::PostgreSQL)
+    }
+
+    /// PostgreSQL defers a join's `ON`, so sqlparser reads `s JOIN a JOIN b` as a right-deep
+    /// chain and nests it. Where no constraint follows there is nothing to defer to, and the
+    /// joins convert as the flat left-deep chain they were written as.
+    #[test]
+    fn constraintless_nested_join_flattens() {
+        let from = from_clause_of("SELECT 1 FROM s LEFT JOIN a LEFT JOIN b")
+            .expect("a constraintless join chain should convert");
+        let FromClause::Join { lhs, .. } = &from else {
+            panic!("expected the outermost join, got {from:?}");
+        };
+        let FromClause::Join { lhs, .. } = lhs.as_ref() else {
+            panic!("expected a second join below it, got {lhs:?}");
+        };
+        assert!(
+            matches!(lhs.as_ref(), FromClause::Tables(tables) if tables.len() == 1),
+            "expected the base table at the root of the chain, got {lhs:?}"
+        );
+    }
+
+    /// A right-deep chain puts a constraint on the outer join, which the left-deep
+    /// [`FromClause`] cannot express, so it stays unsupported rather than being flattened into a
+    /// query that means something else.
+    #[test]
+    fn right_deep_join_chain_is_unsupported() {
+        let err = from_clause_of("SELECT 1 FROM s LEFT JOIN a LEFT JOIN b ON (1 = 1) ON (2 = 2)")
+            .expect_err("a real right-deep chain should not be flattened");
+        assert!(
+            err.to_string().contains("Nested join"),
+            "expected the nested-join rejection, got: {err}"
+        );
+    }
 
     #[test]
     fn strip_zero_offset_makes_limit_topk() {

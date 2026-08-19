@@ -2391,17 +2391,29 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr,
                 data_type,
                 format: None,
-                array,
-            } => Ok(Self::Cast {
-                expr: expr.try_into_dialect(dialect)?,
-                ty: data_type.try_into_dialect(dialect)?,
-                style: if kind == sqlparser::ast::CastKind::DoubleColon {
-                    CastStyle::DoubleColon
-                } else {
-                    CastStyle::As
-                },
-                array,
-            }),
+            } => {
+                // Upstream folds a trailing ARRAY into the data type. MySQL's
+                // `CAST(x AS t ARRAY)` stays a flag here; elsewhere it is an array type.
+                let (data_type, array) = match (dialect, data_type) {
+                    (
+                        Dialect::MySQL,
+                        sqlparser::ast::DataType::Array(
+                            sqlparser::ast::ArrayElemTypeDef::Qualified(inner, _),
+                        ),
+                    ) => (*inner, true),
+                    (_, data_type) => (data_type, false),
+                };
+                Ok(Self::Cast {
+                    expr: expr.try_into_dialect(dialect)?,
+                    ty: data_type.try_into_dialect(dialect)?,
+                    style: if kind == sqlparser::ast::CastKind::DoubleColon {
+                        CastStyle::DoubleColon
+                    } else {
+                        CastStyle::As
+                    },
+                    array,
+                })
+            }
             Ceil { expr: _, field: _ } => not_yet_implemented!("CEIL"),
             Collate { expr, collation } => Ok(Self::Collate {
                 expr: expr.try_into_dialect(dialect)?,
@@ -2547,6 +2559,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 op: BinaryOperator::Is,
                 rhs: distinct_from_rhs(rhs.try_into_dialect(dialect)?)?,
             }),
+            IsJson { .. } => not_yet_implemented!("IS JSON"),
             IsUnknown(_expr) => not_yet_implemented!("IS UNKNOWN"),
             IsNotUnknown(_expr) => not_yet_implemented!("IS NOT UNKNOWN"),
             JsonAccess { value: _, path: _ } => not_yet_implemented!("JSON access"),

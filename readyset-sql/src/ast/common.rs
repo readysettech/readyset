@@ -341,6 +341,8 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 index_name,
                 columns,
                 characteristics,
+                // INCLUDE names payload columns, not key columns.
+                include: _include,
                 // XXX: Not sure why, but we don't support any of these
                 index_type: _index_type,
                 index_options: _index_options,
@@ -359,6 +361,8 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
                 characteristics,
                 index_options,
                 index_type_display: _,
+                // INCLUDE names payload columns, not key columns.
+                include: _,
             }) => {
                 // See above comment on `Index`
                 let index_type = index_options
@@ -389,6 +393,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
             PrimaryKeyUsingIndex(_) | UniqueUsingIndex(_) => {
                 unsupported!("PRIMARY KEY/UNIQUE USING INDEX constraints are not supported")
             }
+            Exclude(_) => unsupported!("EXCLUDE constraints are not supported"),
         }
     }
 }

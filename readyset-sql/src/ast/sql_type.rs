@@ -412,6 +412,7 @@ impl TryFromDialect<sqlparser::ast::ArrayElemTypeDef> for SqlType {
             // TODO: Should we explicitly reject numbers in the square brackets?
             ArrayElemTypeDef::SquareBracket(data_type, _) => data_type.try_into_dialect(dialect),
             ArrayElemTypeDef::Parenthesis(data_type) => data_type.try_into_dialect(dialect),
+            ArrayElemTypeDef::Qualified(data_type, _) => data_type.try_into_dialect(dialect),
         }
     }
 }
