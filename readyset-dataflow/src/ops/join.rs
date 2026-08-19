@@ -531,7 +531,12 @@ impl Join {
                         .iter()
                         .all(|miss| { miss.column_indices == missed_keys.column_indices })
                 );
-                entry.push(missed_keys.clone());
+                // Every downstream replay path that misses on this key records its own upquery,
+                // and each entry drives another lookup and another copy of the joined rows, so
+                // only distinct misses belong here.
+                if !entry.contains(&missed_keys) {
+                    entry.push(missed_keys.clone());
+                }
             })
             .or_insert_with(|| vec![missed_keys.clone()]);
     }
@@ -2264,6 +2269,38 @@ mod tests {
             round_tripped.emit_move_safe,
             "post_deserialize should recompute emit_move_safe"
         );
+    }
+
+    #[test]
+    fn add_missing_upquery_keeps_one_entry_per_distinct_miss() {
+        let l = NodeIndex::new(0);
+        let r = NodeIndex::new(1);
+        let mut j = Join::new(
+            l,
+            r,
+            JoinType::Inner,
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Left, 1), (Side::Right, 1)],
+            true,
+            None,
+        );
+
+        let key = vec![KeyComparison::Equal(vec1![DfValue::from(1)])];
+        let miss = |k: i32| ColumnMiss {
+            node: LocalNodeIndex::make(0),
+            column_indices: std::sync::Arc::from(vec![1]),
+            missed_keys: vec1![KeyComparison::Equal(vec1![DfValue::from(k)])],
+        };
+
+        // A union above the join gives every branch its own replay path, and each one misses on
+        // the same key; the other side of the join should only be looked up once.
+        j.add_missing_upquery(key.clone(), Side::Left, miss(2));
+        j.add_missing_upquery(key.clone(), Side::Left, miss(2));
+        assert_eq!(j.missing_upqueries[&(key.clone(), Side::Left)].len(), 1);
+
+        // A miss on a different key, as `IN (?, ?)` produces, still gets its own lookup.
+        j.add_missing_upquery(key.clone(), Side::Left, miss(3));
+        assert_eq!(j.missing_upqueries[&(key, Side::Left)].len(), 2);
     }
 
     #[test]
