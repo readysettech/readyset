@@ -53,7 +53,7 @@ else
 fi
 
 if [[ "${RELEASE}" == "true" ]]; then
-    release_buildargs=("--build-arg" "release=1" "--build-arg" "RELEASE_VERSION=${RELEASE_VERSION:-}")
+    release_buildargs=("--build-arg" "RELEASE_VERSION=${RELEASE_VERSION:-}")
 else
     release_buildargs=()
 fi
