@@ -1478,6 +1478,20 @@ impl QueryInfo {
         }
         self
     }
+
+    /// [`QueryInfo::from_event`], but moving the fields out of the event. For call sites where
+    /// the event goes unsent afterwards, so the last-query record doesn't cost clones.
+    fn take_from_event(event: &mut QueryExecutionEvent) -> Option<Self> {
+        Some(QueryInfo {
+            destination: event.destination.take()?,
+            reason: event
+                .noria_error
+                .as_ref()
+                .map(|e| e.to_string())
+                .or_else(|| event.reason.take())
+                .unwrap_or_default(),
+        })
+    }
 }
 
 impl FromRow for QueryInfo {
@@ -1977,9 +1991,7 @@ where
         drop(_t);
         if let Some(cache) = &cache {
             event.reason = Some(SHALLOW_CACHE_MISS.to_string());
-            event.destination = Some(QueryDestination::ReadysetThenUpstream(
-                cache.cache_display_name(),
-            ));
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(cache.cache_name()));
         } else {
             event.destination = Some(match &result {
                 Ok(qr) => qr.destination(),
@@ -2005,9 +2017,7 @@ where
             event.destination = Some(QueryDestination::ReadysetThenUpstream(None));
         } else if let Some(cache) = &cache {
             event.reason = Some(SHALLOW_CACHE_MISS.to_string());
-            event.destination = Some(QueryDestination::ReadysetThenUpstream(
-                cache.cache_display_name(),
-            ));
+            event.destination = Some(QueryDestination::ReadysetThenUpstream(cache.cache_name()));
         } else {
             event.destination = Some(QueryDestination::Upstream);
         }
@@ -2205,6 +2215,14 @@ where
 
     pub fn does_require_authentication(&self) -> bool {
         self.settings.require_authentication
+    }
+
+    /// Whether anything downstream consumes a query execution event: the query logger, the
+    /// slow-query log, or the background sampler.
+    fn event_recording(&self) -> bool {
+        self.state.query_log_sender.is_some()
+            || self.settings.slowlog
+            || self.state.sampler_tx.is_some()
     }
 
     /// Look up the plaintext password for `user`, if `user` is allowed to authenticate against

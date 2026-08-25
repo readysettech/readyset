@@ -787,6 +787,7 @@ where
 
         let mut query_shallow = None;
         let mut event = QueryExecutionEvent::new(EventType::Query);
+        event.recording = self.event_recording();
         let result = Self::query_inner(
             &mut self.connectors,
             &self.settings,
@@ -800,7 +801,12 @@ where
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         let staged = self.state.pending_proxy_reason.take();
-        self.state.last_query = QueryInfo::from_event(&event).map(|i| i.or_reason(staged));
+        self.state.last_query = if self.state.query_log_sender.is_some() {
+            QueryInfo::from_event(&event)
+        } else {
+            QueryInfo::take_from_event(&mut event)
+        }
+        .map(|i| i.or_reason(staged));
 
         log_query(
             self.state.query_log_sender.as_ref(),

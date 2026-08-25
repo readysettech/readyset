@@ -334,6 +334,7 @@ mod tests {
             noria_error: None,
             reason: None,
             destination: None,
+            recording: true,
         }
     }
 

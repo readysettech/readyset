@@ -1233,6 +1233,7 @@ where
         // the template is only applied afterwards. `None` for everything but the recognised
         // session-mutating shapes.
         let session_mutation = self.state.prepared.session_mutation(id).cloned();
+        let recording = self.event_recording();
         let cached_statement = self
             .state
             .prepared
@@ -1240,7 +1241,10 @@ where
             .ok_or(PreparedStatementMissing { statement_id: id })?;
 
         let mut event = QueryExecutionEvent::new(EventType::Execute);
-        event.query.clone_from(&cached_statement.parsed_query);
+        event.recording = recording;
+        if event.recording {
+            event.query.clone_from(&cached_statement.parsed_query);
+        }
         event.query_id = cached_statement.query_id;
 
         // Stamp the session's `last_write_at` before dispatching, so that the routing
@@ -1602,7 +1606,14 @@ where
             .pending_proxy_reason
             .take()
             .or(cached_statement.prepare_proxy_reason);
-        self.state.last_query = QueryInfo::from_event(&event).map(|i| i.or_reason(staged));
+        self.state.last_query = if self.state.query_log_sender.is_some() {
+            QueryInfo::from_event(&event)
+        } else {
+            // The event's next stop, `log_query`, only reads the timings: destination and
+            // reason can be moved out rather than cloned.
+            QueryInfo::take_from_event(&mut event)
+        }
+        .map(|i| i.or_reason(staged));
         log_query(
             self.state.query_log_sender.as_ref(),
             event,

@@ -334,7 +334,7 @@ where
         let cache_name = state
             .shallow
             .get(None, Some(&query_id))
-            .and_then(|cache| cache.display_name());
+            .and_then(|cache| cache.name().clone());
 
         match res {
             CacheResult::Hit(values) => {
@@ -450,7 +450,7 @@ where
 
         let cache_name = shallow
             .get(None, Some(query_id))
-            .and_then(|cache| cache.display_name());
+            .and_then(|cache| cache.name().clone());
 
         match res {
             CacheResult::Hit(values) => {

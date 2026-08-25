@@ -1615,7 +1615,7 @@ impl NoriaConnector {
         ctx: ExecuteSelectContext<'_>,
         event: &mut readyset_client_metrics::QueryExecutionEvent,
     ) -> ReadySetResult<QueryResult<'_>> {
-        let start = Instant::now();
+        let start = event.recording.then(Instant::now);
         let (qname, processed_query_params, params) = match ctx {
             ExecuteSelectContext::Prepared {
                 ps:
@@ -1693,16 +1693,17 @@ impl NoriaConnector {
 
         let res = res?;
 
-        event.readyset_event = Some(readyset_client_metrics::ReadysetExecutionEvent::CacheRead {
-            cache_name: qname.clone().into_owned(),
-            num_keys: res.num_keys,
-            cache_misses: res.cache_misses,
-            duration: start.elapsed(),
-        });
+        if let Some(start) = start {
+            event.readyset_event =
+                Some(readyset_client_metrics::ReadysetExecutionEvent::CacheRead {
+                    cache_name: qname.clone().into_owned(),
+                    num_keys: res.num_keys,
+                    cache_misses: res.cache_misses,
+                    duration: start.elapsed(),
+                });
+        }
 
-        event.destination = Some(QueryDestination::Readyset(Some(
-            qname.display_unquoted().to_string(),
-        )));
+        event.destination = Some(QueryDestination::Readyset(Some(qname.into_owned())));
 
         Ok(QueryResult::Select {
             rows: res.rows,

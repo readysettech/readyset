@@ -69,6 +69,11 @@ pub struct QueryExecutionEvent {
 
     /// Where the query ended up executing
     pub destination: Option<QueryDestination>,
+
+    /// Whether anything downstream consumes this event: the query logger is running or the
+    /// slow-query log is enabled. When false, execution paths skip the timing calls and clones
+    /// that exist only to fill the event in.
+    pub recording: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -104,13 +109,13 @@ impl ReadysetExecutionEvent {
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone)]
 pub enum QueryDestination {
-    Readyset(Option<String>),
-    ReadysetShallow(Option<String>),
+    Readyset(Option<Relation>),
+    ReadysetShallow(Option<Relation>),
     /// Readyset had a go at the query and upstream finished it: a shallow-cache miss
     /// that upstream fills, or a cache Readyset started serving and fell back on. The
     /// name, where there is one, is the cache involved; `QueryExecutionEvent::reason`
     /// says which of the two happened.
-    ReadysetThenUpstream(Option<String>),
+    ReadysetThenUpstream(Option<Relation>),
     Upstream,
     Both,
 }
@@ -128,23 +133,21 @@ impl TryFrom<&str> for QueryDestination {
             .strip_prefix("readyset(")
             .and_then(|s| s.strip_suffix(')'))
         {
-            return Ok(QueryDestination::Readyset(Some(name.to_string())));
+            return Ok(QueryDestination::Readyset(Some(name.into())));
         };
 
         if let Some(name) = value
             .strip_prefix("readyset_shallow(")
             .and_then(|s| s.strip_suffix(')'))
         {
-            return Ok(QueryDestination::ReadysetShallow(Some(name.to_string())));
+            return Ok(QueryDestination::ReadysetShallow(Some(name.into())));
         };
 
         if let Some(name) = value
             .strip_prefix("readyset_then_upstream(")
             .and_then(|s| s.strip_suffix(')'))
         {
-            return Ok(QueryDestination::ReadysetThenUpstream(Some(
-                name.to_string(),
-            )));
+            return Ok(QueryDestination::ReadysetThenUpstream(Some(name.into())));
         };
 
         match value {
@@ -168,14 +171,16 @@ impl TryFrom<String> for QueryDestination {
 impl fmt::Display for QueryDestination {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            QueryDestination::Readyset(Some(name)) => write!(f, "readyset({})", name),
+            QueryDestination::Readyset(Some(name)) => {
+                write!(f, "readyset({})", name.display_unquoted())
+            }
             QueryDestination::Readyset(None) => write!(f, "readyset"),
             QueryDestination::ReadysetShallow(Some(name)) => {
-                write!(f, "readyset_shallow({})", name)
+                write!(f, "readyset_shallow({})", name.display_unquoted())
             }
             QueryDestination::ReadysetShallow(None) => write!(f, "readyset_shallow"),
             QueryDestination::ReadysetThenUpstream(Some(name)) => {
-                write!(f, "readyset_then_upstream({})", name)
+                write!(f, "readyset_then_upstream({})", name.display_unquoted())
             }
             QueryDestination::ReadysetThenUpstream(None) => write!(f, "readyset_then_upstream"),
             QueryDestination::Upstream => write!(f, "upstream"),
@@ -255,6 +260,7 @@ impl QueryExecutionEvent {
             noria_error: None,
             reason: None,
             destination: None,
+            recording: true,
         }
     }
 

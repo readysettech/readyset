@@ -631,9 +631,9 @@ where
     K: Clone + Hash + Eq + Send + Sync + 'static,
     V: Send + Sync + 'static,
 {
-    /// The display name of the cache this guard will insert into.
-    pub fn cache_display_name(&self) -> Option<String> {
-        self.cache.display_name()
+    /// The name of the cache this guard will insert into.
+    pub fn cache_name(&self) -> Option<Relation> {
+        self.cache.name().clone()
     }
 
     /// Add a row to the result set.

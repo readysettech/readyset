@@ -70,6 +70,7 @@ fn create_event(
         noria_error: None,
         reason: None,
         destination: None,
+        recording: true,
     }
 }
 
