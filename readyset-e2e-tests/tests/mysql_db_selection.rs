@@ -82,8 +82,8 @@ async fn change_user_updates_schema_search_path() {
     shutdown_tx.shutdown().await;
 }
 
-/// When the `set-database` failpoint is active, the handshake database selection should fail
-/// and the client connection should be rejected (not silently proceed with no database).
+/// When the `set-database` failpoint is active, the handshake database selection fails and the
+/// client receives ER_BAD_DB_ERROR.
 #[cfg(feature = "failure_injection")]
 mod failure_injection {
     use fail::FailScenario;
@@ -113,11 +113,11 @@ mod failure_injection {
         // database when the failpoint is active.
         let opts_with_db =
             mysql_async::OptsBuilder::from_opts(rs_opts.clone()).db_name(Some(db_name));
-        let result = mysql_async::Conn::new(opts_with_db).await;
-        assert!(
-            result.is_err(),
-            "expected connection to fail when set_database errors during handshake"
-        );
+        let err = mysql_async::Conn::new(opts_with_db).await.unwrap_err();
+        let mysql_async::Error::Server(err) = err else {
+            panic!("expected ER_BAD_DB_ERROR, got {err:?}");
+        };
+        assert_eq!(err.code, 1049);
 
         // Disable the failpoint and verify that a connection without a database still works.
         fail::cfg(failpoints::SET_DATABASE, "off").expect("failed to disable failpoint");

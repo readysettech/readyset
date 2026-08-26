@@ -274,6 +274,29 @@ where
     where
         C: for<'a> FnOnce(&'a mut mysql::Conn) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     {
+        let (port, server_handle) = self.spawn_server();
+
+        // Connect to the server
+        let mut url = format!("mysql://{TEST_USER}:{TEST_PASSWORD}@127.0.0.1:{port}");
+        if !extra_opts.is_empty() {
+            url.push('?');
+            url.push_str(extra_opts);
+        }
+        let mut db = mysql::Conn::new(mysql::Opts::from_url(&url).unwrap())
+            .await
+            .unwrap();
+
+        // Run the test closure
+        c(&mut db).await;
+
+        // Clean up
+        drop(db);
+        server_handle.await.unwrap()
+    }
+
+    /// Serve a single connection on an ephemeral port and return the port along with the
+    /// server task.
+    fn spawn_server(self) -> (u16, tokio::task::JoinHandle<io::Result<()>>) {
         let _ = AuthKeys::initialize(None);
         let listener = net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -306,23 +329,7 @@ where
             )
             .await
         });
-
-        // Connect to the server
-        let mut url = format!("mysql://{TEST_USER}:{TEST_PASSWORD}@127.0.0.1:{port}");
-        if !extra_opts.is_empty() {
-            url.push('?');
-            url.push_str(extra_opts);
-        }
-        let mut db = mysql::Conn::new(mysql::Opts::from_url(&url).unwrap())
-            .await
-            .unwrap();
-
-        // Run the test closure
-        c(&mut db).await;
-
-        // Clean up
-        drop(db);
-        server_handle.await.unwrap()
+        (port, server_handle)
     }
 }
 
@@ -423,6 +430,34 @@ async fn it_inits_error() {
         })
     })
     .await;
+}
+
+/// When the shim rejects the handshake database, the client receives ER_BAD_DB_ERROR and the
+/// server closes the connection cleanly.
+#[tokio::test]
+async fn handshake_db_error_returns_bad_db_error() {
+    let (port, server_handle) = TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |schema| {
+            assert_eq!(schema, "test");
+            Box::pin(async move { Err(io::Error::other(format!("Unknown database '{schema}'"))) })
+        },
+        |_, _, _| unreachable!(),
+    )
+    .spawn_server();
+
+    let url = format!("mysql://{TEST_USER}:{TEST_PASSWORD}@127.0.0.1:{port}/test");
+    let err = mysql::Conn::new(mysql::Opts::from_url(&url).unwrap())
+        .await
+        .unwrap_err();
+    let mysql::Error::Server(err) = err else {
+        panic!("expected server error, got {err:?}");
+    };
+    assert_eq!(err.code, u16::from(ErrorKind::ER_BAD_DB_ERROR));
+    assert_eq!(err.message, "Unknown database 'test'");
+    server_handle.await.unwrap().unwrap();
 }
 
 /// Pick a byte whose decoded char is non-ASCII and encodes back to the same byte, proving a

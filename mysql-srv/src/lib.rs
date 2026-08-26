@@ -642,8 +642,20 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 .await?;
             mi.shim.set_charset(charset).await?;
             if let Some(database) = database {
-                mi.shim.on_init(&database).await?;
+                if let Err(e) = mi.shim.on_init(&database).await {
+                    debug!(database, error = %e, "rejecting handshake database");
+                    writers::write_err(
+                        ErrorKind::ER_BAD_DB_ERROR,
+                        e.to_string().as_bytes(),
+                        &mut mi.conn,
+                    )
+                    .await?;
+                    mi.conn.flush().await?;
+                    return Ok(());
+                }
             }
+            writers::write_ok_packet(&mut mi.conn, 0, 0, mi.shim.server_status_flags()).await?;
+            mi.conn.flush().await?;
             mi.run().await?;
         }
         Ok(())
@@ -659,6 +671,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
     /// If no errors are encountered, the return value contains a tuple of a boolean to indicate
     /// whether authentication was successful, the username, the plaintext password if one was
     /// provided, and a database name if one was specified by the client in the handshake response.
+    /// On failure an error packet is written to the client. On success the caller is responsible
+    /// for finishing the handshake with an OK packet once the session has been set up.
     async fn init(&mut self) -> Result<InitResult, io::Error> {
         let auth_data = AuthPlugin::generate_auth_data()
             .map_err(|_| other_error(OtherErrorKind::AuthDataErr))?;
@@ -873,7 +887,6 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         if auth_success {
             self.session_auth_plugin = session_plugin;
             debug!(%username, "Successfully authenticated client");
-            writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags()).await?;
         } else {
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
             writers::write_err(
