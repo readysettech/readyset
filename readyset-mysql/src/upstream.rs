@@ -530,15 +530,31 @@ impl MySqlUpstream {
         })
     }
 
+    /// Run SET NAMES for the given charset and optional collation. Readyset decodes client
+    /// bytes and sends UTF-8 statement text upstream, so the upstream's character_set_client
+    /// must stay utf8mb4. SET options apply left to right, which lets a trailing assignment
+    /// restore it within the same statement.
+    async fn set_names(
+        &mut self,
+        charset: &str,
+        collation: Option<&str>,
+    ) -> Result<(), mysql_async::Error> {
+        let names = match collation {
+            Some(collation) => format!("'{charset}' COLLATE '{collation}'"),
+            None => format!("'{charset}'"),
+        };
+        self.conn
+            .query_drop(format!(
+                "SET NAMES {names}, @@SESSION.character_set_client = 'utf8mb4'"
+            ))
+            .await
+    }
+
     /// Set the session to the upstream's server default charset and collation and return
     /// what was applied.
     async fn set_server_default_charset(&mut self) -> Result<UpstreamCollation, Error> {
         let default = self.collation_for("collation_server").await?;
-        self.conn
-            .query_drop(format!(
-                "SET NAMES '{}' COLLATE '{}', @@SESSION.character_set_client = 'utf8mb4'",
-                default.character_set_name, default.collation_name
-            ))
+        self.set_names(&default.character_set_name, Some(&default.collation_name))
             .await?;
         Ok(default)
     }
@@ -772,51 +788,48 @@ impl UpstreamDatabase for MySqlUpstream {
         if !valid_mysql_name(charset) || !valid_mysql_name(collation) {
             internal!("invalid MySQL charset or collation name")
         }
-        // Readyset decodes client bytes and sends UTF-8 statement text upstream, so the
-        // upstream's character_set_client must stay utf8mb4. SET options apply left to right,
-        // which lets a trailing assignment restore it within the same statement.
-        let result = self
-            .conn
-            .query_drop(format!(
-                "SET NAMES '{charset}' COLLATE '{collation}', \
-                 @@SESSION.character_set_client = 'utf8mb4'"
-            ))
-            .await;
-        match result {
-            Ok(()) => Ok(None),
+        match self.set_names(charset, Some(collation)).await {
+            Ok(()) => return Ok(None),
             Err(e) if server_error_code(&e) == Some(ER_UNKNOWN_COLLATION) => {
                 debug!(
                     charset,
                     collation, "upstream rejected collation, using charset default"
                 );
-                let retry = self
-                    .conn
-                    .query_drop(format!(
-                        "SET NAMES '{charset}', @@SESSION.character_set_client = 'utf8mb4'"
-                    ))
-                    .await;
-                match retry {
-                    Ok(()) => Ok(Some(self.collation_for("collation_connection").await?)),
+                match self.set_names(charset, None).await {
+                    Ok(()) => return Ok(Some(self.collation_for("collation_connection").await?)),
                     Err(e)
                         if matches!(
                             server_error_code(&e),
                             Some(ER_UNKNOWN_COLLATION | ER_UNKNOWN_CHARACTER_SET)
-                        ) =>
-                    {
-                        self.set_server_default_charset().await.map(Some)
-                    }
-                    Err(e) => Err(e.into()),
+                        ) => {}
+                    Err(e) => return Err(e.into()),
                 }
             }
             Err(e) if server_error_code(&e) == Some(ER_UNKNOWN_CHARACTER_SET) => {
-                debug!(
-                    charset,
-                    collation, "upstream rejected charset, using server default"
-                );
-                self.set_server_default_charset().await.map(Some)
+                // Pre-8.0 upstreams know the utf8mb3 charset only by its legacy name, so retry
+                // with that before giving up on the requested charset.
+                if let Some((charset, collation)) = legacy_utf8mb3_names(charset, collation) {
+                    debug!(
+                        charset,
+                        collation, "upstream rejected charset, retrying with legacy names"
+                    );
+                    match self.set_names(charset, Some(&collation)).await {
+                        Ok(()) => {
+                            return Ok(Some(self.collation_for("collation_connection").await?))
+                        }
+                        Err(e)
+                            if matches!(
+                                server_error_code(&e),
+                                Some(ER_UNKNOWN_COLLATION | ER_UNKNOWN_CHARACTER_SET)
+                            ) => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
             }
-            Err(e) => Err(e.into()),
+            Err(e) => return Err(e.into()),
         }
+        debug!(charset, collation, "using server default charset");
+        self.set_server_default_charset().await.map(Some)
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
@@ -937,6 +950,16 @@ fn valid_mysql_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
+/// Map the modern utf8mb3 charset and collation names to the legacy "utf8" names, which are
+/// the only names pre-8.0 upstreams recognize. Return `None` for other charsets.
+fn legacy_utf8mb3_names(charset: &str, collation: &str) -> Option<(&'static str, String)> {
+    if charset != "utf8mb3" {
+        return None;
+    }
+    let suffix = collation.strip_prefix("utf8mb3")?;
+    Some(("utf8", format!("utf8{suffix}")))
+}
+
 impl Drop for MySqlUpstream {
     fn drop(&mut self) {
         gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
@@ -1000,5 +1023,15 @@ mod tests {
         assert!(!valid_mysql_name(""));
         assert!(!valid_mysql_name("utf8mb4'"));
         assert!(!valid_mysql_name("utf8mb4; SELECT 1"));
+    }
+
+    #[test]
+    fn utf8mb3_names_map_to_legacy_utf8() {
+        assert_eq!(
+            legacy_utf8mb3_names("utf8mb3", "utf8mb3_general_ci"),
+            Some(("utf8", "utf8_general_ci".to_string()))
+        );
+        assert_eq!(legacy_utf8mb3_names("utf8mb4", "utf8mb4_general_ci"), None);
+        assert_eq!(legacy_utf8mb3_names("utf8mb3", "latin1_swedish_ci"), None);
     }
 }

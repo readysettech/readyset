@@ -62,6 +62,23 @@ async fn unknown_collation_falls_back_to_charset_default() {
     assert_eq!(applied.collation_name, expected);
 }
 
+/// The modern utf8mb3 names apply either verbatim or through the legacy "utf8" alias,
+/// depending on the upstream version. Either way the session keeps a UTF-8 charset instead
+/// of dropping to the server default.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn utf8mb3_keeps_utf8_charset() {
+    let mut upstream = connect().await;
+    let applied = upstream
+        .set_connection_charset("utf8mb3", "utf8mb3_general_ci")
+        .await
+        .unwrap();
+    if let Some(applied) = applied {
+        assert!(["utf8", "utf8mb3"].contains(&applied.character_set_name.as_str()));
+    }
+}
+
 /// A charset the upstream rejects falls back to the upstream's server default charset and
 /// collation.
 #[tokio::test(flavor = "multi_thread")]
