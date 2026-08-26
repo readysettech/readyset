@@ -43,6 +43,8 @@ struct TestingShim<Q, P, E, I, CU, W> {
     on_cu: CU,
     #[allow(clippy::type_complexity)]
     password_fn: Option<Box<dyn Fn(&str) -> Option<Vec<u8>> + Send>>,
+    #[allow(clippy::type_complexity)]
+    charset_fn: Option<Box<dyn FnMut(u16) -> io::Result<()> + Send>>,
     client_encoding: Encoding,
     _phantom: PhantomData<W>,
 }
@@ -89,8 +91,11 @@ where
         Ok(())
     }
 
-    async fn set_charset(&mut self, _charset: u16) -> io::Result<()> {
-        Ok(())
+    async fn set_charset(&mut self, charset: u16) -> io::Result<()> {
+        match &mut self.charset_fn {
+            Some(f) => f(charset),
+            None => Ok(()),
+        }
     }
 
     async fn on_execute(
@@ -227,6 +232,7 @@ where
             on_i,
             on_cu,
             password_fn: None,
+            charset_fn: None,
             client_encoding: Encoding::Utf8,
             _phantom: PhantomData,
         }
@@ -249,6 +255,11 @@ where
 
     fn with_password_fn(mut self, f: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static) -> Self {
         self.password_fn = Some(Box::new(f));
+        self
+    }
+
+    fn with_charset_fn(mut self, f: impl FnMut(u16) -> io::Result<()> + Send + 'static) -> Self {
+        self.charset_fn = Some(Box::new(f));
         self
     }
 
@@ -458,6 +469,68 @@ async fn handshake_db_error_returns_bad_db_error() {
     assert_eq!(err.code, u16::from(ErrorKind::ER_BAD_DB_ERROR));
     assert_eq!(err.message, "Unknown database 'test'");
     server_handle.await.unwrap().unwrap();
+}
+
+/// When the shim rejects the handshake charset, the client receives ER_HANDSHAKE_ERROR and the
+/// server closes the connection cleanly.
+#[tokio::test]
+async fn handshake_charset_error_returns_handshake_error() {
+    let (port, server_handle) = TestingShim::new(
+        |_, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+    )
+    .with_charset_fn(|_| Err(io::Error::other("upstream went away")))
+    .spawn_server();
+
+    let url = format!("mysql://{TEST_USER}:{TEST_PASSWORD}@127.0.0.1:{port}");
+    let err = mysql::Conn::new(mysql::Opts::from_url(&url).unwrap())
+        .await
+        .unwrap_err();
+    let mysql::Error::Server(err) = err else {
+        panic!("expected server error, got {err:?}");
+    };
+    assert_eq!(err.code, u16::from(ErrorKind::ER_HANDSHAKE_ERROR));
+    assert_eq!(err.message, "upstream went away");
+    server_handle.await.unwrap().unwrap();
+}
+
+/// When the shim rejects the COM_CHANGE_USER charset, the server closes the connection.
+#[tokio::test]
+async fn change_user_charset_error_closes_connection() {
+    let mut calls = 0;
+    let err = TestingShim::new(
+        |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
+        |_| unreachable!(),
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        |_, _, _| Box::pin(async { Ok(()) }),
+    )
+    .with_charset_fn(move |_| {
+        calls += 1;
+        if calls == 1 {
+            Ok(())
+        } else {
+            Err(io::Error::other("upstream went away"))
+        }
+    })
+    .test_with_opts_server_result(
+        |db| {
+            Box::pin(async move {
+                let opts = mysql::ChangeUserOpts::new()
+                    .with_user(Some(TEST_USER.into()))
+                    .with_pass(Some(TEST_PASSWORD.into()));
+                let err = db.change_user(opts).await.unwrap_err();
+                assert!(matches!(err, mysql::Error::Io(_)), "{err:?}");
+            })
+        },
+        "",
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.to_string(), "upstream went away");
 }
 
 /// Pick a byte whose decoded char is non-ASCII and encodes back to the same byte, proving a

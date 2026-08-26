@@ -640,25 +640,36 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             mi.shim
                 .set_auth_info(&username, plain_password, interactive)
                 .await?;
-            mi.shim.set_charset(charset).await?;
+            if let Err(e) = mi.shim.set_charset(charset).await {
+                debug!(charset, error = %e, "rejecting handshake charset");
+                return mi
+                    .reject_session_setup(ErrorKind::ER_HANDSHAKE_ERROR, &e)
+                    .await;
+            }
             if let Some(database) = database
                 && let Err(e) = mi.shim.on_init(&database).await
             {
                 debug!(database, error = %e, "rejecting handshake database");
-                writers::write_err(
-                    ErrorKind::ER_BAD_DB_ERROR,
-                    e.to_string().as_bytes(),
-                    &mut mi.conn,
-                )
-                .await?;
-                mi.conn.flush().await?;
-                return Ok(());
+                return mi
+                    .reject_session_setup(ErrorKind::ER_BAD_DB_ERROR, &e)
+                    .await;
             }
             writers::write_ok_packet(&mut mi.conn, 0, 0, mi.shim.server_status_flags()).await?;
             mi.conn.flush().await?;
             mi.run().await?;
         }
         Ok(())
+    }
+
+    /// Reply to a failed session setup hook with an error packet.
+    async fn reject_session_setup(&mut self, kind: ErrorKind, e: &io::Error) -> io::Result<()> {
+        self.reply_err(kind, e.to_string().as_bytes()).await
+    }
+
+    /// Send an error packet to the client.
+    async fn reply_err(&mut self, kind: ErrorKind, msg: &[u8]) -> io::Result<()> {
+        write_err(kind, msg, &mut self.conn).await?;
+        self.conn.flush().await
     }
 
     /// Handle the client handshake messages for establishing capabilities and handling
@@ -765,13 +776,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             // Client connected using a non encrypted stream. Write an error if TLS mode is required.
             if self.tls_mode == TlsMode::Required {
                 self.conn.set_seq(packet.next_seq());
-                writers::write_err(
+                self.reply_err(
                     ErrorKind::ER_SECURE_TRANSPORT_REQUIRED,
                     b"Connections using insecure transport are prohibited.",
-                    &mut self.conn,
                 )
                 .await?;
-                self.conn.flush().await?;
                 return Ok(InitResult::failed());
             }
         }
@@ -826,11 +835,10 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 .contains(CapabilityFlags::CLIENT_SECURE_CONNECTION)
             {
                 debug!("Client does not support SECURE_CONNECTION, returning authentication error");
-                writers::write_err(
+                self.reply_err(
                     ErrorKind::ER_NOT_SUPPORTED_AUTH_MODE,
                     b"Client does not support authentication protocol requested by server; \
                       consider upgrading MySQL client",
-                    &mut self.conn,
                 )
                 .await?;
                 return Ok(InitResult {
@@ -889,14 +897,12 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             debug!(%username, "Successfully authenticated client");
         } else {
             debug!(%username, ?client_auth_plugin, "Received incorrect password");
-            writers::write_err(
+            self.reply_err(
                 ErrorKind::ER_ACCESS_DENIED_ERROR,
                 format!("Access denied for user {username}").as_bytes(),
-                &mut self.conn,
             )
             .await?;
         }
-        self.conn.flush().await?;
         Ok(InitResult {
             auth_success,
             username,
@@ -917,13 +923,11 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             Ok(s) => Ok(Some(s)),
             Err(e) => {
                 debug!(error = %e, "rejecting statement that cannot be decoded");
-                write_err(
+                self.reply_err(
                     ErrorKind::ER_INVALID_CHARACTER_STRING,
                     e.to_string().as_bytes(),
-                    &mut self.conn,
                 )
                 .await?;
-                self.conn.flush().await?;
                 Ok(None)
             }
         }
@@ -1041,6 +1045,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             .await
                         {
                             Ok(()) => {
+                                // The user has already changed, so an error packet would tell
+                                // the client the change failed. Close the connection instead.
                                 self.shim.set_charset(change_user.charset).await?;
                                 writers::write_ok_packet(
                                     &mut self.conn,
@@ -1056,10 +1062,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                     error = %e,
                                     "COM_CHANGE_USER rejected by shim handler",
                                 );
-                                writers::write_err(
+                                self.reply_err(
                                     ErrorKind::ER_ACCESS_DENIED_ERROR,
                                     format!("Access denied for user {username}").as_bytes(),
-                                    &mut self.conn,
                                 )
                                 .await?;
                             }
@@ -1070,10 +1075,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             ?session_plugin,
                             "COM_CHANGE_USER authentication failed: invalid credentials",
                         );
-                        writers::write_err(
+                        self.reply_err(
                             ErrorKind::ER_ACCESS_DENIED_ERROR,
                             format!("Access denied for user {username}").as_bytes(),
-                            &mut self.conn,
                         )
                         .await?;
                     }
@@ -1093,10 +1097,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                     if DeallocateId::All == dealloc_id {
                                         // mysql doesn't allow 'deallocate all',
                                         // should probably be a nom error.
-                                        writers::write_err(
+                                        self.reply_err(
                                             ErrorKind::ER_PARSE_ERROR,
-                                            "Unsupported 'DEALLOCATE PREPARE ALL'".as_bytes(),
-                                            &mut self.conn,
+                                            b"Unsupported 'DEALLOCATE PREPARE ALL'",
                                         )
                                         .await?;
                                     } else {
@@ -1185,10 +1188,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     // This was deprecated in MySQL 5.7.11, but is still used by the `mysql` cli
                     // utility, for autocompletion/"auto-rehash" (`\rehash` will also manually
                     // trigger it)
-                    writers::write_err(
+                    self.reply_err(
                         ErrorKind::ER_UNKNOWN_COM_ERROR,
-                        "COM_FIELD_LIST is unsupported".as_bytes(),
-                        &mut self.conn,
+                        b"COM_FIELD_LIST is unsupported",
                     )
                     .await?;
                 }
@@ -1208,12 +1210,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             .await?;
                         }
                         Err(e) => {
-                            writers::write_err(
-                                ErrorKind::ER_BAD_DB_ERROR,
-                                e.to_string().as_bytes(),
-                                &mut self.conn,
-                            )
-                            .await?;
+                            self.reject_session_setup(ErrorKind::ER_BAD_DB_ERROR, &e)
+                                .await?;
                         }
                     }
                 }
