@@ -583,7 +583,7 @@ pub(crate) fn reorder_joins_in_stmt(
         vec![]
     };
 
-    let suffix_joins = stmt.join.drain(..).collect::<Vec<_>>();
+    let suffix_joins = std::mem::take(&mut stmt.join);
 
     // === Reorder prefix inner joins if applicable ===
     // These are the joins at the beginning of the join chain, up to the first outer join.

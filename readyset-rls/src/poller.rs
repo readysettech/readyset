@@ -420,7 +420,7 @@ async fn sleep_until_shutdown(
 /// must not advance its fingerprint snapshot: the failed events stay in the next tick's diff and
 /// retry. The generation is left unchanged and `sink` is not invoked, so caches keep serving the
 /// last-known-good state rather than invalidating against a partially-reloaded registry.
-pub async fn apply_events(
+async fn apply_events(
     client: &tokio_postgres::Client,
     registry: &Arc<PolicyRegistry>,
     events: &[ChangeEvent],

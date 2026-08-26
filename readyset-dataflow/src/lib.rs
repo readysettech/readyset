@@ -197,7 +197,7 @@ impl Outboxes {
     }
 
     pub fn take_barrier_credits(&mut self) -> Vec<BarrierCredit> {
-        self.barrier_credits.drain(..).collect()
+        std::mem::take(&mut self.barrier_credits)
     }
 }
 

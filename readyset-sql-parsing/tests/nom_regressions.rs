@@ -1122,7 +1122,7 @@ fn string_literals_mysql() {
 
     check_parse_fails!(
         Dialect::MySQL,
-        format!("SELECT 0x123"),
+        "SELECT 0x123",
         "Odd number of digits"
     );
 }

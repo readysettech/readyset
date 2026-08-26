@@ -1363,7 +1363,7 @@ fn postgres_hex_bytes_odd_digits() {
     check_parse_postgres!("SELECT X'0008275c6480';");
     check_parse_fails!(
         Dialect::PostgreSQL,
-        format!("SELECT X'D617263656C6F'"),
+        "SELECT X'D617263656C6F'",
         "Odd number of digits"
     );
 }

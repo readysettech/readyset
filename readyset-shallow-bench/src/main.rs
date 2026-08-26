@@ -888,7 +888,8 @@ async fn point_scenario(num: u32, args: &Args) {
     });
 
     let warm_list: Vec<RangeInclusive<u64>> = if num == 5 {
-        vec![1..=args.cap_keys]
+        let all_keys = 1..=args.cap_keys;
+        vec![all_keys]
     } else {
         // Hot and warm tiers plus the cold working set; the rest of the long tail
         // populates organically.

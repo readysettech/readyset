@@ -961,8 +961,6 @@ mod tests {
     }
 
     mod json_scalar {
-        use proptest::prelude::*;
-
         use super::*;
 
         /// Like [`JsonScalar`] except it can implement [`Arbitrary`] for testing.
