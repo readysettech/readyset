@@ -387,21 +387,31 @@ mod tests {
         let mut pr = PacketConn::new(r);
         let packet = pr.next().await.unwrap().unwrap();
         let handshake = client_handshake(&packet.data).unwrap();
-        assert!(handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_LONG_PASSWORD));
-        assert!(handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_MULTI_RESULTS));
-        assert!(handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_CONNECT_ATTRS));
-        assert!(!handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB));
-        assert!(!handshake
-            .capabilities
-            .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF));
+        assert!(
+            handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_LONG_PASSWORD)
+        );
+        assert!(
+            handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_MULTI_RESULTS)
+        );
+        assert!(
+            handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_CONNECT_ATTRS)
+        );
+        assert!(
+            !handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_CONNECT_WITH_DB)
+        );
+        assert!(
+            !handshake
+                .capabilities
+                .contains(CapabilityFlags::CLIENT_DEPRECATE_EOF)
+        );
         assert_eq!(handshake.charset, UTF8_GENERAL_CI);
         assert_eq!(handshake.username, "jon");
         assert_eq!(handshake.maxps, 16777216);

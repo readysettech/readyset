@@ -6,9 +6,9 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::myc::constants::{ColumnFlags, StatusFlags};
-use crate::packet::{PacketConn, MAX_PACKET_CHUNK_SIZE};
+use crate::packet::{MAX_PACKET_CHUNK_SIZE, PacketConn};
 use crate::value::ToMySqlValue;
-use crate::{writers, Column, ErrorKind, StatementData};
+use crate::{Column, ErrorKind, StatementData, writers};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
 pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;

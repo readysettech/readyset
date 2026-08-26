@@ -43,7 +43,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
             Some(Stream::Tls(_)) => {
                 return Err(io::Error::other(
                     "tls variant found when plain was expected",
-                ))
+                ));
             }
             None => unreachable!(),
         };

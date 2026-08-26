@@ -352,7 +352,7 @@ mod tests {
     use super::Value;
     use crate::myc::io::{ParseBuf, WriteMysqlExt};
     use crate::myc::proto::MySerialize;
-    use crate::{myc, Column, ColumnFlags, ColumnType, ValueInner};
+    use crate::{Column, ColumnFlags, ColumnType, ValueInner, myc};
 
     macro_rules! rt {
         ($name:ident, $t:ty, $v:expr, $ct:expr) => {

@@ -5,10 +5,10 @@ use myc::proto::MySerialize;
 use mysql_time::MySqlTime;
 use readyset_data::TimestampTz;
 
-use crate::error::{other_error, OtherErrorKind};
+use crate::error::{OtherErrorKind, other_error};
 use crate::myc::constants::{ColumnFlags, ColumnType};
 use crate::myc::io::WriteMysqlExt;
-use crate::{myc, Column};
+use crate::{Column, myc};
 
 /// Implementors of this trait can be sent as a single resultset value to a MySQL/MariaDB client.
 pub trait ToMySqlValue {

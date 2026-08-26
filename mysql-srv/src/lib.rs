@@ -220,11 +220,11 @@ use constants::{
     SECURE_CONNECTION, SSL,
 };
 use database_utils::TlsMode;
-use error::{other_error, OtherErrorKind};
+use error::{OtherErrorKind, other_error};
 use mysql_common::constants::CapabilityFlags;
 use readyset_adapter_types::{DeallocateId, ParsedCommand};
-use readyset_data::encoding::Encoding;
 use readyset_data::DfType;
+use readyset_data::encoding::Encoding;
 use readyset_util::redacted::RedactedString;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net;
@@ -641,18 +641,18 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 .set_auth_info(&username, plain_password, interactive)
                 .await?;
             mi.shim.set_charset(charset).await?;
-            if let Some(database) = database {
-                if let Err(e) = mi.shim.on_init(&database).await {
-                    debug!(database, error = %e, "rejecting handshake database");
-                    writers::write_err(
-                        ErrorKind::ER_BAD_DB_ERROR,
-                        e.to_string().as_bytes(),
-                        &mut mi.conn,
-                    )
-                    .await?;
-                    mi.conn.flush().await?;
-                    return Ok(());
-                }
+            if let Some(database) = database
+                && let Err(e) = mi.shim.on_init(&database).await
+            {
+                debug!(database, error = %e, "rejecting handshake database");
+                writers::write_err(
+                    ErrorKind::ER_BAD_DB_ERROR,
+                    e.to_string().as_bytes(),
+                    &mut mi.conn,
+                )
+                .await?;
+                mi.conn.flush().await?;
+                return Ok(());
             }
             writers::write_ok_packet(&mut mi.conn, 0, 0, mi.shim.server_status_flags()).await?;
             mi.conn.flush().await?;

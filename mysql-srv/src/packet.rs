@@ -459,7 +459,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
                 None => {
                     return Ok(ParseResult::Incomplete {
                         packet: Some(packet),
-                    })
+                    });
                 }
             }
         }
