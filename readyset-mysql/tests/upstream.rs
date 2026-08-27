@@ -79,6 +79,44 @@ async fn utf8mb3_keeps_utf8_charset() {
     }
 }
 
+/// A utf8mb3 collation the upstream lacks falls back to the upstream's default collation for
+/// the utf8mb3 charset. An upstream that has the collation applies it.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn utf8mb3_unknown_collation_falls_back_to_charset_default() {
+    let mut conn = mysql_async::Conn::new(mysql_helpers::upstream_config())
+        .await
+        .unwrap();
+    let supported: Option<String> = conn
+        .query_first(
+            "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+             WHERE COLLATION_NAME IN ('utf8mb3_tolower_ci', 'utf8_tolower_ci')",
+        )
+        .await
+        .unwrap();
+    let charset_default: String = conn
+        .query_first(
+            "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+             WHERE CHARACTER_SET_NAME IN ('utf8', 'utf8mb3') AND IS_DEFAULT = 'Yes'",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut upstream = connect().await;
+    let applied = upstream
+        .set_connection_charset("utf8mb3", "utf8mb3_tolower_ci")
+        .await
+        .unwrap();
+    match (supported, applied) {
+        (Some(_), None) => {}
+        (Some(name), Some(applied)) => assert_eq!(applied.collation_name, name),
+        (None, Some(applied)) => assert_eq!(applied.collation_name, charset_default),
+        (None, None) => panic!("upstream lacks the collation but reported applying it verbatim"),
+    }
+}
+
 /// A charset the upstream rejects falls back to the upstream's server default charset and
 /// collation.
 #[tokio::test(flavor = "multi_thread")]

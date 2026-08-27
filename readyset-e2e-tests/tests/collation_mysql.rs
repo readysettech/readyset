@@ -1021,10 +1021,10 @@ async fn test_handshake_collation_byte_upstream_fidelity() {
 /// The utf8mb4_0900_ai_ci collation id. Upstreams older than MySQL 8.0 reject it.
 const UTF8MB4_0900_AI_CI_COLLATION: u8 = 255;
 
-/// A handshake collation the upstream rejects must still produce a working session that uses
-/// the upstream's default collation for the requested charset. A collation the upstream
-/// supports applies verbatim. The expected collation comes from the upstream itself, so the
-/// assertion does not depend on the upstream version.
+/// A handshake collation the upstream rejects must still produce a working session that keeps
+/// the requested charset and uses the upstream's default collation for it. A collation the
+/// upstream supports applies verbatim. The expected collation comes from the upstream itself, so
+/// the assertion does not depend on the upstream version.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
@@ -1058,6 +1058,93 @@ async fn test_handshake_collation_unknown_upstream_survives() {
     };
 
     let mut raw = RawConn::connect_with_charset(&opts, UTF8MB4_0900_AI_CI_COLLATION).await;
+    let rows = raw.query_raw(SESSION_CHARSET_QUERY).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        single_text_column(&rows[0]),
+        format!("utf8mb4 utf8mb4 utf8mb4 {expected}").as_bytes()
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// The session charset and collation variables, joined into one column.
+const SESSION_CHARSET_QUERY: &[u8] = b"SELECT CONCAT_WS(' ', @@character_set_client, \
+    @@character_set_connection, @@character_set_results, @@collation_connection)";
+
+/// A statement-level SET NAMES with a collation the upstream lacks fails the same way it does
+/// on the upstream and leaves the connection usable. On upstreams that support the collation
+/// the statement succeeds on both.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_set_names_unknown_collation_keeps_connection() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    fn server_error_code(result: Result<(), mysql_async::Error>) -> Option<u16> {
+        match result {
+            Ok(()) => None,
+            Err(mysql_async::Error::Server(e)) => Some(e.code),
+            Err(e) => panic!("expected a server error, got {e:?}"),
+        }
+    }
+
+    const SET_NAMES: &str = "SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci";
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let expected = server_error_code(upstream_conn.query_drop(SET_NAMES).await);
+
+    let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    assert_eq!(server_error_code(conn.query_drop(SET_NAMES).await), expected);
+    let one: i64 = conn.query_first("SELECT 1").await.unwrap().unwrap();
+    assert_eq!(one, 1);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// The utf8mb3_tolower_ci collation id. Upstreams older than MySQL 8.0 lack it.
+const UTF8MB3_TOLOWER_CI_COLLATION: u8 = 76;
+
+/// A utf8mb3 handshake collation the upstream lacks falls back to the upstream's default
+/// collation for the utf8mb3 charset. An upstream that has the collation applies it.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_handshake_utf8mb3_unknown_collation_falls_back_to_charset_default() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let supported: Option<String> = upstream_conn
+        .query_first(format!(
+            "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+             WHERE ID = {UTF8MB3_TOLOWER_CI_COLLATION}"
+        ))
+        .await
+        .unwrap();
+    let expected = match supported {
+        Some(name) => name,
+        None => upstream_conn
+            .query_first(
+                "SELECT COLLATION_NAME FROM information_schema.COLLATIONS \
+                 WHERE CHARACTER_SET_NAME IN ('utf8', 'utf8mb3') AND IS_DEFAULT = 'Yes'",
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+    };
+
+    let mut raw = RawConn::connect_with_charset(&opts, UTF8MB3_TOLOWER_CI_COLLATION).await;
     let rows = raw.query_raw(b"SELECT @@collation_connection").await;
     assert_eq!(rows.len(), 1);
     assert_eq!(single_text_column(&rows[0]), expected.as_bytes());
