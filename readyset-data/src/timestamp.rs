@@ -625,10 +625,10 @@ impl TimestampTz {
                 &self.to_string(),
                 collation,
             )),
-            DfType::Char(l, ..) | DfType::VarChar(l, ..) => {
+            DfType::Char(l, collation) | DfType::VarChar(l, collation) => {
                 let mut string = self.to_string();
                 string.truncate(l as usize);
-                Ok(string.into())
+                Ok(DfValue::from_str_and_collation(&string, collation))
             }
 
             DfType::Blob => Ok(DfValue::ByteArray(std::sync::Arc::new(

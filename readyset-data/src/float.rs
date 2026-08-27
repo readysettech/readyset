@@ -140,20 +140,20 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
             collation,
         )),
 
-        DfType::VarChar(l, ..) => {
+        DfType::VarChar(l, collation) => {
             let mut val = float_to_text(val);
             val.truncate(l as usize);
-            Ok(val.to_string().into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
-        DfType::Char(l, ..) => {
+        DfType::Char(l, collation) => {
             let mut val = float_to_text(val);
             val.truncate(l as usize);
             val.extend(std::iter::repeat_n(
                 ' ',
                 (l as usize).saturating_sub(val.len()),
             ));
-            Ok(val.into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
         DfType::Blob => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
@@ -293,20 +293,20 @@ pub(crate) fn coerce_decimal(
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
 
-        DfType::VarChar(l, ..) => {
+        DfType::VarChar(l, collation) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            Ok(val.to_string().into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
-        DfType::Char(l, ..) => {
+        DfType::Char(l, collation) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
             val.extend(std::iter::repeat_n(
                 ' ',
                 (l as usize).saturating_sub(val.len()),
             ));
-            Ok(val.into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
         DfType::Blob => Ok(DfValue::ByteArray(val.to_string().into_bytes().into())),
