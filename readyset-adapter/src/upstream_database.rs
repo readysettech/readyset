@@ -305,10 +305,15 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Set the schema search path for future queries on the upstream database.
     async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error>;
 
-    /// Set the session's `character_set_results` on the upstream connection so proxied result
-    /// rows come back in the client's charset. The default implementation is a no-op for
-    /// upstreams without that concept (PostgreSQL).
-    async fn set_results_character_set(&mut self, _charset: &str) -> Result<(), Self::Error> {
+    /// Set the session's `character_set_results`, and its `collation_connection` when given, on
+    /// the upstream connection so result rows come back in the client's charset and string
+    /// comparison follows the client's collation. The default implementation is a no-op for
+    /// upstreams without those concepts.
+    async fn set_results_charset_and_collation(
+        &mut self,
+        _charset: &str,
+        _collation: Option<&str>,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 

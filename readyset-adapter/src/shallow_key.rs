@@ -7,10 +7,7 @@
 //! partition. Equality and hashing over this key keep one session's cached rows from being served
 //! to another.
 //!
-//! Entries are additionally partitioned by the session's results charset because the upstream
-//! converts result text into that charset before Readyset caches it. An entry filled under one
-//! charset reflects that charset's conversion (including its lossy substitutions) and must not be
-//! served to sessions using another.
+//! Entries are additionally partitioned by the session's results charset and collation.
 
 use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
@@ -71,6 +68,8 @@ pub struct ShallowKey {
     pub session: SessionInputValues,
     /// The session's results charset, which the upstream converted the cached result text into.
     pub charset: Encoding,
+    /// The session's MySQL `collation_connection` id.
+    pub collation: Option<u16>,
 }
 
 impl ShallowKey {
@@ -80,6 +79,7 @@ impl ShallowKey {
             params,
             session: SessionInputValues::default(),
             charset: Encoding::Utf8,
+            collation: None,
         }
     }
 }
@@ -184,11 +184,13 @@ mod tests {
             params: vec![],
             session: values(&[rls_val("k", Some("a"))]),
             charset: Encoding::Utf8,
+            collation: None,
         };
         let kb = ShallowKey {
             params: vec![],
             session: values(&[rls_val("k", Some("b"))]),
             charset: Encoding::Utf8,
+            collation: None,
         };
         assert_ne!(ka, kb);
         assert_eq!(ka, ka.clone());
@@ -202,6 +204,22 @@ mod tests {
             ..utf8.clone()
         };
         assert_ne!(utf8, latin1);
+    }
+
+    #[test]
+    fn shallow_keys_differ_by_collation() {
+        let plain = ShallowKey::plain(vec![DfValue::from(1)]);
+        let ai_ci = ShallowKey {
+            collation: Some(255),
+            ..plain.clone()
+        };
+        let bin = ShallowKey {
+            collation: Some(46),
+            ..plain.clone()
+        };
+        assert_ne!(plain, ai_ci);
+        assert_ne!(ai_ci, bin);
+        assert_eq!(ai_ci, ai_ci.clone());
     }
 
     #[test]

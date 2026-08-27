@@ -320,6 +320,7 @@ where
             params: params_key,
             session: session_values,
             charset: connectors.noria.results_encoding(),
+            collation: connectors.noria.connection_collation(),
         };
 
         // An entry keyed on session state does not refresh via the
@@ -406,6 +407,7 @@ where
         view_request: &ShallowViewRequest,
         results_encoding: Encoding,
         migration_state: &mut MigrationState,
+        connection_collation: Option<u16>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
         let params_key = query_params.make_keys_from_merged(&merged)?;
@@ -439,6 +441,7 @@ where
             params: params_key,
             session: session_values,
             charset: results_encoding,
+            collation: connection_collation,
         };
 
         // An entry keyed on session state must not refresh through the

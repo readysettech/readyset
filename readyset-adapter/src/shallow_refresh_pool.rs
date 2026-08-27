@@ -8,6 +8,7 @@ use metric::{
     SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
 };
 use metrics::{Gauge, counter, gauge, histogram};
+use mysql_common::collations::{Collation, CollationId};
 use readyset_client::query::QueryId;
 use readyset_data::encoding::Encoding;
 use readyset_shallow::CacheInsertGuard;
@@ -273,9 +274,9 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         let mut reconnect = false;
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
-        // The connection's current results charset. A fresh connection starts at the upstream
-        // default.
-        let mut results_charset = Encoding::Utf8;
+        // The connection's current results charset and collation. A fresh connection starts at
+        // the upstream default.
+        let mut results_cs_coll = (Encoding::Utf8, None);
 
         loop {
             let request = match timeout(WORKER_TIMEOUT, rx.recv()).await {
@@ -299,7 +300,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 match DB::connect(connect_config, None, None, false).await {
                     Ok(conn) => {
                         upstream = Some(conn);
-                        results_charset = Encoding::Utf8;
+                        results_cs_coll = (Encoding::Utf8, None);
                     }
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
@@ -327,23 +328,31 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 shallow_exec_meta,
             } = request;
 
-            // Refresh in the entry's charset, so the upstream applies the same conversion the
-            // fill saw. The fill path never caches under a binary or unsupported results
-            // charset, so no entry can exist under such a key and those requests are dropped.
-            let encoding = cache.key().map(|k| k.charset);
-            let charset_name = encoding.and_then(|e| e.mysql_character_set_name());
-            let (Some(encoding), Some(charset_name)) = (encoding, charset_name) else {
+            // Refresh in the entry's charset and collation, so the upstream applies the same
+            // conversion and string comparison the fill saw. The fill path never caches under a
+            // binary or unsupported results charset, so no entry can exist under such a key and
+            // those requests are dropped.
+            let key_cs_coll = cache.key().map(|k| (k.charset, k.collation));
+            let charset_name = key_cs_coll.and_then(|(e, _)| e.mysql_character_set_name());
+            let (Some(key_cs_coll), Some(charset_name)) = (key_cs_coll, charset_name) else {
                 Self::mark_idle(&pool, &rx, idx).await;
                 continue;
             };
-            if encoding != results_charset {
-                match conn.set_results_character_set(charset_name).await {
-                    Ok(()) => results_charset = encoding,
+            if key_cs_coll != results_cs_coll {
+                let collation_name = key_cs_coll
+                    .1
+                    .map(|id| Collation::resolve(CollationId::from(id)).collation);
+                match conn
+                    .set_results_charset_and_collation(charset_name, collation_name)
+                    .await
+                {
+                    Ok(()) => results_cs_coll = key_cs_coll,
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_CHARSET, || {
                             warn!(
                                 error = %e,
                                 charset = charset_name,
+                                collation = collation_name,
                                 "Failed to set results charset for refresh",
                             )
                         });
@@ -400,7 +409,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             };
 
-            if let Err(e) = result.refresh(cache, encoding).await {
+            if let Err(e) = result.refresh(cache, key_cs_coll.0).await {
                 rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
                     warn!(
                         error = %e,

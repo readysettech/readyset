@@ -135,6 +135,9 @@ pub struct SetBehavior {
     /// columns. Corresponds to the collation a MySQL `SET NAMES` or `SET
     /// @@character_set_results` implies.
     pub set_results_collation: Option<u16>,
+    /// This `SET` statement changes the session's `collation_connection` id. Corresponds to MySQL
+    /// `SET @@collation_connection`, `SET @@character_set_connection`, or `SET NAMES`.
+    pub set_connection_collation: Option<u16>,
     /// This `SET` statement changes the encoding in which the client sends query text.
     /// Corresponds to `SET @@character_set_client` or `SET NAMES` in MySQL.
     pub set_client_encoding: Option<readyset_data::encoding::Encoding>,
@@ -177,6 +180,15 @@ impl SetBehavior {
     pub fn set_results_collation(mut self, collation: Option<u16>) -> Self {
         if let Some(collation) = collation {
             self.set_results_collation = Some(collation);
+        } else {
+            self.unsupported = true;
+        }
+        self
+    }
+
+    pub fn set_connection_collation(mut self, collation: Option<u16>) -> Self {
+        if let Some(collation) = collation {
+            self.set_connection_collation = Some(collation);
         } else {
             self.unsupported = true;
         }
@@ -284,6 +296,7 @@ impl Default for SetBehavior {
             set_search_path: None,
             set_results_encoding: None,
             set_results_collation: None,
+            set_connection_collation: None,
             set_client_encoding: None,
             upstream_rewrite: UpstreamSetRewrite::default(),
             set_timezone: None,

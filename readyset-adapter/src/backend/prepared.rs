@@ -1391,6 +1391,7 @@ where
         }
 
         let results_encoding = self.connectors.noria.results_encoding();
+        let connection_collation = self.connectors.noria.connection_collation();
         let upstream = &mut self.connectors.upstream;
         let noria = &mut self.connectors.noria;
 
@@ -1698,6 +1699,7 @@ where
                     view_request,
                     results_encoding,
                     &mut cached_statement.migration_state,
+                    connection_collation,
                 )
                 .await
             }

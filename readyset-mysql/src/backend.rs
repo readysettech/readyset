@@ -1036,6 +1036,10 @@ where
         self.noria.connectors.noria.set_results_encoding(encoding);
         self.noria.connectors.noria.set_client_encoding(encoding);
         self.noria.connectors.noria.set_results_collation(collation);
+        self.noria
+            .connectors
+            .noria
+            .set_connection_collation(collation);
         Ok(())
     }
 

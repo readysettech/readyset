@@ -824,8 +824,8 @@ async fn test_set_names_collate_forwarded_upstream() {
 }
 
 /// SET collation_connection is forwarded verbatim to the upstream and the session keeps
-/// serving from caches. This documents intended current behavior; no local collation
-/// semantics are attached to the setting (TODO(mvzink) in readyset-mysql/src/query_handler.rs).
+/// serving from caches. It leaves the collation id in column metadata unchanged, matching the
+/// upstream.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
@@ -877,6 +877,19 @@ async fn test_set_collation_connection_proxied_and_still_cached() {
         QueryDestination::Readyset(..)
     );
     assert_eq!(rows, vec![(1, "abc".to_string())]);
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop("SET collation_connection = 'utf8mb4_bin'")
+        .await
+        .unwrap();
+    let expected = column_charsets(&mut upstream_conn, QUERY).await;
+    assert_eq!(column_charsets(&mut conn, QUERY).await, expected);
+    assert_matches!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::Readyset(..)
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1394,6 +1407,76 @@ async fn test_shallow_prepared_params_correct_on_cs_column() {
             assert_eq!(rows, vec![(id, param.to_string())]);
         });
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Sessions with different collations must not share a shallow entry whose row order depends on
+/// the session collation. A sort key built from literals takes that collation, so the labels
+/// order as a, B, c case-insensitively and B, a, c in binary.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql, modern)]
+async fn test_shallow_order_by_not_shared_across_collations() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    const QUERY: &str =
+        "SELECT id FROM coll_order ORDER BY CASE n WHEN 1 THEN 'c' WHEN 2 THEN 'a' WHEN 3 THEN 'B' END";
+
+    let mut ai_ci_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    ai_ci_conn
+        .query_drop("CREATE TABLE coll_order (id INT PRIMARY KEY, n INT)")
+        .await
+        .unwrap();
+    ai_ci_conn
+        .query_drop("INSERT INTO coll_order VALUES (1, 1), (2, 2), (3, 3)")
+        .await
+        .unwrap();
+    ai_ci_conn
+        .query_drop(format!("CREATE SHALLOW CACHE FROM {QUERY}"))
+        .await
+        .unwrap();
+
+    let mut bin_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    for (conn, collation, order) in [
+        (&mut ai_ci_conn, "utf8mb4_0900_ai_ci", vec![2i64, 3, 1]),
+        (&mut bin_conn, "utf8mb4_bin", vec![3, 2, 1]),
+    ] {
+        conn.query_drop(format!("SET NAMES utf8mb4 COLLATE {collation}"))
+            .await
+            .unwrap();
+        let rows: Vec<i64> = conn.query(QUERY).await.unwrap();
+        assert_eq!(rows, order);
+        assert_matches!(
+            last_query_info(conn).await.destination,
+            QueryDestination::ReadysetThenUpstream(..)
+        );
+        eventually!(run_test: {
+            let rows: Vec<i64> = conn.query(QUERY).await.unwrap();
+            let info = last_query_info(conn).await;
+            AssertUnwindSafe(move || (info, rows))
+        }, then_assert: |result| {
+            let (info, rows) = result();
+            assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
+            assert_eq!(rows, order);
+        });
+    }
+
+    // Setting the collation alone selects the binary-collation entry.
+    let mut set_coll_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    set_coll_conn
+        .query_drop("SET collation_connection = utf8mb4_bin")
+        .await
+        .unwrap();
+    let rows: Vec<i64> = set_coll_conn.query(QUERY).await.unwrap();
+    assert_eq!(rows, vec![3, 2, 1]);
+    assert_matches!(
+        last_query_info(&mut set_coll_conn).await.destination,
+        QueryDestination::ReadysetShallow(..)
+    );
 
     shutdown_tx.shutdown().await;
 }

@@ -773,10 +773,21 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
-    async fn set_results_character_set(&mut self, charset: &str) -> Result<(), Self::Error> {
-        self.conn
-            .query_drop(format!("SET character_set_results = {charset}"))
-            .await?;
+    async fn set_results_charset_and_collation(
+        &mut self,
+        charset: &str,
+        collation: Option<&str>,
+    ) -> Result<(), Self::Error> {
+        if !valid_mysql_name(charset) || !collation.is_none_or(valid_mysql_name) {
+            internal!("invalid MySQL charset or collation name")
+        }
+        let stmt = match collation {
+            Some(collation) => {
+                format!("SET character_set_results = {charset}, collation_connection = {collation}")
+            }
+            None => format!("SET character_set_results = {charset}"),
+        };
+        self.conn.query_drop(stmt).await?;
         Ok(())
     }
 
