@@ -409,7 +409,25 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             port = ?pg_config.get_ports()
         );
         span.in_scope(|| debug!("Establishing connection"));
-        let (client, connection) = pg_config.connect(tls).instrument(span.clone()).await?;
+        let connect_timeout = upstream_config.upstream_connect_timeout;
+        let (client, connection) = match tokio::time::timeout(
+            connect_timeout,
+            pg_config.connect(tls).instrument(span.clone()),
+        )
+        .await
+        {
+            Ok(connected) => connected?,
+            Err(_) => {
+                return Err(Error::ReadySet(ReadySetError::UpstreamConnectionLost(
+                    format!(
+                        "connecting to {:?}:{:?} timed out after {}s",
+                        pg_config.get_hosts(),
+                        pg_config.get_ports(),
+                        connect_timeout.as_secs_f64()
+                    ),
+                )));
+            }
+        };
         let version = connection.parameter("server_version").ok_or_else(|| {
             ReadySetError::Internal("Upstream database failed to send server version".to_string())
         })?;

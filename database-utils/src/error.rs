@@ -37,6 +37,9 @@ pub enum DatabaseError {
     #[error("Upstream query timeout")]
     UpstreamQueryTimeout,
 
+    #[error("Connecting to the upstream timed out after {}s", .0.as_secs_f64())]
+    ConnectTimeout(std::time::Duration),
+
     #[error("Row missing from result set")]
     RowMissing,
 
@@ -128,7 +131,8 @@ impl DatabaseError {
             Self::NativeTls(_)
             | Self::DeadpoolPool(_)
             | Self::UpstreamConnectionNone
-            | Self::UpstreamQueryTimeout => UpstreamFailure::Down,
+            | Self::UpstreamQueryTimeout
+            | Self::ConnectTimeout(_) => UpstreamFailure::Down,
             Self::DeadpoolBuild(_)
             | Self::ValueConversion(_)
             | Self::WrongConnection(_)

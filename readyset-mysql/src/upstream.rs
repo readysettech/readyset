@@ -484,9 +484,25 @@ impl MySqlUpstream {
             user = %opts.user().unwrap_or("<NO USER>"),
         );
         span.in_scope(|| debug!("Establishing connection"));
-        let conn = Conn::new(OptsBuilder::from_opts(opts))
-            .instrument(span.clone())
-            .await?;
+        let connect_timeout = upstream_config.upstream_connect_timeout;
+        let conn = match tokio::time::timeout(
+            connect_timeout,
+            Conn::new(OptsBuilder::from_opts(opts.clone())).instrument(span.clone()),
+        )
+        .await
+        {
+            Ok(conn) => conn?,
+            Err(_) => {
+                return Err(Error::ReadySet(ReadySetError::UpstreamConnectionLost(
+                    format!(
+                        "connecting to {}:{} timed out after {}s",
+                        opts.ip_or_hostname(),
+                        opts.tcp_port(),
+                        connect_timeout.as_secs_f64()
+                    ),
+                )));
+            }
+        };
 
         // Check that the server version is supported.
         let (major, minor, _) = conn.server_version();

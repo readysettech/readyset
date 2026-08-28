@@ -203,6 +203,16 @@ pub struct UpstreamConfig {
     #[serde(default = "default_replicator_restart_timeout")]
     pub replicator_restart_timeout: Duration,
 
+    /// Seconds to wait for a connection to an upstream server before treating it as unreachable.
+    #[arg(
+        long,
+        env = "UPSTREAM_CONNECT_TIMEOUT",
+        default_value = "5",
+        value_parser = duration_from_seconds
+    )]
+    #[serde(default = "default_upstream_connect_timeout")]
+    pub upstream_connect_timeout: Duration,
+
     /// By default, ReadySet attempts to snapshot and replicate all tables in the database
     /// specified in --upstream-db-url. However, if the queries you want to cache in ReadySet
     /// access only a subset of tables in the database, you can use this option to limit the tables
@@ -453,6 +463,10 @@ fn default_replicator_restart_timeout() -> Duration {
     UpstreamConfig::default().replicator_restart_timeout
 }
 
+fn default_upstream_connect_timeout() -> Duration {
+    UpstreamConfig::default().upstream_connect_timeout
+}
+
 fn default_snapshot_report_interval_secs() -> u16 {
     UpstreamConfig::default().snapshot_report_interval_secs
 }
@@ -516,6 +530,7 @@ impl Default for UpstreamConfig {
             replica_report_user: Default::default(),
             replica_report_password: Default::default(),
             replicator_restart_timeout: Duration::from_secs(1),
+            upstream_connect_timeout: Duration::from_secs(5),
             replication_tables: Default::default(),
             replication_tables_ignore: Default::default(),
             snapshot_report_interval_secs: 30,
@@ -702,6 +717,19 @@ impl DatabaseURL {
                     tokio::spawn(async move { connection.await.map_err(Into::into) });
                 Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
             }
+        }
+    }
+
+    /// Like [`connect`](Self::connect), but fails with [`DatabaseError::ConnectTimeout`] after
+    /// `timeout`.
+    pub async fn connect_bounded(
+        &self,
+        verification: &ServerCertVerification,
+        timeout: Duration,
+    ) -> Result<DatabaseConnection, DatabaseError> {
+        match tokio::time::timeout(timeout, self.connect(verification)).await {
+            Ok(result) => result,
+            Err(_) => Err(DatabaseError::ConnectTimeout(timeout)),
         }
     }
 
