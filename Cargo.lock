@@ -1461,6 +1461,7 @@ dependencies = [
  "num_cpus",
  "pem",
  "postgres-native-tls",
+ "rand 0.10.2",
  "readyset-errors",
  "readyset-sql",
  "readyset-util",

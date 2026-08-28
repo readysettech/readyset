@@ -26,6 +26,7 @@ use crate::tls::{ServerCertVerification, get_mysql_tls_config, get_tls_connector
 mod connection;
 pub mod error;
 pub mod tls;
+pub mod upstream_registry;
 pub mod upstream_servers;
 
 pub use connection::{
@@ -33,6 +34,9 @@ pub use connection::{
     QueryableConnection, SimpleQueryResults, SimpleQueryResultsRow, Transaction,
 };
 pub use error::{DatabaseError, UpstreamFailure};
+pub use upstream_registry::{
+    SharedUpstreamRegistry, UpstreamConnectionGuard, UpstreamServerRegistry, UpstreamServerState,
+};
 pub use upstream_servers::{UpstreamServer, UpstreamServers};
 
 const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";

@@ -12,6 +12,7 @@ mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 native-tls = { workspace = true }
 pem = { workspace = true }
+rand = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
