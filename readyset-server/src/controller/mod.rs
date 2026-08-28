@@ -15,7 +15,8 @@ use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
-    GetLeaderResult, WorkerDescriptor, WorkerId, WorkerSchedulingConfig,
+    GetLeaderResult, PersistedUpstreamServers, UpstreamServerStore, WorkerDescriptor, WorkerId,
+    WorkerSchedulingConfig,
 };
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::Change;
@@ -670,6 +671,7 @@ impl Controller {
             }) => {
                 info!("won leader election, creating Leader");
                 gauge!(metric::CONTROLLER_IS_LEADER).set(1f64);
+                self.resolve_upstream_servers().await;
 
                 // `DfState.channel_coordinator` is `#[serde(skip)]`, so the state we got from
                 // the Authority (or from a freshly-constructed `ControllerState::new`) carries
@@ -1255,6 +1257,62 @@ impl Controller {
         Ok(())
     }
 
+    /// Replace the configured upstream and CDC lists with the ones stored in the Authority,
+    /// seeding it from this server's configuration when it holds none yet.
+    async fn resolve_upstream_servers(&mut self) {
+        let config = &mut self.config.replicator_config;
+        let bootstrap = match (config.upstream_servers(), config.cdc_list()) {
+            (Ok(upstream), Ok(cdc)) => PersistedUpstreamServers {
+                upstream_db_url: upstream.map(|s| s.raw_list()),
+                cdc_db_url: cdc.map(|s| s.raw_list()),
+            },
+            (Err(error), _) | (_, Err(error)) => {
+                error!(%error, "Invalid configured upstream server list");
+                return;
+            }
+        };
+        let stored = match self
+            .authority
+            .load_or_init_upstream_servers(bootstrap.clone())
+            .await
+        {
+            Ok(stored) => stored,
+            Err(error) => {
+                error!(%error, "Failed to load the upstream server list from the Authority");
+                return;
+            }
+        };
+        let upstream = stored
+            .upstream_db_url
+            .as_deref()
+            .map(|s| s.parse::<database_utils::UpstreamServers>())
+            .transpose();
+        let cdc = stored
+            .cdc_db_url
+            .as_deref()
+            .map(|s| s.parse::<database_utils::UpstreamServers>())
+            .transpose();
+        match (upstream, cdc) {
+            (Ok(upstream), Ok(cdc)) => {
+                if stored != bootstrap {
+                    warn!(
+                        "Using the upstream server lists stored in the Authority; the configured \
+                         --upstream-db-url and --cdc-db-url are ignored after the first start"
+                    );
+                    config.upstream_db_url = upstream
+                        .map(database_utils::UpstreamServers::into_vec)
+                        .unwrap_or_default();
+                    config.cdc_db_url = cdc
+                        .map(database_utils::UpstreamServers::into_vec)
+                        .unwrap_or_default();
+                }
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                error!(%error, "Invalid upstream server list stored in the Authority");
+            }
+        }
+    }
+
     /// Handle CHANGE CDC: update the CDC URL in the replicator config.
     ///
     /// Spawned as a separate tokio task to avoid blocking the controller event loop
@@ -1290,6 +1348,19 @@ impl Controller {
             }
             drop(ds);
 
+            // The lists this controller last saw; the write fails if the Authority holds
+            // something else.
+            let previous = PersistedUpstreamServers {
+                upstream_db_url: leader
+                    .replicator_config
+                    .upstream_servers()?
+                    .map(|s| s.raw_list()),
+                cdc_db_url: leader.replicator_config.cdc_list()?.map(|s| s.raw_list()),
+            };
+            leader
+                .authority
+                .set_cdc_db_url(previous, servers.raw_list())
+                .await?;
             leader.replicator_config.cdc_db_url = servers.clone().into_vec();
             *leader
                 .cdc_server_list

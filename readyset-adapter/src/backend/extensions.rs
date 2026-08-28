@@ -16,7 +16,8 @@ use itertools::Itertools;
 use readyset_client::consensus::mcp_tokens::McpTokenStore;
 use readyset_client::consensus::mcp_tokens::{McpToken, McpTokenScope as AuthorityMcpTokenScope};
 use readyset_client::consensus::{
-    AllowedUsersMap, Authority, AuthorityControl, CacheDDLRequest, PasswordChange, UserStore,
+    AllowedUsersMap, Authority, AuthorityControl, CacheDDLRequest, PasswordChange,
+    PersistedUpstreamServers, UpstreamServerStore, UserStore,
 };
 use readyset_client::post_processing::Results;
 use readyset_client::recipe::CacheExpr;
@@ -1952,6 +1953,16 @@ where
                     .as_ref()
                     .ok_or_else(|| internal_err!("upstream config is not configured"))?;
                 let mut config = config.write().await;
+                // The lists this adapter last saw; the write fails if the Authority holds something
+                // else.
+                let previous = PersistedUpstreamServers {
+                    upstream_db_url: config.upstream_servers()?.map(|s| s.raw_list()),
+                    cdc_db_url: config.cdc_list()?.map(|s| s.raw_list()),
+                };
+                state
+                    .authority
+                    .set_upstream_db_url(previous, servers.raw_list())
+                    .await?;
                 config.upstream_db_url = servers.clone().into_vec();
                 if let Some(registry) = &state.upstream_registry {
                     registry.replace(Some(servers));
@@ -1974,7 +1985,17 @@ where
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                 url,
-            })) => connectors.noria.change_cdc_url(url).await,
+            })) => {
+                let result = connectors.noria.change_cdc_url(url).await?;
+                // The controller stored the new list; keep this adapter's copy in step.
+                if let Some(config) = &state.upstream_config {
+                    let servers = url.parse::<UpstreamServers>().map_err(|_| {
+                        internal_err!("the controller accepted an invalid CDC list")
+                    })?;
+                    config.write().await.cdc_db_url = servers.into_vec();
+                }
+                Ok(result)
+            }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowlistChange(stmt)) => {
                 // Mutating an allowlist steers what auto-caches and persists to
                 // the authority, so it belongs to the cache-DDL family and is

@@ -26,6 +26,7 @@ use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseType, SharedUpstreamRegistry, TlsMode, UpstreamConfig, UpstreamHealthMonitor,
+    UpstreamServers,
 };
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -61,7 +62,8 @@ use readyset_adapter::{
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
 use readyset_client::consensus::{
-    AllowedUsersMap, AuthorityControl, AuthorityType, UserCredentials, UserStore,
+    AllowedUsersMap, AuthorityControl, AuthorityType, PersistedUpstreamServers,
+    UpstreamServerStore, UserCredentials, UserStore,
 };
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
@@ -846,6 +848,83 @@ impl Options {
         }
     }
 
+    /// The address the Authority is reached at.
+    fn authority_address(&self) -> String {
+        match self.authority {
+            AuthorityType::Standalone => self
+                .server_worker_options
+                .storage_dir(&self.deployment)
+                .into_os_string()
+                .into_string()
+                .unwrap_or_else(|_| self.authority_address.clone()),
+            _ => self.authority_address.clone(),
+        }
+    }
+
+    /// Replace the `--upstream-db-url` and `--cdc-db-url` values with the lists stored in the
+    /// Authority, if it holds any.
+    pub async fn resolve_upstream_servers(&mut self) -> anyhow::Result<()> {
+        let authority = self
+            .authority
+            .to_authority(&self.authority_address(), &self.deployment)?;
+        let stored = authority
+            .load_upstream_servers()
+            .await
+            .map_err(|e| anyhow!("Failed to load the upstream server list: {e}"))?;
+        match stored {
+            Some(stored) => self.apply_upstream_servers(stored),
+            None => Ok(()),
+        }
+    }
+
+    /// Seed the Authority with this process's lists if it holds none yet, and adopt the stored
+    /// ones. Runs after the preflight, so a failed start leaves the Authority untouched.
+    pub async fn persist_upstream_servers(&mut self) -> anyhow::Result<()> {
+        let authority = self
+            .authority
+            .to_authority(&self.authority_address(), &self.deployment)?;
+        let config = &self.server_worker_options.replicator_config;
+        let bootstrap = PersistedUpstreamServers {
+            upstream_db_url: config.upstream_servers()?.map(|s| s.raw_list()),
+            cdc_db_url: config.cdc_list()?.map(|s| s.raw_list()),
+        };
+        let stored = authority
+            .load_or_init_upstream_servers(bootstrap)
+            .await
+            .map_err(|e| anyhow!("Failed to store the upstream server list: {e}"))?;
+        self.apply_upstream_servers(stored)
+    }
+
+    fn apply_upstream_servers(&mut self, stored: PersistedUpstreamServers) -> anyhow::Result<()> {
+        let config = &mut self.server_worker_options.replicator_config;
+        let stored_upstream = stored
+            .upstream_db_url
+            .as_deref()
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e| anyhow!("Invalid stored upstream server list: {e}"))?;
+        let stored_cdc = stored
+            .cdc_db_url
+            .as_deref()
+            .map(|s| s.parse())
+            .transpose()
+            .map_err(|e| anyhow!("Invalid stored CDC server list: {e}"))?;
+        if stored_upstream != config.upstream_servers()? || stored_cdc != config.cdc_list()? {
+            warn!(
+                "Using the upstream server lists stored in the Authority; --upstream-db-url and \
+                 --cdc-db-url on the command line are ignored after the first start. Change the \
+                 lists with ALTER READYSET CHANGE UPSTREAM and ALTER READYSET CHANGE CDC."
+            );
+            config.upstream_db_url = stored_upstream
+                .map(UpstreamServers::into_vec)
+                .unwrap_or_default();
+            config.cdc_db_url = stored_cdc
+                .map(UpstreamServers::into_vec)
+                .unwrap_or_default();
+        }
+        Ok(())
+    }
+
     /// Infer the database type from the upstream and/or CDC URLs, validating each server list and
     /// that they agree if both are present. Returns `None` if neither URL is provided.
     fn infer_database_type_from_urls(&self) -> anyhow::Result<Option<DatabaseType>> {
@@ -1373,6 +1452,7 @@ where
     <H::UpstreamDatabase as UpstreamDatabase>::StatementMeta: Sync,
 {
     pub fn run(&mut self, rt: tokio::runtime::Runtime, mut options: Options) -> anyhow::Result<()> {
+        rt.block_on(options.persist_upstream_servers())?;
         info!(?options, "Starting Readyset adapter");
 
         if options.deployment_mode.is_standalone() {
@@ -1450,14 +1530,7 @@ where
         rs_connect.in_scope(|| info!(%options.authority_address, %options.deployment));
 
         let authority_type = options.authority.clone();
-        let authority_address = match authority_type {
-            AuthorityType::Standalone => deployment_dir
-                .clone()
-                .into_os_string()
-                .into_string()
-                .unwrap_or_else(|_| options.authority_address.clone()),
-            _ => options.authority_address.clone(),
-        };
+        let authority_address = options.authority_address();
         let deployment = options.deployment.clone();
         let adapter_authority =
             Arc::new(authority_type.to_authority(&authority_address, &deployment)?);
@@ -2591,8 +2664,67 @@ where
 #[cfg(test)]
 mod tests {
     use database_utils::{DatabaseURL, UpstreamServer};
+    use readyset_client::consensus::UpstreamServerStore;
 
     use super::*;
+
+    /// Options for a standalone deployment rooted at `dir`, with `url` as the upstream list.
+    /// `dir` and `deployment` must be unique to the test.
+    fn options_at(dir: &temp_dir::TempDir, deployment: &str, url: &str) -> Options {
+        Options::try_parse_from([
+            "readyset",
+            "--deployment",
+            deployment,
+            "--authority",
+            "standalone",
+            "--storage-dir",
+            dir.path().to_str().unwrap(),
+            "--upstream-db-url",
+            url,
+        ])
+        .unwrap()
+    }
+
+    /// Resolving leaves the Authority untouched; persisting seeds it, and then the stored list
+    /// wins.
+    #[tokio::test]
+    async fn only_persisting_seeds_the_authority() {
+        let dir = temp_dir::TempDir::new().unwrap();
+        let deployment = "only_persisting_seeds_the_authority";
+        let stored = |options: &Options| {
+            let authority = options
+                .authority
+                .to_authority(&options.authority_address(), &options.deployment)
+                .unwrap();
+            async move { authority.load_upstream_servers().await.unwrap() }
+        };
+
+        let mut rejected = options_at(&dir, deployment, "mysql://bad:bad@a:3306/db");
+        rejected.resolve_upstream_servers().await.unwrap();
+        assert_eq!(stored(&rejected).await, None, "resolving must not seed");
+
+        let mut good = options_at(&dir, deployment, "mysql://u:p@b:3306/db");
+        good.resolve_upstream_servers().await.unwrap();
+        good.persist_upstream_servers().await.unwrap();
+        let seeded = stored(&good).await.expect("persisting seeds");
+        assert_eq!(
+            seeded.upstream_db_url.as_deref().map(String::as_str),
+            Some("mysql://u:p@b:3306/db|50")
+        );
+
+        let mut later = options_at(&dir, deployment, "mysql://u:p@c:3306/db");
+        later.resolve_upstream_servers().await.unwrap();
+        assert_eq!(
+            later
+                .server_worker_options
+                .replicator_config
+                .upstream_db_url
+                .iter()
+                .map(|s| s.display())
+                .collect::<Vec<_>>(),
+            vec!["b:3306"]
+        );
+    }
 
     /// Builds shards without runtimes behind them: placement only reads the live counts.
     fn shards(n: usize) -> ConnectionShards {
