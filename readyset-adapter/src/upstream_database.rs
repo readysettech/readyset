@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-pub use database_utils::UpstreamConfig;
+pub use database_utils::{UpstreamConfig, UpstreamFailure};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::DfValue;
@@ -73,6 +73,9 @@ impl<DB: UpstreamDatabase> Clone for UpstreamPrepare<DB> {
 
 pub trait IsFatalError {
     fn is_fatal(&self) -> bool;
+
+    /// The kind of upstream failure this error represents.
+    fn upstream_failure(&self) -> UpstreamFailure;
 }
 
 /// The engine's answer to an authorization probe ([`UpstreamDatabase::acl_probe`]).

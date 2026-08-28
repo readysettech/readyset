@@ -878,6 +878,11 @@ impl ReadySetError {
         })
     }
 
+    /// Returns `true` if the error means the upstream server is down.
+    pub fn is_upstream_server_down(&self) -> bool {
+        self.any_cause(|e| matches!(e, Self::UpstreamConnectionLost(_)))
+    }
+
     pub fn is_rpc_failure(&self) -> bool {
         matches!(self, Self::RpcFailed { .. })
     }

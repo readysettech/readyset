@@ -1,7 +1,7 @@
 use std::io;
 
 use mysql_srv::MsqlSrvError;
-use readyset_adapter::upstream_database::IsFatalError;
+use readyset_adapter::upstream_database::{IsFatalError, UpstreamFailure};
 use readyset_errors::ReadySetError;
 use thiserror::Error;
 
@@ -59,5 +59,14 @@ impl Error {
 impl IsFatalError for Error {
     fn is_fatal(&self) -> bool {
         matches!(self, Self::MySql(e) if e.is_fatal())
+    }
+
+    fn upstream_failure(&self) -> UpstreamFailure {
+        match self {
+            Self::MySql(e) => UpstreamFailure::from_mysql(e),
+            Self::ReadySet(e) if e.is_upstream_server_down() => UpstreamFailure::Down,
+            Self::Io(_) => UpstreamFailure::Down,
+            Self::ReadySet(_) | Self::MsqlSrv(_) => UpstreamFailure::Semantic,
+        }
     }
 }

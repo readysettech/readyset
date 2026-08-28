@@ -32,7 +32,7 @@ pub use connection::{
     DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,
     QueryableConnection, SimpleQueryResults, SimpleQueryResultsRow, Transaction,
 };
-pub use error::DatabaseError;
+pub use error::{DatabaseError, UpstreamFailure};
 pub use upstream_servers::{UpstreamServer, UpstreamServers};
 
 const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";

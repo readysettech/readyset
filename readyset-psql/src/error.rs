@@ -1,7 +1,7 @@
 use std::io;
 
 use psql_srv as ps;
-use readyset_adapter::upstream_database::IsFatalError;
+use readyset_adapter::upstream_database::{IsFatalError, UpstreamFailure};
 use readyset_errors::ReadySetError;
 use thiserror::Error;
 use tracing::error;
@@ -50,5 +50,14 @@ impl IsFatalError for Error {
         // For now we have no way of matching on the inner error kind ofr postgres errors, so
         // we can't detect io, or other fatal errors.
         matches!(self, Self::PostgreSql(e) if e.is_closed())
+    }
+
+    fn upstream_failure(&self) -> UpstreamFailure {
+        match self {
+            Self::PostgreSql(e) => UpstreamFailure::from_postgres(e),
+            Self::ReadySet(e) if e.is_upstream_server_down() => UpstreamFailure::Down,
+            Self::Io(_) | Self::Tls(_) => UpstreamFailure::Down,
+            Self::ReadySet(_) => UpstreamFailure::Semantic,
+        }
     }
 }
