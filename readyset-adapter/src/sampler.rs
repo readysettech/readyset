@@ -47,6 +47,7 @@
 use metrics::{Label, counter, gauge};
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::{collections::VecDeque, time::Duration};
 use tokio::time::Instant as TokioInstant;
 use tokio::{
@@ -59,7 +60,7 @@ use xxhash_rust::xxh3::Xxh3;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseError, DatabaseURL, QueryResults, QueryableConnection,
-    UpstreamConfig,
+    SharedUpstreamRegistry, UpstreamConfig,
 };
 use metric::QUERY_SAMPLER_QUEUE_LEN;
 use metric::{
@@ -75,6 +76,7 @@ use readyset_util::{
 };
 
 use crate::backend::READYSET_QUERY_SAMPLER;
+use crate::upstream_servers::{self, PickedServer};
 
 /// Configuration for the background query sampler
 #[derive(Debug)]
@@ -110,8 +112,11 @@ pub struct Sampler {
     config: SamplerConfig,
     rx: SamplerRx,
     upstream_conn: Option<DatabaseConnection>,
+    /// The server `upstream_conn` was picked from.
+    upstream_server: Option<PickedServer>,
     rs_conn: Option<DatabaseConnection>,
     upstream_config: UpstreamConfig,
+    upstream_registry: Arc<SharedUpstreamRegistry>,
     shutdown_recv: ShutdownReceiver,
     last_executed_at: Option<std::time::Instant>,
     retry_queue: VecDeque<(TokioInstant, Entry)>,
@@ -190,10 +195,13 @@ async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<Data
     connect(url, verification).await
 }
 
-async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection> {
+/// Pick a server from `registry` and connect to it, marking down servers that refuse.
+async fn connect_upstream(
+    config: &UpstreamConfig,
+    registry: &SharedUpstreamRegistry,
+) -> Option<(DatabaseConnection, PickedServer)> {
     debug!("Connecting to upstream");
-    let mut url = config.preferred_upstream_url()?.clone();
-    url.set_program_or_application_name(READYSET_QUERY_SAMPLER.to_string());
+    let registry = upstream_servers::registry_for(Some(registry), config)?;
     let verification = match ServerCertVerification::from(config).await {
         Ok(verification) => verification,
         Err(error) => {
@@ -201,7 +209,25 @@ async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection>
             return None;
         }
     };
-    connect(url, verification).await
+    let timeout = config.upstream_connect_timeout;
+    let connected = upstream_servers::connect_picked_with(
+        &registry,
+        DatabaseError::upstream_failure,
+        |server| {
+            let mut url = server.url().clone();
+            url.set_program_or_application_name(READYSET_QUERY_SAMPLER.to_string());
+            let verification = &verification;
+            async move { url.connect_bounded(verification, timeout).await }
+        },
+    )
+    .await;
+    match connected {
+        Ok(connected) => Some(connected),
+        Err(error) => {
+            warn!(%error, "Failed to establish sampler upstream connection");
+            None
+        }
+    }
 }
 async fn connect(
     url: DatabaseURL,
@@ -221,6 +247,7 @@ async fn connect(
 pub async fn sampler_builder(
     sampler_cfg: SamplerConfig,
     upstream_config: UpstreamConfig,
+    upstream_registry: Arc<SharedUpstreamRegistry>,
     shutdown_rx: ShutdownReceiver,
     rs_addr: SocketAddr,
 ) -> (Option<Sampler>, Option<SampleSender>) {
@@ -233,11 +260,12 @@ pub async fn sampler_builder(
     let (global_sampler_tx, global_sampler_rx) = build_channel(&sampler_cfg);
 
     // Connect to upstream once if configured
-    let upstream_conn = connect_upstream(&upstream_config).await;
+    let upstream_conn = connect_upstream(&upstream_config, &upstream_registry).await;
     let sampler = Sampler::new(
         sampler_cfg,
         upstream_conn,
         upstream_config,
+        upstream_registry,
         shutdown_rx.clone(),
         global_sampler_rx,
         rs_addr,
@@ -518,7 +546,11 @@ impl Sampler {
         {
             debug!("Sampler upstream connection is closed, creating a new connection");
             counter!(QUERY_SAMPLER_RECONNECTS).increment(1);
-            self.upstream_conn = connect_upstream(&self.upstream_config).await;
+            self.upstream_server = None;
+            let connected = connect_upstream(&self.upstream_config, &self.upstream_registry).await;
+            let (conn, server) = connected.unzip();
+            self.upstream_conn = conn;
+            self.upstream_server = server;
         }
     }
 
@@ -538,19 +570,23 @@ impl Sampler {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: SamplerConfig,
-        upstream_conn: Option<DatabaseConnection>,
+        upstream_conn: Option<(DatabaseConnection, PickedServer)>,
         upstream_config: UpstreamConfig,
+        upstream_registry: Arc<SharedUpstreamRegistry>,
         shutdown_recv: ShutdownReceiver,
         rx: SamplerRx,
         rs_addr: SocketAddr,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
+        let (upstream_conn, upstream_server) = upstream_conn.unzip();
         Self {
             config,
             rx,
             rs_conn: None,
             upstream_conn,
+            upstream_server,
             upstream_config,
+            upstream_registry,
             shutdown_recv,
             last_executed_at: None,
             retry_queue: VecDeque::new(),

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use rand::RngExt;
+use rand::seq::IteratorRandom;
 
 use crate::upstream_servers::{UpstreamServer, UpstreamServers};
 
@@ -138,19 +138,20 @@ impl UpstreamServerRegistry {
         (0..self.len()).filter(|&i| self.is_up(i)).collect()
     }
 
+    /// A random online server not in `exclude`, or `None` if there is none.
+    pub fn pick_healthy_excluding(&self, exclude: &[usize]) -> Option<usize> {
+        (0..self.len())
+            .filter(|i| !exclude.contains(i) && self.is_up(*i))
+            .choose(&mut rand::rng())
+    }
+
     /// A random server not in `exclude`, preferring online ones. `None` if all are excluded.
     pub fn pick_excluding(&self, exclude: &[usize]) -> Option<usize> {
-        let mut candidates: Vec<usize> = (0..self.len())
-            .filter(|i| !exclude.contains(i) && self.is_up(*i))
-            .collect();
-        if candidates.is_empty() {
-            candidates = (0..self.len()).filter(|i| !exclude.contains(i)).collect();
-        }
-        if candidates.is_empty() {
-            return None;
-        }
-        let pick = rand::rng().random_range(0..candidates.len());
-        Some(candidates[pick])
+        self.pick_healthy_excluding(exclude).or_else(|| {
+            (0..self.len())
+                .filter(|i| !exclude.contains(i))
+                .choose(&mut rand::rng())
+        })
     }
 
     /// A random online server, or any server when all are down.
@@ -312,6 +313,18 @@ mod tests {
             assert_eq!(r.pick_excluding(&[0]), Some(2));
         }
         assert_eq!(r.pick_excluding(&[0, 1, 2]), None);
+    }
+
+    #[test]
+    fn the_healthy_pick_never_offers_a_server_marked_down() {
+        let r = registry(THREE);
+        assert!(r.mark_down(1));
+        for _ in 0..200 {
+            assert_ne!(r.pick_healthy_excluding(&[]), Some(1));
+        }
+        assert_eq!(r.pick_healthy_excluding(&[0]), Some(2));
+        assert_eq!(r.pick_healthy_excluding(&[0, 2]), None);
+        assert_eq!(r.pick_excluding(&[0, 2]), Some(1));
     }
 
     #[test]

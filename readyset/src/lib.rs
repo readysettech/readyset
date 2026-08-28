@@ -24,7 +24,7 @@ use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Parser};
 use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseType, TlsMode, UpstreamConfig};
+use database_utils::{DatabaseType, SharedUpstreamRegistry, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{BoxStream, SelectAll, StreamExt};
@@ -33,7 +33,7 @@ use metrics::{counter, gauge};
 use tokio::net;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::{Notify, RwLock};
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tokio_stream::wrappers::TcpListenerStream;
 use tracing::{debug, debug_span, error, info, span, warn, Level};
@@ -1078,32 +1078,36 @@ impl Options {
     }
 }
 
-async fn connect_upstream<U>(upstream_config: UpstreamConfig) -> Result<Option<U>, U::Error>
+async fn connect_upstream<U>(
+    upstream_config: UpstreamConfig,
+    upstream_registry: &SharedUpstreamRegistry,
+) -> Result<Option<U>, U::Error>
 where
     U: UpstreamDatabase,
 {
-    if !upstream_config.upstream_db_url.is_empty() {
+    if let Some(registry) =
+        readyset_adapter::upstream_servers::registry_for(Some(upstream_registry), &upstream_config)
+    {
         set_failpoint!(failpoints::UPSTREAM);
 
         // Upstream services can start accepting connections slightly after the adapter/server
-        // starts. Connection attempts may fail quickly (eg connection refused) or hang (eg SYN
-        // packets dropped), so we use a per-attempt timeout and retry within a fixed retry count.
+        // starts, so retry within a fixed retry count. Each connect is bounded by
+        // --upstream-connect-timeout, and a server that times out is marked down and skipped.
         retry_with_exponential_backoff!(
             {
-                match timeout(
-                    UPSTREAM_CONNECTION_RETRY_INTERVAL,
-                    U::connect(upstream_config.clone(), None, None, false),
+                match readyset_adapter::upstream_servers::connect_picked::<U>(
+                    &registry,
+                    &upstream_config,
+                    None,
+                    None,
+                    false,
                 )
                 .await
                 {
-                    Ok(Ok(conn)) => Ok(Some(conn)),
-                    Ok(Err(e)) => {
+                    Ok((conn, _picked)) => Ok(Some(conn)),
+                    Err(e) => {
                         warn!(error = %e, "Upstream connection error, retrying");
                         Err(e)
-                    }
-                    Err(_) => {
-                        warn!("Upstream connection attempt timed out, retrying");
-                        Err(internal_err!("Connection attempt timed out").into())
                     }
                 }
             },
@@ -1119,7 +1123,10 @@ where
 /// Queries the upstream for its system properties (search path, timezone, casing, version),
 /// retrying until the upstream is reachable. The adapter can't serve without these, so callers
 /// block on this at startup.
-async fn load_system_props<U>(upstream_config: UpstreamConfig) -> UpstreamSystemProperties
+async fn load_system_props<U>(
+    upstream_config: UpstreamConfig,
+    upstream_registry: Arc<SharedUpstreamRegistry>,
+) -> UpstreamSystemProperties
 where
     U: UpstreamDatabase,
 {
@@ -1131,8 +1138,9 @@ where
         };
     }
 
-    let try_load = move |upstream_config: UpstreamConfig| async move {
-        let upstream = connect_upstream::<U>(upstream_config.clone()).await?;
+    let try_load = move |upstream_config: UpstreamConfig,
+                         upstream_registry: Arc<SharedUpstreamRegistry>| async move {
+        let upstream = connect_upstream::<U>(upstream_config.clone(), &upstream_registry).await?;
 
         let Some(mut upstream) = upstream else {
             return Err(internal_err!(
@@ -1162,7 +1170,7 @@ where
 
     let mut first_failure = true;
     loop {
-        match try_load(upstream_config.clone()).await {
+        match try_load(upstream_config.clone(), Arc::clone(&upstream_registry)).await {
             Ok(props) => return props,
             Err(error) => {
                 if first_failure {
@@ -1368,6 +1376,9 @@ where
             .server_worker_options
             .storage_dir(&options.deployment);
         let upstream_config = options.server_worker_options.replicator_config.clone();
+        let upstream_registry = Arc::new(SharedUpstreamRegistry::new(
+            upstream_config.upstream_servers()?,
+        ));
 
         if options.cleanup {
             info!(?options, "Cleaning up deployment");
@@ -1513,6 +1524,7 @@ where
 
         let status_reporter = ReadySetStatusReporter::new(
             upstream_config.clone(),
+            Some(Arc::clone(&upstream_registry)),
             Some(rh.clone()),
             connections.clone(),
             adapter_authority.clone(),
@@ -1718,6 +1730,7 @@ where
             tokio::select! {
                 props = load_system_props::<H::UpstreamDatabase>(
                     upstream_config.clone(),
+                    Arc::clone(&upstream_registry),
                 ) => Some(props),
                 _ = startup_sigterm.recv() => None,
             }
@@ -1959,6 +1972,7 @@ where
                 max_qps: options.sampler_max_queries_per_second,
             },
             upstream_config.clone(),
+            Arc::clone(&upstream_registry),
             shutdown_rx.clone(),
             listen_address,
         ));
@@ -2144,6 +2158,7 @@ where
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
             rt.handle(),
             Arc::clone(&upstream_config),
+            Arc::clone(&upstream_registry),
             options.shallow_refresh_workers,
         );
 
@@ -2377,6 +2392,7 @@ where
                 .connections(connections.clone())
                 .sampler_tx(global_sampler_tx.clone())
                 .upstream_config(Some(Arc::clone(&upstream_config)))
+                .upstream_registry(Some(Arc::clone(&upstream_registry)))
                 .replication_enabled(replication_enabled)
                 .readyset_schema(Arc::clone(&readyset_schema))
                 .shallow_cache_eligibility(shallow_cache_eligibility)

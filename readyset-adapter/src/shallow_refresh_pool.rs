@@ -2,7 +2,7 @@ use std::borrow::Borrow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use database_utils::UpstreamConfig;
+use database_utils::{SharedUpstreamRegistry, UpstreamConfig};
 use metric::{
     SHALLOW_REFRESH_POOL_IDLE_WORKERS, SHALLOW_REFRESH_POOL_QUEUED, SHALLOW_REFRESH_POOL_WORKERS,
     SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
@@ -11,6 +11,7 @@ use metrics::{Gauge, counter, gauge, histogram};
 use mysql_common::collations::{Collation, CollationId};
 use readyset_client::query::QueryId;
 use readyset_data::encoding::Encoding;
+use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, Warnings};
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::logging::*;
@@ -22,6 +23,7 @@ use tracing::warn;
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::backend::READYSET_SHALLOW_REFRESHER;
 use crate::upstream_database::{PendingFill, Refresh, UpstreamDatabase};
+use crate::upstream_servers::{self, PickedServer};
 
 const CHANNEL_CAPACITY: usize = 5;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -50,6 +52,7 @@ where
 pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
     inner: Mutex<PoolInner<DB>>,
     upstream_config: Arc<RwLock<UpstreamConfig>>,
+    upstream_registry: Arc<SharedUpstreamRegistry>,
     rt: tokio::runtime::Handle,
     worker_limit: usize,
     workers_gauge: Gauge,
@@ -78,6 +81,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
     pub fn new(
         rt: &tokio::runtime::Handle,
         upstream_config: Arc<RwLock<UpstreamConfig>>,
+        upstream_registry: Arc<SharedUpstreamRegistry>,
         worker_limit: usize,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -87,6 +91,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 next_rr: 0,
             }),
             upstream_config,
+            upstream_registry,
             rt: rt.clone(),
             worker_limit,
             workers_gauge: gauge!(SHALLOW_REFRESH_POOL_WORKERS),
@@ -270,7 +275,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         mut rx: Receiver<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
         idx: usize,
     ) {
-        let mut upstream = None;
+        let mut upstream: Option<(DB, PickedServer)> = None;
         let mut reconnect = false;
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
@@ -291,13 +296,34 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                     upstream = None;
                     config = (*c).clone();
                 }
+                if upstream
+                    .as_ref()
+                    .is_some_and(|(_, picked)| !picked.still_listed(&pool.upstream_registry))
+                {
+                    upstream = None;
+                }
             }
 
             if upstream.is_none() || reconnect {
                 reconnect = false;
                 let mut connect_config = config.clone();
                 connect_config.program_name = Some(READYSET_SHALLOW_REFRESHER.to_string());
-                match DB::connect(connect_config, None, None, false).await {
+                let registry =
+                    upstream_servers::registry_for(Some(&pool.upstream_registry), &connect_config);
+                let connected = match registry {
+                    Some(registry) => {
+                        upstream_servers::connect_picked::<DB>(
+                            &registry,
+                            &connect_config,
+                            None,
+                            None,
+                            false,
+                        )
+                        .await
+                    }
+                    None => Err(ReadySetError::InvalidUpstreamDatabase.into()),
+                };
+                match connected {
                     Ok(conn) => {
                         upstream = Some(conn);
                         results_cs_coll = (Encoding::Utf8, None);
@@ -315,7 +341,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             }
 
-            let Some(ref mut conn) = upstream else {
+            let Some((ref mut conn, _)) = upstream else {
                 Self::mark_idle(&pool, &rx, idx).await;
                 continue;
             };

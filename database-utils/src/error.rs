@@ -62,6 +62,15 @@ pub enum UpstreamFailure {
 }
 
 impl UpstreamFailure {
+    /// The `reason` tag for this failure on upstream connect failure metrics.
+    pub fn metric_reason(self) -> &'static str {
+        match self {
+            Self::Down => "server_down",
+            Self::Auth => "auth",
+            Self::Semantic => "other",
+        }
+    }
+
     /// Classify a MySQL driver error.
     pub fn from_mysql(error: &mysql::Error) -> Self {
         match error {

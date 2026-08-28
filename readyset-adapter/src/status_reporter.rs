@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crossbeam_skiplist::SkipSet;
-use database_utils::UpstreamConfig;
+use database_utils::{SharedUpstreamRegistry, UpstreamConfig};
 use readyset_client::ReadySetHandle;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
@@ -15,6 +15,7 @@ use tracing::warn;
 use crate::UpstreamDatabase;
 use crate::backend::ConnectionInfo;
 use crate::backend::noria_connector::{MetaVariable, QueryResult};
+use crate::upstream_servers::{self, PickedServer};
 use crate::utils::time_or_null;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -139,6 +140,7 @@ where
 {
     pub fn new(
         upstream_config: UpstreamConfig,
+        upstream_registry: Option<Arc<SharedUpstreamRegistry>>,
         rs_handle: Option<ReadySetHandle>,
         connections: Arc<SkipSet<ConnectionInfo>>,
         authority: Arc<Authority>,
@@ -150,6 +152,7 @@ where
         let inner = Arc::new(Mutex::new(ReadySetStatusReporterInner {
             upstream: None,
             upstream_config,
+            upstream_registry,
             rs_handle,
             connections,
             authority,
@@ -169,8 +172,11 @@ where
 /// [`ReadySetStatusReporterInner`] is responsible for aggregating status-related information from
 /// various sources and generating a [`ReadySetStatus`].
 struct ReadySetStatusReporterInner<U> {
-    pub(crate) upstream: Option<U>,
+    /// The reporter's own upstream connection, paired with the server it was picked from.
+    pub(crate) upstream: Option<(U, PickedServer)>,
     pub(crate) upstream_config: Option<UpstreamConfig>,
+    /// Shared health and connection counts for the upstream server list.
+    pub(crate) upstream_registry: Option<Arc<SharedUpstreamRegistry>>,
     /// A handle to the ReadySet controller, for making controller rpc calls to obtain
     /// a [`ReadySetControllerStatus`]
     pub(crate) rs_handle: Option<ReadySetHandle>,
@@ -208,18 +214,18 @@ where
     async fn upstream_reachable(&mut self) -> Option<bool> {
         let config = self.upstream_config.clone()?;
 
-        if let Some(upstream) = self.upstream.as_mut()
+        if let Some((upstream, _)) = self.upstream.as_mut()
             && upstream.is_connected().await.unwrap_or(false)
         {
             return Some(true);
         }
 
-        // Our connection may have been broken.
-        // Attempt to reconnect once to confirm reachability.
-        match U::connect(config, None, None, false).await {
-            Ok(mut upstream) => {
+        // Pick again, so one dead server does not mark the whole upstream unreachable.
+        let registry = upstream_servers::registry_for(self.upstream_registry.as_deref(), &config)?;
+        match upstream_servers::connect_picked::<U>(&registry, &config, None, None, false).await {
+            Ok((mut upstream, picked)) => {
                 let reachable = upstream.is_connected().await.unwrap_or(false);
-                self.upstream = Some(upstream);
+                self.upstream = Some((upstream, picked));
                 Some(reachable)
             }
             Err(e) => {

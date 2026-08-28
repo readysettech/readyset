@@ -5,8 +5,8 @@ use std::{
 };
 
 use database_utils::{
-    DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection as _, TlsMode,
-    UpstreamConfig,
+    DatabaseConnection, DatabaseType, DatabaseURL, QueryableConnection as _,
+    SharedUpstreamRegistry, TlsMode, UpstreamConfig,
 };
 use itertools::Itertools as _;
 use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
@@ -156,12 +156,21 @@ async fn setup_adapter(
                         UpstreamConfig::from_url(url).expect("valid upstream URL"),
                     ))
                 });
+                let upstream_registry = replication_url.as_ref().map(|url| {
+                    Arc::new(SharedUpstreamRegistry::new(
+                        UpstreamConfig::from_url(url)
+                            .expect("valid upstream URL")
+                            .upstream_servers()
+                            .expect("valid upstream list"),
+                    ))
+                });
 
                 let status_reporter = ReadySetStatusReporter::new(
                     replication_url
                         .as_ref()
                         .map(|url| UpstreamConfig::from_url(url).expect("valid upstream URL"))
                         .unwrap_or_default(),
+                    upstream_registry.clone(),
                     Some(rh),
                     Default::default(),
                     authority.clone(),
@@ -169,20 +178,26 @@ async fn setup_adapter(
                     std::path::Path::new("/"),
                 );
                 let shallow = Arc::new(CacheManager::new(None, None));
-                let shallow_refresh_pool = upstream_config.as_ref().map(|config| {
-                    ShallowRefreshPool::<$upstream>::new(
-                        &tokio::runtime::Handle::current(),
-                        Arc::clone(config),
-                        100,
-                    )
-                });
+                let shallow_refresh_pool = upstream_config
+                    .as_ref()
+                    .zip(upstream_registry.as_ref())
+                    .map(|(config, registry)| {
+                        ShallowRefreshPool::<$upstream>::new(
+                            &tokio::runtime::Handle::current(),
+                            Arc::clone(config),
+                            Arc::clone(registry),
+                            100,
+                        )
+                    });
                 let mut builder = BackendBuilder::new()
                     .require_authentication(false)
                     .dialect($dialect)
                     .parsing_preset(parsing_preset)
                     .migration_mode(migration_mode);
                 if let Some(config) = upstream_config {
-                    builder = builder.upstream_config(Some(config));
+                    builder = builder
+                        .upstream_config(Some(config))
+                        .upstream_registry(upstream_registry);
                 }
                 builder
                     .build::<$upstream, $handler>(

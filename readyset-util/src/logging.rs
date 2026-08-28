@@ -27,6 +27,9 @@ pub const ADAPTER_SHALLOW_REFRESH_READ: &str = "ADAPTER_SHALLOW_REFRESH_READ";
 /// Key for shallow cache refresh send failure.
 pub const ADAPTER_SHALLOW_REFRESH_SEND_REQUEST: &str = "ADAPTER_SHALLOW_REFRESH_SEND_REQUEST";
 
+/// Key for a session failing to reach any upstream server.
+pub const ADAPTER_SESSION_UPSTREAM_CONNECT: &str = "ADAPTER_SESSION_UPSTREAM_CONNECT";
+
 /// Key for cache-ACL probe connection failure.
 pub const ADAPTER_ACL_PROBE_CONNECT: &str = "ADAPTER_ACL_PROBE_CONNECT";
 /// Key for cache-ACL probe failure.

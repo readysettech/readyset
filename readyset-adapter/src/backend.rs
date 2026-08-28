@@ -87,7 +87,7 @@ use crate::shallow_key::ShallowKey;
 use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
-use database_utils::{UpstreamConfig, UpstreamServer};
+use database_utils::{SharedUpstreamRegistry, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use lru::LruCache;
 use metrics::{counter, gauge};
@@ -128,7 +128,7 @@ use readyset_telemetry_reporter::{TelemetryEvent, TelemetrySender};
 use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
-use readyset_util::logging::{ADAPTER_ACL_DECLINED, rate_limit};
+use readyset_util::logging::{ADAPTER_ACL_DECLINED, ADAPTER_SESSION_UPSTREAM_CONNECT, rate_limit};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
@@ -195,6 +195,7 @@ type StatementId = u32;
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::shallow_refresh_pool::ShallowRefreshPool;
 pub use crate::shallow_refresh_pool::ShallowRefreshRequest;
+use crate::upstream_servers::{self, PickedServer};
 
 /// Information about an active connection
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
@@ -455,6 +456,7 @@ pub struct BackendBuilder {
     /// `None` (the default) disables the window.
     opportunistic_ryw_ms: Option<u64>,
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
+    upstream_registry: Option<Arc<SharedUpstreamRegistry>>,
     replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
@@ -502,6 +504,7 @@ impl Default for BackendBuilder {
             default_coalesce_ms: 5_000,
             opportunistic_ryw_ms: None,
             upstream_config: None,
+            upstream_registry: None,
             replication_enabled: true,
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
@@ -560,11 +563,6 @@ impl BackendBuilder {
             ));
         }
 
-        let last_upstream_url = match &self.upstream_config {
-            Some(config) => config.read().await.upstream_db_url.clone(),
-            None => vec![],
-        };
-
         Backend {
             connectors: BackendConnectors {
                 noria,
@@ -603,7 +601,8 @@ impl BackendBuilder {
                 shallow_refresh_pool,
                 db_version: self.db_version,
                 upstream_config: self.upstream_config,
-                last_upstream_url,
+                upstream_registry: self.upstream_registry,
+                picked_server: None,
                 last_routing_check: Instant::now(),
                 routing_changed: false,
                 authority,
@@ -829,6 +828,15 @@ impl BackendBuilder {
 
     pub fn get_upstream_config(&self) -> Option<&Arc<RwLock<UpstreamConfig>>> {
         self.upstream_config.as_ref()
+    }
+
+    pub fn upstream_registry(mut self, registry: Option<Arc<SharedUpstreamRegistry>>) -> Self {
+        self.upstream_registry = registry;
+        self
+    }
+
+    pub fn get_upstream_registry(&self) -> Option<&Arc<SharedUpstreamRegistry>> {
+        self.upstream_registry.as_ref()
     }
 
     pub fn readyset_schema(mut self, readyset_schema: Arc<ReadysetSchema>) -> Self {
@@ -1104,9 +1112,10 @@ where
     db_version: Option<String>,
     /// Shared upstream config, updated by ALTER READYSET CHANGE UPSTREAM.
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
-    /// The upstream server list this connection last connected with, used to detect routing
-    /// changes.
-    last_upstream_url: Vec<UpstreamServer>,
+    /// Shared health and connection counts for the upstream server list.
+    upstream_registry: Option<Arc<SharedUpstreamRegistry>>,
+    /// The server this session's upstream connection was picked from.
+    picked_server: Option<PickedServer>,
     /// When we last checked the shared config for upstream changes (rate-limited to once/sec).
     last_routing_check: Instant,
     /// Set to true when routing changes are detected; causes all subsequent operations to error
@@ -1838,7 +1847,7 @@ where
             .unwrap_or_else(|| DB::DEFAULT_DB_VERSION.to_string())
     }
 
-    /// Check if the upstream URL has changed and close the connection if so.
+    /// Close the upstream connection if its server has left the upstream list.
     ///
     /// When a routing change is detected, this returns an error to force the client to
     /// disconnect and reconnect, picking up the new upstream on the fresh connection.
@@ -1858,20 +1867,18 @@ where
             return Err(err());
         }
 
-        if state.upstream_config.is_none()
-            || connectors.upstream.is_none()
+        let (Some(registry), Some(picked)) = (&state.upstream_registry, &state.picked_server)
+        else {
+            return Ok(());
+        };
+        if connectors.upstream.is_none()
             || state.last_routing_check.elapsed() < ROUTING_CHECK_INTERVAL
         {
             return Ok(());
         }
         state.last_routing_check = Instant::now();
 
-        let shared = state
-            .upstream_config
-            .as_ref()
-            .ok_or_else(|| internal_err!("upstream config is not configured"))?;
-        let current_config = shared.read().await;
-        if current_config.upstream_db_url == state.last_upstream_url {
+        if picked.still_listed(registry) {
             return Ok(());
         }
 
@@ -2058,10 +2065,25 @@ where
 
         // An unreachable upstream does not reject the connection: the session runs without an
         // upstream (statements needing one fail individually), so clients keep access to the
-        // Readyset schema and its commands during an upstream outage.
-        match DB::connect(config, username, password, interactive).await {
-            Ok(upstream) => {
+        // Readyset schema and its commands during an upstream outage. The server is picked once,
+        // when the session starts.
+        let Some(registry) =
+            upstream_servers::registry_for(self.state.upstream_registry.as_deref(), &config)
+        else {
+            return Ok(());
+        };
+        match upstream_servers::connect_picked::<DB>(
+            &registry,
+            &config,
+            username,
+            password,
+            interactive,
+        )
+        .await
+        {
+            Ok((upstream, picked)) => {
                 self.connectors.upstream = Some(upstream);
+                self.state.picked_server = Some(picked);
                 if let Some(telemetry_sender) = &self.state.telemetry_sender
                     && let Err(error) =
                         telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
@@ -2070,7 +2092,11 @@ where
                 }
             }
             Err(error) => {
-                debug!(%error, "Failed to connect to the upstream; serving without one");
+                rate_limit(
+                    true,
+                    ADAPTER_SESSION_UPSTREAM_CONNECT,
+                    || warn!(%error, "Failed to connect to any upstream server; serving without one"),
+                );
             }
         }
         Ok(())

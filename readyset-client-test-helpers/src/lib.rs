@@ -12,7 +12,10 @@ use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
+use database_utils::{
+    DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId,
+    SharedUpstreamRegistry,
+};
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
 use readyset_adapter::backend::{
@@ -758,10 +761,24 @@ impl TestBuilder {
             .get_upstream_config()
             .cloned()
             .unwrap_or_else(|| Arc::new(RwLock::new(cdc_upstream_config.clone())));
+        let shared_upstream_registry = match self.backend_builder.get_upstream_registry() {
+            Some(registry) => Arc::clone(registry),
+            None => Arc::new(SharedUpstreamRegistry::new(
+                shared_upstream_config
+                    .read()
+                    .await
+                    .upstream_servers()
+                    .expect("valid upstream list"),
+            )),
+        };
+        self.backend_builder = self
+            .backend_builder
+            .upstream_registry(Some(Arc::clone(&shared_upstream_registry)));
         let shallow_refresh_pool = if cdc_url.is_some() || upstream_only_url.is_some() {
             Some(ShallowRefreshPool::<A::Upstream>::new(
                 &tokio::runtime::Handle::current(),
                 Arc::clone(&shared_upstream_config),
+                Arc::clone(&shared_upstream_registry),
                 100,
             ))
         } else {
@@ -974,6 +991,7 @@ impl TestBuilder {
 
                     let status_reporter = ReadySetStatusReporter::new(
                         cdc_upstream_config.clone(),
+                        Some(Arc::clone(&shared_upstream_registry)),
                         Some(rh),
                         Default::default(),
                         authority.clone(),

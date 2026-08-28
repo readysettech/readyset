@@ -1943,7 +1943,7 @@ where
                 let servers: UpstreamServers = url
                     .parse()
                     .map_err(|e| internal_err!("invalid upstream URL: {e}"))?;
-                if servers.preferred().url().dialect() != settings.dialect {
+                if Dialect::from(servers.database_type()) != settings.dialect {
                     internal!("wrong database type for upstream");
                 }
                 let displays = servers.displays().join(",");
@@ -1952,7 +1952,10 @@ where
                     .as_ref()
                     .ok_or_else(|| internal_err!("upstream config is not configured"))?;
                 let mut config = config.write().await;
-                config.upstream_db_url = servers.into_vec();
+                config.upstream_db_url = servers.clone().into_vec();
+                if let Some(registry) = &state.upstream_registry {
+                    registry.replace(Some(servers));
+                }
                 drop(config);
                 info!(url = %displays, "Changed upstream configuration");
                 Ok(noria_connector::QueryResult::Empty)
