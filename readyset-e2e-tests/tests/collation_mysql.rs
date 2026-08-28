@@ -629,6 +629,88 @@ async fn test_column_def_collation_ids_proxied_and_shallow_match_upstream() {
     shutdown_tx.shutdown().await;
 }
 
+/// Sessions with different collations must not share a shallow entry's column metadata. The
+/// session that warms an entry stores the upstream's collation ids for its own collation, so a
+/// session in another collation must fill and hit a separate entry whose ids match what the
+/// upstream reports for that collation. Both warm-up orders are covered.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn test_shallow_column_def_collation_ids_not_shared_across_collations() {
+    readyset_tracing::init_test_logging();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    const SET_GENERAL_CI: &str = "SET NAMES utf8mb4 COLLATE utf8mb4_general_ci";
+    const SET_BIN: &str = "SET NAMES utf8mb4 COLLATE utf8mb4_bin";
+
+    let mut general_ci_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    general_ci_conn.query_drop(SET_GENERAL_CI).await.unwrap();
+    general_ci_conn.query_drop(COLL_META_DDL).await.unwrap();
+    general_ci_conn
+        .query_drop("INSERT INTO coll_meta VALUES (1, 'a', 'b', 'c', 'd'), (2, 'a', 'b', 'c', 'd')")
+        .await
+        .unwrap();
+    general_ci_conn
+        .query_drop(
+            "CREATE SHALLOW CACHE FROM SELECT id, lat, bin_c, txt, vb FROM coll_meta WHERE id = ?",
+        )
+        .await
+        .unwrap();
+    let mut bin_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    bin_conn.query_drop(SET_BIN).await.unwrap();
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
+    let mut upstream_general_ci = mysql_async::Conn::new(upstream_opts.clone()).await.unwrap();
+    upstream_general_ci.query_drop(SET_GENERAL_CI).await.unwrap();
+    let mut upstream_bin = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_bin.query_drop(SET_BIN).await.unwrap();
+
+    // Each id is a separate entry, warmed by one session and then read by the other.
+    for id in [1, 2] {
+        let (first, first_upstream, second, second_upstream) = if id == 1 {
+            (
+                &mut general_ci_conn,
+                &mut upstream_general_ci,
+                &mut bin_conn,
+                &mut upstream_bin,
+            )
+        } else {
+            (
+                &mut bin_conn,
+                &mut upstream_bin,
+                &mut general_ci_conn,
+                &mut upstream_general_ci,
+            )
+        };
+        let query = format!("SELECT id, lat, bin_c, txt, vb FROM coll_meta WHERE id = {id}");
+        let first_expected = column_charsets(first_upstream, &query).await;
+        let second_expected = column_charsets(second_upstream, &query).await;
+        assert_ne!(first_expected, second_expected);
+
+        for (conn, expected) in [(first, first_expected), (second, second_expected)] {
+            assert_eq!(column_charsets(conn, &query).await, expected);
+            assert_matches!(
+                last_query_info(conn).await.destination,
+                QueryDestination::ReadysetThenUpstream(..)
+            );
+            eventually!(run_test: {
+                let charsets = column_charsets(conn, &query).await;
+                let info = last_query_info(conn).await;
+                AssertUnwindSafe(move || (info, charsets))
+            }, then_assert: |result| {
+                let (info, charsets) = result();
+                assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
+                assert_eq!(charsets, expected);
+            });
+        }
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
 /// After SET NAMES with a COLLATE clause, a native MySQL session reports result-set metadata
 /// in the named collation. The adapter must mirror that for proxied results, including for a
 /// non-utf8mb4 charset, where the forwarded statement restores the upstream's
