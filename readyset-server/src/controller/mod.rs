@@ -7,6 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{format_err, Context};
 use bytes::Bytes;
+use database_utils::tls::ServerCertVerification;
+use database_utils::{validate_servers, UpstreamConfig, UpstreamServer};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use dataflow::{DomainBuilder, DomainRequest};
@@ -27,6 +29,7 @@ use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
+use readyset_util::redacted::RedactedString;
 use readyset_util::retry_with_exponential_backoff;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -293,6 +296,7 @@ pub(crate) enum AdminCommand {
         url: String,
         response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
     },
+    ReloadUpstreamServers(tokio::sync::oneshot::Sender<ReadySetResult<()>>),
 }
 
 /// Channel for adapter/HTTP → controller commands (failover, admin operations).
@@ -1010,8 +1014,34 @@ impl Controller {
                                 });
                             },
                             AdminCommand::ChangeCdcUrl { url, response } => {
+                                let controller_tx = self.controller_channel.sender();
+                                let telemetry_sender = self.telemetry_sender.clone();
+                                let shutdown_rx = self.shutdown_rx.clone();
                                 Self::spawn_failover_handler(mutex, response, async move {
-                                    Self::handle_change_cdc_url(inner, stopped, url).await
+                                    Self::handle_change_cdc_url(
+                                        inner,
+                                        stopped,
+                                        url,
+                                        controller_tx,
+                                        telemetry_sender,
+                                        shutdown_rx,
+                                    )
+                                    .await
+                                });
+                            },
+                            AdminCommand::ReloadUpstreamServers(response) => {
+                                let controller_tx = self.controller_channel.sender();
+                                let telemetry_sender = self.telemetry_sender.clone();
+                                let shutdown_rx = self.shutdown_rx.clone();
+                                Self::spawn_failover_handler(mutex, response, async move {
+                                    Self::handle_reload_upstream_servers(
+                                        inner,
+                                        stopped,
+                                        controller_tx,
+                                        telemetry_sender,
+                                        shutdown_rx,
+                                    )
+                                    .await
                                 });
                             },
                         }
@@ -1313,7 +1343,8 @@ impl Controller {
         }
     }
 
-    /// Handle CHANGE CDC: update the CDC URL in the replicator config.
+    /// Handle CHANGE CDC: validate the new servers without a lock, persist the list to the
+    /// Authority, then apply it.
     ///
     /// Spawned as a separate tokio task to avoid blocking the controller event loop
     /// while waiting on the LeaderHandle write lock.
@@ -1321,23 +1352,20 @@ impl Controller {
         inner: Arc<LeaderHandle>,
         replication_stopped: Arc<AtomicBool>,
         url: String,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
     ) -> ReadySetResult<()> {
-        if !replication_stopped.load(Ordering::Acquire) {
-            return Err(ReadySetError::Internal(
-                "replication must be stopped before changing CDC URL".into(),
-            ));
-        }
-
-        // Validate the list parses correctly.
         // Avoid including the parse error in the message as it may contain credentials.
         let servers: database_utils::UpstreamServers = url
             .parse()
             .map_err(|_| ReadySetError::Internal("invalid CDC URL".into()))?;
 
-        // Validate dialect matches and update config under a single write lock
-        // to avoid a TOCTOU race between validation and mutation.
-        let mut guard = inner.write().await;
-        if let Some(ref mut leader) = *guard {
+        let (config, current, authority) = {
+            let guard = inner.read().await;
+            let Some(leader) = guard.as_ref() else {
+                return Err(ReadySetError::NotLeader);
+            };
             let ds = leader.dataflow_state_handle.read().await;
             let expected_dialect: readyset_sql::Dialect = ds.recipe.dialect().into();
             let dialect = readyset_sql::Dialect::from(servers.database_type());
@@ -1347,30 +1375,147 @@ impl Controller {
                 )));
             }
             drop(ds);
+            let current = leader
+                .cdc_server_list
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            (
+                leader.replicator_config.clone(),
+                current,
+                Arc::clone(&leader.authority),
+            )
+        };
 
-            // The lists this controller last saw; the write fails if the Authority holds
-            // something else.
-            let previous = PersistedUpstreamServers {
-                upstream_db_url: leader
-                    .replicator_config
-                    .upstream_servers()?
-                    .map(|s| s.raw_list()),
-                cdc_db_url: leader.replicator_config.cdc_list()?.map(|s| s.raw_list()),
+        let verification = ServerCertVerification::from(&config).await?;
+        let outcome = validate_servers(
+            current.as_ref(),
+            &servers,
+            &verification,
+            config.upstream_connect_timeout,
+        )
+        .await
+        .map_err(|e| ReadySetError::BadRequest(format!("CDC {e}")))?;
+        for (server, error) in &outcome.unreachable {
+            warn!(%server, %error, "New CDC server is unreachable; accepted anyway");
+        }
+        // Persist first, so a failed write changes nothing. `previous` holds the lists this
+        // controller last saw; the write fails if the Authority holds something else.
+        let previous = PersistedUpstreamServers {
+            upstream_db_url: config.upstream_servers()?.map(|s| s.raw_list()),
+            cdc_db_url: config.cdc_list()?.map(|s| s.raw_list()),
+        };
+        authority
+            .set_cdc_db_url(previous, servers.raw_list())
+            .await?;
+
+        Self::apply_cdc_servers(
+            inner,
+            replication_stopped,
+            |config| config.cdc_db_url = servers.into_vec(),
+            controller_tx,
+            telemetry_sender,
+            shutdown_rx,
+        )
+        .await
+    }
+
+    /// Handle an adapter's CHANGE UPSTREAM: load both lists from the Authority, where the adapter
+    /// already validated and stored them. With `--cdc-db-url` unset, this changes the CDC list.
+    async fn handle_reload_upstream_servers(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
+    ) -> ReadySetResult<()> {
+        let authority = {
+            let guard = inner.read().await;
+            let Some(leader) = guard.as_ref() else {
+                return Err(ReadySetError::NotLeader);
             };
-            leader
-                .authority
-                .set_cdc_db_url(previous, servers.raw_list())
-                .await?;
-            leader.replicator_config.cdc_db_url = servers.clone().into_vec();
+            Arc::clone(&leader.authority)
+        };
+        let Some(stored) = authority.load_upstream_servers().await? else {
+            return Ok(());
+        };
+        let parse = |list: Option<RedactedString>| -> ReadySetResult<Vec<UpstreamServer>> {
+            // Avoid including the parse error in the message as it may contain credentials.
+            Ok(list
+                .map(|list| list.parse::<database_utils::UpstreamServers>())
+                .transpose()
+                .map_err(|_| internal_err!("invalid upstream server list in the Authority"))?
+                .map(database_utils::UpstreamServers::into_vec)
+                .unwrap_or_default())
+        };
+        let upstream = parse(stored.upstream_db_url)?;
+        let cdc = parse(stored.cdc_db_url)?;
+
+        Self::apply_cdc_servers(
+            inner,
+            replication_stopped,
+            |config| {
+                config.upstream_db_url = upstream;
+                config.cdc_db_url = cdc;
+            },
+            controller_tx,
+            telemetry_sender,
+            shutdown_rx,
+        )
+        .await
+    }
+
+    /// Apply `update` to the leader's replicator config and point replication at the resulting
+    /// CDC list. Replication restarts only if its current server left the list.
+    async fn apply_cdc_servers(
+        inner: Arc<LeaderHandle>,
+        replication_stopped: Arc<AtomicBool>,
+        update: impl FnOnce(&mut UpstreamConfig),
+        controller_tx: UnboundedSender<ControllerMessage>,
+        telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
+    ) -> ReadySetResult<()> {
+        // Re-read the active server under the lock, in case a failover ran meanwhile.
+        let restart = {
+            let mut guard = inner.write().await;
+            let Some(leader) = guard.as_mut() else {
+                return Err(ReadySetError::NotLeader);
+            };
+            update(&mut leader.replicator_config);
+            let Ok(servers) = leader.replicator_config.cdc_servers() else {
+                // No upstream configured; there is nothing to replicate from.
+                return Ok(());
+            };
+            info!(servers = %servers.displays().join(", "), "CDC server list changed");
+            let active = leader
+                .active_cdc_server
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let running = !replication_stopped.load(Ordering::Acquire);
+            let restart =
+                running && active.is_some_and(|active| servers.position(&active).is_none());
             *leader
                 .cdc_server_list
                 .write()
                 .unwrap_or_else(|e| e.into_inner()) = Some(servers);
-            info!("CDC URL changed");
-            Ok(())
-        } else {
-            Err(ReadySetError::NotLeader)
+            restart
+        };
+
+        if restart {
+            info!("The active CDC server left the list; restarting replication on the new list");
+            Self::handle_stop_replication(Arc::clone(&inner), Arc::clone(&replication_stopped))
+                .await?;
+            Self::handle_start_replication(
+                inner,
+                replication_stopped,
+                controller_tx,
+                telemetry_sender,
+                shutdown_rx,
+            )
+            .await?;
         }
+        Ok(())
     }
 
     async fn maybe_recreate_caches(&mut self) -> ReadySetResult<()> {
@@ -2051,6 +2196,18 @@ async fn handle_failover_request(
                     position,
                     response: tx,
                 })
+                .is_err()
+            {
+                return Some(Err(ReadySetError::Internal(
+                    "controller channel closed".into(),
+                )));
+            }
+            Some(await_response(rx).await)
+        }
+        (&Method::POST, "/reload_upstream_servers") => {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            if command_tx
+                .send(AdminCommand::ReloadUpstreamServers(tx))
                 .is_err()
             {
                 return Some(Err(ReadySetError::Internal(

@@ -295,20 +295,20 @@ async fn psql_failover_commands_require_stopped_replication() {
         "SET REPLICATION POSITION should require stopped replication"
     );
 
-    // CHANGE CDC should fail while replication is running.
     let err = rs_conn
         .simple_query("ALTER READYSET CHANGE CDC TO 'postgresql://other-host/db'")
         .await;
     assert!(
         err.is_err(),
-        "CHANGE CDC should require stopped replication"
+        "CHANGE CDC to a list with no reachable server should fail"
     );
 
     shutdown_tx.shutdown().await;
 }
 
-/// CHANGE CDC TO updates the CDC URL. Verify that pointing to a bad URL
-/// prevents new data from replicating, then fixing the URL restores it.
+/// CHANGE CDC TO updates the CDC URL. Verify that a URL with bad credentials
+/// is rejected at the statement and leaves the list untouched, and that
+/// pointing to a good URL restores replication with no lost rows.
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(postgres)]
@@ -392,26 +392,22 @@ async fn psql_change_cdc_url() {
         .await
         .unwrap();
 
-    rs_conn
+    let err = rs_conn
         .simple_query(&format!("ALTER READYSET CHANGE CDC TO '{bad_url}'"))
         .await
-        .unwrap();
+        .expect_err("CHANGE CDC with bad credentials should be rejected");
+    let message = err.as_db_error().map(|e| e.message().to_string());
+    assert!(
+        message
+            .as_deref()
+            .is_some_and(|m| m.contains("credentials rejected")),
+        "unexpected error: {err:?}"
+    );
 
-    // Start replication with the bad URL.
-    rs_conn
-        .simple_query("ALTER READYSET START REPLICATION")
-        .await
-        .unwrap();
-
-    // Insert data upstream while replication is broken.
     upstream_conn
         .simple_query("INSERT INTO t1 VALUES (2, 20)")
         .await
         .unwrap();
-
-    // Give time for replication to attempt connection, then verify the
-    // new row does NOT appear in the cache.
-    tokio::time::sleep(Duration::from_secs(3)).await;
     let rows = rs_conn
         .simple_query("SELECT val FROM t1 WHERE id = 2")
         .await
@@ -420,16 +416,7 @@ async fn psql_change_cdc_url() {
         .iter()
         .filter(|m| matches!(m, SimpleQueryMessage::Row(_)))
         .count();
-    assert_eq!(
-        count, 0,
-        "Row should NOT replicate when CDC URL has bad credentials"
-    );
-
-    // Now fix the CDC URL: stop, change to the correct URL, start.
-    rs_conn
-        .simple_query("ALTER READYSET STOP REPLICATION")
-        .await
-        .unwrap();
+    assert_eq!(count, 0, "Row should NOT replicate while stopped");
 
     let good_url = PostgreSQLAdapter::upstream_url(db_name);
     rs_conn

@@ -81,7 +81,7 @@ async fn verify_servers(
         .server_worker_options
         .replicator_config
         .upstream_connect_timeout;
-    let outcome = validate_servers(servers, verification, timeout)
+    let outcome = validate_servers(None, servers, verification, timeout)
         .await
         .map_err(|e| anyhow!("{label} {e}"))?;
     for (server, error) in &outcome.unreachable {

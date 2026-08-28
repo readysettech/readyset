@@ -208,8 +208,7 @@ async fn seed_upstream(test_name: &str, stmts: &[&str]) {
 /// pgwire client to it. The returned handles keep the server alive for the test.
 async fn connect_backend(test_name: &str) -> (RawPgConn, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let backend_builder = BackendBuilder::default()
-        .require_authentication(false)
-        .replication_enabled(false);
+        .require_authentication(false);
 
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)

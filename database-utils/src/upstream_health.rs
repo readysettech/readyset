@@ -1,7 +1,8 @@
 //! Probing upstream servers, one-shot or continuously, and the health status the probes maintain.
 //!
-//! [`validate_servers`] probes every server once, at startup. An unreachable server is reported
-//! and marked down; a rejected one causes them all to be refused.
+//! [`validate_servers`] probes the servers once, at startup and on runtime list edits. An
+//! unreachable server is reported and marked down; a rejected one causes the whole list to be
+//! refused.
 //!
 //! [`UpstreamHealthMonitor`] holds a connection to each server believed up and pings it every
 //! interval, so a server that dies while idle is marked down before a session picks it. Servers
@@ -132,31 +133,71 @@ pub enum ValidationError {
 
     #[error("servers are all unreachable")]
     NoneReachable,
+
+    #[error("server validation did not finish within {}s", .0.as_secs_f64())]
+    TimedOut(Duration),
 }
 
 /// What [`validate_servers`] found when it accepted the servers.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ValidationReport {
+    /// Servers already in the current list with the same URL; not re-validated.
+    pub unchanged: Vec<UpstreamServer>,
     /// Servers that connected and passed every check.
     pub verified: Vec<UpstreamServer>,
     /// Servers that could not be reached, by `host:port`, with the error.
     pub unreachable: Vec<(String, String)>,
 }
 
-/// Probe every server of `servers` once. Any rejected server causes them all to be refused;
-/// unreachable servers are reported, as long as at least one server is reachable.
+/// Validate `new` as the list that replaces `current`. Only servers not already in `current`
+/// with the same URL are probed, all within twice `timeout`.
+///
+/// Any rejected server causes the list to be refused. Unreachable servers are reported, as long
+/// as at least one server is reachable or retained, so an operator can still remove a dead one.
 pub async fn validate_servers(
-    servers: &UpstreamServers,
+    current: Option<&UpstreamServers>,
+    new: &UpstreamServers,
     verification: &ServerCertVerification,
     timeout: Duration,
 ) -> Result<ValidationReport, ValidationError> {
-    let statuses = probe_all(servers.iter(), verification, timeout, !servers.is_single()).await;
-    let mut outcome = ValidationReport::default();
+    let retained = |server: &UpstreamServer| {
+        current.is_some_and(|c| c.iter().any(|s| s.raw_url() == server.raw_url()))
+    };
+    let (unchanged, added): (Vec<_>, Vec<_>) = new.iter().partition(|s| retained(s));
+
+    // A server kept from a single-server list never had the multi-server checks (gtid_mode),
+    // so growing the list checks it again.
+    let grows_single_list = current.is_some_and(|c| c.is_single()) && !new.is_single();
+    let to_validate: Vec<&UpstreamServer> = if grows_single_list {
+        new.iter().collect()
+    } else {
+        added
+    };
+
+    let deadline = timeout.saturating_mul(2);
+    let statuses = tokio::time::timeout(
+        deadline,
+        probe_all(to_validate, verification, timeout, !new.is_single()),
+    )
+    .await
+    .map_err(|_| ValidationError::TimedOut(deadline))?;
+
+    let mut outcome = ValidationReport {
+        unchanged: unchanged.into_iter().cloned().collect(),
+        ..Default::default()
+    };
     let mut rejected = Vec::new();
     for (server, status) in statuses {
         let display = server.display().to_string();
+        let is_retained = retained(server);
         match status {
+            // A revalidated retained server keeps its "unchanged" row.
+            ServerStatus::Ok(_) if is_retained => {}
             ServerStatus::Ok(_) => outcome.verified.push(server.clone()),
+            // Growing the list needs the kept server's gtid_mode, so it must be reachable.
+            ServerStatus::Unreachable(error) if is_retained => {
+                rejected.push(format!("{display} (cannot verify gtid_mode: {error})"))
+            }
             ServerStatus::Unreachable(error) => {
                 outcome.unreachable.push((display, error.to_string()))
             }
@@ -166,7 +207,7 @@ pub async fn validate_servers(
     if !rejected.is_empty() {
         return Err(ValidationError::Rejected(rejected));
     }
-    if outcome.verified.is_empty() {
+    if outcome.unchanged.is_empty() && outcome.verified.is_empty() {
         return Err(ValidationError::NoneReachable);
     }
     Ok(outcome)

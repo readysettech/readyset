@@ -457,7 +457,6 @@ pub struct BackendBuilder {
     opportunistic_ryw_ms: Option<u64>,
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
     upstream_registry: Option<Arc<SharedUpstreamRegistry>>,
-    replication_enabled: bool,
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
     shallow_cache_allowlists: ShallowCacheAllowlists,
@@ -505,7 +504,6 @@ impl Default for BackendBuilder {
             opportunistic_ryw_ms: None,
             upstream_config: None,
             upstream_registry: None,
-            replication_enabled: true,
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
             shallow_cache_allowlists: ShallowCacheAllowlists::default(),
@@ -624,7 +622,6 @@ impl BackendBuilder {
                 cache_mode: self.cache_mode,
                 default_ttl_ms: self.default_ttl_ms,
                 default_coalesce_ms: self.default_coalesce_ms,
-                replication_enabled: self.replication_enabled,
                 allow_cache_ddl: self.allow_cache_ddl,
                 admin: self.admin,
                 storage_dir: self.storage_dir.clone(),
@@ -818,11 +815,6 @@ impl BackendBuilder {
 
     pub fn upstream_config(mut self, upstream_config: Option<Arc<RwLock<UpstreamConfig>>>) -> Self {
         self.upstream_config = upstream_config;
-        self
-    }
-
-    pub fn replication_enabled(mut self, replication_enabled: bool) -> Self {
-        self.replication_enabled = replication_enabled;
         self
     }
 
@@ -1534,8 +1526,6 @@ struct BackendSettings {
     default_ttl_ms: u64,
     /// Specifies the default coalesce interval for shallow caches when none is specified.
     default_coalesce_ms: u64,
-    /// Whether replication is enabled. When true, CHANGE UPSTREAM is disallowed.
-    replication_enabled: bool,
     /// Whether or not to allow cache ddl statements to be executed. If false, cache ddl statements
     /// received will instead return an error prompting the user to use Readyset cloud to manage
     /// their caches.

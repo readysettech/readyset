@@ -1066,6 +1066,10 @@ impl NoriaConnector {
         self.inner.noria.change_cdc_url(url.to_string()).await?;
         Ok(QueryResult::Empty)
     }
+
+    pub(crate) async fn reload_upstream_servers(&mut self) -> ReadySetResult<()> {
+        self.inner.noria.reload_upstream_servers().await
+    }
 }
 
 impl NoriaConnector {

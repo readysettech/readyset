@@ -612,6 +612,12 @@ impl ReadySetHandle {
     );
 
     simple_request!(
+        /// Reload the upstream and CDC server lists from the Authority after an adapter changed
+        /// them
+        reload_upstream_servers() -> ()
+    );
+
+    simple_request!(
         /// The `host:port` of the CDC server replication is currently using, or `None` when
         /// replication has not started.
         replication_server() -> Option<String>

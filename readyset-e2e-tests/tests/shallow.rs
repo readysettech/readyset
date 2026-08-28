@@ -1132,7 +1132,6 @@ async fn mysql_change_upstream() {
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
-        .replication_enabled(false)
         .upstream_config(Some(upstream_config));
 
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
@@ -1575,7 +1574,6 @@ async fn pg_change_upstream() {
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
-        .replication_enabled(false)
         .upstream_config(Some(upstream_config));
 
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)

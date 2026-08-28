@@ -11,7 +11,8 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use database_utils::UpstreamServers;
+use database_utils::tls::ServerCertVerification;
+use database_utils::{UpstreamServers, validate_servers};
 use itertools::Itertools;
 use readyset_client::consensus::mcp_tokens::McpTokenStore;
 use readyset_client::consensus::mcp_tokens::{McpToken, McpTokenScope as AuthorityMcpTokenScope};
@@ -53,7 +54,7 @@ use schema_catalog::SchemaGeneration;
 use tracing::{error, info, trace, warn};
 use vec1::Vec1;
 
-use super::noria_connector::{self, MetaVariable};
+use super::noria_connector::{self, MetaVariable, NoriaConnector};
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, CACHE_CREATE_IN_READYSET_SCHEMA_MSG,
     UNSUPPORTED_CACHE_DDL_MSG, acl_creator, create_cache_statement, readyset_version,
@@ -1256,6 +1257,78 @@ where
         Ok(noria_connector::QueryResult::Empty)
     }
 
+    /// `ALTER READYSET CHANGE UPSTREAM TO '<list>'`: validate and replace the proxy server list.
+    /// Sessions whose server stays in the list keep running. The leader reloads the list too, as
+    /// replication uses it when `--cdc-db-url` is unset.
+    async fn change_upstream(
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        noria: &mut NoriaConnector,
+        url: &str,
+    ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
+        // The parse error may hold credentials.
+        let servers: UpstreamServers = url
+            .parse()
+            .map_err(|_| internal_err!("invalid upstream URL"))?;
+        if Dialect::from(servers.database_type()) != settings.dialect {
+            internal!("wrong database type for upstream");
+        }
+        let shared = state
+            .upstream_config
+            .as_ref()
+            .ok_or_else(|| internal_err!("upstream config is not configured"))?;
+        let config = shared.read().await.clone();
+        let current = config.upstream_servers()?;
+        let verification = ServerCertVerification::from(&config).await?;
+        let outcome = validate_servers(
+            current.as_ref(),
+            &servers,
+            &verification,
+            config.upstream_connect_timeout,
+        )
+        .await
+        .map_err(|e| ReadySetError::BadRequest(format!("upstream {e}")))?;
+
+        // Persist first, so a failed write changes nothing. `previous` holds the lists this adapter
+        // last saw; the write fails if the Authority holds something else.
+        let previous = PersistedUpstreamServers {
+            upstream_db_url: current.map(|s| s.raw_list()),
+            cdc_db_url: config.cdc_list()?.map(|s| s.raw_list()),
+        };
+        state
+            .authority
+            .set_upstream_db_url(previous, servers.raw_list())
+            .await?;
+
+        let displays = servers.displays().join(",");
+        let mut config = shared.write().await;
+        config.upstream_db_url = servers.clone().into_vec();
+        if let Some(registry) = &state.upstream_registry
+            && let Some(next) = registry.replace(Some(servers))
+        {
+            for (display, error) in &outcome.unreachable {
+                if let Some(idx) = next.servers().position(display) {
+                    next.mark_down(idx, error);
+                }
+            }
+        }
+        drop(config);
+        info!(url = %displays, "Changed upstream configuration");
+        noria.reload_upstream_servers().await?;
+
+        let mut rows: Vec<MetaVariable> = Vec::new();
+        for server in &outcome.unchanged {
+            rows.push((server.display().to_string(), "unchanged".to_string()).into());
+        }
+        for server in &outcome.verified {
+            rows.push((server.display().to_string(), "verified".to_string()).into());
+        }
+        for (server, error) in &outcome.unreachable {
+            rows.push((server.clone(), format!("unreachable, marked down: {error}")).into());
+        }
+        Ok(noria_connector::QueryResult::MetaVariables(rows))
+    }
+
     /// Returns whether `user` is the user implied by `--upstream-db-url`. Dropping or rotating
     /// that user would break MCP loopback auth and upstream-credential login, and the original
     /// password could not be re-derived, so those mutations are rejected.
@@ -1937,40 +2010,7 @@ where
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeUpstream(
                 ChangeUpstreamStatement { url },
-            )) => {
-                if settings.replication_enabled {
-                    unsupported!("CHANGE UPSTREAM is only allowed when replication is disabled");
-                }
-                let servers: UpstreamServers = url
-                    .parse()
-                    .map_err(|e| internal_err!("invalid upstream URL: {e}"))?;
-                if Dialect::from(servers.database_type()) != settings.dialect {
-                    internal!("wrong database type for upstream");
-                }
-                let displays = servers.displays().join(",");
-                let config = state
-                    .upstream_config
-                    .as_ref()
-                    .ok_or_else(|| internal_err!("upstream config is not configured"))?;
-                let mut config = config.write().await;
-                // The lists this adapter last saw; the write fails if the Authority holds something
-                // else.
-                let previous = PersistedUpstreamServers {
-                    upstream_db_url: config.upstream_servers()?.map(|s| s.raw_list()),
-                    cdc_db_url: config.cdc_list()?.map(|s| s.raw_list()),
-                };
-                state
-                    .authority
-                    .set_upstream_db_url(previous, servers.raw_list())
-                    .await?;
-                config.upstream_db_url = servers.clone().into_vec();
-                if let Some(registry) = &state.upstream_registry {
-                    registry.replace(Some(servers));
-                }
-                drop(config);
-                info!(url = %displays, "Changed upstream configuration");
-                Ok(noria_connector::QueryResult::Empty)
-            }
+            )) => Self::change_upstream(settings, state, &mut connectors.noria, url).await,
             SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication) => {
                 connectors.noria.stop_replication().await
             }

@@ -2233,7 +2233,6 @@ where
             variables: seed_allowlist(ShallowCacheAllowlistKind::Variable),
             schemas: seed_allowlist(ShallowCacheAllowlistKind::Schema),
         };
-        let replication_enabled = upstream_config.replication_enabled;
         let upstream_config = Arc::new(RwLock::new(upstream_config));
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
             rt.handle(),
@@ -2485,7 +2484,6 @@ where
                 .sampler_tx(global_sampler_tx.clone())
                 .upstream_config(Some(Arc::clone(&upstream_config)))
                 .upstream_registry(Some(Arc::clone(&upstream_registry)))
-                .replication_enabled(replication_enabled)
                 .readyset_schema(Arc::clone(&readyset_schema))
                 .shallow_cache_eligibility(shallow_cache_eligibility)
                 .shallow_cache_allowlists(shallow_cache_allowlists);
