@@ -2289,6 +2289,10 @@ where
                 users: users.clone(),
                 shallow: Arc::clone(&shallow) as _,
             }),
+            Arc::new(readyset_adapter::AdapterUpstreamServers {
+                config: Arc::clone(&upstream_config),
+                registry: Arc::clone(&upstream_registry),
+            }),
         )?;
 
         // MCP tool calls dispatch via a loopback SQL connection to the

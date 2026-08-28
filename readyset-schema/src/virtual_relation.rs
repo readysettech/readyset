@@ -46,6 +46,44 @@ pub struct VrelContext {
     pub query_status_cache: &'static (dyn std::any::Any + Send + Sync),
     pub users: Arc<dyn UsersInfo>,
     pub cache_grants: Arc<dyn CacheGrantsInfo>,
+    pub upstream_servers: Arc<dyn UpstreamServersInfo>,
+}
+
+/// One row of `readyset.upstream_servers`. Health and connections are `None` for a CDC-only
+/// server.
+pub struct UpstreamServerRow {
+    /// `host:port`, matching what the controller reports as the active CDC server.
+    pub server: String,
+    pub host: String,
+    pub port: u16,
+    pub database: Option<String>,
+    pub user: Option<String>,
+    pub weight: u8,
+    /// Whether the server is in the CDC list.
+    pub cdc: bool,
+    /// Whether the server is in the proxy list.
+    pub proxy: bool,
+    pub up: Option<bool>,
+    pub down_since: Option<std::time::SystemTime>,
+    pub last_ok: Option<std::time::SystemTime>,
+    pub connections: Option<u64>,
+}
+
+/// Backs the `readyset.upstream_servers` vrel.
+#[async_trait]
+pub trait UpstreamServersInfo: Send + Sync {
+    /// One row per server across the proxy and CDC lists.
+    async fn servers(&self) -> Vec<UpstreamServerRow>;
+}
+
+/// An [`UpstreamServersInfo`] with no servers behind it.
+pub struct NoUpstreamServers;
+
+#[async_trait]
+impl UpstreamServersInfo for NoUpstreamServers {
+    async fn servers(&self) -> Vec<UpstreamServerRow> {
+        Vec::new()
+    }
 }
 
 /// Provide the users allowed to authenticate against the adapter.
@@ -734,6 +772,7 @@ mod tests {
             &(),
             Arc::new(NoopUsers),
             Arc::new(NoCacheGrants),
+            Arc::new(NoUpstreamServers),
         )
         .expect("init succeeds");
 

@@ -908,6 +908,10 @@ impl TestBuilder {
                     users: users_for_schema,
                     shallow: Arc::clone(&shallow_for_schema) as _,
                 }),
+                Arc::new(readyset_adapter::AdapterUpstreamServers {
+                    config: Arc::clone(&shared_upstream_config),
+                    registry: Arc::clone(&shared_upstream_registry),
+                }),
             )
             .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();

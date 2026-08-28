@@ -21,7 +21,7 @@ use readyset_errors::{ReadySetResult, readyset_schema_err};
 use readyset_sql::Dialect;
 
 use shallow_vrels::ShallowInfo;
-use virtual_relation::{CacheGrantsInfo, UsersInfo, VrelContext, init_vrels};
+use virtual_relation::{CacheGrantsInfo, UpstreamServersInfo, UsersInfo, VrelContext, init_vrels};
 
 pub mod mysql;
 pub mod psql;
@@ -38,6 +38,7 @@ pub struct ReadysetSchema {
 }
 
 impl ReadysetSchema {
+    #[allow(clippy::too_many_arguments)]
     pub fn init<S, Q>(
         name: &str,
         dialect: Dialect,
@@ -46,6 +47,7 @@ impl ReadysetSchema {
         query_status_cache: &'static Q,
         users: Arc<dyn UsersInfo>,
         cache_grants: Arc<dyn CacheGrantsInfo>,
+        upstream_servers: Arc<dyn UpstreamServersInfo>,
     ) -> ReadySetResult<Arc<Self>>
     where
         S: ShallowInfo + 'static,
@@ -89,6 +91,7 @@ impl ReadysetSchema {
             query_status_cache,
             users,
             cache_grants,
+            upstream_servers,
         });
         for (name, provider) in init_vrels(&vrel_ctx) {
             schema
