@@ -4,6 +4,7 @@ use std::assert_matches;
 use std::collections::HashMap;
 use std::env;
 use std::marker::PhantomData;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -13,8 +14,8 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
-    DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId,
-    SharedUpstreamRegistry,
+    DatabaseConnection, QueryableConnection, ReplicationServerId, SharedUpstreamRegistry,
+    UpstreamServers,
 };
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
@@ -33,7 +34,9 @@ use readyset_adapter::{
     recreate_inline_literal_caches, recreate_shallow_caches, Backend, QueryHandler,
     ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase, ViewsSynchronizer,
 };
-use readyset_client::consensus::{Authority, AuthorityControl, LocalAuthorityStore};
+use readyset_client::consensus::{
+    Authority, AuthorityControl, LocalAuthorityStore, UpstreamServerStore,
+};
 use readyset_client::status::CurrentStatus;
 use readyset_client_metrics::QueryLogMode;
 use readyset_data::upstream_system_props::{
@@ -49,6 +52,7 @@ use readyset_shallow::CacheManager;
 use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites;
+use readyset_util::redacted::RedactedString;
 use readyset_util::shared_cache::SharedCache;
 use readyset_util::shutdown::{ShutdownReceiver, ShutdownSender};
 use readyset_util::{eventually, scheduler_yield};
@@ -274,6 +278,9 @@ pub struct TestBuilder {
     rls_poll_interval: Option<Duration>,
     shallow_adaptive_max_extra_load_percent: Option<u64>,
     cache_acl_refresh_interval: Option<Duration>,
+    cdc_db_url: bool,
+    load_stored_upstream_servers: bool,
+    external_addr: Option<SocketAddr>,
 }
 
 impl Default for TestBuilder {
@@ -314,7 +321,24 @@ impl TestBuilder {
             rls_poll_interval: None,
             shallow_adaptive_max_extra_load_percent: None,
             cache_acl_refresh_interval: None,
+            cdc_db_url: true,
+            load_stored_upstream_servers: false,
+            external_addr: None,
         }
+    }
+
+    /// Pass the replication URL as `--upstream-db-url` alone, leaving `--cdc-db-url` unset.
+    pub fn cdc_db_url(mut self, cdc_db_url: bool) -> Self {
+        self.cdc_db_url = cdc_db_url;
+        self
+    }
+
+    /// Adopt the server lists stored in the Authority at build time and share one upstream config
+    /// across connections, as the adapter binary does. Off by default, so the test's own URLs stay
+    /// in place.
+    pub fn load_stored_upstream_servers(mut self, load: bool) -> Self {
+        self.load_stored_upstream_servers = load;
+        self
     }
 
     /// Bootstrap the RLS policy registry from the (Postgres) upstream and wire
@@ -435,6 +459,12 @@ impl TestBuilder {
 
     pub fn authority(mut self, authority: Arc<Authority>) -> Self {
         self.authority = Some(authority);
+        self
+    }
+
+    /// The address of the deployment's worker.
+    pub fn external_addr(mut self, external_addr: SocketAddr) -> Self {
+        self.external_addr = Some(external_addr);
         self
     }
 
@@ -569,7 +599,7 @@ impl TestBuilder {
         let cdc_url_and_db_name = match self.replicate {
             ReplicationBehavior::None => None,
             ReplicationBehavior::Url(url) => {
-                let db_name = DatabaseURL::from_str(&url)
+                let db_name = UpstreamServers::from_str(&url)
                     .unwrap()
                     .db_name()
                     .unwrap()
@@ -623,14 +653,19 @@ impl TestBuilder {
         builder.set_parsing_preset(self.parsing_preset);
         builder.set_dialect(A::DIALECT);
         builder.set_upquery_timeout(self.upquery_timeout);
+        if let Some(external_addr) = self.external_addr {
+            builder.set_external_addr(external_addr);
+        }
 
         if !self.partial {
             builder.disable_partial();
         }
 
         if let Some((url, _)) = &cdc_url_and_db_name {
-            builder.set_cdc_db_url(url);
-            if self.fallback == FallbackBehavior::UseReplicationUpstream {
+            if self.cdc_db_url {
+                builder.set_cdc_db_url(url);
+            }
+            if !self.cdc_db_url || self.fallback == FallbackBehavior::UseReplicationUpstream {
                 builder.set_upstream_db_url(url);
             }
         } else if self.fallback == FallbackBehavior::UseReplicationUpstream {
@@ -890,6 +925,30 @@ impl TestBuilder {
             AclHandle::disabled()
         };
 
+        let stored = if self.load_stored_upstream_servers {
+            authority
+                .load_upstream_servers()
+                .await
+                .expect("Authority is readable")
+        } else {
+            None
+        };
+        if let Some(stored) = stored {
+            let parse = |list: Option<RedactedString>| {
+                list.map(|list| list.parse::<UpstreamServers>().expect("stored list parses"))
+            };
+            let upstream = parse(stored.upstream_db_url);
+            let mut config = shared_upstream_config.write().await;
+            config.upstream_db_url = upstream
+                .clone()
+                .map(UpstreamServers::into_vec)
+                .unwrap_or_default();
+            config.cdc_db_url = parse(stored.cdc_db_url)
+                .map(UpstreamServers::into_vec)
+                .unwrap_or_default();
+            shared_upstream_registry.replace(upstream);
+        }
+
         tokio::spawn(async move {
             // Keep the RLS bootstrap handle alive for the server's lifetime: it
             // owns the poller's shutdown sender, so dropping it would stop catalog
@@ -1009,7 +1068,12 @@ impl TestBuilder {
                         .cache_acl(cache_acl.clone())
                         .readyset_schema(Arc::clone(&readyset_schema));
                     if enable_fallback && backend_builder.get_upstream_config().is_none() {
-                        if let Some(url) = &upstream_url {
+                        // Lists from the Authority are shared, as in the adapter binary, so an
+                        // edit on one connection shows on every connection.
+                        if self.load_stored_upstream_servers {
+                            backend_builder = backend_builder
+                                .upstream_config(Some(Arc::clone(&shared_upstream_config)));
+                        } else if let Some(url) = &upstream_url {
                             backend_builder =
                                 backend_builder.upstream_config(Some(Arc::new(RwLock::new(
                                     UpstreamConfig::from_url(url).expect("valid upstream URL"),
