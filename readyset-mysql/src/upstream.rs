@@ -442,13 +442,12 @@ impl MySqlUpstream {
         password: Option<String>,
         interactive: bool,
     ) -> Result<(Conn, HashMap<StatementID, mysql_async::Statement>), Error> {
-        let url = upstream_config
-            .upstream_db_url
-            .as_deref()
+        let server = upstream_config
+            .preferred_upstream_server()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
         let mut builder = {
-            let opts = Opts::from_url(url)
+            let opts = Opts::from_url(server.raw_url())
                 .map_err(|e: UrlError| Error::MySql(mysql_async::Error::Url(e)))?;
             OptsBuilder::from_opts(opts)
                 .stmt_cache_size(0)

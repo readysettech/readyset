@@ -145,10 +145,8 @@ where
         enabled_features: Vec<String>,
         disk_path: &Path,
     ) -> Self {
-        let upstream_config = upstream_config
-            .upstream_db_url
-            .is_some()
-            .then_some(upstream_config);
+        let upstream_config =
+            (!upstream_config.upstream_db_url.is_empty()).then_some(upstream_config);
         let inner = Arc::new(Mutex::new(ReadySetStatusReporterInner {
             upstream: None,
             upstream_config,

@@ -191,10 +191,15 @@ pub trait Adapter: Send {
 
     /// Connect to the upstream at `addr`, returning `None` when it is unreachable.
     async fn make_upstream(addr: String) -> Option<Self::Upstream> {
-        Self::Upstream::connect(UpstreamConfig::from_url(addr), None, None, false)
-            .await
-            .inspect_err(|error| tracing::warn!(%error, "Failed to connect to upstream"))
-            .ok()
+        Self::Upstream::connect(
+            UpstreamConfig::from_url(addr).expect("valid upstream URL"),
+            None,
+            None,
+            false,
+        )
+        .await
+        .inspect_err(|error| tracing::warn!(%error, "Failed to connect to upstream"))
+        .ok()
     }
 
     async fn recreate_database(db_name: &str);
@@ -701,9 +706,9 @@ impl TestBuilder {
         // backend either has upstream or noria writer
         let cdc_url = cdc_url_and_db_name.as_ref().map(|(f, _)| f.clone());
         let mut cdc_upstream_config = if let Some(f) = &cdc_url {
-            UpstreamConfig::from_url(f)
+            UpstreamConfig::from_url(f).expect("valid upstream URL")
         } else if let Some(url) = &upstream_only_url {
-            UpstreamConfig::from_url(url)
+            UpstreamConfig::from_url(url).expect("valid upstream URL")
         } else {
             UpstreamConfig::default()
         };
@@ -899,11 +904,14 @@ impl TestBuilder {
                     };
                     let auto_increments = auto_increments.clone();
 
-                    let upstream_url =
-                        match shared_upstream_config.read().await.upstream_db_url.clone() {
-                            Some(url) => Some(url.into()),
-                            None => cdc_url.clone(),
-                        };
+                    let upstream_url = match shared_upstream_config
+                        .read()
+                        .await
+                        .preferred_upstream_server()
+                    {
+                        Some(server) => Some(server.raw_url().0.clone()),
+                        None => cdc_url.clone(),
+                    };
                     // Probe the upstream for system properties; an unreachable upstream falls
                     // back to the defaults below.
                     let mut cdc_upstream = match &upstream_url {
@@ -980,9 +988,10 @@ impl TestBuilder {
                         .readyset_schema(Arc::clone(&readyset_schema));
                     if enable_fallback && backend_builder.get_upstream_config().is_none() {
                         if let Some(url) = &upstream_url {
-                            backend_builder = backend_builder.upstream_config(Some(Arc::new(
-                                RwLock::new(UpstreamConfig::from_url(url)),
-                            )));
+                            backend_builder =
+                                backend_builder.upstream_config(Some(Arc::new(RwLock::new(
+                                    UpstreamConfig::from_url(url).expect("valid upstream URL"),
+                                ))));
                         }
                     }
                     let backend = backend_builder

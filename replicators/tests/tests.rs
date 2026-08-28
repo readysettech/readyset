@@ -444,8 +444,8 @@ impl TestHandle {
                 readyset_sql::Dialect::PostgreSQL => None,
             },
         )?;
-        let upstream_db_url = Some(self.url.clone().into());
-        let cdc_db_url = Some(self.url.clone().into());
+        let upstream_db_url = vec![self.url.parse().unwrap()];
+        let cdc_db_url = vec![self.url.parse().unwrap()];
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
                 controller,

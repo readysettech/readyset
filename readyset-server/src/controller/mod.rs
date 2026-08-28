@@ -126,7 +126,7 @@ impl ControllerState {
             .unwrap_or_else(|| {
                 config
                     .replicator_config
-                    .get_cdc_db_url()
+                    .preferred_cdc_url()
                     .expect("Failed to get CDC database URL; provide URL or explicit dialect")
                     .database_type()
                     .into()
@@ -533,7 +533,7 @@ impl Controller {
         shutdown_rx: ShutdownReceiver,
     ) -> Self {
         // If we don't have an upstream, we allow permissive writes to base tables.
-        let permissive_writes = config.replicator_config.upstream_db_url.is_none();
+        let permissive_writes = config.replicator_config.upstream_db_url.is_empty();
         let (background_task_failed_tx, background_task_failed_rx) = mpsc::channel(1);
         let table_statuses = TableStatusState::new(
             authority.is_single_process(),
@@ -1271,7 +1271,7 @@ impl Controller {
 
         // Validate the URL parses correctly.
         // Avoid including the parse error in the message as it may contain credentials.
-        let parsed: database_utils::DatabaseURL = url
+        let servers: database_utils::UpstreamServers = url
             .parse()
             .map_err(|_| ReadySetError::Internal("invalid CDC URL".into()))?;
 
@@ -1281,15 +1281,15 @@ impl Controller {
         if let Some(ref mut leader) = *guard {
             let ds = leader.dataflow_state_handle.read().await;
             let expected_dialect: readyset_sql::Dialect = ds.recipe.dialect().into();
-            if parsed.dialect() != expected_dialect {
+            let dialect = servers.preferred().url().dialect();
+            if dialect != expected_dialect {
                 return Err(ReadySetError::Internal(format!(
-                    "CDC URL dialect mismatch: expected {expected_dialect:?}, got {:?}",
-                    parsed.dialect()
+                    "CDC URL dialect mismatch: expected {expected_dialect:?}, got {dialect:?}"
                 )));
             }
             drop(ds);
 
-            leader.replicator_config.cdc_db_url = Some(url.into());
+            leader.replicator_config.cdc_db_url = servers.into_vec();
             info!("CDC URL changed");
             Ok(())
         } else {

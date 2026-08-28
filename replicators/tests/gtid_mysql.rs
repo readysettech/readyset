@@ -260,8 +260,8 @@ impl TestHandle {
             url.db_name(),
         )?;
 
-        let upstream_db_url = Some(self.url.clone().into());
-        let cdc_db_url = Some(self.url.clone().into());
+        let upstream_db_url = vec![self.url.parse().unwrap()];
+        let cdc_db_url = vec![self.url.parse().unwrap()];
         let config = Config {
             upstream_db_url,
             cdc_db_url,

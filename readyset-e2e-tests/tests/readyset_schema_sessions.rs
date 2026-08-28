@@ -268,7 +268,7 @@ async fn readyset_schema_session_with_unreachable_upstream_mysql() {
         .require_authentication(false)
         .upstream_config(Some(Arc::new(RwLock::new(UpstreamConfig::from_url(
             UNREACHABLE_MYSQL_UPSTREAM,
-        )))));
+        ).expect("valid upstream URL")))));
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
         .replicate_db(&test_name)
@@ -308,7 +308,7 @@ async fn readyset_schema_session_with_unreachable_upstream_psql() {
         .require_authentication(false)
         .upstream_config(Some(Arc::new(RwLock::new(UpstreamConfig::from_url(
             UNREACHABLE_PSQL_UPSTREAM,
-        )))));
+        ).expect("valid upstream URL")))));
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
         .replicate_db(&test_name)

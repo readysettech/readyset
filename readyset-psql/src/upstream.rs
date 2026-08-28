@@ -383,12 +383,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         password: Option<String>,
         _interactive: bool,
     ) -> Result<Self, Error> {
-        let url = upstream_config
-            .upstream_db_url
-            .as_ref()
+        let server = upstream_config
+            .preferred_upstream_server()
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
-        let mut pg_config = Config::from_str(url)?;
+        let mut pg_config = Config::from_str(server.raw_url())?;
         if let Some(username) = username {
             pg_config.user(username);
         }

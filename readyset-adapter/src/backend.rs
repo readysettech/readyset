@@ -87,7 +87,7 @@ use crate::shallow_key::ShallowKey;
 use anyhow::bail;
 use clap::ValueEnum;
 use crossbeam_skiplist::SkipSet;
-use database_utils::UpstreamConfig;
+use database_utils::{UpstreamConfig, UpstreamServer};
 use failpoint_macros::set_failpoint;
 use lru::LruCache;
 use metrics::{counter, gauge};
@@ -536,7 +536,7 @@ impl BackendBuilder {
         // itself is opened later, at auth, by `connect_upstream`. Admin sessions never open one
         // and never proxy.
         let upstream_configured = match &self.upstream_config {
-            Some(config) => config.read().await.upstream_db_url.is_some(),
+            Some(config) => !config.read().await.upstream_db_url.is_empty(),
             None => false,
         };
         let proxy_state = if upstream_configured && !self.admin {
@@ -562,7 +562,7 @@ impl BackendBuilder {
 
         let last_upstream_url = match &self.upstream_config {
             Some(config) => config.read().await.upstream_db_url.clone(),
-            None => None,
+            None => vec![],
         };
 
         Backend {
@@ -1104,8 +1104,9 @@ where
     db_version: Option<String>,
     /// Shared upstream config, updated by ALTER READYSET CHANGE UPSTREAM.
     upstream_config: Option<Arc<RwLock<UpstreamConfig>>>,
-    /// The upstream URL this connection last connected to, used to detect routing changes.
-    last_upstream_url: Option<RedactedString>,
+    /// The upstream server list this connection last connected with, used to detect routing
+    /// changes.
+    last_upstream_url: Vec<UpstreamServer>,
     /// When we last checked the shared config for upstream changes (rate-limited to once/sec).
     last_routing_check: Instant,
     /// Set to true when routing changes are detected; causes all subsequent operations to error
@@ -2042,7 +2043,7 @@ where
             return Ok(());
         };
         let config = config.read().await.clone();
-        if config.upstream_db_url.is_none() {
+        if config.upstream_db_url.is_empty() {
             return Ok(());
         }
 

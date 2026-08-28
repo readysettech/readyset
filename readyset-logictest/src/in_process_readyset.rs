@@ -151,14 +151,16 @@ async fn setup_adapter(
 
         macro_rules! make_backend {
             ($upstream:ty, $handler:ty, $dialect:expr $(,)?) => {{
-                let upstream_config = replication_url
-                    .as_ref()
-                    .map(|url| Arc::new(RwLock::new(UpstreamConfig::from_url(url))));
+                let upstream_config = replication_url.as_ref().map(|url| {
+                    Arc::new(RwLock::new(
+                        UpstreamConfig::from_url(url).expect("valid upstream URL"),
+                    ))
+                });
 
                 let status_reporter = ReadySetStatusReporter::new(
                     replication_url
                         .as_ref()
-                        .map(|url| UpstreamConfig::from_url(url))
+                        .map(|url| UpstreamConfig::from_url(url).expect("valid upstream URL"))
                         .unwrap_or_default(),
                     Some(rh),
                     Default::default(),

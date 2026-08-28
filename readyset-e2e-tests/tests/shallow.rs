@@ -1128,7 +1128,7 @@ async fn mysql_change_upstream() {
 
     let url_a = MySQLAdapter::upstream_url(&db_a);
     let url_b = MySQLAdapter::upstream_url(&db_b);
-    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a)));
+    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a).expect("valid upstream URL")));
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
@@ -1571,7 +1571,7 @@ async fn pg_change_upstream() {
 
     let url_a = PostgreSQLAdapter::upstream_url(&db_a);
     let url_b = PostgreSQLAdapter::upstream_url(&db_b);
-    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a)));
+    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a).expect("valid upstream URL")));
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)

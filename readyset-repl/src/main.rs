@@ -144,7 +144,7 @@ impl ReplContext {
         if let Some(user) = self.options.database_url.user() {
             url.push_str(&format!("{user}@"))
         }
-        url.push_str(self.options.database_url.host());
+        url.push_str(self.options.database_url.host().unwrap_or_default());
         if let Some(db_name) = self.options.database_url.db_name() {
             url.push_str(&format!("/{db_name}"));
         }

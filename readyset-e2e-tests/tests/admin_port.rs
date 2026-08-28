@@ -33,9 +33,9 @@ fn admin_backend_builder(upstream_url: &str) -> BackendBuilder {
             )]),
             None,
         )))
-        .upstream_config(Some(Arc::new(RwLock::new(UpstreamConfig::from_url(
-            upstream_url,
-        )))))
+        .upstream_config(Some(Arc::new(RwLock::new(
+            UpstreamConfig::from_url(upstream_url).expect("valid upstream URL"),
+        ))))
 }
 
 fn admin_mysql_opts(rs_opts: &mysql_async::Opts, db: Option<&str>) -> mysql_async::Opts {

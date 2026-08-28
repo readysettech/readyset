@@ -389,7 +389,7 @@ async fn e2e_cannot_mutate_upstream_user() {
 
     let mut users = HashMap::new();
     users.insert(ROOT_USER.to_string(), ROOT_PASSWORD.into());
-    let upstream_config = UpstreamConfig::from_url(MySQLAdapter::url_with_db("noria"));
+    let upstream_config = UpstreamConfig::from_url(MySQLAdapter::url_with_db("noria")).expect("valid upstream URL");
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)

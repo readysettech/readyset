@@ -11,7 +11,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use database_utils::DatabaseURL;
+use database_utils::UpstreamServers;
 use itertools::Itertools;
 use readyset_client::consensus::mcp_tokens::McpTokenStore;
 use readyset_client::consensus::mcp_tokens::{McpToken, McpTokenScope as AuthorityMcpTokenScope};
@@ -46,7 +46,7 @@ use readyset_sql_passes::DetectBucketFunctions;
 use readyset_sql_passes::shallow::rewrite_shallow;
 use readyset_telemetry_reporter::TelemetryEvent;
 use readyset_util::SizeOf;
-use readyset_util::redacted::{RedactedString, Sensitive};
+use readyset_util::redacted::Sensitive;
 use readyset_util::retry_with_exponential_backoff;
 use schema_catalog::SchemaGeneration;
 use tracing::{error, info, trace, warn};
@@ -1260,11 +1260,9 @@ where
     /// password could not be re-derived, so those mutations are rejected.
     async fn is_upstream_url_user(state: &BackendState<DB>, user: &str) -> bool {
         if let Some(cfg) = state.upstream_config.as_ref() {
-            let upstream_url = cfg.read().await.upstream_db_url.clone();
-            if let Some(url) = upstream_url
-                && let Ok(parsed) = url.parse::<DatabaseURL>()
-            {
-                return parsed.user() == Some(user);
+            let config = cfg.read().await;
+            if let Some(url) = config.preferred_upstream_url() {
+                return url.user() == Some(user);
             }
         }
         false
@@ -1942,22 +1940,21 @@ where
                 if settings.replication_enabled {
                     unsupported!("CHANGE UPSTREAM is only allowed when replication is disabled");
                 }
-                let parsed: DatabaseURL = url
+                let servers: UpstreamServers = url
                     .parse()
                     .map_err(|e| internal_err!("invalid upstream URL: {e}"))?;
-                if parsed.dialect() != settings.dialect {
+                if servers.preferred().url().dialect() != settings.dialect {
                     internal!("wrong database type for upstream");
                 }
-                let url = url.clone();
-                let redacted = RedactedString::from(url.clone());
+                let displays = servers.displays().join(",");
                 let config = state
                     .upstream_config
                     .as_ref()
                     .ok_or_else(|| internal_err!("upstream config is not configured"))?;
                 let mut config = config.write().await;
-                config.upstream_db_url = Some(url.into());
+                config.upstream_db_url = servers.into_vec();
                 drop(config);
-                info!(url = %redacted, "Changed upstream configuration");
+                info!(url = %displays, "Changed upstream configuration");
                 Ok(noria_connector::QueryResult::Empty)
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication) => {

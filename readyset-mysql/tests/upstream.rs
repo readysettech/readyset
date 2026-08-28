@@ -16,7 +16,7 @@ async fn connect() -> MySqlUpstream {
         opts.ip_or_hostname(),
         opts.tcp_port(),
     );
-    MySqlUpstream::connect(UpstreamConfig::from_url(url), None, None, false)
+    MySqlUpstream::connect(UpstreamConfig::from_url(url).expect("valid upstream URL"), None, None, false)
         .await
         .unwrap()
 }

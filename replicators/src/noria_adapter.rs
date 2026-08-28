@@ -102,7 +102,7 @@ pub(crate) trait Connector {
 /// Cleans up replication related assets on the upstream database as supplied by the
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
-    if let DatabaseURL::PostgreSQL(mut options) = config.get_cdc_db_url()? {
+    if let DatabaseURL::PostgreSQL(mut options) = config.preferred_cdc_url()? {
         let repl_slot_name = replication_slot_name(&config);
         let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
 

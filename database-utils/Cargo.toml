@@ -27,5 +27,8 @@ icu = { workspace = true }
 yore = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

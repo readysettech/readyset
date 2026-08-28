@@ -184,8 +184,8 @@ impl Leader {
             return false;
         }
 
-        if self.replicator_config.cdc_db_url.is_none()
-            && self.replicator_config.upstream_db_url.is_none()
+        if self.replicator_config.cdc_db_url.is_empty()
+            && self.replicator_config.upstream_db_url.is_empty()
         {
             // Controller must be notified that snapshot is completed even though we don't have an
             // upstream db. This is only relevant for tests as users will not run without an
@@ -196,7 +196,7 @@ impl Leader {
             info!("No primary instance specified");
             return false;
         }
-        let url: DatabaseURL = match self.replicator_config.get_cdc_db_url() {
+        let url: DatabaseURL = match self.replicator_config.preferred_cdc_url() {
             Ok(url) => url,
             Err(e) => {
                 error!("Error in replication config: {e}");

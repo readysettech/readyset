@@ -24,7 +24,7 @@ use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Parser};
 use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseType, DatabaseURL, TlsMode, UpstreamConfig};
+use database_utils::{DatabaseType, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{BoxStream, SelectAll, StreamExt};
@@ -839,28 +839,14 @@ impl Options {
         }
     }
 
-    /// Extract database type from a URL string
-    ///
-    /// # Input
-    ///
-    /// - `url` - A string representing a database URL
-    ///
-    /// # Output
-    ///
-    /// - A `DatabaseType` representing the database type
-    fn infer_database_type_from_url(&self, url: &str) -> anyhow::Result<DatabaseType> {
-        Ok(url.parse::<DatabaseURL>()?.database_type())
-    }
-
-    /// Infer the database type from the upstream and/or CDC URLs, validating that they agree if
-    /// both are present. Returns `None` if neither URL is provided.
+    /// Infer the database type from the upstream and/or CDC URLs, validating each server list and
+    /// that they agree if both are present. Returns `None` if neither URL is provided.
     fn infer_database_type_from_urls(&self) -> anyhow::Result<Option<DatabaseType>> {
-        let upstream = &self.server_worker_options.replicator_config.upstream_db_url;
-        let cdc = &self.server_worker_options.replicator_config.cdc_db_url;
-        match (upstream, cdc) {
-            (Some(url), Some(cdc_url)) => {
-                let inferred = self.infer_database_type_from_url(url)?;
-                let cdc_inferred = self.infer_database_type_from_url(cdc_url)?;
+        let config = &self.server_worker_options.replicator_config;
+        match (config.upstream_servers()?, config.cdc_list()?) {
+            (Some(servers), Some(cdc_servers)) => {
+                let inferred = servers.database_type();
+                let cdc_inferred = cdc_servers.database_type();
                 if inferred != cdc_inferred {
                     bail!(
                         "Database type for --upstream-db-url ({}) does not match \
@@ -871,9 +857,7 @@ impl Options {
                 }
                 Ok(Some(inferred))
             }
-            (Some(url), None) | (None, Some(url)) => {
-                Ok(Some(self.infer_database_type_from_url(url)?))
-            }
+            (Some(servers), None) | (None, Some(servers)) => Ok(Some(servers.database_type())),
             (None, None) => Ok(None),
         }
     }
@@ -963,9 +947,7 @@ impl Options {
         let upstream_url = self
             .server_worker_options
             .replicator_config
-            .upstream_db_url
-            .as_ref()
-            .and_then(|s| s.parse::<DatabaseURL>().ok());
+            .preferred_upstream_url();
         // Parse allowed users from comma-separated "user:pass" pairs
         let mut allowed_users = self
             .allowed_users_arg
@@ -1100,7 +1082,7 @@ async fn connect_upstream<U>(upstream_config: UpstreamConfig) -> Result<Option<U
 where
     U: UpstreamDatabase,
 {
-    if upstream_config.upstream_db_url.is_some() {
+    if !upstream_config.upstream_db_url.is_empty() {
         set_failpoint!(failpoints::UPSTREAM);
 
         // Upstream services can start accepting connections slightly after the adapter/server
@@ -1141,7 +1123,7 @@ async fn load_system_props<U>(upstream_config: UpstreamConfig) -> UpstreamSystem
 where
     U: UpstreamDatabase,
 {
-    if upstream_config.upstream_db_url.is_none() {
+    if upstream_config.upstream_db_url.is_empty() {
         return UpstreamSystemProperties {
             search_path: upstream_config.default_schema_search_path(),
             timezone: parse_upstream_timezone(&upstream_config.default_timezone_name()),
@@ -1882,9 +1864,7 @@ where
             let parsed = options
                 .server_worker_options
                 .replicator_config
-                .upstream_db_url
-                .as_ref()
-                .and_then(|s| s.parse::<database_utils::DatabaseURL>().ok())
+                .preferred_upstream_url()
                 .and_then(|url| match (url.user(), url.password()) {
                     (Some(u), Some(p)) => Some((u.to_string(), p.to_string())),
                     _ => None,
@@ -2026,9 +2006,8 @@ where
         // run RLS-disabled (every shallow cache stays plain).
         let (rls_registry, rls_coordinator, rls_bootstrap_handle) = {
             let upstream_url = upstream_config
-                .upstream_db_url
-                .as_ref()
-                .map(|u| u.0.clone());
+                .preferred_upstream_server()
+                .map(|server| server.raw_url().0.clone());
             let deferred_sink = Arc::new(readyset_rls::DeferredSink::new());
             let rls_config = readyset_rls::RlsConfig::default()
                 .with_poll_interval(Duration::from_secs(options.rls_poll_interval_secs));
@@ -2576,6 +2555,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use database_utils::{DatabaseURL, UpstreamServer};
+
     use super::*;
 
     /// Builds shards without runtimes behind them: placement only reads the live counts.
@@ -3079,14 +3060,12 @@ mod tests {
         assert_eq!(
             opts.server_worker_options
                 .replicator_config
-                .upstream_db_url
-                .as_ref()
-                .unwrap()
-                .parse::<DatabaseURL>()
+                .preferred_upstream_url()
                 .unwrap(),
-            opts.server_worker_options
+            &opts
+                .server_worker_options
                 .replicator_config
-                .get_cdc_db_url()
+                .preferred_cdc_url()
                 .unwrap()
         );
 
@@ -3098,25 +3077,20 @@ mod tests {
             "mysql://replication:rpl_pwd@mysql:3306/my_app",
         ]);
 
-        let upstream = opts
-            .server_worker_options
-            .replicator_config
-            .upstream_db_url
-            .as_ref()
-            .unwrap();
+        let upstream = &opts.server_worker_options.replicator_config.upstream_db_url;
         let cdc = opts
             .server_worker_options
             .replicator_config
-            .get_cdc_db_url()
+            .preferred_cdc_url()
             .unwrap();
 
-        let r_upstream: RedactedString = "mysql://app_user:app_password@mysql:3306/my_app"
+        let r_upstream: UpstreamServer = "mysql://app_user:app_password@mysql:3306/my_app"
             .parse()
             .unwrap();
         let r_cdc: DatabaseURL = "mysql://replication:rpl_pwd@mysql:3306/my_app"
             .parse()
             .unwrap();
-        assert_eq!(*upstream, r_upstream);
+        assert_eq!(*upstream, vec![r_upstream]);
         assert_eq!(cdc, r_cdc);
 
         let opts = Options::parse_from(vec![

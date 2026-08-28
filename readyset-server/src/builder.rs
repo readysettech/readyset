@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{self, Duration};
 
-use database_utils::{ReplicationServerId, UpstreamConfig};
+use database_utils::{ReplicationServerId, UpstreamConfig, UpstreamServers};
 use dataflow::PersistenceParameters;
 use readyset_client::consensus::{
     Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
@@ -226,12 +226,18 @@ impl Builder {
 
     /// Sets the URL for the database to fallback to
     pub fn set_upstream_db_url(&mut self, url: &str) {
-        self.config.replicator_config.upstream_db_url = Some(url.to_string().into());
+        self.config.replicator_config.upstream_db_url = url
+            .parse::<UpstreamServers>()
+            .expect("valid upstream URL list")
+            .into_vec();
     }
 
     /// Sets the URL for the database to replicate from
     pub fn set_cdc_db_url(&mut self, url: &str) {
-        self.config.replicator_config.cdc_db_url = Some(url.to_string().into());
+        self.config.replicator_config.cdc_db_url = url
+            .parse::<UpstreamServers>()
+            .expect("valid CDC URL list")
+            .into_vec();
     }
 
     /// Sets configuration for the replicator thread

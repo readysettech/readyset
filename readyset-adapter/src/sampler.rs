@@ -164,17 +164,7 @@ fn build_channel(config: &SamplerConfig) -> (SampleSender, SamplerRx) {
 }
 
 async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<DatabaseConnection> {
-    let mut url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
-        match url.parse() {
-            Ok(url) => url,
-            Err(error) => {
-                warn!(%error, "Failed to parse sampler upstream URL");
-                return None;
-            }
-        }
-    } else {
-        return None;
-    };
+    let mut url = config.preferred_upstream_url()?.clone();
 
     // extract port and host from rs_addr
     let port = rs_addr.port();
@@ -202,17 +192,7 @@ async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<Data
 
 async fn connect_upstream(config: &UpstreamConfig) -> Option<DatabaseConnection> {
     debug!("Connecting to upstream");
-    let mut url: DatabaseURL = if let Some(url) = &config.upstream_db_url {
-        match url.parse() {
-            Ok(url) => url,
-            Err(error) => {
-                warn!(%error, "Failed to parse sampler upstream URL");
-                return None;
-            }
-        }
-    } else {
-        return None;
-    };
+    let mut url = config.preferred_upstream_url()?.clone();
     url.set_program_or_application_name(READYSET_QUERY_SAMPLER.to_string());
     let verification = match ServerCertVerification::from(config).await {
         Ok(verification) => verification,

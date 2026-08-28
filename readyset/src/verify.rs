@@ -51,7 +51,7 @@ fn verify_cdc_url(options: &Options) -> Result<DatabaseURL> {
     let url = options
         .server_worker_options
         .replicator_config
-        .get_cdc_db_url()
+        .preferred_cdc_url()
         .map_err(|e| anyhow!("Failed to verify CDC URL: {e}"))?;
     info!("Verified upstream CDC URL");
     Ok(url)
@@ -61,12 +61,9 @@ fn verify_upstream_url(options: &Options) -> Result<DatabaseURL> {
     let url = options
         .server_worker_options
         .replicator_config
-        .upstream_db_url
-        .as_ref()
+        .preferred_upstream_url()
+        .cloned()
         .ok_or_else(|| anyhow!("Failed to determine upstream URL"))?;
-    let url = url
-        .parse()
-        .map_err(|e| anyhow!("Invalid upstream URL: {e}"))?;
     info!("Verified upstream URL");
     Ok(url)
 }

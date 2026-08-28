@@ -26,12 +26,14 @@ use crate::tls::{ServerCertVerification, get_mysql_tls_config, get_tls_connector
 mod connection;
 pub mod error;
 pub mod tls;
+pub mod upstream_servers;
 
 pub use connection::{
     DatabaseConnection, DatabaseConnectionPool, DatabaseStatement, QueryResults,
     QueryableConnection, SimpleQueryResults, SimpleQueryResultsRow, Transaction,
 };
 pub use error::DatabaseError;
+pub use upstream_servers::{UpstreamServer, UpstreamServers};
 
 const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";
 
@@ -40,16 +42,23 @@ const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";
 pub struct UpstreamConfig {
     /// URL for the upstream database to connect to. Should include username and password if
     /// necessary. This is used to proxy queries to the upstream database.
-    #[arg(long, env = "UPSTREAM_DB_URL")]
-    #[serde(default)]
-    pub upstream_db_url: Option<RedactedString>,
+    ///
+    /// Repeat the flag or pass a comma-separated list for more than one server. Each URL takes
+    /// an optional `|<weight>` suffix (1-100, default 50), for example `mysql://u:p@a/db|60`.
+    /// Every server in a list must use the same database type, database name, user, and
+    /// password. A comma inside a password must be percent-encoded.
+    #[arg(long, env = "UPSTREAM_DB_URL", value_delimiter = ',')]
+    #[serde(default, with = "upstream_servers::config_list")]
+    pub upstream_db_url: Vec<UpstreamServer>,
 
     /// URL for the CDC database to connect to. Should include username and password if
     /// necessary. This is used for replication and snapshotting. Defaults to the same as
-    /// `--upstream-db-url`
-    #[arg(long, env = "CDC_DB_URL")]
-    #[serde(default)]
-    pub cdc_db_url: Option<RedactedString>,
+    /// `--upstream-db-url`. Accepts the same weighted list syntax as `--upstream-db-url`;
+    /// replication uses the highest-weight server and fails over to the next-highest-weight
+    /// server.
+    #[arg(long, env = "CDC_DB_URL", value_delimiter = ',')]
+    #[serde(default, with = "upstream_servers::config_list")]
+    pub cdc_db_url: Vec<UpstreamServer>,
 
     /// Disable verification of SSL certificates supplied by the upstream database (postgres
     /// only, ignored for mysql). Ignored if `--upstream-db-url` is not passed.
@@ -306,34 +315,74 @@ impl UpstreamConfig {
         Ok(Some(certs))
     }
 
-    /// get the cdc db url if it is set, otherwise return the upstream db url
-    ///
-    /// # Output
-    ///
-    /// - A `Result<DatabaseURL>` representing the cdc db url if it is set, otherwise the
-    ///   upstream db url; returns an error if the url is invalid.
-    pub fn get_cdc_db_url(&self) -> ReadySetResult<DatabaseURL> {
-        let (arg, url) = if let Some(url) = &self.cdc_db_url {
-            ("--cdc-db-url", url)
-        } else if let Some(url) = &self.upstream_db_url {
-            ("--upstream-db-url", url)
+    /// The `--upstream-db-url` servers, or `None` when it is unset. Errors if they do not form a
+    /// valid list.
+    pub fn upstream_servers(&self) -> ReadySetResult<Option<UpstreamServers>> {
+        if self.upstream_db_url.is_empty() {
+            return Ok(None);
+        }
+        server_list(&self.upstream_db_url).map(Some)
+    }
+
+    /// The `--cdc-db-url` servers, or `None` when it is unset. Errors if they do not form a valid
+    /// list.
+    pub fn cdc_list(&self) -> ReadySetResult<Option<UpstreamServers>> {
+        if self.cdc_db_url.is_empty() {
+            return Ok(None);
+        }
+        server_list(&self.cdc_db_url).map(Some)
+    }
+
+    /// The servers replication and snapshotting use: `--cdc-db-url` if set, otherwise
+    /// `--upstream-db-url`. Errors if neither is set or they do not form a valid list.
+    pub fn cdc_servers(&self) -> ReadySetResult<UpstreamServers> {
+        let servers = if self.cdc_db_url.is_empty() {
+            &self.upstream_db_url
         } else {
+            &self.cdc_db_url
+        };
+        if servers.is_empty() {
             return Err(ReadySetError::UrlParseFailed(
                 "Please provide --cdc-db-url or --upstream-db-url".to_string(),
             ));
-        };
-
-        url.parse().map_err(|e| {
-            ReadySetError::UrlParseFailed(format!("Invalid URL supplied to {arg}: {e}"))
-        })
+        }
+        server_list(servers)
     }
 
-    pub fn from_url<S: AsRef<str>>(url: S) -> Self {
+    /// The highest-weight CDC server's URL. See [`cdc_servers`](Self::cdc_servers).
+    pub fn preferred_cdc_url(&self) -> ReadySetResult<DatabaseURL> {
+        Ok(self.cdc_servers()?.preferred().url().clone())
+    }
+
+    /// The highest-weight `--upstream-db-url` server, or `None` when it is unset.
+    pub fn preferred_upstream_server(&self) -> Option<&UpstreamServer> {
+        upstream_servers::preferred(&self.upstream_db_url)
+    }
+
+    /// The highest-weight `--upstream-db-url` server's URL, or `None` when it is unset.
+    pub fn preferred_upstream_url(&self) -> Option<&DatabaseURL> {
+        self.preferred_upstream_server().map(UpstreamServer::url)
+    }
+
+    /// A copy of this config whose upstream and CDC lists hold only `server`.
+    pub fn for_server(&self, server: &UpstreamServer) -> UpstreamConfig {
         UpstreamConfig {
-            upstream_db_url: Some(url.as_ref().to_string().into()),
-            cdc_db_url: Some(url.as_ref().to_string().into()),
-            ..Default::default()
+            upstream_db_url: vec![server.clone()],
+            cdc_db_url: vec![server.clone()],
+            ..self.clone()
         }
+    }
+
+    /// A config whose upstream and CDC lists are both `url`.
+    pub fn from_url<S: AsRef<str>>(
+        url: S,
+    ) -> Result<Self, upstream_servers::UpstreamServersParseError> {
+        let servers = url.as_ref().parse::<UpstreamServers>()?.into_vec();
+        Ok(UpstreamConfig {
+            upstream_db_url: servers.clone(),
+            cdc_db_url: servers,
+            ..Default::default()
+        })
     }
 
     pub fn max_parallel_snapshot_tables(&self) -> usize {
@@ -342,24 +391,16 @@ impl UpstreamConfig {
     }
 
     pub fn default_schema_search_path(&self) -> Vec<SqlIdentifier> {
-        if let Some(Ok(ref db_url)) = self
-            .upstream_db_url
-            .as_ref()
-            .map(|u| u.parse::<DatabaseURL>())
-        {
-            return db_url.default_schema_search_path();
+        match self.preferred_upstream_url() {
+            Some(db_url) => db_url.default_schema_search_path(),
+            None => vec![],
         }
-        vec![]
     }
 
     pub fn default_timezone_name(&self) -> SqlIdentifier {
-        match self
-            .upstream_db_url
-            .as_ref()
-            .map(|url| url.parse::<DatabaseURL>())
-        {
-            Some(Ok(db_url)) => db_url.default_timezone_name(),
-            _ => DEFAULT_TIMEZONE_NAME.into(),
+        match self.preferred_upstream_url() {
+            Some(db_url) => db_url.default_timezone_name(),
+            None => DEFAULT_TIMEZONE_NAME.into(),
         }
     }
 }
@@ -445,6 +486,10 @@ fn default_group_commit_wait_us() -> u64 {
     500
 }
 
+fn server_list(servers: &[UpstreamServer]) -> ReadySetResult<UpstreamServers> {
+    UpstreamServers::new(servers.to_vec()).map_err(|e| ReadySetError::UrlParseFailed(e.to_string()))
+}
+
 fn duration_from_seconds(i: &str) -> Result<Duration, ParseIntError> {
     i.parse::<u64>().map(Duration::from_secs)
 }
@@ -494,6 +539,16 @@ pub enum DatabaseType {
     #[value(name = "postgresql")]
     #[default]
     PostgreSQL,
+}
+
+impl DatabaseType {
+    /// Whether replication can fail over across a list of upstream servers.
+    pub fn supports_failover(self) -> bool {
+        match self {
+            DatabaseType::MySQL => true,
+            DatabaseType::PostgreSQL => false,
+        }
+    }
 }
 
 /// Parses the strings `"mysql"` and `"postgresql"`, case-insensitively
@@ -750,25 +805,26 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns the host name for this database URL
+    /// Returns the host name for this database URL, or `None` for a PostgreSQL URL with no host.
     ///
     /// # Panics
     ///
     /// * Panics if the hostname in the URL is not valid UTF8
-    /// * Panics if a postgresql URL has no hostname set
-    pub fn host(&self) -> &str {
+    pub fn host(&self) -> Option<&str> {
         match self {
-            DatabaseURL::MySQL(opts) => opts.ip_or_hostname(),
-            DatabaseURL::PostgreSQL(config) => {
-                let host = config
-                    .get_hosts()
-                    .first()
-                    .expect("PostgreSQL URL has no hostname set");
-                match host {
-                    pgsql::config::Host::Tcp(tcp) => tcp.as_str(),
-                    pgsql::config::Host::Unix(p) => p.to_str().expect("Invalid UTF-8 in host"),
-                }
-            }
+            DatabaseURL::MySQL(opts) => Some(opts.ip_or_hostname()),
+            DatabaseURL::PostgreSQL(config) => config.get_hosts().first().map(|host| match host {
+                pgsql::config::Host::Tcp(tcp) => tcp.as_str(),
+                pgsql::config::Host::Unix(p) => p.to_str().expect("Invalid UTF-8 in host"),
+            }),
+        }
+    }
+
+    /// Returns the TCP port for this database URL, falling back to the dialect's default.
+    pub fn port(&self) -> u16 {
+        match self {
+            DatabaseURL::MySQL(opts) => opts.tcp_port(),
+            DatabaseURL::PostgreSQL(config) => config.get_ports().first().copied().unwrap_or(5432),
         }
     }
 
