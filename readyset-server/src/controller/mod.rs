@@ -48,6 +48,7 @@ use crate::materialization::Materializations;
 use crate::worker::WorkerRequest;
 use crate::Config;
 
+mod cdc_selector;
 mod domain_handle;
 pub(crate) mod events;
 mod inner;
@@ -1269,7 +1270,7 @@ impl Controller {
             ));
         }
 
-        // Validate the URL parses correctly.
+        // Validate the list parses correctly.
         // Avoid including the parse error in the message as it may contain credentials.
         let servers: database_utils::UpstreamServers = url
             .parse()
@@ -1281,7 +1282,7 @@ impl Controller {
         if let Some(ref mut leader) = *guard {
             let ds = leader.dataflow_state_handle.read().await;
             let expected_dialect: readyset_sql::Dialect = ds.recipe.dialect().into();
-            let dialect = servers.preferred().url().dialect();
+            let dialect = readyset_sql::Dialect::from(servers.database_type());
             if dialect != expected_dialect {
                 return Err(ReadySetError::Internal(format!(
                     "CDC URL dialect mismatch: expected {expected_dialect:?}, got {dialect:?}"
@@ -1289,7 +1290,11 @@ impl Controller {
             }
             drop(ds);
 
-            leader.replicator_config.cdc_db_url = servers.into_vec();
+            leader.replicator_config.cdc_db_url = servers.clone().into_vec();
+            *leader
+                .cdc_server_list
+                .write()
+                .unwrap_or_else(|e| e.into_inner()) = Some(servers);
             info!("CDC URL changed");
             Ok(())
         } else {

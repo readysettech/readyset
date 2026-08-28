@@ -321,7 +321,12 @@ impl MySqlBinlogConnector {
 
     /// After we have registered as a replica, we can request the binlog
     async fn request_binlog(&mut self) -> mysql::Result<()> {
-        info!(offset = %self.replication_offset, "Starting binlog replication");
+        let server = format!(
+            "{}:{}",
+            self.connection.opts().ip_or_hostname(),
+            self.connection.opts().tcp_port()
+        );
+        info!(%server, offset = %self.replication_offset, "Starting binlog replication");
 
         match &self.replication_offset {
             ReplicationOffset::MySql(pos) => {
@@ -533,6 +538,19 @@ impl MySqlBinlogConnector {
                 config.replica_report_password.as_ref().map(|p| p.0.clone()),
             )
             .await?;
+        #[cfg(feature = "failure_injection")]
+        {
+            let opts = connector.connection.opts();
+            let server = format!("{}:{}", opts.ip_or_hostname(), opts.tcp_port());
+            if fail::eval(failpoints::MYSQL_REQUEST_BINLOG, |refusing| refusing)
+                .flatten()
+                .is_some_and(|refusing| refusing == server)
+            {
+                return Err(ReadySetError::ReplicationFailed(format!(
+                    "{server} refused the binlog request"
+                )));
+            }
+        }
         let binlog_request = connector.request_binlog().await;
         match binlog_request {
             Ok(()) => (),

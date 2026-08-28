@@ -1,6 +1,13 @@
 /// Histogram: The amount of time in microseconds a snapshot takes to be performed.
 pub const REPLICATOR_SNAPSHOT_DURATION: &str = "readyset_replicator.snapshot_duration_us";
 
+/// Counter: Times replication moved from one CDC server to the next, labeled `from` and `to`
+/// (host:port).
+pub const UPSTREAM_FAILOVER_TOTAL: &str = "readyset_upstream_failover_total";
+
+/// Counter: Failed connection attempts replication made against a CDC `server`.
+pub const UPSTREAM_CONNECT_RETRIES_TOTAL: &str = "readyset_upstream_connect_retries_total";
+
 /// How the replicator handled a snapshot.
 pub enum SnapshotStatusTag {
     /// A snapshot was started by the replicator.

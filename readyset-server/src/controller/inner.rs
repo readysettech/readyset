@@ -12,13 +12,15 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
-use database_utils::{DatabaseURL, UpstreamConfig};
+use database_utils::tls::ServerCertVerification;
+use database_utils::{UpstreamConfig, UpstreamFailure, UpstreamServer, UpstreamServers};
 use dataflow::DomainIndex;
 use failpoint_macros::failpoint;
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use http::Method;
-use metrics::gauge;
+use metric::{UPSTREAM_CONNECT_RETRIES_TOTAL, UPSTREAM_FAILOVER_TOTAL};
+use metrics::{counter, gauge};
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
 use readyset_client::query::QueryId;
@@ -56,6 +58,7 @@ use crate::controller::state::{DfState, DfStateHandle};
 use crate::controller::{ControllerState, Worker, WorkerIdentifier};
 use crate::worker::WorkerRequest;
 
+use super::cdc_selector::CdcServerSelector;
 use super::table_status::TableStatusState;
 
 /// Maximum amount of time to wait for an `extend_recipe` request to run synchronously, before we
@@ -119,6 +122,11 @@ pub struct Leader {
     pub(super) replicator_stop_tx: Option<tokio::sync::watch::Sender<bool>>,
     /// Shared replication lag status, written by the replicator's background task.
     pub(super) replication_lag_status: SharedLagStatus,
+    /// The CDC server list the replication task walks. Replaced in place by CHANGE CDC so a
+    /// running task sees the new failover candidates.
+    pub(super) cdc_server_list: Arc<RwLock<Option<UpstreamServers>>>,
+    /// The `host:port` of the CDC server replication is currently using.
+    pub(super) active_cdc_server: Arc<RwLock<Option<String>>>,
 }
 
 impl Leader {
@@ -196,8 +204,8 @@ impl Leader {
             info!("No primary instance specified");
             return false;
         }
-        let url: DatabaseURL = match self.replicator_config.preferred_cdc_url() {
-            Ok(url) => url,
+        let servers = match self.replicator_config.cdc_servers() {
+            Ok(servers) => servers,
             Err(e) => {
                 error!("Error in replication config: {e}");
                 if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
@@ -206,12 +214,13 @@ impl Leader {
                 return false;
             }
         };
+        let dialect: Dialect = servers.database_type().into();
         let mut table_filter = match TableFilter::try_new(
-            url.dialect(),
+            dialect,
             self.replicator_config.replication_tables.as_deref(),
             self.replicator_config.replication_tables_ignore.as_deref(),
-            match url.dialect() {
-                Dialect::MySQL => url.db_name(),
+            match dialect {
+                Dialect::MySQL => servers.db_name(),
                 Dialect::PostgreSQL => None,
             },
         ) {
@@ -232,6 +241,12 @@ impl Leader {
         let parsing_preset = self.parsing_preset;
         let table_status_tx = self.table_status_tx.clone();
         let replication_lag_status = self.replication_lag_status.clone();
+        *self
+            .cdc_server_list
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(servers);
+        let cdc_server_list = self.cdc_server_list.clone();
+        let active_cdc_server = self.active_cdc_server.clone();
 
         let (stop_tx, mut stop_rx) = watch::channel(false);
 
@@ -240,11 +255,79 @@ impl Leader {
         // the upstream will be filling up disk
         // So, we abort on any panic of the replicator task.
         let handle = tokio::spawn(abort_on_panic(async move {
+            let stopped_cdc_server = active_cdc_server.clone();
             let replication_future = async move {
                 // The replicator wants to know if we're restarting the server so that it can
                 // resnapshot to capture changes made to replication-tables.
                 let mut server_startup = server_startup;
+                let mut selector = CdcServerSelector::new(config.upstream_connect_retries);
+                let verification = match ServerCertVerification::from(&config).await {
+                    Ok(verification) => verification,
+                    Err(error) => {
+                        error!(%error, "Invalid TLS configuration for the CDC connection");
+                        ServerCertVerification::Default
+                    }
+                };
                 loop {
+                    let servers = cdc_server_list
+                        .read()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    let Some(servers) = servers else {
+                        error!("No CDC servers configured");
+                        tokio::time::sleep(replicator_restart_timeout).await;
+                        continue;
+                    };
+                    let server = selector.current(&servers).clone();
+                    *active_cdc_server.write().unwrap_or_else(|e| e.into_inner()) = None;
+
+                    if let Err(error) = server
+                        .url()
+                        .connect_bounded(&verification, config.upstream_connect_timeout)
+                        .await
+                    {
+                        let failure = error.upstream_failure();
+                        if failure == UpstreamFailure::Down {
+                            counter!(
+                                UPSTREAM_CONNECT_RETRIES_TOTAL,
+                                "server" => server.display().to_string()
+                            )
+                            .increment(1);
+                            if record_cdc_failure(&mut selector, &servers, &server, &error) {
+                                continue;
+                            }
+                        }
+                        error!(
+                            target: "replicators",
+                            server = %server.display(),
+                            %error,
+                            timeout_sec = replicator_restart_timeout.as_secs(),
+                            "Could not connect to the CDC server, will retry after timeout"
+                        );
+                        let _ = controller_tx.send(ControllerMessage::RecoverableError(
+                            ReadySetError::ReplicationFailed(format!(
+                                "could not connect to CDC server {}: {error}",
+                                server.display()
+                            )),
+                        ));
+                        tokio::time::sleep(replicator_restart_timeout).await;
+                        continue;
+                    }
+                    *active_cdc_server.write().unwrap_or_else(|e| e.into_inner()) =
+                        Some(server.display().to_string());
+                    info!(
+                        target: "replicators",
+                        server = %server.display(),
+                        "Connecting the replicator to the CDC server"
+                    );
+                    let url = server.url().clone();
+                    // The list this iteration selected from, including edits made while running.
+                    let config = UpstreamConfig {
+                        cdc_db_url: servers.clone().into_vec(),
+                        ..config.clone()
+                    };
+                    let stream_started = AtomicBool::new(false);
+
                     let noria: readyset_client::ReadySetHandle =
                         readyset_client::ReadySetHandle::make_raw(
                             controller_uri.clone(),
@@ -265,6 +348,7 @@ impl Leader {
                         parsing_preset,
                         table_status_tx.clone(),
                         replication_lag_status.clone(),
+                        &stream_started,
                     )
                     .await
                     {
@@ -287,10 +371,19 @@ impl Leader {
                                 timeout_sec=replicator_restart_timeout.as_secs(),
                                 "Error in replication, will retry after timeout"
                             );
+                            // Only a server that never streamed spends its retries.
+                            let failover = if stream_started.load(Ordering::Relaxed) {
+                                selector.record_success();
+                                false
+                            } else {
+                                record_cdc_failure(&mut selector, &servers, &server, &error)
+                            };
                             // Send the error to the controller so that we can update the replicator
                             // status
                             let _ = controller_tx.send(ControllerMessage::RecoverableError(error));
-                            tokio::time::sleep(replicator_restart_timeout).await;
+                            if !failover {
+                                tokio::time::sleep(replicator_restart_timeout).await;
+                            }
                         }
                     }
                     server_startup = false;
@@ -302,6 +395,9 @@ impl Leader {
                 _ = shutdown_rx.recv() => {},
                 _ = stop_rx.wait_for(|v| *v) => {},
             }
+            *stopped_cdc_server
+                .write()
+                .unwrap_or_else(|e| e.into_inner()) = None;
         }));
 
         self.replicator_handle = Some(handle);
@@ -583,6 +679,14 @@ impl Leader {
                     ds.min_persisted_replication_offset().await
                 }?;
                 return_serialized!(res);
+            }
+            (&Method::POST, "/replication_server") => {
+                let server = self
+                    .active_cdc_server
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                return_serialized!(server);
             }
             (&Method::POST, "/replication_lag_status") => {
                 let status = self
@@ -1183,6 +1287,34 @@ impl Leader {
             replicator_handle: None,
             replicator_stop_tx: None,
             replication_lag_status: Arc::new(RwLock::new(None)),
+            cdc_server_list: Arc::new(RwLock::new(None)),
+            active_cdc_server: Arc::new(RwLock::new(None)),
         }
     }
+}
+
+/// Count a failed attempt against `server`. When that moves replication to the next server, log
+/// and count the failover and return `true`.
+fn record_cdc_failure(
+    selector: &mut CdcServerSelector,
+    servers: &UpstreamServers,
+    server: &UpstreamServer,
+    error: &dyn std::fmt::Display,
+) -> bool {
+    let Some(next) = selector.record_failure(servers) else {
+        return false;
+    };
+    warn!(
+        from = %server.display(),
+        to = %next.display(),
+        %error,
+        "CDC server failed; failing replication over"
+    );
+    counter!(
+        UPSTREAM_FAILOVER_TOTAL,
+        "from" => server.display().to_string(),
+        "to" => next.display().to_string()
+    )
+    .increment(1);
+    true
 }

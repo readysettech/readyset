@@ -1,5 +1,6 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::mem;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
@@ -191,6 +192,8 @@ impl Drop for NoriaAdapter<'_> {
 }
 
 impl<'a> NoriaAdapter<'a> {
+    /// Replicate from `url` until an error. Sets `stream_started` once the upstream accepts the
+    /// binlog request.
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
         noria: ReadySetHandle,
@@ -205,6 +208,7 @@ impl<'a> NoriaAdapter<'a> {
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
+        stream_started: &AtomicBool,
     ) -> ReadySetResult<std::convert::Infallible> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -233,6 +237,7 @@ impl<'a> NoriaAdapter<'a> {
                         parsing_preset,
                         table_status_tx.clone(),
                         lag_status.clone(),
+                        stream_started,
                     )
                     .await
                 }
@@ -341,7 +346,13 @@ impl<'a> NoriaAdapter<'a> {
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
+        stream_started: &AtomicBool,
     ) -> ReadySetResult<std::convert::Infallible> {
+        let server = format!(
+            "{}:{}",
+            mysql_options.ip_or_hostname(),
+            mysql_options.tcp_port()
+        );
         let mut mysql_opts_builder = OptsBuilder::from_opts(mysql_options).prefer_socket(false);
 
         let ssl_opts = get_mysql_tls_config(&ServerCertVerification::from(config).await?);
@@ -362,6 +373,10 @@ impl<'a> NoriaAdapter<'a> {
             backoff: 2,
         )?;
 
+        let multi_server_cdc = config
+            .cdc_servers()
+            .is_ok_and(|servers| !servers.is_single());
+
         // Determine GTID mode: infer from stored offset type when available,
         // fall back to --require-gtid flag for fresh starts.
         let gtid_mode = match replication_offsets.min_present_offset()? {
@@ -379,27 +394,43 @@ impl<'a> NoriaAdapter<'a> {
                 info!("GTID mode inferred from stored replication offset");
                 true
             }
+            Some(_) if multi_server_cdc => {
+                return Err(ReadySetError::ReplicationFailed(
+                    "The stored replication offset is a binlog file and position, which is \
+                     local to the server that wrote it and cannot fail over across a \
+                     multi-server --cdc-db-url list. Resnapshot to store GTID offsets, or \
+                     configure a single CDC server"
+                        .to_string(),
+                ));
+            }
             Some(_) => {
                 // Stored offset is binlog file+pos — use file-based replication
                 false
             }
             None => {
-                // Fresh start — use the --require-gtid flag
-                if config.require_gtid {
+                if config.require_gtid || multi_server_cdc {
                     let mut conn = mysql::Conn::new(mysql_opts_builder.clone()).await?;
                     let server_gtid = is_gtid_mode_enabled(&mut conn).await?;
                     if !server_gtid {
                         return Err(ReadySetError::ReplicationFailed(
-                            "--require-gtid is set but the upstream MySQL server \
-                             does not have gtid_mode=ON. Enable GTID mode on \
-                             the server or remove --require-gtid"
+                            "--require-gtid is set or --cdc-db-url names more than one \
+                             server, but the upstream MySQL server does not have \
+                             gtid_mode=ON. Enable GTID mode on the server, or use a single \
+                             CDC server without --require-gtid"
                                 .to_string(),
                         ));
                     }
-                    info!(
-                        "GTID mode enabled via --require-gtid, \
-                         server confirms gtid_mode=ON"
-                    );
+                    if config.require_gtid {
+                        info!(
+                            "GTID mode enabled via --require-gtid, \
+                             server confirms gtid_mode=ON"
+                        );
+                    } else {
+                        info!(
+                            "GTID mode enabled for the multi-server CDC list, \
+                             server confirms gtid_mode=ON"
+                        );
+                    }
                     true
                 } else {
                     false
@@ -460,7 +491,7 @@ impl<'a> NoriaAdapter<'a> {
                 )
                 .increment(1u64);
 
-                span.in_scope(|| info!("Starting snapshot"));
+                span.in_scope(|| info!(server = %server, "Starting snapshot"));
                 let snapshot_result = replicator
                     .snapshot_to_noria(
                         &mut noria,
@@ -536,6 +567,7 @@ impl<'a> NoriaAdapter<'a> {
             )
             .await?,
         );
+        stream_started.store(true, Ordering::Relaxed);
         let heartbeat = config.replication_heartbeat;
         // Allow the heartbeat table through the binlog connector's table filter
         // so events reach handle_action where we intercept them.

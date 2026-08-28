@@ -25,6 +25,9 @@ pub const POSTGRES_PARTIAL_RESNAPSHOT: &str = "postgres-partial-resnapshot";
 pub const POSTGRES_SNAPSHOT_TABLE: &str = "postgres-snapshot-table";
 /// Imitates a failure right before we invoke `START_REPLICATION` during Postgres replication
 pub const POSTGRES_START_REPLICATION: &str = "postgres-start-replication";
+/// Imitates a MySQL server refusing the binlog request. The payload names the `host:port` that
+/// refuses; other servers are unaffected.
+pub const MYSQL_REQUEST_BINLOG: &str = "mysql-request-binlog";
 /// Imitates a failure when we go to pull the next event from the WAL during Postgres replication
 pub const POSTGRES_NEXT_WAL_EVENT: &str = "postgres-next-wal-event";
 /// Imitates a failure in the `NoriaAdapter::start_inner_postgres()` function that happens before we

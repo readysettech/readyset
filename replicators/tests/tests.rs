@@ -464,6 +464,7 @@ impl TestHandle {
                 parsing_preset,
                 tokio::sync::mpsc::unbounded_channel().0, // sink; we don't care
                 Arc::new(RwLock::new(None)),
+                &std::sync::atomic::AtomicBool::new(false),
             )
             .await;
             error!(%error, "Error in replicator");

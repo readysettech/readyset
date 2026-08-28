@@ -611,6 +611,12 @@ impl ReadySetHandle {
         change_cdc_url(url: String) -> ()
     );
 
+    simple_request!(
+        /// The `host:port` of the CDC server replication is currently using, or `None` when
+        /// replication has not started.
+        replication_server() -> Option<String>
+    );
+
     /// Return a list of all relations (tables or views) which are known to exist in the upstream
     /// database that we are replicating from, but are not being replicated to ReadySet (which are
     /// recorded via [`Change::AddNonReplicatedRelation`]).

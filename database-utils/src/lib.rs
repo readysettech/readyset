@@ -222,6 +222,12 @@ pub struct UpstreamConfig {
     #[serde(default = "default_upstream_connect_timeout")]
     pub upstream_connect_timeout: Duration,
 
+    /// How many times replication retries a CDC server before moving to the next one in the
+    /// --cdc-db-url list. A single server is retried forever.
+    #[arg(long, env = "UPSTREAM_CONNECT_RETRIES", default_value = "3")]
+    #[serde(default = "default_upstream_connect_retries")]
+    pub upstream_connect_retries: u32,
+
     /// By default, ReadySet attempts to snapshot and replicate all tables in the database
     /// specified in --upstream-db-url. However, if the queries you want to cache in ReadySet
     /// access only a subset of tables in the database, you can use this option to limit the tables
@@ -476,6 +482,10 @@ fn default_upstream_connect_timeout() -> Duration {
     UpstreamConfig::default().upstream_connect_timeout
 }
 
+fn default_upstream_connect_retries() -> u32 {
+    UpstreamConfig::default().upstream_connect_retries
+}
+
 fn default_snapshot_report_interval_secs() -> u16 {
     UpstreamConfig::default().snapshot_report_interval_secs
 }
@@ -540,6 +550,7 @@ impl Default for UpstreamConfig {
             replica_report_password: Default::default(),
             replicator_restart_timeout: Duration::from_secs(1),
             upstream_connect_timeout: Duration::from_secs(5),
+            upstream_connect_retries: 3,
             replication_tables: Default::default(),
             replication_tables_ignore: Default::default(),
             snapshot_report_interval_secs: 30,
