@@ -1,4 +1,7 @@
-//! Probing upstream servers, and the health status the probes maintain.
+//! Probing upstream servers, one-shot or continuously, and the health status the probes maintain.
+//!
+//! [`validate_servers`] probes every server once, at startup. An unreachable server is reported
+//! and marked down; a rejected one causes them all to be refused.
 //!
 //! [`UpstreamHealthMonitor`] holds a connection to each server believed up and pings it every
 //! interval, so a server that dies while idle is marked down before a session picks it. Servers
@@ -10,7 +13,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use futures::future::join_all;
 use readyset_util::shutdown::ShutdownReceiver;
+use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tracing::{debug, error, info};
@@ -18,19 +23,22 @@ use tracing::{debug, error, info};
 use crate::error::{DatabaseError, UpstreamFailure};
 use crate::tls::ServerCertVerification;
 use crate::upstream_registry::{PickedServer, SharedUpstreamRegistry, UpstreamServerRegistry};
-use crate::upstream_servers::UpstreamServer;
-use crate::{DatabaseConnection, UpstreamConfig};
+use crate::upstream_servers::{UpstreamServer, UpstreamServers};
+use crate::{DatabaseConnection, DatabaseType, QueryableConnection, UpstreamConfig};
 
 /// Program name the health monitor's connections report to the upstream.
 pub const HEALTH_MONITOR_PROGRAM_NAME: &str = "READYSET_HEALTH_MONITOR";
 
+/// Program name validation connections report to the upstream.
+pub const VALIDATION_PROGRAM_NAME: &str = "READYSET_VALIDATE";
+
 /// The outcome of probing one server.
 pub enum ServerStatus {
     /// Connected, credentials accepted, configuration acceptable.
-    Ok(DatabaseConnection),
+    Ok(Box<DatabaseConnection>),
     /// Could not reach the server.
     Unreachable(DatabaseError),
-    /// The server can never be used as configured: bad credentials or a missing database.
+    /// The server cannot be used as configured, e.g. bad credentials or a missing database.
     Rejected(String),
 }
 
@@ -44,27 +52,124 @@ impl fmt::Debug for ServerStatus {
     }
 }
 
-/// Connect to `server`, bounded by `timeout`, and classify the outcome.
+/// Connect to `server`, bounded by `timeout`, and classify the outcome. With `check_failover`, a
+/// MySQL server must also have `gtid_mode = ON`, so replication can fail over to it.
 pub async fn probe_server(
     server: &UpstreamServer,
     verification: &ServerCertVerification,
     timeout: Duration,
     program_name: &str,
+    check_failover: bool,
 ) -> ServerStatus {
     let mut url = server.url().clone();
     url.set_program_or_application_name(program_name.to_string());
-    match url.connect_bounded(verification, timeout).await {
-        Ok(connection) => ServerStatus::Ok(connection),
-        Err(error) => connect_failure_status(error),
+    let mut connection = match url.connect_bounded(verification, timeout).await {
+        Ok(connection) => connection,
+        Err(error) => return failure_status(error),
+    };
+    if check_failover
+        && url.database_type() == DatabaseType::MySQL
+        && let Err(status) = check_gtid_mode(&mut connection).await
+    {
+        return status;
     }
+    ServerStatus::Ok(Box::new(connection))
 }
 
-fn connect_failure_status(error: DatabaseError) -> ServerStatus {
+fn failure_status(error: DatabaseError) -> ServerStatus {
     match error.upstream_failure() {
         UpstreamFailure::Down => ServerStatus::Unreachable(error),
         UpstreamFailure::Auth => ServerStatus::Rejected(format!("credentials rejected: {error}")),
         UpstreamFailure::Semantic => ServerStatus::Rejected(error.to_string()),
     }
+}
+
+async fn read_gtid_mode(conn: &mut DatabaseConnection) -> Result<String, DatabaseError> {
+    let row = conn
+        .query("SELECT @@gtid_mode")
+        .await?
+        .into_iter()
+        .get_single_row()?;
+    row.get(0)
+}
+
+async fn check_gtid_mode(conn: &mut DatabaseConnection) -> Result<(), ServerStatus> {
+    match read_gtid_mode(conn).await {
+        Ok(mode) if mode.eq_ignore_ascii_case("ON") => Ok(()),
+        Ok(mode) => Err(ServerStatus::Rejected(format!(
+            "gtid_mode is {mode}; a list of more than one server requires gtid_mode = ON"
+        ))),
+        Err(error) => Err(failure_status(error)),
+    }
+}
+
+/// Probe every server in `servers` concurrently.
+async fn probe_all<'a>(
+    servers: impl IntoIterator<Item = &'a UpstreamServer>,
+    verification: &ServerCertVerification,
+    timeout: Duration,
+    check_failover: bool,
+) -> Vec<(&'a UpstreamServer, ServerStatus)> {
+    join_all(servers.into_iter().map(|server| async move {
+        let status = probe_server(
+            server,
+            verification,
+            timeout,
+            VALIDATION_PROGRAM_NAME,
+            check_failover,
+        )
+        .await;
+        (server, status)
+    }))
+    .await
+}
+
+/// Why [`validate_servers`] refused the servers.
+#[derive(Debug, Error)]
+pub enum ValidationError {
+    #[error("server{} cannot be used: {}", if .0.len() == 1 { "" } else { "s" }, .0.join(", "))]
+    Rejected(Vec<String>),
+
+    #[error("servers are all unreachable")]
+    NoneReachable,
+}
+
+/// What [`validate_servers`] found when it accepted the servers.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ValidationReport {
+    /// Servers that connected and passed every check.
+    pub verified: Vec<UpstreamServer>,
+    /// Servers that could not be reached, by `host:port`, with the error.
+    pub unreachable: Vec<(String, String)>,
+}
+
+/// Probe every server of `servers` once. Any rejected server causes them all to be refused;
+/// unreachable servers are reported, as long as at least one server is reachable.
+pub async fn validate_servers(
+    servers: &UpstreamServers,
+    verification: &ServerCertVerification,
+    timeout: Duration,
+) -> Result<ValidationReport, ValidationError> {
+    let statuses = probe_all(servers.iter(), verification, timeout, !servers.is_single()).await;
+    let mut outcome = ValidationReport::default();
+    let mut rejected = Vec::new();
+    for (server, status) in statuses {
+        let display = server.display().to_string();
+        match status {
+            ServerStatus::Ok(_) => outcome.verified.push(server.clone()),
+            ServerStatus::Unreachable(error) => {
+                outcome.unreachable.push((display, error.to_string()))
+            }
+            ServerStatus::Rejected(reason) => rejected.push(format!("{display} ({reason})")),
+        }
+    }
+    if !rejected.is_empty() {
+        return Err(ValidationError::Rejected(rejected));
+    }
+    if outcome.verified.is_empty() {
+        return Err(ValidationError::NoneReachable);
+    }
+    Ok(outcome)
 }
 
 /// Most servers one monitor pass checks at once.
@@ -214,10 +319,18 @@ async fn connect_and_record(
 ) -> Option<HeldConnection> {
     let server = registry.get(idx)?;
     let was_down = !registry.is_up(idx);
-    match probe_server(server, verification, timeout, HEALTH_MONITOR_PROGRAM_NAME).await {
+    let status = probe_server(
+        server,
+        verification,
+        timeout,
+        HEALTH_MONITOR_PROGRAM_NAME,
+        false,
+    )
+    .await;
+    match status {
         ServerStatus::Ok(conn) => {
             registry.mark_up(idx);
-            return Some((conn, PickedServer::new(registry, idx)));
+            return Some((*conn, PickedServer::new(registry, idx)));
         }
         ServerStatus::Unreachable(error) => {
             if !registry.mark_down(idx, &error) {

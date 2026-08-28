@@ -7,11 +7,12 @@ use anyhow::{anyhow, bail, ensure, Error, Result};
 use futures::future::join_all;
 use regex::{Captures, Regex};
 use sysinfo::Disks;
-use tracing::info;
+use tracing::{info, warn};
 
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
-    DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL, QueryableConnection,
+    validate_servers, DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL,
+    QueryableConnection, UpstreamServers,
 };
 use readyset_sql::Dialect;
 use replicators::{replication_slot_name, MYSQL_INTERNAL_DBS};
@@ -47,24 +48,55 @@ fn verify_database_type(options: &Options) -> Result<DatabaseType> {
     Ok(database_type)
 }
 
-fn verify_cdc_url(options: &Options) -> Result<DatabaseURL> {
-    let url = options
+fn verify_cdc_servers(options: &Options) -> Result<UpstreamServers> {
+    let servers = options
         .server_worker_options
         .replicator_config
-        .preferred_cdc_url()
+        .cdc_servers()
         .map_err(|e| anyhow!("Failed to verify CDC URL: {e}"))?;
     info!("Verified upstream CDC URL");
-    Ok(url)
+    Ok(servers)
 }
 
-fn verify_upstream_url(options: &Options) -> Result<DatabaseURL> {
-    let url = options
+fn verify_upstream_servers(options: &Options) -> Result<UpstreamServers> {
+    let servers = options
         .server_worker_options
         .replicator_config
-        .preferred_upstream_url()
-        .cloned()
+        .upstream_servers()
+        .map_err(|e| anyhow!("Failed to verify upstream URL: {e}"))?
         .ok_or_else(|| anyhow!("Failed to determine upstream URL"))?;
     info!("Verified upstream URL");
+    Ok(servers)
+}
+
+/// Connect to every server in the list, so a bad failover target is caught at startup. Returns
+/// the first reachable server, or an error if none is reachable.
+async fn verify_servers(
+    servers: &UpstreamServers,
+    verification: &ServerCertVerification,
+    options: &Options,
+    label: &str,
+) -> Result<DatabaseURL> {
+    let timeout = options
+        .server_worker_options
+        .replicator_config
+        .upstream_connect_timeout;
+    let outcome = validate_servers(servers, verification, timeout)
+        .await
+        .map_err(|e| anyhow!("{label} {e}"))?;
+    for (server, error) in &outcome.unreachable {
+        warn!(%server, %error, "{label} server is unreachable; continuing without it");
+    }
+    let url = outcome
+        .verified
+        .first()
+        .map(|server| server.url().clone())
+        .ok_or_else(|| anyhow!("Failed to establish {label} connection to any server"))?;
+    info!(
+        reachable = outcome.verified.len(),
+        unreachable = outcome.unreachable.len(),
+        "Verified {label} servers"
+    );
     Ok(url)
 }
 
@@ -456,14 +488,30 @@ pub async fn verify(options: &Options) -> Result<()> {
 
     let verification = add_err!(verify_tls(options).await);
     add_err!(verify_database_type(options));
-    let upstream_url = add_err!(verify_upstream_url(options));
+    let upstream_servers = add_err!(verify_upstream_servers(options));
+    let upstream_url = match (&verification, &upstream_servers) {
+        (Some(verification), Some(servers)) => {
+            add_err!(verify_servers(servers, verification, options, "upstream").await)
+        }
+        _ => None,
+    };
 
     if let (Some(verification), Some(upstream_url)) = (&verification, &upstream_url) {
         add_err!(verify_users(upstream_url, Arc::clone(verification), options).await);
     }
 
     if replication_enabled {
-        let cdc_url = add_err!(verify_cdc_url(options));
+        let cdc_servers = add_err!(verify_cdc_servers(options));
+        // The CDC list defaults to the upstream list, which was just verified.
+        let cdc_url = match (&verification, &cdc_servers) {
+            (Some(_), Some(servers)) if Some(servers) == upstream_servers.as_ref() => {
+                upstream_url.clone()
+            }
+            (Some(verification), Some(servers)) => {
+                add_err!(verify_servers(servers, verification, options, "CDC").await)
+            }
+            _ => None,
+        };
         let conn = if let (Some(verification), Some(cdc_url)) = (&verification, &cdc_url) {
             add_err!(verify_connection(cdc_url, verification, Some("CDC")).await)
         } else {
