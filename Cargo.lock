@@ -1455,6 +1455,8 @@ dependencies = [
  "derive_more",
  "futures",
  "icu",
+ "metric",
+ "metrics",
  "mysql_async",
  "mysql_common",
  "native-tls",
@@ -1470,6 +1472,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-postgres",
+ "tracing",
  "uuid",
  "yore",
 ]

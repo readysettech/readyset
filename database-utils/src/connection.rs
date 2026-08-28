@@ -321,6 +321,20 @@ impl DatabaseConnection {
         }
     }
 
+    /// Check the connection is alive with the cheapest round-trip the protocol offers.
+    pub async fn ping(&mut self) -> Result<(), DatabaseError> {
+        match self {
+            Self::MySQL(conn) => conn.ping().await?,
+            Self::PostgreSQL(client, _) => {
+                client.simple_query("select 1").await?;
+            }
+            Self::PostgreSQLPool(client) => {
+                client.simple_query("select 1").await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Returns true if the connection is closed
     pub fn is_closed(&self) -> bool {
         match self {

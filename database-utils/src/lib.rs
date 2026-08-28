@@ -26,6 +26,7 @@ use crate::tls::{ServerCertVerification, get_mysql_tls_config, get_tls_connector
 mod connection;
 pub mod error;
 pub mod tls;
+pub mod upstream_health;
 pub mod upstream_registry;
 pub mod upstream_servers;
 
@@ -34,8 +35,12 @@ pub use connection::{
     QueryableConnection, SimpleQueryResults, SimpleQueryResultsRow, Transaction,
 };
 pub use error::{DatabaseError, UpstreamFailure};
+pub use upstream_health::{
+    HEALTH_MONITOR_PROGRAM_NAME, ServerStatus, UpstreamHealthMonitor, probe_server,
+};
 pub use upstream_registry::{
-    SharedUpstreamRegistry, UpstreamConnectionGuard, UpstreamServerRegistry, UpstreamServerState,
+    PickedServer, SharedUpstreamRegistry, UpstreamConnectionGuard, UpstreamServerRegistry,
+    UpstreamServerState,
 };
 pub use upstream_servers::{UpstreamServer, UpstreamServers};
 

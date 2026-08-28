@@ -24,7 +24,9 @@ use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Parser};
 use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
-use database_utils::{DatabaseType, SharedUpstreamRegistry, TlsMode, UpstreamConfig};
+use database_utils::{
+    DatabaseType, SharedUpstreamRegistry, TlsMode, UpstreamConfig, UpstreamHealthMonitor,
+};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
 use futures_util::stream::{BoxStream, SelectAll, StreamExt};
@@ -491,6 +493,11 @@ pub struct Options {
     /// can keep being served cache hits. Applies only when authentication is enabled.
     #[arg(long, env = "CACHE_ACL_REFRESH_INTERVAL_SECS", default_value = "300")]
     cache_acl_refresh_interval_secs: u64,
+
+    /// How often, in seconds, the adapter pings each upstream server and retries servers marked
+    /// down. Holds one idle connection per server. 0 disables it.
+    #[arg(long, env = "UPSTREAM_HEALTH_INTERVAL", default_value = "10")]
+    upstream_health_interval_secs: u64,
 
     /// Maximum extra refresh load an adaptive shallow cache may send to the upstream, as a
     /// percentage of the load required to refresh every current entry at the cache's
@@ -2161,6 +2168,18 @@ where
             Arc::clone(&upstream_registry),
             options.shallow_refresh_workers,
         );
+
+        if options.upstream_health_interval_secs > 0 {
+            rt.spawn(
+                UpstreamHealthMonitor::new(
+                    Arc::clone(&upstream_config),
+                    Arc::clone(&upstream_registry),
+                    Duration::from_secs(options.upstream_health_interval_secs),
+                    shutdown_rx.clone(),
+                )
+                .run(),
+            );
+        }
 
         // The cache ACL applies only with authentication on: without user identities the
         // enforcement seams are inert and no worker runs.

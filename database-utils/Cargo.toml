@@ -19,6 +19,9 @@ tokio-postgres = { workspace = true, features = ["with-chrono-0_4"] }
 postgres-native-tls = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
+metric = { path = "../metric" }
+metrics = { workspace = true }
+tracing = { workspace = true }
 readyset-sql = { path = "../readyset-sql" }
 readyset-util = { path = "../readyset-util" }
 readyset-errors = { path = "../readyset-errors" }

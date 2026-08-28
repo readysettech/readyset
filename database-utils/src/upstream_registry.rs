@@ -3,12 +3,17 @@
 //! Each field is its own atomic, so only replacing the list takes a lock. A reader can see a mix
 //! of two updates to one server; at worst a probe runs early or late.
 
+use std::fmt;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use metric::{UPSTREAM_CONNECT_FAILURES, UPSTREAM_SERVER_CONNECTIONS, UPSTREAM_SERVER_UP};
+use metrics::{counter, gauge};
 use rand::seq::IteratorRandom;
+use tracing::{info, warn};
 
+use crate::error::UpstreamFailure;
 use crate::upstream_servers::{UpstreamServer, UpstreamServers};
 
 /// Shortest wait before a server marked down is probed again.
@@ -160,10 +165,19 @@ impl UpstreamServerRegistry {
         self.pick_excluding(&[]).unwrap_or(0)
     }
 
-    /// Mark `idx` down after a connection to it failed. Returns `true` if the server was up.
-    /// Marking an up server down resets its probe backoff; marking a server that is already down
-    /// leaves it as is.
-    pub fn mark_down(&self, idx: usize) -> bool {
+    /// Mark `idx` down after a connection to it failed with `error`. Returns `true` if the
+    /// server was up. Marking an up server down resets its probe backoff; marking a server that is
+    /// already down leaves it as is.
+    pub fn mark_down(&self, idx: usize, error: &dyn fmt::Display) -> bool {
+        let Some(name) = self.get(idx).map(UpstreamServer::display) else {
+            return false;
+        };
+        counter!(
+            UPSTREAM_CONNECT_FAILURES,
+            "server" => name.to_string(),
+            "reason" => UpstreamFailure::Down.metric_reason()
+        )
+        .increment(1);
         let health = self.state(idx);
         let went_down = health
             .down_since
@@ -175,17 +189,27 @@ impl UpstreamServerRegistry {
                 now_millis() + PROBE_BACKOFF_MIN.as_millis() as u64,
                 Ordering::Relaxed,
             );
+            warn!(server = %name, %error, "Upstream server marked down");
+            gauge!(UPSTREAM_SERVER_UP, "server" => name.to_string()).set(0.0);
         }
         went_down
     }
 
     /// Mark `idx` up after it answered. Returns `true` if the server was down.
     pub fn mark_up(&self, idx: usize) -> bool {
+        let Some(name) = self.get(idx).map(UpstreamServer::display) else {
+            return false;
+        };
         let health = self.state(idx);
         health.last_ok.store(now_millis(), Ordering::Relaxed);
         health.failures.store(0, Ordering::Relaxed);
         health.next_probe.store(0, Ordering::Relaxed);
-        health.down_since.swap(0, Ordering::Relaxed) != 0
+        let was_down = health.down_since.swap(0, Ordering::Relaxed) != 0;
+        if was_down {
+            info!(server = %name, "Upstream server is back up");
+        }
+        gauge!(UPSTREAM_SERVER_UP, "server" => name.to_string()).set(1.0);
+        was_down
     }
 
     /// Record a failed probe of `idx`. The wait before the next probe doubles with each failure,
@@ -202,6 +226,18 @@ impl UpstreamServerRegistry {
     /// Whether the monitor may probe `idx` now: it is down and its backoff has elapsed.
     pub fn probe_due(&self, idx: usize) -> bool {
         !self.is_up(idx) && self.state(idx).next_probe.load(Ordering::Relaxed) <= now_millis()
+    }
+
+    /// How long until the earliest probe of a down server is due, or `None` while all are up.
+    pub fn next_probe_due_in(&self) -> Option<Duration> {
+        let now = now_millis();
+        (0..self.len())
+            .filter(|&idx| !self.is_up(idx))
+            .map(|idx| {
+                let due = self.state(idx).next_probe.load(Ordering::Relaxed);
+                Duration::from_millis(due.saturating_sub(now))
+            })
+            .min()
     }
 
     /// Live connections this process holds to `idx`.
@@ -250,6 +286,42 @@ impl Drop for UpstreamConnectionGuard {
             .state(self.idx)
             .connections
             .fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// The server a live upstream connection was picked from.
+#[derive(Debug)]
+pub struct PickedServer {
+    guard: UpstreamConnectionGuard,
+}
+
+impl PickedServer {
+    pub fn new(registry: &Arc<UpstreamServerRegistry>, idx: usize) -> Self {
+        let guard = registry.acquire(idx);
+        gauge!(UPSTREAM_SERVER_CONNECTIONS, "server" => guard.server().display().to_string())
+            .increment(1.0);
+        Self { guard }
+    }
+
+    pub fn server(&self) -> &UpstreamServer {
+        self.guard.server()
+    }
+
+    /// Whether the server is still in the current list with the same URL.
+    pub fn still_listed(&self, shared: &SharedUpstreamRegistry) -> bool {
+        shared.current().is_some_and(|current| {
+            current
+                .servers()
+                .iter()
+                .any(|s| s.raw_url() == self.server().raw_url())
+        })
+    }
+}
+
+impl Drop for PickedServer {
+    fn drop(&mut self) {
+        gauge!(UPSTREAM_SERVER_CONNECTIONS, "server" => self.server().display().to_string())
+            .decrement(1.0);
     }
 }
 
@@ -307,7 +379,7 @@ mod tests {
     #[test]
     fn pick_skips_down_servers_and_honors_exclusions() {
         let r = registry(THREE);
-        assert!(r.mark_down(1));
+        assert!(r.mark_down(1, &"refused"));
         for _ in 0..200 {
             assert_ne!(r.pick(), 1);
             assert_eq!(r.pick_excluding(&[0]), Some(2));
@@ -318,7 +390,7 @@ mod tests {
     #[test]
     fn the_healthy_pick_never_offers_a_server_marked_down() {
         let r = registry(THREE);
-        assert!(r.mark_down(1));
+        assert!(r.mark_down(1, &"refused"));
         for _ in 0..200 {
             assert_ne!(r.pick_healthy_excluding(&[]), Some(1));
         }
@@ -341,7 +413,7 @@ mod tests {
     fn all_down_still_returns_a_candidate() {
         let r = registry(THREE);
         for i in 0..3 {
-            r.mark_down(i);
+            r.mark_down(i, &"refused");
         }
         assert!(r.healthy().is_empty());
         let picked = r.pick();
@@ -353,8 +425,11 @@ mod tests {
     fn marks_flip_once_and_report_transitions() {
         let r = registry(THREE);
         assert!(r.is_up(0));
-        assert!(r.mark_down(0));
-        assert!(!r.mark_down(0), "a second failure does not flip again");
+        assert!(r.mark_down(0, &"refused"));
+        assert!(
+            !r.mark_down(0, &"refused"),
+            "a second failure does not flip again"
+        );
         assert!(!r.is_up(0));
         assert!(r.mark_up(0));
         assert!(
@@ -380,17 +455,39 @@ mod tests {
     #[test]
     fn repeat_mark_down_keeps_the_backoff_and_mark_up_clears_it() {
         let r = registry(THREE);
-        r.mark_down(2);
+        r.mark_down(2, &"refused");
         assert!(!r.probe_due(2), "a fresh mark waits before the first probe");
         for _ in 0..10 {
             r.record_probe_failure(2);
         }
         let read = || r.state(2).next_probe.load(Ordering::Relaxed);
         let grown = read();
-        r.mark_down(2);
+        r.mark_down(2, &"refused");
         assert_eq!(read(), grown, "a repeat mark keeps the grown backoff");
         r.mark_up(2);
         assert!(!r.probe_due(2));
+    }
+
+    #[test]
+    fn next_probe_due_in_tracks_the_earliest_down_server() {
+        let r = registry(THREE);
+        assert_eq!(r.next_probe_due_in(), None, "all servers are up");
+        r.mark_down(1, &"refused");
+        r.mark_down(2, &"refused");
+        r.record_probe_failure(2);
+        let due = r.next_probe_due_in().expect("servers are down");
+        assert!(
+            due <= PROBE_BACKOFF_MIN,
+            "the earliest backoff wins: {due:?}"
+        );
+        r.mark_up(1);
+        let due = r.next_probe_due_in().expect("a server is down");
+        assert!(
+            due > PROBE_BACKOFF_MIN,
+            "the grown backoff is left: {due:?}"
+        );
+        r.mark_up(2);
+        assert_eq!(r.next_probe_due_in(), None);
     }
 
     #[test]
@@ -411,7 +508,7 @@ mod tests {
     fn replacement_inherits_state_for_servers_that_stay() {
         let shared = SharedUpstreamRegistry::new(Some(THREE.parse().unwrap()));
         let first = shared.current().unwrap();
-        first.mark_down(2);
+        first.mark_down(2, &"refused");
         let held = first.acquire(0);
 
         let next = shared
