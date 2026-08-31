@@ -1399,6 +1399,10 @@ impl Controller {
         for (server, error) in &outcome.unreachable {
             warn!(%server, %error, "New CDC server is unreachable; accepted anyway");
         }
+        for (server, warning) in &outcome.warnings {
+            warn!(%server, %warning, "New CDC server differs from the list");
+        }
+
         // Persist first, so a failed write changes nothing. `previous` holds the lists this
         // controller last saw; the write fails if the Authority holds something else.
         let previous = PersistedUpstreamServers {

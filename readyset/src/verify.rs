@@ -87,6 +87,9 @@ async fn verify_servers(
     for (server, error) in &outcome.unreachable {
         warn!(%server, %error, "{label} server is unreachable; continuing without it");
     }
+    for (server, warning) in &outcome.warnings {
+        warn!(%server, %warning, "{label} server differs from the list");
+    }
     let url = outcome
         .verified
         .first()

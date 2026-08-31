@@ -36,8 +36,8 @@ pub use connection::{
 };
 pub use error::{DatabaseError, UpstreamFailure};
 pub use upstream_health::{
-    HEALTH_MONITOR_PROGRAM_NAME, ServerStatus, UpstreamHealthMonitor, VALIDATION_PROGRAM_NAME,
-    ValidationError, ValidationReport, probe_server, validate_servers,
+    HEALTH_MONITOR_PROGRAM_NAME, ServerStatus, ServerSystemProperties, UpstreamHealthMonitor,
+    VALIDATION_PROGRAM_NAME, ValidationError, ValidationReport, probe_server, validate_servers,
 };
 pub use upstream_registry::{
     PickedServer, SharedUpstreamRegistry, UpstreamConnectionGuard, UpstreamServerRegistry,

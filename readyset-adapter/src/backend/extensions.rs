@@ -1326,6 +1326,9 @@ where
         for (server, error) in &outcome.unreachable {
             rows.push((server.clone(), format!("unreachable, marked down: {error}")).into());
         }
+        for (server, warning) in &outcome.warnings {
+            rows.push((server.clone(), format!("warning: {warning}")).into());
+        }
         Ok(noria_connector::QueryResult::MetaVariables(rows))
     }
 
