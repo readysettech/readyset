@@ -544,3 +544,32 @@ async fn list_edits_persist_across_restarts() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// SHOW CONNECTIONS names the upstream server each session's connection uses.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn show_connections_reports_the_picked_upstream() {
+    readyset_tracing::init_test_logging();
+    let db_name = "upstream_servers_show_connections";
+    let _upstream = seed_table(db_name).await;
+    let live = live_server();
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(db_name)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut rs = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
+    wait_online(&mut rs).await;
+
+    let rows: Vec<(String, String, Option<String>)> = rs.query("SHOW CONNECTIONS").await.unwrap();
+    assert!(
+        rows.iter()
+            .any(|(_, _, upstream)| upstream.as_deref() == Some(live.as_str())),
+        "{rows:?}"
+    );
+
+    shutdown_tx.shutdown().await;
+}

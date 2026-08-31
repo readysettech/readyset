@@ -204,11 +204,18 @@ pub struct ConnectionInfo {
     pub addr: SocketAddr,
     /// The authenticated username for this connection
     pub username: String,
+    /// `host:port` of the upstream server this session's connection uses, or `None`
+    /// while no upstream connection is open.
+    pub upstream: Option<String>,
 }
 
 impl ConnectionInfo {
     pub fn new(addr: SocketAddr, username: String) -> Self {
-        Self { addr, username }
+        Self {
+            addr,
+            username,
+            upstream: None,
+        }
     }
 }
 
@@ -1189,6 +1196,21 @@ where
         noria_connector::QueryResult::from_owned(schema, vec![Results::new(rows)])
     }
 
+    /// This session's entry in the connection-tracking set.
+    fn connection_info(&self) -> ConnectionInfo {
+        ConnectionInfo {
+            addr: self.client_addr,
+            username: self
+                .client_username
+                .clone()
+                .unwrap_or_else(|| UNAUTHENTICATED_USER.to_string()),
+            upstream: self
+                .picked_server
+                .as_ref()
+                .map(|picked| picked.server().display().to_string()),
+        }
+    }
+
     /// Consume the off-cache reason the serve seams staged for the statement just
     /// finished. Empty when a cache was consulted, or when Readyset holds none.
     fn take_proxy_reason(&mut self) -> String {
@@ -1359,15 +1381,36 @@ where
                     column_type: DfType::DEFAULT_TEXT,
                     base: None,
                 },
+                ColumnSchema {
+                    column: ast::Column {
+                        name: "upstream".into(),
+                        table: None,
+                    },
+                    column_type: DfType::DEFAULT_TEXT,
+                    base: None,
+                },
             ]),
-            columns: Cow::Owned(vec!["client_addr".into(), "username".into()]),
+            columns: Cow::Owned(vec![
+                "client_addr".into(),
+                "username".into(),
+                "upstream".into(),
+            ]),
         };
 
         let data = self
             .connections
             .iter()
             .flat_map(|c| c.iter())
-            .map(|conn| vec![conn.addr.to_string().into(), conn.username.clone().into()])
+            .map(|conn| {
+                vec![
+                    conn.addr.to_string().into(),
+                    conn.username.clone().into(),
+                    conn.upstream
+                        .clone()
+                        .map(DfValue::from)
+                        .unwrap_or(DfValue::None),
+                ]
+            })
             .collect::<Vec<_>>();
 
         Ok(noria_connector::QueryResult::from_owned(
@@ -1999,26 +2042,28 @@ where
     /// with the updated username.
     fn update_connection_username(&mut self, new_username: &str) {
         if let Some(connections) = &self.state.connections {
-            // Remove old connection entry
-            let old_username = self
-                .state
-                .client_username
-                .as_deref()
-                .unwrap_or(UNAUTHENTICATED_USER);
-            connections.remove(&ConnectionInfo::new(
-                self.state.client_addr,
-                old_username.to_string(),
-            ));
-
-            // Insert new connection entry with updated username
-            connections.insert(ConnectionInfo::new(
-                self.state.client_addr,
-                new_username.to_string(),
-            ));
+            connections.remove(&self.state.connection_info());
         }
 
         self.state.client_username = Some(new_username.to_string());
         self.state.client_identity = Some(SqlIdentifier::from(new_username));
+
+        if let Some(connections) = &self.state.connections {
+            connections.insert(self.state.connection_info());
+        }
+    }
+
+    /// Updates connection tracking when this session's upstream connection is picked.
+    fn update_connection_upstream(&mut self, picked: PickedServer) {
+        if let Some(connections) = &self.state.connections {
+            connections.remove(&self.state.connection_info());
+        }
+
+        self.state.picked_server = Some(picked);
+
+        if let Some(connections) = &self.state.connections {
+            connections.insert(self.state.connection_info());
+        }
     }
 
     /// Open the upstream fallback connection for this session, if one is configured.
@@ -2073,7 +2118,7 @@ where
         {
             Ok((upstream, picked)) => {
                 self.connectors.upstream = Some(upstream);
-                self.state.picked_server = Some(picked);
+                self.update_connection_upstream(picked);
                 if let Some(telemetry_sender) = &self.state.telemetry_sender
                     && let Err(error) =
                         telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)
@@ -2458,15 +2503,7 @@ where
 {
     fn drop(&mut self) {
         if let Some(connections) = &self.state.connections {
-            let username = self
-                .state
-                .client_username
-                .as_deref()
-                .unwrap_or(UNAUTHENTICATED_USER);
-            connections.remove(&ConnectionInfo::new(
-                self.state.client_addr,
-                username.to_string(),
-            ));
+            connections.remove(&self.state.connection_info());
         }
         gauge!(metric::CONNECTED_CLIENTS).decrement(1.0);
         counter!(metric::CLIENT_CONNECTIONS_CLOSED).increment(1);

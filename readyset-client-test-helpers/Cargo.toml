@@ -24,6 +24,7 @@ tracing = { workspace = true }
 database-utils = { path = "../database-utils" }
 mysql-srv = { path = "../mysql-srv" }
 psql-srv = { path = "../psql-srv" }
+crossbeam-skiplist = { workspace = true }
 readyset-adapter = { path = "../readyset-adapter" }
 readyset-client = { path = "../readyset-client/" }
 readyset-client-metrics = { path = "../readyset-client-metrics" }

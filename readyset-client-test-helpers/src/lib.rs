@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
+use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, QueryableConnection, ReplicationServerId, SharedUpstreamRegistry,
@@ -31,7 +32,7 @@ use readyset_adapter::query_status_cache::{
 use readyset_adapter::rls_coordinator::RlsCoordinator;
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
-    recreate_inline_literal_caches, recreate_shallow_caches, Backend, QueryHandler,
+    recreate_inline_literal_caches, recreate_shallow_caches, Backend, ConnectionInfo, QueryHandler,
     ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase, ViewsSynchronizer,
 };
 use readyset_client::consensus::{
@@ -974,6 +975,7 @@ impl TestBuilder {
             )
             .unwrap();
             let backend_shutdown_rx_connection = backend_shutdown_rx.clone();
+            let connection_tracking: Arc<SkipSet<ConnectionInfo>> = Arc::default();
             let connection_fut = async move {
                 loop {
                     let (s, _) = listener.accept().await.unwrap();
@@ -1066,6 +1068,8 @@ impl TestBuilder {
                         .migration_mode(self.migration_mode)
                         .parsing_preset(self.parsing_preset)
                         .cache_acl(cache_acl.clone())
+                        .connections(Arc::clone(&connection_tracking))
+                        .client_addr(s.peer_addr().unwrap())
                         .readyset_schema(Arc::clone(&readyset_schema));
                     if enable_fallback && backend_builder.get_upstream_config().is_none() {
                         // Lists from the Authority are shared, as in the adapter binary, so an
