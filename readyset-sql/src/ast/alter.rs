@@ -563,12 +563,24 @@ pub struct AddUserStatement {
     pub password: RedactedString,
 }
 
-/// `ALTER READYSET MODIFY USER <user> PASSWORD '<password>'`. Rotates the password for an
-/// existing allowed user.
+/// A mutation requested by an `ALTER READYSET MODIFY USER` statement.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub enum ModifyUserAction {
+    /// `PASSWORD '<password>' [RETAIN CURRENT PASSWORD]`. Set a new password, optionally
+    /// retaining the current one as a secondary that remains valid for authentication.
+    SetPassword {
+        password: RedactedString,
+        retain_current: bool,
+    },
+    /// `DISCARD OLD PASSWORD`. Retire the retained secondary password.
+    DiscardOldPassword,
+}
+
+/// `ALTER READYSET MODIFY USER <user> ...`. Change the password for an existing allowed user.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct ModifyUserStatement {
     pub user: SqlIdentifier,
-    pub password: RedactedString,
+    pub action: ModifyUserAction,
 }
 
 /// `ALTER READYSET DROP USER <user>`. Removes an entry from the adapter's allowed-users set.
@@ -663,13 +675,21 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::ModifyUser(stmt) => {
                 let user = stmt.user.as_str().replace('\'', "''");
-                let password = stmt.password.replace('\'', "''");
-                write!(
-                    f,
-                    "MODIFY USER '{}' PASSWORD '{}'",
-                    user,
-                    Sensitive(&password)
-                )
+                write!(f, "MODIFY USER '{}'", user)?;
+                match &stmt.action {
+                    ModifyUserAction::SetPassword {
+                        password,
+                        retain_current,
+                    } => {
+                        let password = password.replace('\'', "''");
+                        write!(f, " PASSWORD '{}'", Sensitive(&password))?;
+                        if *retain_current {
+                            write!(f, " RETAIN CURRENT PASSWORD")?;
+                        }
+                        Ok(())
+                    }
+                    ModifyUserAction::DiscardOldPassword => write!(f, " DISCARD OLD PASSWORD"),
+                }
             }
             Self::DropUser(stmt) => {
                 let user = stmt.user.as_str().replace('\'', "''");
@@ -701,11 +721,35 @@ mod tests {
 
         let modify = AlterReadysetStatement::ModifyUser(ModifyUserStatement {
             user: "alice".into(),
-            password: RedactedString("newsecret".to_string()),
+            action: ModifyUserAction::SetPassword {
+                password: RedactedString("newsecret".to_string()),
+                retain_current: false,
+            },
         });
         assert_eq!(
             modify.display(Dialect::MySQL).to_string(),
             "MODIFY USER 'alice' PASSWORD 'newsecret'"
+        );
+
+        let retain = AlterReadysetStatement::ModifyUser(ModifyUserStatement {
+            user: "alice".into(),
+            action: ModifyUserAction::SetPassword {
+                password: RedactedString("newsecret".to_string()),
+                retain_current: true,
+            },
+        });
+        assert_eq!(
+            retain.display(Dialect::MySQL).to_string(),
+            "MODIFY USER 'alice' PASSWORD 'newsecret' RETAIN CURRENT PASSWORD"
+        );
+
+        let discard = AlterReadysetStatement::ModifyUser(ModifyUserStatement {
+            user: "alice".into(),
+            action: ModifyUserAction::DiscardOldPassword,
+        });
+        assert_eq!(
+            discard.display(Dialect::MySQL).to_string(),
+            "MODIFY USER 'alice' DISCARD OLD PASSWORD"
         );
 
         let drop = AlterReadysetStatement::DropUser(DropUserStatement {

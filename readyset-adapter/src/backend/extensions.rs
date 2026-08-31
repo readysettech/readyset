@@ -35,9 +35,9 @@ use readyset_sql::ast::{
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
     CreateMcpTokenStatement, DropAllCachesStatement, DropMcpTokenStatement, DropUserStatement,
     ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
-    McpTokenScope as ParserMcpTokenScope, ModifyUserStatement, ProxiedQueriesOptions, Relation,
-    ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShowStatement, SqlQuery,
-    TrxCachePolicy,
+    McpTokenScope as ParserMcpTokenScope, ModifyUserAction, ModifyUserStatement,
+    ProxiedQueriesOptions, Relation, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
+    ShowStatement, SqlQuery, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::DetectBucketFunctions;
@@ -1341,7 +1341,19 @@ where
         if Self::is_upstream_url_user(state, &user).await {
             unsupported!("cannot MODIFY the user from --upstream-db-url");
         }
-        let password = stmt.password.0.clone();
+        let password = match &stmt.action {
+            ModifyUserAction::SetPassword {
+                password,
+                retain_current: false,
+            } => password.0.clone(),
+            ModifyUserAction::SetPassword {
+                retain_current: true,
+                ..
+            } => unsupported!("RETAIN CURRENT PASSWORD is not yet supported"),
+            ModifyUserAction::DiscardOldPassword => {
+                unsupported!("DISCARD OLD PASSWORD is not yet supported")
+            }
+        };
         let result = Self::persist_user_mutation(state, |authority, seed| async move {
             authority
                 .modify_allowed_user(seed, user.clone(), password)

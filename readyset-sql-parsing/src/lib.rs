@@ -9,10 +9,11 @@ use readyset_sql::ast::{
     AutoparamControl, CacheInner, CacheType, ChangeCdcStatement, ChangeUpstreamStatement,
     CreateCacheOptions, CreateCacheStatement, CreateTableStatement, CreateViewStatement,
     DropCacheStatement, DropUserStatement, EvictionPolicy, Expr, FlushAllShallowCachesStatement,
-    FlushCacheStatement, ModifyUserStatement, ReadysetHintDirective, ResnapshotTableStatement,
-    SelectStatement, SessionAuthorizationValue, SetEviction, SetReplicationPositionStatement,
-    SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
-    ShallowCacheQuery, ShowLimit, ShowStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    FlushCacheStatement, ModifyUserAction, ModifyUserStatement, ReadysetHintDirective,
+    ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue, SetEviction,
+    SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
+    ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShallowCacheQuery, ShowLimit,
+    ShowStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -552,10 +553,21 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
             ],
         ) {
             let user = parser.parse_literal_string()?.into();
-            parser.expect_keyword(Keyword::PASSWORD)?;
-            let password = parser.parse_literal_string()?.into();
+            let action = if parser.parse_keyword(Keyword::DISCARD) {
+                parser.expect_keywords(&[Keyword::OLD, Keyword::PASSWORD])?;
+                ModifyUserAction::DiscardOldPassword
+            } else {
+                parser.expect_keyword(Keyword::PASSWORD)?;
+                let password = parser.parse_literal_string()?.into();
+                let retain_current =
+                    parser.parse_keywords(&[Keyword::RETAIN, Keyword::CURRENT, Keyword::PASSWORD]);
+                ModifyUserAction::SetPassword {
+                    password,
+                    retain_current,
+                }
+            };
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::ModifyUser(
-                ModifyUserStatement { user, password },
+                ModifyUserStatement { user, action },
             )))
         } else if parse_readyset_keywords(
             parser,

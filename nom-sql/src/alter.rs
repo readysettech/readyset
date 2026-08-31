@@ -615,7 +615,10 @@ pub fn modify_user_statement(
             i,
             AlterReadysetStatement::ModifyUser(ModifyUserStatement {
                 user: user.into(),
-                password: RedactedString(password),
+                action: ModifyUserAction::SetPassword {
+                    password: RedactedString(password),
+                    retain_current: false,
+                },
             }),
         ))
     }
@@ -1986,7 +1989,10 @@ mod tests {
                 res,
                 AlterReadysetStatement::ModifyUser(ModifyUserStatement {
                     user: "alice".into(),
-                    password: RedactedString("newsecret".to_string()),
+                    action: ModifyUserAction::SetPassword {
+                        password: RedactedString("newsecret".to_string()),
+                        retain_current: false,
+                    },
                 })
             );
         }
