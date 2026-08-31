@@ -323,6 +323,9 @@ lto = "thin"
 [profile.release-fat-lto]
 inherits = "release"
 lto = "fat"
+# Line tables and scopes: enough for symbolized backtraces in the shipped debug symbols,
+# without the type and variable DWARF that dominates fat-LTO codegen and link time.
+debug = "limited"
 
 [profile.release-dist]
 # configs for distro release packages (i.e. deb, rpm, etc.)
