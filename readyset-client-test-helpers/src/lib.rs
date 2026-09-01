@@ -821,7 +821,12 @@ impl TestBuilder {
                 .get_users()
                 .read()
                 .iter()
-                .map(|(user, credentials)| (user.clone(), credentials.current.0.clone()))
+                .map(|(user, credentials)| {
+                    (
+                        user.clone(),
+                        readyset_mysql::user_passwords(credentials.clone()),
+                    )
+                })
                 .collect(),
         );
         // Wire the fast-auth cache to the allowed-users handle so runtime `ALTER READYSET ... USER`

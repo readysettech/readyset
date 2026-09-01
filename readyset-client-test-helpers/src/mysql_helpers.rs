@@ -8,7 +8,7 @@ use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::backend::{QueryInfo, UsersSync};
 use readyset_client::consensus::AllowedUsersMap;
-use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
+use readyset_mysql::{user_passwords, Backend, MySqlQueryHandler, MySqlUpstream};
 use readyset_util::retry_with_exponential_backoff;
 use tokio::net::TcpStream;
 
@@ -25,7 +25,7 @@ impl UsersSync for AuthCacheSync {
         self.0.set_all(
             &users
                 .iter()
-                .map(|(user, credentials)| (user.clone(), credentials.current.0.clone()))
+                .map(|(user, credentials)| (user.clone(), user_passwords(credentials.clone())))
                 .collect(),
         );
     }

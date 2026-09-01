@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use clap::Parser;
 use database_utils::TlsMode;
-use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary};
+use mysql_srv::{AuthCache, AuthPlugin, MySqlIntermediary, UserPasswords};
 use readyset_adapter::backend::UsersSync;
 use readyset_client::consensus::AllowedUsersMap;
-use readyset_mysql::{MySqlQueryHandler, MySqlUpstream};
+use readyset_mysql::{user_passwords, MySqlQueryHandler, MySqlUpstream};
 use tokio::net::TcpStream;
 use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error};
@@ -21,14 +21,14 @@ struct AuthCacheSync(Arc<AuthCache>);
 
 impl UsersSync for AuthCacheSync {
     fn refresh(&self, users: &AllowedUsersMap) {
-        self.0.set_all(&current_passwords(users));
+        self.0.set_all(&passwords_by_user(users));
     }
 }
 
-fn current_passwords(users: &AllowedUsersMap) -> HashMap<String, String> {
+fn passwords_by_user(users: &AllowedUsersMap) -> HashMap<String, UserPasswords> {
     users
         .iter()
-        .map(|(user, credentials)| (user.clone(), credentials.current.0.clone()))
+        .map(|(user, credentials)| (user.clone(), user_passwords(credentials.clone())))
         .collect()
 }
 
@@ -107,7 +107,7 @@ impl ConnectionHandler for MySqlHandler {
     }
 
     fn warm_up(&mut self, users: &AllowedUsersMap) {
-        self.auth_cache.populate(&current_passwords(users));
+        self.auth_cache.populate(&passwords_by_user(users));
     }
 
     fn users_sync(&self) -> Option<Arc<dyn UsersSync>> {

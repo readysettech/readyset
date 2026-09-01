@@ -20,7 +20,7 @@ use mysql::{Row, ServerError};
 use mysql_srv::{
     AuthCache, AuthKeys, AuthPlugin, CachedSchema, CachingSha2Password, Column, ErrorKind,
     MySqlIntermediary, MySqlShim, ParamParser, QueryResultWriter, QueryResultsResponse,
-    StatementMetaWriter,
+    StatementMetaWriter, UserPasswords,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_data::encoding::{Encoding, SingleByteCharset};
@@ -175,12 +175,12 @@ where
         }
     }
 
-    fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
+    fn password_for_username(&self, username: &str) -> Option<UserPasswords> {
         if let Some(f) = &self.password_fn {
-            return f(username);
+            return f(username).map(UserPasswords::new);
         }
         if username == TEST_USER {
-            Some(TEST_PASSWORD.as_bytes().to_vec())
+            Some(UserPasswords::new(TEST_PASSWORD.as_bytes().to_vec()))
         } else {
             None
         }
@@ -324,7 +324,10 @@ where
         // every caching_sha2_password client hits fast-auth without needing
         // the RSA full-auth exchange (gated off by default).
         let auth_cache = AuthCache::new();
-        auth_cache.insert(TEST_USER, TEST_PASSWORD.as_bytes());
+        auth_cache.insert(
+            TEST_USER,
+            &UserPasswords::new(TEST_PASSWORD.as_bytes().to_vec()),
+        );
 
         // Spawn the server task
         let server_handle = tokio::spawn(async move {
@@ -1968,6 +1971,24 @@ async fn sha2_cache_population_then_fast_auth() {
             .expect("second connect (fast auth)");
         assert!(db2.ping().await.is_ok());
         drop(db2);
+    })
+    .await;
+}
+
+/// A password the cache accepts is rejected when the stored passwords no longer include it.
+#[tokio::test]
+async fn sha2_fast_auth_rejects_password_missing_from_stored() {
+    let cache = AuthCache::new();
+    cache.insert("user", &UserPasswords::new(b"newpw".to_vec()));
+    sha2_test_server("user", "oldpw", cache, 1, |port, _cache| async move {
+        let url = format!("mysql://user:newpw@127.0.0.1:{port}?prefer_socket=false");
+        let res = mysql::Conn::new(mysql::Opts::from_url(&url).expect("url")).await;
+        match res {
+            Err(mysql::Error::Server(err)) => {
+                assert_eq!(err.code, ErrorKind::ER_ACCESS_DENIED_ERROR as u16)
+            }
+            res => panic!("expected access denied, got {res:?}"),
+        }
     })
     .await;
 }

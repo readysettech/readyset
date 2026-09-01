@@ -139,8 +139,8 @@
 //!         }
 //!     }
 //!
-//!     fn password_for_username(&self, _username: &str) -> Option<Vec<u8>> {
-//!         Some(b"password".to_vec())
+//!     fn password_for_username(&self, _username: &str) -> Option<UserPasswords> {
+//!         Some(UserPasswords::new(b"password".to_vec()))
 //!     }
 //!
 //!     fn version(&self) -> String {
@@ -160,7 +160,7 @@
 //!     // authoritative -- cache-miss denies the connection rather than
 //!     // falling back to the RSA-based full-auth exchange.
 //!     let auth_cache = AuthCache::new();
-//!     auth_cache.insert("root", b"password");
+//!     auth_cache.insert("root", &UserPasswords::new(b"password".to_vec()));
 //!
 //!     let jh = thread::spawn(move || {
 //!         if let Ok((s, _)) = listener.accept() {
@@ -233,7 +233,8 @@ use tracing::{debug, info};
 use writers::write_err;
 
 pub use crate::authentication::{
-    AuthCache, AuthContext, AuthKeys, AuthPlugin, CachingSha2Password, MysqlNativePassword,
+    AuthCache, AuthContext, AuthKeys, AuthOutcome, AuthPlugin, CachingSha2Password,
+    MysqlNativePassword, PasswordType, UserPasswords,
 };
 use crate::commands::change_user;
 use crate::constants::{CONNECT_ATTRS, INTERACTIVE};
@@ -447,10 +448,10 @@ pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
     /// Default implementation is a no-op.
     fn on_connect_attrs(&mut self, _attrs: &HashMap<&str, &str>) {}
 
-    /// Retrieve the password for the user with the given username, if any.
+    /// Retrieve the passwords the user with the given username may authenticate with, if any.
     ///
     /// If the user doesn't exist, return [`None`].
-    fn password_for_username(&self, username: &str) -> Option<Vec<u8>>;
+    fn password_for_username(&self, username: &str) -> Option<UserPasswords>;
 
     /// Return false if password checking should be skipped entirely
     fn require_authentication(&self) -> bool {
@@ -869,13 +870,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             (switch_plugin, packet.data.to_vec())
         };
 
-        let plain_password = self.shim.password_for_username(&username);
+        let stored_passwords = self.shim.password_for_username(&username);
         let require_auth = self.shim.require_authentication();
-        let auth_success = session_plugin
+        let outcome = session_plugin
             .handle_authentication(
                 &AuthContext {
                     username: &username,
-                    password: plain_password.as_deref(),
+                    passwords: stored_passwords.as_ref(),
                     handshake_password: &handshake_password,
                     auth_data: &self.auth_data,
                     require_auth,
@@ -884,12 +885,18 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 &self.auth_cache,
             )
             .await?;
+        let password = stored_passwords
+            .as_ref()
+            .and_then(|passwords| passwords.matched(outcome));
+        // Fast auth checks the cache, which can accept a password missing from the snapshot above.
+        let outcome = if require_auth && password.is_none() {
+            AuthOutcome::Denied
+        } else {
+            outcome
+        };
+        let auth_success = outcome.is_allowed();
         let plain_password = if require_auth {
-            Some(RedactedString::from(
-                plain_password
-                    .map(|p| String::from_utf8_lossy(&p).into_owned())
-                    .unwrap_or_default(),
-            ))
+            password.map(RedactedString::from)
         } else {
             None
         };
@@ -1014,13 +1021,13 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             (switch_plugin, packet.data.to_vec(), fresh_nonce)
                         };
 
-                    let plain_password = self.shim.password_for_username(&username);
+                    let stored_passwords = self.shim.password_for_username(&username);
                     let require_auth = self.shim.require_authentication();
-                    let auth_success = session_plugin
+                    let outcome = session_plugin
                         .handle_authentication(
                             &AuthContext {
                                 username: &username,
-                                password: plain_password.as_deref(),
+                                passwords: stored_passwords.as_ref(),
                                 handshake_password: &handshake_password,
                                 auth_data: &change_user_auth_data,
                                 require_auth,
@@ -1029,18 +1036,25 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                             &self.auth_cache,
                         )
                         .await?;
+                    let password = stored_passwords
+                        .as_ref()
+                        .and_then(|passwords| passwords.matched(outcome));
+                    // Fast auth checks the cache, which can accept a password missing from the
+                    // snapshot above.
+                    let outcome = if require_auth && password.is_none() {
+                        AuthOutcome::Denied
+                    } else {
+                        outcome
+                    };
 
-                    if auth_success {
+                    if outcome.is_allowed() {
                         self.session_auth_plugin = session_plugin;
                         debug!("Successfully authenticated client");
                         match self
                             .shim
                             .on_change_user(
                                 &username,
-                                &plain_password
-                                    .as_ref()
-                                    .map(|p| String::from_utf8_lossy(p))
-                                    .unwrap_or_default(),
+                                password.as_deref().unwrap_or_default(),
                                 change_user.database.unwrap_or_default(),
                             )
                             .await

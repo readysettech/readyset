@@ -11,7 +11,7 @@ use mysql_async::consts::StatusFlags;
 use mysql_common::collations::{Collation, CollationId};
 use mysql_srv::{
     CachedSchema, Column, ColumnFlags, ColumnType, MsqlSrvError, MySqlShim, QueryResultWriter,
-    QueryResultsResponse, RowWriter, StatementMetaWriter,
+    QueryResultsResponse, RowWriter, StatementMetaWriter, UserPasswords,
 };
 use readyset_adapter::backend::noria_connector::{
     MetaVariable, PreparedSelectTypes, SelectPrepareResultInner,
@@ -21,6 +21,7 @@ use readyset_adapter::backend::{
 };
 use readyset_adapter::upstream_database::PendingFill;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
+use readyset_client::consensus::UserCredentials;
 use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::{system_props, UpstreamCollation};
 use readyset_data::{DfType, DfValue, DfValueKind};
@@ -356,6 +357,14 @@ fn handshake_collation(collation_id: u16, server_default: Option<&UpstreamCollat
         )
     } else {
         collation_id
+    }
+}
+
+/// Convert an allowed user's credentials into the form the MySQL protocol layer uses.
+pub fn user_passwords(credentials: UserCredentials) -> UserPasswords {
+    UserPasswords {
+        current: credentials.current.0.into_bytes(),
+        old: credentials.old.map(|old| old.0.into_bytes()),
     }
 }
 
@@ -1154,8 +1163,8 @@ where
         }
     }
 
-    fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {
-        self.password_for_user(username).map(String::into_bytes)
+    fn password_for_username(&self, username: &str) -> Option<UserPasswords> {
+        self.credentials_for_user(username).map(user_passwords)
     }
 
     fn require_authentication(&self) -> bool {

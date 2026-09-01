@@ -194,17 +194,105 @@ impl AuthKeys {
     }
 }
 
+/// Which of a user's passwords a client authenticated with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordType {
+    /// No password was verified because authentication is disabled.
+    None,
+    /// The user's primary password.
+    Current,
+    /// The secondary password retained for a rotation.
+    Old,
+}
+
+/// The result of authenticating a client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthOutcome {
+    /// The client is rejected.
+    Denied,
+    /// The client is accepted, having verified the given password.
+    Allowed(PasswordType),
+}
+
+impl AuthOutcome {
+    /// Whether the client is accepted.
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, Self::Allowed(_))
+    }
+}
+
+/// The passwords a user may authenticate with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserPasswords {
+    /// The user's primary password.
+    pub current: Vec<u8>,
+    /// The secondary password retained for a rotation.
+    pub old: Option<Vec<u8>>,
+}
+
+impl UserPasswords {
+    /// Passwords for a user in the steady state, with no rotation in progress.
+    pub fn new(current: Vec<u8>) -> Self {
+        Self { current, old: None }
+    }
+
+    /// The password of the given type.
+    fn get(&self, password_type: PasswordType) -> Option<&[u8]> {
+        match password_type {
+            PasswordType::None => None,
+            PasswordType::Current => Some(&self.current),
+            PasswordType::Old => self.old.as_deref(),
+        }
+    }
+
+    /// The password `outcome` verified, as a lossy UTF-8 string.
+    ///
+    /// The session's upstream connection is opened with this password, so it must be the one the
+    /// client presented. An upstream account mid-rotation holds the same two passwords, and only
+    /// the one the client proved knowledge of is guaranteed to authenticate there. With
+    /// authentication disabled nothing was verified, so the primary password is used.
+    pub fn matched(&self, outcome: AuthOutcome) -> Option<String> {
+        let AuthOutcome::Allowed(password_type) = outcome else {
+            return None;
+        };
+        let password = match password_type {
+            PasswordType::None | PasswordType::Current => &self.current,
+            PasswordType::Old => self.old.as_deref()?,
+        };
+        Some(String::from_utf8_lossy(password).into_owned())
+    }
+}
+
+/// The fast-auth digests of a user's passwords.
+#[derive(Debug, Clone, Copy)]
+struct UserDigests {
+    current: [u8; 32],
+    old: Option<[u8; 32]>,
+}
+
+impl UserDigests {
+    fn new(passwords: &UserPasswords) -> Self {
+        Self {
+            current: CachingSha2Password::generate_fast_digest(&passwords.current),
+            old: passwords
+                .old
+                .as_ref()
+                .map(|old| CachingSha2Password::generate_fast_digest(old)),
+        }
+    }
+}
+
 /// Caches the double-SHA256 digest of successfully authenticated passwords.
 ///
 /// Used by `caching_sha2_password` to skip the full RSA-based exchange on
 /// subsequent connections from the same user (the "fast-auth" path).
 #[derive(Debug)]
 pub struct AuthCache {
-    /// Maps username -> SHA256(SHA256(password)).
+    /// Maps username -> the digests of the passwords that user may authenticate with.
     ///
     /// Lock ordering: this is the only lock in this struct. Callers must not
     /// hold any other lock while accessing the cache.
-    cache: RwLock<HashMap<String, [u8; 32]>>,
+    cache: RwLock<HashMap<String, UserDigests>>,
 }
 
 impl AuthCache {
@@ -215,12 +303,12 @@ impl AuthCache {
         })
     }
 
-    /// Store the double-SHA256 digest of a successfully authenticated password.
-    pub fn insert(&self, username: &str, password: &[u8]) {
-        let digest = CachingSha2Password::generate_fast_digest(password);
+    /// Store the double-SHA256 digests of a user's passwords.
+    pub fn insert(&self, username: &str, passwords: &UserPasswords) {
+        let digests = UserDigests::new(passwords);
         match self.cache.write() {
             Ok(mut cache) => {
-                cache.insert(username.to_string(), digest);
+                cache.insert(username.to_string(), digests);
             }
             Err(e) => {
                 error!("Failed to write to auth cache: {}", e);
@@ -228,22 +316,14 @@ impl AuthCache {
         }
     }
 
-    /// Bulk-populate the cache from a map of `username -> plaintext password`.
+    /// Bulk-populate the cache from a map of `username -> passwords`.
     ///
     /// Intended to be called once at startup with the full set of configured
     /// users. Every user becomes immediately eligible for fast-auth on their
     /// first connection, avoiding the RSA-based full-auth round trip that
     /// would otherwise be needed to warm the cache.
-    pub fn populate(&self, users: &HashMap<String, String>) {
-        let entries: Vec<(String, [u8; 32])> = users
-            .iter()
-            .map(|(user, password)| {
-                (
-                    user.clone(),
-                    CachingSha2Password::generate_fast_digest(password.as_bytes()),
-                )
-            })
-            .collect();
+    pub fn populate(&self, users: &HashMap<String, UserPasswords>) {
+        let entries = Self::digests(users);
         match self.cache.write() {
             Ok(mut cache) => {
                 cache.extend(entries);
@@ -254,20 +334,19 @@ impl AuthCache {
         }
     }
 
+    fn digests(users: &HashMap<String, UserPasswords>) -> Vec<(String, UserDigests)> {
+        users
+            .iter()
+            .map(|(user, passwords)| (user.clone(), UserDigests::new(passwords)))
+            .collect()
+    }
+
     /// Replace the entire cache contents to match `users`. Used when the allowed-users set is
     /// mutated at runtime (`ALTER READYSET ADD|MODIFY|DROP USER`) so the fast-auth path stays in
     /// sync with the authoritative map; unlike [`AuthCache::populate`] this also drops digests for
     /// removed or rotated users.
-    pub fn set_all(&self, users: &HashMap<String, String>) {
-        let entries: Vec<(String, [u8; 32])> = users
-            .iter()
-            .map(|(user, password)| {
-                (
-                    user.clone(),
-                    CachingSha2Password::generate_fast_digest(password.as_bytes()),
-                )
-            })
-            .collect();
+    pub fn set_all(&self, users: &HashMap<String, UserPasswords>) {
+        let entries = Self::digests(users);
         match self.cache.write() {
             Ok(mut cache) => {
                 cache.clear();
@@ -279,41 +358,55 @@ impl AuthCache {
         }
     }
 
-    /// Validate a scramble against the cached digest for `username`.
+    /// Validate a scramble against the cached digests for `username`, returning which of the
+    /// user's passwords it matched.
     ///
     /// The validation algorithm (matching MySQL's `Validate_scramble::validate`):
     /// 1. Look up cached `hash = SHA256(SHA256(password))`
     /// 2. Compute `x = SHA256(hash || nonce)`
     /// 3. Compute `y = XOR(x, scramble)` -- yields `SHA256(password)` if correct
     /// 4. Check `SHA256(y) == hash`
-    pub fn check(&self, username: &str, scramble: &[u8], nonce: &AuthData) -> bool {
-        // Copy entry out before releasing the read lock so we don't hold it
+    ///
+    /// A retained password is tried only after the primary one fails, matching how MySQL
+    /// validates a dual-password account. Each individual comparison is constant-time.
+    pub fn check(&self, username: &str, scramble: &[u8], nonce: &AuthData) -> Option<PasswordType> {
+        // Copy the entry out before releasing the read lock so we don't hold it
         // during hash computation.
         let entry = match self.cache.read() {
             Ok(cache) => cache.get(username).copied(),
             Err(e) => {
                 error!("Failed to read auth cache: {}", e);
-                return false;
+                return None;
             }
         };
+        let entry = entry?;
 
-        if let Some(entry) = entry {
-            let x: [u8; 32] = {
-                let mut hasher = Sha256::new();
-                hasher.update(entry);
-                hasher.update(nonce);
-                hasher.finalize().into()
-            };
-            let mut y = [0u8; 32];
-            for (i, (&a, &b)) in x.iter().zip(scramble.iter()).enumerate() {
-                y[i] = a ^ b;
-            }
-            let expected: [u8; 32] = sha256(&y);
-            // Constant-time comparison to prevent timing side-channel attacks.
-            return entry.ct_eq(&expected).into();
+        if Self::matches(entry.current, scramble, nonce) {
+            return Some(PasswordType::Current);
         }
+        if entry
+            .old
+            .is_some_and(|old| Self::matches(old, scramble, nonce))
+        {
+            return Some(PasswordType::Old);
+        }
+        None
+    }
 
-        false
+    fn matches(digest: [u8; 32], scramble: &[u8], nonce: &AuthData) -> bool {
+        let x: [u8; 32] = {
+            let mut hasher = Sha256::new();
+            hasher.update(digest);
+            hasher.update(nonce);
+            hasher.finalize().into()
+        };
+        let mut y = [0u8; 32];
+        for (i, (&a, &b)) in x.iter().zip(scramble.iter()).enumerate() {
+            y[i] = a ^ b;
+        }
+        let expected: [u8; 32] = sha256(&y);
+        // Constant-time comparison to prevent timing side-channel attacks.
+        digest.ct_eq(&expected).into()
     }
 }
 
@@ -401,7 +494,7 @@ impl AuthPlugin {
         ctx: &AuthContext<'_>,
         conn: &mut PacketConn<S>,
         auth_cache: &Arc<AuthCache>,
-    ) -> Result<bool, io::Error>
+    ) -> Result<AuthOutcome, io::Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
@@ -421,9 +514,9 @@ impl AuthPlugin {
 pub struct AuthContext<'a> {
     /// Username sent by the client in the handshake.
     pub username: &'a str,
-    /// Plain-text password returned by [`MySqlShim::password_for_username`],
+    /// Plain-text passwords returned by [`MySqlShim::password_for_username`],
     /// or `None` when the backend does not know the user.
-    pub password: Option<&'a [u8]>,
+    pub passwords: Option<&'a UserPasswords>,
     /// The password bytes from the client handshake (or auth-switch response).
     pub handshake_password: &'a [u8],
     /// The 20-byte random challenge sent in the server greeting.
@@ -454,19 +547,28 @@ impl MysqlNativePassword {
         res
     }
 
-    /// Verify the client's password hash against the stored password.
-    pub fn handle_authentication(&self, ctx: &AuthContext<'_>) -> bool {
+    /// Verify the client's password hash against the user's stored passwords.
+    pub fn handle_authentication(&self, ctx: &AuthContext<'_>) -> AuthOutcome {
         if !ctx.require_auth {
-            return true;
+            return AuthOutcome::Allowed(PasswordType::None);
         }
-        ctx.password.is_some_and(|password| {
-            let expected = self.hash_password(password, ctx.auth_data);
-            if ctx.handshake_password.len() != expected.len() {
-                return false;
+        let Some(passwords) = ctx.passwords else {
+            return AuthOutcome::Denied;
+        };
+        for password_type in [PasswordType::Current, PasswordType::Old] {
+            if passwords
+                .get(password_type)
+                .is_some_and(|password| self.verify(password, ctx))
+            {
+                return AuthOutcome::Allowed(password_type);
             }
-            // Constant-time comparison to prevent timing side-channel attacks.
-            ctx.handshake_password.ct_eq(&expected).into()
-        })
+        }
+        AuthOutcome::Denied
+    }
+
+    fn verify(&self, password: &[u8], ctx: &AuthContext<'_>) -> bool {
+        let expected = self.hash_password(password, ctx.auth_data);
+        ctx.handshake_password.ct_eq(&expected[..]).into()
     }
 }
 
@@ -530,7 +632,7 @@ impl CachingSha2Password {
         ctx: &AuthContext<'_>,
         conn: &mut PacketConn<S>,
         auth_cache: &Arc<AuthCache>,
-    ) -> Result<bool, io::Error>
+    ) -> Result<AuthOutcome, io::Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
@@ -540,10 +642,15 @@ impl CachingSha2Password {
             || (ctx.handshake_password.len() == 1 && ctx.handshake_password[0] == 0)
         {
             if !ctx.require_auth {
-                return Ok(true);
+                return Ok(AuthOutcome::Allowed(PasswordType::None));
             }
-            // Allow only if stored password is explicitly empty
-            return Ok(ctx.password.is_some_and(|p| p.is_empty()));
+            // Allow only if the primary stored password is explicitly empty
+            let outcome = if ctx.passwords.is_some_and(|p| p.current.is_empty()) {
+                AuthOutcome::Allowed(PasswordType::Current)
+            } else {
+                AuthOutcome::Denied
+            };
+            return Ok(outcome);
         }
 
         if !ctx.require_auth {
@@ -551,16 +658,29 @@ impl CachingSha2Password {
             if ctx.handshake_password.len() > 1 {
                 Self::send_auth_status_packet(conn, FAST_AUTH_SUCCESS).await?;
             }
-            return Ok(true);
+            return Ok(AuthOutcome::Allowed(PasswordType::None));
         }
 
-        // Fast-auth scramble must be exactly 32 bytes
+        // Fast-auth scramble must be exactly 32 bytes. The cache can change after `ctx.passwords`
+        // was read, and the session's upstream connection is opened with the password from
+        // `ctx.passwords`, so the scramble must verify against that password too.
         if ctx.handshake_password.len() == 32
-            && auth_cache.check(ctx.username, ctx.handshake_password, ctx.auth_data)
+            && let Some(password_type) =
+                auth_cache.check(ctx.username, ctx.handshake_password, ctx.auth_data)
+            && ctx
+                .passwords
+                .and_then(|passwords| passwords.get(password_type))
+                .is_some_and(|password| {
+                    AuthCache::matches(
+                        Self::generate_fast_digest(password),
+                        ctx.handshake_password,
+                        ctx.auth_data,
+                    )
+                })
         {
             set_failpoint!(failpoints::CACHING_SHA2_FAST_AUTH_SUCCESS);
             Self::send_auth_status_packet(conn, FAST_AUTH_SUCCESS).await?;
-            return Ok(true);
+            return Ok(AuthOutcome::Allowed(password_type));
         }
 
         // Cache miss -> deny. The fast-auth cache is authoritative; we do
@@ -572,7 +692,7 @@ impl CachingSha2Password {
             username = ctx.username,
             "fast-auth cache miss; denying connection"
         );
-        Ok(false)
+        Ok(AuthOutcome::Denied)
         // self.handle_full_auth(ctx, conn, auth_cache).await
     }
 
@@ -590,7 +710,7 @@ impl CachingSha2Password {
         ctx: &AuthContext<'_>,
         conn: &mut PacketConn<S>,
         auth_cache: &Arc<AuthCache>,
-    ) -> Result<bool, io::Error>
+    ) -> Result<AuthOutcome, io::Error>
     where
         S: AsyncRead + AsyncWrite + Unpin + Send,
     {
@@ -641,7 +761,7 @@ impl CachingSha2Password {
                 Ok(decrypted) => decrypted,
                 Err(e) => {
                     warn!(username = ctx.username, error = %e, "RSA password decryption failed");
-                    return Ok(false);
+                    return Ok(AuthOutcome::Denied);
                 }
             }
         };
@@ -651,21 +771,26 @@ impl CachingSha2Password {
             Some((&0, rest)) => rest,
             _ => {
                 debug!(username = ctx.username, "password not NUL-terminated");
-                return Ok(false);
+                return Ok(AuthOutcome::Denied);
             }
         };
 
-        // Verify against stored password
-        if let Some(stored) = ctx.password {
-            // Constant-time comparison to prevent timing side-channel attacks.
-            if constant_time_eq(stored, received_password) {
-                // Cache the digest for fast-auth on subsequent connections
-                auth_cache.insert(ctx.username, stored);
-                return Ok(true);
+        // Verify against stored passwords
+        if let Some(passwords) = ctx.passwords {
+            for password_type in [PasswordType::Current, PasswordType::Old] {
+                // Constant-time comparison to prevent timing side-channel attacks.
+                if passwords
+                    .get(password_type)
+                    .is_some_and(|stored| constant_time_eq(stored, received_password))
+                {
+                    // Cache the digests for fast-auth on subsequent connections
+                    auth_cache.insert(ctx.username, passwords);
+                    return Ok(AuthOutcome::Allowed(password_type));
+                }
             }
         }
 
-        Ok(false)
+        Ok(AuthOutcome::Denied)
     }
 }
 
@@ -760,25 +885,55 @@ mod tests {
         assert_eq!(result, vec![0xfe, 0xfd, 0xfc, 0xfb]);
     }
 
+    fn passwords(current: &str, old: Option<&str>) -> UserPasswords {
+        UserPasswords {
+            current: current.as_bytes().to_vec(),
+            old: old.map(|old| old.as_bytes().to_vec()),
+        }
+    }
+
+    /// A known-good fast-auth scramble for the password "test", with the auth data it was
+    /// computed against.
+    fn test_scramble() -> ([u8; 32], AuthData) {
+        (
+            [
+                0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x09, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
+                0xfa, 0xa6, 0x38, 0x03, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
+                0xf1, 0x31, 0x81, 0x9e,
+            ],
+            [
+                0x15, 0x2d, 0x62, 0x01, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
+                0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
+            ],
+        )
+    }
+
+    /// Authenticate `password` against `stored` using mysql_native_password.
+    fn native_outcome(stored: &UserPasswords, password: &[u8]) -> AuthOutcome {
+        let plugin = MysqlNativePassword;
+        let auth_data: AuthData = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+        let handshake = plugin.hash_password(password, &auth_data);
+        plugin.handle_authentication(&AuthContext {
+            username: "readyset",
+            passwords: Some(stored),
+            handshake_password: &handshake,
+            auth_data: &auth_data,
+            require_auth: true,
+        })
+    }
+
     #[test]
     fn auth_cache_insert_and_check() {
         let auth_cache = AuthCache::new();
 
-        auth_cache.insert("readyset", b"test");
+        auth_cache.insert("readyset", &passwords("test", None));
 
-        // Known-good scramble and auth_data for password "test"
-        let scramble = [
-            0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x09, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
-            0xfa, 0xa6, 0x38, 0x03, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
-            0xf1, 0x31, 0x81, 0x9e,
-        ];
-        let auth_data: AuthData = [
-            0x15, 0x2d, 0x62, 0x01, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
-            0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
-        ];
-
-        assert!(auth_cache.check("readyset", &scramble, &auth_data));
-        assert!(!auth_cache.check("wrong_user", &scramble, &auth_data));
+        let (scramble, auth_data) = test_scramble();
+        assert_eq!(
+            auth_cache.check("readyset", &scramble, &auth_data),
+            Some(PasswordType::Current)
+        );
+        assert_eq!(auth_cache.check("wrong_user", &scramble, &auth_data), None);
     }
 
     #[test]
@@ -786,24 +941,17 @@ mod tests {
         let auth_cache = AuthCache::new();
 
         let mut users = HashMap::new();
-        users.insert("readyset".to_string(), "test".to_string());
-        users.insert("alice".to_string(), "hunter2".to_string());
+        users.insert("readyset".to_string(), passwords("test", None));
+        users.insert("alice".to_string(), passwords("hunter2", None));
         auth_cache.populate(&users);
 
-        // Known-good scramble and auth_data for password "test"
-        let scramble = [
-            0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x09, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
-            0xfa, 0xa6, 0x38, 0x03, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
-            0xf1, 0x31, 0x81, 0x9e,
-        ];
-        let auth_data: AuthData = [
-            0x15, 0x2d, 0x62, 0x01, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
-            0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
-        ];
-
-        assert!(auth_cache.check("readyset", &scramble, &auth_data));
-        assert!(!auth_cache.check("alice", &scramble, &auth_data));
-        assert!(!auth_cache.check("missing", &scramble, &auth_data));
+        let (scramble, auth_data) = test_scramble();
+        assert_eq!(
+            auth_cache.check("readyset", &scramble, &auth_data),
+            Some(PasswordType::Current)
+        );
+        assert_eq!(auth_cache.check("alice", &scramble, &auth_data), None);
+        assert_eq!(auth_cache.check("missing", &scramble, &auth_data), None);
     }
 
     #[test]
@@ -811,19 +959,67 @@ mod tests {
         let auth_cache = AuthCache::new();
 
         // Cache "noria" but scramble is for "test"
-        auth_cache.insert("readyset", b"noria");
+        auth_cache.insert("readyset", &passwords("noria", None));
 
-        let scramble = [
-            0xf9, 0x84, 0xa1, 0x9d, 0x9b, 0xa5, 0xef, 0x09, 0x61, 0x2d, 0xe0, 0x48, 0xe4, 0x88,
-            0xfa, 0xa6, 0x38, 0x03, 0xd6, 0x51, 0x57, 0x13, 0x99, 0x59, 0x33, 0x9d, 0x86, 0x8e,
-            0xf1, 0x31, 0x81, 0x9e,
-        ];
-        let auth_data: AuthData = [
-            0x15, 0x2d, 0x62, 0x01, 0x34, 0x1d, 0x68, 0x47, 0x14, 0x60, 0x19, 0x4c, 0x73, 0x23,
-            0x63, 0x75, 0x1b, 0x64, 0x28, 0x4e,
-        ];
+        let (scramble, auth_data) = test_scramble();
+        assert_eq!(auth_cache.check("readyset", &scramble, &auth_data), None);
+    }
 
-        assert!(!auth_cache.check("readyset", &scramble, &auth_data));
+    #[test]
+    fn auth_cache_checks_retained_password() {
+        let auth_cache = AuthCache::new();
+        auth_cache.insert("readyset", &passwords("noria", Some("test")));
+
+        let (scramble, auth_data) = test_scramble();
+        assert_eq!(
+            auth_cache.check("readyset", &scramble, &auth_data),
+            Some(PasswordType::Old)
+        );
+
+        auth_cache.insert("readyset", &passwords("noria", None));
+        assert_eq!(auth_cache.check("readyset", &scramble, &auth_data), None);
+    }
+
+    #[test]
+    fn auth_cache_set_all_drops_discarded_digests() {
+        let auth_cache = AuthCache::new();
+        let mut users = HashMap::new();
+        users.insert("readyset".to_string(), passwords("noria", Some("test")));
+        auth_cache.set_all(&users);
+
+        let (scramble, auth_data) = test_scramble();
+        assert_eq!(
+            auth_cache.check("readyset", &scramble, &auth_data),
+            Some(PasswordType::Old)
+        );
+
+        users.insert("readyset".to_string(), passwords("noria", None));
+        auth_cache.set_all(&users);
+        assert_eq!(auth_cache.check("readyset", &scramble, &auth_data), None);
+    }
+
+    #[test]
+    fn matched_password_by_outcome() {
+        let stored = passwords("newpw", Some("oldpw"));
+        let matched = |password_type| stored.matched(AuthOutcome::Allowed(password_type));
+        assert_eq!(matched(PasswordType::Current).as_deref(), Some("newpw"));
+        assert_eq!(matched(PasswordType::Old).as_deref(), Some("oldpw"));
+        assert_eq!(matched(PasswordType::None).as_deref(), Some("newpw"));
+        assert_eq!(stored.matched(AuthOutcome::Denied), None);
+    }
+
+    #[test]
+    fn native_accepts_either_password() {
+        let stored = passwords("newpw", Some("oldpw"));
+        assert_eq!(
+            native_outcome(&stored, b"newpw"),
+            AuthOutcome::Allowed(PasswordType::Current)
+        );
+        assert_eq!(
+            native_outcome(&stored, b"oldpw"),
+            AuthOutcome::Allowed(PasswordType::Old)
+        );
+        assert_eq!(native_outcome(&stored, b"wrongpw"), AuthOutcome::Denied);
     }
 
     #[test]
