@@ -764,6 +764,17 @@ impl Leader {
                         ReplicationStatus::Running
                     },
 
+                    cdc_server: if self.replicator_config.replication_enabled
+                        && !replication_stopped
+                    {
+                        self.active_cdc_server
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone()
+                    } else {
+                        None
+                    },
+
                     max_replication_offset: replication_offsets
                         .as_ref()
                         .and_then(|offs| offs.max_offset().ok().flatten().cloned()),

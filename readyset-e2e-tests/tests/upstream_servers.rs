@@ -170,6 +170,10 @@ async fn replication_fails_over_past_a_dead_server() {
         .unwrap();
     assert_eq!(n, 2);
 
+    let rows: Vec<(String, String)> = rs.query("SHOW READYSET STATUS").await.unwrap();
+    let cdc_server = rows.iter().find(|(name, _)| name == "CDC Server");
+    assert_eq!(cdc_server.map(|(_, value)| value.as_str()), Some(live.as_str()), "{rows:?}");
+
     let servers = upstream_servers(&mut rs).await;
     assert_eq!(servers.len(), 2, "{servers:?}");
     let dead_row = &servers[&dead];

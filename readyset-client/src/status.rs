@@ -21,6 +21,7 @@ use replication_offset::ReplicationOffset;
 
 const STATUS_VARIABLE: &str = "Status";
 const REPLICATION_STATUS_VARIABLE: &str = "Replication Status";
+const CDC_SERVER_VARIABLE: &str = "CDC Server";
 const MAX_REPLICATION_OFFSET: &str = "Maximum Replication Offset";
 const MIN_REPLICATION_OFFSET: &str = "Minimum Replication Offset";
 
@@ -36,6 +37,9 @@ pub struct ReadySetControllerStatus {
     pub current_status: CurrentStatus,
     /// The status of the replicator.
     pub replication_status: ReplicationStatus,
+    /// The `host:port` of the CDC server replication is connected to, or `None` while
+    /// replication is not running.
+    pub cdc_server: Option<String>,
     /// The current maximum replication offset known by the leader.
     pub max_replication_offset: Option<ReplicationOffset>,
     /// The current minimum replication offset known by the leader.
@@ -54,6 +58,10 @@ impl From<ReadySetControllerStatus> for Vec<(String, String)> {
                 status.replication_status.to_string(),
             ),
         ];
+
+        if let Some(cdc_server) = status.cdc_server {
+            res.push((CDC_SERVER_VARIABLE.to_string(), cdc_server))
+        }
 
         if let Some(replication_offset) = status.max_replication_offset {
             res.push((
