@@ -5,7 +5,8 @@ pub mod psql;
 pub mod verify;
 
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fs::remove_dir_all;
 use std::future::Future;
 use std::io::Read;
@@ -852,11 +853,7 @@ impl Options {
         ))))
     }
 
-    fn process_pair(
-        &self,
-        pair: &str,
-        seen_users: &mut HashSet<String>,
-    ) -> Result<(String, String), anyhow::Error> {
+    fn process_pair(&self, pair: &str) -> Result<(String, String), anyhow::Error> {
         let mut parts = pair.trim().splitn(2, ':');
         match (parts.next(), parts.next()) {
             (Some(user), Some(pass)) => {
@@ -866,13 +863,33 @@ impl Options {
                     !user.is_empty() && !pass.is_empty(),
                     "Invalid user:password pair format. Expected format: user:password"
                 );
-                if !seen_users.insert(user.to_string()) {
-                    bail!("Duplicate user found: {user}");
-                }
                 Ok((user.to_string(), pass.to_string()))
             }
             _ => bail!("Invalid user:password pair format. Expected format: user:password"),
         }
+    }
+
+    /// Add one `user:password` pair to `users`. A user's first occurrence sets their primary
+    /// password and a second sets their retained one.
+    fn add_allowed_pair(
+        users: &mut AllowedUsersMap,
+        user: String,
+        password: String,
+    ) -> anyhow::Result<()> {
+        match users.entry(user) {
+            Entry::Vacant(entry) => {
+                entry.insert(UserCredentials::new(password));
+            }
+            Entry::Occupied(mut entry) => {
+                ensure!(
+                    entry.get().old.is_none(),
+                    "user '{}' appears more than twice in --allowed-users",
+                    entry.key()
+                );
+                entry.get_mut().old = Some(password.into());
+            }
+        }
+        Ok(())
     }
 
     fn build_allowed_users(&self) -> anyhow::Result<AllowedUsersMap> {
@@ -882,7 +899,6 @@ impl Options {
             .upstream_db_url
             .as_ref()
             .and_then(|s| s.parse::<DatabaseURL>().ok());
-        let mut seen_users = std::collections::HashSet::new();
         // Parse allowed users from comma-separated "user:pass" pairs
         let mut allowed_users = self
             .allowed_users_arg
@@ -913,8 +929,8 @@ impl Options {
                         }
                         ',' if !in_quotes => {
                             if !current.is_empty() {
-                                let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                                users.insert(user, UserCredentials::new(pass));
+                                let (user, pass) = self.process_pair(&current)?;
+                                Self::add_allowed_pair(&mut users, user, pass)?;
                                 current.clear();
                             }
                         }
@@ -924,8 +940,8 @@ impl Options {
 
                 // Process the last pair if any
                 if !current.is_empty() {
-                    let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                    users.insert(user, UserCredentials::new(pass));
+                    let (user, pass) = self.process_pair(&current)?;
+                    Self::add_allowed_pair(&mut users, user, pass)?;
                 }
 
                 ensure!(!in_quotes, "Unclosed quote in input");
@@ -935,16 +951,28 @@ impl Options {
             .transpose()?
             .unwrap_or_default();
 
+        let retained = allowed_users
+            .iter()
+            .find(|(_, credentials)| credentials.old.is_some())
+            .map(|(user, _)| user.clone());
+        if let Some(user) = retained {
+            let dialect: readyset_sql::Dialect = self.database_type()?.into();
+            ensure!(
+                dialect.supports_dual_passwords(),
+                "duplicate user '{user}' in --allowed-users, but upstream does not support \
+                 password rotation"
+            );
+        }
+
         match (
             upstream_url.as_ref().and_then(|url| url.user()),
             upstream_url.as_ref().and_then(|url| url.password()),
         ) {
             (Some(user), Some(pass)) => {
-                if seen_users.insert(user.to_owned()) {
-                    allowed_users.insert(user.to_owned(), UserCredentials::new(pass.to_owned()))
-                } else {
+                if allowed_users.contains_key(user) {
                     bail!("Duplicate user found: {user}");
                 }
+                allowed_users.insert(user.to_owned(), UserCredentials::new(pass.to_owned()))
             }
             _ => None,
         };
@@ -2969,16 +2997,6 @@ mod tests {
         let users = opts.get_allowed_users(true).unwrap();
         assert!(users.is_empty(), "Unexpected --allowed-users: {users:?}");
 
-        // duplicate user
-        let opts = Options::parse_from(vec![
-            "readyset",
-            "--allowed-users",
-            "user1:pass1,user1:pass2",
-            "--upstream-db-url",
-            "mysql://root:password@mysql:3306/readyset",
-        ]);
-        opts.get_allowed_users(false).unwrap_err();
-
         // duplicate user between allowed-users and upstream-db-url
         let opts = Options::parse_from(vec![
             "readyset",
@@ -2988,5 +3006,61 @@ mod tests {
             "mysql://user1:pass1@mysql:3306/readyset",
         ]);
         opts.get_allowed_users(false).unwrap_err();
+    }
+
+    #[test]
+    fn allowed_users_duplicate_sets_old_password() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--allowed-users",
+            "user1:new,user1:old,user2:pass2",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ]);
+        let user_list = opts.get_allowed_users(false).unwrap();
+        assert_eq!(
+            user_list["user1"],
+            UserCredentials {
+                current: "new".to_string().into(),
+                old: Some("old".to_string().into()),
+            }
+        );
+        assert_eq!(
+            user_list["user2"],
+            UserCredentials::new("pass2".to_string())
+        );
+    }
+
+    #[test]
+    fn allowed_users_triple_errors() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--allowed-users",
+            "user1:a,user1:b,user1:c",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ]);
+        let err = opts.get_allowed_users(false).unwrap_err();
+        assert!(
+            err.to_string().contains("more than twice"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn allowed_users_duplicate_requires_rotating_upstream() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--allowed-users",
+            "user1:new,user1:old",
+            "--upstream-db-url",
+            "postgresql://root:password@pg:5432/readyset", // trufflehog:ignore
+        ]);
+        let err = opts.get_allowed_users(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not support password rotation"),
+            "unexpected error: {err}"
+        );
     }
 }
