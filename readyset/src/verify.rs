@@ -114,11 +114,16 @@ async fn verify_users(
 ) -> Result<()> {
     let mut users = Vec::new();
     let allow_all = options.allow_unauthenticated_connections;
-    for (user, pass) in options.get_allowed_users(allow_all)? {
+    for (user, credentials) in options.get_allowed_users(allow_all)? {
         let verification = Arc::clone(&verification);
         users.push((
             user.clone(),
-            tokio::spawn(verify_user(url.clone(), verification, user, pass)),
+            tokio::spawn(verify_user(
+                url.clone(),
+                verification,
+                user,
+                credentials.current.0,
+            )),
         ));
     }
     let users = join_all(

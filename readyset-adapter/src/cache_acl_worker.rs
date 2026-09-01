@@ -429,7 +429,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         // assume anymore; a partial pass must not mass-discard live rows.
         let mut discovered: HashSet<SqlIdentifier> = HashSet::new();
         let mut discovery_complete = true;
-        for (user, password) in &users {
+        for (user, credentials) in &users {
             let user = SqlIdentifier::from(user.as_str());
             if !self
                 .backoff
@@ -441,7 +441,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
                 discovery_complete = false;
                 continue;
             }
-            let Ok(conn) = conns.for_user(&user, password).await else {
+            let Ok(conn) = conns.for_user(&user, &credentials.current).await else {
                 self.mark_row_denied(&user, &targets);
                 discovery_complete = false;
                 continue;
@@ -600,8 +600,8 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             let Some(target) = targets.iter().find(|t| t.cache == cache) else {
                 continue;
             };
-            if let Some(password) = users.get(identity.as_str()) {
-                let password = password.clone();
+            if let Some(credentials) = users.get(identity.as_str()) {
+                let password = credentials.current.clone();
                 self.probe_cell_as_user(&mut conns, &identity, &password, target)
                     .await;
             } else {
@@ -627,7 +627,10 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .collect();
         let mut conns = self.pass_conns().await;
         for identity in column_probe_order(identities, creator.as_ref().map(|c| &c.identity)) {
-            let Some(password) = users.get(identity.as_str()).cloned() else {
+            let Some(password) = users
+                .get(identity.as_str())
+                .map(|credentials| credentials.current.clone())
+            else {
                 continue;
             };
             self.probe_cell_as_user(&mut conns, &identity, &password, &target)
@@ -668,7 +671,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         }
         let targets = self.probe_targets();
         let mut conns = self.pass_conns().await;
-        if self.users.password_for(identity.as_str()).is_some() {
+        if self.users.primary_password_for(identity.as_str()).is_some() {
             self.probe_row(&mut conns, &identity, &targets).await;
             return;
         }
@@ -698,7 +701,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         user: &SqlIdentifier,
         targets: &[ProbeTarget],
     ) {
-        let Some(password) = self.users.password_for(user.as_str()) else {
+        let Some(password) = self.users.primary_password_for(user.as_str()) else {
             return;
         };
         for target in targets {
@@ -715,7 +718,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         role: &SqlIdentifier,
     ) -> Option<(SqlIdentifier, String)> {
         let via = self.roles.get(role)?.via.clone()?;
-        let password = self.users.password_for(via.as_str())?;
+        let password = self.users.primary_password_for(via.as_str())?;
         conns.for_user(&via, &password).await.ok()?;
         Some((via, password))
     }

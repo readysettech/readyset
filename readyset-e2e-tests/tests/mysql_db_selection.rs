@@ -43,7 +43,7 @@ async fn change_user_updates_schema_search_path() {
     readyset_tracing::init_test_logging();
 
     let mut users = std::collections::HashMap::new();
-    users.insert("root".to_string(), "noria".to_string());
+    users.insert("root".to_string(), "noria".into());
 
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()

@@ -8,7 +8,6 @@
 //! report on.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,7 +15,9 @@ use database_utils::DatabaseURL;
 use itertools::Itertools;
 use readyset_client::consensus::mcp_tokens::McpTokenStore;
 use readyset_client::consensus::mcp_tokens::{McpToken, McpTokenScope as AuthorityMcpTokenScope};
-use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest, UserStore};
+use readyset_client::consensus::{
+    AllowedUsersMap, Authority, AuthorityControl, CacheDDLRequest, PasswordChange, UserStore,
+};
 use readyset_client::post_processing::Results;
 use readyset_client::recipe::CacheExpr;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
@@ -1292,8 +1293,8 @@ where
         mutate: F,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>>
     where
-        F: FnOnce(Arc<Authority>, HashMap<String, String>) -> Fut,
-        Fut: std::future::Future<Output = ReadySetResult<HashMap<String, String>>>,
+        F: FnOnce(Arc<Authority>, AllowedUsersMap) -> Fut,
+        Fut: std::future::Future<Output = ReadySetResult<AllowedUsersMap>>,
     {
         let _guard = state.users.lock_mutations().await;
         let seed = state.users.snapshot();
@@ -1341,11 +1342,14 @@ where
         if Self::is_upstream_url_user(state, &user).await {
             unsupported!("cannot MODIFY the user from --upstream-db-url");
         }
-        let password = match &stmt.action {
+        let change = match &stmt.action {
             ModifyUserAction::SetPassword {
                 password,
                 retain_current: false,
-            } => password.0.clone(),
+            } => PasswordChange::Set {
+                password: password.clone(),
+                retain_current: false,
+            },
             ModifyUserAction::SetPassword {
                 retain_current: true,
                 ..
@@ -1356,7 +1360,7 @@ where
         };
         let result = Self::persist_user_mutation(state, |authority, seed| async move {
             authority
-                .modify_allowed_user(seed, user.clone(), password)
+                .modify_allowed_user(seed, user.clone(), change)
                 .await
         })
         .await;

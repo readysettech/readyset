@@ -815,7 +815,15 @@ impl TestBuilder {
         let shallow_for_schema = Arc::clone(&shallow);
 
         let auth_cache = AuthCache::new();
-        auth_cache.populate(&self.backend_builder.get_users().read());
+        auth_cache.populate(
+            &self
+                .backend_builder
+                .get_users()
+                .read()
+                .iter()
+                .map(|(user, credentials)| (user.clone(), credentials.current.0.clone()))
+                .collect(),
+        );
         // Wire the fast-auth cache to the allowed-users handle so runtime `ALTER READYSET ... USER`
         // mutations refresh it, mirroring the adapter binary. The handle is shared, so this is the
         // same map the backend authenticates against and the `readyset.users` vrel reads.

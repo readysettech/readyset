@@ -91,7 +91,9 @@ use lru::LruCache;
 use metrics::{counter, gauge};
 use mysql_common::row::convert::{FromRow, FromRowError};
 use readyset_adapter_types::{ParsedCommand, PreparedStatementType};
-use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest};
+use readyset_client::consensus::{
+    AllowedUsersMap, Authority, AuthorityControl, CacheDDLRequest, UserCredentials,
+};
 use readyset_client::post_processing::Results;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
 use readyset_client::{CacheMode, ViewCreateRequest};
@@ -302,18 +304,18 @@ fn record_acl_decline(query_id: QueryId, verdict: &'static str) {
 /// Notified when the adapter's allowed-users map changes at runtime so protocol-level caches
 /// (today: MySQL `caching_sha2_password` fast-auth digests) can be kept in sync.
 pub trait UsersSync: Send + Sync + std::fmt::Debug {
-    /// Replace any cached state with one entry per `(user, password)` in `users`.
-    fn refresh(&self, users: &HashMap<String, String>);
+    /// Replace any cached state with one entry per user in `users`.
+    fn refresh(&self, users: &AllowedUsersMap);
 }
 
 /// Process-wide allowed-users map paired with an optional sync hook that keeps protocol-level
 /// fast-auth caches in step. Mutated by `ALTER READYSET ADD|MODIFY|DROP USER`.
 #[derive(Debug)]
 pub struct AllowedUsers {
-    /// Username to plaintext password for every user allowed to authenticate. Read on each
-    /// authentication attempt and written only by [`AllowedUsers::replace`]; reads are never held
-    /// across an await, so a std read-write lock fits this read-mostly hot path.
-    map: StdRwLock<HashMap<String, String>>,
+    /// Credentials for every user allowed to authenticate. Read on each authentication attempt
+    /// and written only by [`AllowedUsers::replace`]; reads are never held across an await, so a
+    /// std read-write lock fits this read-mostly hot path.
+    map: StdRwLock<AllowedUsersMap>,
     /// Fast-auth refresh hook, invoked by [`AllowedUsers::replace`] under the map's write lock.
     /// Write-once: production installs it at construction, the test harness right after, and
     /// every later read is lock-free.
@@ -326,7 +328,7 @@ pub struct AllowedUsers {
 }
 
 impl AllowedUsers {
-    pub fn new(initial: HashMap<String, String>, sync: Option<Arc<dyn UsersSync>>) -> Self {
+    pub fn new(initial: AllowedUsersMap, sync: Option<Arc<dyn UsersSync>>) -> Self {
         let sync_cell = OnceLock::new();
         if let Some(sync) = sync {
             let _ = sync_cell.set(sync);
@@ -347,13 +349,17 @@ impl AllowedUsers {
 
     /// Empty users map with no sync hook. Used as the default for [`BackendBuilder`].
     pub fn empty() -> Arc<Self> {
-        Arc::new(Self::new(HashMap::new(), None))
+        Arc::new(Self::new(AllowedUsersMap::new(), None))
     }
 
-    /// Look up `user`'s plaintext password, cloning it out so the read lock isn't held by the
-    /// caller. A poisoned lock is recovered rather than propagated so a single panic elsewhere
-    /// cannot turn into a blanket authentication outage.
-    pub(crate) fn password_for(&self, user: &str) -> Option<String> {
+    /// Look up `user`'s primary password.
+    pub(crate) fn primary_password_for(&self, user: &str) -> Option<String> {
+        self.credentials_for(user)
+            .map(|credentials| credentials.current.0)
+    }
+
+    /// Look up all passwords for `user`.
+    pub(crate) fn credentials_for(&self, user: &str) -> Option<UserCredentials> {
         self.map
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -363,13 +369,13 @@ impl AllowedUsers {
 
     /// Read-lock the underlying map. Intended for one-shot startup work (e.g. priming the MySQL
     /// `AuthCache`). Recovers a poisoned lock rather than panicking.
-    pub fn read(&self) -> StdRwLockReadGuard<'_, HashMap<String, String>> {
+    pub fn read(&self) -> StdRwLockReadGuard<'_, AllowedUsersMap> {
         self.map.read().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Clone the current map, e.g. to seed an Authority `read_modify_write` or list usernames.
     /// Recovers a poisoned lock rather than panicking.
-    pub fn snapshot(&self) -> HashMap<String, String> {
+    pub fn snapshot(&self) -> AllowedUsersMap {
         self.map
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -379,7 +385,7 @@ impl AllowedUsers {
     /// Replace the whole map and notify the sync hook while still under the write lock, so an
     /// observer never sees the map and the fast-auth cache disagree. Recovers a poisoned lock
     /// rather than panicking.
-    pub fn replace(&self, new: HashMap<String, String>) {
+    pub fn replace(&self, new: AllowedUsersMap) {
         let mut map = self.map.write().unwrap_or_else(PoisonError::into_inner);
         *map = new;
         if let Some(sync) = self.sync.get() {
@@ -2288,10 +2294,14 @@ where
             || self.state.sampler_tx.is_some()
     }
 
-    /// Look up the plaintext password for `user`, if `user` is allowed to authenticate against
-    /// this adapter.
+    /// Look up the primary password for `user`.
     pub fn password_for_user(&self, user: &str) -> Option<String> {
-        self.state.users.password_for(user)
+        self.state.users.primary_password_for(user)
+    }
+
+    /// Look up all passwords for `user`.
+    pub fn credentials_for_user(&self, user: &str) -> Option<UserCredentials> {
+        self.state.users.credentials_for(user)
     }
 
     /// The process-wide allowed-users handle for this backend.

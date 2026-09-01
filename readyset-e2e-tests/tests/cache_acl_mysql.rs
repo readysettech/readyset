@@ -32,8 +32,8 @@ const DB: &str = "noria";
 /// authentication on and a short ACL freshness interval.
 async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>, Conn) {
     let mut users = HashMap::new();
-    users.insert("acl_alice".to_string(), "pass".to_string());
-    users.insert("acl_bob".to_string(), "pass".to_string());
+    users.insert("acl_alice".to_string(), "pass".into());
+    users.insert("acl_bob".to_string(), "pass".into());
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)

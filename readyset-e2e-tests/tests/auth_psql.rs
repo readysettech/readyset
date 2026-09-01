@@ -70,8 +70,8 @@ async fn user_default_schema_is_used() {
         .unwrap();
 
     let mut users = HashMap::new();
-    users.insert("alice".to_string(), "pass".to_string());
-    users.insert("bob".to_string(), "pass".to_string());
+    users.insert("alice".to_string(), "pass".into());
+    users.insert("bob".to_string(), "pass".into());
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)
@@ -153,7 +153,7 @@ async fn authenticated_upstream_uses_client_user() {
         .await
         .unwrap();
 
-    let users = HashMap::from([("alice".to_string(), "secret".to_string())]);
+    let users = HashMap::from([("alice".to_string(), "secret".into())]);
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)

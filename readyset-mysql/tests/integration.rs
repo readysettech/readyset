@@ -30,7 +30,7 @@ where
 {
     readyset_tracing::init_test_logging();
     let mut users = std::collections::HashMap::new();
-    users.insert("root".to_string(), "noria".to_string());
+    users.insert("root".to_string(), "noria".into());
 
     let builder = TestBuilder::new(
         BackendBuilder::new()

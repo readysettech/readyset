@@ -207,8 +207,8 @@ async fn connect_auth_rls(test_name: &str) -> (Client, Client, Handle, TestShutd
     let admin_pw = std::env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into());
 
     let mut users = HashMap::new();
-    users.insert(admin_user.clone(), admin_pw.clone());
-    users.insert(VICTIM.to_string(), VICTIM_PW.to_string());
+    users.insert(admin_user.clone(), admin_pw.clone().into());
+    users.insert(VICTIM.to_string(), VICTIM_PW.into());
 
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()

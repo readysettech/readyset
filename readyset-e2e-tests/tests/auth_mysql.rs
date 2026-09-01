@@ -20,7 +20,7 @@ const TEST_PASSWORD: &str = "noria";
 /// credentials and uses the given [`AuthPlugin`] for the server-side handshake.
 fn auth_test_builder(auth_plugin: AuthPlugin) -> TestBuilder {
     let mut users = HashMap::new();
-    users.insert(TEST_USER.to_string(), TEST_PASSWORD.to_string());
+    users.insert(TEST_USER.to_string(), TEST_PASSWORD.into());
 
     TestBuilder::new(
         BackendBuilder::new()
@@ -182,7 +182,7 @@ async fn authenticated_upstream_uses_client_user() {
         .await
         .unwrap();
 
-    let users = HashMap::from([("alice".to_string(), "secret".to_string())]);
+    let users = HashMap::from([("alice".to_string(), "secret".into())]);
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)

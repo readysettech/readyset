@@ -10,7 +10,7 @@ use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
 use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client::consensus::{
-    Authority, AuthorityControl, LocalAuthority, LocalAuthorityStore, UserStore,
+    AllowedUsersMap, Authority, AuthorityControl, LocalAuthority, LocalAuthorityStore, UserStore,
 };
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
@@ -35,7 +35,7 @@ fn empty_authority() -> Arc<Authority> {
 async fn proxy_with_users(
     auth_plugin: AuthPlugin,
     authority: Arc<Authority>,
-    users: HashMap<String, String>,
+    users: AllowedUsersMap,
 ) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
@@ -56,7 +56,7 @@ async fn alter_users_proxy(
     auth_plugin: AuthPlugin,
     authority: Arc<Authority>,
 ) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
-    let users = HashMap::from([(ROOT_USER.to_string(), ROOT_PASSWORD.to_string())]);
+    let users = AllowedUsersMap::from([(ROOT_USER.to_string(), ROOT_PASSWORD.into())]);
     proxy_with_users(auth_plugin, authority, users).await
 }
 
@@ -245,8 +245,8 @@ async fn e2e_add_user_persists_to_authority() {
         .await
         .unwrap()
         .expect("the allowed_users key should exist after the first mutation");
-    assert_eq!(persisted.get("alice").map(String::as_str), Some("secret"));
-    assert_eq!(persisted.get(ROOT_USER).map(String::as_str), Some(ROOT_PASSWORD));
+    assert_eq!(persisted.get("alice"), Some(&"secret".into()));
+    assert_eq!(persisted.get(ROOT_USER), Some(&ROOT_PASSWORD.into()));
 
     shutdown_tx.shutdown().await;
 }
@@ -260,7 +260,7 @@ async fn e2e_cannot_mutate_upstream_user() {
     readyset_tracing::init_test_logging();
 
     let mut users = HashMap::new();
-    users.insert(ROOT_USER.to_string(), ROOT_PASSWORD.to_string());
+    users.insert(ROOT_USER.to_string(), ROOT_PASSWORD.into());
     let upstream_config = UpstreamConfig::from_url(MySQLAdapter::url_with_db("noria"));
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
@@ -302,7 +302,7 @@ async fn e2e_cannot_mutate_upstream_user() {
 async fn e2e_added_user_persists_across_restart() {
     readyset_tracing::init_test_logging();
     set_upstream_user("alice", "secret").await;
-    let bootstrap = HashMap::from([(ROOT_USER.to_string(), ROOT_PASSWORD.to_string())]);
+    let bootstrap = AllowedUsersMap::from([(ROOT_USER.to_string(), ROOT_PASSWORD.into())]);
 
     // The `LocalAuthorityStore` is the durable state that survives the restart. Each boot gets its
     // own `Authority` over that shared store, mirroring a real restart that re-reads persisted
@@ -341,7 +341,7 @@ async fn e2e_added_user_persists_across_restart() {
         tokio::task::yield_now().await;
     }
     let resolved = second.load_or_init_allowed_users(bootstrap).await.unwrap();
-    assert_eq!(resolved.get("alice").map(String::as_str), Some("secret"));
+    assert_eq!(resolved.get("alice"), Some(&"secret".into()));
     let (rs_opts, _handle, shutdown_tx) =
         proxy_with_users(AuthPlugin::Sha2(CachingSha2Password), second, resolved).await;
 

@@ -55,7 +55,9 @@ use readyset_adapter::{
 };
 use readyset_alloc::{StdThreadBuildWrapper, ThreadBuildWrapper};
 use readyset_alloc_metrics::report_allocator_metrics;
-use readyset_client::consensus::{AuthorityControl, AuthorityType, UserStore};
+use readyset_client::consensus::{
+    AllowedUsersMap, AuthorityControl, AuthorityType, UserCredentials, UserStore,
+};
 use readyset_client::{CacheMode, ReadySetHandle};
 use readyset_client_metrics::QueryLogMode;
 use readyset_common::host_info::collect_host_info;
@@ -114,7 +116,7 @@ pub trait ConnectionHandler {
 
     /// Warm handler-specific caches from the configured users. Called once
     /// during adapter startup, after the user list has been resolved.
-    fn warm_up(&mut self, _users: &HashMap<String, String>) {}
+    fn warm_up(&mut self, _users: &AllowedUsersMap) {}
 
     /// Returns a hook for keeping handler-specific authentication state in sync with the shared
     /// allowed-users map when it is mutated at runtime (`ALTER READYSET ADD|MODIFY|DROP USER`).
@@ -293,7 +295,7 @@ pub struct Options {
     allowed_users_arg: Option<RedactedString>,
 
     #[clap(skip)]
-    allowed_users: OnceCell<anyhow::Result<HashMap<String, RedactedString>>>,
+    allowed_users: OnceCell<anyhow::Result<AllowedUsersMap>>,
 
     /// Enable recording and exposing Prometheus metrics
     #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
@@ -873,7 +875,7 @@ impl Options {
         }
     }
 
-    fn build_allowed_users(&self) -> anyhow::Result<HashMap<String, RedactedString>> {
+    fn build_allowed_users(&self) -> anyhow::Result<AllowedUsersMap> {
         let upstream_url = self
             .server_worker_options
             .replicator_config
@@ -886,7 +888,7 @@ impl Options {
             .allowed_users_arg
             .as_ref()
             .map(|s| {
-                let mut users = HashMap::new();
+                let mut users = AllowedUsersMap::new();
                 let mut current = String::new();
                 let mut in_quotes = false;
                 let mut quote_char = None;
@@ -912,7 +914,7 @@ impl Options {
                         ',' if !in_quotes => {
                             if !current.is_empty() {
                                 let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                                users.insert(user, pass.into());
+                                users.insert(user, UserCredentials::new(pass));
                                 current.clear();
                             }
                         }
@@ -923,7 +925,7 @@ impl Options {
                 // Process the last pair if any
                 if !current.is_empty() {
                     let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                    users.insert(user, pass.into());
+                    users.insert(user, UserCredentials::new(pass));
                 }
 
                 ensure!(!in_quotes, "Unclosed quote in input");
@@ -939,7 +941,7 @@ impl Options {
         ) {
             (Some(user), Some(pass)) => {
                 if seen_users.insert(user.to_owned()) {
-                    allowed_users.insert(user.to_owned(), pass.to_owned().into())
+                    allowed_users.insert(user.to_owned(), UserCredentials::new(pass.to_owned()))
                 } else {
                     bail!("Duplicate user found: {user}");
                 }
@@ -955,19 +957,16 @@ impl Options {
         Ok(allowed_users)
     }
 
-    /// Get mappings of username -> password allowed to connect to Readyset.
-    fn get_allowed_users(&self, allow_all: bool) -> anyhow::Result<HashMap<String, String>> {
+    /// Get credentials by username for the users allowed to connect to Readyset.
+    fn get_allowed_users(&self, allow_all: bool) -> anyhow::Result<AllowedUsersMap> {
         if allow_all {
-            return Ok(HashMap::new());
+            return Ok(AllowedUsersMap::new());
         }
         match self
             .allowed_users
             .get_or_init(|| self.build_allowed_users())
         {
-            Ok(users) => Ok(users
-                .iter()
-                .map(|(user, password)| (user.clone(), password.0.clone()))
-                .collect()),
+            Ok(users) => Ok(users.clone()),
             Err(e) => bail!(
                 "Failed to build authentication map from --upstream-db-url or --allowed-users. \
                  Please ensure they are present and correctly formatted as follows: \
@@ -2953,10 +2952,16 @@ mod tests {
         ]);
         let user_list = opts.get_allowed_users(false).unwrap();
         assert_eq!(user_list.len(), 4);
-        assert_eq!(user_list["user1"], "pass1");
-        assert_eq!(user_list["u"], "pwd,");
-        assert_eq!(user_list["u2"], "pwd,:,");
-        assert_eq!(user_list["root"], "password");
+        assert_eq!(
+            user_list["user1"],
+            UserCredentials::new("pass1".to_string())
+        );
+        assert_eq!(user_list["u"], UserCredentials::new("pwd,".to_string()));
+        assert_eq!(user_list["u2"], UserCredentials::new("pwd,:,".to_string()));
+        assert_eq!(
+            user_list["root"],
+            UserCredentials::new("password".to_string())
+        );
 
         // allow everyone
         let users = opts.get_allowed_users(true).unwrap();

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::env;
 use std::fmt::Display;
 use std::sync::Arc;
@@ -8,6 +7,7 @@ use database_utils::TlsMode;
 use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
 use readyset_adapter::backend::{QueryInfo, UsersSync};
+use readyset_client::consensus::AllowedUsersMap;
 use readyset_mysql::{Backend, MySqlQueryHandler, MySqlUpstream};
 use readyset_util::retry_with_exponential_backoff;
 use tokio::net::TcpStream;
@@ -21,8 +21,13 @@ use crate::Adapter;
 struct AuthCacheSync(Arc<AuthCache>);
 
 impl UsersSync for AuthCacheSync {
-    fn refresh(&self, users: &HashMap<String, String>) {
-        self.0.set_all(users);
+    fn refresh(&self, users: &AllowedUsersMap) {
+        self.0.set_all(
+            &users
+                .iter()
+                .map(|(user, credentials)| (user.clone(), credentials.current.0.clone()))
+                .collect(),
+        );
     }
 }
 

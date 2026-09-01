@@ -7,7 +7,6 @@
 //! checks each interval, and `ALTER READYSET FLUSH PRIVILEGES` on demand --
 //! so these tests assert convergence with `eventually!`, never sleeps.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +16,7 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::AllowedUsers;
 use readyset_client::CacheMode;
+use readyset_client::consensus::AllowedUsersMap;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
@@ -104,9 +104,9 @@ async fn start_readyset(
     users: &[&String],
     interval: Duration,
 ) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
-    let users: HashMap<String, String> = users
+    let users: AllowedUsersMap = users
         .iter()
-        .map(|user| ((*user).clone(), "pass".to_string()))
+        .map(|user| ((*user).clone(), "pass".into()))
         .collect();
     TestBuilder::new(
         BackendBuilder::new()

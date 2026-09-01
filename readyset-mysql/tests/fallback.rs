@@ -1110,7 +1110,7 @@ async fn assert_last_statement_matches(table: &str, dest: &str, status: &str, cl
 #[upstream(mysql)]
 async fn it_change_user() {
     let mut users = std::collections::HashMap::new();
-    users.insert("root".to_string(), "noria".to_string());
+    users.insert("root".to_string(), "noria".into());
     let (opts, _handle, shutdown_tx) = setup_with(
         BackendBuilder::new()
             .require_authentication(false)

@@ -1,12 +1,13 @@
 //! End-to-end coverage for runtime allowed-user management on the PostgreSQL front door:
 //! `ALTER READYSET ADD/MODIFY/DROP USER` and the `readyset.users` vrel (REA-6702).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
-use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::consensus::{
+    AllowedUsersMap, Authority, LocalAuthority, LocalAuthorityStore,
+};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_server::Handle;
@@ -55,7 +56,7 @@ async fn create_upstream_role(test_name: &str, role: &str, password: &str) {
 async fn proxy_with_users(
     authority: Arc<Authority>,
     test_name: &str,
-    users: HashMap<String, String>,
+    users: AllowedUsersMap,
 ) -> (Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let (rs_config, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
@@ -89,7 +90,7 @@ async fn e2e_add_user_then_connect() {
     create_upstream_role(&test_name, TEST_USER, "secret").await;
 
     let (admin_user, admin_password) = admin_creds();
-    let users = HashMap::from([(admin_user.clone(), admin_password.clone())]);
+    let users = AllowedUsersMap::from([(admin_user.clone(), admin_password.clone().into())]);
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
@@ -128,7 +129,7 @@ async fn e2e_drop_user_blocks_connect() {
     create_upstream_role(&test_name, TEST_USER, "secret").await;
 
     let (admin_user, admin_password) = admin_creds();
-    let users = HashMap::from([(admin_user.clone(), admin_password.clone())]);
+    let users = AllowedUsersMap::from([(admin_user.clone(), admin_password.clone().into())]);
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
@@ -171,7 +172,7 @@ async fn e2e_readyset_users_vrel() {
     PostgreSQLAdapter::recreate_database(&test_name).await;
 
     let (admin_user, admin_password) = admin_creds();
-    let users = HashMap::from([(admin_user.clone(), admin_password.clone())]);
+    let users = AllowedUsersMap::from([(admin_user.clone(), admin_password.clone().into())]);
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
