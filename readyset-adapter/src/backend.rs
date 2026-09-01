@@ -401,8 +401,11 @@ impl AllowedUsers {
 }
 
 impl readyset_schema::virtual_relation::UsersInfo for AllowedUsers {
-    fn usernames(&self) -> Vec<String> {
-        self.snapshot().into_keys().collect()
+    fn users(&self) -> Vec<(String, bool)> {
+        self.snapshot()
+            .into_iter()
+            .map(|(user, credentials)| (user, credentials.old.is_some()))
+            .collect()
     }
 }
 

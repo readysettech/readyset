@@ -11,6 +11,7 @@ use readyset_client::consensus::{
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_server::Handle;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
@@ -64,6 +65,9 @@ async fn proxy_with_users(
             .users(Arc::new(AllowedUsers::new(users, None))),
     )
     .authority(authority)
+    // The password rotation clauses are parsed by sqlparser only, so these tests need the
+    // production preset. The default test preset prefers nom's result.
+    .parsing_preset(ParsingPreset::for_prod())
     .fallback(true)
     .replicate_db(test_name)
     .recreate_database(false)
@@ -201,6 +205,58 @@ async fn e2e_readyset_users_vrel() {
         .collect();
     names.sort();
     assert_eq!(names, vec![TEST_USER.to_string(), admin_user]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn e2e_rotation_clauses_rejected() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    create_upstream_role(&test_name, TEST_USER, "secret").await;
+
+    let (admin_user, admin_password) = admin_creds();
+    let users = AllowedUsersMap::from([(admin_user.clone(), admin_password.clone().into())]);
+    let (rs_config, _handle, shutdown_tx) =
+        proxy_with_users(empty_authority(), &test_name, users).await;
+
+    let admin =
+        psql_helpers::connect(client_config(&rs_config, &test_name, &admin_user, &admin_password))
+            .await;
+    admin
+        .simple_query(&format!(
+            "ALTER READYSET ADD USER '{TEST_USER}' PASSWORD 'secret'"
+        ))
+        .await
+        .unwrap();
+
+    let err = admin
+        .simple_query(&format!(
+            "ALTER READYSET MODIFY USER '{TEST_USER}' PASSWORD 'rotated' RETAIN CURRENT PASSWORD"
+        ))
+        .await
+        .expect_err("RETAIN CURRENT PASSWORD must be rejected");
+    let msg = err.as_db_error().expect("expected db error").message();
+    assert!(msg.contains("RETAIN CURRENT PASSWORD"), "unexpected error: {msg}");
+
+    let err = admin
+        .simple_query(&format!(
+            "ALTER READYSET MODIFY USER '{TEST_USER}' DISCARD OLD PASSWORD"
+        ))
+        .await
+        .expect_err("DISCARD OLD PASSWORD must be rejected");
+    let msg = err.as_db_error().expect("expected db error").message();
+    assert!(msg.contains("DISCARD OLD PASSWORD"), "unexpected error: {msg}");
+
+    admin
+        .simple_query(&format!(
+            "ALTER READYSET MODIFY USER '{TEST_USER}' PASSWORD 'rotated'"
+        ))
+        .await
+        .expect("a plain password change is still supported");
 
     shutdown_tx.shutdown().await;
 }

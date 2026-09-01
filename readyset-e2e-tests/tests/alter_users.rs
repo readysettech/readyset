@@ -14,6 +14,8 @@ use readyset_client::consensus::{
 };
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_sql::Dialect;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_server::Handle;
 use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
@@ -44,6 +46,9 @@ async fn proxy_with_users(
     )
     .authority(authority)
     .auth_plugin(auth_plugin)
+    // The password rotation clauses are parsed by sqlparser only, so these tests need the
+    // production preset. The default test preset prefers nom's result.
+    .parsing_preset(ParsingPreset::for_prod())
     .fallback(true)
     .build::<MySQLAdapter>()
     .await;
@@ -211,12 +216,36 @@ async fn e2e_readyset_users_vrel() {
         .await
         .unwrap();
 
-    let mut names: Vec<String> = root
-        .query("SELECT user FROM readyset.users")
+    let mut rows: Vec<(String, bool)> = root
+        .query("SELECT user, has_old_password FROM readyset.users")
         .await
         .unwrap();
-    names.sort();
-    assert_eq!(names, vec!["alice".to_string(), ROOT_USER.to_string()]);
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec![
+            ("alice".to_string(), false),
+            (ROOT_USER.to_string(), false)
+        ]
+    );
+
+    root.query_drop("ALTER READYSET MODIFY USER 'alice' PASSWORD 'rotated' RETAIN CURRENT PASSWORD")
+        .await
+        .unwrap();
+    let rows: Vec<(String, bool)> = root
+        .query("SELECT user, has_old_password FROM readyset.users WHERE user = 'alice'")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![("alice".to_string(), true)]);
+
+    root.query_drop("ALTER READYSET MODIFY USER 'alice' DISCARD OLD PASSWORD")
+        .await
+        .unwrap();
+    let rows: Vec<(String, bool)> = root
+        .query("SELECT user, has_old_password FROM readyset.users WHERE user = 'alice'")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![("alice".to_string(), false)]);
 
     shutdown_tx.shutdown().await;
 }
@@ -315,7 +344,7 @@ async fn e2e_added_user_persists_across_restart() {
     // binary seeds the `allowed_users` key on startup.
     let first = authority();
     let resolved = first
-        .load_or_init_allowed_users(bootstrap.clone())
+        .load_or_init_allowed_users(Dialect::MySQL, bootstrap.clone())
         .await
         .unwrap();
     let (rs_opts, handle, shutdown_tx) =
@@ -340,7 +369,10 @@ async fn e2e_added_user_persists_across_restart() {
     while !second.get_workers().await.unwrap().is_empty() {
         tokio::task::yield_now().await;
     }
-    let resolved = second.load_or_init_allowed_users(bootstrap).await.unwrap();
+    let resolved = second
+        .load_or_init_allowed_users(Dialect::MySQL, bootstrap)
+        .await
+        .unwrap();
     assert_eq!(resolved.get("alice"), Some(&"secret".into()));
     let (rs_opts, _handle, shutdown_tx) =
         proxy_with_users(AuthPlugin::Sha2(CachingSha2Password), second, resolved).await;

@@ -2,16 +2,20 @@ use readyset_data::DfType;
 use readyset_schema::bind_vrel;
 use readyset_schema::virtual_relation::{VrelContext, VrelRead, VrelRows};
 
-const USERS_SCHEMA: &[(&str, DfType)] = &[("user", DfType::DEFAULT_TEXT)];
+const USERS_SCHEMA: &[(&str, DfType)] = &[
+    ("user", DfType::DEFAULT_TEXT),
+    ("has_old_password", DfType::Bool),
+];
 
-/// Backs `SELECT * FROM readyset.users`: one row per allowed username. Passwords are never
-/// exposed. Computed per query, so it reflects runtime `ALTER READYSET ADD|MODIFY|DROP USER`
-/// mutations immediately.
 fn users_read(ctx: &VrelContext) -> VrelRead {
-    let mut usernames = ctx.users.usernames();
+    let mut users = ctx.users.users();
     Box::pin(async move {
-        usernames.sort();
-        let rows: VrelRows = Box::new(usernames.into_iter().map(|user| vec![user.into()]));
+        users.sort();
+        let rows: VrelRows = Box::new(
+            users
+                .into_iter()
+                .map(|(user, has_old_password)| vec![user.into(), has_old_password.into()]),
+        );
         Ok(rows)
     })
 }

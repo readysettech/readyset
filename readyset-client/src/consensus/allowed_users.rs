@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::mem;
 
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::{unsupported, ReadySetError, ReadySetResult};
+use readyset_sql::Dialect;
 use readyset_util::redacted::RedactedString;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
@@ -144,6 +145,17 @@ pub enum PasswordChange {
     DiscardOld,
 }
 
+/// Error unless `dialect` supports password rotation. `feature` names what requires it.
+fn ensure_dual_password_support(
+    dialect: Dialect,
+    feature: fmt::Arguments<'_>,
+) -> ReadySetResult<()> {
+    if !dialect.supports_dual_passwords() {
+        unsupported!("{feature} not supported by upstream");
+    }
+    Ok(())
+}
+
 /// Extension methods on [`AuthorityControl`] for managing the allowed-users set.
 ///
 /// Mutations take a `seed` map used only when the key is absent: the first mutation captures the
@@ -163,11 +175,23 @@ pub trait UserStore: AuthorityControl {
     /// always exists, so the Authority is the source of truth from then on.
     async fn load_or_init_allowed_users(
         &self,
+        dialect: Dialect,
         bootstrap: AllowedUsersMap,
     ) -> ReadySetResult<AllowedUsersMap> {
         self.read_modify_write::<_, AllowedUsersMap, ReadySetError>(
             ALLOWED_USERS_PATH,
-            move |stored| Ok(stored.unwrap_or_else(|| bootstrap.clone())),
+            move |stored| {
+                let users = stored.unwrap_or_else(|| bootstrap.clone());
+                for (user, credentials) in &users {
+                    if credentials.old.is_some() {
+                        ensure_dual_password_support(
+                            dialect,
+                            format_args!("retained password for user '{user}'"),
+                        )?;
+                    }
+                }
+                Ok(users)
+            },
         )
         .await?
     }
@@ -206,10 +230,24 @@ pub trait UserStore: AuthorityControl {
     /// When discarding, drop any secondary, succeeding when there is none.
     async fn modify_allowed_user(
         &self,
+        dialect: Dialect,
         seed: AllowedUsersMap,
         user: String,
         change: PasswordChange,
     ) -> ReadySetResult<AllowedUsersMap> {
+        match change {
+            PasswordChange::Set {
+                retain_current: true,
+                ..
+            } => ensure_dual_password_support(dialect, format_args!("RETAIN CURRENT PASSWORD"))?,
+            PasswordChange::DiscardOld => {
+                ensure_dual_password_support(dialect, format_args!("DISCARD OLD PASSWORD"))?
+            }
+            PasswordChange::Set {
+                retain_current: false,
+                ..
+            } => {}
+        }
         self.read_modify_write::<_, AllowedUsersMap, ReadySetError>(
             ALLOWED_USERS_PATH,
             move |stored| {
@@ -338,7 +376,12 @@ mod tests {
         change: PasswordChange,
     ) -> ReadySetResult<AllowedUsersMap> {
         authority
-            .modify_allowed_user(AllowedUsersMap::new(), "alice".to_string(), change)
+            .modify_allowed_user(
+                Dialect::MySQL,
+                AllowedUsersMap::new(),
+                "alice".to_string(),
+                change,
+            )
             .await
     }
 
@@ -406,14 +449,43 @@ mod tests {
     async fn load_or_init_seeds_then_is_authoritative() {
         let authority = make_authority();
         // First start writes the bootstrap set and returns it.
-        let first = authority.load_or_init_allowed_users(seed()).await.unwrap();
+        let first = authority
+            .load_or_init_allowed_users(Dialect::MySQL, seed())
+            .await
+            .unwrap();
         assert_eq!(first, seed());
         assert_eq!(authority.load_allowed_users().await.unwrap(), Some(seed()));
 
         // A later start with a different bootstrap is ignored; the persisted set wins.
         let other = AllowedUsersMap::from([("different".to_string(), credentials("pw", None))]);
-        let second = authority.load_or_init_allowed_users(other).await.unwrap();
+        let second = authority
+            .load_or_init_allowed_users(Dialect::MySQL, other)
+            .await
+            .unwrap();
         assert_eq!(second, seed());
+    }
+
+    #[tokio::test]
+    async fn load_or_init_rejects_retained_password_without_rotation_support() {
+        let bootstrap =
+            AllowedUsersMap::from([("alice".to_string(), credentials("new", Some("old")))]);
+
+        let authority = make_authority();
+        let err = authority
+            .load_or_init_allowed_users(Dialect::PostgreSQL, bootstrap.clone())
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("retained password for user 'alice'"));
+        // The rejected bootstrap is not persisted.
+        assert!(authority.load_allowed_users().await.unwrap().is_none());
+
+        let resolved = authority
+            .load_or_init_allowed_users(Dialect::MySQL, bootstrap.clone())
+            .await
+            .unwrap();
+        assert_eq!(resolved, bootstrap);
     }
 
     #[tokio::test]
@@ -460,7 +532,12 @@ mod tests {
     async fn modify_unknown_user_errors() {
         let authority = authority_with_alice("secret").await;
         assert!(authority
-            .modify_allowed_user(AllowedUsersMap::new(), "bob".to_string(), set("pw"))
+            .modify_allowed_user(
+                Dialect::MySQL,
+                AllowedUsersMap::new(),
+                "bob".to_string(),
+                set("pw")
+            )
             .await
             .is_err());
     }

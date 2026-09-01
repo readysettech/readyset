@@ -102,4 +102,12 @@ impl Dialect {
             s
         }
     }
+
+    /// Whether this dialect supports password rotation.
+    pub fn supports_dual_passwords(self) -> bool {
+        match self {
+            Self::MySQL => true,
+            Self::PostgreSQL => false,
+        }
+    }
 }

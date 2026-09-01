@@ -1345,22 +1345,16 @@ where
         let change = match &stmt.action {
             ModifyUserAction::SetPassword {
                 password,
-                retain_current: false,
+                retain_current,
             } => PasswordChange::Set {
                 password: password.clone(),
-                retain_current: false,
+                retain_current: *retain_current,
             },
-            ModifyUserAction::SetPassword {
-                retain_current: true,
-                ..
-            } => unsupported!("RETAIN CURRENT PASSWORD is not yet supported"),
-            ModifyUserAction::DiscardOldPassword => {
-                unsupported!("DISCARD OLD PASSWORD is not yet supported")
-            }
+            ModifyUserAction::DiscardOldPassword => PasswordChange::DiscardOld,
         };
         let result = Self::persist_user_mutation(state, |authority, seed| async move {
             authority
-                .modify_allowed_user(seed, user.clone(), change)
+                .modify_allowed_user(DB::SQL_DIALECT, seed, user.clone(), change)
                 .await
         })
         .await;

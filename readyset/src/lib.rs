@@ -1324,7 +1324,9 @@ where
             options.get_allowed_users(true)?
         } else {
             let bootstrap = options.get_allowed_users(false)?;
-            rt.block_on(adapter_authority.load_or_init_allowed_users(bootstrap))?
+            rt.block_on(
+                adapter_authority.load_or_init_allowed_users(self.database_type.into(), bootstrap),
+            )?
         };
         let users = Arc::new(AllowedUsers::new(
             resolved_users,

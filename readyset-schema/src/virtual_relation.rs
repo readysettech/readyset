@@ -48,11 +48,10 @@ pub struct VrelContext {
     pub cache_grants: Arc<dyn CacheGrantsInfo>,
 }
 
-/// Provides the set of usernames allowed to authenticate against the adapter, backing the
-/// `readyset.users` vrel.
+/// Provide the users allowed to authenticate against the adapter.
 pub trait UsersInfo: Send + Sync {
-    /// Returns the current allowed usernames.
-    fn usernames(&self) -> Vec<String>;
+    /// Return the allowed usernames, paired with whether the user has a retained old password.
+    fn users(&self) -> Vec<(String, bool)>;
 }
 
 /// One row of `readyset.cache_grants`: the cache-ACL verdict for an (identity, cache) pair.
@@ -721,7 +720,7 @@ mod tests {
 
         struct NoopUsers;
         impl UsersInfo for NoopUsers {
-            fn usernames(&self) -> Vec<String> {
+            fn users(&self) -> Vec<(String, bool)> {
                 vec![]
             }
         }
