@@ -100,6 +100,105 @@ async fn set_upstream_user(user: &str, password: &str) {
         .unwrap();
 }
 
+/// A retained password keeps working until it is discarded, and is the password forwarded to the
+/// upstream. The upstream here accepts only that password, so connecting with it succeeds only if
+/// it was forwarded instead of the adapter's current one.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn e2e_retained_password_authenticates() {
+    readyset_tracing::init_test_logging();
+    for plugin in [
+        AuthPlugin::Native(MysqlNativePassword),
+        AuthPlugin::Sha2(CachingSha2Password),
+    ] {
+        set_upstream_user("carol", "pw1").await;
+        let (rs_opts, _handle, shutdown_tx) = alter_users_proxy(plugin, empty_authority()).await;
+
+        let mut root = connect_root(&rs_opts).await;
+        root.query_drop("ALTER READYSET ADD USER 'carol' PASSWORD 'pw1'")
+            .await
+            .unwrap();
+        root.query_drop("ALTER READYSET MODIFY USER 'carol' PASSWORD 'pw2' RETAIN CURRENT PASSWORD")
+            .await
+            .unwrap();
+
+        let mut carol = mysql_async::Conn::new(opts_for(&rs_opts, "carol", "pw1"))
+            .await
+            .unwrap_or_else(|e| panic!("{plugin}: the retained password should connect: {e}"));
+        let user: Option<(String,)> = carol.query_first("SELECT CURRENT_USER()").await.unwrap();
+        assert!(user.unwrap().0.starts_with("carol@"));
+
+        root.query_drop("ALTER READYSET MODIFY USER 'carol' DISCARD OLD PASSWORD")
+            .await
+            .unwrap();
+        assert!(
+            mysql_async::Conn::new(opts_for(&rs_opts, "carol", "pw1"))
+                .await
+                .is_err(),
+            "{plugin}: the discarded password must stop working"
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+}
+
+/// During a rotation both passwords authenticate, and after the discard only the new one does.
+/// The upstream stays mid-rotation, so it accepts whichever password is forwarded.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn e2e_both_passwords_authenticate_during_rotation() {
+    readyset_tracing::init_test_logging();
+    for plugin in [
+        AuthPlugin::Native(MysqlNativePassword),
+        AuthPlugin::Sha2(CachingSha2Password),
+    ] {
+        set_upstream_user("dave", "pw1").await;
+        let mut upstream = mysql_async::Conn::new(mysql_helpers::upstream_config())
+            .await
+            .unwrap();
+        let (rs_opts, _handle, shutdown_tx) = alter_users_proxy(plugin, empty_authority()).await;
+
+        let mut root = connect_root(&rs_opts).await;
+        root.query_drop("ALTER READYSET ADD USER 'dave' PASSWORD 'pw1'")
+            .await
+            .unwrap();
+        upstream
+            .query_drop("ALTER USER 'dave'@'%' IDENTIFIED BY 'pw2' RETAIN CURRENT PASSWORD")
+            .await
+            .unwrap();
+        root.query_drop("ALTER READYSET MODIFY USER 'dave' PASSWORD 'pw2' RETAIN CURRENT PASSWORD")
+            .await
+            .unwrap();
+
+        for password in ["pw1", "pw2"] {
+            let mut dave = mysql_async::Conn::new(opts_for(&rs_opts, "dave", password))
+                .await
+                .unwrap_or_else(|e| panic!("{plugin}: {password} should connect: {e}"));
+            let user: Option<(String,)> = dave.query_first("SELECT CURRENT_USER()").await.unwrap();
+            assert!(user.unwrap().0.starts_with("dave@"));
+        }
+
+        // The upstream keeps accepting pw1, so the rejection below comes from the adapter.
+        root.query_drop("ALTER READYSET MODIFY USER 'dave' DISCARD OLD PASSWORD")
+            .await
+            .unwrap();
+
+        mysql_async::Conn::new(opts_for(&rs_opts, "dave", "pw2"))
+            .await
+            .unwrap_or_else(|e| panic!("{plugin}: the new password should connect: {e}"));
+        assert!(
+            mysql_async::Conn::new(opts_for(&rs_opts, "dave", "pw1"))
+                .await
+                .is_err(),
+            "{plugin}: the discarded password must stop working"
+        );
+
+        shutdown_tx.shutdown().await;
+    }
+}
+
 /// A user added at runtime can immediately authenticate, under both MySQL auth plugins.
 #[tokio::test]
 #[tags(serial)]

@@ -966,11 +966,17 @@ mod tests {
     }
 
     #[test]
-    fn auth_cache_checks_retained_password() {
+    fn auth_cache_checks_both_passwords() {
         let auth_cache = AuthCache::new();
-        auth_cache.insert("readyset", &passwords("noria", Some("test")));
-
         let (scramble, auth_data) = test_scramble();
+
+        auth_cache.insert("readyset", &passwords("test", Some("noria")));
+        assert_eq!(
+            auth_cache.check("readyset", &scramble, &auth_data),
+            Some(PasswordType::Current)
+        );
+
+        auth_cache.insert("readyset", &passwords("noria", Some("test")));
         assert_eq!(
             auth_cache.check("readyset", &scramble, &auth_data),
             Some(PasswordType::Old)
