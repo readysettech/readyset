@@ -12,6 +12,7 @@ use readyset_client::consensus::UserCredentials;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
+use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use test_utils::{tags, upstream};
 
@@ -177,6 +178,32 @@ async fn admin_port_session_psql() {
         .map(|db_err| db_err.message().to_owned())
         .unwrap_or_else(|| err.to_string());
     assert!(msg.contains("Readyset schema"), "{msg}");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn shutdown_denied_off_admin_port_mysql() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    MySQLAdapter::recreate_database(&test_name).await;
+
+    // The statement exists in sqlparser only, so parse as production does.
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .parsing_preset(ParsingPreset::for_prod())
+        .recreate_database(false)
+        .replicate_db(&test_name)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    for stmt in ["ALTER READYSET SHUTDOWN", "ALTER READYSET SHUTDOWN RESET"] {
+        let err = conn.query_drop(stmt).await.unwrap_err();
+        assert!(err.to_string().contains("admin port"), "{stmt}: {err}");
+    }
 
     shutdown_tx.shutdown().await;
 }

@@ -1298,6 +1298,7 @@ pub fn walk_alter_readyset_statement<'a, V: Visitor<'a>>(
             .try_for_each(|name| visitor.visit_sql_identifier(name)),
         AlterReadysetStatement::EnterMaintenanceMode
         | AlterReadysetStatement::ExitMaintenanceMode
+        | AlterReadysetStatement::Shutdown(_)
         | AlterReadysetStatement::SetLogLevel(_)
         | AlterReadysetStatement::SetEviction(_)
         | AlterReadysetStatement::ChangeUpstream(_)

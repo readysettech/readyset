@@ -31,7 +31,7 @@ use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterS
 use metrics::{counter, gauge};
 use tokio::net;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio::time::{sleep, timeout};
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tokio_stream::wrappers::TcpListenerStream;
@@ -1536,6 +1536,7 @@ where
             options.server_worker_options.enabled_features(),
             &deployment_dir,
         );
+        let shutdown_request = Arc::new(Notify::new());
         let ctrlc = tokio::signal::ctrl_c();
         let mut startup_sigterm = {
             let _guard = rt.enter();
@@ -1554,12 +1555,24 @@ where
                         Err(io::Error::new(io::ErrorKind::Interrupted, "got ctrl-c"))
                     })
                     .into_stream(),
-                sigterm
-                    .recv()
-                    .map(futures_util::stream::iter)
-                    .into_stream()
-                    .flatten()
-                    .map(|_| Err(io::Error::new(io::ErrorKind::Interrupted, "got SIGTERM"))),
+                futures_util::stream::select(
+                    sigterm
+                        .recv()
+                        .map(futures_util::stream::iter)
+                        .into_stream()
+                        .flatten()
+                        .map(|_| Err(io::Error::new(io::ErrorKind::Interrupted, "got SIGTERM"))),
+                    futures_util::stream::once({
+                        let shutdown_request = Arc::clone(&shutdown_request);
+                        async move { shutdown_request.notified().await }
+                    })
+                    .map(|_| {
+                        Err(io::Error::new(
+                            io::ErrorKind::Interrupted,
+                            "got ALTER READYSET SHUTDOWN",
+                        ))
+                    }),
+                ),
             ),
         ));
         rs_connect.in_scope(|| info!("Now capturing ctrl-c and SIGTERM events"));
@@ -1899,7 +1912,7 @@ where
             let mut builder = match readyset_server::Builder::from_worker_options(
                 options.server_worker_options,
                 &options.deployment,
-                deployment_dir,
+                deployment_dir.clone(),
             ) {
                 Ok(builder) => builder,
                 Err(error) => {
@@ -2352,6 +2365,8 @@ where
                 .allow_cache_ddl(allow_cache_ddl)
                 .admin(is_admin)
                 .require_authentication(is_admin || !options.allow_unauthenticated_connections)
+                .storage_dir(Some(deployment_dir.clone()))
+                .shutdown_request(Some(Arc::clone(&shutdown_request)))
                 .dialect(self.parse_dialect)
                 .parsing_preset(parsing_preset)
                 .query_log_sender(qlog_sender.clone())

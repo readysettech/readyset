@@ -475,6 +475,12 @@ pub struct ResnapshotTableStatement {
     pub table: Relation,
 }
 
+/// `ALTER READYSET SHUTDOWN [RESET]`; with `reset`, the next start empties the storage directory.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ShutdownStatement {
+    pub reset: bool,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct AddTablesStatement {
     pub tables: Vec<Relation>,
@@ -595,6 +601,7 @@ pub enum AlterReadysetStatement {
     AddTables(AddTablesStatement),
     EnterMaintenanceMode,
     ExitMaintenanceMode,
+    Shutdown(ShutdownStatement),
     SetLogLevel(String),
     SetEviction(SetEviction),
     ChangeUpstream(ChangeUpstreamStatement),
@@ -627,6 +634,13 @@ impl DialectDisplay for AlterReadysetStatement {
             }
             Self::ExitMaintenanceMode => {
                 write!(f, "EXIT MAINTENANCE MODE")
+            }
+            Self::Shutdown(stmt) => {
+                write!(f, "SHUTDOWN")?;
+                if stmt.reset {
+                    write!(f, " RESET")?;
+                }
+                Ok(())
             }
             Self::SetLogLevel(level) => {
                 write!(f, "SET LOG LEVEL '{}'", level)

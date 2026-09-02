@@ -13,7 +13,7 @@ use readyset_sql::ast::{
     ResnapshotTableStatement, SelectStatement, SessionAuthorizationValue, SetEviction,
     SetReplicationPositionStatement, SetSessionAuthorization, SetStatement,
     ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShallowCacheQuery, ShowLimit,
-    ShowStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    ShowStatement, ShutdownStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -243,6 +243,7 @@ enum ReadysetKeyword {
     RSA,
     SCOPE,
     SHALLOW,
+    SHUTDOWN,
     SIMPLIFIED,
     STOP,
     SUPPORTED,
@@ -289,6 +290,7 @@ impl ReadysetKeyword {
             Self::RSA => "RSA",
             Self::SCOPE => "SCOPE",
             Self::SHALLOW => "SHALLOW",
+            Self::SHUTDOWN => "SHUTDOWN",
             Self::SIMPLIFIED => "SIMPLIFIED",
             Self::STOP => "STOP",
             Self::SUPPORTED => "SUPPORTED",
@@ -365,6 +367,7 @@ fn parse_readyset_keywords(parser: &mut Parser, keywords: &[ReadysetKeyword]) ->
 /// ALTER READYSET
 ///     | ADD TABLES
 ///     | RESNAPSHOT TABLE
+///     | SHUTDOWN [RESET]
 ///     | {ENTER | EXIT} MAINTENANCE MODE
 fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
@@ -389,6 +392,11 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::AddTables(
                 AddTablesStatement { tables },
+            )))
+        } else if parse_readyset_keyword(parser, ReadysetKeyword::SHUTDOWN) {
+            let reset = parse_readyset_keyword(parser, ReadysetKeyword::Standard(Keyword::RESET));
+            Ok(SqlQuery::AlterReadySet(AlterReadysetStatement::Shutdown(
+                ShutdownStatement { reset },
             )))
         } else if parse_readyset_keywords(
             parser,
@@ -2352,6 +2360,26 @@ mod tests {
             expected,
             "round-trip mismatch for {input:?}",
         );
+    }
+
+    #[test]
+    fn shutdown_statements_round_trip() {
+        use readyset_sql::ast::{AlterReadysetStatement, ShutdownStatement};
+
+        // `AlterReadySet` displays only the part after `ALTER READYSET`.
+        for (input, reset, displayed) in [
+            ("ALTER READYSET SHUTDOWN", false, "SHUTDOWN"),
+            ("ALTER READYSET SHUTDOWN RESET", true, "SHUTDOWN RESET"),
+        ] {
+            let query = parse_pg_sqlparser(input);
+            assert_eq!(
+                query,
+                SqlQuery::AlterReadySet(AlterReadysetStatement::Shutdown(ShutdownStatement {
+                    reset
+                }))
+            );
+            assert_eq!(query.display(Dialect::PostgreSQL).to_string(), displayed);
+        }
     }
 
     #[test]

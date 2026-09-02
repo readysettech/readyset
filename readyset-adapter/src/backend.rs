@@ -73,6 +73,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::path::PathBuf;
 use std::sync::{
     Arc, OnceLock, PoisonError, RwLock as StdRwLock, RwLockReadGuard as StdRwLockReadGuard,
 };
@@ -130,8 +131,8 @@ use readyset_util::logging::{ADAPTER_ACL_DECLINED, rate_limit};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::query_status_cache::{InlineLiteralRegistration, QueryStatusCache};
@@ -437,6 +438,8 @@ pub struct BackendBuilder {
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     allow_cache_ddl: bool,
     admin: bool,
+    storage_dir: Option<PathBuf>,
+    shutdown_request: Option<Arc<Notify>>,
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     db_version: Option<String>,
@@ -490,6 +493,8 @@ impl Default for BackendBuilder {
             connections: None,
             allow_cache_ddl: true,
             admin: false,
+            storage_dir: None,
+            shutdown_request: None,
             sampler_tx: None,
             db_version: None,
             cache_mode: CacheMode::Deep,
@@ -623,6 +628,8 @@ impl BackendBuilder {
                 replication_enabled: self.replication_enabled,
                 allow_cache_ddl: self.allow_cache_ddl,
                 admin: self.admin,
+                storage_dir: self.storage_dir.clone(),
+                shutdown_request: self.shutdown_request.clone(),
                 shallow_cache_eligibility: self.shallow_cache_eligibility,
             },
             _query_handler: PhantomData,
@@ -708,6 +715,18 @@ impl BackendBuilder {
 
     pub fn admin(mut self, admin: bool) -> Self {
         self.admin = admin;
+        self
+    }
+
+    /// This deployment's storage directory.
+    pub fn storage_dir(mut self, storage_dir: Option<PathBuf>) -> Self {
+        self.storage_dir = storage_dir;
+        self
+    }
+
+    /// Handle that asks the adapter's main loop to shut down, for `ALTER READYSET SHUTDOWN`.
+    pub fn shutdown_request(mut self, shutdown_request: Option<Arc<Notify>>) -> Self {
+        self.shutdown_request = shutdown_request;
         self
     }
 
@@ -1518,6 +1537,10 @@ struct BackendSettings {
     /// Admin session: bound to the Readyset schema for its lifetime and never connected to the
     /// upstream database.
     admin: bool,
+    /// This deployment's storage directory.
+    storage_dir: Option<PathBuf>,
+    /// Handle that asks the adapter's main loop to shut down.
+    shutdown_request: Option<Arc<Notify>>,
     /// Per-category opt-ins for shallow-cache auto-creation eligibility. Adapter-local config
     /// (from CLI flags), consulted by the in-request-path auto-create filter.
     shallow_cache_eligibility: ShallowCacheEligibility,

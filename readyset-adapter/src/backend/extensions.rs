@@ -30,6 +30,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
 use readyset_rls::InvalidationSink;
+use readyset_server::STORAGE_RESET_MARKER;
 use readyset_shallow::CacheInfo;
 use readyset_sql::ast::{
     self, AddUserStatement, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
@@ -1893,6 +1894,26 @@ where
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ExitMaintenanceMode) => {
                 connectors.noria.exit_maintenance_mode().await
+            }
+            SqlQuery::AlterReadySet(AlterReadysetStatement::Shutdown(stmt)) => {
+                if !settings.admin {
+                    unsupported!("ALTER READYSET SHUTDOWN is only available on the admin port");
+                }
+                let shutdown = settings
+                    .shutdown_request
+                    .as_ref()
+                    .ok_or_else(|| internal_err!("This deployment cannot be shut down over SQL"))?;
+                if stmt.reset {
+                    let dir = settings.storage_dir.as_ref().ok_or_else(|| {
+                        internal_err!("This deployment has no storage directory to reset")
+                    })?;
+                    tokio::fs::write(dir.join(STORAGE_RESET_MARKER), b"")
+                        .await
+                        .map_err(|e| internal_err!("Failed to request a reset: {e}"))?;
+                }
+                info!(reset = stmt.reset, "Shutting down on request");
+                shutdown.notify_one();
+                Ok(noria_connector::QueryResult::Empty)
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::SetLogLevel(directives)) => {
                 match readyset_tracing::set_log_level(directives) {
