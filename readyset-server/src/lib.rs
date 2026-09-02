@@ -432,6 +432,9 @@ use tracing::info;
 /// `--memory-limit` is not set.
 const DEFAULT_MEMORY_LIMIT_PERCENT: u64 = 80;
 
+/// Delete storage directory on start if this file is found in its root.
+pub const STORAGE_RESET_MARKER: &str = "reset";
+
 /// Configuration for a running Readyset cluster.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Config {

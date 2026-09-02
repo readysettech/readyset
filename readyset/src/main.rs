@@ -1,4 +1,6 @@
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::Path;
 use std::process::exit;
 
 use clap::Parser;
@@ -13,6 +15,7 @@ use readyset::psql::PsqlHandler;
 use readyset::verify::verify;
 use readyset::{init_adapter_runtime, init_adapter_tracing, NoriaAdapter, Options};
 use readyset_client::CacheMode;
+use readyset_server::STORAGE_RESET_MARKER;
 
 fn main() -> anyhow::Result<()> {
     antithesis_sdk::antithesis_init();
@@ -41,6 +44,14 @@ fn main() -> anyhow::Result<()> {
         false => Some(init_adapter_tracing(&rt, &options)?),
     };
 
+    let deployment_dir = options
+        .server_worker_options
+        .storage_dir(&options.deployment);
+    let reset_marker = deployment_dir.join(STORAGE_RESET_MARKER);
+    if reset_marker.exists() {
+        reset_storage_dir(&deployment_dir, &reset_marker)?;
+    }
+
     if options.verify_skip {
         info!("Config verification skipped due to --verify-skip");
     } else if let Err(e) = rt.block_on(verify(&options)) {
@@ -65,9 +76,6 @@ fn main() -> anyhow::Result<()> {
 
     match options.database_type()? {
         DatabaseType::MySQL => {
-            let deployment_dir = options
-                .server_worker_options
-                .storage_dir(&options.deployment);
             AuthKeys::initialize(Some(deployment_dir)).expect("failed to initialize auth RSA keys");
 
             NoriaAdapter {
@@ -104,4 +112,20 @@ fn main() -> anyhow::Result<()> {
         }
         .run(rt, options),
     }
+}
+
+fn reset_storage_dir(storage_dir: &Path, marker: &Path) -> anyhow::Result<()> {
+    info!(dir = %storage_dir.display(), "Resetting storage directory");
+    for entry in fs::read_dir(storage_dir)? {
+        let entry = entry?;
+        if entry.path() == marker {
+            continue;
+        }
+        if entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+        } else {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(fs::remove_file(marker)?)
 }
