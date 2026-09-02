@@ -139,13 +139,17 @@ fn use_fallback_pagination(
     server_supports_topk: bool,
     limit_clause: &LimitClause,
 ) -> bool {
+    // Neither node the server might build can key on a placeholder LIMIT, so one falls back to
+    // adapter post-processing wherever it appears -- beside an OFFSET as much as without one.
+    if matches!(limit_clause.limit(), Some(Literal::Placeholder(_))) {
+        return true;
+    }
+
     // A literal LIMIT with no OFFSET lowers to a TopK node -- ordered or order-less alike -- when
     // feature-topk is on, which the nested-loop-limit pass can then collapse for a base-table spine.
-    // With topk off the server can't build one, and a placeholder k can't parameterize one, so both
-    // fall back to adapter post-processing.
+    // With topk off the server can't build one, so it falls back to adapter post-processing.
     if limit_clause.is_topk() {
-        return !server_supports_topk
-            || matches!(limit_clause.limit(), Some(Literal::Placeholder(_)));
+        return !server_supports_topk;
     }
 
     if server_supports_pagination &&
@@ -3138,6 +3142,45 @@ mod tests {
                 (None, None)
             );
             assert_eq!(lim_off_topk("SELECT a FROM t LIMIT 10"), (None, None));
+        }
+
+        /// A parameterized LIMIT cannot lower to a Paginate any more than it can to a TopK -- the
+        /// server refuses to key on one -- so it falls back to adapter post-processing wherever it
+        /// appears.  The offset-less form is covered by the is_topk branch above; this is the same
+        /// predicate for the form that carries an OFFSET.
+        #[test]
+        fn parameterized_limit_falls_back_beside_an_offset() {
+            let lim_off_paginate = |query: &str, params: &[DfValue]| {
+                let mut flags = rewrite_params(Dialect::MySQL);
+                flags.server_supports_topk = true;
+                flags.server_supports_pagination = true;
+                let proc = rewrite_query(
+                    &mut parse_select_statement(query, Dialect::MySQL),
+                    flags,
+                    rewrite_context(Dialect::MySQL),
+                )
+                .unwrap();
+                proc.limit_offset_params(params).unwrap()
+            };
+
+            // The adapter applies both, since the server cannot key on a parameterized LIMIT.
+            assert_eq!(
+                lim_off_paginate(
+                    "SELECT a FROM t WHERE x = ? ORDER BY a LIMIT ? OFFSET ?",
+                    &[1.into(), 2.into(), 3.into()],
+                ),
+                (Some(2), Some(3))
+            );
+
+            // A literal LIMIT beside an OFFSET does lower to a Paginate, so the adapter applies
+            // nothing and the offset becomes the page number server-side.
+            assert_eq!(
+                lim_off_paginate(
+                    "SELECT a FROM t WHERE x = ? ORDER BY a LIMIT 2 OFFSET ?",
+                    &[1.into(), 3.into()],
+                ),
+                (None, None)
+            );
         }
 
         #[test]
