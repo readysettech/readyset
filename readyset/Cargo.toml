@@ -110,6 +110,16 @@ assets = [
 #pre_uninstall_script = ...
 #post_uninstall_script = ...
 
+# Debug symbols, packaged separately so they can be installed alongside the application rpm.
+[package.metadata.generate-rpm.variants.debuginfo]
+name = "readyset-debuginfo"
+summary = "Debug symbols for readyset"
+auto-req = "disabled"
+require-sh = false
+assets = [
+    { source = "target/release/readyset.debug", dest = "/usr/lib/debug/usr/bin/readyset.debug", mode = "644" },
+]
+
 
 # see https://github.com/kornelski/cargo-deb
 [package.metadata.deb]
