@@ -49,6 +49,7 @@ fn is_privilege_error(code: u16) -> bool {
 
 const ER_UNKNOWN_CHARACTER_SET: u16 = 1115;
 const ER_UNKNOWN_COLLATION: u16 = 1273;
+const ER_BAD_DB_ERROR: u16 = 1049;
 
 /// Extract the server error code from a raw mysql_async error, if it is a server error.
 fn server_error_code(error: &mysql_async::Error) -> Option<u16> {
@@ -56,6 +57,58 @@ fn server_error_code(error: &mysql_async::Error) -> Option<u16> {
         mysql_async::Error::Server(e) => Some(e.code),
         _ => None,
     }
+}
+
+fn trim_leading_sql_comments(mut query: &str) -> &str {
+    loop {
+        query = query.trim_start();
+
+        if let Some(comment) = query.strip_prefix("--") {
+            query = comment
+                .split_once('\n')
+                .map(|(_, rest)| rest)
+                .unwrap_or_default();
+        } else if let Some(comment) = query.strip_prefix('#') {
+            query = comment
+                .split_once('\n')
+                .map(|(_, rest)| rest)
+                .unwrap_or_default();
+        } else if let Some(comment) = query.strip_prefix("/*") {
+            query = comment
+                .split_once("*/")
+                .map(|(_, rest)| rest)
+                .unwrap_or_default();
+        } else {
+            return query;
+        }
+    }
+}
+
+fn take_sql_keyword(query: &str) -> Option<(&str, &str)> {
+    let end = query
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii_alphabetic()).then_some(idx))
+        .unwrap_or(query.len());
+
+    (end > 0).then(|| query.split_at(end))
+}
+
+fn is_create_database_statement(query: &str) -> bool {
+    let query = trim_leading_sql_comments(query);
+    let Some((create, query)) = take_sql_keyword(query) else {
+        return false;
+    };
+
+    if !create.eq_ignore_ascii_case("CREATE") {
+        return false;
+    }
+
+    let query = trim_leading_sql_comments(query);
+    let Some((object_type, _)) = take_sql_keyword(query) else {
+        return false;
+    };
+
+    object_type.eq_ignore_ascii_case("DATABASE") || object_type.eq_ignore_ascii_case("SCHEMA")
 }
 
 /// Extract the granted roles from `SHOW GRANTS` output. Role grants are the
@@ -434,6 +487,38 @@ macro_rules! handle_query_result {
 }
 
 impl MySqlUpstream {
+    async fn query_without_default_database<'a>(
+        query: &'a str,
+        opts: &Opts,
+    ) -> Result<QueryResult<'a>, Error> {
+        let mut conn =
+            Conn::new(OptsBuilder::from_opts(opts.clone()).db_name(None::<String>)).await?;
+
+        let result = conn.query_iter(query).await?;
+        let columns = result.columns().ok_or_else(|| {
+            ReadySetError::Internal("The mysql_async result was already consumed".to_string())
+        })?;
+
+        if columns.len() > 0 {
+            internal!("CREATE DATABASE/SCHEMA returned an unexpected result set");
+        }
+
+        let resultset = result.stream_and_drop::<Row>().await?.ok_or_else(|| {
+            ReadySetError::Internal("The mysql_async result has no resultsets".to_string())
+        })?;
+
+        Ok(QueryResult::WriteResult {
+            num_rows_affected: resultset.affected_rows(),
+            last_inserted_id: resultset.last_insert_id().unwrap_or(0),
+            status_flags: resultset
+                .ok_packet()
+                .ok_or_else(|| {
+                    ReadySetError::Internal("The mysql_async result has no ok packet".to_string())
+                })?
+                .status_flags(),
+        })
+    }
+
     async fn connect_inner(
         upstream_config: UpstreamConfig,
         username: Option<String>,
@@ -833,8 +918,21 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn query<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
-        let result = self.conn.query_iter(query).await?;
-        handle_query_result!(result)
+        let has_default_database = self.database().is_some();
+        let opts = self.conn.opts().clone();
+
+        match self.conn.query_iter(query).await {
+            Ok(result) => handle_query_result!(result),
+            Err(e)
+                if server_error_code(&e) == Some(ER_BAD_DB_ERROR)
+                    && has_default_database
+                    && is_create_database_statement(query) =>
+            {
+                debug!("retrying CREATE DATABASE/SCHEMA without a default database");
+                Self::query_without_default_database(query, &opts).await
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn query_ext<'a>(
