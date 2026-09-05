@@ -4825,6 +4825,55 @@ mod tests {
             );
             check_comparison!(point_bytes.clone(), DfType::PostgisPolygon, point_bytes);
         }
+
+        // Regression test for #1662.
+        #[test]
+        fn number_to_char_types_preserves_collation() {
+            let collation = Collation::Utf8Ci;
+            let char_tys = [DfType::VarChar(255, collation), DfType::Char(255, collation)];
+
+            let numeric_keys = [
+                DfValue::Int(20000000000),
+                DfValue::UnsignedInt(20000000000),
+                DfValue::Double(20000000000.0),
+                DfValue::Numeric(Decimal::try_from(20000000000.0).unwrap().into()),
+            ];
+            for ty in &char_tys {
+                for key in &numeric_keys {
+                    let coerced = key.coerce_for_comparison(ty).expect("coerce failed");
+                    assert_eq!(
+                        coerced.collation(),
+                        Some(collation),
+                        "coercing {key:?} to {ty:?} dropped the column collation"
+                    );
+                }
+            }
+
+            let enum_ty = DfType::from_enum_variants(
+                ["red", "yellow", "green"].into_iter().map(Into::into),
+                None,
+            );
+            for ty in &char_tys {
+                let coerced = DfValue::Int(2).coerce_to(ty, &enum_ty).expect("coerce failed");
+                assert_eq!(
+                    coerced.collation(),
+                    Some(collation),
+                    "coercing enum label to {ty:?} dropped the column collation"
+                );
+            }
+
+            fn hash_of(value: &DfValue) -> u64 {
+                use std::hash::{DefaultHasher, Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                value.hash(&mut hasher);
+                hasher.finish()
+            }
+            let stored = DfValue::from_str_and_collation("20000000000", collation);
+            let coerced = DfValue::Int(20000000000)
+                .coerce_for_comparison(&DfType::VarChar(255, collation))
+                .unwrap();
+            assert_eq!(hash_of(&coerced), hash_of(&stored));
+        }
     }
 
     #[test]
