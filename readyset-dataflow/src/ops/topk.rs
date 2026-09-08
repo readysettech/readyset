@@ -445,7 +445,7 @@ impl Ingredient for TopK {
         let mut misses = Vec::new();
         let mut lookups = Vec::new();
         // +1 so insertions after reaching capacity don't cause a reallocation
-        let current_capacity = self.total_capacity().saturating_add(1);
+        let current_capacity = min(rs.len() + 1, self.total_capacity().saturating_add(1));
         let mut current: Vec<CurrentRecord> = Vec::with_capacity(current_capacity);
 
         // records are now chunked by group
