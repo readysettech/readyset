@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::Debug;
 
@@ -19,8 +20,8 @@ use crate::shallow_key::ShallowKey;
 pub type UpstreamStatementId = u32;
 
 /// A shallow cache fill whose statement raised `warnings` warnings upstream. Once the result has
-/// been consumed, the caller reads them from the connection, attaches them to `cache`, and
-/// completes the fill.
+/// been consumed, the caller reads them from the connection, decoding their text from `encoding`,
+/// attaches them to `cache`, and completes the fill.
 #[derive(Debug)]
 pub struct PendingFill<V>
 where
@@ -28,6 +29,7 @@ where
 {
     pub cache: CacheInsertGuard<ShallowKey, V>,
     pub warnings: u16,
+    pub encoding: Encoding,
 }
 
 /// Trait for refreshing a shallow cache from an upstream query result
@@ -36,14 +38,11 @@ pub trait Refresh {
     /// The type of value in the shallow cache.
     type Entry: Send + Sync + 'static;
 
-    /// Populate the cache with data from this query result. `encoding` is the results charset
-    /// of the entry being refreshed, which the connection that produced this result had mirrored
-    /// upstream. Upstreams without a results charset concept ignore it. Return the fill still
-    /// open when the caller has to attach the statement's warnings before completing it.
+    /// Populate the cache with data from this query result. Return the fill still open when the
+    /// caller has to attach the statement's warnings before completing it.
     async fn refresh(
         self,
         cache: CacheInsertGuard<ShallowKey, Self::Entry>,
-        encoding: Encoding,
     ) -> std::io::Result<Option<PendingFill<Self::Entry>>>;
 }
 
@@ -383,9 +382,12 @@ pub trait UpstreamDatabase: Sized + Send {
         Ok(None)
     }
 
-    /// Discover the connection's current collation, if available.
-    async fn connection_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
-        Ok(None)
+    /// Return the values a fresh connection starts with for session variables whose `DEFAULT` may
+    /// differ from them.
+    async fn initial_session_variables(
+        &mut self,
+    ) -> Result<BTreeMap<String, Literal>, Self::Error> {
+        Ok(BTreeMap::new())
     }
 
     /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.

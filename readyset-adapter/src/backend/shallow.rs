@@ -9,6 +9,7 @@
 //! time, judges an existing entry against the statement's execution metadata, and hands a
 //! prepared handle to a background refresh rather than the query text.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -18,11 +19,11 @@ use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::{MigrationState, QueryId};
 use readyset_client_metrics::{QueryDestination, QueryExecutionEvent, ReadysetExecutionEvent};
 use readyset_data::DfValue;
-use readyset_data::encoding::Encoding;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheManager, CacheResult};
 use readyset_sql::ast::{
-    CacheType, CreateCacheOptions, ReadysetHintDirective, ShallowCacheQuery, TrxCachePolicy,
+    CacheType, CreateCacheOptions, Literal, ReadysetHintDirective, ShallowCacheQuery,
+    TrxCachePolicy,
 };
 use readyset_sql_passes::adapter_rewrites::ShallowQueryParameters;
 use readyset_sql_passes::shallow::auto_cache_skip_reasons;
@@ -314,8 +315,7 @@ where
         let shallow_key = ShallowKey {
             params: params_key,
             session: session_values,
-            charset: connectors.noria.results_encoding(),
-            collation: connectors.noria.connection_collation(),
+            vars: Arc::clone(connectors.noria.session_vars()),
         };
 
         // An entry keyed on session state does not refresh via the
@@ -400,9 +400,8 @@ where
         query_params: &ShallowQueryParameters,
         refresh: Option<&Arc<ShallowRefreshPool<DB>>>,
         view_request: &ShallowViewRequest,
-        results_encoding: Encoding,
+        session_vars: Arc<BTreeMap<String, Literal>>,
         migration_state: &mut MigrationState,
-        connection_collation: Option<u16>,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
         let merged = query_params.merge_params(params)?.unwrap_or_default();
         let params_key = query_params.make_keys_from_merged(&merged)?;
@@ -435,8 +434,7 @@ where
         let shallow_key = ShallowKey {
             params: params_key,
             session: session_values,
-            charset: results_encoding,
-            collation: connection_collation,
+            vars: session_vars,
         };
 
         // An entry keyed on session state must not refresh through the

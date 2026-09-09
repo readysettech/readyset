@@ -1,7 +1,7 @@
 use chrono::FixedOffset;
 use readyset_data::TimestampTz;
 use readyset_errors::ReadySetResult;
-use readyset_sql::ast::{SetStatement, SqlIdentifier, SqlQuery};
+use readyset_sql::ast::{Literal, SetStatement, SqlIdentifier, SqlQuery};
 
 use crate::backend::noria_connector;
 
@@ -128,19 +128,19 @@ pub struct SetBehavior {
     pub set_autocommit: Option<bool>,
     /// This `SET` statement changes the current schema search path.
     pub set_search_path: Option<Vec<SqlIdentifier>>,
-    /// This `SET` statement changes the encoding to be used for results. Corresponds to `SET
-    /// @@character_set_results` in MySQL or `SET NAMES` in Postgres or MySQL.
-    pub set_results_encoding: Option<readyset_data::encoding::Encoding>,
-    /// This `SET` statement changes the collation id reported in result-set metadata for text
-    /// columns. Corresponds to the collation a MySQL `SET NAMES` or `SET
+    /// This `SET` statement changes the collation id reported in result set metadata for text
+    /// columns. It corresponds to the collation a MySQL `SET NAMES` or `SET
     /// @@character_set_results` implies.
     pub set_results_collation: Option<u16>,
-    /// This `SET` statement changes the session's `collation_connection` id. Corresponds to MySQL
-    /// `SET @@collation_connection`, `SET @@character_set_connection`, or `SET NAMES`.
-    pub set_connection_collation: Option<u16>,
+    /// This `SET` statement changes the encoding in which to return text results. Corresponds to
+    /// `SET @@character_set_results` or `SET NAMES` in MySQL.
+    pub set_results_encoding: Option<readyset_data::encoding::Encoding>,
     /// This `SET` statement changes the encoding in which the client sends query text.
     /// Corresponds to `SET @@character_set_client` or `SET NAMES` in MySQL.
     pub set_client_encoding: Option<readyset_data::encoding::Encoding>,
+    /// This `SET` statement sets these session variables. A `None` value sets the variable to
+    /// its default.
+    pub set_session_vars: Vec<(String, Option<Literal>)>,
     /// What to forward upstream for this `SET` statement.
     pub upstream_rewrite: UpstreamSetRewrite,
     /// This `SET` statement changes the session timezone for TIMESTAMP conversions.
@@ -165,18 +165,6 @@ impl SetBehavior {
         self
     }
 
-    pub fn set_results_encoding(
-        mut self,
-        encoding: Option<readyset_data::encoding::Encoding>,
-    ) -> Self {
-        if let Some(encoding) = encoding {
-            self.set_results_encoding = Some(encoding);
-        } else {
-            self.unsupported = true;
-        }
-        self
-    }
-
     pub fn set_results_collation(mut self, collation: Option<u16>) -> Self {
         if let Some(collation) = collation {
             self.set_results_collation = Some(collation);
@@ -186,12 +174,8 @@ impl SetBehavior {
         self
     }
 
-    pub fn set_connection_collation(mut self, collation: Option<u16>) -> Self {
-        if let Some(collation) = collation {
-            self.set_connection_collation = Some(collation);
-        } else {
-            self.unsupported = true;
-        }
+    pub fn set_results_encoding(mut self, encoding: readyset_data::encoding::Encoding) -> Self {
+        self.set_results_encoding = Some(encoding);
         self
     }
 
@@ -204,6 +188,11 @@ impl SetBehavior {
         } else {
             self.unsupported = true;
         }
+        self
+    }
+
+    pub fn set_session_var(mut self, name: &str, value: Option<Literal>) -> Self {
+        self.set_session_vars.push((name.to_string(), value));
         self
     }
 
@@ -294,10 +283,10 @@ impl Default for SetBehavior {
             proxy: true,
             set_autocommit: None,
             set_search_path: None,
-            set_results_encoding: None,
             set_results_collation: None,
-            set_connection_collation: None,
+            set_results_encoding: None,
             set_client_encoding: None,
+            set_session_vars: Vec::new(),
             upstream_rewrite: UpstreamSetRewrite::default(),
             set_timezone: None,
         }

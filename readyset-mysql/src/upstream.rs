@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::fmt;
 use std::io::{self, ErrorKind};
@@ -36,6 +36,7 @@ use readyset_util::hash::hash;
 use readyset_util::SizeOf;
 
 use crate::backend::write_query_results;
+use crate::query_handler::{results_encoding, COLLATION_CONNECTION};
 use crate::{handle_error, Error};
 
 type StatementID = u32;
@@ -349,7 +350,11 @@ impl<'a> QueryResult<'a> {
                         columns: Arc::clone(&columns),
                         columns_encoding: results_encoding,
                     }));
-                    PendingFill { cache, warnings }
+                    PendingFill {
+                        cache,
+                        warnings,
+                        encoding: results_encoding,
+                    }
                 }))
             }
         }
@@ -363,8 +368,11 @@ impl Refresh for QueryResult<'_> {
     async fn refresh(
         self,
         cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
-        encoding: Encoding,
     ) -> io::Result<Option<PendingFill<CacheEntry>>> {
+        let encoding = cache
+            .key()
+            .map(|k| results_encoding(&k.vars))
+            .unwrap_or(Encoding::Utf8);
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),
@@ -1003,8 +1011,14 @@ impl UpstreamDatabase for MySqlUpstream {
         self.global_variable("interactive_timeout").await
     }
 
-    async fn connection_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
-        Ok(Some(self.collation_for("collation_connection").await?))
+    async fn initial_session_variables(
+        &mut self,
+    ) -> Result<BTreeMap<String, Literal>, Self::Error> {
+        let collation = self.collation_for(COLLATION_CONNECTION).await?;
+        Ok(BTreeMap::from([(
+            COLLATION_CONNECTION.to_string(),
+            Literal::from(collation.collation_name),
+        )]))
     }
 
     async fn shallow_exec_meta(

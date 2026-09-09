@@ -35,6 +35,10 @@ use tracing::{debug, error, info, trace, warn};
 use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_COLLATION;
+use crate::query_handler::{
+    character_set_results_value, collation_connection_value, CHARACTER_SET_RESULTS,
+    COLLATION_CONNECTION,
+};
 use crate::schema::convert_column;
 use crate::upstream::{self, CacheEntry, MySqlUpstream};
 use crate::value::mysql_param_to_dataflow_value;
@@ -411,20 +415,17 @@ impl Backend {
 
     /// Complete a shallow cache fill, first attaching the warnings its statement raised, which
     /// the upstream connection still holds.
-    async fn finish_fill(
-        &mut self,
-        pending: Option<PendingFill<CacheEntry>>,
-        results_encoding: Encoding,
-    ) -> io::Result<()> {
+    async fn finish_fill(&mut self, pending: Option<PendingFill<CacheEntry>>) -> io::Result<()> {
         let Some(PendingFill {
             mut cache,
             warnings,
+            encoding,
         }) = pending
         else {
             return Ok(());
         };
         if warnings > 0 {
-            let rows = match self.noria.upstream_warnings(results_encoding).await {
+            let rows = match self.noria.upstream_warnings(encoding).await {
                 Ok(rows) => rows.into(),
                 Err(error) => {
                     debug!(%error, "Failed to read warnings for shallow cache fill");
@@ -1027,7 +1028,7 @@ where
                 .await?
             }
         };
-        self.finish_fill(pending, results_encoding).await
+        self.finish_fill(pending).await
     }
 
     async fn set_auth_info(
@@ -1083,13 +1084,18 @@ where
                 encoding = Encoding::from_mysql_collation_id(applied.id);
             }
         }
-        self.noria.connectors.noria.set_results_encoding(encoding);
-        self.noria.connectors.noria.set_client_encoding(encoding);
-        self.noria.connectors.noria.set_results_collation(collation);
-        self.noria
-            .connectors
-            .noria
-            .set_connection_collation(collation);
+        let noria = &mut self.noria.connectors.noria;
+        noria.set_results_encoding(encoding);
+        noria.set_client_encoding(encoding);
+        noria.set_results_collation(collation);
+        noria.set_session_var(
+            CHARACTER_SET_RESULTS,
+            Some(character_set_results_value(encoding)),
+        );
+        noria.set_session_var(
+            COLLATION_CONNECTION,
+            Some(collation_connection_value(collation)),
+        );
         Ok(())
     }
 
@@ -1156,7 +1162,7 @@ where
                 )
                 .await;
                 QueryResultsResponse::IoResult(match pending {
-                    Ok(pending) => self.finish_fill(pending, results_encoding).await,
+                    Ok(pending) => self.finish_fill(pending).await,
                     Err(e) => Err(e),
                 })
             }

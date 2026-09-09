@@ -1387,8 +1387,7 @@ where
             self.state.write_tracker.mark_write();
         }
 
-        let results_encoding = self.connectors.noria.results_encoding();
-        let connection_collation = self.connectors.noria.connection_collation();
+        let session_vars = Arc::clone(self.connectors.noria.session_vars());
         let upstream = &mut self.connectors.upstream;
         let noria = &mut self.connectors.noria;
 
@@ -1694,9 +1693,8 @@ where
                     query_params,
                     self.state.shallow_refresh_pool.as_ref(),
                     view_request,
-                    results_encoding,
+                    session_vars,
                     &mut cached_statement.migration_state,
-                    connection_collation,
                 )
                 .await
             }

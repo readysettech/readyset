@@ -13,7 +13,9 @@ use readyset_client_metrics::QueryExecutionEvent;
 use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_sql::DialectDisplay;
-use readyset_sql::ast::{SessionAuthorizationValue, SetSessionAuthorization, SetStatement};
+use readyset_sql::ast::{
+    Literal, SessionAuthorizationValue, SetSessionAuthorization, SetStatement,
+};
 use readyset_util::SizeOf;
 use tracing::{debug, error, trace, warn};
 
@@ -28,29 +30,29 @@ use crate::{QueryHandler, UpstreamDatabase};
 /// it must be applied only once the upstream accepts the statement.
 #[derive(Debug, Default)]
 pub(super) struct PendingSetState {
-    results_encoding: Option<Encoding>,
     results_collation: Option<u16>,
-    connection_collation: Option<u16>,
+    results_encoding: Option<Encoding>,
     client_encoding: Option<Encoding>,
+    session_vars: Vec<(String, Option<Literal>)>,
 }
 
 impl PendingSetState {
     pub(super) fn apply(self, noria: &mut NoriaConnector) {
-        if let Some(encoding) = self.results_encoding {
-            trace!(?encoding, "Setting results_encoding");
-            noria.set_results_encoding(encoding);
-        }
         if let Some(collation) = self.results_collation {
             trace!(collation, "Setting results_collation");
             noria.set_results_collation(collation);
         }
-        if let Some(collation) = self.connection_collation {
-            trace!(collation, "Setting connection_collation");
-            noria.set_connection_collation(collation);
+        if let Some(encoding) = self.results_encoding {
+            trace!(?encoding, "Setting results_encoding");
+            noria.set_results_encoding(encoding);
         }
         if let Some(encoding) = self.client_encoding {
             trace!(?encoding, "Setting client_encoding");
             noria.set_client_encoding(encoding);
+        }
+        for (name, value) in self.session_vars {
+            trace!(%name, ?value, "Setting session variable");
+            noria.set_session_var(&name, value);
         }
     }
 }
@@ -84,10 +86,10 @@ where
             proxy: _, // Basically ignored, caller will proxy unless we return an error
             set_autocommit,
             set_search_path,
-            set_results_encoding,
             set_results_collation,
-            set_connection_collation,
+            set_results_encoding,
             set_client_encoding,
+            set_session_vars,
             upstream_rewrite,
             set_timezone,
         } = Handler::handle_set_statement(set);
@@ -175,10 +177,10 @@ where
         Ok((
             upstream_rewrite,
             PendingSetState {
-                results_encoding: set_results_encoding,
                 results_collation: set_results_collation,
-                connection_collation: set_connection_collation,
+                results_encoding: set_results_encoding,
                 client_encoding: set_client_encoding,
+                session_vars: set_session_vars,
             },
         ))
     }

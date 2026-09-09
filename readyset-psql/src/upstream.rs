@@ -31,7 +31,6 @@ use readyset_adapter::upstream_database::{
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
-use readyset_data::encoding::Encoding;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
 use readyset_sql::ast::{Relation, SqlIdentifier};
@@ -240,7 +239,6 @@ impl Refresh for QueryResult {
     async fn refresh(
         self,
         mut cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
-        _encoding: Encoding,
     ) -> std::io::Result<Option<PendingFill<CacheEntry>>> {
         async fn drain_resultset(
             resultset: Resultset,

@@ -5,6 +5,7 @@ use bit_vec::BitVec;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use proptest::prelude::Strategy;
+use readyset_util::SizeOf;
 use readyset_util::arbitrary::{
     arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal_string_with_digits, arbitrary_ipcidr,
     arbitrary_ipinet, arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
@@ -106,6 +107,27 @@ pub enum Literal {
     /// pipeline should treat it as a bug.
     #[weight(0)]
     Preserved(Box<Literal>),
+}
+
+impl SizeOf for Literal {
+    fn deep_size_of(&self) -> usize {
+        let heap = match self {
+            Literal::Number(s) | Literal::String(s) => s.deep_size_of(),
+            Literal::Blob(b) | Literal::ByteArray(b) => b.len(),
+            Literal::BitVector(b) => b.len().div_ceil(8),
+            Literal::Preserved(inner) => inner.deep_size_of(),
+            Literal::Null
+            | Literal::Boolean(_)
+            | Literal::Integer(_)
+            | Literal::UnsignedInteger(_)
+            | Literal::Placeholder(_) => 0,
+        };
+        size_of::<Self>() + heap
+    }
+
+    fn size_is_empty(&self) -> bool {
+        false
+    }
 }
 
 impl From<bool> for Literal {

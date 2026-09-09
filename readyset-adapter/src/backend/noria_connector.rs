@@ -23,9 +23,9 @@ use readyset_errors::{
 };
 use readyset_server::worker::readers::ReadRequestHandler;
 use readyset_sql::ast::{
-    self, ColumnConstraint, CreateViewStatement, DeleteStatement, Expr, InsertStatement, Relation,
-    SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement, TrxCachePolicy,
-    UnaryOperator, UpdateStatement,
+    self, ColumnConstraint, CreateViewStatement, DeleteStatement, Expr, InsertStatement, Literal,
+    Relation, SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TruncateStatement,
+    TrxCachePolicy, UnaryOperator, UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
 use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
@@ -287,18 +287,15 @@ pub struct NoriaConnector {
     /// in MySQL can be thought of as a schema search path that only has one element.
     schema_search_path: Vec<SqlIdentifier>,
 
-    /// The encoding in which to return text results. Corresponds to `character_set_results` in
-    /// MySQL and `SET NAMES` in both MySQL and Postgres.
-    results_encoding: Encoding,
-
-    /// The MySQL collation id to report in result-set metadata for text columns, following the
-    /// session collation named by the handshake, `SET NAMES`, or `SET character_set_results`.
-    /// Unset until the MySQL handshake provides one; unused for Postgres.
+    /// The collation id to report in result set metadata for text columns. The MySQL handshake
+    /// sets it, and Postgres never uses it.
     results_collation: Option<u16>,
 
-    /// The session's MySQL `collation_connection` id. Unset until the handshake provides one and
-    /// unused for Postgres.
-    connection_collation: Option<u16>,
+    /// Session variables that affect cached results.
+    session_vars: Arc<BTreeMap<String, Literal>>,
+
+    /// The encoding in which to return text results, as determined by `session_vars`.
+    results_encoding: Encoding,
 
     /// The encoding in which the client sends query text. Corresponds to `character_set_client`
     /// in MySQL.
@@ -423,9 +420,9 @@ impl NoriaConnector {
             dialect,
             parse_dialect,
             schema_search_path,
-            results_encoding: Encoding::Utf8,
             results_collation: None,
-            connection_collation: None,
+            session_vars: Arc::default(),
+            results_encoding: Encoding::Utf8,
             client_encoding: Encoding::Utf8,
             timezone: SessionTimezone::System,
         }
@@ -932,34 +929,42 @@ impl NoriaConnector {
         self.schema_search_path.as_ref()
     }
 
-    /// Set the encoding for result sets
-    pub fn set_results_encoding(&mut self, encoding: Encoding) {
-        self.results_encoding = encoding;
-    }
-
-    /// Returns the encoding for result sets
-    pub fn results_encoding(&self) -> Encoding {
-        self.results_encoding
-    }
-
-    /// Set the collation id to report in result-set metadata for text columns
+    /// Set the collation id to report in result set metadata for text columns.
     pub fn set_results_collation(&mut self, collation: u16) {
         self.results_collation = Some(collation);
     }
 
-    /// Returns the collation id to report in result-set metadata for text columns
+    /// Return the collation id to report in result set metadata for text columns.
     pub fn results_collation(&self) -> Option<u16> {
         self.results_collation
     }
 
-    /// Set the session's `collation_connection` id
-    pub fn set_connection_collation(&mut self, collation: u16) {
-        self.connection_collation = Some(collation);
+    /// Return the session variables that affect cached results.
+    pub fn session_vars(&self) -> &Arc<BTreeMap<String, Literal>> {
+        &self.session_vars
     }
 
-    /// Return the session's `collation_connection` id
-    pub fn connection_collation(&self) -> Option<u16> {
-        self.connection_collation
+    /// Record a session variable's value. `None` means the variable has its default value.
+    pub fn set_session_var(&mut self, name: &str, value: Option<Literal>) {
+        let vars = Arc::make_mut(&mut self.session_vars);
+        match value {
+            Some(value) => {
+                vars.insert(name.to_string(), value);
+            }
+            None => {
+                vars.remove(name);
+            }
+        }
+    }
+
+    /// Set the encoding in which to return text results.
+    pub fn set_results_encoding(&mut self, encoding: Encoding) {
+        self.results_encoding = encoding;
+    }
+
+    /// Return the encoding in which to return text results.
+    pub fn results_encoding(&self) -> Encoding {
+        self.results_encoding
     }
 
     /// Set the encoding in which the client sends query text

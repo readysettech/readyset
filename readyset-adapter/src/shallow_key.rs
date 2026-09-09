@@ -7,12 +7,14 @@
 //! partition. Equality and hashing over this key keep one session's cached rows from being served
 //! to another.
 //!
-//! Entries are additionally partitioned by the session's results charset and collation.
+//! Entries are additionally partitioned by session variables that affect the result.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use readyset_data::DfValue;
-use readyset_data::encoding::Encoding;
 use readyset_rls::SessionInputType;
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Literal, SqlIdentifier};
 use readyset_util::SizeOf;
 
 /// One session-derived fact a cached result depends on, resolved against the calling session.
@@ -66,10 +68,8 @@ impl SessionInputValues {
 pub struct ShallowKey {
     pub params: Vec<DfValue>,
     pub session: SessionInputValues,
-    /// The session's results charset, which the upstream converted the cached result text into.
-    pub charset: Encoding,
-    /// The session's MySQL `collation_connection` id.
-    pub collation: Option<u16>,
+    /// Session variables that affect the cached result.
+    pub vars: Arc<BTreeMap<String, Literal>>,
 }
 
 impl ShallowKey {
@@ -78,8 +78,7 @@ impl ShallowKey {
         Self {
             params,
             session: SessionInputValues::default(),
-            charset: Encoding::Utf8,
-            collation: None,
+            vars: Arc::default(),
         }
     }
 }
@@ -91,6 +90,7 @@ impl SizeOf for ShallowKey {
         size_of::<Self>()
             + self.params.deep_size_of()
             + self.session.values.capacity() * size_of::<SessionInputValue>()
+            + self.vars.deep_size_of()
     }
 
     fn size_is_empty(&self) -> bool {
@@ -183,43 +183,45 @@ mod tests {
         let ka = ShallowKey {
             params: vec![],
             session: values(&[rls_val("k", Some("a"))]),
-            charset: Encoding::Utf8,
-            collation: None,
+            vars: Arc::default(),
         };
         let kb = ShallowKey {
             params: vec![],
             session: values(&[rls_val("k", Some("b"))]),
-            charset: Encoding::Utf8,
-            collation: None,
+            vars: Arc::default(),
         };
         assert_ne!(ka, kb);
         assert_eq!(ka, ka.clone());
     }
 
-    #[test]
-    fn shallow_keys_differ_by_charset() {
-        let utf8 = ShallowKey::plain(vec![DfValue::from(1)]);
-        let latin1 = ShallowKey {
-            charset: Encoding::LATIN1,
-            ..utf8.clone()
-        };
-        assert_ne!(utf8, latin1);
+    fn with_vars(vars: &[(&str, Literal)]) -> ShallowKey {
+        ShallowKey {
+            vars: Arc::new(
+                vars.iter()
+                    .map(|(name, value)| (name.to_string(), value.clone()))
+                    .collect(),
+            ),
+            ..ShallowKey::plain(vec![DfValue::from(1)])
+        }
     }
 
     #[test]
-    fn shallow_keys_differ_by_collation() {
+    fn shallow_keys_differ_by_vars() {
         let plain = ShallowKey::plain(vec![DfValue::from(1)]);
-        let ai_ci = ShallowKey {
-            collation: Some(255),
-            ..plain.clone()
-        };
-        let bin = ShallowKey {
-            collation: Some(46),
-            ..plain.clone()
-        };
-        assert_ne!(plain, ai_ci);
-        assert_ne!(ai_ci, bin);
-        assert_eq!(ai_ci, ai_ci.clone());
+        let latin1 = with_vars(&[("character_set_results", Literal::from("latin1"))]);
+        let latin1_bin = with_vars(&[
+            ("character_set_results", Literal::from("latin1")),
+            ("collation_connection", Literal::from("latin1_bin")),
+        ]);
+        let limit = with_vars(&[("sql_select_limit", Literal::Integer(1))]);
+        assert_ne!(plain, latin1);
+        assert_ne!(latin1, latin1_bin);
+        assert_ne!(plain, limit);
+        assert_eq!(latin1_bin, latin1_bin.clone());
+        assert_eq!(
+            latin1,
+            with_vars(&[("character_set_results", Literal::from("latin1"))])
+        );
     }
 
     #[test]

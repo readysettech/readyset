@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -8,9 +9,7 @@ use metric::{
     SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
 };
 use metrics::{Gauge, counter, gauge, histogram};
-use mysql_common::collations::{Collation, CollationId};
 use readyset_client::query::QueryId;
-use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, Warnings};
 use readyset_sql::ast::{Literal, SqlIdentifier};
@@ -279,11 +278,10 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         let mut reconnect = false;
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
-        // The connection's current results charset and collation. A fresh connection starts at
-        // the upstream default. A `None` collation is the collation the connection started with.
-        let mut results_cs_coll = (Encoding::Utf8, None);
-        // The collation the connection started with, as reported by the upstream.
-        let mut initial_collation = None;
+        // The session variables set on the connection.
+        let mut session_vars = BTreeMap::new();
+        // The values the connection started with, as reported by the upstream.
+        let mut initial_vars = BTreeMap::new();
 
         loop {
             let request = match timeout(WORKER_TIMEOUT, rx.recv()).await {
@@ -326,17 +324,17 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                     None => Err(ReadySetError::InvalidUpstreamDatabase.into()),
                 };
                 match connected {
-                    Ok(mut conn) => match conn.0.connection_collation().await {
-                        Ok(collation) => {
+                    Ok(mut conn) => match conn.0.initial_session_variables().await {
+                        Ok(vars) => {
                             upstream = Some(conn);
-                            results_cs_coll = (Encoding::Utf8, None);
-                            initial_collation = collation;
+                            session_vars = BTreeMap::new();
+                            initial_vars = vars;
                         }
                         Err(e) => {
                             rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
                                 warn!(
                                     error = %e,
-                                    "Failed to read connection collation for shallow refresh",
+                                    "Failed to read session variables for shallow refresh",
                                 )
                             });
                             reconnect = true;
@@ -370,33 +368,25 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 shallow_exec_meta,
             } = request;
 
-            // Refresh in the entry's charset and collation, so the upstream applies the same
-            // conversion and string comparison the fill saw. The fill path never caches under a
-            // binary or unsupported results charset, so no entry can exist under such a key and
-            // those requests are dropped.
-            let key_cs_coll = cache.key().map(|k| (k.charset, k.collation));
-            let charset_name = key_cs_coll.and_then(|(e, _)| e.mysql_character_set_name());
-            let (Some(key_cs_coll), Some(charset_name)) = (key_cs_coll, charset_name) else {
+            // Refresh with the session variables the entry was filled under, so the upstream
+            // produces the same result the fill saw.
+            let Some(key_vars) = cache.key().map(|k| &k.vars) else {
                 Self::mark_idle(&pool, &rx, idx).await;
                 continue;
             };
-            if key_cs_coll != results_cs_coll {
-                let charset = Literal::String(charset_name.to_string());
-                let collation = match key_cs_coll.1 {
-                    Some(id) => Some(
-                        Collation::resolve(CollationId::from(id))
-                            .collation
-                            .to_string(),
-                    ),
-                    None => initial_collation.as_ref().map(|c| c.collation_name.clone()),
-                }
-                .map(Literal::String);
-                let mut vars = vec![("character_set_results", Some(&charset))];
-                if let Some(collation) = &collation {
-                    vars.push(("collation_connection", Some(collation)));
-                }
+            if **key_vars != session_vars {
+                let vars: Vec<(&str, Option<&Literal>)> = session_vars
+                    .keys()
+                    .filter(|name| !key_vars.contains_key(*name))
+                    .map(|name| (name.as_str(), initial_vars.get(name)))
+                    .chain(
+                        key_vars
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), Some(value))),
+                    )
+                    .collect();
                 match conn.set_session_variables(&vars).await {
-                    Ok(()) => results_cs_coll = key_cs_coll,
+                    Ok(()) => session_vars = BTreeMap::clone(key_vars),
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_VARS, || {
                             warn!(
@@ -461,7 +451,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                     }
                 };
 
-                match result.refresh(cache, key_cs_coll.0).await {
+                match result.refresh(cache).await {
                     Ok(pending) => pending,
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
@@ -479,10 +469,11 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             if let Some(PendingFill {
                 mut cache,
                 warnings,
+                encoding,
             }) = pending
             {
                 if warnings > 0 {
-                    let rows = match conn.fetch_warnings(key_cs_coll.0).await {
+                    let rows = match conn.fetch_warnings(encoding).await {
                         Ok(rows) => rows.into(),
                         Err(e) => {
                             rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {

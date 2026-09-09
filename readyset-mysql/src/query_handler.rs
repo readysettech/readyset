@@ -1,10 +1,10 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr;
 
 use lazy_static::lazy_static;
 use metrics::counter;
-use mysql_common::collations::CollationId;
+use mysql_common::collations::{Collation as MySqlCollation, CollationId};
 use mysql_srv::AuthKeys;
 use readyset_adapter::backend::noria_connector::QueryResult;
 #[cfg(test)]
@@ -12,7 +12,7 @@ use readyset_adapter::SessionTimezone;
 use readyset_adapter::{parse_timezone, QueryHandler, SetBehavior, UpstreamSetRewrite};
 use readyset_client::post_processing::Results;
 use readyset_client::schema::{ColumnSchema, SelectSchema};
-use readyset_data::encoding::mysql_character_set_name_to_collation_id;
+use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding};
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
@@ -21,6 +21,36 @@ use readyset_sql::ast::{
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use tracing::warn;
+
+/// The session variable naming the charset into which the upstream converts result text.
+pub(crate) const CHARACTER_SET_RESULTS: &str = "character_set_results";
+/// The session variable naming the collation of string literals and comparisons.
+pub(crate) const COLLATION_CONNECTION: &str = "collation_connection";
+
+/// The `character_set_results` value for the encoding.
+pub(crate) fn character_set_results_value(encoding: Encoding) -> Literal {
+    let name = match encoding {
+        Encoding::OtherMySql(id) => MySqlCollation::resolve(CollationId::from(id)).charset,
+        _ => encoding.mysql_character_set_name().unwrap_or("utf8mb4"),
+    };
+    Literal::from(name)
+}
+
+/// The `collation_connection` value for the collation id.
+pub(crate) fn collation_connection_value(collation: u16) -> Literal {
+    Literal::from(MySqlCollation::resolve(CollationId::from(collation)).collation)
+}
+
+/// The encoding named by the `character_set_results` session variable, or utf8mb4 when the
+/// variable is unset.
+pub(crate) fn results_encoding(vars: &BTreeMap<String, Literal>) -> Encoding {
+    match vars.get(CHARACTER_SET_RESULTS) {
+        Some(Literal::String(name)) => {
+            Encoding::from_mysql_collation_id(mysql_character_set_name_to_collation_id(name))
+        }
+        _ => Encoding::Utf8,
+    }
+}
 
 const MAX_ALLOWED_PACKET_VARIABLE_NAME: &str = "max_allowed_packet";
 const MAX_ALLOWED_PACKET_DEFAULT: DfValue = DfValue::UnsignedInt(67108864);
@@ -1004,17 +1034,24 @@ impl QueryHandler for MySqlQueryHandler {
                             behavior.unsupported(!supported)
                         }
                         "character_set_results" => {
-                            let encoding = get_encoding_for_charset(value, var_name);
-                            behavior = behavior.set_results_encoding(encoding);
-                            // MySQL reports the charset's default collation in result-set
-                            // metadata once results convert to a charset set this way.
-                            if encoding.is_some() {
-                                let collation = charset_name_from_expr(value)
-                                    .map(|name| mysql_character_set_name_to_collation_id(&name))
-                                    .filter(|&id| id != 0);
-                                behavior = behavior.set_results_collation(collation);
+                            match get_encoding_for_charset(value, var_name) {
+                                Some(encoding) => {
+                                    // MySQL reports the charset's default collation in result
+                                    // set metadata once results convert to a charset set this
+                                    // way.
+                                    let collation = charset_name_from_expr(value)
+                                        .map(|name| mysql_character_set_name_to_collation_id(&name))
+                                        .filter(|&id| id != 0);
+                                    behavior
+                                        .set_results_collation(collation)
+                                        .set_results_encoding(encoding)
+                                        .set_session_var(
+                                            CHARACTER_SET_RESULTS,
+                                            Some(character_set_results_value(encoding)),
+                                        )
+                                }
+                                None => behavior.unsupported(true),
                             }
-                            behavior
                         }
                         // character_set_client describes the bytes the client sends, but
                         // Readyset decodes those and sends UTF-8 text upstream, so the upstream
@@ -1036,14 +1073,26 @@ impl QueryHandler for MySqlQueryHandler {
                             let collation = charset_name_from_expr(value)
                                 .map(|name| mysql_character_set_name_to_collation_id(&name))
                                 .filter(|&id| id != 0);
-                            behavior.set_connection_collation(collation)
+                            match collation {
+                                Some(id) => behavior.set_session_var(
+                                    COLLATION_CONNECTION,
+                                    Some(collation_connection_value(id)),
+                                ),
+                                None => behavior.unsupported(true),
+                            }
                         }
                         // Cached results depend on collation_connection, so track it.
                         "collation_connection" => {
                             let collation = charset_name_from_expr(value)
                                 .map(|name| CollationId::from(name.as_str()) as u16)
                                 .filter(|&id| id != 0);
-                            behavior.set_connection_collation(collation)
+                            match collation {
+                                Some(id) => behavior.set_session_var(
+                                    COLLATION_CONNECTION,
+                                    Some(collation_connection_value(id)),
+                                ),
+                                None => behavior.unsupported(true),
+                            }
                         }
                         "character_set_server" | "collation_server" => {
                             let _ = get_encoding_for_charset(value, var_name);
@@ -1090,14 +1139,22 @@ impl QueryHandler for MySqlQueryHandler {
                 )
                 .increment(1);
 
-                behavior = behavior
-                    .set_results_encoding(encoding)
-                    .set_client_encoding(encoding);
-                if encoding.is_some() {
-                    let collation = (collation != 0).then_some(collation);
-                    behavior = behavior
-                        .set_results_collation(collation)
-                        .set_connection_collation(collation);
+                behavior = behavior.set_client_encoding(encoding);
+                if let Some(encoding) = encoding {
+                    behavior = behavior.set_results_encoding(encoding).set_session_var(
+                        CHARACTER_SET_RESULTS,
+                        Some(character_set_results_value(encoding)),
+                    );
+                    if collation == 0 {
+                        behavior = behavior.unsupported(true);
+                    } else {
+                        behavior = behavior
+                            .set_results_collation(Some(collation))
+                            .set_session_var(
+                                COLLATION_CONNECTION,
+                                Some(collation_connection_value(collation)),
+                            );
+                    }
                 }
 
                 // MySQL derives result-set metadata collation ids from a statement-level SET
@@ -1291,14 +1348,18 @@ mod tests {
         );
     }
 
+    /// Charset names a client may set, each paired with the `character_set_results` value the
+    /// handler records for it, its encoding, and the charset's default collation id.
+    const CHARSET_NAMES: [(&str, &str, Encoding, u16); 4] = [
+        ("latin1", "latin1", Encoding::LATIN1, 8),
+        ("utf8", "utf8mb3", Encoding::Utf8Mb3, 33),
+        ("utf8mb4", "utf8mb4", Encoding::Utf8, 255),
+        ("utf8mb3", "utf8mb3", Encoding::Utf8Mb3, 33),
+    ];
+
     #[test]
     fn set_character_set_results_string_literal_supported() {
-        for (charset, encoding, collation) in [
-            ("latin1", Encoding::LATIN1, 8),
-            ("utf8", Encoding::Utf8Mb3, 33),
-            ("utf8mb4", Encoding::Utf8, 255),
-            ("utf8mb3", Encoding::Utf8Mb3, 33),
-        ] {
+        for (charset, recorded, encoding, collation) in CHARSET_NAMES {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
                     Variable {
@@ -1311,8 +1372,9 @@ mod tests {
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
                 SetBehavior::default()
-                    .set_results_encoding(Some(encoding))
                     .set_results_collation(Some(collation))
+                    .set_results_encoding(encoding)
+                    .set_session_var(CHARACTER_SET_RESULTS, Some(Literal::from(recorded)))
             )
         }
     }
@@ -1336,12 +1398,7 @@ mod tests {
 
     #[test]
     fn set_character_set_results_bare_name_supported() {
-        for (charset, encoding, collation) in [
-            ("latin1", Encoding::LATIN1, 8),
-            ("utf8", Encoding::Utf8Mb3, 33),
-            ("utf8mb4", Encoding::Utf8, 255),
-            ("utf8mb3", Encoding::Utf8Mb3, 33),
-        ] {
+        for (charset, recorded, encoding, collation) in CHARSET_NAMES {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(
                     Variable {
@@ -1357,8 +1414,9 @@ mod tests {
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
                 SetBehavior::default()
-                    .set_results_encoding(Some(encoding))
                     .set_results_collation(Some(collation))
+                    .set_results_encoding(encoding)
+                    .set_session_var(CHARACTER_SET_RESULTS, Some(Literal::from(recorded)))
             )
         }
     }
@@ -1392,10 +1450,17 @@ mod tests {
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
                 SetBehavior::default()
-                    .set_results_encoding(Some(encoding))
                     .set_client_encoding(Some(encoding))
                     .set_results_collation(Some(collation))
-                    .set_connection_collation(Some(collation))
+                    .set_results_encoding(encoding)
+                    .set_session_var(
+                        CHARACTER_SET_RESULTS,
+                        Some(character_set_results_value(encoding))
+                    )
+                    .set_session_var(
+                        COLLATION_CONNECTION,
+                        Some(collation_connection_value(collation))
+                    )
                     .upstream_rewrite(names_rewrite(charset))
             )
         }
@@ -1414,10 +1479,11 @@ mod tests {
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
                 SetBehavior::default()
-                    .set_results_encoding(Some(encoding))
                     .set_client_encoding(Some(encoding))
                     .set_results_collation(Some(collation_id))
-                    .set_connection_collation(Some(collation_id))
+                    .set_results_encoding(encoding)
+                    .set_session_var(CHARACTER_SET_RESULTS, Some(Literal::from(charset)))
+                    .set_session_var(COLLATION_CONNECTION, Some(Literal::from(collation)))
                     .upstream_rewrite(UpstreamSetRewrite::Rewrite(format!(
                         "SET NAMES '{charset}' COLLATE '{collation}', \
                          @@SESSION.character_set_client = 'utf8mb4'"
@@ -1515,7 +1581,8 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_connection_collation(Some(8))
+            SetBehavior::default()
+                .set_session_var(COLLATION_CONNECTION, Some(collation_connection_value(8)))
         )
     }
 
@@ -1529,7 +1596,8 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().set_connection_collation(Some(46))
+            SetBehavior::default()
+                .set_session_var(COLLATION_CONNECTION, Some(Literal::from("utf8mb4_bin")))
         )
     }
 
