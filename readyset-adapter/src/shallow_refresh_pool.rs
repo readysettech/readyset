@@ -13,7 +13,7 @@ use readyset_client::query::QueryId;
 use readyset_data::encoding::Encoding;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, Warnings};
-use readyset_sql::ast::SqlIdentifier;
+use readyset_sql::ast::{Literal, SqlIdentifier};
 use readyset_util::logging::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::{Mutex, RwLock};
@@ -280,8 +280,10 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
         // The connection's current results charset and collation. A fresh connection starts at
-        // the upstream default.
+        // the upstream default. A `None` collation is the collation the connection started with.
         let mut results_cs_coll = (Encoding::Utf8, None);
+        // The collation the connection started with, as reported by the upstream.
+        let mut initial_collation = None;
 
         loop {
             let request = match timeout(WORKER_TIMEOUT, rx.recv()).await {
@@ -324,10 +326,24 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                     None => Err(ReadySetError::InvalidUpstreamDatabase.into()),
                 };
                 match connected {
-                    Ok(conn) => {
-                        upstream = Some(conn);
-                        results_cs_coll = (Encoding::Utf8, None);
-                    }
+                    Ok(mut conn) => match conn.0.connection_collation().await {
+                        Ok(collation) => {
+                            upstream = Some(conn);
+                            results_cs_coll = (Encoding::Utf8, None);
+                            initial_collation = collation;
+                        }
+                        Err(e) => {
+                            rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
+                                warn!(
+                                    error = %e,
+                                    "Failed to read connection collation for shallow refresh",
+                                )
+                            });
+                            reconnect = true;
+                            Self::mark_idle(&pool, &rx, idx).await;
+                            continue;
+                        }
+                    },
                     Err(e) => {
                         rate_limit(true, ADAPTER_SHALLOW_REFRESH_OPEN, || {
                             warn!(
@@ -365,21 +381,28 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 continue;
             };
             if key_cs_coll != results_cs_coll {
-                let collation_name = key_cs_coll
-                    .1
-                    .map(|id| Collation::resolve(CollationId::from(id)).collation);
-                match conn
-                    .set_results_charset_and_collation(charset_name, collation_name)
-                    .await
-                {
+                let charset = Literal::String(charset_name.to_string());
+                let collation = match key_cs_coll.1 {
+                    Some(id) => Some(
+                        Collation::resolve(CollationId::from(id))
+                            .collation
+                            .to_string(),
+                    ),
+                    None => initial_collation.as_ref().map(|c| c.collation_name.clone()),
+                }
+                .map(Literal::String);
+                let mut vars = vec![("character_set_results", Some(&charset))];
+                if let Some(collation) = &collation {
+                    vars.push(("collation_connection", Some(collation)));
+                }
+                match conn.set_session_variables(&vars).await {
                     Ok(()) => results_cs_coll = key_cs_coll,
                     Err(e) => {
-                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_CHARSET, || {
+                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_SET_VARS, || {
                             warn!(
                                 error = %e,
-                                charset = charset_name,
-                                collation = collation_name,
-                                "Failed to set results charset for refresh",
+                                vars = ?vars,
+                                "Failed to set session variables for refresh",
                             )
                         });
                         reconnect = true;

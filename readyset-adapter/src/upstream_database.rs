@@ -11,7 +11,7 @@ use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash, Warning};
-use readyset_sql::ast::{Relation, SqlIdentifier};
+use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 
 use crate::shallow_key::ShallowKey;
@@ -323,14 +323,11 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Set the schema search path for future queries on the upstream database.
     async fn set_schema_search_path(&mut self, path: &[SqlIdentifier]) -> Result<(), Self::Error>;
 
-    /// Set the session's `character_set_results`, and its `collation_connection` when given, on
-    /// the upstream connection so result rows come back in the client's charset and string
-    /// comparison follows the client's collation. The default implementation is a no-op for
-    /// upstreams without those concepts.
-    async fn set_results_charset_and_collation(
+    /// Assign session variables on the upstream connection. A `None` value restores the variable's
+    /// default.
+    async fn set_session_variables(
         &mut self,
-        _charset: &str,
-        _collation: Option<&str>,
+        _vars: &[(&str, Option<&Literal>)],
     ) -> Result<(), Self::Error> {
         Ok(())
     }
@@ -383,6 +380,11 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Query the upstream's `interactive_timeout`, if it has one.
     async fn interactive_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Discover the connection's current collation, if available.
+    async fn connection_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
         Ok(None)
     }
 

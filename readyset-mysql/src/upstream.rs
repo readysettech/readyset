@@ -5,6 +5,7 @@ use std::io::{self, ErrorKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use metrics::gauge;
 use mysql_async::consts::{CapabilityFlags, Command, StatusFlags};
 use mysql_async::prelude::Queryable;
@@ -29,8 +30,8 @@ use readyset_data::upstream_system_props::{
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata, Warning};
-use readyset_sql::ast::{Relation, SqlIdentifier};
-use readyset_sql::Dialect;
+use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::hash::hash;
 use readyset_util::SizeOf;
 
@@ -802,21 +803,26 @@ impl UpstreamDatabase for MySqlUpstream {
         Ok(())
     }
 
-    async fn set_results_charset_and_collation(
+    async fn set_session_variables(
         &mut self,
-        charset: &str,
-        collation: Option<&str>,
+        vars: &[(&str, Option<&Literal>)],
     ) -> Result<(), Self::Error> {
-        if !valid_mysql_name(charset) || !collation.is_none_or(valid_mysql_name) {
-            internal!("invalid MySQL charset or collation name")
+        if vars.is_empty() {
+            return Ok(());
         }
-        let stmt = match collation {
-            Some(collation) => {
-                format!("SET character_set_results = {charset}, collation_connection = {collation}")
-            }
-            None => format!("SET character_set_results = {charset}"),
-        };
-        self.conn.query_drop(stmt).await?;
+        if vars.iter().any(|(name, _)| !valid_mysql_name(name)) {
+            internal!("invalid MySQL session variable name")
+        }
+        let assignments = vars
+            .iter()
+            .map(|(name, value)| match value {
+                Some(value) => format!("{name} = {}", value.display(Dialect::MySQL)),
+                None => format!("{name} = DEFAULT"),
+            })
+            .join(", ");
+        self.conn
+            .query_drop(format!("SET SESSION {assignments}"))
+            .await?;
         Ok(())
     }
 
@@ -995,6 +1001,10 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn interactive_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
         self.global_variable("interactive_timeout").await
+    }
+
+    async fn connection_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
+        Ok(Some(self.collation_for("collation_connection").await?))
     }
 
     async fn shallow_exec_meta(
