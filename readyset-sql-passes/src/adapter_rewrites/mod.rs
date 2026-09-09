@@ -35,7 +35,9 @@ use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
-use crate::rewrite_utils::{contains_placeholders, contains_question_mark_placeholders};
+use crate::rewrite_utils::{
+    contains_placeholders, contains_question_mark_placeholders, standardize_placeholders,
+};
 use crate::shallow::literalize_shallow_prepared;
 use crate::unnest_subqueries::{NonNullSchemaImpl, UnnestSubqueries as _};
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
@@ -245,7 +247,7 @@ fn rewrite_equivalent_parameters(
     let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
 
-    let reordered_placeholders = reorder_numbered_placeholders(query);
+    let reordered_placeholders = reorder_numbered_placeholders(query, client_params);
     trace!(
         parent: &span,
         pass="reorder_numbered_placeholders",
@@ -390,42 +392,44 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
     query.normalize_right_join()?;
     trace!(parent: &span, pass="normalize_right_join", query = %query.display(flags.dialect));
-    if !contains_question_mark_placeholders(query)? {
-        let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
-        trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
-        match invariants_ok {
-            Ok(_) => {
-                query.validate_query_semantics(flags.dialect)?;
-                trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
-                let nonnull_schema = NonNullSchemaImpl::from(&context);
-                let wrap_aliases = query.normalize_subquery_positions()?;
-                trace!(parent: &span, pass="normalize_subquery_positions", query = %query.display(flags.dialect));
-                query.rewrite_array_constructors(&context)?;
-                trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
-                let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
-                query.drop_redundant_join(&unique_cols_schema)?;
-                trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
-                query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?;
-                trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
-                query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?;
-                trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
-                // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
-                // derived_tables_rewrite brings the predicate into the same statement as the join
-                // while the LEFT-join promotion step can still see it, which is what a decorrelated
-                // query needs to reach the plan its own emitted text already produces.
-                query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?;
-                trace!(parent: &span, pass="inline_leading_derived_table_after_unnest", query = %query.display(flags.dialect));
-                query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
-                trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
-                query.query_optimization_rewrite(
-                    &context,
-                    OptimizationStrategy::HoistParametrizableFilters,
-                )?;
-                trace!(parent: &span, pass="query_optimization_rewrite", query = %query.display(flags.dialect));
-            }
-            Err(e) => {
-                warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
-            }
+    // Settle the placeholder spelling in the walk that used to only look for `?`, so every
+    // pass below sees one representation and a cache reaches the form its reads produce.
+    standardize_placeholders(query)?;
+    trace!(parent: &span, pass="standardize_placeholders", query = %query.display(flags.dialect));
+    let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
+    trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
+    match invariants_ok {
+        Ok(_) => {
+            query.validate_query_semantics(flags.dialect)?;
+            trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
+            let nonnull_schema = NonNullSchemaImpl::from(&context);
+            let wrap_aliases = query.normalize_subquery_positions()?;
+            trace!(parent: &span, pass="normalize_subquery_positions", query = %query.display(flags.dialect));
+            query.rewrite_array_constructors(&context)?;
+            trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
+            let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
+            query.drop_redundant_join(&unique_cols_schema)?;
+            trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
+            query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?;
+            trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
+            query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?;
+            trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
+            // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
+            // derived_tables_rewrite brings the predicate into the same statement as the join
+            // while the LEFT-join promotion step can still see it, which is what a decorrelated
+            // query needs to reach the plan its own emitted text already produces.
+            query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?;
+            trace!(parent: &span, pass="inline_leading_derived_table_after_unnest", query = %query.display(flags.dialect));
+            query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
+            trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
+            query.query_optimization_rewrite(
+                &context,
+                OptimizationStrategy::HoistParametrizableFilters,
+            )?;
+            trace!(parent: &span, pass="query_optimization_rewrite", query = %query.display(flags.dialect));
+        }
+        Err(e) => {
+            warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
         }
     }
     query.order_limit_removal(&context)?;
@@ -1456,7 +1460,10 @@ impl<'ast> VisitorMut<'ast> for ReorderNumberedPlaceholdersVisitor {
     }
 }
 
-fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usize>> {
+fn reorder_numbered_placeholders(
+    query: &mut SelectStatement,
+    client_params: u16,
+) -> Option<Vec<usize>> {
     let mut visitor = ReorderNumberedPlaceholdersVisitor {
         current: 1,
         out: vec![],
@@ -1464,19 +1471,14 @@ fn reorder_numbered_placeholders(query: &mut SelectStatement) -> Option<Vec<usiz
 
     let Ok(()) = visitor.visit_select_statement(query);
 
-    // As an optimization, check if the placeholders were *already* ordered and contiguous, and
-    // return None if so. This allows us to save some clones on the actual read-path.
-    let mut contiguous = true;
-    let mut prev = *visitor.out.first()?;
-    for n in &visitor.out {
-        if prev + 1 != *n {
-            contiguous = false;
-            break;
-        }
-        prev = *n;
+    // When each of the client's values fills exactly one placeholder, in order, the values need no
+    // reordering, which saves the read path a clone of every one of them. A placeholder a pass
+    // dropped leaves its value behind, and only the map discards it.
+    if visitor.out.is_empty() || visitor.out.iter().copied().eq(0..client_params as usize) {
+        None
+    } else {
+        Some(visitor.out)
     }
-
-    if contiguous { None } else { Some(visitor.out) }
 }
 
 /// Reorder the values in `params` according to `order_map`. `order_map` is a slice of indices where
@@ -3795,6 +3797,248 @@ mod tests {
             .user_param_placeholders()
             .unwrap_err();
             assert!(err.is_unsupported(), "{err}");
+        }
+
+        /// Values already in the order the placeholders are walked are used as they come, and a
+        /// placeholder a pass dropped keeps the map, which leaves its value out of the key.
+        #[test]
+        fn values_in_walk_order_are_not_reordered() {
+            let rewritten = |text: &str, dialect| {
+                let mut query = parse_select_statement(text, dialect);
+                rewrite_query(
+                    &mut query,
+                    rewrite_params(dialect),
+                    rewrite_context(dialect),
+                )
+                .expect("Should be able to rewrite query")
+            };
+            let in_order = rewritten(
+                "SELECT t.x FROM t WHERE t.x = ? AND t.y = ?",
+                Dialect::MySQL,
+            );
+            assert_eq!(in_order.reordered_placeholders, None);
+            let reversed = rewritten(
+                "SELECT t.x FROM t WHERE t.x = $2 AND t.y = $1",
+                Dialect::PostgreSQL,
+            );
+            assert_eq!(reversed.reordered_placeholders, Some(vec![1, 0]));
+            let dropped = rewritten(
+                "SELECT t.x FROM t WHERE t.x = ? AND EXISTS (SELECT count(*) FROM t2 WHERE t2.y = ?)",
+                Dialect::MySQL,
+            );
+            let values = [DfValue::from(1), DfValue::from(2)];
+            assert_eq!(
+                dropped.make_keys(&values).unwrap(),
+                vec![Cow::Borrowed(&values[..1])]
+            );
+        }
+
+        /// A cache and a read of one query must reach the same form, or the cache never serves.
+        mod placeholder_spelling {
+            use pretty_assertions::assert_eq;
+
+            use super::*;
+            use crate::rewrite_utils::standardize_placeholders;
+
+            const SHAPES: &[(&str, &str, &str)] = &[
+                (
+                    "equality predicate",
+                    "SELECT t.x FROM t WHERE t.y = {p}",
+                    "1",
+                ),
+                ("range predicate", "SELECT t.x FROM t WHERE t.y > {p}", "1"),
+                (
+                    "two parameters",
+                    "SELECT t.x FROM t WHERE t.x = {p} AND t.y = {p}",
+                    "1",
+                ),
+                (
+                    "having over an aliased count",
+                    "SELECT t.x, COUNT(*) AS c FROM t WHERE t.y = {p} GROUP BY t.x \
+                     HAVING COUNT(*) > 1",
+                    "1",
+                ),
+                (
+                    "having over an aliased sum",
+                    "SELECT t.x, SUM(t.y) AS s FROM t WHERE t.x = {p} GROUP BY t.x \
+                     HAVING SUM(t.y) > 10",
+                    "1",
+                ),
+                (
+                    "order by an aggregate",
+                    "SELECT t.x, COUNT(*) AS c FROM t WHERE t.y = {p} GROUP BY t.x \
+                     ORDER BY COUNT(*) DESC",
+                    "1",
+                ),
+                (
+                    "having and order by together",
+                    "SELECT t.x, COUNT(*) AS c FROM t WHERE t.y = {p} GROUP BY t.x \
+                     HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC",
+                    "1",
+                ),
+                (
+                    "join",
+                    "SELECT t.x FROM t JOIN t2 ON t.x = t2.x WHERE t.y = {p}",
+                    "1",
+                ),
+                (
+                    "left join",
+                    "SELECT t.x FROM t LEFT JOIN t2 ON t.x = t2.x WHERE t.y = {p}",
+                    "1",
+                ),
+                (
+                    "in subquery",
+                    "SELECT t.x FROM t WHERE t.x IN (SELECT t2.x FROM t2 WHERE t2.z = {p})",
+                    "1",
+                ),
+                (
+                    "exists subquery",
+                    "SELECT t.x FROM t WHERE EXISTS \
+                     (SELECT t2.x FROM t2 WHERE t2.x = t.x AND t2.z = {p})",
+                    "1",
+                ),
+                (
+                    "derived table",
+                    "SELECT d.x FROM (SELECT t.x AS x, COUNT(*) AS c FROM t GROUP BY t.x) d \
+                     WHERE d.x = {p}",
+                    "1",
+                ),
+                (
+                    "distinct",
+                    "SELECT DISTINCT t.y FROM t WHERE t.x = {p}",
+                    "1",
+                ),
+                (
+                    "limit",
+                    "SELECT t.x FROM t WHERE t.y = {p} ORDER BY t.x DESC LIMIT 2",
+                    "1",
+                ),
+            ];
+
+            fn spell_placeholders(template: &str, dialect: Dialect) -> String {
+                let mut out = String::new();
+                let mut rest = template;
+                let mut n = 1;
+                while let Some(at) = rest.find("{p}") {
+                    out.push_str(&rest[..at]);
+                    match dialect {
+                        Dialect::MySQL => out.push('?'),
+                        Dialect::PostgreSQL => out.push_str(&format!("${n}")),
+                    }
+                    n += 1;
+                    rest = &rest[at + "{p}".len()..];
+                }
+                out.push_str(rest);
+                out
+            }
+
+            fn canonical_form(query: &str, dialect: Dialect) -> String {
+                let mut query = parse_select_statement(query, dialect);
+                match rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(dialect),
+                    rewrite_context(dialect),
+                ) {
+                    Ok(_) => query.display(dialect).to_string(),
+                    Err(e) => format!("<no cache: {e}>"),
+                }
+            }
+
+            #[test]
+            fn a_placeholder_and_a_literal_agree() {
+                let mut divergent = Vec::new();
+                for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+                    for (shape, template, literal) in SHAPES {
+                        let cache = canonical_form(&spell_placeholders(template, dialect), dialect);
+                        let read = canonical_form(&template.replace("{p}", literal), dialect);
+                        if cache != read {
+                            divergent.push(format!(
+                                "{dialect} {shape}\n     cache: {cache}\n      read: {read}"
+                            ));
+                        }
+                    }
+                }
+                assert_eq!(divergent, Vec::<String>::new());
+            }
+
+            #[test]
+            fn question_marks_are_numbered_in_the_order_they_are_written() {
+                let mut query =
+                    parse_select_statement_mysql("SELECT t.x FROM t WHERE t.x = ? AND t.y = ?");
+
+                standardize_placeholders(&mut query).unwrap();
+                assert_eq!(
+                    query.display(Dialect::MySQL).to_string(),
+                    parse_select_statement_mysql("SELECT t.x FROM t WHERE t.x = $1 AND t.y = $2")
+                        .display(Dialect::MySQL)
+                        .to_string()
+                );
+            }
+
+            #[test]
+            fn a_numbering_the_author_wrote_is_left_alone() {
+                let sql = "SELECT t.x FROM t WHERE t.x = $2 AND t.y = $1";
+                let mut query = parse_select_statement_postgres(sql);
+
+                standardize_placeholders(&mut query).unwrap();
+                assert_eq!(
+                    query.display(Dialect::PostgreSQL).to_string(),
+                    parse_select_statement_postgres(sql)
+                        .display(Dialect::PostgreSQL)
+                        .to_string()
+                );
+            }
+
+            /// Only nom accepts the text of a mixed statement, so the spellings are mixed in the
+            /// tree.
+            #[test]
+            fn a_statement_mixing_the_spellings_is_refused() {
+                struct QuestionFirst(bool);
+                impl<'ast> VisitorMut<'ast> for QuestionFirst {
+                    type Error = std::convert::Infallible;
+                    fn visit_literal(
+                        &mut self,
+                        literal: &'ast mut Literal,
+                    ) -> Result<(), Self::Error> {
+                        if !self.0
+                            && let Literal::Placeholder(item) = literal
+                        {
+                            *item = ItemPlaceholder::QuestionMark;
+                            self.0 = true;
+                        }
+                        Ok(())
+                    }
+                }
+                let mut query = parse_select_statement_postgres(
+                    "SELECT t.x FROM t WHERE t.x = $1 AND t.y = $2",
+                );
+                let Ok(()) = QuestionFirst(false).visit_select_statement(&mut query);
+
+                let result = standardize_placeholders(&mut query);
+                assert!(
+                    matches!(result, Err(readyset_errors::ReadySetError::Unsupported(_))),
+                    "{result:?}"
+                );
+            }
+
+            /// The reorder map is 0-based positions into the values the client binds.
+            #[test]
+            fn an_out_of_order_numbering_still_remaps_the_bind_order() {
+                let dialect = Dialect::PostgreSQL;
+                let mut query = parse_select_statement(
+                    "SELECT t.x FROM t WHERE t.x = $2 AND t.y = $1",
+                    dialect,
+                );
+
+                let params = rewrite_equivalent_deep(
+                    &mut query,
+                    rewrite_params(dialect),
+                    rewrite_context(dialect),
+                )
+                .expect("rewrite should succeed");
+
+                assert_eq!(params.reordered_placeholders, Some(vec![1, 0]));
+            }
         }
     }
 

@@ -9,8 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_2`, `column_1`) VALUES (0, 1), (1, 138072667), (2, 2), (3, 1834787048), (4, 0), (5, -707738993), (6, 1), (7, -1647468289), (8, 2), (9, 911226849)
 
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -26,8 +25,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 2
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -43,8 +41,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 2
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -60,8 +57,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 2
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -69,8 +65,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1834787048
 911226849
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -78,8 +73,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1834787048
 911226849
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -87,8 +81,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1834787048
 911226849
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -97,8 +90,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 ----
 
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -107,8 +99,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 ----
 
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -138,7 +129,7 @@ DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -148,7 +139,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -158,7 +149,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE `table_1`.`column_1` IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -168,28 +159,27 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 2
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 911226849
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 911226849
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 911226849
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -198,8 +188,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 ----
 
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1
@@ -208,8 +197,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 ----
 
 
-# REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` IN (?, ?, ?) AND (`table_1`.`column_1` > ?))
 ? = 0
 ? = 1

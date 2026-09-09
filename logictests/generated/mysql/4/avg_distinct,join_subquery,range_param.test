@@ -31,7 +31,7 @@ SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -53,7 +53,7 @@ SELECT avg(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN
 ----
 NULL
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Self\-joins using the same column are unsupported|AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -107,7 +107,7 @@ SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT avg(d
 ----
 
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Self\-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -126,7 +126,7 @@ SELECT avg(distinct `table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN
 ----
 NULL
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Self\-joins using the same column are unsupported|AVG\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 SELECT avg(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----

@@ -4026,6 +4026,26 @@ impl<'ast> Visitor<'ast> for PlaceholderVisitor {
     }
 }
 
+struct StandardizePlaceholdersVisitor {
+    next_param_number: u32,
+    kept_number: bool,
+}
+
+impl<'ast> VisitorMut<'ast> for StandardizePlaceholdersVisitor {
+    type Error = ReadySetError;
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        match literal {
+            Literal::Placeholder(item @ ItemPlaceholder::QuestionMark) => {
+                *item = ItemPlaceholder::DollarNumber(self.next_param_number);
+                self.next_param_number += 1;
+            }
+            Literal::Placeholder(_) => self.kept_number = true,
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
 fn contains(query: &SelectStatement, question_mark_only: bool) -> ReadySetResult<bool> {
     let mut visitor = PlaceholderVisitor {
         found: false,
@@ -4033,6 +4053,30 @@ fn contains(query: &SelectStatement, question_mark_only: bool) -> ReadySetResult
     };
     visitor.visit_select_statement(query)?;
     Ok(visitor.found)
+}
+
+/// Settle the dialect's placeholder spelling.
+///
+/// `?` becomes `$1..$n` in the order the AST visitor reaches the placeholders, the order
+/// `number_placeholders` assigns too, so each bound value keeps its position. Existing `$n` keep
+/// their numbers, leaving the ordering the author chose for `reorder_numbered_placeholders` to
+/// capture once the rewrite passes have finished moving predicates around. A statement holding both
+/// spellings is refused: no client writes one, and a converted `?` could land on a number the
+/// author already used.
+///
+/// Running this before the pipeline means no later pass has to know which dialect wrote the
+/// statement, and a cache and a read of the same query reach the same form whichever spelling
+/// each used.
+pub(crate) fn standardize_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
+    let mut visitor = StandardizePlaceholdersVisitor {
+        next_param_number: 1,
+        kept_number: false,
+    };
+    visitor.visit_select_statement(query)?;
+    if visitor.next_param_number > 1 && visitor.kept_number {
+        unsupported!("a statement mixing `?` with numbered placeholders");
+    }
+    Ok(())
 }
 
 pub(crate) fn contains_question_mark_placeholders(query: &SelectStatement) -> ReadySetResult<bool> {

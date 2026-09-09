@@ -1,0 +1,67 @@
+# Shapes written with `?` reach the same plan as the same query written with literals.
+
+statement ok
+CREATE TABLE authors (id int primary key, name text);
+
+statement ok
+CREATE TABLE books (id int primary key, author_id int, rating int);
+
+statement ok
+INSERT INTO authors (id, name) VALUES (1, 'ada'), (2, 'bob');
+
+statement ok
+INSERT INTO books (id, author_id, rating) VALUES (1, 1, 5), (2, 1, 5), (3, 2, 5), (4, 2, 3);
+
+query I rowsort
+SELECT books.id FROM books JOIN authors ON books.author_id = authors.id WHERE books.rating = ?;
+? = 5
+----
+1
+2
+3
+
+query II nosort
+SELECT author_id, COUNT(*) AS c FROM books WHERE rating = ? GROUP BY author_id HAVING COUNT(*) > 1;
+? = 5
+----
+1
+2
+
+query II nosort
+SELECT author_id, COUNT(*) AS c FROM books WHERE rating = ? GROUP BY author_id ORDER BY COUNT(*) DESC;
+? = 5
+----
+1
+2
+2
+1
+
+query II nosort
+SELECT t.author_id, t.c FROM (SELECT author_id, COUNT(*) AS c FROM books GROUP BY author_id) t WHERE t.author_id = ?;
+? = 1
+----
+1
+2
+
+query I rowsort
+SELECT id FROM books WHERE author_id IN (SELECT id FROM authors WHERE name = ?);
+? = ada
+----
+1
+2
+
+query I rowsort
+SELECT id FROM books WHERE author_id = ? AND rating = ?;
+? = 1
+? = 5
+----
+1
+2
+
+query I rowsort
+SELECT id FROM books WHERE rating > ?;
+? = 3
+----
+1
+2
+3

@@ -48,7 +48,7 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_1 FROM table_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -86,7 +86,7 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -152,7 +152,7 @@ SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT 1 AS alias_1)
 1
 1
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Self\-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT table_1.column_1 AS alias_3 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_1 FROM table_1) AS alias_2 ON (table_1.column_1 = alias_2.alias_1) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
@@ -182,7 +182,7 @@ SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT 1 AS alias_2) AS alias_3 ON 
 1
 1
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Self\-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
 SELECT 1 AS alias_1 FROM table_1 INNER JOIN (SELECT table_1.column_1 AS alias_2 FROM table_1) AS alias_3 ON (table_1.column_1 = alias_3.alias_2) WHERE table_1.column_1 IN (?, ?, ?)
 ? = 0
 ? = 1
