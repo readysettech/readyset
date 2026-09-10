@@ -79,9 +79,9 @@ const PG_SYSTEM_SCHEMAS: &[&str] = &["information_schema", "readyset"];
 /// function only under-caches, whereas a wrongly-included non-deterministic one
 /// would serve stale results.
 /// Deliberately excluded are functions that vary with `lc_time_names` or
-/// `lc_numeric` (`date_format`, `str_to_date`, `dayname`, `format`), the session
-/// time zone (`from_unixtime`, `convert_tz`), or a session variable
-/// (`week`/`yearweek` honor `default_week_format`). Standard-SQL keyword
+/// `lc_numeric` (`str_to_date`, `format`), the session time zone
+/// (`from_unixtime`, `convert_tz`), or a session variable (`week`/`yearweek`
+/// honor `default_week_format`). Standard-SQL keyword
 /// functions (`cast`, `coalesce`, `greatest`, ...) are handled by
 /// [`is_keyword_function`]. Not exhaustive by design.
 const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
@@ -170,14 +170,16 @@ const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     "ifnull",
     "interval",
     "isnull",
-    // Date/time arithmetic and extraction (no clock, locale, or time zone).
+    // Date/time arithmetic, extraction, and formatting (no clock or time zone).
     "adddate",
     "addtime",
     "date",
     "date_add",
+    "date_format",
     "date_sub",
     "datediff",
     "day",
+    "dayname",
     "dayofmonth",
     "dayofweek",
     "dayofyear",
@@ -189,6 +191,7 @@ const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     "microsecond",
     "minute",
     "month",
+    "monthname",
     "period_add",
     "period_diff",
     "quarter",
@@ -2306,6 +2309,7 @@ mod tests {
             "SELECT inet_aton(ip), hex(x) FROM t",
             "SELECT version(), icu_version()",
             "SELECT group_concat(s) FROM t",
+            "SELECT date_format(d, '%W'), dayname(d), monthname(d) FROM t",
         ] {
             assert_eligible(Dialect::MySQL, q);
         }
@@ -2315,13 +2319,12 @@ mod tests {
     fn mysql_non_immutable_builtins_are_denied() {
         // Under default-deny, a recognized MySQL builtin absent from the
         // immutable allow-list is denied even when it is on no curated denylist.
-        // Each of these varies with the session locale, time zone, or a session
-        // variable -- a denylist would have silently cached them, serving stale
-        // or cross-session results.
+        // Each of these varies with the session time zone or a session variable
+        // -- a denylist would have silently cached them, serving stale or
+        // cross-session results.
         for q in [
             "SELECT from_unixtime(t) FROM foo", // session time zone
             "SELECT convert_tz(t, '+00:00', '+09:00') FROM foo", // time-zone tables
-            "SELECT date_format(d, '%W') FROM foo", // lc_time_names
             "SELECT week(d) FROM foo",          // default_week_format
         ] {
             assert_rejected(Dialect::MySQL, q, REASON_BUILTIN_NOT_ALLOWED);

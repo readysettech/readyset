@@ -24,7 +24,27 @@ use tracing::warn;
 
 /// Session variables that change a query's result. The shallow cache keys entries on their
 /// values, and refresh workers set them before rerunning a query.
-const CACHE_KEYED_VARIABLES: [&str; 2] = ["group_concat_max_len", "sql_select_limit"];
+const CACHE_KEYED_VARIABLES: [&str; 3] =
+    ["group_concat_max_len", "lc_time_names", "sql_select_limit"];
+
+/// Return the canonical form of a cache keyed variable's value, so spellings the upstream treats
+/// alike share a cache key.
+fn cache_key_value(var: &str, value: Literal) -> Literal {
+    match value {
+        // MySQL matches locale names case-insensitively and reports them in the form `fr_FR`.
+        Literal::String(locale) if var == "lc_time_names" => {
+            Literal::String(match locale.split_once('_') {
+                Some((language, region)) => format!(
+                    "{}_{}",
+                    language.to_ascii_lowercase(),
+                    region.to_ascii_uppercase()
+                ),
+                None => locale.to_ascii_lowercase(),
+            })
+        }
+        value => value,
+    }
+}
 
 /// The session variable naming the charset into which the upstream converts result text.
 pub(crate) const CHARACTER_SET_RESULTS: &str = "character_set_results";
@@ -530,7 +550,6 @@ lazy_static! {
         "keyring_operations",
         "last_insert_id",
         "lc_messages",
-        "lc_time_names",
         "local_infile",
         "lock_wait_timeout",
         "log_bin_trust_function_creators",
@@ -1105,14 +1124,20 @@ impl QueryHandler for MySqlQueryHandler {
                                 behavior
                             } else {
                                 match value {
-                                    Expr::Literal(literal) => {
-                                        behavior.set_session_var(p, Some(literal.clone()))
-                                    }
+                                    Expr::Literal(literal) => behavior.set_session_var(
+                                        p,
+                                        Some(cache_key_value(p, literal.clone())),
+                                    ),
                                     Expr::Column(Column { name, table: None })
                                         if name.eq_ignore_ascii_case("default") =>
                                     {
                                         behavior.set_session_var(p, None)
                                     }
+                                    Expr::Column(Column { name, table: None }) => behavior
+                                        .set_session_var(
+                                            p,
+                                            Some(cache_key_value(p, Literal::from(name.as_str()))),
+                                        ),
                                     _ => behavior.unsupported(true),
                                 }
                             }
@@ -1679,6 +1704,41 @@ mod tests {
             MySqlQueryHandler::handle_set_statement(&stmt),
             SetBehavior::default().set_session_var("sql_select_limit", None)
         )
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_identifier_is_tracked_as_string() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("lc_time_names"),
+                Expr::Column(Column {
+                    name: "En_us".into(),
+                    table: None,
+                }),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_session_var("lc_time_names", Some(Literal::from("en_US")))
+        )
+    }
+
+    #[test]
+    fn set_lc_time_names_is_normalized() {
+        for locale in ["fr_FR", "fr_fr", "Fr_fr", "FR_FR"] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    session_var("lc_time_names"),
+                    Expr::Literal(Literal::from(locale)),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default()
+                    .set_session_var("lc_time_names", Some(Literal::from("fr_FR"))),
+                "{locale}"
+            )
+        }
     }
 
     #[test]

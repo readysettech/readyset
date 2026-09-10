@@ -128,6 +128,39 @@ async fn group_concat_max_len_partitions_entries() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
+async fn lc_time_names_partitions_entries() {
+    const QUERY: &str = "SELECT DATE_FORMAT('2000-01-01', '%W') FROM t WHERE id = 1";
+    let (mut a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    let day: String = a.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(day, "Saturday");
+    assert_filled(&mut a).await;
+
+    let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
+    b.query_drop("SET lc_time_names = fr_FR").await.unwrap();
+    let day: String = b.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(day, "samedi");
+    assert_filled(&mut b).await;
+    let day: String = b.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(day, "samedi");
+    assert_hit(&mut b).await;
+
+    let mut c = mysql_async::Conn::new(opts).await.unwrap();
+    c.query_drop("SET lc_time_names = 'Fr_fr'").await.unwrap();
+    let day: String = c.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(day, "samedi");
+    assert_hit(&mut c).await;
+
+    let day: String = a.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(day, "Saturday");
+    assert_hit(&mut a).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
 async fn sql_select_limit_survives_refresh() {
     const QUERY: &str = "SELECT id FROM t ORDER BY id DESC";
     let (mut a, mut upstream, opts, _handle, shutdown_tx) =
