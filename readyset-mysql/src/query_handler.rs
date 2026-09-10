@@ -24,8 +24,17 @@ use tracing::warn;
 
 /// Session variables that change a query's result. The shallow cache keys entries on their
 /// values, and refresh workers set them before rerunning a query.
-const CACHE_KEYED_VARIABLES: [&str; 3] =
-    ["group_concat_max_len", "lc_time_names", "sql_select_limit"];
+const CACHE_KEYED_VARIABLES: [&str; 8] = [
+    "block_encryption_mode",
+    "default_week_format",
+    "div_precision_increment",
+    "group_concat_max_len",
+    "lc_time_names",
+    // MySQL 8.4 sorts on full values, so this only changes results on older upstreams.
+    "max_sort_length",
+    "sql_select_limit",
+    "windowing_use_high_precision",
+];
 
 /// Return the canonical form of a cache keyed variable's value, so spellings the upstream treats
 /// alike share a cache key.
@@ -42,7 +51,30 @@ fn cache_key_value(var: &str, value: Literal) -> Literal {
                 None => locale.to_ascii_lowercase(),
             })
         }
+        // MySQL matches encryption modes case-insensitively and reports them in lowercase.
+        Literal::String(mode) if var == "block_encryption_mode" => {
+            Literal::String(mode.to_ascii_lowercase())
+        }
+        value if var == "windowing_use_high_precision" => {
+            boolean_value(&value).map_or(value, Literal::Boolean)
+        }
         value => value,
+    }
+}
+
+/// Return the value of a boolean system variable setting, if the literal is one MySQL accepts.
+fn boolean_value(value: &Literal) -> Option<bool> {
+    match value {
+        Literal::Boolean(b) => Some(*b),
+        Literal::Integer(0) | Literal::UnsignedInteger(0) => Some(false),
+        Literal::Integer(1) | Literal::UnsignedInteger(1) => Some(true),
+        Literal::String(s) if s.eq_ignore_ascii_case("on") || s.eq_ignore_ascii_case("true") => {
+            Some(true)
+        }
+        Literal::String(s) if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("false") => {
+            Some(false)
+        }
+        _ => None,
     }
 }
 
@@ -275,7 +307,6 @@ lazy_static! {
         "binlog_transaction_compression_level_zstd",
         "binlog_transaction_dependency_history_size",
         "binlog_transaction_dependency_tracking",
-        "block_encryption_mode",
         "bulk_insert_buffer_size",
         "character_set_database",
         "character_set_filesystem",
@@ -311,12 +342,10 @@ lazy_static! {
         "default_storage_engine",
         "default_table_encryption",
         "default_tmp_storage_engine",
-        "default_week_format",
         "delay_key_write",
         "delayed_insert_limit",
         "delayed_insert_timeout",
         "delayed_queue_size",
-        "div_precision_increment",
         "dragnet.log_error_filter_rules",
         "end_markers_in_json",
         "enforce_gtid_consistency",
@@ -593,7 +622,6 @@ lazy_static! {
         "max_prepared_stmt_count",
         "max_relay_log_size",
         "max_seeks_for_key",
-        "max_sort_length",
         "max_sp_recursion_depth",
         "max_user_connections",
         "max_write_lock_count",
@@ -880,7 +908,6 @@ lazy_static! {
         "validate_password_special_char_count",
         "version_tokens_session",
         "wait_timeout",
-        "windowing_use_high_precision",
         "xa_detach_on_prepare"
     ]);
 }
@@ -1741,6 +1768,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn set_block_encryption_mode_is_normalized() {
+        for mode in ["aes-256-cbc", "AES-256-CBC", "Aes-256-Cbc"] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    session_var("block_encryption_mode"),
+                    Expr::Literal(Literal::from(mode)),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default()
+                    .set_session_var("block_encryption_mode", Some(Literal::from("aes-256-cbc"))),
+                "{mode}"
+            )
+        }
+    }
+
+    #[test]
+    fn set_windowing_use_high_precision_is_normalized() {
+        for (value, expected) in [
+            (Literal::Boolean(false), false),
+            (Literal::Integer(0), false),
+            (Literal::UnsignedInteger(1), true),
+            (Literal::from("ON"), true),
+            (Literal::from("off"), false),
+            (Literal::from("True"), true),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(
+                    session_var("windowing_use_high_precision"),
+                    Expr::Literal(value.clone()),
+                )],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().set_session_var(
+                    "windowing_use_high_precision",
+                    Some(Literal::Boolean(expected))
+                ),
+                "{value:?}"
+            )
+        }
+    }
     #[test]
     fn set_cache_keyed_variable_expression_unsupported() {
         let stmt = SetStatement::Variable(SetVariables {
