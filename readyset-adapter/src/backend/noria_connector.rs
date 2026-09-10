@@ -556,15 +556,6 @@ impl NoriaConnector {
         self.inner.noria.verbose_views(query_id, name).await
     }
 
-    pub(crate) async fn list_create_cache_stmts(&mut self) -> ReadySetResult<Vec<String>> {
-        Ok(self
-            .verbose_views(None, None)
-            .await?
-            .into_iter()
-            .map(|stmt| stmt.display(self.parse_dialect).to_string())
-            .collect())
-    }
-
     pub(crate) fn rewrite_params(&self) -> AdapterRewriteParams {
         self.inner.rewrite_params
     }

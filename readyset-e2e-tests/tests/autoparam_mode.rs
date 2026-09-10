@@ -621,6 +621,48 @@ async fn show_caches_names_a_cache_that_keeps_its_literals() {
     shutdown_tx.shutdown().await;
 }
 
+/// `EXPLAIN CACHES` writes the option back into each reconstructed statement, so replaying its
+/// output recreates a cache that keeps its literals as one that keeps them.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn explain_caches_names_a_cache_that_keeps_its_literals() {
+    let (mut rs_conn, _upstream, _handle, shutdown_tx) =
+        adapter("autoparam_explain_caches", T).await;
+
+    rs_conn
+        .query_drop(
+            "CREATE CACHE kept WITH (AUTOPARAM OFF) \
+             FROM SELECT v FROM t WHERE id = ? AND status = 'active'",
+        )
+        .await
+        .unwrap();
+    rs_conn
+        .query_drop("CREATE CACHE plain FROM SELECT v FROM t WHERE id = ? AND status = ?")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let rows: Vec<String> = rs_conn.query("EXPLAIN CACHES").await.unwrap();
+    let statement = |name: &str| {
+        rows.iter()
+            .find(|s| s.contains(&format!("`{name}`")))
+            .unwrap_or_else(|| panic!("{name} is not listed in {rows:?}"))
+    };
+    assert!(
+        statement("kept").contains("WITH (AUTOPARAM OFF)"),
+        "expected the option to be listed, got {:?}",
+        statement("kept")
+    );
+    assert!(
+        !statement("plain").contains("AUTOPARAM"),
+        "a cache that parameterizes lists no option, got {:?}",
+        statement("plain")
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// A query reaches the status cache already rewritten, so naming one by id leaves no literals for
 /// `AUTOPARAM OFF` to keep. The statement is refused rather than built as an ordinary cache.
 #[tokio::test]

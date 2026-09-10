@@ -2012,10 +2012,15 @@ where
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
         let mut results: Vec<Vec<DfValue>> = connectors
             .noria
-            .list_create_cache_stmts()
+            .verbose_views(None, None)
             .await?
             .into_iter()
-            .map(|s| vec![DfValue::from(s)])
+            .map(|view| {
+                let off = state.query_status_cache.keeps_literals_inline(&view.name);
+                let mut create = CreateCacheStatement::from(view);
+                create.autoparam.off = off;
+                vec![DfValue::from(create.display(DB::SQL_DIALECT).to_string())]
+            })
             .collect();
         results.extend(
             state
