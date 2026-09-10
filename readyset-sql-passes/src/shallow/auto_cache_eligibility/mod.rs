@@ -81,11 +81,9 @@ const PG_SYSTEM_SCHEMAS: &[&str] = &["information_schema", "readyset"];
 /// Deliberately excluded are functions that vary with `lc_time_names` or
 /// `lc_numeric` (`date_format`, `str_to_date`, `dayname`, `format`), the session
 /// time zone (`from_unixtime`, `convert_tz`), or a session variable
-/// (`week`/`yearweek` honor `default_week_format`; `group_concat` is instead
-/// in [`MYSQL_SESSION_SPECIFIC_FUNCTIONS`], since it honors
-/// `group_concat_max_len`). Standard-SQL keyword functions (`cast`, `coalesce`,
-/// `greatest`, ...) are handled by [`is_keyword_function`]. Not exhaustive by
-/// design.
+/// (`week`/`yearweek` honor `default_week_format`). Standard-SQL keyword
+/// functions (`cast`, `coalesce`, `greatest`, ...) are handled by
+/// [`is_keyword_function`]. Not exhaustive by design.
 const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     // Numeric and mathematical.
     "abs",
@@ -257,6 +255,7 @@ const MYSQL_IMMUTABLE_FUNCTIONS: &[&str] = &[
     "bit_or",
     "bit_xor",
     "count",
+    "group_concat",
     "json_arrayagg",
     "json_objectagg",
     "max",
@@ -319,10 +318,9 @@ const MYSQL_NONDETERMINISTIC_FUNCTIONS: &[&str] = &[
 ];
 
 /// MySQL builtins whose result depends on session identity (current user, role,
-/// database, schema), privileges, or a session-scoped setting (`group_concat`
-/// honors `group_concat_max_len`, truncating its result under a limit that
-/// differs by session). Caching one would serve another session's value;
-/// `--shallow-cache-allow-session-specific` opts into caching these.
+/// database, schema), privileges, or a session-scoped setting. Caching one would
+/// serve another session's value; `--shallow-cache-allow-session-specific` opts
+/// into caching these.
 const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "user",
     "current_user",
@@ -339,7 +337,6 @@ const MYSQL_SESSION_SPECIFIC_FUNCTIONS: &[&str] = &[
     "charset",
     "collation",
     "coercibility",
-    "group_concat",
 ];
 
 /// MySQL side-effecting or blocking builtins. Under default-deny these are
@@ -2109,7 +2106,6 @@ mod tests {
             "SELECT CHARSET('x')",
             "SELECT COLLATION('x')",
             "SELECT COERCIBILITY('x')",
-            "SELECT GROUP_CONCAT(comment) FROM book_reviews", // group_concat_max_len
         ] {
             assert_rejected(Dialect::MySQL, q, REASON_SESSION_SPECIFIC);
         }
@@ -2225,13 +2221,6 @@ mod tests {
         );
         assert!(skip_reason_allow_session_specific(Dialect::MySQL, "SELECT DATABASE()").is_none());
         assert!(
-            skip_reason_allow_session_specific(
-                Dialect::MySQL,
-                "SELECT GROUP_CONCAT(comment) FROM book_reviews"
-            )
-            .is_none()
-        );
-        assert!(
             skip_reason_allow_session_specific(Dialect::PostgreSQL, "SELECT current_user")
                 .is_none()
         );
@@ -2316,6 +2305,7 @@ mod tests {
             "SELECT json_extract(doc, '$.k'), json_length(doc) FROM t",
             "SELECT inet_aton(ip), hex(x) FROM t",
             "SELECT version(), icu_version()",
+            "SELECT group_concat(s) FROM t",
         ] {
             assert_eligible(Dialect::MySQL, q);
         }

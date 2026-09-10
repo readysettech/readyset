@@ -24,7 +24,7 @@ use tracing::warn;
 
 /// Session variables that change a query's result. The shallow cache keys entries on their
 /// values, and refresh workers set them before rerunning a query.
-const CACHE_KEYED_VARIABLES: [&str; 1] = ["sql_select_limit"];
+const CACHE_KEYED_VARIABLES: [&str; 2] = ["group_concat_max_len", "sql_select_limit"];
 
 /// The session variable naming the charset into which the upstream converts result text.
 pub(crate) const CHARACTER_SET_RESULTS: &str = "character_set_results";
@@ -313,7 +313,6 @@ lazy_static! {
         "generated_random_password_length",
         "global_connection_memory_limit",
         "global_connection_memory_tracking",
-        "group_concat_max_len",
         "group_replication_advertise_recovery_endpoints",
         "group_replication_allow_local_lower_version_join",
         "group_replication_auto_increment_increment",
