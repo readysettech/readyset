@@ -1680,6 +1680,8 @@ fn set() {
     check_parse_both!("SET NAMES 'UTF8'");
     check_parse_postgres!("SET SESSION timezone TO DEFAULT");
     check_parse_postgres!("SET SESSION timezone = DEFAULT");
+    check_parse_mysql!("SET sql_select_limit = DEFAULT");
+    check_parse_mysql!("SET SESSION sql_select_limit = default, @@GLOBAL.var = 2");
     check_parse_postgres!("SET LOCAL whatever = 'x', 1, hi");
     check_parse_postgres!("SET standard_conforming_strings = on");
 }

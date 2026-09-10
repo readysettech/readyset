@@ -10,6 +10,7 @@ use readyset_sql::{ast::*, Dialect};
 use crate::common::statement_terminator;
 use crate::dialect::DialectParser;
 use crate::expression::expression;
+use crate::keywords::keyword_follow_char;
 use crate::literal::literal;
 use crate::whitespace::{whitespace0, whitespace1};
 use crate::{NomSqlError, NomSqlResult};
@@ -139,7 +140,18 @@ fn set_variable(
         let (i, _) = whitespace0(i)?;
         let (i, _) = alt((tag_no_case("="), tag_no_case(":=")))(i)?;
         let (i, _) = whitespace0(i)?;
-        let (i, value) = expression(dialect)(i)?;
+        let (i, value) = alt((
+            map(
+                terminated(tag_no_case("default"), keyword_follow_char),
+                |word: LocatedSpan<&[u8]>| {
+                    Expr::Column(Column {
+                        name: String::from_utf8_lossy(&word).as_ref().into(),
+                        table: None,
+                    })
+                },
+            ),
+            expression(dialect),
+        ))(i)?;
         Ok((i, (variable, value)))
     }
 }
@@ -219,6 +231,27 @@ mod tests {
                         name: "sql_auto_is_null".into()
                     },
                     Expr::Literal(0.into())
+                )),
+            })
+        );
+    }
+
+    #[test]
+    fn set_default() {
+        let qstring = "SET sql_select_limit = DEFAULT";
+        let res = set(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
+        assert_eq!(
+            res.unwrap().1,
+            SetStatement::Variable(SetVariables {
+                variables: vec!((
+                    Variable {
+                        scope: VariableScope::Local,
+                        name: "sql_select_limit".into()
+                    },
+                    Expr::Column(Column {
+                        name: "DEFAULT".into(),
+                        table: None
+                    })
                 )),
             })
         );

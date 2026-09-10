@@ -14,7 +14,7 @@ use crate::NomSqlResult;
 // which is implemented for tuples sizes up to 21. Because of this constraint
 // on maximum tuple sizes, keywords are aggregated into groups of 20
 
-fn keyword_follow_char(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
+pub(crate) fn keyword_follow_char(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], &[u8]> {
     map(
         peek(alt((
             tag(" "),
