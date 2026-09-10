@@ -17,10 +17,14 @@ use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SetVariables, ShowStatement,
-    SqlIdentifier, SqlQuery,
+    SqlIdentifier, SqlQuery, VariableScope,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use tracing::warn;
+
+/// Session variables that change a query's result. The shallow cache keys entries on their
+/// values, and refresh workers set them before rerunning a query.
+const CACHE_KEYED_VARIABLES: [&str; 1] = ["sql_select_limit"];
 
 /// The session variable naming the charset into which the upstream converts result text.
 pub(crate) const CHARACTER_SET_RESULTS: &str = "character_set_results";
@@ -792,7 +796,6 @@ lazy_static! {
         "sql_replica_skip_counter",
         "sql_require_primary_key",
         "sql_safe_updates",
-        "sql_select_limit",
         "sql_slave_skip_counter",
         "sql_warnings",
         "ssl_ca",
@@ -1098,6 +1101,23 @@ impl QueryHandler for MySqlQueryHandler {
                             let _ = get_encoding_for_charset(value, var_name);
                             behavior
                         }
+                        p if CACHE_KEYED_VARIABLES.contains(&p) => {
+                            if variable.scope == VariableScope::Global {
+                                behavior
+                            } else {
+                                match value {
+                                    Expr::Literal(literal) => {
+                                        behavior.set_session_var(p, Some(literal.clone()))
+                                    }
+                                    Expr::Column(Column { name, table: None })
+                                        if name.eq_ignore_ascii_case("default") =>
+                                    {
+                                        behavior.set_session_var(p, None)
+                                    }
+                                    _ => behavior.unsupported(true),
+                                }
+                            }
+                        }
                         p => behavior.unsupported(!ALLOWED_PARAMETERS_ANY_VALUE.contains(p)),
                     };
                     if keep_for_upstream {
@@ -1221,7 +1241,9 @@ fn get_encoding_for_charset(
 #[cfg(test)]
 mod tests {
     use readyset_data::encoding::Encoding;
-    use readyset_sql::ast::{SetNames, SetStatement, SetVariables, Variable, VariableScope};
+    use readyset_sql::ast::{
+        BinaryOperator, SetNames, SetStatement, SetVariables, Variable, VariableScope,
+    };
 
     use super::*;
 
@@ -1627,6 +1649,72 @@ mod tests {
                 "{var}"
             )
         }
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_literal_is_tracked() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("sql_select_limit"),
+                Expr::Literal(Literal::Integer(10)),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_session_var("sql_select_limit", Some(Literal::Integer(10)))
+        )
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_default_clears_it() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("sql_select_limit"),
+                Expr::Column(Column {
+                    name: "DEFAULT".into(),
+                    table: None,
+                }),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_session_var("sql_select_limit", None)
+        )
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_expression_unsupported() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("sql_select_limit"),
+                Expr::BinaryOp {
+                    lhs: Box::new(Expr::Literal(Literal::Integer(1024))),
+                    op: BinaryOperator::Multiply,
+                    rhs: Box::new(Expr::Literal(Literal::Integer(1024))),
+                },
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().unsupported(true)
+        )
+    }
+
+    #[test]
+    fn set_global_cache_keyed_variable_not_tracked() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Global,
+                    name: "sql_select_limit".into(),
+                },
+                Expr::Literal(Literal::Integer(10)),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+        )
     }
 
     fn fixed(secs: i32) -> super::SessionTimezone {
