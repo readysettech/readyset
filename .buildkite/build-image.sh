@@ -61,22 +61,46 @@ fi
 docker_repo="$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
 image="$docker_repo/$image_name"
 
-# Pull the latest image to populate the cache layers. This can make the container build go much
-# faster. We attempt to pull the image, then inspect it to verify the architecture matches
-# before using it for cache.
-cache_from=""
-echo "--- :docker: Pulling $image:latest"
-if docker pull --platform "$platform" --quiet "$image:latest" 2>/dev/null; then
-    # Pull succeeded - now check if the architecture matches
-    pulled_arch=$(docker image inspect "$image:latest" --format='{{.Architecture}}' 2>/dev/null)
-    if [ "$pulled_arch" = "$arch" ]; then
-        cache_from="--cache-from=$image:latest"
-    else
-        echo "Warning: $image:latest is for $pulled_arch, not $arch (removing)"
-        docker rmi "$image:latest" >/dev/null 2>&1
+build_week=$(date +%Y%W)
+
+# Use an already published image to populate the cache layers. We attempt to pull a candidate, then
+# inspect it to verify the architecture matches before using it for cache.
+#
+# With EXPIRE_CACHE_WEEKLY set, a candidate stamped with an earlier week is rejected and the build
+# runs with --no-cache so that images whose dockerfiles fetch unpinned dependencies will pick up current
+# versions weekly.
+cache_from=()
+no_cache=()
+function add_cache_source() {
+    local ref="$1" pulled_arch pulled_week
+    echo "--- :docker: Pulling $ref"
+    if ! docker pull --platform "$platform" --quiet "$ref" 2>/dev/null; then
+        echo "No $ref found"
+        return
     fi
-else
-    echo "No $image:latest found (first build?)"
+    pulled_arch=$(docker image inspect "$ref" --format='{{.Architecture}}' 2>/dev/null)
+    if [ "$pulled_arch" != "$arch" ]; then
+        echo "Warning: $ref is for $pulled_arch, not $arch (removing)"
+        docker rmi "$ref" >/dev/null 2>&1
+        return
+    fi
+    if [ -n "${EXPIRE_CACHE_WEEKLY-}" ]; then
+        pulled_week=$(docker image inspect "$ref" \
+            --format='{{index .Config.Labels "build.week"}}' 2>/dev/null || true)
+        if [ "$pulled_week" != "$build_week" ]; then
+            echo "Ignoring $ref: built in week ${pulled_week:-unknown}, not $build_week"
+            no_cache=("--no-cache")
+            return
+        fi
+    fi
+    cache_from+=("--cache-from=$ref")
+}
+
+# Prefer this commit's own image, which an earlier attempt at the same commit may already have
+# pushed.  Otherwise, pull latest.
+add_cache_source "$image:$tag_version"
+if [ ${#cache_from[@]} -eq 0 ] && [ ${#no_cache[@]} -eq 0 ]; then
+    add_cache_source "$image:latest"
 fi
 
 build_cmd_prefix=(
@@ -95,7 +119,7 @@ build_cmd_prefix=(
 # metadata portion of the image, which changes the digest without changing or adding any layers. We
 # may have to make this more frequent if we ever hit the 1000 tag limit within a week, but that
 # seems like it would be a pathological situation.
-build_cmd_prefix+=("--label" "build.week=$(date +%Y%W)")
+build_cmd_prefix+=("--label" "build.week=$build_week")
 
 if [[ -n "${SCCACHE_BUCKET-}" ]] && [[ -n "${SCCACHE_REGION-}" ]]; then
     build_cmd_prefix+=(
@@ -120,8 +144,12 @@ if [ ${#release_buildargs[@]} -gt 0 ]; then
     build_cmd+=("${release_buildargs[@]}")
 fi
 
-if [ -n "$cache_from" ]; then
-    build_cmd+=("$cache_from")
+if [ ${#cache_from[@]} -gt 0 ]; then
+    build_cmd+=("${cache_from[@]}")
+fi
+
+if [ ${#no_cache[@]} -gt 0 ]; then
+    build_cmd+=("${no_cache[@]}")
 fi
 
 build_cmd+=("${build_cmd_suffix[@]}")
