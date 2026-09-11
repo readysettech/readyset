@@ -15,7 +15,7 @@ use readyset_sql::ast::{
 
 /// Session variables that change a query's result. The shallow cache keys entries on their
 /// values, and refresh workers set them before rerunning a query.
-const CACHE_KEYED_VARIABLES: [&str; 1] = ["timezone_abbreviations"];
+const CACHE_KEYED_VARIABLES: [&str; 2] = ["intervalstyle", "timezone_abbreviations"];
 
 /// Parse PG's numeric `SET TimeZone = N` shorthand. PG documents this as
 /// "N hours behind UTC" — POSIX-style, sign-inverted relative to ISO 8601 —
@@ -318,12 +318,8 @@ lazy_static! {
             "wal_writer_delay",
             "wal_writer_flush_after",
 
-            // This parameter *would* matter, if we supported intervals - once we do we should move
-            // this to WITH_VALUE and specify the value for the interval style we actually use
-            "intervalstyle",
-
-            // Similarly this parameter *would* matter if we supported arrays, and once we do we
-            // should move this to WITH_VALUE
+            // This parameter *would* matter if we supported arrays, and once we do we should move
+            // this to WITH_VALUE
             "array_nulls",
         ]);
 
@@ -872,6 +868,17 @@ mod tests {
             )),
             SetBehavior::default()
                 .set_session_var("timezone_abbreviations", Some(Literal::from("australia"))),
+        );
+    }
+
+    #[test]
+    fn set_intervalstyle_is_tracked() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET IntervalStyle = iso_8601"
+            )),
+            SetBehavior::default()
+                .set_session_var("intervalstyle", Some(Literal::from("iso_8601"))),
         );
     }
 
