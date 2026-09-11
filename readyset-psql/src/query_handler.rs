@@ -9,9 +9,13 @@ use readyset_client::schema::SelectSchema;
 use readyset_errors::ReadySetResult;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
-    Literal, PostgresParameterValue, PostgresParameterValueInner, SetNames, SetPostgresParameter,
-    SetPostgresParameterValue, SetStatement, SqlQuery,
+    Literal, PostgresParameterScope, PostgresParameterValue, PostgresParameterValueInner, SetNames,
+    SetPostgresParameter, SetPostgresParameterValue, SetStatement, SqlQuery,
 };
+
+/// Session variables that change a query's result. The shallow cache keys entries on their
+/// values, and refresh workers set them before rerunning a query.
+const CACHE_KEYED_VARIABLES: [&str; 1] = ["timezone_abbreviations"];
 
 /// Parse PG's numeric `SET TimeZone = N` shorthand. PG documents this as
 /// "N hours behind UTC" — POSIX-style, sign-inverted relative to ISO 8601 —
@@ -75,7 +79,6 @@ lazy_static! {
             "autovacuum_vacuum_threshold",
             "default_text_search_config",
             "server_encoding",
-            "timezone_abbreviations",
             "dynamic_library_path",
             "gin_fuzzy_search_limit",
             "tcp_keepalives_count",
@@ -380,7 +383,7 @@ impl QueryHandler for PostgreSqlQueryHandler {
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior {
         let behavior = SetBehavior::default();
         match stmt {
-            SetStatement::PostgresParameter(SetPostgresParameter { name, value, .. }) => {
+            SetStatement::PostgresParameter(SetPostgresParameter { scope, name, value }) => {
                 // PG preserves case in double-quoted identifiers, so match
                 // against the lowercased name to converge `SET "TimeZone"`
                 // with `SET timezone`.
@@ -460,6 +463,25 @@ impl QueryHandler for PostgreSqlQueryHandler {
                         };
 
                         behavior.set_search_path(search_path)
+                    }
+                    p if CACHE_KEYED_VARIABLES.contains(&p) => {
+                        // A LOCAL value reverts at COMMIT, but the recorded variable would
+                        // outlive the transaction.
+                        if *scope == Some(PostgresParameterScope::Local) {
+                            return behavior.unsupported(true);
+                        }
+                        match value {
+                            SetPostgresParameterValue::Default => behavior.set_session_var(p, None),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Literal(literal),
+                            )) => behavior.set_session_var(p, Some(literal.clone())),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                                PostgresParameterValueInner::Identifier(id),
+                            )) => behavior.set_session_var(p, Some(Literal::from(id.as_str()))),
+                            SetPostgresParameterValue::Value(PostgresParameterValue::List(_)) => {
+                                behavior.unsupported(true)
+                            }
+                        }
                     }
                     other => {
                         if let Some(allowed_value) = ALLOWED_PARAMETERS_WITH_VALUE.get(other) {
@@ -828,6 +850,48 @@ mod tests {
                 "SET autocommit = on"
             )),
             SetBehavior::default().set_autocommit(true),
+        );
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_string_is_tracked() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET timezone_abbreviations = 'Australia'"
+            )),
+            SetBehavior::default()
+                .set_session_var("timezone_abbreviations", Some(Literal::from("Australia"))),
+        );
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_identifier_is_tracked_as_string() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET timezone_abbreviations = Australia"
+            )),
+            SetBehavior::default()
+                .set_session_var("timezone_abbreviations", Some(Literal::from("australia"))),
+        );
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_default_clears_it() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET Timezone_Abbreviations TO DEFAULT"
+            )),
+            SetBehavior::default().set_session_var("timezone_abbreviations", None),
+        );
+    }
+
+    #[test]
+    fn set_local_cache_keyed_variable_is_unsupported() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET LOCAL timezone_abbreviations = 'Australia'"
+            )),
+            SetBehavior::default().unsupported(true),
         );
     }
 

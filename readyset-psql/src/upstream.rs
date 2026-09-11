@@ -33,7 +33,7 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
-use readyset_sql::ast::{Relation, SqlIdentifier};
+use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::SizeOf;
 use readyset_util::hash::hash;
@@ -876,6 +876,26 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
         let query = format!("SET search_path TO {}", path);
         debug!(%query, "Setting search path on upstream");
+        self.client.simple_query(&query).await?;
+        Ok(())
+    }
+
+    async fn set_session_variables(
+        &mut self,
+        vars: &[(&str, Option<&Literal>)],
+    ) -> Result<(), Self::Error> {
+        if vars.is_empty() {
+            return Ok(());
+        }
+        let statements = vars.iter().map(|(name, value)| {
+            let name = Dialect::PostgreSQL.quote_identifier(name);
+            match value {
+                Some(value) => format!("SET {name} = {}", value.display(Dialect::PostgreSQL)),
+                None => format!("SET {name} TO DEFAULT"),
+            }
+        });
+        let query = itertools::join(statements, "; ");
+        debug!(%query, "Setting session variables on upstream");
         self.client.simple_query(&query).await?;
         Ok(())
     }
