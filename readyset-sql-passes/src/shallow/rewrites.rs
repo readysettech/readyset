@@ -1,18 +1,13 @@
 //! Rewrite passes for sqlparser AST used by shallow caches.
 //!
-//! This module provides rewrite passes that operate on the sqlparser AST, mirroring the
-//! passes in the parent module that operate on the Readyset AST. Shallow caches use the
-//! sqlparser AST directly to support queries with syntax not yet supported by Readyset.
+//! This module provides rewrite passes that operate on the sqlparser AST, mirroring the passes in
+//! the parent module that operate on the Readyset AST. Shallow caches use the sqlparser AST
+//! directly to support queries with syntax not yet supported by Readyset.
 //!
 //! # Differences from Deep Cache Rewrites
 //!
-//! The key difference is that shallow cache rewrites always operate on the sqlparser AST
-//! directly, rather than the Readyset AST and the parameterization pass replaces all literals.
-//!
-//! - [`rewrite_shallow`]: Equivalent to [`super::rewrite_equivalent`]
-//! - [`anonymize_shallow_query`]: Equivalent to [`crate::anonymize::Anonymize`]
-//! - [`literalize_shallow_query`]: Equivalent to [`super::literalize`]
-//! - [`convert_placeholders_to_question_marks`]: Equivalent to [`super::convert_placeholders_to_question_marks`]
+//! The key difference is that shallow cache rewrites always operate on the sqlparser AST directly,
+//! rather than the Readyset AST and the parameterization pass replaces all literals.
 
 use std::convert::Infallible;
 use std::mem;
@@ -417,36 +412,6 @@ impl VisitorMut for NumberPlaceholdersVisitor {
     }
 }
 
-/// Converts all placeholders to MySQL-style `?` placeholders.
-///
-/// This is the sqlparser-AST equivalent of the deep cache's `convert_placeholders_to_question_marks`.
-struct QuestionMarkPlaceholdersVisitor;
-
-impl VisitorMut for QuestionMarkPlaceholdersVisitor {
-    type Break = Infallible;
-
-    fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
-        let Expr::Value(ValueWithSpan {
-            value: Value::Placeholder(placeholder_str),
-            ..
-        }) = expr
-        else {
-            return ControlFlow::Continue(());
-        };
-
-        *placeholder_str = "?".to_string();
-        ControlFlow::Continue(())
-    }
-}
-
-/// Converts all placeholders to MySQL-style `?` placeholders.
-///
-/// This is primarily used for MySQL compatibility checks when preparing statements.
-pub fn convert_placeholders_to_question_marks(query: &mut ShallowCacheQuery) {
-    let mut visitor = QuestionMarkPlaceholdersVisitor;
-    let _ = VisitMut::visit(&mut **query, &mut visitor);
-}
-
 /// Finds the highest `$n` placeholder index in the query, i.e. its parameter
 /// count. Zero for a query without numbered placeholders.
 struct MaxPlaceholderVisitor {
@@ -802,8 +767,8 @@ mod tests {
         let q = parse_query(Dialect::PostgreSQL, "SELECT * FROM t WHERE id = 1");
         assert_eq!(max_placeholder_index(&q), 0);
         let mut q = parse_query(Dialect::MySQL, "SELECT * FROM t WHERE id = $1");
-        convert_placeholders_to_question_marks(&mut q);
-        // `?` placeholders carry no index.
+        q.convert_placeholders_to_question_marks();
+        // `?` placeholders are not indexed.
         assert_eq!(max_placeholder_index(&q), 0);
     }
 
@@ -1049,7 +1014,7 @@ mod tests {
         let dialect = Dialect::PostgreSQL;
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = $1 AND val = $2");
 
-        convert_placeholders_to_question_marks(&mut query);
+        query.convert_placeholders_to_question_marks();
 
         let query_str = format!("{query}");
         assert!(!query_str.contains("$1"));
@@ -1062,7 +1027,7 @@ mod tests {
         let dialect = Dialect::MySQL;
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = ? AND val = ?");
 
-        convert_placeholders_to_question_marks(&mut query);
+        query.convert_placeholders_to_question_marks();
 
         let query_str = format!("{query}");
         assert_eq!(query_str.matches('?').count(), 2);
@@ -1074,7 +1039,7 @@ mod tests {
         let mut query = parse_query(dialect, "SELECT * FROM t WHERE id = 1");
         let original = format!("{query}");
 
-        convert_placeholders_to_question_marks(&mut query);
+        query.convert_placeholders_to_question_marks();
 
         assert_eq!(format!("{query}"), original);
     }

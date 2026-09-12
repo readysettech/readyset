@@ -31,7 +31,6 @@ use readyset_sql::ast::{
 use readyset_sql::DialectDisplay;
 use readyset_sql::TryFromDialect as _;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
-use readyset_sql_passes::shallow::convert_placeholders_to_question_marks;
 use readyset_tracing::child_span;
 use readyset_tracing::presampled::instrument_if_enabled;
 use readyset_tracing::propagation::Instrumented;
@@ -173,7 +172,7 @@ impl ShallowViewRequest {
                 readyset_sql::Dialect::MySQL => {
                     // MySQL rejects `$N`, so normalize on a clone before rendering.
                     let mut query = self.query.clone();
-                    convert_placeholders_to_question_marks(&mut query);
+                    query.convert_placeholders_to_question_marks();
                     let sql = query.display(dialect).to_string();
                     Cow::Owned(sql)
                 }

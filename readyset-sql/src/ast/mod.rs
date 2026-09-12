@@ -68,13 +68,15 @@ pub use truncate::*;
 pub use update::*;
 pub use use_statement::*;
 
+use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 
 use derive_more::Display;
 use proptest::arbitrary::Arbitrary;
 use proptest::prelude::Just;
 use serde::{Deserialize, Serialize};
+use sqlparser::ast::{Value, ValueWithSpan, VisitMut, VisitorMut};
 
 use crate::{Dialect, DialectDisplay};
 
@@ -182,19 +184,44 @@ impl DialectDisplay for ShallowCacheQuery {
 }
 
 impl ShallowCacheQuery {
-    /// Removes **all** optimizer hints from the inner `Select` AST node, regardless
-    /// of prefix, and returns the first `/*rs+ … */` hint (case-insensitive prefix
-    /// match) if one was present.
+    /// Converts all placeholders to MySQL-style `?` placeholders.
+    pub fn convert_placeholders_to_question_marks(&mut self) {
+        use sqlparser::ast::Expr;
+
+        struct QuestionMarkPlaceholdersVisitor;
+
+        impl VisitorMut for QuestionMarkPlaceholdersVisitor {
+            type Break = Infallible;
+
+            fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+                let Expr::Value(ValueWithSpan {
+                    value: Value::Placeholder(placeholder_str),
+                    ..
+                }) = expr
+                else {
+                    return ControlFlow::Continue(());
+                };
+
+                *placeholder_str = "?".to_string();
+                ControlFlow::Continue(())
+            }
+        }
+
+        let mut visitor = QuestionMarkPlaceholdersVisitor;
+        let _ = VisitMut::visit(&mut **self, &mut visitor);
+    }
+
+    /// Removes **all** optimizer hints from the inner `Select` AST node, regardless of prefix, and
+    /// returns the first `/*rs+ … */` hint (case-insensitive prefix match) if one was present.
     ///
-    /// Non-`rs` hints (e.g. `/*mysql+ … */`) are also stripped so they do not
-    /// affect the query hash or `Display` output, but they are not returned.
+    /// Non-`rs` hints (e.g. `/*mysql+ … */`) are also stripped so they do not affect the query
+    /// hash or `Display` output, but they are not returned.
     ///
-    /// This must be called before hashing or comparing `ShallowCacheQuery` values,
-    /// because `Select::Display` includes hints in its output. Without stripping,
-    /// a hinted query would get a different `QueryId` than the same query without a hint.
-    /// Walk the entire [`SetExpr`] tree and drain optimizer hints from every
-    /// `Select` node.  Returns the first `rs`-prefixed hint encountered
-    /// (left-to-right) so the caller can interpret it as a directive.
+    /// This must be called before hashing or comparing `ShallowCacheQuery` values, because
+    /// `Select::Display` includes hints in its output. Without stripping, a hinted query would get
+    /// a different `QueryId` than the same query without a hint. Walk the entire [`SetExpr`] tree
+    /// and drain optimizer hints from every `Select` node.  Returns the first `rs`-prefixed hint
+    /// encountered (left-to-right) so the caller can interpret it as a directive.
     pub fn take_hints(&mut self) -> Option<sqlparser::ast::OptimizerHint> {
         let mut first_rs = None;
         let mut stack: Vec<&mut sqlparser::ast::SetExpr> = vec![&mut self.0.body];

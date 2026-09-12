@@ -31,7 +31,7 @@ use readyset_shallow::{CacheInfo, CacheManager};
 use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{Relation, SqlIdentifier};
-use readyset_sql_passes::shallow::{convert_placeholders_to_question_marks, max_placeholder_index};
+use readyset_sql_passes::shallow::max_placeholder_index;
 use readyset_util::logging::*;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, UnboundedReceiver};
@@ -68,7 +68,7 @@ impl ProbeTarget {
         let sql = match dialect {
             Dialect::MySQL => {
                 let mut query = info.query.clone();
-                convert_placeholders_to_question_marks(&mut query);
+                query.convert_placeholders_to_question_marks();
                 query.display(dialect).to_string()
             }
             Dialect::PostgreSQL => info.query.display(dialect).to_string(),
