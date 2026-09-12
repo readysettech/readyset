@@ -59,20 +59,8 @@ struct ProbeTarget {
 
 impl ProbeTarget {
     fn from_cache_info(info: &CacheInfo, dialect: Dialect) -> Self {
-        // The pipeline stores statements with normalized `$n` placeholders;
-        // Postgres prepares that form directly, MySQL needs `?` (the same
-        // conversion `upstream_supports` applies before its prepare). The
-        // count feeds the Postgres `EXPLAIN EXECUTE p(NULL, ...)`; the MySQL
-        // probe is the prepare alone and ignores it.
         let n_params = max_placeholder_index(&info.query);
-        let sql = match dialect {
-            Dialect::MySQL => {
-                let mut query = info.query.clone();
-                query.convert_placeholders_to_question_marks();
-                query.display(dialect).to_string()
-            }
-            Dialect::PostgreSQL => info.query.display(dialect).to_string(),
-        };
+        let sql = info.query.display(dialect).to_string();
         Self {
             cache: info.query_id,
             sql,

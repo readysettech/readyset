@@ -334,7 +334,7 @@ async fn show_shallow_caches() {
     let (query_id, name, query, properties, count) = &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
-    assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
+    assert_eq!(query, "SELECT * FROM foo WHERE a = ?");
     let count: u64 = count.parse().unwrap();
     assert!(count >= 1, "expected at least one shallow hit, got {count}");
 
@@ -361,7 +361,7 @@ async fn show_shallow_caches() {
         &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
-    assert_eq!(query, "SELECT * FROM foo WHERE a = $1");
+    assert_eq!(query, "SELECT * FROM foo WHERE a = ?");
     assert_eq!(*ttl_ms, 32000);
     assert_eq!(*refresh_ms, 8000);
     assert_eq!(*coalesce_ms, 2000);

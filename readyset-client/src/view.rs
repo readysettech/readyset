@@ -163,23 +163,11 @@ impl ShallowViewRequest {
     }
 
     /// The query to PREPARE-probe for upstream support: the original text when we have it,
-    /// otherwise the rendered parameterized query as a fallback, with numbered placeholders
-    /// normalized to `?` for MySQL (which rejects `$N` in a prepared statement).
+    /// otherwise the rendered parameterized query as a fallback.
     pub fn original_query(&self, dialect: readyset_sql::Dialect) -> Cow<'_, str> {
         match &self.query_orig {
             Some(original) => Cow::Borrowed(original),
-            None => match dialect {
-                readyset_sql::Dialect::MySQL => {
-                    // MySQL rejects `$N`, so normalize on a clone before rendering.
-                    let mut query = self.query.clone();
-                    query.convert_placeholders_to_question_marks();
-                    let sql = query.display(dialect).to_string();
-                    Cow::Owned(sql)
-                }
-                readyset_sql::Dialect::PostgreSQL => {
-                    Cow::Owned(self.query.display(dialect).to_string())
-                }
-            },
+            None => Cow::Owned(self.query.display(dialect).to_string()),
         }
     }
 

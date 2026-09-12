@@ -78,6 +78,8 @@ use proptest::prelude::Just;
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{Value, ValueWithSpan, VisitMut, VisitorMut};
 
+use readyset_util::fmt::fmt_with;
+
 use crate::{Dialect, DialectDisplay};
 
 #[derive(Clone, Display, Debug, Serialize, Deserialize, Eq)]
@@ -177,9 +179,17 @@ impl Arbitrary for ShallowCacheQuery {
 }
 
 impl DialectDisplay for ShallowCacheQuery {
-    fn display(&self, _dialect: Dialect) -> impl std::fmt::Display + '_ {
-        // sqlparser preserves dialect-specific formatting, so we don't need to do anything
-        &self.0
+    fn display(&self, dialect: Dialect) -> impl std::fmt::Display + '_ {
+        let display: Box<dyn std::fmt::Display> = match dialect {
+            Dialect::MySQL => Box::new(fmt_with(move |f| {
+                let mut query = self.clone();
+                query.convert_placeholders_to_question_marks();
+                write!(f, "{query}")?;
+                Ok(())
+            })),
+            Dialect::PostgreSQL => Box::new(&self.0),
+        };
+        display
     }
 }
 
