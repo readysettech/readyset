@@ -64,7 +64,7 @@ fn flip_binary_operands(expr: &Expr) -> Option<Expr> {
 }
 
 /// What the autoparameterization pass found at each canonical parameter position: the literal it
-/// lifted there, or `None` where the query already held a placeholder.
+/// lifted (parameterized) there, or `None` where the query already held a placeholder.
 ///
 /// A canonical parameter position is one [`auto_parameterize_query`] takes: a literal it lifts, or
 /// a placeholder already there. They are numbered from zero in walk order, and the numbering runs

@@ -503,21 +503,6 @@ where
                         ));
                     }
                     rewrite_params.autoparameterize = autoparam.autoparameterize();
-                    // A cache keeping its literals inline is reached by the shape a read hashes
-                    // to, which the rewrite's structural passes produce. Those passes run only
-                    // for a statement holding no placeholder, so a statement holding one takes a
-                    // shape no read arrives at and the cache would serve nothing.
-                    if !rewrite_params.autoparameterize
-                        && let Ok(stmt) = &deep
-                        && !readyset_sql_passes::adapter_rewrites::inline_literals_are_reachable(
-                            stmt,
-                            rewrite_params.dialect,
-                        )?
-                    {
-                        return Err(ReadySetError::Unsupported(
-                            "AUTOPARAM with a placeholder in a joined or nested statement".into(),
-                        ));
-                    }
                     match deep {
                         // Creating a cache and recovering one after a restart derive its form and
                         // its registration the same way, so a recovered cache is reachable by the

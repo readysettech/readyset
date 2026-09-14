@@ -1,0 +1,58 @@
+# A cache built `WITH (AUTOPARAM OFF)` accepts a placeholder beside a join, CTE or subquery.
+
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, a int, b int)
+
+statement ok
+CREATE TABLE u (a int PRIMARY KEY, c text)
+
+statement ok
+INSERT INTO t VALUES (1, 1, 5), (2, 1, 7), (3, 2, 5)
+
+statement ok
+INSERT INTO u VALUES (1, 'x'), (2, 'y')
+
+onlyif readyset
+statement ok
+CREATE CACHE joined_kept WITH (AUTOPARAM OFF) FROM SELECT t.id FROM t JOIN u ON t.a = u.a WHERE t.b = ? AND u.c = 'x'
+
+query I rowsort
+SELECT t.id FROM t JOIN u ON t.a = u.a WHERE t.b = ? AND u.c = 'x'
+? = 5
+----
+1
+
+query I rowsort
+SELECT t.id FROM t JOIN u ON t.a = u.a WHERE t.b = 7 AND u.c = 'x'
+----
+2
+
+onlyif readyset
+statement ok
+CREATE CACHE cte_kept WITH (AUTOPARAM OFF) FROM WITH labelled AS (SELECT a, c FROM u) SELECT t.id FROM t JOIN labelled ON t.a = labelled.a WHERE t.b = ? AND labelled.c = 'x'
+
+query I rowsort
+WITH labelled AS (SELECT a, c FROM u) SELECT t.id FROM t JOIN labelled ON t.a = labelled.a WHERE t.b = ? AND labelled.c = 'x'
+? = 5
+----
+1
+
+query I rowsort
+WITH labelled AS (SELECT a, c FROM u) SELECT t.id FROM t JOIN labelled ON t.a = labelled.a WHERE t.b = 7 AND labelled.c = 'x'
+----
+2
+
+onlyif readyset
+statement ok
+CREATE CACHE subquery_kept WITH (AUTOPARAM OFF) FROM SELECT t.id FROM t WHERE t.b = ? AND t.a IN (SELECT u.a FROM u WHERE u.c = 'x')
+
+query I rowsort
+SELECT t.id FROM t WHERE t.b = ? AND t.a IN (SELECT u.a FROM u WHERE u.c = 'x')
+? = 5
+----
+1
+
+query I rowsort
+SELECT t.id FROM t WHERE t.b = 7 AND t.a IN (SELECT u.a FROM u WHERE u.c = 'x')
+----
+2

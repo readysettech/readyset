@@ -719,34 +719,33 @@ async fn keeping_literals_from_a_query_id_is_refused() {
     shutdown_tx.shutdown().await;
 }
 
-/// A statement keeping its literals inline is refused where a read could not reach the cache it
-/// would build.
-///
-/// The shape a read hashes to comes out of the rewrite's structural passes, and those run only
-/// for a statement holding no placeholder. A statement holding one alongside a join or a subquery
-/// takes a shape no read arrives at, so the cache would serve nothing and the statement is
-/// refused instead. A single-table statement is unaffected: there the passes reshape nothing, so
-/// the two shapes coincide and a read reaches the cache.
+/// A statement keeping its literals inline is reached by a read whether or not it holds a join or
+/// a subquery beside its placeholder: placeholders are settled before the rewrite's structural
+/// passes, so the cache and the read take the same shape.
 #[tokio::test]
 #[tags(serial)]
 #[upstream(mysql)]
-async fn a_placeholder_in_a_nested_statement_is_refused() {
+async fn a_placeholder_in_a_nested_statement_is_reached() {
     let (mut rs_conn, _upstream, _handle, shutdown_tx) = adapter("autoparam_mode_nested", T).await;
 
-    let refused = rs_conn
+    rs_conn
         .query_drop(
-            "CREATE CACHE gated WITH (AUTOPARAM OFF) \
+            "CREATE CACHE nested WITH (AUTOPARAM OFF) \
              FROM SELECT d.v FROM (SELECT id, status, v FROM t) AS d \
              WHERE d.id = ? AND d.status = 'active'",
         )
-        .await;
-    let err = refused.expect_err("a nested statement with a placeholder has to be refused");
-    assert!(
-        err.to_string().contains("AUTOPARAM with a placeholder"),
-        "unexpected error: {err}"
-    );
+        .await
+        .unwrap();
 
-    // The same option over a single-table statement still builds a cache a read reaches.
+    let got: Vec<i32> = eventually_readyset(
+        &mut rs_conn,
+        "SELECT d.v FROM (SELECT id, status, v FROM t) AS d WHERE d.id = 1 AND d.status = 'active'",
+        QueryDestination::Readyset(Some("nested".into())),
+    )
+    .await;
+    assert_eq!(got, vec![10]);
+
+    // A single-table statement builds a cache a read reaches the same way.
     rs_conn
         .query_drop(
             "CREATE CACHE flat WITH (AUTOPARAM OFF) \

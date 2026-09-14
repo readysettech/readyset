@@ -4004,28 +4004,6 @@ pub(crate) fn correlated_relations(stmt: &SelectStatement) -> ReadySetResult<Has
     Ok(v.correlated)
 }
 
-struct PlaceholderVisitor {
-    found: bool,
-    /// Count only `?`, rather than every spelling a placeholder has.
-    question_mark_only: bool,
-}
-
-impl<'ast> Visitor<'ast> for PlaceholderVisitor {
-    type Error = ReadySetError;
-    fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
-        if !self.found
-            && match literal {
-                Literal::Placeholder(ItemPlaceholder::QuestionMark) => true,
-                Literal::Placeholder(_) => !self.question_mark_only,
-                _ => false,
-            }
-        {
-            self.found = true;
-        }
-        Ok(())
-    }
-}
-
 struct StandardizePlaceholdersVisitor {
     next_param_number: u32,
     kept_number: bool,
@@ -4044,15 +4022,6 @@ impl<'ast> VisitorMut<'ast> for StandardizePlaceholdersVisitor {
         }
         Ok(())
     }
-}
-
-fn contains(query: &SelectStatement, question_mark_only: bool) -> ReadySetResult<bool> {
-    let mut visitor = PlaceholderVisitor {
-        found: false,
-        question_mark_only,
-    };
-    visitor.visit_select_statement(query)?;
-    Ok(visitor.found)
 }
 
 /// Settle the dialect's placeholder spelling.
@@ -4077,15 +4046,6 @@ pub(crate) fn standardize_placeholders(query: &mut SelectStatement) -> ReadySetR
         unsupported!("a statement mixing `?` with numbered placeholders");
     }
     Ok(())
-}
-
-pub(crate) fn contains_question_mark_placeholders(query: &SelectStatement) -> ReadySetResult<bool> {
-    contains(query, true)
-}
-
-/// Whether the statement holds a placeholder of any spelling: `?`, `$n` or `:n`.
-pub(crate) fn contains_placeholders(query: &SelectStatement) -> ReadySetResult<bool> {
-    contains(query, false)
 }
 
 /// Return true if a SELECT has DISTINCT, aggregates, or GROUP BY.

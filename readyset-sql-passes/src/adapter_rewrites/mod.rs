@@ -16,11 +16,11 @@ use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported, unsupported_err,
 };
-use readyset_sql::analysis::visit::{self, Visitor};
+use readyset_sql::analysis::visit::Visitor;
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectMetadata,
-    SelectStatement, ShallowCacheQuery, TableExprInner,
+    SelectStatement, ShallowCacheQuery,
 };
 use readyset_sql::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
@@ -35,9 +35,7 @@ use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
-use crate::rewrite_utils::{
-    contains_placeholders, contains_question_mark_placeholders, standardize_placeholders,
-};
+use crate::rewrite_utils::standardize_placeholders;
 use crate::shallow::literalize_shallow_prepared;
 use crate::unnest_subqueries::{NonNullSchemaImpl, UnnestSubqueries as _};
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
@@ -282,58 +280,6 @@ fn rewrite_equivalent_parameters(
         slots: run.slots,
         client_params,
     })
-}
-
-/// Whether a read can reach a cache that keeps this statement's literals inline.
-///
-/// The shape a read hashes to comes out of the structural passes in
-/// [`rewrite_equivalent_deep`], which run only for a statement holding no placeholder. A
-/// statement that holds one takes a shape those passes never produce, so a read spelling its own
-/// values out looks under a different shape and finds nothing there. The two coincide only where
-/// the passes have nothing to reshape.
-///
-/// What counts is whether the cache and a read of it land on the same side of that gate, and a
-/// read's placeholders are spelled the way its client spells them. A MySQL client binds `?`, so a
-/// cache written with `$n` keeps the passes while the read that should reach it does not; both
-/// spellings are equally out of reach there. A Postgres client binds `$n`, which keeps the passes
-/// on both sides, so only a `?` puts them on opposite sides.
-pub fn inline_literals_are_reachable(
-    query: &SelectStatement,
-    dialect: Dialect,
-) -> ReadySetResult<bool> {
-    let gated = match dialect {
-        Dialect::MySQL => contains_placeholders(query)?,
-        Dialect::PostgreSQL => contains_question_mark_placeholders(query)?,
-    };
-    if !gated {
-        return Ok(true);
-    }
-    Ok(query.ctes.is_empty()
-        && query.join.is_empty()
-        && query.tables.len() == 1
-        && !matches!(
-            query.tables.first().map(|t| &t.inner),
-            Some(TableExprInner::Subquery(_))
-        )
-        && !contains_subquery_expr(query))
-}
-
-/// Whether any expression in the statement holds a subquery.
-fn contains_subquery_expr(query: &SelectStatement) -> bool {
-    struct FindSubquery {
-        found: bool,
-    }
-    impl<'ast> Visitor<'ast> for FindSubquery {
-        type Error = std::convert::Infallible;
-
-        fn visit_select_statement(&mut self, _: &'ast SelectStatement) -> Result<(), Self::Error> {
-            self.found = true;
-            Ok(())
-        }
-    }
-    let mut visitor = FindSubquery { found: false };
-    let Ok(()) = visit::walk_select_statement(&mut visitor, query);
-    visitor.found
 }
 
 /// Rewrites that keep the query semantically equivalent, but are appropriate for deep caching.
@@ -1565,82 +1511,6 @@ fn splice_auto_parameters<'param, T: Clone>(
     }
     res.extend(params.to_vec());
     Cow::Owned(res)
-}
-
-#[cfg(test)]
-mod reachability {
-    use readyset_sql::Dialect;
-
-    use super::inline_literals_are_reachable;
-
-    fn reachable(query: &str) -> bool {
-        reachable_in(Dialect::MySQL, query)
-    }
-
-    fn reachable_in(dialect: Dialect, query: &str) -> bool {
-        let stmt = readyset_sql_parsing::parse_select(dialect, query).unwrap();
-        inline_literals_are_reachable(&stmt, dialect).unwrap()
-    }
-
-    /// Without a placeholder the statement takes the same shape a read does, whatever it holds.
-    #[test]
-    fn a_statement_without_a_placeholder_is_always_reachable() {
-        assert!(reachable("SELECT v FROM t WHERE a = 1"));
-        assert!(reachable(
-            "SELECT d.v FROM (SELECT a, v FROM t) AS d WHERE d.a = 1"
-        ));
-        assert!(reachable(
-            "SELECT t.v FROM t JOIN u ON t.a = u.a WHERE t.a = 1"
-        ));
-        assert!(reachable(
-            "SELECT v FROM t WHERE a IN (SELECT a FROM u WHERE b = 1)"
-        ));
-    }
-
-    /// A placeholder is reachable where the structural passes have nothing to reshape.
-    #[test]
-    fn a_placeholder_in_a_single_table_statement_is_reachable() {
-        assert!(reachable("SELECT v FROM t WHERE a = ? AND b = 'x'"));
-        assert!(reachable("SELECT v FROM t WHERE a = ?"));
-    }
-
-    /// A MySQL client binds `?` however the cache was written, so a `$n` beside a join is as far
-    /// out of reach there as a `?` is. Accepting one and refusing the other is what REA-6928
-    /// reported: the `$n` cache was created and then never served.
-    #[test]
-    fn mysql_treats_a_dollar_placeholder_like_a_question_mark() {
-        let join = "SELECT t.v FROM t JOIN u ON t.a = u.a WHERE t.b = $1 AND u.c = 'x'";
-        assert!(!reachable_in(Dialect::MySQL, join));
-        let single = "SELECT v FROM t WHERE a = $1 AND b = 'x'";
-        assert!(reachable_in(Dialect::MySQL, single));
-    }
-
-    /// A Postgres client binds `$n`, which keeps the structural passes on both sides, so a `$n`
-    /// beside a join still lands on the shape a read produces.
-    #[test]
-    fn postgres_keeps_a_dollar_placeholder_reachable() {
-        assert!(reachable_in(
-            Dialect::PostgreSQL,
-            "SELECT t.v FROM t JOIN u ON t.a = u.a WHERE t.b = $1 AND u.c = 'x'"
-        ));
-    }
-
-    /// A placeholder beside a join or a subquery is not: those are what the passes reshape.
-    #[test]
-    fn a_placeholder_beside_a_join_or_subquery_is_unreachable() {
-        assert!(!reachable(
-            "SELECT d.v FROM (SELECT a, v FROM t) AS d WHERE d.a = ? AND d.b = 'x'"
-        ));
-        assert!(!reachable(
-            "SELECT t.v FROM t JOIN u ON t.a = u.a WHERE t.a = ?"
-        ));
-        assert!(!reachable(
-            "SELECT v FROM t WHERE a IN (SELECT a FROM u WHERE b = ?)"
-        ));
-        assert!(!reachable(
-            "SELECT v FROM t WHERE a = ? AND EXISTS (SELECT 1 FROM u WHERE u.a = t.a)"
-        ));
-    }
 }
 
 #[cfg(test)]
