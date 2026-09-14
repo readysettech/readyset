@@ -148,3 +148,12 @@ query I rowsort
 SELECT id FROM tn WHERE (a, b) = (a, b)
 ----
 1
+
+# A row comparison whose operands hold different numbers of positions, and arithmetic on a row,
+# are both errors upstream. A projection reaches the expression without passing the WHERE
+# clause's own check, so the lowering has to refuse them itself.
+statement error
+SELECT (a, b) < (c, d, id) FROM t
+
+statement error
+SELECT (a, b) + (c, d) FROM t

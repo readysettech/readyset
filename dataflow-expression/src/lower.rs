@@ -1389,6 +1389,36 @@ impl BinaryOperator {
         ))
     }
 
+    /// Refuses a row operand, leaving it to the upstream rather than answering it: a row's only
+    /// operand is another row holding the same number of positions, and only under a comparison.
+    ///
+    /// MySQL rejects anything else outright, and so does PostgreSQL, bar a NULL operand, which it
+    /// answers position by position.
+    fn check_row_operands(&self, left_type: &DfType, right_type: &DfType) -> ReadySetResult<()> {
+        let (left, right) = match (left_type, right_type) {
+            (DfType::Row(left), DfType::Row(right)) => (left, right),
+            (DfType::Row(_), _) | (_, DfType::Row(_)) => {
+                unsupported!("a row compares only with another row")
+            }
+            _ => return Ok(()),
+        };
+        if !matches!(
+            self,
+            Self::Equal
+                | Self::Is
+                | Self::Greater
+                | Self::GreaterOrEqual
+                | Self::Less
+                | Self::LessOrEqual
+        ) {
+            unsupported!("'{self}' does not take a row operand");
+        }
+        if left.len() != right.len() {
+            unsupported!("row comparison operands hold different numbers of positions");
+        }
+        Ok(())
+    }
+
     /// Returns this operator's output type given its input types, or
     /// [`ReadySetError::InvalidQuery`](readyset_errors::ReadySetError::InvalidQuery) if it could
     /// not be inferred.
@@ -1788,6 +1818,7 @@ impl Expr {
                     unsupported!("'{op}' operator not implemented yet for MySQL");
                 }
 
+                op.check_row_operands(left.ty(), right.ty())?;
                 let out = op.output_type(dialect, left.ty(), right.ty())?;
                 let (left_coerce_target, right_coerce_target) =
                     op.argument_type_coercions(&left, &right, dialect)?;
@@ -1957,6 +1988,7 @@ impl Expr {
                     let make_comparison = |rhs| -> ReadySetResult<_> {
                         let mut left = Box::new(lhs.clone());
                         let mut right = Box::new(Self::lower(rhs, dialect, context)?);
+                        BinaryOperator::Equal.check_row_operands(left.ty(), right.ty())?;
 
                         // Apply the same type coercions that BinaryOp uses for
                         // Equal, so that e.g. Int vs Numeric gets a Cast node
@@ -2165,6 +2197,7 @@ impl Expr {
             invalid_query!("op ANY/ALL (array) requires an array on the right-hand side")
         };
 
+        op.check_row_operands(left.ty(), right_member_ty)?;
         let ty = op.output_type(dialect, left.ty(), right_member_ty)?;
         if !ty.is_bool() {
             // localhost/noria=# select 1 + any('{1,2}');
@@ -3370,6 +3403,38 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(left, None);
             assert_eq!(right, None);
+        }
+    }
+
+    /// A row compares only with another row of the same arity, and only under a comparison,
+    /// whichever construct carries the comparison.
+    #[test]
+    fn row_operands_upstream_rejects_are_refused() {
+        let lower = |dialect: Dialect, sql: &str| {
+            let parser = match dialect.engine() {
+                SqlEngine::MySQL => ParserDialect::MySQL,
+                SqlEngine::PostgreSQL => ParserDialect::PostgreSQL,
+            };
+            Expr::lower(
+                parse_expr(parser, sql).unwrap(),
+                dialect,
+                &no_op_lower_context(),
+            )
+        };
+        for (dialect, sql) in [
+            (Dialect::DEFAULT_MYSQL, "(1, 2) + (3, 4)"),
+            (Dialect::DEFAULT_MYSQL, "(1, 2) < (3, 4, 5)"),
+            (Dialect::DEFAULT_MYSQL, "(1, 2) = 1"),
+            (Dialect::DEFAULT_MYSQL, "1 = (1, 2)"),
+            (Dialect::DEFAULT_MYSQL, "(1, 2) IN ((1, 2), (3, 4, 5))"),
+            (Dialect::DEFAULT_MYSQL, "(1, 2) IN (1, 2)"),
+            (Dialect::DEFAULT_POSTGRESQL, "(1, 2) = ANY ('{1,2}')"),
+        ] {
+            let error = lower(dialect, sql).unwrap_err();
+            assert!(error.is_unsupported(), "{sql}: {error}");
+        }
+        for sql in ["(1, 2) = (3, 4)", "(1, 2) IN ((1, 2), (3, 4))"] {
+            lower(Dialect::DEFAULT_MYSQL, sql).unwrap();
         }
     }
 
