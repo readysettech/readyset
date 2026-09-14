@@ -19,10 +19,12 @@ use readyset_client::query::{MigrationState, QueryId};
 use readyset_client_metrics::{QueryDestination, QueryExecutionEvent, ReadysetExecutionEvent};
 use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
-use readyset_errors::ReadySetError;
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheManager, CacheResult};
 use readyset_sql::DialectDisplay;
-use readyset_sql::ast::{CacheType, CreateCacheOptions, ReadysetHintDirective, TrxCachePolicy};
+use readyset_sql::ast::{
+    CacheType, CreateCacheOptions, ReadysetHintDirective, ShallowCacheQuery, TrxCachePolicy,
+};
 use readyset_sql_passes::adapter_rewrites::ShallowQueryParameters;
 use readyset_sql_passes::shallow::auto_cache_skip_reasons;
 use readyset_util::SizeOf;
@@ -470,11 +472,11 @@ where
                 event.readyset_event = Some(ReadysetExecutionEvent::Other {
                     duration: start.elapsed(),
                 });
-                if let (false, Some(refresh)) = (session_keyed, refresh) {
+                if let (false, Some(refresh)) = (session_keyed, refresh)
+                    && let Some(query) =
+                        Self::refresh_query(query_params, &view_request.query, &merged)?
+                {
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
-                    let query =
-                        query_params.literalize_from_merged(&view_request.query, &merged)?;
-
                     let request = ShallowRefreshRequest {
                         query_id: *query_id,
                         path: view_request.schema_search_path.clone(),
@@ -489,16 +491,16 @@ where
                 Ok(QueryResult::Shallow(values))
             }
             CacheResult::Miss(mut cache) => {
-                let query = query_params.literalize_from_merged(&view_request.query, &merged)?;
                 let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await?;
 
                 if let (false, Some(refresh)) = (session_keyed, refresh)
                     && cache.is_scheduled()
+                    && let Some(query) =
+                        Self::refresh_query(query_params, &view_request.query, &merged)?
                 {
                     let callback = {
                         let query_id = *query_id;
                         let path = view_request.schema_search_path.clone();
-                        let query = query.clone();
                         let shallow_exec_meta = shallow_exec_meta.clone();
                         let refresh = refresh.clone();
 
@@ -533,6 +535,24 @@ where
                 Self::execute_upstream(upstream, prep, params, exec_meta, None, event, false, None)
                     .await
             }
+        }
+    }
+
+    /// The literal query text a background refresh of this read runs, or `None` when a bound
+    /// parameter has no literal form. Such a read still fills and serves from the cache and its
+    /// entry lapses at expiry instead of refreshing.
+    fn refresh_query(
+        query_params: &ShallowQueryParameters,
+        query: &ShallowCacheQuery,
+        merged: &[DfValue],
+    ) -> ReadySetResult<Option<String>> {
+        match query_params.literalize_from_merged(query, merged) {
+            Ok(query) => Ok(Some(query)),
+            Err(error @ ReadySetError::Unsupported(_)) => {
+                debug!(%error, query = %query, "Shallow cache entry will not refresh");
+                Ok(None)
+            }
+            Err(error) => Err(error),
         }
     }
 

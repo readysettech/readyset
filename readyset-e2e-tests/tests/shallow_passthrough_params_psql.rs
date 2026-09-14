@@ -6,7 +6,7 @@ use std::assert_matches;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::psql_helpers::{
-    self, PostgreSQLAdapter, TextParam, last_query_info,
+    self, BinaryParam, PostgreSQLAdapter, TextParam, last_query_info,
 };
 use readyset_server::Handle;
 use readyset_util::shutdown::ShutdownSender;
@@ -102,6 +102,23 @@ async fn cidr_text_param_fills_then_hits() {
     let (conn, _handle, shutdown_tx) = setup(&[CIDR_EQ]).await;
 
     let params: [&(dyn ToSql + Sync); 2] = [&TextParam("192.168.1.0/24"), &1i32];
+    assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
+    assert_filled(&conn).await;
+    assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
+    assert_hit(&conn).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn cidr_binary_param_fills_then_hits() {
+    let (conn, _handle, shutdown_tx) = setup(&[CIDR_EQ]).await;
+
+    // Address family 2, 24 prefix bits, is_cidr, 4 address bytes.
+    let cidr = BinaryParam(&[2, 24, 1, 4, 192, 168, 1, 0]);
+    let params: [&(dyn ToSql + Sync); 2] = [&cidr, &1i32];
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
     assert_filled(&conn).await;
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
