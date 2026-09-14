@@ -89,6 +89,7 @@ steps:
       - '[ -d public ] && cd public'
       - export RUST_BACKTRACE=full
       - cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
+      - cargo --locked check --workspace --all-targets --no-default-features
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'

@@ -36,7 +36,7 @@ tracing = { workspace = true }
 walkdir = { workspace = true }
 
 database-utils = { path = "../database-utils" }
-mysql-srv = { path = "../mysql-srv", optional = true }
+mysql-srv = { path = "../mysql-srv" }
 mysql-time = { path = "../mysql-time" }
 nom-sql = { path = "../nom-sql" }
 psql-srv = { path = "../psql-srv", optional = true }
@@ -63,7 +63,6 @@ test-utils = { path = "../test-utils" }
 [features]
 default = ["in-process-readyset"]
 in-process-readyset = [
-    "mysql-srv",
     "psql-srv",
     "readyset-adapter",
     "readyset-client",
