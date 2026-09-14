@@ -1256,16 +1256,32 @@ impl BinaryOperator {
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
             },
 
-            Greater | GreaterOrEqual | Less | LessOrEqual => match dialect.engine() {
-                // A row's positions resolve against the left side the way `Equal`'s do below:
-                // the field-wise cast is what turns an unknown-typed literal into the column's
-                // type, position by position.
-                SqlEngine::PostgreSQL
-                    if matches!(left_type, DfType::Row(_))
-                        && matches!(right_type, DfType::Row(_)) =>
-                {
-                    (None, Some(left_type.clone()))
+            // PostgreSQL resolves a row comparison one position at a time whichever comparison
+            // it is, so every operator that takes two rows shares the field-wise cast that turns
+            // an unknown-typed literal into the type standing opposite it.
+            Equal | Is | Greater | GreaterOrEqual | Less | LessOrEqual
+                if let (SqlEngine::PostgreSQL, DfType::Row(left), DfType::Row(right)) =
+                    (dialect.engine(), left_type, right_type) =>
+            {
+                // Rows of unequal arity resolve to nothing: pairing their positions up would
+                // truncate the longer row, and the comparison refuses them anyway.
+                if left.len() != right.len() {
+                    (None, None)
+                } else {
+                    let resolved: Box<[DfType]> = left
+                        .iter()
+                        .zip(right)
+                        .map(|(left, right)| if left.is_known() { left } else { right }.clone())
+                        .collect();
+                    let cast_to_resolved = |fields: &[DfType]| {
+                        (*fields != *resolved).then(|| DfType::Row(resolved.clone()))
+                    };
+
+                    (cast_to_resolved(left), cast_to_resolved(right))
                 }
+            }
+
+            Greater | GreaterOrEqual | Less | LessOrEqual => match dialect.engine() {
                 SqlEngine::PostgreSQL => pg_array_coercion(left_type, right_type),
                 SqlEngine::MySQL => mysql_type_conversion(left_type, right_type)
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
@@ -3354,6 +3370,123 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(left, None);
             assert_eq!(right, None);
+        }
+    }
+
+    mod row_comparison_coercions {
+        use pretty_assertions::assert_eq;
+
+        use super::*;
+
+        /// A row whose positions carry `field_types`. Only the row's type is read here, so each
+        /// position holds a literal standing in for whatever produced that type.
+        fn row_expr(field_types: &[DfType]) -> Expr {
+            Expr::Row {
+                elements: field_types
+                    .iter()
+                    .map(|ty| Expr::Literal {
+                        val: DfValue::None,
+                        ty: ty.clone(),
+                    })
+                    .collect(),
+                ty: row_ty(field_types),
+            }
+        }
+
+        fn row_ty(field_types: &[DfType]) -> DfType {
+            DfType::Row(field_types.into())
+        }
+
+        /// The types a row of columns carries.
+        const COLUMNS: [DfType; 2] = [DfType::DEFAULT_TEXT, DfType::Int];
+
+        /// PostgreSQL types an unadorned literal `Unknown`, leaving the comparison to resolve it
+        /// against the type standing opposite it.
+        const LITERALS: [DfType; 2] = [DfType::Unknown, DfType::Unknown];
+
+        #[test]
+        fn ordering_resolves_literal_row_on_right() {
+            let (left, right) = BinaryOperator::Less
+                .argument_type_coercions(
+                    &row_expr(&COLUMNS),
+                    &row_expr(&LITERALS),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, Some(row_ty(&COLUMNS)));
+        }
+
+        #[test]
+        fn ordering_resolves_literal_row_on_left() {
+            let (left, right) = BinaryOperator::Greater
+                .argument_type_coercions(
+                    &row_expr(&LITERALS),
+                    &row_expr(&COLUMNS),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(row_ty(&COLUMNS)));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn ordering_resolves_each_position_against_the_side_holding_a_type() {
+            // `(a, 'x') < ('y', b)`: the type a position needs sits on the left at one position
+            // and on the right at the other.
+            let left_fields = [DfType::DEFAULT_TEXT, DfType::Unknown];
+            let right_fields = [DfType::Unknown, DfType::Int];
+            let (left, right) = BinaryOperator::Less
+                .argument_type_coercions(
+                    &row_expr(&left_fields),
+                    &row_expr(&right_fields),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(row_ty(&COLUMNS)));
+            assert_eq!(right, Some(row_ty(&COLUMNS)));
+        }
+
+        #[test]
+        fn equality_resolves_literal_row_on_left() {
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &row_expr(&LITERALS),
+                    &row_expr(&COLUMNS),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(row_ty(&COLUMNS)));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn rows_of_unequal_arity_resolve_to_nothing() {
+            // Pairing the positions up would truncate the longer row, hiding the arity the
+            // comparison itself refuses.
+            let (left, right) = BinaryOperator::Less
+                .argument_type_coercions(
+                    &row_expr(&COLUMNS),
+                    &row_expr(&[DfType::Unknown]),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn mysql_resolves_a_row_the_same_way_round() {
+            let columns = row_expr(&COLUMNS);
+            let literals = row_expr(&LITERALS);
+            assert_eq!(
+                BinaryOperator::Less
+                    .argument_type_coercions(&columns, &literals, Dialect::DEFAULT_MYSQL)
+                    .unwrap(),
+                BinaryOperator::Greater
+                    .argument_type_coercions(&literals, &columns, Dialect::DEFAULT_MYSQL)
+                    .unwrap(),
+            );
         }
     }
 

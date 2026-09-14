@@ -115,6 +115,21 @@ SELECT id FROM tm WHERE (a, b) = (c, e)
 ----
 5
 
+# The literals can sit on the left, and each position still resolves against whichever side
+# carries the type.
+query I rowsort
+SELECT id FROM tm WHERE ('y', '2') > (a, b)
+----
+1
+3
+4
+5
+
+query I rowsort
+SELECT id FROM tm WHERE ('y', '2') <= (a, b)
+----
+2
+
 # A NULL at any position leaves the comparison undecided, so the row stays out of the result.
 # Comparing the rows structurally treats two NULLs as equal, which answers a tautology with every
 # row and answers its negation with the rows that hold a NULL.

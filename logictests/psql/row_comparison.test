@@ -78,3 +78,59 @@ SELECT id FROM t WHERE (b, d) = ($1, 2)
 $1 = 1
 ----
 5
+
+# A row comparison can be written with its literals on the left, and each position still
+# resolves against whichever side carries the type. Resolving against the left alone leaves the
+# literal untyped, and it then compares against the column as a value of another kind.
+query I rowsort
+SELECT id FROM t WHERE ('x', '2') > (a, b)
+----
+1
+5
+
+query I rowsort
+SELECT id FROM t WHERE ('x', '1') = (a, b)
+----
+1
+5
+
+# Both sides can hold a column and a literal at once, and the position is what decides which of
+# them carries the type: the left side supplies it at the first position and the right at the
+# second.
+query I rowsort
+SELECT id FROM t WHERE (a, '0') < ('y', b)
+----
+1
+2
+3
+5
+
+# A projection reaches the comparison by a different path than a WHERE clause does, and resolves
+# its positions the same way.
+query IT nosort
+SELECT id, (a, b) < (c, d) FROM t ORDER BY id
+----
+1
+0
+2
+1
+3
+1
+4
+0
+5
+1
+
+query IT nosort
+SELECT id, ('x', '1') = (a, b) FROM t ORDER BY id
+----
+1
+1
+2
+0
+3
+0
+4
+0
+5
+1
