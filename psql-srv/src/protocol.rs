@@ -81,6 +81,7 @@ pub(crate) enum SaslState {
 /// * AuthenticatingSasl -> AuthenticatingSasl
 /// * AuthenticatingSasl -> Ready
 /// * Ready -> Extended
+/// * Extended -> Ready
 /// * Extended -> Error
 /// * Error -> Ready
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -927,7 +928,7 @@ impl Protocol {
         let response = backend
             .on_execute(*prepared_statement_id, params, result_transfer_formats)
             .await?;
-        let res = if let Select { resultset, .. } = response {
+        if let Select { resultset, .. } = response {
             Ok(Response::Stream {
                 header: None,
                 resultset,
@@ -969,9 +970,7 @@ impl Protocol {
                 }
             };
             Ok(Response::Message(command_complete))
-        };
-        self.state = State::Ready;
-        res
+        }
     }
 
     // A request to close (deallocate) either a prepared statement or a portal.
@@ -1241,7 +1240,7 @@ mod tests {
     use std::convert::TryFrom;
     use std::pin::Pin;
     use std::task::Poll;
-    use std::{io, vec};
+    use std::{assert_matches, io, vec};
 
     use bytes::BytesMut;
     use futures::task::Context;
@@ -2697,6 +2696,68 @@ mod tests {
                 ..
             }) if message == "internal error: error requested"
         ));
+        assert_eq!(protocol.state, State::Error);
+    }
+
+    // A row error surfaces after Execute has returned its stream. The protocol is still in the
+    // extended sequence, so the error must leave it in the Error state.
+    #[tokio::test]
+    async fn on_error_after_execute_stream() {
+        let mut protocol = Protocol::new(TlsMode::Disabled);
+        let mut backend = Backend::new();
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
+
+        let startup_request = FrontendMessage::StartupMessage {
+            protocol_version: 12345,
+            user: Some(bytes_str("user_name")),
+            database: Some(bytes_str("database_name")),
+            application_name: None,
+        };
+        protocol
+            .on_request(startup_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
+
+        let parse_request = FrontendMessage::Parse {
+            prepared_statement_name: bytes_str("prepared1"),
+            query: bytes_str("SELECT * FROM test WHERE x = $1 AND y = $2;"),
+            parameter_data_types: vec![],
+        };
+        protocol
+            .on_request(parse_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
+
+        let bind_request = FrontendMessage::Bind {
+            prepared_statement_name: bytes_str("prepared1"),
+            portal_name: bytes_str("portal1"),
+            params: vec![PsqlValue::Double(0.8887), PsqlValue::Int(45678)],
+            result_transfer_formats: vec![TransferFormat::Text, TransferFormat::Binary],
+        };
+        protocol
+            .on_request(bind_request, &mut backend, &mut channel)
+            .await
+            .unwrap();
+
+        let request = FrontendMessage::Execute {
+            portal_name: bytes_str("portal1"),
+            limit: 0,
+        };
+        assert_matches!(
+            protocol
+                .on_request(request, &mut backend, &mut channel)
+                .await
+                .unwrap(),
+            Response::Stream { .. }
+        );
+
+        assert_matches!(
+            protocol
+                .on_error::<Backend>(Error::InternalError("row failed".to_string()), false)
+                .await
+                .unwrap(),
+            Response::Message(ErrorResponse { .. })
+        );
         assert_eq!(protocol.state, State::Error);
     }
 }

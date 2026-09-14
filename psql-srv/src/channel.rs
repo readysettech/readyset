@@ -67,7 +67,7 @@ where
     }
 
     /// Write a `Response` (actually the `BackendMessage`s generated a `Response`) to the channel.
-    pub async fn send<S>(&mut self, item: Response<S>) -> Result<(), EncodeError>
+    pub async fn send<S>(&mut self, item: Response<S>) -> Result<(), Error>
     where
         S: Stream<Item = Result<PsqlSrvRow, Error>> + Unpin,
     {

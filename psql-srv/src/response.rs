@@ -34,7 +34,9 @@ impl<S> Response<S>
 where
     S: Stream<Item = Result<PsqlSrvRow, Error>> + Unpin,
 {
-    pub async fn write<K>(self, sink: &mut K) -> Result<(), EncodeError>
+    /// Write the response's messages to `sink`. A result stream that yields an error ends the
+    /// response there. The error is returned for the protocol to report.
+    pub async fn write<K>(self, sink: &mut K) -> Result<(), Error>
     where
         K: Sink<BackendMessage, Error = EncodeError> + Unpin,
     {
@@ -44,7 +46,7 @@ where
 
             Message(m) => {
                 trace!("Sending message: {:?}", m);
-                sink.feed(m).await
+                Ok(sink.feed(m).await?)
             }
 
             Messages(ms) => {
@@ -91,10 +93,7 @@ where
                             sink.feed(BackendMessage::PassThroughDataRow(row)).await?;
                             n_rows += 1;
                         }
-                        Err(e) => {
-                            trace!("Sending error: {:?}", e);
-                            sink.feed(e.into()).await?;
-                        }
+                        Err(e) => return Err(e),
                         Ok(PsqlSrvRow::SimpleQueryMessage(m)) => {
                             trace!("Sending simple query message: {:?}", m);
                             debug_assert_eq!(n_rows, 0, "should not see a mix of simple query messages and rows that we count manually");
@@ -263,6 +262,39 @@ mod tests {
         });
         futures::pin_mut!(validating_sink);
         block_on(response.write(&mut validating_sink)).unwrap();
+        block_on(validating_sink.flush()).unwrap();
+    }
+
+    #[test]
+    fn write_select_stops_at_error() {
+        let response = Response::Stream {
+            header: None,
+            resultset: stream::iter(vec![
+                Ok(vec![PsqlValue::Int(5)].into()),
+                Err(Error::InternalError("row failed".to_string())),
+                Ok(vec![PsqlValue::Int(99)].into()),
+            ]),
+            result_transfer_formats: None,
+            trailer: Some(BackendMessage::ready_for_query(
+                TransactionState::NotInTransaction,
+            )),
+        };
+        let validating_sink = sink::unfold(0, |i, m: BackendMessage| {
+            async move {
+                match (i, m) {
+                    (0, BackendMessage::DataRow { values, .. }) => {
+                        assert_eq!(values, vec![PsqlValue::Int(5)])
+                    }
+                    // The error ends the response. No further rows, no CommandComplete and no
+                    // trailer follow it.
+                    (i, m) => panic!("Unexpected message {i}: {m:?}"),
+                }
+                Ok::<_, EncodeError>(i + 1)
+            }
+        });
+        futures::pin_mut!(validating_sink);
+        let result = block_on(response.write(&mut validating_sink));
+        assert!(matches!(result, Err(Error::InternalError(m)) if m == "row failed"));
         block_on(validating_sink.flush()).unwrap();
     }
 
