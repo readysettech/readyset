@@ -6189,6 +6189,7 @@ name = "readyset-client-test-helpers"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "database-utils",
  "futures",
  "mysql-srv",

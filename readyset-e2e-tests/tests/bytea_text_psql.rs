@@ -1,13 +1,9 @@
 //! Text-format bytea parameters must decode the way Postgres decodes them, in both the `\x` hex
 //! form libpq sends and the legacy escape form.
 
-use std::error::Error;
-
-use bytes::BytesMut;
-use postgres_types::{Format, IsNull, ToSql, Type, to_sql_checked};
 use readyset_client_test_helpers::{
     TestBuilder,
-    psql_helpers::{self, PostgreSQLAdapter},
+    psql_helpers::{self, PostgreSQLAdapter, TextParam},
 };
 use test_utils::{tags, upstream};
 use tokio_postgres::Client;
@@ -16,32 +12,6 @@ const SETUP: &str = "
     CREATE TABLE bytea_text (id INT PRIMARY KEY, b BYTEA);
     INSERT INTO bytea_text VALUES (1, '\\xDEADBEEF'), (2, 'abc\\000\\\\'), (3, NULL);
 ";
-
-/// A parameter sent in text format with exactly these bytes, so the test controls the text
-/// Readyset decodes.
-#[derive(Debug)]
-struct TextParam(&'static str);
-
-impl ToSql for TextParam {
-    fn to_sql(
-        &self,
-        _: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        out.extend_from_slice(self.0.as_bytes());
-        Ok(IsNull::No)
-    }
-
-    fn accepts(_: &Type) -> bool {
-        true
-    }
-
-    fn encode_format(&self, _: &Type) -> Format {
-        Format::Text
-    }
-
-    to_sql_checked!();
-}
 
 async fn ids_matching(conn: &Client, param: &'static str) -> Vec<i32> {
     conn.query("SELECT id FROM bytea_text WHERE b = $1", &[&TextParam(param)])

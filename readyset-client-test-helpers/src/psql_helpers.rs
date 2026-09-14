@@ -1,8 +1,10 @@
 use std::env;
+use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use bytes::BytesMut;
 use database_utils::TlsMode;
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::{QueryDestination, QueryInfo};
@@ -10,6 +12,7 @@ use readyset_adapter::Backend;
 use readyset_psql::{PostgreSqlQueryHandler, PostgreSqlUpstream};
 use readyset_util::retry_with_exponential_backoff;
 use tokio::net::TcpStream;
+use tokio_postgres::types::{to_sql_checked, Format, IsNull, ToSql, Type};
 use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage};
 use tracing::error;
 
@@ -119,6 +122,45 @@ impl Adapter for PostgreSQLAdapter {
         )
         .await
     }
+}
+
+/// A parameter sent in text format with exactly these bytes, whatever type the statement gives it.
+#[derive(Debug)]
+pub struct TextParam(pub &'static str);
+
+impl ToSql for TextParam {
+    fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        out.extend_from_slice(self.0.as_bytes());
+        Ok(IsNull::No)
+    }
+
+    fn accepts(_: &Type) -> bool {
+        true
+    }
+
+    fn encode_format(&self, _: &Type) -> Format {
+        Format::Text
+    }
+
+    to_sql_checked!();
+}
+
+/// A parameter sent in binary format with exactly these bytes, whatever type the statement gives
+/// it.
+#[derive(Debug)]
+pub struct BinaryParam(pub &'static [u8]);
+
+impl ToSql for BinaryParam {
+    fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
+        out.extend_from_slice(self.0);
+        Ok(IsNull::No)
+    }
+
+    fn accepts(_: &Type) -> bool {
+        true
+    }
+
+    to_sql_checked!();
 }
 
 /// Retrieves where the query executed by parsing the row returned by EXPLAIN LAST STATEMENT.

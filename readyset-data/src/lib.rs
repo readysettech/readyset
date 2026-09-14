@@ -704,10 +704,16 @@ impl DfValue {
                 _ => Err(mk_err()),
             },
             DfValue::Default | DfValue::Max => Err(mk_err()),
+            // A text-format value is its type's text representation, so it coerces as text does.
+            DfValue::PassThrough(ref p) if p.format == PassThroughFormat::Text => {
+                let s = std::str::from_utf8(&p.data)?;
+                DfValue::from_str_and_collation(s, Collation::Utf8)
+                    .coerce_to_inner(to_ty, from_ty, dialect)
+            }
             DfValue::PassThrough(ref p) => Err(ReadySetError::DfValueConversionError {
                 src_type: format!("PassThrough[{}]", p.ty),
                 target_type: to_ty.to_string(),
-                details: "PassThrough items cannot be coerced".into(),
+                details: "binary-format PassThrough items cannot be coerced".into(),
             }),
         }
     }
@@ -3555,6 +3561,26 @@ mod tests {
             String::try_from(&DfValue::try_from(s.clone()).unwrap()).unwrap(),
             s
         )
+    }
+
+    fn passthrough(ty: Type, format: PassThroughFormat, data: &[u8]) -> DfValue {
+        DfValue::PassThrough(Arc::new(PassThrough {
+            ty,
+            format,
+            data: data.into(),
+        }))
+    }
+
+    #[test]
+    fn text_passthrough_coerces_as_text() {
+        let enum_ty = DfType::from_enum_variants(["red", "yellow", "green"].map(Into::into), None);
+        let text = passthrough(Type::TEXT, PassThroughFormat::Text, b"yellow");
+        assert_eq!(
+            text.coerce_to(&enum_ty, &DfType::Unknown).unwrap(),
+            DfValue::UnsignedInt(2)
+        );
+        let binary = passthrough(Type::TEXT, PassThroughFormat::Binary, b"yellow");
+        assert!(binary.coerce_to(&enum_ty, &DfType::Unknown).is_err());
     }
 
     #[test]
