@@ -140,12 +140,11 @@ where
                 }
             }
         };
-        state
-            .query_status_cache
-            .update_query_migration_state(&deep, migration_state, None);
-        state
-            .query_status_cache
-            .set_trx_cache_policy(&deep, trx_cache_policy);
+        state.query_status_cache.update_query_migration_state(
+            &deep,
+            migration_state,
+            Some(trx_cache_policy),
+        );
         let query = Self::format_query_text(deep.statement.display(DB::SQL_DIALECT).to_string());
         Ok(Self::create_cache_result(
             query_id,
@@ -230,10 +229,7 @@ where
             ddl_req.ok_or_else(|| internal_err!("No statement supplied to shallow cache"))?;
 
         let shallow = shallow?;
-        if let Err(e) = connectors
-            .upstream_supports(&shallow.original_query(settings.dialect))
-            .await
-        {
+        if let Err(e) = connectors.upstream_supports(&shallow).await {
             return Err(ReadySetError::CreateCacheError(e.to_string()));
         }
 
@@ -364,7 +360,7 @@ where
         let res = state.shallow.create_cache(
             Some(name.clone()),
             query_id,
-            shallow.query.clone(),
+            shallow.query.as_ref().clone(),
             shallow.schema_search_path.clone(),
             resolve_eviction_policy(policy, settings.default_ttl_ms),
             ddl_req.clone(),
@@ -428,11 +424,8 @@ where
                 state.query_status_cache.update_query_migration_state(
                     shallow,
                     MigrationState::Successful(CacheType::Shallow),
-                    None,
+                    Some(trx_cache_policy),
                 );
-                state
-                    .query_status_cache
-                    .set_trx_cache_policy(shallow, trx_cache_policy);
 
                 // Hand the column to the freshness worker, which probes the creator first so
                 // the identity most likely to read the new cache resolves before the rest.
@@ -542,16 +535,14 @@ where
                     }
                 };
 
-                // Rewrite for shallow, first rendering a copy of the AST as plaintext before the
-                // rewrite potentially puts placeholders in places the upstream doesn't support.
-                let shallow = match shallow {
-                    Ok(mut shallow) => {
-                        let shallow_orig = shallow.display(settings.dialect).to_string();
-                        rewrite_shallow(&mut shallow, connectors.noria.rewrite_params())?;
+                let shallow = match shallow.map(|query| *query) {
+                    Ok(mut query) => {
+                        let query_orig = query.clone();
+                        rewrite_shallow(&mut query, connectors.noria.rewrite_params())?;
                         Ok(ShallowViewRequest::new(
-                            *shallow,
+                            query,
                             connectors.noria.schema_search_path().to_owned(),
-                            Some(shallow_orig),
+                            query_orig,
                         ))
                     }
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
@@ -767,10 +758,7 @@ where
             }
             Some(CacheType::Shallow) => {
                 let shallow = shallow?;
-                let supported = if let Err(e) = connectors
-                    .upstream_supports(&shallow.original_query(settings.dialect))
-                    .await
-                {
+                let supported = if let Err(e) = connectors.upstream_supports(&shallow).await {
                     &format!("no: {e}")
                 } else {
                     "yes"
@@ -795,10 +783,7 @@ where
                     | MigrationState::Supported
                     | MigrationState::Unsupported(..) => {
                         let shallow = shallow?;
-                        if let Err(e) = connectors
-                            .upstream_supports(&shallow.original_query(settings.dialect))
-                            .await
-                        {
+                        if let Err(e) = connectors.upstream_supports(&shallow).await {
                             (None, Some(shallow), &format!("no: {e}"))
                         } else {
                             (None, Some(shallow), "yes")

@@ -759,27 +759,24 @@ where
         query_shallow: &mut Option<ShallowViewRequest>,
         event: &mut QueryExecutionEvent,
     ) -> ReadySetResult<(PrepareMeta, bool)> {
-        let (shallow_parsed, hint) = {
+        let (shallow, hint) = {
             let _t = event.start_parse_timer();
             parse_shallow_query(&self.settings, query)
         };
 
         let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
 
-        // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so the
-        // fall-through below can derive the Readyset AST without a second text parse.
-        let deep_ast = match &shallow_parsed {
+        let deep_ast = match &shallow {
             Ok(q) if self.settings.retain_shallow_ast() => Some((**q).clone()),
             _ => None,
         };
 
-        if let Some((shallow, params)) = self.connectors.prepare_shallow_query(shallow_parsed) {
+        if let Some((shallow, params)) = self.connectors.rewrite_shallow_query(shallow) {
             if let Some((query_id, trx_cache_policy)) = Self::should_query_shallow(
                 &mut self.connectors,
                 &self.settings,
                 &mut self.state,
                 &shallow,
-                query,
                 hint,
             )
             .await

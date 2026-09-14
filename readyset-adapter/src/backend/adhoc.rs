@@ -468,26 +468,19 @@ where
 
         let is_skip_cache = matches!(&hint, Some(ReadysetHintDirective::SkipCache));
 
-        // A successful shallow parse is always SELECT-shaped, so the Set/Use handling in
-        // `check_readyset_schema_routing` cannot apply: route and serve the query on the
-        // shallow parse alone, deferring the cost of the full parse to the fall-through path.
         let mut deep_ast = None;
-        if let Ok(shallow_query) = shallow_parsed {
-            // Keep a copy of the sqlparser AST before the shallow rewrite mutates it, so
-            // the fall-through below can derive the Readyset AST without a second text
-            // parse.
+        if let Ok(shallow) = shallow_parsed {
             if settings.retain_shallow_ast() {
-                deep_ast = Some((*shallow_query).clone());
+                deep_ast = Some((*shallow).clone());
             }
-            if state.select_should_query_readyset_schema(settings, &shallow_query) {
+            if state.select_should_query_readyset_schema(settings, &shallow) {
                 let session = Self::readyset_schema_session(connectors, state)?;
                 let result = session.query(query).await?;
                 return Ok(QueryResult::ReadysetSchema(result));
             }
-            if let Some((shallow, params)) = connectors.prepare_shallow_query(Ok(shallow_query)) {
+            if let Some((shallow, params)) = connectors.rewrite_shallow_query(Ok(shallow)) {
                 if let Some((query_id, _)) =
-                    Self::should_query_shallow(connectors, settings, state, &shallow, query, hint)
-                        .await
+                    Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
                     && !Self::acl_declines_serve(connectors, settings, state, query_id)
                 {
                     let result =

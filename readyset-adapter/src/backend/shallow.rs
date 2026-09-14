@@ -59,17 +59,12 @@ where
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
         shallow: &ShallowViewRequest,
-        shallow_orig: &str,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<(QueryId, TrxCachePolicy)> {
         let (query_id, migration) =
             match state.query_status_cache.try_query_migration_state(shallow) {
                 (id, Some(migration)) => (id, migration),
-                (_, None) => state.query_status_cache.insert(ShallowViewRequest::new(
-                    shallow.query.clone(),
-                    shallow.schema_search_path.clone(),
-                    Some(shallow_orig.to_string()),
-                )),
+                (_, None) => state.query_status_cache.insert(shallow.clone()),
             };
 
         if matches!(&hint_directive, Some(ReadysetHintDirective::SkipCache)) {
@@ -86,7 +81,6 @@ where
                 settings,
                 state,
                 shallow,
-                shallow_orig,
                 hint_directive,
             )
             .await;
@@ -155,7 +149,6 @@ where
         settings: &BackendSettings,
         state: &BackendState<DB>,
         shallow: &ShallowViewRequest,
-        shallow_orig: &str,
         hint_directive: Option<ReadysetHintDirective>,
     ) -> Option<MigrationState> {
         let (mut opts, trigger) = match hint_directive {
@@ -248,7 +241,7 @@ where
             return None;
         }
 
-        if let Err(error) = connectors.upstream_supports(shallow_orig).await {
+        if let Err(error) = connectors.upstream_supports(shallow).await {
             warn!(
                 trigger = trigger.as_str(),
                 %error,

@@ -28,7 +28,6 @@ use readyset_sql::ast::{
     BinaryOperator, ItemPlaceholder, Literal, Relation, SelectStatement, ShallowCacheQuery,
     SqlIdentifier,
 };
-use readyset_sql::DialectDisplay;
 use readyset_sql::TryFromDialect as _;
 use readyset_sql_passes::anonymize::{Anonymize, Anonymizer};
 use readyset_tracing::child_span;
@@ -107,21 +106,19 @@ impl ViewCreateRequest {
 /// instead of a `SelectStatement`, allowing it to handle queries with syntax unsupported by deep caching.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShallowViewRequest {
-    /// The query itself, stored as sqlparser AST to support unsupported syntax
-    pub query: ShallowCacheQuery,
-
+    /// The fully-parameterized query.
+    pub query: Box<ShallowCacheQuery>,
     /// The schema search path to use to resolve table references within the changelist
     ///
     /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
     /// views are created.
     pub schema_search_path: Vec<SqlIdentifier>,
-
-    /// An example of the query as originally written, before we apply our rewrites.
+    /// An example of the query, before we apply our rewrites.
     ///
     /// An original copy is useful for determining support via preparing it upstream.  Our
     /// fully-parameterized form may have put placeholders in positions not valid in a prepared
     /// statement, which could lead us to falsely report a query as unsupported.
-    query_orig: Option<String>,
+    pub query_orig: Box<ShallowCacheQuery>,
     /// Memoized [`QueryId`] for this request; computing it renders the query AST to a string,
     /// which is too expensive to repeat on every status-cache access. Not part of the request's
     /// identity: excluded from serialization, `PartialEq`, and `Hash`.
@@ -147,27 +144,17 @@ impl Hash for ShallowViewRequest {
 impl ShallowViewRequest {
     /// Initialize a new [`ShallowViewRequest`].
     ///
-    /// Please provide the pre-rewrite form of the query via `query_orig` if this
-    /// [`ShallowViewRequest`] is going to be stored in the query status cache.
+    /// Please provide the pre-rewritten query via `query_orig`.
     pub fn new(
         query: ShallowCacheQuery,
         schema_search_path: Vec<SqlIdentifier>,
-        query_orig: Option<String>,
+        query_orig: ShallowCacheQuery,
     ) -> Self {
         Self {
-            query,
+            query: Box::new(query),
             schema_search_path,
-            query_orig,
+            query_orig: Box::new(query_orig),
             query_id: OnceLock::new(),
-        }
-    }
-
-    /// The query to PREPARE-probe for upstream support: the original text when we have it,
-    /// otherwise the rendered parameterized query as a fallback.
-    pub fn original_query(&self, dialect: readyset_sql::Dialect) -> Cow<'_, str> {
-        match &self.query_orig {
-            Some(original) => Cow::Borrowed(original),
-            None => Cow::Owned(self.query.display(dialect).to_string()),
         }
     }
 

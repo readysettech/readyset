@@ -104,7 +104,7 @@ use readyset_errors::ReadySetError;
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
-use readyset_shallow::{CacheInfo, CacheInsertGuard, CacheManager, ContentHash};
+use readyset_shallow::{CacheInsertGuard, CacheManager, ContentHash};
 use readyset_sql::ast::{
     self, CacheInner, CacheType, CreateCacheOptions, CreateCacheStatement, ReadysetHintDirective,
     Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, SqlQuery, TrxCachePolicy,
@@ -886,18 +886,22 @@ where
     }
 
     /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
-    fn prepare_shallow_query(
+    fn rewrite_shallow_query(
         &self,
         shallow: Result<ShallowCacheQuery, ReadySetError>,
     ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
-        let Ok(mut shallow) = shallow else {
+        let Ok(mut query) = shallow else {
             return None;
         };
-        let Ok(params) = rewrite_shallow(&mut shallow, self.noria.rewrite_params()) else {
+        let query_orig = query.clone();
+        let Ok(params) = rewrite_shallow(&mut query, self.noria.rewrite_params()) else {
             return None;
         };
-        let shallow =
-            ShallowViewRequest::new(shallow, self.noria.schema_search_path().to_owned(), None);
+        let shallow = ShallowViewRequest::new(
+            query,
+            self.noria.schema_search_path().to_owned(),
+            query_orig,
+        );
         Some((shallow, params))
     }
 
@@ -947,16 +951,14 @@ where
         ))
     }
 
-    /// Determines via running PREPARE if the upstream can support this literal query text.
-    ///
-    /// Prepares the original query in order to avoid additional parameterization we may do that
-    /// could otherwise introduce a placeholder in an invalid PREPARE position.
-    async fn upstream_supports(&mut self, sql: &str) -> anyhow::Result<()> {
+    /// Determines via running PREPARE if the upstream can support this query.
+    async fn upstream_supports(&mut self, shallow: &ShallowViewRequest) -> anyhow::Result<()> {
         let Some(upstream) = self.upstream.as_mut() else {
             bail!("No upstream database found");
         };
 
-        upstream.can_prepare(sql).await
+        let query = shallow.query_orig.to_string();
+        upstream.can_prepare(query).await
     }
 
     /// Initialize the search_path by reading it from the upstream.
@@ -1115,22 +1117,21 @@ where
         self.query_status_cache.update_query_migration_state(
             view_request,
             MigrationState::Pending,
-            None,
+            Some(TrxCachePolicy::Never),
         );
-        self.query_status_cache
-            .set_trx_cache_policy(view_request, TrxCachePolicy::Never);
         self.prepared.invalidate(view_request);
     }
 
-    fn drop_shallow_view_request(&mut self, shallow: &ShallowViewRequest) {
+    fn drop_shallow_view_request(&mut self, query_id: QueryId) {
+        self.prepared.invalidate_shallow(query_id);
+        let Some(view) = self.query_status_cache.query(&query_id.to_string()) else {
+            return;
+        };
         self.query_status_cache.update_query_migration_state(
-            shallow,
+            &view,
             MigrationState::Pending,
-            None,
+            Some(TrxCachePolicy::Never),
         );
-        self.query_status_cache
-            .set_trx_cache_policy(shallow, TrxCachePolicy::Never);
-        self.prepared.invalidate_shallow(QueryId::from(shallow));
     }
 
     async fn drop_shallow_cached_query(
@@ -1138,38 +1139,18 @@ where
         name: Option<&Relation>,
         query_id: Option<QueryId>,
     ) -> ReadySetResult<()> {
-        let info = self
-            .shallow
-            .get(name, query_id.as_ref())
-            .map(|cache| cache.get_info());
+        let info = self.shallow.drop_cache(name, query_id.as_ref())?;
+        let query_id = info.query_id;
 
-        self.shallow.drop_cache(name, query_id.as_ref())?;
-
-        let dropped_id = query_id.or_else(|| info.as_ref().map(|i| i.query_id));
-        if let Some(dropped_id) = dropped_id {
-            if let Some(coordinator) = &self.rls_coordinator {
-                coordinator.unregister(&dropped_id);
-            }
-            self.acl
-                .send_lifecycle(AclMessage::CacheDropped { cache: dropped_id });
+        if let Some(coordinator) = &self.rls_coordinator {
+            coordinator.unregister(&query_id);
         }
+        self.acl
+            .send_lifecycle(AclMessage::CacheDropped { cache: query_id });
 
-        // The cache held the exact `CREATE CACHE` request that was persisted; remove that entry.
-        // Matching the stored request (rather than the drop statement) also handles entries
-        // written before `cache_name` existed.
-        let Some(CacheInfo {
-            query,
-            schema_search_path,
-            ddl_req,
-            ..
-        }) = info
-        else {
-            return Ok(());
-        };
+        self.drop_shallow_view_request(query_id);
 
-        let view_request = ShallowViewRequest::new(query, schema_search_path, None);
-        self.drop_shallow_view_request(&view_request);
-
+        let ddl_req = info.ddl_req;
         if let Err(e) = retry_with_exponential_backoff!(
             || async {
                 self.authority
@@ -2810,7 +2791,7 @@ where
         internal!("Not a shallow cache");
     }
 
-    let mut select_stmt = match stmt.inner {
+    let mut query = match stmt.inner {
         CacheInner::Statement { shallow: Ok(s), .. } => *s,
         CacheInner::Statement {
             shallow: Err(e), ..
@@ -2818,40 +2799,39 @@ where
         CacheInner::Id(_) => internal!("Cannot recreate from query ID"),
     };
 
-    rewrite_shallow(&mut select_stmt, rewrite_params)?;
+    let query_orig = query.clone();
+    rewrite_shallow(&mut query, rewrite_params)?;
 
-    let query_id = QueryId::from_shallow_query(&select_stmt, &schema_search_path);
+    let query_id = QueryId::from_shallow_query(&query, &schema_search_path);
     let name = stmt.name.unwrap_or_else(|| query_id.into());
     let display_name = name.display_unquoted().to_string();
 
-    // Run the RLS analyzer at recovery time too. Without this a cache
-    // persisted under a previous run that targeted a now-RLS-protected
-    // table would come back as `Plain` and serve cross-tenant rows on
-    // startup.
-    let registration =
-        match analyze_recovered_cache(policy_registry, &select_stmt, &schema_search_path) {
-            RecoveryDeps::Plain => None,
-            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
-            RecoveryDeps::Scoped {
-                relations,
-                session_rls_inputs,
-            } => Some((relations, Some(session_rls_inputs))),
-            RecoveryDeps::WaitForPoll { unknown } => {
-                return Ok(RecoveryOutcome::Deferred {
-                    unknown: unknown.iter().map(|u| u.qualified()).collect(),
-                });
-            }
-            RecoveryDeps::Skip { reason } => {
-                return Ok(RecoveryOutcome::Skipped {
-                    reason: format!("{display_name}: {reason}"),
-                });
-            }
-        };
+    // Run the RLS analyzer at recovery time too. Without this a cache persisted under a previous
+    // run that targeted a now-RLS-protected table would come back as `Plain` and serve
+    // cross-tenant rows on startup.
+    let registration = match analyze_recovered_cache(policy_registry, &query, &schema_search_path) {
+        RecoveryDeps::Plain => None,
+        RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+        RecoveryDeps::Scoped {
+            relations,
+            session_rls_inputs,
+        } => Some((relations, Some(session_rls_inputs))),
+        RecoveryDeps::WaitForPoll { unknown } => {
+            return Ok(RecoveryOutcome::Deferred {
+                unknown: unknown.iter().map(|u| u.qualified()).collect(),
+            });
+        }
+        RecoveryDeps::Skip { reason } => {
+            return Ok(RecoveryOutcome::Skipped {
+                reason: format!("{display_name}: {reason}"),
+            });
+        }
+    };
 
     shallow.create_cache(
         Some(name),
         query_id,
-        select_stmt.clone(),
+        query.clone(),
         schema_search_path.clone(),
         resolve_eviction_policy(stmt.policy, default_ttl_ms),
         ddl_req,
@@ -2871,13 +2851,9 @@ where
     }
 
     query_status_cache.update_query_migration_state(
-        &ShallowViewRequest::new(select_stmt.clone(), schema_search_path.clone(), None),
+        &ShallowViewRequest::new(query, schema_search_path.clone(), query_orig),
         MigrationState::Successful(CacheType::Shallow),
-        None,
-    );
-    query_status_cache.set_trx_cache_policy(
-        &ShallowViewRequest::new(select_stmt, schema_search_path, None),
-        stmt.trx_cache_policy,
+        Some(stmt.trx_cache_policy),
     );
 
     Ok(RecoveryOutcome::Done)

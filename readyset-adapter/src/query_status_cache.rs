@@ -1149,20 +1149,6 @@ impl QueryStatusCache {
         self.persistent_handle.pending_inlined_migrations.remove(q);
     }
 
-    /// Updates the query's transaction cache policy, controlling how the cached query is
-    /// served when the connection is inside a transaction.
-    /// Will not try to insert a query if it has not already been registered.
-    pub fn set_trx_cache_policy<Q>(&self, q: &Q, trx_cache_policy: TrxCachePolicy)
-    where
-        Q: QueryStatusKey,
-    {
-        q.with_mut_status(self, |s| {
-            if let Some(s) = s {
-                s.trx_cache_policy = trx_cache_policy;
-            }
-        })
-    }
-
     /// Updates a queries status to `status` unless the queries migration state was
     pub fn update_query_status<Q>(&self, q: &Q, status: QueryStatus)
     where
@@ -1602,7 +1588,7 @@ impl FromStr for MigrationStyle {
 #[cfg(test)]
 mod tests {
     use readyset_client::ViewCreateRequest;
-    use readyset_sql::ast::{CacheType, SelectStatement, SqlQuery};
+    use readyset_sql::ast::{CacheType, SelectStatement, ShallowCacheQuery, SqlQuery};
     use readyset_util::hash::hash;
     use vec1::Vec1;
 
@@ -1684,11 +1670,8 @@ mod tests {
     #[test]
     fn shallow_auto_create_skip_is_proxied_with_reason() {
         let cache = QueryStatusCache::new().style(MigrationStyle::InRequestPath);
-        let query = ShallowViewRequest::new(
-            readyset_sql::ast::ShallowCacheQuery::default(),
-            vec![],
-            None,
-        );
+        let query = ShallowCacheQuery::default();
+        let query = ShallowViewRequest::new(query.clone(), vec![], query);
 
         let (id, state) = cache.query_migration_state(&query);
         assert_eq!(state, MigrationState::Pending);

@@ -278,7 +278,7 @@ where
         &self,
         name: Option<&Relation>,
         query_id: Option<&QueryId>,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<CacheInfo> {
         Self::check_identifiers(name, query_id)?;
         let display_name = Self::format_name(name, query_id);
 
@@ -292,6 +292,7 @@ where
         let cache = guard
             .get(&id)
             .ok_or_else(|| ReadySetError::ViewNotFound(display_name.clone()))?;
+        let info = cache.get_info();
         cache.stop();
 
         if let Some(name) = cache.name() {
@@ -307,7 +308,7 @@ where
         }
 
         info!("dropped shallow cache {display_name}");
-        Ok(())
+        Ok(info)
     }
 
     pub fn drop_all_caches(&self) {
