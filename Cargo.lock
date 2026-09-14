@@ -6986,6 +6986,7 @@ dependencies = [
  "hex",
  "itertools 0.15.0",
  "parking_lot",
+ "postgres-types",
  "pretty_assertions",
  "proptest",
  "readyset-data",

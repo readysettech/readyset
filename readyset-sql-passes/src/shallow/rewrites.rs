@@ -18,7 +18,7 @@ use std::convert::Infallible;
 use std::mem;
 use std::ops::ControlFlow;
 
-use readyset_data::DfValue;
+use readyset_data::{DfValue, PassThroughFormat};
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, unsupported, unsupported_err};
 use readyset_sql::ast::{ItemPlaceholder, Literal, ShallowCacheQuery, SqlIdentifier};
 use readyset_sql::{AstConversionError, Dialect, DialectDisplay};
@@ -752,11 +752,18 @@ fn dfvalue_to_sql_value(v: &DfValue) -> ReadySetResult<Value> {
         }
         // maybe this needs to be changed later
         DfValue::Array(arr) => Value::SingleQuotedString(arr.to_string()),
-        DfValue::PassThrough(_) => {
-            return Err(internal_err!(
-                "PassThrough has no representation as a literal"
-            ));
+        // A text-format parameter of a type without a native DfValue holds the client's own
+        // text, which Postgres coerces to the target type the same way it would a literal.
+        DfValue::PassThrough(p) if p.format == PassThroughFormat::Text => {
+            let text = str::from_utf8(&p.data).map_err(|e| {
+                internal_err!("Text-format {} parameter is not UTF-8: {e}", p.ty.name())
+            })?;
+            Value::SingleQuotedString(text.to_string())
         }
+        DfValue::PassThrough(p) => unsupported!(
+            "Binary-format {} parameter has no representation as a literal",
+            p.ty.name()
+        ),
         DfValue::Default => {
             return Err(internal_err!("Default has no representation as a literal"));
         }
@@ -769,8 +776,10 @@ fn dfvalue_to_sql_value(v: &DfValue) -> ReadySetResult<Value> {
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
+    use std::sync::Arc;
 
-    use readyset_data::DfValue;
+    use postgres_types::{Kind, Type};
+    use readyset_data::{DfValue, PassThrough, PassThroughFormat};
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_shallow_query;
 
@@ -902,6 +911,43 @@ mod tests {
         let result = literalize_shallow_query(&query, &params, dialect).unwrap();
 
         assert_eq!(result, "SELECT * FROM t WHERE id = 42 AND val = 'test'");
+    }
+
+    fn passthrough(ty: Type, format: PassThroughFormat, data: &[u8]) -> DfValue {
+        DfValue::PassThrough(Arc::new(PassThrough {
+            ty,
+            format,
+            data: data.into(),
+        }))
+    }
+
+    #[test]
+    fn literalize_text_passthrough() {
+        let dialect = Dialect::PostgreSQL;
+        let query = parse_query(dialect, "SELECT id FROM t WHERE m = $1");
+        let mood = Type::new(
+            "mood".into(),
+            16384,
+            Kind::Enum(vec!["sad".into(), "hap'py".into()]),
+            "public".into(),
+        );
+        let params = vec![passthrough(mood, PassThroughFormat::Text, b"hap'py")];
+
+        let result = literalize_shallow_query(&query, &params, dialect).unwrap();
+
+        assert_eq!(result, "SELECT id FROM t WHERE m = 'hap''py'");
+    }
+
+    #[test]
+    fn literalize_binary_passthrough_returns_error() {
+        let dialect = Dialect::PostgreSQL;
+        let query = parse_query(dialect, "SELECT id FROM t WHERE net = $1");
+        let cidr = [2, 24, 1, 4, 192, 168, 1, 0];
+        let params = vec![passthrough(Type::CIDR, PassThroughFormat::Binary, &cidr)];
+
+        let result = literalize_shallow_query(&query, &params, dialect);
+
+        assert!(result.is_err());
     }
 
     #[test]
