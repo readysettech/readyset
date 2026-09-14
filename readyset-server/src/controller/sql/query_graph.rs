@@ -1059,6 +1059,28 @@ fn default_row_for_select(st: &SelectStatement, dialect: Dialect) -> Option<Vec<
     )
 }
 
+/// Puts a table or view on the left of an inner join with a derived table. A grouped derived table
+/// on the left answers a key pairing a join column with a column of the table from a hole
+/// (REA-6983), and with the table on the left the replay fills it. Any derived table moves, since
+/// one can reach grouped state through a nested derived table or a view. A STRAIGHT_JOIN keeps its
+/// written order, and a cartesian product has no join column to key on. The swap changes the edge's
+/// source, which also moves the join in `join_order`.
+fn base_goes_left(
+    relations: &HashMap<Relation, QueryGraphNode>,
+    operator: JoinOperator,
+    left: &mut Relation,
+    right: &mut Relation,
+) {
+    let source = |rel: &Relation| relations.get(rel).map(|node| &node.source);
+    if operator.is_inner_join()
+        && operator != JoinOperator::StraightJoin
+        && matches!(source(left), Some(RelationSource::Subquery(_)))
+        && matches!(source(right), Some(RelationSource::Table))
+    {
+        mem::swap(left, right);
+    }
+}
+
 #[allow(clippy::cognitive_complexity)]
 pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult<QueryGraph> {
     // a handy closure for making new relation nodes
@@ -1330,8 +1352,8 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
             JoinRightSide::Tables(_) => unsupported!("JoinRightSide::Tables not yet implemented"),
         };
         // will be defined by join constraint
-        let left_table;
-        let right_table;
+        let mut left_table;
+        let mut right_table;
 
         let (on, extra_preds) = match jc.constraint {
             JoinConstraint::On(cond) => {
@@ -1357,6 +1379,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                     }
                     left_table = tables_mentioned.remove(0);
                     right_table = tables_mentioned.remove(0);
+                    base_goes_left(&relations, jc.operator, &mut left_table, &mut right_table);
                 } else if tables_mentioned.len() == 1 {
                     // just one table mentioned --> this is a self-join
                     left_table = tables_mentioned.remove(0);

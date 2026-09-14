@@ -6,6 +6,7 @@ mod add_bogokey;
 mod decorrelate;
 mod filters_to_join_keys;
 mod fuse;
+mod grouped_join_parameter;
 mod predicate_pushup;
 mod prune_columns;
 mod pull_columns;
@@ -19,6 +20,7 @@ impl MirQuery<'_> {
         decorrelate::eliminate_dependent_joins(&mut self)?;
         predicate_pushup::push_filters_up(&mut self)?;
         filters_to_join_keys::convert_filters_to_join_keys(&mut self, dialect)?;
+        grouped_join_parameter::refuse_parameter_on_grouped_join_key(&self)?;
         add_bogokey::add_bogokey_if_necessary(&mut self)?;
         pull_columns::pull_all_required_columns(&mut self)?;
 

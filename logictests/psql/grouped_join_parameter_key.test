@@ -1,0 +1,132 @@
+# A grouped derived table on the left of an inner join, read by a key pairing a join column with
+# a column only the table has, answered from a hole after the first read (REA-6983). Each query
+# is read once while the tables are empty, so later rows have to reach its key through the join.
+# Derived tables are named to sort before `posts`, which leaves them on the join's left.
+
+statement ok
+CREATE TABLE posts (id int primary key, author_id int, promoted smallint)
+
+statement ok
+CREATE TABLE votes (user_id int, post_id int)
+
+statement ok
+CREATE VIEW vote_counts AS SELECT votes.post_id AS post_id, COUNT(*) AS c FROM votes GROUP BY votes.post_id
+
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM (SELECT votes.post_id AS post_id, COUNT(*) AS c FROM votes GROUP BY votes.post_id) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM (SELECT votes.post_id AS post_id FROM votes ORDER BY votes.post_id LIMIT 10) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id, votes.user_id AS uid FROM votes) AS d INNER JOIN posts ON (d.uid = posts.author_id AND d.post_id = posts.id) WHERE posts.author_id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE d.post_id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM posts INNER JOIN (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+
+query I rowsort
+SELECT posts.id FROM posts WHERE posts.id = 1 AND posts.promoted = 1 AND EXISTS (SELECT 1 FROM votes WHERE votes.post_id = posts.id)
+----
+
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d LEFT JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+
+query II rowsort
+SELECT d.post_id, posts.promoted FROM (SELECT DISTINCT votes.post_id AS post_id, votes.user_id AS uid FROM votes) AS d LEFT JOIN posts ON (d.post_id = posts.id AND posts.promoted = 1) WHERE d.post_id = 4 AND d.uid = 1
+----
+
+query III rowsort
+SELECT d.post_id, d.c, posts.promoted FROM (SELECT votes.post_id AS post_id, votes.user_id AS uid, COUNT(*) AS c FROM votes GROUP BY votes.post_id, votes.user_id) AS d LEFT JOIN posts ON (d.post_id = posts.id AND d.uid = posts.author_id) WHERE d.post_id = 3 AND d.uid = 3
+----
+
+statement ok
+INSERT INTO votes VALUES (1, 1), (2, 2), (3, 3), (1, 4)
+
+statement ok
+INSERT INTO posts VALUES (1, 1, 1), (2, 2, 1), (3, 3, 1), (4, 1, 0)
+
+# A DISTINCT derived table, keyed on the join column and a column of `posts`.
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+1
+
+# The same over GROUP BY.
+query I rowsort
+SELECT posts.id FROM (SELECT votes.post_id AS post_id, COUNT(*) AS c FROM votes GROUP BY votes.post_id) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+1
+
+# Over a LIMIT.
+query I rowsort
+SELECT posts.id FROM (SELECT votes.post_id AS post_id FROM votes ORDER BY votes.post_id LIMIT 10) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+1
+
+# Joined on two columns.
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id, votes.user_id AS uid FROM votes) AS d INNER JOIN posts ON (d.uid = posts.author_id AND d.post_id = posts.id) WHERE posts.author_id = 1 AND posts.promoted = 1
+----
+1
+
+# The join column named through the derived table.
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d INNER JOIN posts ON (d.post_id = posts.id) WHERE d.post_id = 1 AND posts.promoted = 1
+----
+1
+
+# Written with the derived table on the right.
+query I rowsort
+SELECT posts.id FROM posts INNER JOIN (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+1
+
+# A correlated EXISTS, which decorrelates into a DISTINCT derived table.
+query I rowsort
+SELECT posts.id FROM posts WHERE posts.id = 1 AND posts.promoted = 1 AND EXISTS (SELECT 1 FROM votes WHERE votes.post_id = posts.id)
+----
+1
+
+# A LEFT JOIN, which the parameter on `posts` turns into an inner join.
+query I rowsort
+SELECT posts.id FROM (SELECT DISTINCT votes.post_id AS post_id FROM votes) AS d LEFT JOIN posts ON (d.post_id = posts.id) WHERE posts.id = 1 AND posts.promoted = 1
+----
+1
+
+# A LEFT JOIN keyed on the derived table only, which stays one and is correct either way.
+query II rowsort
+SELECT d.post_id, posts.promoted FROM (SELECT DISTINCT votes.post_id AS post_id, votes.user_id AS uid FROM votes) AS d LEFT JOIN posts ON (d.post_id = posts.id AND posts.promoted = 1) WHERE d.post_id = 4 AND d.uid = 1
+----
+4
+NULL
+
+# The same over GROUP BY, keyed on both join columns.
+query III rowsort
+SELECT d.post_id, d.c, posts.promoted FROM (SELECT votes.post_id AS post_id, votes.user_id AS uid, COUNT(*) AS c FROM votes GROUP BY votes.post_id, votes.user_id) AS d LEFT JOIN posts ON (d.post_id = posts.id AND d.uid = posts.author_id) WHERE d.post_id = 3 AND d.uid = 3
+----
+3
+1
+1
+
+# Two derived tables leave a grouped one on the left, so the query is refused.
+onlyif readyset
+statement error
+CREATE CACHE FROM SELECT a.uid FROM (SELECT votes.user_id AS uid, COUNT(*) AS c FROM votes GROUP BY votes.user_id) AS a INNER JOIN (SELECT DISTINCT posts.author_id AS author_id, posts.promoted AS promoted FROM posts) AS b ON (a.uid = b.author_id) WHERE a.uid = 1 AND b.promoted = 1
+
+# So is a grouped view, which the swap puts on the left as it would a table.
+onlyif readyset
+statement error
+CREATE CACHE FROM SELECT d.post_id FROM (SELECT DISTINCT votes.post_id AS post_id, votes.user_id AS uid FROM votes) AS d INNER JOIN vote_counts ON (vote_counts.post_id = d.post_id) WHERE d.post_id = 4 AND d.uid = 1
