@@ -67,14 +67,47 @@ type JsonObject = serde_json::Map<String, JsonValue>;
 
 /// Used to wrap arbitrary Postgres types which aren't natively supported, enabling more extensive
 /// proxying support
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq)]
 pub struct PassThrough {
     pub ty: Type,
     pub format: PassThroughFormat,
     pub data: Box<[u8]>,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+impl PartialEq for PassThrough {
+    fn eq(&self, other: &Self) -> bool {
+        self.ty.oid() == other.ty.oid() && self.format == other.format && self.data == other.data
+    }
+}
+
+impl Hash for PassThrough {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        self.ty.oid().hash(state);
+        self.format.hash(state);
+        self.data.hash(state);
+    }
+}
+
+impl PartialOrd for PassThrough {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PassThrough {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ty
+            .oid()
+            .cmp(&other.ty.oid())
+            .then_with(|| self.format.cmp(&other.format))
+            .then_with(|| self.data.cmp(&other.data))
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum PassThroughFormat {
     Binary,
     Text,
@@ -1148,6 +1181,7 @@ impl PartialEq for DfValue {
                 bits_a.as_ref() == bits_b.as_ref()
             }
             (DfValue::Array(vs_a), DfValue::Array(vs_b)) => vs_a == vs_b,
+            (DfValue::PassThrough(a), DfValue::PassThrough(b)) => a == b,
             (&DfValue::None, &DfValue::None) => true,
             (&DfValue::Default, &DfValue::Default) => true,
             (&DfValue::Max, &DfValue::Max) => true,
@@ -1280,6 +1314,7 @@ impl Ord for DfValue {
             (DfValue::ByteArray(array_a), DfValue::ByteArray(array_b)) => array_a.cmp(array_b),
             (DfValue::BitVector(bits_a), DfValue::BitVector(bits_b)) => bits_a.cmp(bits_b),
             (DfValue::Array(vs_a), DfValue::Array(vs_b)) => vs_a.cmp(vs_b),
+            (DfValue::PassThrough(a), DfValue::PassThrough(b)) => a.cmp(b),
 
             // for all other kinds of data types, just compare the variants in order
             (_, _) => DfValueKind::from(self).cmp(&DfValueKind::from(other)),
@@ -2471,6 +2506,8 @@ impl Arbitrary for DfValue {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::DefaultHasher;
+
     use chrono::TimeZone;
     use proptest::prelude::*;
     use readyset_util::{eq_laws, hash_laws, ord_laws};
@@ -3569,6 +3606,42 @@ mod tests {
             format,
             data: data.into(),
         }))
+    }
+
+    fn hash_of(value: &DfValue) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn passthrough_eq_hash_and_cmp_compare_contents() {
+        let a = passthrough(Type::CIDR, PassThroughFormat::Text, b"192.168.1.0/24");
+        let same = passthrough(Type::CIDR, PassThroughFormat::Text, b"192.168.1.0/24");
+        let other_data = passthrough(Type::CIDR, PassThroughFormat::Text, b"10.0.0.0/8");
+        let other_format = passthrough(Type::CIDR, PassThroughFormat::Binary, b"192.168.1.0/24");
+        let other_type = passthrough(Type::MACADDR8, PassThroughFormat::Text, b"192.168.1.0/24");
+        let same_oid = passthrough(
+            Type::new(
+                "custom".into(),
+                Type::CIDR.oid(),
+                Kind::Simple,
+                "app".into(),
+            ),
+            PassThroughFormat::Text,
+            b"192.168.1.0/24",
+        );
+
+        assert_eq!(a, same);
+        assert_eq!(hash_of(&a), hash_of(&same));
+        assert_eq!(a.cmp(&same), Ordering::Equal);
+        assert_eq!(a, same_oid);
+        assert_eq!(hash_of(&a), hash_of(&same_oid));
+        assert_eq!(a.cmp(&same_oid), Ordering::Equal);
+        for other in [other_data, other_format, other_type] {
+            assert_ne!(a, other);
+            assert_ne!(a.cmp(&other), Ordering::Equal);
+        }
     }
 
     #[test]
