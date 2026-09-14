@@ -1365,6 +1365,34 @@ impl ReaderHandle {
         &self.key_mapping
     }
 
+    /// The schema of the key column this reader compares the value of `placeholder` against, or
+    /// `None` if it has none.
+    pub fn placeholder_key_column(&self, placeholder: PlaceholderIdx) -> Option<&ColumnSchema> {
+        let key_column = self
+            .key_mapping
+            .iter()
+            .find_map(|(view_placeholder, key_column)| match view_placeholder {
+                ViewPlaceholder::OneToOne(idx, _) => (*idx == placeholder).then_some(*key_column),
+                // Both bounds of a range look up the same key column.
+                ViewPlaceholder::Between(lower, upper) => {
+                    (*lower == placeholder || *upper == placeholder).then_some(*key_column)
+                }
+                // A generated key has no client value, and a page number is derived from OFFSET.
+                ViewPlaceholder::Generated | ViewPlaceholder::PageNumber { .. } => None,
+            })?;
+        self.schema()?
+            .schema(SchemaType::ProjectedSchema)
+            .get(key_column)
+    }
+
+    /// Whether this reader computes a page number from the value of `placeholder`, an OFFSET.
+    pub fn is_page_offset(&self, placeholder: PlaceholderIdx) -> bool {
+        self.key_mapping.iter().any(|(view_placeholder, _)| {
+            matches!(view_placeholder, ViewPlaceholder::PageNumber { offset_placeholder, .. }
+                if *offset_placeholder == placeholder)
+        })
+    }
+
     /// Get the current keys of this view. For debugging only.
     pub async fn keys(&mut self) -> ReadySetResult<Vec<Vec<DfValue>>> {
         future::poll_fn(|cx| self.poll_ready(cx)).await?;

@@ -12,7 +12,6 @@
 //! serialization, post-lookup decomposition recompose, etc.).
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_errors::{internal_err, ReadySetResult};
@@ -168,37 +167,6 @@ impl ViewSchema {
             .map(|i| schema.get(i).map(|c| &c.column_type))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| internal_err!("Schema expects valid column indices"))
-    }
-
-    /// Map the given [`Column`]s to their [`ColumnSchema`]s in the
-    /// selected schema, matching on either the column alias or the base
-    /// column name.
-    pub fn to_cols<'a, 'b, T>(
-        &'a self,
-        cols: T,
-        schema_type: SchemaType,
-    ) -> ReadySetResult<Vec<&'a ColumnSchema>>
-    where
-        T: IntoIterator<Item = &'b Column>,
-    {
-        let mut by_name = HashMap::new();
-        let mut by_base_name = HashMap::new();
-        for cs in self.schema(schema_type) {
-            by_name.insert(&cs.column.name, cs);
-            if let Some(base) = &cs.base {
-                by_base_name.insert(&base.column, cs);
-            }
-        }
-
-        cols.into_iter()
-            .map(move |c| {
-                by_name
-                    .get(&c.name)
-                    .or_else(|| by_base_name.get(&c.name))
-                    .copied()
-                    .ok_or_else(|| internal_err!("Column {} not found", c.display_unquoted()))
-            })
-            .collect()
     }
 
     /// Get the positions in the selected schema of the given

@@ -1,0 +1,38 @@
+# Parameters bind for a row IN list, a repeated `$n`, and a LIMIT or OFFSET that comes first.
+
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, a int, b int, c int)
+
+statement ok
+INSERT INTO t VALUES (1, 10, 1, 5), (2, 20, 2, 5), (3, 30, 2, 6), (4, 40, 3, 6), (5, 50, 3, 7), (6, 60, 6, 6)
+
+query I rowsort
+SELECT a FROM t WHERE (b, c) IN (($1, $2), ($3, $4))
+$1 = 2
+$2 = 5
+$3 = 3
+$4 = 7
+----
+20
+50
+
+query I rowsort
+SELECT a FROM t WHERE b = $1 AND c = $1
+$1 = 6
+----
+60
+
+query I rowsort
+SELECT a FROM t WHERE b = $2 ORDER BY a LIMIT $1
+$1 = 1
+$2 = 2
+----
+20
+
+query I rowsort
+SELECT a FROM t WHERE b = $3 ORDER BY a LIMIT $2 OFFSET $1
+$1 = 1
+$2 = 1
+$3 = 3
+----
+50

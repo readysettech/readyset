@@ -12,7 +12,7 @@ use readyset_client::recipe::CacheExpr;
 use readyset_client::recipe::changelist::{Change, ChangeList, IntoChanges};
 use readyset_client::schema::{ColumnSchema, SchemaType, SelectSchema};
 use readyset_client::{
-    GraphvizOptions, ReadySetHandle, Table, TableOperation, View, ViewCreateRequest,
+    GraphvizOptions, ReaderHandle, ReadySetHandle, Table, TableOperation, View, ViewCreateRequest,
 };
 use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
@@ -1521,24 +1521,6 @@ impl NoriaConnector {
         create_if_not_exist: bool,
         rewrite_context: &RewriteContext,
     ) -> ReadySetResult<PrepareResult> {
-        // extract parameter columns *for the client*
-        // note that we have to do this *before* processing the query, otherwise the
-        // client will be confused about the number of parameters it's supposed to
-        // give.
-        let client_param_columns: Vec<_> = utils::select_statement_parameter_columns(&statement)
-            .into_iter()
-            .cloned()
-            .collect();
-
-        let limit_columns: Vec<_> = utils::get_limit_parameters(&statement)
-            .into_iter()
-            .map(|column| ColumnSchema {
-                column,
-                column_type: DfType::UnsignedBigInt,
-                base: None,
-            })
-            .collect();
-
         trace!("select::collapse where-in clauses");
         let processed_query_params = adapter_rewrites::rewrite_query(
             &mut statement,
@@ -1561,15 +1543,13 @@ impl NoriaConnector {
         let view_failed = self.failed_views.take(&qname).is_some();
         let getter = self.inner.get_noria_view(&qname, view_failed).await?;
 
-        // extract result schema
-        let getter_schema = match getter {
+        let reader = match getter {
             View::MultipleReused(_) => None,
             View::Single(view) => {
-                let schema = view.schema();
-                if schema.is_none() {
+                if view.schema().is_none() {
                     warn!(view = %qname.display_unquoted(), "no schema for view");
                 }
-                schema
+                Some(&*view)
             }
         };
 
@@ -1578,19 +1558,26 @@ impl NoriaConnector {
             processed_query_params,
         };
 
-        let types = if let Some(getter_schema) = getter_schema {
-            let mut params: Vec<_> = getter_schema
-                .to_cols(&client_param_columns, SchemaType::ProjectedSchema)?
-                .into_iter()
-                .map(|cs| {
-                    let mut cs = cs.clone();
-                    cs.column.table = Some(qname.clone());
-                    cs
-                })
-                .collect();
+        let getter_schema = reader.and_then(|reader| reader.schema());
 
-            params.extend(limit_columns);
+        let params = match reader.zip(getter_schema) {
+            Some((reader, _)) => {
+                match param_types(reader, &statement.processed_query_params, &qname) {
+                    Ok(params) => Some(params),
+                    Err(error) => {
+                        warn!(
+                            %error,
+                            view = %qname.display_unquoted(),
+                            "falling back to the upstream's parameter types"
+                        );
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
 
+        let types = if let (Some(params), Some(getter_schema)) = (params, getter_schema) {
             let mut schema = getter_schema.schema(SchemaType::ReturnedSchema).to_vec();
 
             // Align the prepared-statement RowDescription with what
@@ -1778,4 +1765,37 @@ impl NoriaConnector {
             .map(|names| names.into_iter().nth(0).unwrap())?
             .map(|info| info.name().clone()))
     }
+}
+
+/// The type of each parameter the client binds. It is the type of the key column its placeholder
+/// is looked up in, or a count for a LIMIT or OFFSET.
+fn param_types(
+    reader: &ReaderHandle,
+    params: &DfQueryParameters,
+    view: &Relation,
+) -> ReadySetResult<Vec<ColumnSchema>> {
+    let count = || ColumnSchema {
+        column: ast::Column {
+            name: "__limit_or_offset".into(),
+            table: None,
+        },
+        column_type: DfType::UnsignedBigInt,
+        base: None,
+    };
+    params
+        .user_param_placeholders()?
+        .into_iter()
+        .map(|placeholder| match placeholder {
+            None => Ok(count()),
+            Some(placeholder) => match reader.placeholder_key_column(placeholder) {
+                Some(key_column) => {
+                    let mut column = key_column.clone();
+                    column.column.table = Some(view.clone());
+                    Ok(column)
+                }
+                None if reader.is_page_offset(placeholder) => Ok(count()),
+                None => Err(internal_err!("placeholder {placeholder} has no key column")),
+            },
+        })
+        .collect()
 }

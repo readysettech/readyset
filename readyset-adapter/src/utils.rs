@@ -304,23 +304,6 @@ pub(crate) fn select_statement_parameter_columns(query: &SelectStatement) -> Vec
         .collect()
 }
 
-pub(crate) fn get_limit_parameters(query: &SelectStatement) -> Vec<Column> {
-    let mut limit_params = vec![];
-    if let Some(Literal::Placeholder(_)) = query.limit_clause.limit() {
-        limit_params.push(Column {
-            name: "__row_count".into(),
-            table: None,
-        });
-    }
-    if let Some(Literal::Placeholder(_)) = query.limit_clause.offset() {
-        limit_params.push(Column {
-            name: "__offset".into(),
-            table: None,
-        });
-    }
-    limit_params
-}
-
 pub(crate) fn insert_statement_parameter_columns(query: &InsertStatement) -> Vec<&Column> {
     // need to find for which fields we *actually* have a parameter
     query

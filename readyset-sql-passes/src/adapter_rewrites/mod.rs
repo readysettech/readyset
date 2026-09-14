@@ -14,7 +14,7 @@ pub use autoparameterize::{
 use itertools::{Either, Itertools, repeat_n};
 use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
-    ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported,
+    ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported, unsupported_err,
 };
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
@@ -22,7 +22,7 @@ use readyset_sql::ast::{
     BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectMetadata,
     SelectStatement, ShallowCacheQuery, TableExprInner,
 };
-use readyset_sql::{Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
+use readyset_sql::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
 use tracing::{trace, trace_span, warn};
 
@@ -76,6 +76,9 @@ pub struct DfQueryParameters {
     /// What the rewrite found at each canonical parameter position, which is what a cache's
     /// inline literals are matched against.
     slots: LiteralSlots,
+    /// How many values the client binds, counted before any rewrite could drop a placeholder.
+    /// Both wire protocols count parameters in 16 bits.
+    client_params: u16,
 }
 
 /// Information about parameters from a query, which allows converting a parameter list into a
@@ -90,6 +93,8 @@ pub struct QueryParameters {
     slots: LiteralSlots,
     /// Whether the query arrived with placeholders, which only a bind can fill.
     has_user_placeholders: bool,
+    /// How many values the client binds.
+    client_params: u16,
 }
 
 impl QueryParameters {
@@ -235,6 +240,7 @@ impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {}
 fn rewrite_equivalent_parameters(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
+    client_params: u16,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
@@ -272,6 +278,7 @@ fn rewrite_equivalent_parameters(
         has_user_placeholders: positions > run.params.len(),
         auto_parameters: run.params,
         slots: run.slots,
+        client_params,
     })
 }
 
@@ -366,6 +373,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     let span = trace_span!("adapter_rewrites", part = "equivalent_deep").entered();
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
+    let client_params = client_parameter_count(query)?;
     query.disallow_row(flags.dialect)?;
     trace!(parent: &span, pass="disallow_row", query = %query.display(flags.dialect));
     query.validate_window_functions()?;
@@ -423,7 +431,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     query.order_limit_removal(&context)?;
     trace!(parent: &span, pass="order_limit_removal", query = %query.display(flags.dialect));
 
-    rewrite_equivalent_parameters(query, flags)
+    rewrite_equivalent_parameters(query, flags, client_params)
 }
 
 /// Returns true if the query's WHERE clause will produce a range-based index
@@ -477,6 +485,7 @@ pub fn rewrite_for_readyset(
         auto_parameters,
         slots,
         has_user_placeholders: _,
+        client_params,
     } = prev;
     assert_eq!(dialect, flags.dialect);
 
@@ -564,6 +573,7 @@ pub fn rewrite_for_readyset(
         },
         post_lookup_plan,
         slots,
+        client_params,
     })
 }
 
@@ -666,6 +676,17 @@ where
     Ok(Cow::Owned(
         splice_auto_parameters(&params, &auto_parameters).into_owned(),
     ))
+}
+
+/// The index of a client parameter, laid out by `make_keys` in place of its value. A lifted
+/// literal lays out as `None`.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ParamSlot(Option<usize>);
+
+impl TryFromDialect<Literal> for ParamSlot {
+    fn try_from_dialect(_: Literal, _: Dialect) -> Result<Self, AstConversionError> {
+        Ok(Self(None))
+    }
 }
 
 fn make_keys<'param, T>(
@@ -1029,6 +1050,38 @@ impl DfQueryParameters {
         )
     }
 
+    /// The placeholder each client parameter fills, or `None` for a LIMIT or OFFSET the adapter
+    /// applies itself. The values of one `IN` list share a placeholder, and a repeated `$n` takes
+    /// the placeholder of its first use. A parameter that fills no placeholder is an error.
+    pub fn user_param_placeholders(&self) -> ReadySetResult<Vec<Option<usize>>> {
+        let params = self.client_params as usize;
+        let positions = (0..params)
+            .map(|param| ParamSlot(Some(param)))
+            .collect::<Vec<_>>();
+        // A lookup key has one value per placeholder, in placeholder order.
+        let mut placeholders = vec![None; params];
+        for key in self.make_keys(&positions)? {
+            for (position, ParamSlot(param)) in key.iter().enumerate() {
+                if let Some(param) = param {
+                    placeholders[*param].get_or_insert(position + 1);
+                }
+            }
+        }
+
+        let reordered = match &self.reordered_placeholders {
+            Some(order_map) => reorder_params(&positions, order_map)?,
+            None => positions,
+        };
+        let mut held = vec![false; params];
+        for param in reordered.into_iter().filter_map(|ParamSlot(param)| param) {
+            held[param] = true;
+        }
+        if let Some(param) = held.iter().position(|is_held| !is_held) {
+            unsupported!("parameter {} fills no placeholder", param + 1);
+        }
+        Ok(placeholders)
+    }
+
     /// Returns the precomputed post-lookup plan for this query.
     pub fn post_lookup_plan(&self) -> &PostLookupPlan {
         &self.post_lookup_plan
@@ -1354,6 +1407,36 @@ where
     )))
 }
 
+/// How many values a client binds to `query`, which is one per `?` or the highest `$n`.
+fn client_parameter_count(query: &SelectStatement) -> ReadySetResult<u16> {
+    #[derive(Default)]
+    struct ParameterCount {
+        question_marks: usize,
+        highest_number: usize,
+    }
+
+    impl<'ast> Visitor<'ast> for ParameterCount {
+        type Error = std::convert::Infallible;
+
+        fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
+            match literal {
+                Literal::Placeholder(ItemPlaceholder::QuestionMark) => self.question_marks += 1,
+                Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) => {
+                    self.highest_number = self.highest_number.max(*n as usize)
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+
+    let mut count = ParameterCount::default();
+    let Ok(()) = count.visit_select_statement(query);
+    let params = count.question_marks.max(count.highest_number);
+    u16::try_from(params)
+        .map_err(|_| unsupported_err!("{params} parameters, more than {}", u16::MAX))
+}
+
 struct ReorderNumberedPlaceholdersVisitor {
     current: u32,
     out: Vec<usize>,
@@ -1618,9 +1701,14 @@ mod tests {
 
         fn expects_user_params(dialect: Dialect, sql: &str) -> bool {
             let mut query = parse_select_statement(sql, dialect);
-            rewrite_equivalent_parameters(&mut query, AdapterRewriteParams::new(dialect))
-                .unwrap()
-                .expects_user_params()
+            let client_params = client_parameter_count(&query).unwrap();
+            rewrite_equivalent_parameters(
+                &mut query,
+                AdapterRewriteParams::new(dialect),
+                client_params,
+            )
+            .unwrap()
+            .expects_user_params()
         }
 
         #[test]
@@ -3642,6 +3730,71 @@ mod tests {
                 rewrite_context(Dialect::MySQL),
             )
             .expect("DISTINCT + AVG without PLA should not be rejected here");
+        }
+
+        fn placeholders(query: &str, dialect: Dialect) -> Vec<Option<usize>> {
+            let mut query = parse_select_statement(query, dialect);
+            rewrite_query(
+                &mut query,
+                rewrite_params(dialect),
+                rewrite_context(dialect),
+            )
+            .expect("Should be able to rewrite query")
+            .user_param_placeholders()
+            .expect("Should be able to number the parameters")
+        }
+
+        #[test]
+        fn each_parameter_maps_to_its_placeholder() {
+            let mysql = |query| placeholders(query, Dialect::MySQL);
+            let postgres = |query| placeholders(query, Dialect::PostgreSQL);
+            assert_eq!(
+                mysql("SELECT v FROM t WHERE a = ? AND b = ?"),
+                vec![Some(1), Some(2)]
+            );
+            assert_eq!(
+                postgres("SELECT v FROM t WHERE a = $2 AND b = $1"),
+                vec![Some(2), Some(1)]
+            );
+            assert_eq!(
+                postgres("SELECT v FROM t WHERE a = $1 AND b = $1"),
+                vec![Some(1)]
+            );
+            assert_eq!(
+                mysql("SELECT v FROM t WHERE a = 5 AND b = ?"),
+                vec![Some(2)]
+            );
+            assert_eq!(
+                mysql("SELECT v FROM t WHERE a IN (?, ?, ?) AND b = ?"),
+                vec![Some(1), Some(1), Some(1), Some(2)]
+            );
+            assert_eq!(
+                mysql("SELECT v FROM t WHERE (a, b) IN ((?, ?), (?, ?))"),
+                vec![Some(1), Some(2), Some(1), Some(2)]
+            );
+            assert_eq!(
+                mysql("SELECT v FROM t WHERE a = ? LIMIT ? OFFSET ?"),
+                vec![Some(1), None, None]
+            );
+            assert_eq!(
+                postgres("SELECT v FROM t WHERE a = $2 LIMIT $1"),
+                vec![None, Some(1)]
+            );
+        }
+
+        #[test]
+        fn a_parameter_no_placeholder_holds_is_refused() {
+            let dialect = Dialect::PostgreSQL;
+            let mut query = parse_select_statement("SELECT v FROM t WHERE a = $2", dialect);
+            let err = rewrite_query(
+                &mut query,
+                rewrite_params(dialect),
+                rewrite_context(dialect),
+            )
+            .expect("Should be able to rewrite query")
+            .user_param_placeholders()
+            .unwrap_err();
+            assert!(err.is_unsupported(), "{err}");
         }
     }
 

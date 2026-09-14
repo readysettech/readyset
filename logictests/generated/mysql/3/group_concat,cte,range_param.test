@@ -25,8 +25,7 @@ WITH `alias_3` AS (SELECT group_concat(`table_1`.`column_5` separator ', ') AS `
 ----
 NULL
 
-# REA-6472
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 WITH `alias_2` AS (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -42,8 +41,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_6` AS `alias_1` FROM `table_1`) SELE
 234668356
 269297525
 
-# REA-6472
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 WITH `alias_2` AS (SELECT group_concat(`table_1`.`column_8` separator ', ') AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -104,8 +102,7 @@ WITH `alias_3` AS (SELECT group_concat(`table_1`.`column_5` separator ', ') AS `
 ----
 NULL
 
-# REA-6472
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 WITH `alias_2` AS (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -119,8 +116,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_6` AS `alias_1` FROM `table_1`) SELE
 1736416653
 269297525
 
-# REA-6472
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 WITH `alias_2` AS (SELECT group_concat(`table_1`.`column_8` separator ', ') AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----

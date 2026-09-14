@@ -24,7 +24,7 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -99,7 +99,7 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort error: Column\ table_1\.column_6\ not\ found
+query  rowsort
 SELECT `table_1`.`column_6` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_6` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----

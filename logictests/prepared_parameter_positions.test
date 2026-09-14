@@ -1,0 +1,17 @@
+# Each value of a row IN list is its own parameter.
+
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, a int, b int, c int)
+
+statement ok
+INSERT INTO t VALUES (1, 10, 1, 5), (2, 20, 2, 5), (3, 30, 2, 6), (4, 40, 3, 6), (5, 50, 3, 7)
+
+query I rowsort
+SELECT a FROM t WHERE (b, c) IN ((?, ?), (?, ?))
+? = 2
+? = 5
+? = 3
+? = 7
+----
+20
+50
