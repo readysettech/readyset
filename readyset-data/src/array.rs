@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::fmt::{self, Display};
@@ -375,6 +376,41 @@ impl PartialOrd for Array {
     }
 }
 
+/// Whether Postgres quotes `s` when rendering it as an array element. Postgres treats only the
+/// ASCII whitespace characters as whitespace here.
+fn element_needs_quotes(s: &str) -> bool {
+    s.is_empty()
+        || s.eq_ignore_ascii_case("NULL")
+        || s.chars().any(|c| {
+            matches!(
+                c,
+                '{' | '}' | ',' | '"' | '\\' | ' ' | '\t' | '\n' | '\x0B' | '\x0C' | '\r'
+            )
+        })
+}
+
+/// Write `val` as Postgres renders it inside an array literal.
+fn print_element(f: &mut fmt::Formatter, val: &DfValue) -> fmt::Result {
+    if val.is_none() {
+        return write!(f, "NULL");
+    }
+    let s = match val.as_str() {
+        Some(s) => Cow::Borrowed(s),
+        None => Cow::Owned(val.to_string()),
+    };
+    if !element_needs_quotes(&s) {
+        return write!(f, "{s}");
+    }
+    write!(f, "\"")?;
+    for c in s.chars() {
+        if matches!(c, '"' | '\\') {
+            write!(f, "\\")?;
+        }
+        write!(f, "{c}")?;
+    }
+    write!(f, "\"")
+}
+
 impl Display for Array {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.lower_bounds.iter().any(|b| *b != 1) {
@@ -396,11 +432,7 @@ impl Display for Array {
                         write!(f, ",")?;
                     }
 
-                    if let Ok(s) = <&str>::try_from(val) {
-                        write!(f, "\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))?;
-                    } else {
-                        write!(f, "{val}")?;
-                    }
+                    print_element(f, val)?;
                 }
             } else {
                 let next_level = arr.outer_iter();
@@ -803,6 +835,7 @@ mod parse {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
     use proptest::arbitrary::any;
     use proptest::strategy::Strategy;
     use readyset_util::ord_laws;
@@ -886,7 +919,7 @@ mod tests {
             DfValue::from("b"),
             DfValue::from("c"),
         ]);
-        assert_eq!(arr.to_string(), r#"{"a","b","c"}"#);
+        assert_eq!(arr.to_string(), "{a,b,c}");
     }
 
     #[test]
@@ -961,6 +994,23 @@ mod tests {
         assert_eq!(
             arr.to_string(),
             r#"{"hello\\world","say \"hello\"","path\\to\\\"file\"","","NULL"}"#
+        );
+    }
+
+    #[test]
+    fn print_array_quotes_whitespace_as_postgres() {
+        let arr = Array::from(vec![
+            DfValue::from("a\x0Bb"),
+            DfValue::from("a\u{a0}b"),
+            DfValue::from(NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2021, 3, 17).unwrap(),
+                NaiveTime::from_hms_opt(1, 2, 3).unwrap(),
+            )),
+            DfValue::None,
+        ]);
+        assert_eq!(
+            arr.to_string(),
+            "{\"a\x0Bb\",a\u{a0}b,\"2021-03-17 01:02:03\",NULL}"
         );
     }
 

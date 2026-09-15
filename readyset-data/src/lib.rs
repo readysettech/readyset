@@ -4542,7 +4542,7 @@ mod tests {
             let res = input
                 .coerce_to(&DfType::DEFAULT_TEXT, &DfType::Unknown)
                 .unwrap();
-            assert_eq!(res, DfValue::from(r#"{"a","b","c","d","e","f"}"#),)
+            assert_eq!(res, DfValue::from("{a,b,c,d,e,f}"))
         }
 
         #[test]
