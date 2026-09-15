@@ -27,7 +27,12 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
     type Error = ps::Error;
 
     fn try_from(v: TypedDfValue) -> Result<Self, Self::Error> {
-        let convert_enum_value = |vs: &[String], val| {
+        // A row cached from upstream holds the enum's label. A deep cache row holds the label's
+        // 1-based position among the variants.
+        let convert_enum_value = |vs: &[String], val: DfValue| {
+            if let Some(label) = val.as_str() {
+                return Ok(label.to_owned());
+            }
             let idx = u64::try_from(val).map_err(|e| {
                 ps::Error::InternalError(format!("Invalid representation for enum value: {e}"))
             })?;
@@ -126,7 +131,7 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                 Kind::Array(member) => {
                     let mut arr = (**arr).clone();
                     if let Kind::Enum(vs) = member.kind() {
-                        for val in arr.values_mut() {
+                        for val in arr.values_mut().filter(|v| !v.is_none()) {
                             *val = convert_enum_value(vs, val.clone())?.clone().into();
                         }
                     }
@@ -223,6 +228,71 @@ mod tests {
         assert_eq!(
             PsqlValue::try_from(val).unwrap(),
             PsqlValue::TinyText(TinyText::from_arr(b"aaaaaaaaaaaaaa"))
+        );
+    }
+
+    fn mood() -> Type {
+        Type::new(
+            "mood".into(),
+            16384,
+            Kind::Enum(vec!["sad".into(), "ok".into(), "happy".into()]),
+            "public".into(),
+        )
+    }
+
+    #[test]
+    fn enum_label_from_upstream() {
+        let val = TypedDfValue {
+            col_type: &mood(),
+            value: DfValue::from("happy"),
+        };
+        assert_eq!(
+            PsqlValue::try_from(val).unwrap(),
+            PsqlValue::Text("happy".into())
+        );
+    }
+
+    #[test]
+    fn enum_position_from_deep_cache() {
+        let val = TypedDfValue {
+            col_type: &mood(),
+            value: DfValue::UnsignedInt(3),
+        };
+        assert_eq!(
+            PsqlValue::try_from(val).unwrap(),
+            PsqlValue::Text("happy".into())
+        );
+    }
+
+    #[test]
+    fn enum_array_labels_from_upstream() {
+        let mood = mood();
+        let moods = Type::new("_mood".into(), 16385, Kind::Array(mood), "public".into());
+        let labels = Array::from(vec![DfValue::from("sad"), DfValue::from("happy")]);
+        let val = TypedDfValue {
+            col_type: &moods,
+            value: DfValue::from(labels.clone()),
+        };
+        assert_eq!(
+            PsqlValue::try_from(val).unwrap(),
+            PsqlValue::Array(labels, moods)
+        );
+    }
+
+    #[test]
+    fn enum_array_with_null_element() {
+        let mood = mood();
+        let moods = Type::new("_mood".into(), 16385, Kind::Array(mood), "public".into());
+        let val = TypedDfValue {
+            col_type: &moods,
+            value: DfValue::from(Array::from(vec![DfValue::UnsignedInt(1), DfValue::None])),
+        };
+        assert_eq!(
+            PsqlValue::try_from(val).unwrap(),
+            PsqlValue::Array(
+                Array::from(vec![DfValue::from("sad"), DfValue::None]),
+                moods
+            )
         );
     }
 

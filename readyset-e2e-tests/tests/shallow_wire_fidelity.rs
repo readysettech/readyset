@@ -26,6 +26,7 @@ use tokio_postgres::{Client, GenericResult};
 /// A typed table whose first row is fully populated and whose second row is all
 /// NULLs, so every per-column query exercises both a value and a NULL.
 const CREATE_TYPED_TABLE: &str = "
+    CREATE TYPE shallow_mood AS ENUM ('sad', 'ok', 'happy');
     CREATE TABLE shallow_wire (
         id INT NOT NULL,
         c_int2 SMALLINT,
@@ -41,15 +42,17 @@ const CREATE_TYPED_TABLE: &str = "
         c_date DATE,
         c_timestamp TIMESTAMP,
         c_timestamptz TIMESTAMPTZ,
-        c_time TIME
+        c_time TIME,
+        c_enum shallow_mood,
+        c_enum_array shallow_mood[]
     );
     INSERT INTO shallow_wire VALUES
         (1, 32000, 2000000000, 9223372036854775807, 12345.6789, 3.5,
          2.718281828459045, 'hello world', 'varchar value', '\\xDEADBEEF', true,
          '2021-03-14', '2021-03-14 09:26:53.589793',
-         '2021-03-14 09:26:53.589793+00', '09:26:53.5'),
+         '2021-03-14 09:26:53.589793+00', '09:26:53.5', 'happy', '{sad,happy}'),
         (2, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-         NULL, NULL, NULL);
+         NULL, NULL, NULL, NULL, NULL);
 ";
 
 /// One projection per type, each fetched in isolation so a byte mismatch points
@@ -69,6 +72,8 @@ const COLUMN_CASES: &[(&str, &str)] = &[
     ("timestamp", "c_timestamp"),
     ("timestamptz", "c_timestamptz"),
     ("time", "c_time"),
+    ("enum", "c_enum"),
+    ("enum_array", "c_enum_array"),
 ];
 
 /// Raw DataRow body bytes for an extended-protocol query at a single key.
