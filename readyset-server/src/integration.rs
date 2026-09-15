@@ -34,7 +34,7 @@ use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange
 use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
 use readyset_sql::ast;
-use readyset_sql::ast::{NullOrder, OrderType, Relation, SqlQuery};
+use readyset_sql::ast::{NonReplicatedRelation, NullOrder, OrderType, Relation, SqlQuery};
 use readyset_sql::Dialect as SqlDialect;
 use readyset_sql_parsing::{
     parse_create_table, parse_create_view, parse_query, parse_select, ParsingPreset,
@@ -8694,6 +8694,64 @@ async fn it_recovers_fully_materialized() {
             ]
         );
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A drop must remove the base of a relation that is also recorded as non-replicated.
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_removes_base_recorded_as_non_replicated() {
+    fn rel(schema: &str, name: &str) -> Relation {
+        Relation {
+            schema: Some(schema.into()),
+            name: name.into(),
+        }
+    }
+
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("drop_removes_base_recorded_as_non_replicated").await;
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE TABLE db.t (id int);"],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+    // The replicator records a relation as non-replicated without dropping it when it
+    // rejects its CREATE TABLE, so the record can sit on top of a live base.
+    let record = NonReplicatedRelation::new(rel("db", "t"));
+    g.extend_recipe(ChangeList::from_change(
+        Change::AddNonReplicatedRelation(record.clone()),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    g.extend_recipe(ChangeList::from_change(
+        Change::Drop {
+            name: rel("db", "t"),
+            if_exists: false,
+        },
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    assert!(
+        g.table(rel("db", "t")).await.is_err(),
+        "the base outlived the drop"
+    );
+    assert!(
+        !g.non_replicated_relations()
+            .await
+            .unwrap()
+            .contains(&record),
+        "the record outlived the drop"
+    );
 
     shutdown_tx.shutdown().await;
 }

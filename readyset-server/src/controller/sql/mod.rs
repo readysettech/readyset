@@ -997,14 +997,11 @@ impl SqlIncorporator {
         mut table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
         mig: &mut Migration<'_>,
     ) -> ReadySetResult<()> {
+        // A relation recorded as non-replicated can also still have a base,
+        // so remove the record regardless of what the rest of the drop finds.
         let was_non_replicated =
             self.remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()));
-        let removed = if was_non_replicated {
-            if let Some(table_statuses) = table_statuses.as_mut() {
-                table_statuses.insert(name.clone(), TableStatus::Dropped);
-            }
-            true
-        } else if self.registry.remove_custom_type(&name) {
+        let removed = if self.registry.remove_custom_type(&name) {
             for expr in self
                 .registry
                 .expressions_referencing_custom_type(&name)
@@ -1042,7 +1039,7 @@ impl SqlIncorporator {
             removed
         };
 
-        if !removed && !if_exists {
+        if !removed && !was_non_replicated && !if_exists {
             error!(
                 name = %name.display_unquoted(),
                 "attempted to drop relation, but relation does not exist"
