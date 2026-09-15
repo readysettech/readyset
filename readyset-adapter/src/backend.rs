@@ -2869,38 +2869,40 @@ where
 
     let query_orig = query.clone();
     rewrite_shallow(&mut query, rewrite_params)?;
+    let request = ShallowViewRequest::new(query, schema_search_path, query_orig);
 
-    let query_id = QueryId::from_shallow_query(&query, &schema_search_path);
+    let query_id = request.query_id();
     let name = stmt.name.unwrap_or_else(|| query_id.into());
     let display_name = name.display_unquoted().to_string();
 
     // Run the RLS analyzer at recovery time too. Without this a cache persisted under a previous
     // run that targeted a now-RLS-protected table would come back as `Plain` and serve
     // cross-tenant rows on startup.
-    let registration = match analyze_recovered_cache(policy_registry, &query, &schema_search_path) {
-        RecoveryDeps::Plain => None,
-        RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
-        RecoveryDeps::Scoped {
-            relations,
-            session_rls_inputs,
-        } => Some((relations, Some(session_rls_inputs))),
-        RecoveryDeps::WaitForPoll { unknown } => {
-            return Ok(RecoveryOutcome::Deferred {
-                unknown: unknown.iter().map(|u| u.qualified()).collect(),
-            });
-        }
-        RecoveryDeps::Skip { reason } => {
-            return Ok(RecoveryOutcome::Skipped {
-                reason: format!("{display_name}: {reason}"),
-            });
-        }
-    };
+    let registration =
+        match analyze_recovered_cache(policy_registry, &request.query, &request.schema_search_path)
+        {
+            RecoveryDeps::Plain => None,
+            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+            RecoveryDeps::Scoped {
+                relations,
+                session_rls_inputs,
+            } => Some((relations, Some(session_rls_inputs))),
+            RecoveryDeps::WaitForPoll { unknown } => {
+                return Ok(RecoveryOutcome::Deferred {
+                    unknown: unknown.iter().map(|u| u.qualified()).collect(),
+                });
+            }
+            RecoveryDeps::Skip { reason } => {
+                return Ok(RecoveryOutcome::Skipped {
+                    reason: format!("{display_name}: {reason}"),
+                });
+            }
+        };
 
     shallow.create_cache(
         Some(name),
         query_id,
-        query.clone(),
-        schema_search_path.clone(),
+        request.clone(),
         resolve_eviction_policy(stmt.policy, default_ttl_ms),
         ddl_req,
         stmt.trx_cache_policy,
@@ -2919,7 +2921,7 @@ where
     }
 
     query_status_cache.update_query_migration_state(
-        &ShallowViewRequest::new(query, schema_search_path.clone(), query_orig),
+        &request,
         MigrationState::Successful(CacheType::Shallow),
         Some(stmt.trx_cache_policy),
     );

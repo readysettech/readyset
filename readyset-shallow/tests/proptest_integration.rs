@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use proptest::prelude::*;
+use readyset_client::ShallowViewRequest;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_shallow::{
@@ -38,8 +39,9 @@ fn test_policy() -> EvictionPolicy {
     }
 }
 
-fn test_stmt() -> ShallowCacheQuery {
-    ShallowCacheQuery::default()
+fn test_request() -> ShallowViewRequest {
+    let query = ShallowCacheQuery::default();
+    ShallowViewRequest::new(query.clone(), vec![], query)
 }
 
 fn test_ddl_req() -> CacheDDLRequest {
@@ -64,8 +66,7 @@ where
     manager.create_cache(
         name,
         query_id,
-        test_stmt(),
-        vec![],
+        test_request(),
         policy,
         test_ddl_req(),
         readyset_sql::ast::TrxCachePolicy::Never,

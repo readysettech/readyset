@@ -13,10 +13,11 @@ use seize::Collector;
 use tokio::sync::watch::Sender;
 use tracing::info;
 
+use readyset_client::ShallowViewRequest;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
-use readyset_sql::ast::{Relation, ShallowCacheQuery, SqlIdentifier, TrxCachePolicy};
+use readyset_sql::ast::{Relation, TrxCachePolicy};
 use readyset_util::SizeOf;
 use readyset_util::shutdown::ShutdownReceiver;
 
@@ -210,8 +211,7 @@ where
         &self,
         name: Option<Relation>,
         query_id: QueryId,
-        query: ShallowCacheQuery,
-        schema_search_path: Vec<SqlIdentifier>,
+        request: ShallowViewRequest,
         policy: EvictionPolicy,
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
@@ -254,8 +254,7 @@ where
             policy,
             name.clone(),
             query_id,
-            query,
-            schema_search_path,
+            request,
             ddl_req,
             trx_cache_policy,
             coalesce_ms,
@@ -777,6 +776,11 @@ mod tests {
         }
     }
 
+    fn test_request() -> ShallowViewRequest {
+        let query = ShallowCacheQuery::default();
+        ShallowViewRequest::new(query.clone(), vec![], query)
+    }
+
     #[tokio::test]
     async fn test_list_entries_empty_manager() {
         let manager: CacheManager<String, String> = CacheManager::new(None, None);
@@ -796,8 +800,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id_1,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -810,8 +813,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id_2,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -872,8 +874,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id_1,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -886,8 +887,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id_2,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -947,8 +947,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id_1,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -985,8 +984,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,
@@ -1040,8 +1038,7 @@ mod tests {
             .create_cache(
                 None,
                 query_id,
-                ShallowCacheQuery::default(),
-                vec![],
+                test_request(),
                 default_policy(),
                 test_ddl_req(),
                 TrxCachePolicy::Never,

@@ -15,12 +15,10 @@ use tokio::sync::{Mutex, oneshot, watch};
 use tokio::time::{interval, timeout};
 
 use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
+use readyset_client::ShallowViewRequest;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
-use readyset_sql::ast::{
-    CacheInner, CacheType, CreateCacheStatement, Relation, ShallowCacheQuery, SqlIdentifier,
-    TrxCachePolicy,
-};
+use readyset_sql::ast::{CacheInner, CacheType, CreateCacheStatement, Relation, TrxCachePolicy};
 use readyset_util::SizeOf;
 use readyset_util::timestamp::current_timestamp_ms;
 
@@ -387,8 +385,7 @@ impl<K, V> Expiry<K, Arc<CacheEntry<V>>> for CacheExpiration {
 pub struct CacheInfo {
     pub name: Option<Relation>,
     pub query_id: QueryId,
-    pub query: ShallowCacheQuery,
-    pub schema_search_path: Vec<SqlIdentifier>,
+    pub request: ShallowViewRequest,
     pub ttl_ms: Option<u64>,
     pub refresh_ms: Option<u64>,
     pub coalesce_ms: Option<u64>,
@@ -453,7 +450,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
             inner: CacheInner::Statement {
                 deep: Err("deep".into()),
-                shallow: Ok(Box::new(info.query.clone())),
+                shallow: Ok(info.request.query.clone()),
             },
             unparsed_create_cache_statement: None,
             trx_cache_policy: info.trx_cache_policy,
@@ -476,8 +473,7 @@ where
     cache_metadata: OnceLock<Arc<QueryMetadata>>,
     name: Option<Relation>,
     query_id: QueryId,
-    query: ShallowCacheQuery,
-    schema_search_path: Vec<SqlIdentifier>,
+    request: ShallowViewRequest,
     ttl_ms: Option<u64>,
     refresh_ms: Option<u64>,
     coalesce_ms: Option<u64>,
@@ -534,8 +530,7 @@ where
         policy: EvictionPolicy,
         name: Option<Relation>,
         query_id: QueryId,
-        query: ShallowCacheQuery,
-        schema_search_path: Vec<SqlIdentifier>,
+        request: ShallowViewRequest,
         ddl_req: CacheDDLRequest,
         trx_cache_policy: TrxCachePolicy,
         coalesce_ms: Option<Duration>,
@@ -599,8 +594,7 @@ where
             cache_metadata: Default::default(),
             name,
             query_id,
-            query,
-            schema_search_path,
+            request,
             ttl_ms,
             refresh_ms,
             coalesce_ms: coalesce_ms.map(|d| d.as_millis().try_into().unwrap_or_default()),
@@ -1127,8 +1121,7 @@ where
         CacheInfo {
             name: self.name.clone(),
             query_id: self.query_id,
-            query: self.query.clone(),
-            schema_search_path: self.schema_search_path.clone(),
+            request: self.request.clone(),
             ttl_ms: self.ttl_ms,
             refresh_ms: self.refresh_ms,
             coalesce_ms: self.coalesce_ms,
@@ -1227,6 +1220,8 @@ where
 mod tests {
     use std::{assert_matches, time::Duration};
 
+    use readyset_sql::ast::ShallowCacheQuery;
+
     use crate::{CacheManager, EvictionPolicy, QueryMetadata};
 
     use super::*;
@@ -1258,6 +1253,11 @@ mod tests {
         })
     }
 
+    fn test_request() -> ShallowViewRequest {
+        let query = ShallowCacheQuery::default();
+        ShallowViewRequest::new(query.clone(), vec![], query)
+    }
+
     fn new_capped<K, V>(
         max_capacity: Option<u64>,
         policy: EvictionPolicy,
@@ -1275,8 +1275,7 @@ mod tests {
             policy,
             None,
             query_id,
-            ShallowCacheQuery::default(),
-            vec![],
+            test_request(),
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
@@ -1406,8 +1405,6 @@ mod tests {
         let policy = EvictionPolicy::Ttl {
             ttl: Duration::from_secs(60),
         };
-        let stmt = ShallowCacheQuery::default();
-
         let query_id_0 = QueryId::random();
         let cache_0 = Cache::new(
             0,
@@ -1415,8 +1412,7 @@ mod tests {
             policy,
             None,
             query_id_0,
-            stmt.clone(),
-            vec![],
+            test_request(),
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
@@ -1430,8 +1426,7 @@ mod tests {
             policy,
             None,
             query_id_1,
-            stmt.clone(),
-            vec![],
+            test_request(),
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,
@@ -1738,8 +1733,7 @@ mod tests {
             },
             Some(relation.clone()),
             query_id,
-            ShallowCacheQuery::default(),
-            vec![],
+            test_request(),
             test_ddl_req(),
             TrxCachePolicy::Never,
             None,

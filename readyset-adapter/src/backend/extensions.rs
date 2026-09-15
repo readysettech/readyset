@@ -360,8 +360,7 @@ where
         let res = state.shallow.create_cache(
             Some(name.clone()),
             query_id,
-            shallow.query.as_ref().clone(),
-            shallow.schema_search_path.clone(),
+            shallow.clone(),
             resolve_eviction_policy(policy, settings.default_ttl_ms),
             ddl_req.clone(),
             trx_cache_policy,
@@ -910,7 +909,7 @@ where
         for CacheInfo {
             name,
             query_id,
-            query,
+            request,
             ..
         } in state.shallow.list_caches(query_id, name)
         {
@@ -920,7 +919,7 @@ where
                 name = %name
                     .as_ref()
                     .map_or_else(none, |name| name.display(DB::SQL_DIALECT).to_string()),
-                statement = %Sensitive(&query.display(settings.dialect)),
+                statement = %Sensitive(&request.query.display(settings.dialect)),
                 "Dropping previously shallow-cached query",
             );
             state
@@ -1128,7 +1127,7 @@ where
             for CacheInfo {
                 name,
                 query_id,
-                query,
+                request,
                 ttl_ms,
                 refresh_ms,
                 coalesce_ms,
@@ -1142,7 +1141,7 @@ where
                 let name = name
                     .map(|n| n.display_unquoted().to_string().into())
                     .unwrap_or("".into());
-                let query = query.display(DB::SQL_DIALECT).to_string().into();
+                let query = request.query.display(DB::SQL_DIALECT).to_string().into();
                 let properties = {
                     let mut properties = CacheProperties::new(CacheType::Shallow);
                     if let Some(ttl_ms) = ttl_ms {

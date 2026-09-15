@@ -59,13 +59,13 @@ struct ProbeTarget {
 
 impl ProbeTarget {
     fn from_cache_info(info: &CacheInfo, dialect: Dialect) -> Self {
-        let n_params = max_placeholder_index(&info.query);
-        let sql = info.query.display(dialect).to_string();
+        let n_params = max_placeholder_index(&info.request.query);
+        let sql = info.request.query.display(dialect).to_string();
         Self {
             cache: info.query_id,
             sql,
             n_params,
-            path: info.schema_search_path.clone(),
+            path: info.request.schema_search_path.clone(),
         }
     }
 }
@@ -387,7 +387,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .shallow
             .list_caches(None, None)
             .iter()
-            .flat_map(|info| extract_referenced_relation_names(&info.query))
+            .flat_map(|info| extract_referenced_relation_names(&info.request.query))
             .map(|(schema, name)| Relation {
                 schema: schema.map(Into::into),
                 name: name.into(),

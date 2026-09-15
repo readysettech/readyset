@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::RngExt;
+use readyset_client::ShallowViewRequest;
 use readyset_client::consensus::CacheDDLRequest;
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheManager, CacheResult, EvictionPolicy, QueryMetadata};
@@ -21,13 +22,13 @@ fn bench_cache_hit(c: &mut Criterion) {
         Arc::new(CacheManager::new(None, None));
 
     let query_id = QueryId::from_unparsed_select("SELECT bench");
+    let query = ShallowCacheQuery::default();
 
     manager
         .create_cache(
             None,
             query_id,
-            ShallowCacheQuery::default(),
-            vec![],
+            ShallowViewRequest::new(query.clone(), vec![], query),
             EvictionPolicy::Ttl {
                 ttl: Duration::from_secs(3600),
             },
@@ -93,13 +94,13 @@ fn bench_cache_insert(c: &mut Criterion) {
         Arc::new(CacheManager::new(None, None));
 
     let query_id = QueryId::from_unparsed_select("SELECT bench_insert");
+    let query = ShallowCacheQuery::default();
 
     manager
         .create_cache(
             None,
             query_id,
-            ShallowCacheQuery::default(),
-            vec![],
+            ShallowViewRequest::new(query.clone(), vec![], query),
             EvictionPolicy::Ttl {
                 ttl: Duration::from_secs(3600),
             },

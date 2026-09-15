@@ -73,7 +73,7 @@ fn shallow_caches_read(ctx: &VrelContext) -> VrelRead {
             vec![
                 query_id.clone().into(),
                 cache.name.map(|n| n.display_unquoted().to_string()).into(),
-                cache.query.display(dialect).to_string().into(),
+                cache.request.query.display(dialect).to_string().into(),
                 cache.ttl_ms.into(),
                 cache.refresh_ms.into(),
                 cache.coalesce_ms.into(),
