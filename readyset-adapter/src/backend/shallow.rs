@@ -21,7 +21,6 @@ use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheManager, CacheResult};
-use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
     CacheType, CreateCacheOptions, ReadysetHintDirective, ShallowCacheQuery, TrxCachePolicy,
 };
@@ -33,7 +32,7 @@ use tracing::{debug, warn};
 use super::routing::{SelectRouter, record_skip_cache};
 use super::{
     AutoCreateTrigger, Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode,
-    QueryResult, acl_creator, acl_decline_reason, build_hint_ddl_string,
+    QueryResult, acl_creator, acl_decline_reason, create_cache_statement,
 };
 use crate::rls_coordinator::RlsCoordinator;
 use crate::session_context::SessionContext;
@@ -173,6 +172,7 @@ where
             }
             _ => return None,
         };
+        opts.cache_type = Some(CacheType::Shallow);
 
         // Filter implicit in-request-path attempts to prevent driver/ORM
         // bootstrap traffic (system-schema introspection, session variables,
@@ -251,10 +251,10 @@ where
         }
 
         let (query_id, name) = Self::resolve_id_and_name(None, query_id);
-        let query_text = shallow.query.display(DB::SQL_DIALECT).to_string();
-        let ddl_stmt = build_hint_ddl_string(DB::SQL_DIALECT, &opts, &query_text);
+        let create =
+            create_cache_statement(DB::SQL_DIALECT, &opts, &shallow.query_orig.to_string());
         let ddl_req = CacheDDLRequest {
-            unparsed_stmt: ddl_stmt,
+            unparsed_stmt: create,
             schema_search_path: connectors.noria.schema_search_path().to_owned(),
             dialect: settings.dialect.into(),
             cache_name: None,

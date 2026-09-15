@@ -1234,7 +1234,7 @@ async fn hint_creates_shallow_cache() {
         .await
         .unwrap();
 
-    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+    let (readyset_opts, handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .fallback(true)
         .build::<MySQLAdapter>()
@@ -1265,6 +1265,35 @@ async fn hint_creates_shallow_cache() {
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(_)
+    );
+
+    drop(readyset);
+    let (readyset_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    // Shallow cache created by hint was recreated on restart.
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 100)]);
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetThenUpstream(..)
+    );
+    let rows: Vec<(i32, i32)> = readyset
+        .query("SELECT id, val FROM t WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 100)]);
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow(..)
     );
 
     shutdown_tx.shutdown().await;

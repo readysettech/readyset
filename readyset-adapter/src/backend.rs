@@ -2356,20 +2356,10 @@ fn resolve_eviction_policy(
     }
 }
 
-/// Build a synthetic `CREATE SHALLOW CACHE ...` DDL string for hint-based creation.
-///
-/// Emits the trx-cache-policy keyword so the policy survives a restart: caches reload by
-/// re-parsing this persisted DDL via `recreate_shallow_caches`.
-fn build_hint_ddl_string(dialect: Dialect, opts: &CreateCacheOptions, query_text: &str) -> String {
-    // Hints create shallow caches only, so force the type: a bare `CREATE CACHE` hint still
-    // materializes as shallow. The `CREATE [type] CACHE [name] WITH (...)` head renders through the
-    // same `CreateCacheOptions` display as `CREATE CACHE` DDL, so every option carries through here
-    // without per-option wiring; we only append the hint-specific `FROM <query>` tail.
-    let opts = CreateCacheOptions {
-        cache_type: Some(CacheType::Shallow),
-        ..opts.clone()
-    };
-    format!("{} FROM {query_text}", opts.display(dialect))
+/// Build a synthetic `CREATE CACHE` statement.
+fn create_cache_statement(dialect: Dialect, opts: &CreateCacheOptions, query: &str) -> String {
+    let create = opts.display(dialect);
+    format!("{create} FROM {query}")
 }
 
 fn resolve_coalesce(coalesce: Option<Duration>, default_coalesce_ms: u64) -> Option<Duration> {
@@ -3024,10 +3014,11 @@ mod tests {
     #[test]
     fn hint_ddl_string_includes_coalesce() {
         let opts = CreateCacheOptions {
+            cache_type: Some(CacheType::Shallow),
             coalesce_ms: Some(Duration::from_secs(17)),
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT RAND()");
         assert_eq!(
             ddl,
             "CREATE SHALLOW CACHE WITH (COALESCE 17 SECONDS) FROM SELECT RAND()"
@@ -3043,7 +3034,7 @@ mod tests {
             coalesce_ms: Some(Duration::from_secs(17)),
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT RAND()");
         assert!(
             ddl.contains("COALESCE 17 SECONDS"),
             "DDL missing COALESCE: {ddl}"
@@ -3064,7 +3055,7 @@ mod tests {
                 coalesce_ms: Some(coalesce),
                 ..Default::default()
             };
-            let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+            let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT RAND()");
 
             // Re-parse the generated DDL — this is the path taken on restart.
             let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
@@ -3086,7 +3077,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::Always,
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT RAND()");
 
         let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
         let SqlQuery::CreateCache(stmt) = parsed else {
@@ -3107,7 +3098,7 @@ mod tests {
             concurrently: true,
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT RAND()");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT RAND()");
 
         let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
         let SqlQuery::CreateCache(stmt) = parsed else {
@@ -3125,7 +3116,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::UntilWrite,
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT 1");
         assert!(
             ddl.contains("UNTIL WRITE"),
             "DDL missing UNTIL WRITE: {ddl}"
@@ -3139,7 +3130,7 @@ mod tests {
             trx_cache_policy: TrxCachePolicy::UntilWrite,
             ..Default::default()
         };
-        let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+        let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT 1");
         assert!(ddl.contains("ADAPTIVE"), "DDL missing ADAPTIVE: {ddl}");
 
         // Re-parse the generated DDL — this is the path taken on restart.
@@ -3161,7 +3152,7 @@ mod tests {
                 trx_cache_policy: policy,
                 ..Default::default()
             };
-            let ddl = build_hint_ddl_string(Dialect::MySQL, &opts, "SELECT 1");
+            let ddl = create_cache_statement(Dialect::MySQL, &opts, "SELECT 1");
             let parsed = parse_query(Dialect::MySQL, &ddl).expect("DDL should parse");
             let SqlQuery::CreateCache(stmt) = parsed else {
                 panic!("Expected CreateCache, got: {parsed:?}");
