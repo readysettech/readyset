@@ -456,7 +456,7 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
                 explain_conn.query_first(&explain_sql).await;
 
             match explain_result {
-                Ok(Some((_query_id, readyset_supported, _query_text))) => {
+                Ok(Some((_query_id, _query_text, readyset_supported))) => {
                     let supported_lower = readyset_supported.to_lowercase();
                     // Only follow up on "yes" — the status where staleness
                     // actually matters. "cached" means a cache already exists
@@ -501,7 +501,7 @@ async fn run_query(mysql: &MysqlOpts, readyset: &ReadysetOpts, duration_secs: u6
                                     let recheck: Result<Option<(String, String, String)>, _> =
                                         explain_conn.query_first(&explain_sql).await;
                                     let still_stale = match recheck {
-                                        Ok(Some((_, status, _))) => {
+                                        Ok(Some((_, _, status))) => {
                                             let s = status.to_lowercase();
                                             s == "yes"
                                         }
