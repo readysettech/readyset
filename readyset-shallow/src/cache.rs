@@ -450,7 +450,7 @@ impl From<CacheInfo> for CreateCacheStatement {
             coalesce_ms: info.coalesce_ms.map(Duration::from_millis),
             inner: CacheInner::Statement {
                 deep: Err("deep".into()),
-                shallow: Ok(info.request.query.clone()),
+                shallow: Ok(info.request.query_orig.clone()),
             },
             unparsed_create_cache_statement: None,
             trx_cache_policy: info.trx_cache_policy,

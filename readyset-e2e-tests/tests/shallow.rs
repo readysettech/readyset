@@ -3444,3 +3444,51 @@ async fn shallow_cache_create_from_id_using_original_query_text() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn explain_caches_renders_original_shallow_query() {
+    init_test_logging();
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .cache_mode(readyset_client::CacheMode::Shallow)
+        .migration_mode(MigrationMode::OutOfBand)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+
+    let query = "SELECT CURRENT_TIMESTAMP(4)";
+
+    readyset
+        .query_drop(format!("CREATE SHALLOW CACHE FROM {query}"))
+        .await
+        .unwrap();
+
+    let rows: Vec<mysql_async::Row> = readyset
+        .query("EXPLAIN CACHES")
+        .await
+        .unwrap();
+
+    assert_eq!(rows.len(), 1);
+    let create: String = rows.first().unwrap().get(0).unwrap();
+
+    readyset.query_drop("DROP ALL CACHES").await.unwrap();
+    readyset.query_drop(create).await.unwrap();
+
+    readyset
+        .query_drop(query)
+        .await
+        .unwrap();
+    readyset
+        .query_drop(query)
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow(..)
+    );
+
+    shutdown_tx.shutdown().await;
+}
