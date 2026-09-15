@@ -1287,6 +1287,21 @@ mod tests {
     }
 
     #[test]
+    fn array_to_string_agg_order_by_wraps_the_aggregate() {
+        let mut b = PatternBuilder::new("array_to_string_agg_with_order_by");
+        let t = b.table();
+        let c = b.column(t);
+        b.from(t);
+        b.project_array_to_string_agg(c, t);
+        b.order_by(c, t, OrderType::OrderDescending, None);
+        let sql = resolve_pattern(&b.build(), Dialect::PostgreSQL);
+        let order_by = sql.split("ORDER BY").nth(1).expect("ORDER BY clause");
+        assert!(order_by.to_lowercase().contains("array_agg("), "{sql}");
+        // The only ascending key a single-row aggregate result could gain is the PK tiebreaker.
+        assert!(!order_by.contains(" ASC"), "{sql}");
+    }
+
+    #[test]
     fn array_to_string_agg_builds() {
         let p = array_to_string_agg();
         assert_eq!(p.name, "array_to_string_agg");

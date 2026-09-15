@@ -119,13 +119,14 @@ fn build_select_inner(
     let has_group_by = constraints
         .iter()
         .any(|c| matches!(c, Constraint::GroupBy { .. }));
-    let ungrouped_aggregate_targets: HashMap<VarId, &AggregateFn> = if has_group_by {
+    let ungrouped_aggregate_targets: HashMap<VarId, &Constraint> = if has_group_by {
         HashMap::new()
     } else {
         constraints
             .iter()
             .filter_map(|c| match c {
-                Constraint::ProjectAggregate { function, col, .. } => Some((*col, function)),
+                Constraint::ProjectAggregate { col, .. }
+                | Constraint::ProjectArrayToStringAgg { col, .. } => Some((*col, c)),
                 _ => None,
             })
             .collect()
@@ -167,18 +168,8 @@ fn build_select_inner(
             Constraint::ProjectArrayToStringAgg { col, table } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_expr = make_column_expr(&col_name, &table_name);
-                let array_agg = Expr::Call(FunctionExpr::Udf {
-                    schema: None,
-                    name: SqlIdentifier::from("ARRAY_AGG"),
-                    arguments: vec![col_expr],
-                });
-                let delimiter = Expr::Literal(Literal::String(",".to_string()));
                 fields.push(FieldDefinitionExpr::Expr {
-                    expr: Expr::Call(FunctionExpr::ArrayToString(
-                        Box::new(array_agg),
-                        Box::new(delimiter),
-                        None,
-                    )),
+                    expr: array_to_string_agg_expr(col_expr),
                     alias: None,
                 });
             }
@@ -619,7 +610,10 @@ fn build_select_inner(
                 }
                 let col_expr = make_column_expr(&col_name, &table_name);
                 let order_field = match ungrouped_aggregate_targets.get(col) {
-                    Some(function) => Expr::Call(make_aggregate_expr(function, col_expr)),
+                    Some(Constraint::ProjectAggregate { function, .. }) => {
+                        Expr::Call(make_aggregate_expr(function, col_expr))
+                    }
+                    Some(_) => array_to_string_agg_expr(col_expr),
                     None => col_expr,
                 };
                 order_bys.push(OrderBy {
@@ -1693,6 +1687,20 @@ fn resolve_cte_inner_subquery(
 
     let ddl = inner_env.into_ddl_steps(state)?;
     Ok((query, params, ddl))
+}
+
+fn array_to_string_agg_expr(col_expr: Expr) -> Expr {
+    let array_agg = Expr::Call(FunctionExpr::Udf {
+        schema: None,
+        name: SqlIdentifier::from("ARRAY_AGG"),
+        arguments: vec![col_expr],
+    });
+    let delimiter = Expr::Literal(Literal::String(",".to_string()));
+    Expr::Call(FunctionExpr::ArrayToString(
+        Box::new(array_agg),
+        Box::new(delimiter),
+        None,
+    ))
 }
 
 /// Convert an AggregateFn constraint to a FunctionExpr AST node.
