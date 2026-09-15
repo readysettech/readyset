@@ -252,6 +252,9 @@ impl ChangeList {
                     name: dcs.name,
                     if_exists: false,
                 }),
+                SqlQuery::DropDatabase(dds) => {
+                    changes.extend(dds.names.into_iter().map(Change::DropSchema))
+                }
                 SqlQuery::RenameTable(rts) => {
                     changes.extend(rts.into_changes());
                 }
@@ -446,6 +449,9 @@ pub enum Change {
         /// If `false`, then an error should be thrown if the relation is not found.
         if_exists: bool,
     },
+    /// Remove every table, view and non-replicated relation in a schema, along with the caches over
+    /// them. Replicated from MySQL's DROP DATABASE.
+    DropSchema(SqlIdentifier),
 }
 
 impl Change {
@@ -533,6 +539,7 @@ impl Change {
             | Change::CreateCache(_)
             | Change::CreateType { .. }
             | Change::Drop { .. }
+            | Change::DropSchema(_)
             | Change::AddNonReplicatedRelation(_) => false,
         }
     }

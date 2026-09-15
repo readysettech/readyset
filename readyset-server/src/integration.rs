@@ -3425,6 +3425,99 @@ async fn overlapping_or_not_doubled_after_reader_migration() {
     shutdown_tx.shutdown().await;
 }
 
+/// REA-6757: a replicated DROP DATABASE removes every relation in that schema and nothing else.
+#[tokio::test(flavor = "multi_thread")]
+async fn drop_schema_removes_every_relation_in_the_schema() {
+    fn rel(schema: &str, name: &str) -> Relation {
+        Relation {
+            schema: Some(schema.into()),
+            name: name.into(),
+        }
+    }
+    fn drop_schema(schema: &str) -> ChangeList {
+        ChangeList::from_change(Change::DropSchema(schema.into()), Dialect::DEFAULT_MYSQL)
+    }
+
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("drop_schema_removes_every_relation_in_the_schema").await;
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec![
+                    "CREATE TABLE gone.t (g int, x int);",
+                    "CREATE VIEW gone.v AS SELECT g FROM gone.t;",
+                    "CREATE TABLE kept.k (z int);",
+                    "CREATE VIEW kept.over_gone AS SELECT x FROM gone.t;",
+                    "CREATE CACHE gone_q FROM SELECT g FROM gone.v;",
+                    "CREATE CACHE kept_q FROM SELECT z FROM kept.k;",
+                ],
+                Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+    // A base can also be recorded as non-replicated; the schema drop removes both.
+    let non_replicated = NonReplicatedRelation::new(rel("gone", "t"));
+    g.extend_recipe(ChangeList::from_change(
+        Change::AddNonReplicatedRelation(non_replicated.clone()),
+        Dialect::DEFAULT_MYSQL,
+    ))
+    .await
+    .unwrap();
+
+    g.extend_recipe(drop_schema("gone")).await.unwrap();
+
+    assert!(
+        g.table(rel("gone", "t")).await.is_err(),
+        "gone.t outlived its schema"
+    );
+    assert!(
+        g.view("gone_q").await.is_err(),
+        "a cache over the dropped schema outlived it"
+    );
+    assert!(!g
+        .non_replicated_relations()
+        .await
+        .unwrap()
+        .contains(&non_replicated));
+    g.table(rel("kept", "k"))
+        .await
+        .expect("another schema's table was dropped");
+    g.view("kept_q")
+        .await
+        .expect("another schema's cache was dropped");
+    g.extend_recipe(drop_schema("gone"))
+        .await
+        .expect("an empty schema drops as a no-op");
+
+    // Recreating the table brings back the surviving schema's view, not the dropped schema's.
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE gone.t (g int, x int);",
+                "CREATE CACHE over_gone_q FROM SELECT x FROM kept.over_gone;",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("a view in a surviving schema lost its definition");
+    let gone_view = ChangeList::from_strings(
+        vec!["CREATE CACHE gone_v_q FROM SELECT g FROM gone.v;"],
+        Dialect::DEFAULT_MYSQL,
+    )
+    .unwrap();
+    assert!(
+        g.extend_recipe(gone_view).await.is_err(),
+        "the dropped schema's view came back"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn recipe_activates_and_migrates() {
     let r_txt = vec!["CREATE TABLE b (a text, c text, x text);\n"];

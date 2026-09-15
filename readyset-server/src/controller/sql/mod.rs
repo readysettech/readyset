@@ -509,6 +509,20 @@ impl SqlIncorporator {
                     }
                     self.drop_relation(name, if_exists, table_statuses.as_deref_mut(), mig)?;
                 }
+                Change::DropSchema(schema) => {
+                    let relations = self.relations_in_schema(&schema);
+                    info!(schema = %schema, relations = relations.len(), "dropping schema");
+                    antithesis_sdk::assert_sometimes!(
+                        !relations.is_empty(),
+                        "Replicated schema drop removed its relations",
+                        &serde_json::json!({ "schema": schema.to_string() })
+                    );
+                    // `if_exists = true` because dropping a table takes its dependent views with
+                    // it, so a later name may already be gone.
+                    for name in relations {
+                        self.drop_relation(name, true, table_statuses.as_deref_mut(), mig)?;
+                    }
+                }
                 Change::AlterType { oid, name, change } => {
                     let (ty, _old_name) =
                         self.alter_custom_type(oid, &name, change).map_err(|e| {
@@ -886,6 +900,21 @@ impl SqlIncorporator {
 
     pub(crate) fn get_custom_type(&self, name: &Relation) -> Option<&DfType> {
         self.custom_types.get(name)
+    }
+
+    /// Every table, view and non-replicated relation recorded in `schema`.
+    fn relations_in_schema(&self, schema: &SqlIdentifier) -> HashSet<Relation> {
+        self.registry
+            .table_names()
+            .chain(self.views.keys())
+            .chain(
+                self.non_replicated_relations()
+                    .iter()
+                    .map(|relation| &relation.name),
+            )
+            .filter(|name| name.schema.as_ref() == Some(schema))
+            .cloned()
+            .collect()
     }
 
     /// Return a set of all relations (tables or views) which are known to exist in the upstream

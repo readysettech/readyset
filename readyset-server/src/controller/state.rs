@@ -1437,7 +1437,7 @@ impl DfState {
         // O(N+E)) reachability scan for pure ADD/ALTER migrations.
         let has_drops = changelist
             .changes()
-            .any(|c| matches!(c, Change::Drop { .. }));
+            .any(|c| matches!(c, Change::Drop { .. } | Change::DropSchema(_)));
 
         let r = self
             .migrate(dry_run, changelist.dialect, |mig| {

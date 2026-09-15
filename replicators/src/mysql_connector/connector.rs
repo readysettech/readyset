@@ -1272,6 +1272,9 @@ impl MySqlBinlogConnector {
                 Change::Drop { name, .. } => {
                     table_schemas.remove(&Self::table_schemas_key(name, schema));
                 }
+                Change::DropSchema(dropped) => {
+                    table_schemas.retain(|table, _| table.schema.as_ref() != Some(&*dropped));
+                }
                 Change::AlterTable(AlterTableStatement { table, .. }) => {
                     table_schemas.remove(&Self::table_schemas_key(table, schema));
                 }
@@ -2632,6 +2635,26 @@ mod tests {
 
         assert!(cache.contains_key(&make_relation("users")));
         assert!(!cache.contains_key(&Relation::from("users")));
+    }
+
+    #[test]
+    fn apply_ddl_drop_schema_evicts_only_that_schema() {
+        let body = parse_create_table("CREATE TABLE t (id INT)")
+            .body
+            .expect("parses");
+        let kept = Relation {
+            schema: Some("other_db".into()),
+            name: SqlIdentifier::from("t"),
+        };
+        let mut cache = HashMap::from([
+            (make_relation("users"), body.clone()),
+            (make_relation("orders"), body.clone()),
+            (kept.clone(), body),
+        ]);
+        let mut changes = vec![Change::DropSchema("test_db".into())];
+        MySqlBinlogConnector::apply_ddl_to_table_schemas(&mut cache, &mut changes, None, "test_db");
+
+        assert_eq!(cache.into_keys().collect::<Vec<_>>(), [kept]);
     }
 
     #[test]
