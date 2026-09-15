@@ -21,7 +21,7 @@ use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
-use readyset_sql::ast::{ColumnConstraint, NonReplicatedRelation, Relation};
+use readyset_sql::ast::{ColumnConstraint, NonReplicatedRelation, NotReplicatedReason, Relation};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 #[cfg(feature = "failure_injection")]
@@ -3448,6 +3448,108 @@ async fn pgsql_dont_replicate_partitioned_table() {
             .unwrap()
             .contains(&NonReplicatedRelation::new(relation.clone()))
     }
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_dont_replicate_generated_columns() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+
+    client
+        .query(
+            "DROP TABLE IF EXISTS t_snapshot CASCADE;
+             DROP TABLE IF EXISTS t_streaming CASCADE;
+             DROP TABLE IF EXISTS t_plain CASCADE;
+
+             CREATE TABLE t_snapshot (
+                 cm double precision,
+                 inches double precision GENERATED ALWAYS AS (cm / 2.54) STORED
+             );
+             CREATE TABLE t_plain (x int);
+
+             INSERT INTO t_snapshot (cm) VALUES (20);
+             INSERT INTO t_plain (x) VALUES (1);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let snapshot_rel = Relation {
+        schema: Some("public".into()),
+        name: "t_snapshot".into(),
+    };
+    ctx.noria.table(snapshot_rel.clone()).await.unwrap_err();
+    assert_eq!(
+        ctx.noria
+            .non_replicated_relations()
+            .await
+            .unwrap()
+            .get(&NonReplicatedRelation::new(snapshot_rel))
+            .map(|rel| rel.reason.clone()),
+        Some(NotReplicatedReason::GeneratedColumn)
+    );
+
+    client
+        .query(
+            "CREATE TABLE t_streaming (
+                 cm double precision,
+                 inches double precision GENERATED ALWAYS AS (cm / 2.54) STORED
+             )",
+        )
+        .await
+        .unwrap();
+
+    let streaming_rel = Relation {
+        schema: Some("public".into()),
+        name: "t_streaming".into(),
+    };
+    eventually! {
+        ctx.noria
+            .non_replicated_relations()
+            .await
+            .unwrap()
+            .contains(&NonReplicatedRelation::new(streaming_rel.clone()))
+    }
+    assert_eq!(
+        ctx.noria
+            .non_replicated_relations()
+            .await
+            .unwrap()
+            .get(&NonReplicatedRelation::new(streaming_rel.clone()))
+            .map(|rel| rel.reason.clone()),
+        Some(NotReplicatedReason::GeneratedColumn)
+    );
+    ctx.noria.table(streaming_rel).await.unwrap_err();
+
+    // Writes to the refused table are discarded rather than stopping replication.
+    client
+        .query(
+            "INSERT INTO t_streaming (cm) VALUES (20);
+             INSERT INTO t_plain (x) VALUES (2);",
+        )
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "t_plain",
+        "pgsql_dont_replicate_generated_columns",
+        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+    );
 
     shutdown_tx.shutdown().await;
 }

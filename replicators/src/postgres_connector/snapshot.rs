@@ -82,6 +82,7 @@ struct TableEntry {
     schema: String,
     name: String,
     oid: u32,
+    has_generated_columns: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +239,7 @@ impl TryFrom<pgsql::Row> for TableEntry {
             schema: row.try_get(0)?,
             oid: row.try_get(1)?,
             name: row.try_get(2)?,
+            has_generated_columns: row.try_get(4)?,
         })
     }
 }
@@ -861,8 +863,10 @@ impl<'a> PostgresReplicator<'a> {
 
         let (table_list, mut non_replicated) =
             table_list.into_iter().partition::<Vec<_>, _>(|tbl| {
-                self.table_filter
-                    .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
+                !tbl.has_generated_columns
+                    && self
+                        .table_filter
+                        .should_be_processed(tbl.schema.as_str(), tbl.name.as_str())
             });
 
         // We don't support partitioned tables (only the partitions themselves) so mark those as
@@ -902,6 +906,8 @@ impl<'a> PostgresReplicator<'a> {
                         let not_replicated_reason: NotReplicatedReason =
                             if partitioned_identifiers.contains(&te_identifier) {
                                 NotReplicatedReason::Partitioned
+                            } else if te.has_generated_columns {
+                                NotReplicatedReason::GeneratedColumn
                             } else {
                                 NotReplicatedReason::Configuration
                             };
@@ -1159,12 +1165,17 @@ impl<'a> PostgresReplicator<'a> {
             TableKind::PartitionedTable => 'p',
         } as i8;
 
-        // We filter out tables that have any generated columns (pgcatalog.pg_attribute.attgenerated
-        // <> '') because they are currently unsupported and will cause issues
-        // with replication when the column count on an insert doesnt match the column count
-        // of the table.
+        // Relations with generated columns are reported alongside the rest so the caller can mark
+        // them non-replicated with a reason, rather than dropping them from the list entirely.
         let query = r"
-        SELECT n.nspname, c.oid, c.relname, c.relkind
+        SELECT n.nspname, c.oid, c.relname, c.relkind, EXISTS(
+            SELECT 1
+            FROM pg_catalog.pg_attribute a
+            WHERE a.attrelid = c.oid
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+              AND a.attgenerated <> ''
+        )
         FROM pg_catalog.pg_class c
         LEFT JOIN pg_catalog.pg_namespace n
         ON n.oid = c.relnamespace
@@ -1172,13 +1183,6 @@ impl<'a> PostgresReplicator<'a> {
                                 AND n.nspname <> 'information_schema'
                                 AND n.nspname <> 'readyset'
                                 AND n.nspname !~ '^pg_toast'
-                                AND c.oid NOT IN(
-        SELECT c.oid
-            FROM pg_catalog.pg_class c
-            JOIN pg_catalog.pg_attribute a
-            ON a.attrelid = c.oid
-            WHERE attgenerated <> ''
-        )
         ";
 
         let tables = get_transaction!(self).query(query, &[&kind_code]).await?;

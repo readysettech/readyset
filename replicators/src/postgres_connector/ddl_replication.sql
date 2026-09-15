@@ -81,7 +81,8 @@ BEGIN
                         ),
                         'not_null', attr.attnotnull,
                         'collation_name', coll.collname,
-                        'collation_provider', coll.collprovider
+                        'collation_provider', coll.collprovider,
+                        'generated', attr.attgenerated <> ''
                     ) ORDER BY attr.attnum)
                     FROM pg_catalog.pg_attribute attr
                     LEFT JOIN pg_catalog.pg_collation coll

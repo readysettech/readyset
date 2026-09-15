@@ -105,6 +105,14 @@ pub(crate) struct DdlCreateTableColumn {
     /// semantics as `collation_name`.
     #[allow(dead_code)]
     collation_provider: Option<String>,
+    /// Whether `pg_attribute.attgenerated` is set for this column. Logical replication omits
+    /// generated columns from row messages, so a table with any of them replicates a narrower
+    /// tuple than its column list describes. Postgres 18 lifts that restriction for publications
+    /// created with `publish_generated_columns = stored`, which do send stored generated columns;
+    /// this field says only what the catalog declares, not what the publication will transmit.
+    /// Defaults to `false`.
+    #[serde(default)]
+    generated: bool,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -175,6 +183,17 @@ impl DdlEvent {
                     .iter()
                     .map(|c| (c.name.clone().into(), c.attnum))
                     .collect();
+
+                // Row messages for a table with generated columns carry only the
+                // non-generated values, so the base table would reject every write with a
+                // column-count mismatch. Refuse the table up front instead, matching the
+                // `attgenerated` exclusion applied to tables found during snapshotting.
+                if columns.iter().any(|col| col.generated) {
+                    return Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
+                        name: table,
+                        reason: NotReplicatedReason::GeneratedColumn,
+                    }));
+                }
 
                 let create_table_body: Result<_, String> = columns
                     .into_iter()
@@ -535,6 +554,7 @@ mod tests {
                             not_null: true,
                             collation_name: None,
                             collation_provider: None,
+                            generated: false,
                         },
                         DdlCreateTableColumn {
                             attnum: 2,
@@ -543,6 +563,7 @@ mod tests {
                             not_null: false,
                             collation_name: Some("default".into()),
                             collation_provider: Some("d".into()),
+                            generated: false,
                         },
                         DdlCreateTableColumn {
                             attnum: 3,
@@ -551,6 +572,7 @@ mod tests {
                             not_null: false,
                             collation_name: Some("C".into()),
                             collation_provider: Some("c".into()),
+                            generated: false,
                         },
                     ]
                 );

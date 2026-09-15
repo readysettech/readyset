@@ -382,6 +382,11 @@ pub enum NotReplicatedReason {
     OtherError(String),
     /// Default is a generic and is used when one of the above enums are not need.
     Default,
+    /// GeneratedColumn indicates the table has at least one generated column. Postgres logical
+    /// replication sends generated columns only for publications that set
+    /// `publish_generated_columns`, which Postgres 18 added and ReadySet's publications leave
+    /// unset, so the replicated tuple is narrower than the table's column list.
+    GeneratedColumn,
 }
 
 impl NotReplicatedReason {
@@ -407,6 +412,9 @@ impl NotReplicatedReason {
                 format!("An unexpected replication error occurred: {error}")
             }
             NotReplicatedReason::Default => "No specific reason provided.".to_string(),
+            NotReplicatedReason::GeneratedColumn => {
+                "Tables with generated columns are not supported.".to_string()
+            }
         }
     }
 
@@ -428,6 +436,7 @@ impl fmt::Debug for NotReplicatedReason {
             Self::UnsupportedType(s) => write!(f, "UnsupportedType({s})"),
             Self::OtherError(s) => write!(f, "OtherError({s})"),
             Self::Default => write!(f, ""),
+            Self::GeneratedColumn => write!(f, "GeneratedColumn"),
         }
     }
 }
