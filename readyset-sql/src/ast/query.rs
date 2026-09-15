@@ -13,6 +13,8 @@ use crate::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryInto
 pub enum SqlQuery {
     #[weight(0)]
     CreateDatabase(CreateDatabaseStatement),
+    #[weight(0)]
+    DropDatabase(DropDatabaseStatement),
     CreateTable(CreateTableStatement),
     CreateView(CreateViewStatement),
     CreateIndex(CreateIndexStatement),
@@ -102,6 +104,7 @@ impl DialectDisplay for SqlQuery {
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
             Self::Truncate(truncate) => write!(f, "{}", truncate.display(dialect)),
             Self::CreateDatabase(create) => write!(f, "{}", create.display(dialect)),
+            Self::DropDatabase(drop) => write!(f, "{}", drop.display(dialect)),
             Self::CreateRls(create_rls) => write!(f, "{}", create_rls.display(dialect)),
             Self::DropRls(drop_rls) => write!(f, "{}", drop_rls.display(dialect)),
             Self::CreateMcpToken(create) => write!(f, "{}", create.display(dialect)),
@@ -193,6 +196,26 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                     views: names.try_into_dialect(dialect)?,
                     if_exists,
                 })),
+                sqlparser::ast::ObjectType::Database | sqlparser::ast::ObjectType::Schema => {
+                    Ok(Self::DropDatabase(DropDatabaseStatement {
+                        is_schema: object_type == sqlparser::ast::ObjectType::Schema,
+                        if_exists,
+                        names: names
+                            .into_iter()
+                            .map(|name| {
+                                name.0
+                                    .into_iter()
+                                    .exactly_one()
+                                    .map_err(|_| {
+                                        failed_err!(
+                                            "Expected unqualified name in DROP {object_type}"
+                                        )
+                                    })?
+                                    .try_into_dialect(dialect)
+                            })
+                            .try_collect()?,
+                    }))
+                }
                 _ => not_yet_implemented!("drop statement type: {object_type:?}"),
             },
             StartTransaction { begin, .. } => Ok(Self::StartTransaction(if begin {
@@ -327,6 +350,13 @@ impl SqlQuery {
                     "CREATE DATABASE"
                 }
             }
+            Self::DropDatabase(dd) => {
+                if dd.is_schema {
+                    "DROP SCHEMA"
+                } else {
+                    "DROP DATABASE"
+                }
+            }
             Self::CreateTable(_) => "CREATE TABLE",
             Self::CreateView(_) => "CREATE VIEW",
             Self::CreateIndex(_) => "CREATE INDEX",
@@ -393,7 +423,8 @@ impl SqlQuery {
             | Self::CreateView(_)
             | Self::DropView(_)
             | Self::CreateIndex(_)
-            | Self::CreateDatabase(_) => true,
+            | Self::CreateDatabase(_)
+            | Self::DropDatabase(_) => true,
             // Cache lifecycle.
             Self::CreateCache(_)
             | Self::DropCache(_)
@@ -471,6 +502,7 @@ impl SqlQuery {
             | SqlQuery::DropMcpToken(_)
             | SqlQuery::AlterMcpToken(_) => true,
             SqlQuery::CreateDatabase(_)
+            | SqlQuery::DropDatabase(_)
             | SqlQuery::CreateTable(_)
             | SqlQuery::CreateView(_)
             | SqlQuery::CreateIndex(_)

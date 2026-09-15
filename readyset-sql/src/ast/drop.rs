@@ -40,6 +40,29 @@ impl DialectDisplay for DropTableStatement {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct DropDatabaseStatement {
+    pub is_schema: bool,
+    pub if_exists: bool,
+    /// MySQL permits one name; Postgres `DROP SCHEMA` permits a list.
+    pub names: Vec<SqlIdentifier>,
+}
+
+impl DialectDisplay for DropDatabaseStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            let kind = if self.is_schema { "SCHEMA" } else { "DATABASE" };
+            let if_exists = if self.if_exists { "IF EXISTS " } else { "" };
+            let names = self
+                .names
+                .iter()
+                .map(|name| dialect.quote_identifier(name))
+                .join(", ");
+            write!(f, "DROP {kind} {if_exists}{names}")
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct DropCacheStatement {
     pub name: Relation,
 }

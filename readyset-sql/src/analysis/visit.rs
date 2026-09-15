@@ -204,6 +204,13 @@ pub trait Visitor<'ast>: Sized {
         walk_create_database_statement(self, create_database_statement)
     }
 
+    fn visit_drop_database_statement(
+        &mut self,
+        drop_database_statement: &'ast DropDatabaseStatement,
+    ) -> Result<(), Self::Error> {
+        walk_drop_database_statement(self, drop_database_statement)
+    }
+
     fn visit_create_index_statement(
         &mut self,
         create_index_statement: &'ast CreateIndexStatement,
@@ -1028,6 +1035,16 @@ pub fn walk_create_database_statement<'a, V: Visitor<'a>>(
     Ok(())
 }
 
+pub fn walk_drop_database_statement<'a, V: Visitor<'a>>(
+    visitor: &mut V,
+    drop_database_statement: &'a DropDatabaseStatement,
+) -> Result<(), V::Error> {
+    for name in &drop_database_statement.names {
+        visitor.visit_sql_identifier(name)?;
+    }
+    Ok(())
+}
+
 pub fn walk_drop_rls_statement<'a, V: Visitor<'a>>(
     visitor: &mut V,
     drop_rls_statement: &'a DropRlsStatement,
@@ -1504,6 +1521,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         SqlQuery::Deallocate(statement) => visitor.visit_deallocate_statement(statement),
         SqlQuery::Truncate(statement) => visitor.visit_truncate_statement(statement),
         SqlQuery::CreateDatabase(statement) => visitor.visit_create_database_statement(statement),
+        SqlQuery::DropDatabase(statement) => visitor.visit_drop_database_statement(statement),
         SqlQuery::CreateRls(statement) => visitor.visit_create_rls_statement(statement),
         SqlQuery::DropRls(statement) => visitor.visit_drop_rls_statement(statement),
         SqlQuery::CreateMcpToken(_)

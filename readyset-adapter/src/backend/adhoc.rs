@@ -297,6 +297,7 @@ where
                     }
 
                     SqlQuery::CreateDatabase(_)
+                    | SqlQuery::DropDatabase(_)
                     | SqlQuery::CreateView(_)
                     | SqlQuery::CreateTable(_)
                     | SqlQuery::DropTable(_)

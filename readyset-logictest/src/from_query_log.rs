@@ -121,6 +121,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::DropMcpToken(_)
         | SqlQuery::AlterMcpToken(_) => false,
         SqlQuery::CreateDatabase(_)
+        | SqlQuery::DropDatabase(_)
         | SqlQuery::CreateTable(_)
         | SqlQuery::CreateView(_)
         | SqlQuery::DropTable(_)
