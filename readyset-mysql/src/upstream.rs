@@ -16,7 +16,8 @@ use tracing::{debug, error, info_span, Instrument};
 
 use database_utils::tls::{get_mysql_tls_config, ServerCertVerification};
 use readyset_adapter::upstream_database::{
-    fingerprint_rows, AclProbeOutcome, Refresh, UpstreamDestination, UpstreamStatementId,
+    fingerprint_rows, AclProbeOutcome, PendingFill, Refresh, UpstreamDestination,
+    UpstreamStatementId,
 };
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
@@ -25,7 +26,7 @@ use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::{UpstreamCollation, DEFAULT_TIMEZONE_NAME};
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
-use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata, Warning};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 use readyset_util::hash::hash;
@@ -198,8 +199,9 @@ impl UpstreamDestination for QueryResult<'_> {
 }
 
 impl<'a> QueryResult<'a> {
-    /// Process the query result, writing it to the given writer and optionally
-    /// caching it.
+    /// Process the query result, writing it to the given writer and optionally caching it. A
+    /// cache fill comes back still open, with the warning count the statement raised, so the
+    /// caller can attach the warnings once this result no longer borrows the connection.
     ///
     /// `status_flags_override` replaces the flags mysql-async extracted from the upstream
     /// response packets, which can be garbage (e.g. due to PREPARE_Response mis-parsing). It
@@ -217,7 +219,7 @@ impl<'a> QueryResult<'a> {
         mut cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
         status_flags_override: Option<StatusFlags>,
         results_encoding: Encoding,
-    ) -> io::Result<()>
+    ) -> io::Result<Option<PendingFill<CacheEntry>>>
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
@@ -227,14 +229,15 @@ impl<'a> QueryResult<'a> {
                 warnings,
             } => {
                 let Some(writer) = writer else {
-                    return Ok(());
+                    return Ok(None);
                 };
                 let flags = status_flags_override.unwrap_or(status_flags);
                 let rw = writer.start(&[]).await?;
                 rw.set_status_flags(flags)
                     .set_warnings(warnings)
                     .finish()
-                    .await
+                    .await?;
+                Ok(None)
             }
             QueryResult::WriteResult {
                 num_rows_affected,
@@ -244,7 +247,7 @@ impl<'a> QueryResult<'a> {
                 info,
             } => {
                 let Some(writer) = writer else {
-                    return Ok(());
+                    return Ok(None);
                 };
                 let flags = status_flags_override.unwrap_or(status_flags);
                 write_query_results(
@@ -254,7 +257,8 @@ impl<'a> QueryResult<'a> {
                     warnings,
                     &info,
                 )
-                .await
+                .await?;
+                Ok(None)
             }
             QueryResult::ReadResult {
                 mut stream,
@@ -293,7 +297,7 @@ impl<'a> QueryResult<'a> {
                         Ok(None) => break,
                         Err(err) => {
                             if let Some(rw) = rw {
-                                return handle_error!(Error::MySql(err), rw);
+                                return handle_error!(Error::MySql(err), rw).map(|()| None);
                             } else {
                                 return Err(io::Error::other(format!("MySQL error: {err:?}")));
                             }
@@ -329,22 +333,21 @@ impl<'a> QueryResult<'a> {
                     }
                 }
 
+                let warnings = stream.warnings();
                 if let Some(mut rw) = rw {
                     if let Some(flags) = status_flags_override {
                         rw = rw.set_status_flags(flags);
                     }
-                    rw.set_warnings(stream.warnings()).finish().await?;
+                    rw.set_warnings(warnings).finish().await?;
                 }
 
-                if let Some(ref mut cache) = cache {
+                Ok(cache.map(|mut cache| {
                     cache.set_metadata(QueryMetadata::MySql(MySqlMetadata {
                         columns: Arc::clone(&columns),
                         columns_encoding: results_encoding,
                     }));
-                    drop(cache.filled());
-                }
-
-                Ok(())
+                    PendingFill { cache, warnings }
+                }))
             }
         }
     }
@@ -358,7 +361,7 @@ impl Refresh for QueryResult<'_> {
         self,
         cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
         encoding: Encoding,
-    ) -> io::Result<()> {
+    ) -> io::Result<Option<PendingFill<CacheEntry>>> {
         self.process(
             None::<QueryResultWriter<'_, tokio::net::TcpStream>>,
             Some(cache),
@@ -890,6 +893,19 @@ impl UpstreamDatabase for MySqlUpstream {
             status_flags: self.conn.status(),
             warnings: self.conn.get_warnings(),
         })
+    }
+
+    async fn fetch_warnings(&mut self, encoding: Encoding) -> Result<Vec<Warning>, Error> {
+        let rows: Vec<(Vec<u8>, u32, Vec<u8>)> = self.conn.query("SHOW WARNINGS").await?;
+        rows.into_iter()
+            .map(|(level, code, message)| {
+                Ok(Warning {
+                    level: encoding.decode(&level)?,
+                    code,
+                    message: encoding.decode(&message)?,
+                })
+            })
+            .collect()
     }
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {

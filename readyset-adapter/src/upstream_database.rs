@@ -10,11 +10,25 @@ use readyset_data::DfValue;
 use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_errors::ReadySetError;
-use readyset_shallow::{CacheInsertGuard, ContentHash};
+use readyset_shallow::{CacheInsertGuard, ContentHash, Warning};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 
+use crate::shallow_key::ShallowKey;
+
 pub type UpstreamStatementId = u32;
+
+/// A shallow cache fill whose statement raised `warnings` warnings upstream. Once the result has
+/// been consumed, the caller reads them from the connection, attaches them to `cache`, and
+/// completes the fill.
+#[derive(Debug)]
+pub struct PendingFill<V>
+where
+    V: Send + Sync + 'static,
+{
+    pub cache: CacheInsertGuard<ShallowKey, V>,
+    pub warnings: u16,
+}
 
 /// Trait for refreshing a shallow cache from an upstream query result
 #[async_trait]
@@ -24,12 +38,13 @@ pub trait Refresh {
 
     /// Populate the cache with data from this query result. `encoding` is the results charset
     /// of the entry being refreshed, which the connection that produced this result had mirrored
-    /// upstream. Upstreams without a results charset concept ignore it.
+    /// upstream. Upstreams without a results charset concept ignore it. Return the fill still
+    /// open when the caller has to attach the statement's warnings before completing it.
     async fn refresh(
         self,
-        cache: CacheInsertGuard<crate::shallow_key::ShallowKey, Self::Entry>,
+        cache: CacheInsertGuard<ShallowKey, Self::Entry>,
         encoding: Encoding,
-    ) -> std::io::Result<()>;
+    ) -> std::io::Result<Option<PendingFill<Self::Entry>>>;
 }
 
 /// Information about a statement that has been prepared in an [`UpstreamDatabase`]
@@ -315,6 +330,13 @@ pub trait UpstreamDatabase: Sized + Send {
         _collation: Option<&str>,
     ) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    /// The warnings the connection holds for the statement it last ran, with text decoded from
+    /// `encoding`, the connection's results charset. The default implementation returns none,
+    /// for upstreams without a diagnostics area.
+    async fn fetch_warnings(&mut self, _encoding: Encoding) -> Result<Vec<Warning>, Self::Error> {
+        Ok(Vec::new())
     }
 
     /// Set the session's connection charset and collation on the upstream connection so

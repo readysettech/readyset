@@ -11,6 +11,42 @@ use readyset_util::SizeOf;
 pub use cache::{CacheEntryInfo, CacheInfo};
 pub use manager::{CacheInsertGuard, CacheManager, CacheResult, RequestRefresh};
 
+/// A row of MySQL's `SHOW WARNINGS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    pub level: String,
+    pub code: u32,
+    pub message: String,
+}
+
+impl SizeOf for Warning {
+    fn deep_size_of(&self) -> usize {
+        size_of::<Self>() + self.level.len() + self.message.len()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        false
+    }
+}
+
+/// The warnings a statement raised upstream. MySQL caps the rows `SHOW WARNINGS` returns, so
+/// `count` can exceed the length of `rows`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Warnings {
+    pub count: u16,
+    pub rows: Arc<[Warning]>,
+}
+
+impl SizeOf for Warnings {
+    fn deep_size_of(&self) -> usize {
+        size_of::<Self>() + self.rows.iter().map(SizeOf::deep_size_of).sum::<usize>()
+    }
+
+    fn size_is_empty(&self) -> bool {
+        false
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MySqlMetadata {
     pub columns: Arc<[mysql_async::Column]>,
@@ -82,6 +118,7 @@ impl SizeOf for QueryMetadata {
 pub struct QueryResult<V> {
     pub values: Arc<Vec<V>>,
     pub metadata: Arc<QueryMetadata>,
+    pub warnings: Option<Arc<Warnings>>,
 }
 
 /// Hash of a cached row's value content, used by adaptive refresh to detect whether a refresh

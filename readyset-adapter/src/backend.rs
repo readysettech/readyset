@@ -98,17 +98,18 @@ use readyset_client::{CacheMode, ViewCreateRequest};
 use readyset_client::{ShallowViewRequest, query::*};
 pub use readyset_client_metrics::QueryDestination;
 use readyset_client_metrics::{QueryExecutionEvent, QueryLogMode};
+use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError;
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
-use readyset_shallow::{CacheInsertGuard, CacheManager, ContentHash};
+use readyset_shallow::{CacheInsertGuard, CacheManager, ContentHash, Warning};
 use readyset_sql::ast::{
     self, CacheInner, CacheType, CreateCacheOptions, CreateCacheStatement, ReadysetHintDirective,
-    Relation, SelectStatement, ShallowCacheQuery, SqlIdentifier, SqlQuery, TrxCachePolicy,
-    UseStatement,
+    Relation, SelectStatement, ShallowCacheQuery, ShowLimit, SqlIdentifier, SqlQuery,
+    TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -549,6 +550,7 @@ impl BackendBuilder {
                 last_query: None,
                 pending_proxy_reason: None,
                 preserve_last_query: false,
+                last_warnings: Default::default(),
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared: Default::default(),
                 query_status_cache,
@@ -1000,6 +1002,9 @@ where
     /// Set by a statement that reports on the previous statement, such as `EXPLAIN LAST
     /// STATEMENT`, so that it does not replace [`Self::last_query`] when it finishes.
     preserve_last_query: bool,
+    /// The warnings stored with the shallow cache entry that served the previous statement,
+    /// which `SHOW WARNINGS` replays.
+    last_warnings: Arc<[Warning]>,
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: &'static QueryStatusCache,
     /// A cache of all previously parsed queries
@@ -1074,32 +1079,67 @@ where
     shallow_cache_allowlists: ShallowCacheAllowlists,
 }
 
-/// The result set of `SHOW WARNINGS` for a statement Readyset served itself, which raises no
-/// warnings.
-fn show_warnings() -> noria_connector::QueryResult<'static> {
-    let column = |name: &str, column_type| ColumnSchema {
-        column: ast::Column {
-            name: name.into(),
-            table: None,
-        },
-        column_type,
-        base: None,
-    };
-    let schema = SelectSchema {
-        schema: Cow::Owned(vec![
-            column("Level", DfType::DEFAULT_TEXT),
-            column("Code", DfType::UnsignedInt),
-            column("Message", DfType::DEFAULT_TEXT),
-        ]),
-        columns: Cow::Owned(vec!["Level".into(), "Code".into(), "Message".into()]),
-    };
-    noria_connector::QueryResult::from_owned(schema, vec![Results::new(Vec::new())])
+/// The warnings stored with the shallow cache entry that served `result`, if one did.
+fn shallow_warnings<DB>(result: &Result<QueryResult<'_, DB>, DB::Error>) -> Arc<[Warning]>
+where
+    DB: UpstreamDatabase,
+{
+    match result {
+        Ok(QueryResult::Shallow(values)) => values
+            .warnings
+            .as_ref()
+            .map_or_default(|w| Arc::clone(&w.rows)),
+        _ => Default::default(),
+    }
 }
 
 impl<DB> BackendState<DB>
 where
     DB: UpstreamDatabase,
 {
+    /// The result set of `SHOW WARNINGS` for a statement Readyset served.
+    fn show_warnings(&self, limit: Option<ShowLimit>) -> noria_connector::QueryResult<'static> {
+        let column = |name: &str, column_type| ColumnSchema {
+            column: ast::Column {
+                name: name.into(),
+                table: None,
+            },
+            column_type,
+            base: None,
+        };
+        let schema = SelectSchema {
+            schema: Cow::Owned(vec![
+                column("Level", DfType::DEFAULT_TEXT),
+                column("Code", DfType::UnsignedInt),
+                column("Message", DfType::DEFAULT_TEXT),
+            ]),
+            columns: Cow::Owned(vec!["Level".into(), "Code".into(), "Message".into()]),
+        };
+        let warnings = match self.last_query.as_ref().map(|q| &q.destination) {
+            Some(QueryDestination::ReadysetShallow(_)) => &self.last_warnings[..],
+            _ => &[],
+        };
+        let (offset, row_count) = limit.map_or((0, usize::MAX), |l| {
+            (
+                usize::try_from(l.offset).unwrap_or(usize::MAX),
+                usize::try_from(l.row_count).unwrap_or(usize::MAX),
+            )
+        });
+        let rows = warnings
+            .iter()
+            .skip(offset)
+            .take(row_count)
+            .map(|w| {
+                vec![
+                    w.level.as_str().into(),
+                    DfValue::UnsignedInt(w.code.into()),
+                    w.message.as_str().into(),
+                ]
+            })
+            .collect();
+        noria_connector::QueryResult::from_owned(schema, vec![Results::new(rows)])
+    }
+
     /// Consume the off-cache reason the serve seams staged for the statement just
     /// finished. Empty when a cache was consulted, or when Readyset holds none.
     fn take_proxy_reason(&mut self) -> String {
@@ -1985,6 +2025,18 @@ where
         self.update_connection_username(user);
 
         Ok(())
+    }
+
+    /// The warnings the session's upstream connection holds for the statement it last ran, with
+    /// text decoded from `encoding`, the session's results charset.
+    pub async fn upstream_warnings(
+        &mut self,
+        encoding: Encoding,
+    ) -> Result<Vec<Warning>, DB::Error> {
+        match self.connectors.upstream.as_mut() {
+            Some(upstream) => upstream.fetch_warnings(encoding).await,
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Executes query on the upstream database, for when it cannot be parsed or executed by noria.

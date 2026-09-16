@@ -24,7 +24,7 @@ use crate::cache::{
     AdaptiveState, Cache, CacheEntry, CacheEntryInfo, CacheExpiration, CacheInfo, CacheState,
     DEFAULT_MAX_EXTRA_LOAD_PERCENT, InnerCache, Lookup, WastedRefreshes,
 };
-use crate::{ContentHash, EvictionPolicy, QueryMetadata};
+use crate::{ContentHash, EvictionPolicy, QueryMetadata, Warnings};
 use readyset_util::hash::hash;
 
 pub type RequestRefresh<K, V> = Arc<dyn Fn(CacheInsertGuard<K, V>) + Send + Sync>;
@@ -478,6 +478,7 @@ where
             key: Some(key),
             results: Some(Vec::new()),
             metadata: None,
+            warnings: None,
             filled: FillState::Pending,
             requested: Instant::now(),
             done: None,
@@ -604,6 +605,7 @@ where
     pub(crate) key: Option<K>,
     pub(crate) results: Option<Vec<V>>,
     pub(crate) metadata: Option<QueryMetadata>,
+    pub(crate) warnings: Option<Arc<Warnings>>,
     pub(crate) filled: FillState,
     pub(crate) requested: Instant,
     /// If set, dropping the guard will notify any listeners.
@@ -652,6 +654,11 @@ where
         self.metadata = Some(metadata);
     }
 
+    /// Set the warnings the statement raised.
+    pub fn set_warnings(&mut self, warnings: Warnings) {
+        self.warnings = Some(Arc::new(warnings));
+    }
+
     pub async fn schedule_refresh(&mut self, req: RequestRefresh<K, V>) {
         let Some(key) = self.key.clone() else {
             return;
@@ -673,9 +680,9 @@ where
         self.filled = FillState::Filled;
         async {
             if self.filled == FillState::Filled {
-                let (metadata, cache, key, results, execution, done) = self.take();
+                let (metadata, warnings, cache, key, results, execution, done) = self.take();
                 cache
-                    .insert(key, results, metadata, execution, self.refresh)
+                    .insert(key, results, metadata, warnings, execution, self.refresh)
                     .await;
                 drop(done);
             }
@@ -687,6 +694,7 @@ where
         &mut self,
     ) -> (
         QueryMetadata,
+        Option<Arc<Warnings>>,
         Arc<Cache<K, V>>,
         K,
         Vec<V>,
@@ -694,6 +702,7 @@ where
         Option<Sender<()>>,
     ) {
         let metadata = self.metadata.take().expect("no metadata for result set");
+        let warnings = self.warnings.take();
         let cache = Arc::clone(&self.cache);
         let key = self.key.take().unwrap();
         let results = self.results.take().unwrap();
@@ -701,6 +710,7 @@ where
         self.filled = FillState::Consumed;
         (
             metadata,
+            warnings,
             cache,
             key,
             results,
@@ -718,11 +728,11 @@ where
     fn drop(&mut self) {
         match self.filled {
             FillState::Filled => {
-                let (metadata, cache, key, results, execution, done) = self.take();
+                let (metadata, warnings, cache, key, results, execution, done) = self.take();
                 let refresh = self.refresh;
                 tokio::spawn(async move {
                     cache
-                        .insert(key, results, metadata, execution, refresh)
+                        .insert(key, results, metadata, warnings, execution, refresh)
                         .await;
                     drop(done);
                 });
@@ -821,6 +831,7 @@ mod tests {
                 vec!["key1"],
                 vec![vec!["value1"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )
@@ -833,6 +844,7 @@ mod tests {
                 vec!["key2"],
                 vec![vec!["value2"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )
@@ -894,6 +906,7 @@ mod tests {
                 vec!["key1"],
                 vec![vec!["value1"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )
@@ -905,6 +918,7 @@ mod tests {
                 vec!["key2"],
                 vec![vec!["value2"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )
@@ -950,6 +964,7 @@ mod tests {
                 vec!["key"],
                 vec![vec!["value"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )
@@ -991,6 +1006,7 @@ mod tests {
                     key,
                     vec!["value".to_string()],
                     crate::QueryMetadata::Test,
+                    None,
                     Duration::ZERO,
                     false,
                 )
@@ -1050,6 +1066,7 @@ mod tests {
                 vec!["real_key"],
                 vec![vec!["value"]],
                 crate::QueryMetadata::Test,
+                None,
                 Duration::ZERO,
                 false,
             )

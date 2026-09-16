@@ -27,7 +27,7 @@ use readyset_util::timestamp::current_timestamp_ms;
 use crate::manager::FillState;
 use crate::{
     CacheInsertGuard, ContentHash, EvictionPolicy, QueryMetadata, QueryResult, RequestRefresh,
-    rows_content_hash,
+    Warnings, rows_content_hash,
 };
 
 /// Minimum adaptive refresh period, as a percentage of the cache's configured period.
@@ -253,6 +253,7 @@ pub(crate) struct CacheState {
 pub(crate) struct CacheValues<V> {
     values: Arc<Vec<V>>,
     metadata: Option<Arc<QueryMetadata>>,
+    warnings: Option<Arc<Warnings>>,
     pub(crate) accessed_ms: AtomicU64,
     pub(crate) refreshed_ms: u64,
     refreshing: Arc<AtomicBool>,
@@ -292,6 +293,9 @@ where
                 let mut sz = size_of::<Self>() + values.values.deep_size_of();
                 if let Some(ref meta) = values.metadata {
                     sz += meta.deep_size_of();
+                }
+                if let Some(ref warnings) = values.warnings {
+                    sz += warnings.deep_size_of();
                 }
                 sz
             }
@@ -645,6 +649,7 @@ where
             key: Some(key),
             results: Some(Vec::new()),
             metadata: None,
+            warnings: None,
             filled: FillState::Pending,
             requested: Instant::now(),
             done,
@@ -800,6 +805,7 @@ where
         &self,
         v: Vec<V>,
         metadata: Option<Arc<QueryMetadata>>,
+        warnings: Option<Arc<Warnings>>,
         execution: Duration,
         refresh: bool,
     ) -> CacheValues<V> {
@@ -813,6 +819,7 @@ where
         CacheValues {
             values: Arc::new(v),
             metadata,
+            warnings,
             accessed_ms: now.into(),
             refreshed_ms: now,
             refreshing: Arc::new(false.into()),
@@ -934,6 +941,7 @@ where
         k: K,
         v: Vec<V>,
         metadata: QueryMetadata,
+        warnings: Option<Arc<Warnings>>,
         execution: Duration,
         refresh: bool,
     ) {
@@ -946,7 +954,7 @@ where
             return;
         }
         let metadata = self.dedupe_metadata(metadata);
-        let entry = self.make_entry(v, metadata, execution, refresh);
+        let entry = self.make_entry(v, metadata, warnings, execution, refresh);
         self.insert_entry(k, entry, refresh).await;
     }
 
@@ -992,6 +1000,7 @@ where
             QueryResult {
                 values: Arc::clone(&values.values),
                 metadata: Arc::clone(metadata),
+                warnings: values.warnings.clone(),
             },
             refresh,
         )
@@ -1299,6 +1308,7 @@ mod tests {
                 vec!["k"],
                 result.clone(),
                 QueryMetadata::Test,
+                None,
                 ZERO_DURATION,
                 false,
             )
@@ -1311,7 +1321,14 @@ mod tests {
             new_capped(None, policy, Some(10 * 1024 * 1024));
         mark_fresh_insert_intent(&cache, &["k"]).await;
         cache
-            .insert(vec!["k"], result, QueryMetadata::Test, ZERO_DURATION, false)
+            .insert(
+                vec!["k"],
+                result,
+                QueryMetadata::Test,
+                None,
+                ZERO_DURATION,
+                false,
+            )
             .await;
         assert!(cache.get(vec!["k"]).await.0.is_some());
         assert_eq!(cache.count().await, 1);
@@ -1332,7 +1349,14 @@ mod tests {
 
         mark_fresh_insert_intent(&cache, &key).await;
         cache
-            .insert(key.clone(), values.clone(), metadata, ZERO_DURATION, false)
+            .insert(
+                key.clone(),
+                values.clone(),
+                metadata,
+                None,
+                ZERO_DURATION,
+                false,
+            )
             .await;
         let result = cache.get(key.clone()).await.0.unwrap();
         assert_eq!(result.0.values.as_ref(), &values);
@@ -1359,7 +1383,14 @@ mod tests {
             let exec = Duration::from_millis(500);
             tokio::time::sleep(exec).await;
             cache
-                .insert(key.clone(), values.clone(), metadata.clone(), exec, false)
+                .insert(
+                    key.clone(),
+                    values.clone(),
+                    metadata.clone(),
+                    None,
+                    exec,
+                    false,
+                )
                 .await;
             let result = cache.get(key.clone()).await.0.unwrap();
             assert_eq!(result.0.values.as_ref(), &values);
@@ -1419,6 +1450,7 @@ mod tests {
                 key.clone(),
                 values_0.clone(),
                 metadata.clone(),
+                None,
                 ZERO_DURATION,
                 false,
             )
@@ -1429,6 +1461,7 @@ mod tests {
                 key.clone(),
                 values_1.clone(),
                 metadata.clone(),
+                None,
                 ZERO_DURATION,
                 false,
             )
@@ -1447,6 +1480,7 @@ mod tests {
         let entry = CacheEntry::Present(CacheValues {
             values: Arc::new(vec![1u64, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
             metadata: Some(Arc::new(QueryMetadata::Test)),
+            warnings: None,
             accessed_ms: now.into(),
             refreshed_ms: now,
             refreshing: Arc::new(false.into()),
@@ -1473,7 +1507,7 @@ mod tests {
         for i in 0..COUNT {
             let v = vec!["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_string()];
             cache
-                .insert(i, v, QueryMetadata::Test, ZERO_DURATION, false)
+                .insert(i, v, QueryMetadata::Test, None, ZERO_DURATION, false)
                 .await;
         }
         cache.inner.run_pending_tasks().await;
@@ -1574,6 +1608,7 @@ mod tests {
                 present.clone(),
                 vec![vec!["v"]],
                 QueryMetadata::Test,
+                None,
                 ZERO_DURATION,
                 false,
             )

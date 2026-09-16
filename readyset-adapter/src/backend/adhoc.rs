@@ -33,7 +33,7 @@ use super::routing::{ProxyState, SelectRouter, ShouldTrySelect};
 use super::set_handler::PendingSetState;
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode, QueryInfo,
-    QueryResult, convert_or_parse_query, log_query, parse_shallow_query, show_warnings,
+    QueryResult, convert_or_parse_query, log_query, parse_shallow_query, shallow_warnings,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::session_mutation;
@@ -614,7 +614,7 @@ where
             // SHOW WARNINGS reports on the statement before it and leaves the diagnostics area
             // in place. The upstream connection's diagnostics area is current only when that
             // statement ran there.
-            Ok(SqlQuery::Show(ShowStatement::Warnings { .. })) => {
+            Ok(SqlQuery::Show(ShowStatement::Warnings { limit })) => {
                 state.preserve_last_query = true;
                 let ran_upstream = matches!(
                     state.last_query.as_ref().map(|q| &q.destination),
@@ -629,7 +629,7 @@ where
                 } else {
                     event.sql_type = SqlQueryType::Other;
                     event.destination = Some(QueryDestination::Readyset(None));
-                    Ok(QueryResult::Noria(show_warnings()))
+                    Ok(QueryResult::Noria(state.show_warnings(limit)))
                 }
             }
             Ok(ref parsed_query) if parsed_query.is_readyset_extension() => {
@@ -795,6 +795,7 @@ where
                 QueryInfo::take_from_event(&mut event)
             }
             .map(|i| i.or_reason(staged));
+            self.state.last_warnings = shallow_warnings(&result);
         }
 
         log_query(

@@ -11,7 +11,7 @@ use metrics::{Gauge, counter, gauge, histogram};
 use mysql_common::collations::{Collation, CollationId};
 use readyset_client::query::QueryId;
 use readyset_data::encoding::Encoding;
-use readyset_shallow::CacheInsertGuard;
+use readyset_shallow::{CacheInsertGuard, Warnings};
 use readyset_sql::ast::SqlIdentifier;
 use readyset_util::logging::*;
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -21,7 +21,7 @@ use tracing::warn;
 
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::backend::READYSET_SHALLOW_REFRESHER;
-use crate::upstream_database::{Refresh, UpstreamDatabase};
+use crate::upstream_database::{PendingFill, Refresh, UpstreamDatabase};
 
 const CHANNEL_CAPACITY: usize = 5;
 const WORKER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -379,44 +379,79 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             }
 
-            let query_start = std::time::Instant::now();
-            let result = match shallow_exec_meta {
-                Some(ref exec_meta) => conn.query_ext(&query, exec_meta.borrow()).await,
-                None => conn.query(&query).await,
-            };
+            // The result borrows the connection until it has been read, so it is scoped to this
+            // block to leave the connection free for the warnings fetch that may follow.
+            let pending = {
+                let query_start = Instant::now();
+                let result = match shallow_exec_meta {
+                    Some(ref exec_meta) => conn.query_ext(&query, exec_meta.borrow()).await,
+                    None => conn.query(&query).await,
+                };
 
-            let result = match result {
-                Ok(result) => {
-                    let query_time = query_start.elapsed();
-                    histogram!(
-                        SHALLOW_REFRESH_QUERY_TIME,
-                        "query_id" => query_id.to_string()
-                    )
-                    .record(query_time.as_micros() as f64);
-                    result
-                }
-                Err(e) => {
-                    rate_limit(true, ADAPTER_SHALLOW_REFRESH_RUN, || {
-                        warn!(
-                            error = %e,
-                            cache = %query_id,
-                            "Failed to refresh cached query",
+                let result = match result {
+                    Ok(result) => {
+                        let query_time = query_start.elapsed();
+                        histogram!(
+                            SHALLOW_REFRESH_QUERY_TIME,
+                            "query_id" => query_id.to_string()
                         )
-                    });
-                    reconnect = true;
-                    Self::mark_idle(&pool, &rx, idx).await;
-                    continue;
+                        .record(query_time.as_micros() as f64);
+                        result
+                    }
+                    Err(e) => {
+                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_RUN, || {
+                            warn!(
+                                error = %e,
+                                cache = %query_id,
+                                "Failed to refresh cached query",
+                            )
+                        });
+                        reconnect = true;
+                        Self::mark_idle(&pool, &rx, idx).await;
+                        continue;
+                    }
+                };
+
+                match result.refresh(cache, key_cs_coll.0).await {
+                    Ok(pending) => pending,
+                    Err(e) => {
+                        rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
+                            warn!(
+                                error = %e,
+                                cache = %query_id,
+                                "Failed to read results for cached query",
+                            )
+                        });
+                        None
+                    }
                 }
             };
 
-            if let Err(e) = result.refresh(cache, key_cs_coll.0).await {
-                rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
-                    warn!(
-                        error = %e,
-                        cache = %query_id,
-                        "Failed to read results for cached query",
-                    )
-                });
+            if let Some(PendingFill {
+                mut cache,
+                warnings,
+            }) = pending
+            {
+                if warnings > 0 {
+                    let rows = match conn.fetch_warnings(key_cs_coll.0).await {
+                        Ok(rows) => rows.into(),
+                        Err(e) => {
+                            rate_limit(true, ADAPTER_SHALLOW_REFRESH_READ, || {
+                                warn!(
+                                    error = %e,
+                                    cache = %query_id,
+                                    "Failed to read warnings for cached query",
+                                )
+                            });
+                            Default::default()
+                        }
+                    };
+                    cache.set_warnings(Warnings {
+                        count: warnings,
+                        rows,
+                    });
+                }
+                drop(cache.filled());
             }
 
             Self::mark_idle(&pool, &rx, idx).await;

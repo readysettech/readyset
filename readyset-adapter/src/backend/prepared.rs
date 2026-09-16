@@ -37,7 +37,7 @@ use super::routing::{ProxyState, SelectRouter, has_topk_literal_limit, record_sk
 use super::{
     Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
     acl_decline_reason, convert_or_parse_query, log_query, no_upstream_err, parse_query,
-    parse_shallow_query,
+    parse_shallow_query, shallow_warnings,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::{
@@ -1783,6 +1783,7 @@ where
             QueryInfo::take_from_event(&mut event)
         }
         .map(|i| i.or_reason(staged));
+        self.state.last_warnings = shallow_warnings(&result);
         log_query(
             self.state.query_log_sender.as_ref(),
             event,

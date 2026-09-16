@@ -19,12 +19,13 @@ use readyset_adapter::backend::noria_connector::{
 use readyset_adapter::backend::{
     noria_connector, QueryResult, SinglePrepareResult, UpstreamPrepare,
 };
+use readyset_adapter::upstream_database::PendingFill;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::{system_props, UpstreamCollation};
 use readyset_data::{DfType, DfValue, DfValueKind};
 use readyset_errors::{internal, ReadySetError};
-use readyset_shallow::{CacheInsertGuard, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, QueryMetadata, Warnings};
 use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
@@ -399,6 +400,37 @@ impl Backend {
         Self::flags_from_proxy_state(self.noria.proxy_state())
     }
 
+    /// Complete a shallow cache fill, first attaching the warnings its statement raised, which
+    /// the upstream connection still holds.
+    async fn finish_fill(
+        &mut self,
+        pending: Option<PendingFill<CacheEntry>>,
+        results_encoding: Encoding,
+    ) -> io::Result<()> {
+        let Some(PendingFill {
+            mut cache,
+            warnings,
+        }) = pending
+        else {
+            return Ok(());
+        };
+        if warnings > 0 {
+            let rows = match self.noria.upstream_warnings(results_encoding).await {
+                Ok(rows) => rows.into(),
+                Err(error) => {
+                    debug!(%error, "Failed to read warnings for shallow cache fill");
+                    Default::default()
+                }
+            };
+            cache.set_warnings(Warnings {
+                count: warnings,
+                rows,
+            });
+        }
+        drop(cache.filled());
+        Ok(())
+    }
+
     /// The collation id to report in result-set metadata for text columns, falling back to the
     /// greeting default until the handshake names one.
     fn session_results_collation(&self) -> u16 {
@@ -615,7 +647,10 @@ where
         }
         rw.end_row().await?;
     }
-    rw.set_status_flags(status_flags).finish().await
+    rw.set_status_flags(status_flags)
+        .set_warnings(result.warnings.as_ref().map_or_default(|w| w.count))
+        .finish()
+        .await
 }
 
 async fn handle_upstream_result<S>(
@@ -624,7 +659,7 @@ async fn handle_upstream_result<S>(
     cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
     results_encoding: Encoding,
     status_flags_override: Option<StatusFlags>,
-) -> io::Result<()>
+) -> io::Result<Option<PendingFill<CacheEntry>>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -653,17 +688,19 @@ where
     rw.set_status_flags(status_flags).finish().await
 }
 
+/// Write a statement's result to the client. A shallow cache fill comes back still open so the
+/// caller can attach the statement's warnings once the upstream connection is free again.
 async fn handle_execute_result<S>(
     result: Result<QueryResult<'_, MySqlUpstream>, Error>,
     writer: QueryResultWriter<'_, S>,
     results_encoding: Encoding,
     results_collation: u16,
     status_flags: StatusFlags,
-) -> io::Result<()>
+) -> io::Result<Option<PendingFill<CacheEntry>>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    match result {
+    let written = match result {
         Ok(QueryResult::Noria(result)) => {
             handle_readyset_result(
                 result,
@@ -678,8 +715,14 @@ where
             handle_shallow_result(result, writer, results_encoding, status_flags).await
         }
         Ok(QueryResult::Upstream(result, cache, _)) => {
-            handle_upstream_result(result, writer, cache, results_encoding, Some(status_flags))
-                .await
+            return handle_upstream_result(
+                result,
+                writer,
+                cache,
+                results_encoding,
+                Some(status_flags),
+            )
+            .await;
         }
         Ok(QueryResult::UpstreamBufferedInMemory(..)) => handle_error!(
             Error::ReadySet(readyset_errors::unsupported_err!(
@@ -697,32 +740,8 @@ where
             handle_readyset_schema_result(result, writer, status_flags).await
         }
         Err(error) => handle_error!(error, writer),
-    }
-}
-
-async fn handle_query_result<S>(
-    result: Result<QueryResult<'_, MySqlUpstream>, Error>,
-    writer: QueryResultWriter<'_, S>,
-    results_encoding: Encoding,
-    results_collation: u16,
-    status_flags: StatusFlags,
-) -> QueryResultsResponse
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
-    match result {
-        Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
-        res => QueryResultsResponse::IoResult(
-            handle_execute_result(
-                res,
-                writer,
-                results_encoding,
-                results_collation,
-                status_flags,
-            )
-            .await,
-        ),
-    }
+    };
+    written.map(|()| None)
 }
 
 impl<S> MySqlShim<S> for Backend
@@ -918,7 +937,7 @@ where
             .map(Self::flags_from_proxy_state)
             .unwrap_or(pre_flags);
 
-        match execute_result {
+        let pending = match execute_result {
             Ok(QueryResult::Noria(noria_connector::QueryResult::Select { mut rows, schema })) => {
                 let CachedSchema {
                     mysql_schema,
@@ -985,7 +1004,8 @@ where
                     }
                     rw.end_row().await?;
                 }
-                rw.set_status_flags(status_flags).finish().await
+                rw.set_status_flags(status_flags).finish().await?;
+                None
             }
             execute_result => {
                 handle_execute_result(
@@ -995,9 +1015,10 @@ where
                     results_collation,
                     status_flags,
                 )
-                .await
+                .await?
             }
-        }
+        };
+        self.finish_fill(pending, results_encoding).await
     }
 
     async fn set_auth_info(
@@ -1114,14 +1135,23 @@ where
             Ok((result, state)) => (Ok(result), Self::flags_from_proxy_state(state)),
             Err(e) => (Err(e), pre_flags),
         };
-        handle_query_result(
-            query_result,
-            results,
-            results_encoding,
-            results_collation,
-            status_flags,
-        )
-        .await
+        match query_result {
+            Ok(QueryResult::Parser(command)) => QueryResultsResponse::Command(command),
+            query_result => {
+                let pending = handle_execute_result(
+                    query_result,
+                    results,
+                    results_encoding,
+                    results_collation,
+                    status_flags,
+                )
+                .await;
+                QueryResultsResponse::IoResult(match pending {
+                    Ok(pending) => self.finish_fill(pending, results_encoding).await,
+                    Err(e) => Err(e),
+                })
+            }
+        }
     }
 
     fn password_for_username(&self, username: &str) -> Option<Vec<u8>> {

@@ -25,7 +25,8 @@ use tracing_futures::Instrument;
 use database_utils::tls::{ServerCertVerification, get_tls_connector};
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{
-    AclProbeOutcome, Refresh, UpstreamDestination, UpstreamStatementId, fingerprint_rows,
+    AclProbeOutcome, PendingFill, Refresh, UpstreamDestination, UpstreamStatementId,
+    fingerprint_rows,
 };
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
@@ -240,14 +241,16 @@ impl Refresh for QueryResult {
         self,
         mut cache: CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, Self::Entry>,
         _encoding: Encoding,
-    ) -> std::io::Result<()> {
-        async fn drain_resultset(resultset: Resultset) -> std::io::Result<()> {
+    ) -> std::io::Result<Option<PendingFill<CacheEntry>>> {
+        async fn drain_resultset(
+            resultset: Resultset,
+        ) -> std::io::Result<Option<PendingFill<CacheEntry>>> {
             // Run the stream to trigger cache population.
             resultset
                 .try_for_each(|_| async { Ok(()) })
                 .await
                 .map_err(std::io::Error::other)?;
-            Ok(())
+            Ok(None)
         }
 
         match self {
@@ -286,7 +289,7 @@ impl Refresh for QueryResult {
                 }
                 cache.set_metadata(QueryMetadata::PostgreSql(Default::default()));
                 drop(cache.filled());
-                Ok(())
+                Ok(None)
             }
             x => Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,

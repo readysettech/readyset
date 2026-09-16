@@ -278,7 +278,14 @@ where
         let cache = self.manager.get(None, Some(&self.query_id)).unwrap();
         let values = values.into_iter().map(Into::into).collect();
         cache
-            .insert(key.to_string(), values, QueryMetadata::Test, exec, true)
+            .insert(
+                key.to_string(),
+                values,
+                QueryMetadata::Test,
+                None,
+                exec,
+                true,
+            )
             .await;
         // Run the eviction listener for the replaced entry so load accounting settles.
         self.run_pending_tasks().await;
