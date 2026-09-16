@@ -507,62 +507,7 @@ impl SqlIncorporator {
                             name.schema = Some(first_schema.clone());
                         }
                     }
-
-                    let removed = if self
-                        .remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()))
-                    {
-                        if let Some(table_statuses) = table_statuses.as_mut() {
-                            table_statuses.insert(name.clone(), TableStatus::Dropped);
-                        }
-                        true
-                    } else if self.registry.remove_custom_type(&name) {
-                        for expr in self
-                            .registry
-                            .expressions_referencing_custom_type(&name)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                        {
-                            match &expr {
-                                // Technically postgres doesn't allow removing custom types
-                                // before removing tables and views referencing those custom types -
-                                // but we might as well be more
-                                // permissive here
-                                RecipeExpr::Table { name, .. }
-                                | RecipeExpr::View { name, .. }
-                                | RecipeExpr::Cache { name, .. } => {
-                                    self.remove_expression(name, mig)?;
-                                }
-                            }
-                            if let RecipeExpr::Table { name, .. } = expr {
-                                if let Some(table_statuses) = table_statuses.as_mut() {
-                                    table_statuses.insert(name, TableStatus::Dropped);
-                                }
-                            }
-                        }
-
-                        self.drop_custom_type(&name).is_some()
-                    } else {
-                        let removed = self.remove_expression(&name, mig)?.is_some();
-                        // An explicit drop is the one removal that forgets a view's
-                        // definition; every other removal path keeps it so the view can be
-                        // compiled again when next referenced.
-                        self.views.remove(&name);
-                        if let Some(table_statuses) = table_statuses.as_mut() {
-                            table_statuses.insert(name.clone(), TableStatus::Dropped);
-                        }
-                        removed
-                    };
-
-                    if !removed && !if_exists {
-                        error!(
-                            name = %name.display_unquoted(),
-                            "attempted to drop relation, but relation does not exist"
-                        );
-                        internal!(
-                            "attempted to drop relation, but relation {} does not exist",
-                            name.display_unquoted()
-                        );
-                    }
+                    self.drop_relation(name, if_exists, table_statuses.as_deref_mut(), mig)?;
                 }
                 Change::AlterType { oid, name, change } => {
                     let (ty, _old_name) =
@@ -1040,6 +985,74 @@ impl SqlIncorporator {
             _ => self.remove_query(name, mig)?,
         };
         Ok(Some(removal_result.dataflow_nodes_to_remove))
+    }
+
+    /// Drops the table, view, custom type or non-replicated relation `name` refers to, along
+    /// with everything depending on it. `name` must already be schema-qualified. Without
+    /// `if_exists`, a name nothing is recorded under is an error.
+    fn drop_relation(
+        &mut self,
+        name: Relation,
+        if_exists: bool,
+        mut table_statuses: Option<&mut HashMap<Relation, TableStatus>>,
+        mig: &mut Migration<'_>,
+    ) -> ReadySetResult<()> {
+        let was_non_replicated =
+            self.remove_non_replicated_relation(&NonReplicatedRelation::new(name.clone()));
+        let removed = if was_non_replicated {
+            if let Some(table_statuses) = table_statuses.as_mut() {
+                table_statuses.insert(name.clone(), TableStatus::Dropped);
+            }
+            true
+        } else if self.registry.remove_custom_type(&name) {
+            for expr in self
+                .registry
+                .expressions_referencing_custom_type(&name)
+                .cloned()
+                .collect::<Vec<_>>()
+            {
+                match &expr {
+                    // Technically postgres doesn't allow removing custom types
+                    // before removing tables and views referencing those custom types -
+                    // but we might as well be more
+                    // permissive here
+                    RecipeExpr::Table { name, .. }
+                    | RecipeExpr::View { name, .. }
+                    | RecipeExpr::Cache { name, .. } => {
+                        self.remove_expression(name, mig)?;
+                    }
+                }
+                if let RecipeExpr::Table { name, .. } = expr {
+                    if let Some(table_statuses) = table_statuses.as_mut() {
+                        table_statuses.insert(name, TableStatus::Dropped);
+                    }
+                }
+            }
+
+            self.drop_custom_type(&name).is_some()
+        } else {
+            let removed = self.remove_expression(&name, mig)?.is_some();
+            // An explicit drop is the one removal that forgets a view's
+            // definition; every other removal path keeps it so the view can be
+            // compiled again when next referenced.
+            self.views.remove(&name);
+            if let Some(table_statuses) = table_statuses.as_mut() {
+                table_statuses.insert(name.clone(), TableStatus::Dropped);
+            }
+            removed
+        };
+
+        if !removed && !if_exists {
+            error!(
+                name = %name.display_unquoted(),
+                "attempted to drop relation, but relation does not exist"
+            );
+            internal!(
+                "attempted to drop relation, but relation {} does not exist",
+                name.display_unquoted()
+            );
+        }
+        Ok(())
     }
 
     fn drop_and_recreate_table(
