@@ -548,6 +548,7 @@ impl BackendBuilder {
                 ),
                 last_query: None,
                 pending_proxy_reason: None,
+                preserve_last_query: false,
                 parsed_query_cache: LruCache::new(10_000.try_into().expect("10000 is not 0")),
                 prepared: Default::default(),
                 query_status_cache,
@@ -996,6 +997,9 @@ where
     /// serve-or-proxy seams and folded into [`Self::last_query`] when the
     /// statement finishes.
     pending_proxy_reason: Option<&'static str>,
+    /// Set by a statement that reports on the previous statement, such as `EXPLAIN LAST
+    /// STATEMENT`, so that it does not replace [`Self::last_query`] when it finishes.
+    preserve_last_query: bool,
     /// A cache of queries that we've seen, and their current state, used for processing
     query_status_cache: &'static QueryStatusCache,
     /// A cache of all previously parsed queries
@@ -1430,7 +1434,7 @@ impl BackendSettings {
 
 /// QueryInfo holds information regarding the last query that was sent along this connection
 /// (Backend).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct QueryInfo {
     pub destination: QueryDestination,
     pub reason: String,

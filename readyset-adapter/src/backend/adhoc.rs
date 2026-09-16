@@ -767,12 +767,14 @@ where
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         let staged = self.state.pending_proxy_reason.take();
-        self.state.last_query = if self.state.query_log_sender.is_some() {
-            QueryInfo::from_event(&event)
-        } else {
-            QueryInfo::take_from_event(&mut event)
+        if !std::mem::take(&mut self.state.preserve_last_query) {
+            self.state.last_query = if self.state.query_log_sender.is_some() {
+                QueryInfo::from_event(&event)
+            } else {
+                QueryInfo::take_from_event(&mut event)
+            }
+            .map(|i| i.or_reason(staged));
         }
-        .map(|i| i.or_reason(staged));
 
         log_query(
             self.state.query_log_sender.as_ref(),

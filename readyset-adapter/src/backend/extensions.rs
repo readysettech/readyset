@@ -1531,7 +1531,10 @@ where
         let start = Instant::now();
 
         let res = match query {
-            SqlQuery::Explain(ExplainStatement::LastStatement) => state.explain_last_statement(),
+            SqlQuery::Explain(ExplainStatement::LastStatement) => {
+                state.preserve_last_query = true;
+                state.explain_last_statement()
+            }
             SqlQuery::Explain(ExplainStatement::Graphviz {
                 simplified: _,
                 for_cache,
