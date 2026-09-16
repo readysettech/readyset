@@ -45,7 +45,7 @@
 //!         results: QueryResultWriter<'_, W>,
 //!         schema_cache: &mut HashMap<u32, CachedSchema>,
 //!     ) -> io::Result<()> {
-//!         results.completed(0, 0, None).await
+//!         results.completed(0, 0, None, 0, &[]).await
 //!     }
 //!     async fn on_close(&mut self, _: DeallocateId) {}
 //!
@@ -102,7 +102,7 @@
 //!                     w.write_row(iter::once(67108864u32)).await.expect("writer");
 //!                     QueryResultsResponse::IoResult(w.finish().await)
 //!                 }
-//!                 _ => QueryResultsResponse::IoResult(results.completed(0, 0, None).await),
+//!                 _ => QueryResultsResponse::IoResult(results.completed(0, 0, None, 0, &[]).await),
 //!             };
 //!         } else {
 //!             let cols = [
@@ -654,7 +654,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     .reject_session_setup(ErrorKind::ER_BAD_DB_ERROR, &e)
                     .await;
             }
-            writers::write_ok_packet(&mut mi.conn, 0, 0, mi.shim.server_status_flags()).await?;
+            writers::write_ok_packet(&mut mi.conn, 0, 0, mi.shim.server_status_flags(), 0, &[])
+                .await?;
             mi.conn.flush().await?;
             mi.run().await?;
         }
@@ -1053,6 +1054,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                     0,
                                     0,
                                     self.shim.server_status_flags(),
+                                    0,
+                                    &[],
                                 )
                                 .await?;
                             }
@@ -1113,6 +1116,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                             0,
                                             0,
                                             self.shim.server_status_flags(),
+                                            0,
+                                            &[],
                                         )
                                         .await?;
                                     }
@@ -1145,8 +1150,15 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         })?
                         .long_data
                         .clear();
-                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
-                        .await?;
+                    writers::write_ok_packet(
+                        &mut self.conn,
+                        0,
+                        0,
+                        self.shim.server_status_flags(),
+                        0,
+                        &[],
+                    )
+                    .await?;
                 }
                 Command::Execute { stmt, params } => {
                     let state = stmts.get_mut(&stmt).ok_or_else(|| {
@@ -1206,6 +1218,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                                 0,
                                 0,
                                 self.shim.server_status_flags(),
+                                0,
+                                &[],
                             )
                             .await?;
                         }
@@ -1217,8 +1231,15 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                 }
                 Command::Ping => {
                     self.shim.on_ping().await?;
-                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
-                        .await?;
+                    writers::write_ok_packet(
+                        &mut self.conn,
+                        0,
+                        0,
+                        self.shim.server_status_flags(),
+                        0,
+                        &[],
+                    )
+                    .await?;
                     self.conn.flush().await?;
                 }
                 Command::ComSetOption(_) => {
@@ -1227,14 +1248,28 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     // statements, so failure with any one will be forwarded to the underlying
                     // database as a single statement, meaning that the underlying database does
                     // not need to have multi-statement support enabled for this connection.
-                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
-                        .await?;
+                    writers::write_ok_packet(
+                        &mut self.conn,
+                        0,
+                        0,
+                        self.shim.server_status_flags(),
+                        0,
+                        &[],
+                    )
+                    .await?;
                     self.conn.flush().await?;
                 }
                 Command::Reset => {
                     self.shim.on_reset().await?;
-                    writers::write_ok_packet(&mut self.conn, 0, 0, self.shim.server_status_flags())
-                        .await?;
+                    writers::write_ok_packet(
+                        &mut self.conn,
+                        0,
+                        0,
+                        self.shim.server_status_flags(),
+                        0,
+                        &[],
+                    )
+                    .await?;
                     self.conn.flush().await?;
                 }
                 Command::Quit => {

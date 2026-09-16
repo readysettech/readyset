@@ -168,7 +168,7 @@ where
                     w.write_row(iter::once(67108864u32)).await.expect("writer");
                     QueryResultsResponse::IoResult(w.finish().await)
                 }
-                _ => QueryResultsResponse::IoResult(results.completed(0, 0, None).await),
+                _ => QueryResultsResponse::IoResult(results.completed(0, 0, None, 0, &[]).await),
             }
         } else {
             QueryResultsResponse::IoResult((self.on_q)(query, results).await)
@@ -502,7 +502,7 @@ async fn handshake_charset_error_returns_handshake_error() {
 async fn change_user_charset_error_closes_connection() {
     let mut calls = 0;
     let err = TestingShim::new(
-        |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
+        |_, w| Box::pin(async move { w.completed(0, 0, None, 0, &[]).await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_| unreachable!(),
@@ -558,7 +558,7 @@ async fn single_byte_query_is_decoded() {
         TestingShim::new(
             move |query, w| {
                 assert_eq!(query, expected_query);
-                Box::pin(async move { w.completed(0, 0, None).await })
+                Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
             },
             |_| unreachable!(),
             |_, _, _| unreachable!(),
@@ -597,7 +597,7 @@ async fn invalid_utf8_query_statement_errors() {
     TestingShim::new(
         |query, w| {
             assert_eq!(query, "SELECT 1");
-            Box::pin(async move { w.completed(0, 0, None).await })
+            Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
@@ -627,7 +627,7 @@ async fn invalid_utf8_prepare_statement_errors() {
     TestingShim::new(
         |query, w| {
             assert_eq!(query, "SELECT 1");
-            Box::pin(async move { w.completed(0, 0, None).await })
+            Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
@@ -656,7 +656,7 @@ async fn invalid_utf8_init_statement_errors() {
     TestingShim::new(
         |query, w| {
             assert_eq!(query, "SELECT 1");
-            Box::pin(async move { w.completed(0, 0, None).await })
+            Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
         },
         |_| unreachable!(),
         |_, _, _| unreachable!(),
@@ -754,7 +754,7 @@ async fn unsupported_encoding_query_falls_back_to_utf8() {
         TestingShim::new(
             |query, w| {
                 assert_eq!(query, "SELECT 'Não'");
-                Box::pin(async move { w.completed(0, 0, None).await })
+                Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
             },
             |_| unreachable!(),
             |_, _, _| unreachable!(),
@@ -791,7 +791,7 @@ async fn it_pings() {
 #[tokio::test]
 async fn empty_response() {
     TestingShim::new(
-        |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
+        |_, w| Box::pin(async move { w.completed(0, 0, None, 0, &[]).await }),
         |_| unreachable!(),
         |_, _, _| unreachable!(),
         |_| unreachable!(),
@@ -1313,7 +1313,7 @@ async fn insert_exec() {
                 "mtok199"
             );
 
-            Box::pin(async move { w.completed(42, 1, None).await })
+            Box::pin(async move { w.completed(42, 1, None, 0, &[]).await })
         },
         |_| unreachable!(),
         move |_, _, _| unreachable!(),
@@ -1524,7 +1524,7 @@ async fn prepared_empty() {
         |_| 0,
         move |_, params, w| {
             assert!(!params.is_empty());
-            Box::pin(async move { w.completed(0, 0, None).await })
+            Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
         },
         |_| unreachable!(),
         move |_, _, _| unreachable!(),
@@ -1825,7 +1825,7 @@ async fn large_packet_query_response_seq() {
         move |q, w| {
             // Verify the server received the full query
             assert_eq!(q.len(), expected_len);
-            Box::pin(async move { w.completed(0, 0, None).await })
+            Box::pin(async move { w.completed(0, 0, None, 0, &[]).await })
         },
         |_| 0,
         |_, _, _| unreachable!(),
@@ -1886,7 +1886,7 @@ async fn sha2_test_server<F, Fut>(
             let cache = Arc::clone(&server_cache);
 
             let shim = TestingShim::new(
-                move |_, w| Box::pin(async move { w.completed(0, 0, None).await }),
+                move |_, w| Box::pin(async move { w.completed(0, 0, None, 0, &[]).await }),
                 |_| 0,
                 |_, _, _| unreachable!(),
                 |_| Box::pin(async move { Ok(()) }),

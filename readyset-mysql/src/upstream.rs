@@ -1,18 +1,15 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::fmt;
 use std::io::{self, ErrorKind};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures_util::{Stream, StreamExt};
 use metrics::gauge;
 use mysql_async::consts::{CapabilityFlags, Command, StatusFlags};
 use mysql_async::prelude::Queryable;
-use mysql_async::{
-    ChangeUserOpts, Column, Conn, Opts, OptsBuilder, ResultSetStream, Row, UrlError,
-};
+use mysql_async::{ChangeUserOpts, Column, Conn, Opts, OptsBuilder, Row, UrlError};
 use mysql_srv::{MsqlSrvError, QueryResultWriter};
-use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::runtime::RuntimeFlavor;
 use tracing::{debug, error, info_span, Instrument};
@@ -139,26 +136,34 @@ fn cache_df_value(col: &mysql_async::Value, column_charset: u16) -> io::Result<D
     })
 }
 
-#[pin_project(project = ReadResultStreamProj)]
-#[derive(Debug)]
+/// The rows of an upstream read, streamed from the connection as they are consumed.
 pub enum ReadResultStream<'a> {
-    Text(#[pin] ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>),
-    Binary(#[pin] ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>),
+    Text(mysql_async::QueryResult<'a, 'static, mysql_async::TextProtocol>),
+    Binary(mysql_async::QueryResult<'a, 'static, mysql_async::BinaryProtocol>),
 }
 
-impl<'a> From<ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>>
-    for ReadResultStream<'a>
-{
-    fn from(s: ResultSetStream<'a, 'a, 'static, Row, mysql_async::TextProtocol>) -> Self {
-        ReadResultStream::Text(s)
+impl fmt::Debug for ReadResultStream<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            ReadResultStream::Text(_) => "Text",
+            ReadResultStream::Binary(_) => "Binary",
+        })
     }
 }
 
-impl<'a> From<ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>>
+impl<'a> From<mysql_async::QueryResult<'a, 'static, mysql_async::TextProtocol>>
     for ReadResultStream<'a>
 {
-    fn from(s: ResultSetStream<'a, 'a, 'static, Row, mysql_async::BinaryProtocol>) -> Self {
-        ReadResultStream::Binary(s)
+    fn from(r: mysql_async::QueryResult<'a, 'static, mysql_async::TextProtocol>) -> Self {
+        ReadResultStream::Text(r)
+    }
+}
+
+impl<'a> From<mysql_async::QueryResult<'a, 'static, mysql_async::BinaryProtocol>>
+    for ReadResultStream<'a>
+{
+    fn from(r: mysql_async::QueryResult<'a, 'static, mysql_async::BinaryProtocol>) -> Self {
+        ReadResultStream::Binary(r)
     }
 }
 
@@ -171,6 +176,10 @@ pub enum QueryResult<'a> {
         // If no auto-increment column was involved, this value will be 0.
         last_inserted_id: u64,
         status_flags: StatusFlags,
+        warnings: u16,
+        /// The OK packet's human readable trailer, such as the `Records: 3  Duplicates: 2
+        /// Warnings: 2` summary of a multi-row INSERT.
+        info: Box<[u8]>,
     },
     ReadResult {
         stream: ReadResultStream<'a>,
@@ -178,6 +187,7 @@ pub enum QueryResult<'a> {
     },
     Command {
         status_flags: StatusFlags,
+        warnings: u16,
     },
 }
 
@@ -191,16 +201,10 @@ impl<'a> QueryResult<'a> {
     /// Process the query result, writing it to the given writer and optionally
     /// caching it.
     ///
-    /// When `status_flags_override` is `Some(flags)`, those flags replace the
-    /// flags that mysql-async extracted from the upstream response packets.
-    /// This is the normal path for proxied results because mysql-async can
-    /// produce garbage flags (e.g. due to PREPARE_Response mis-parsing).
-    /// The override should be the "base" flags; mysql-srv will OR in
-    /// `SERVER_MORE_RESULTS_EXISTS` when appropriate.
-    ///
-    /// When `status_flags_override` is `None`, the flags from mysql-async are
-    /// forwarded verbatim (used only for cache-refresh paths that have no
-    /// client writer).
+    /// `status_flags_override` replaces the flags mysql-async extracted from the upstream
+    /// response packets, which can be garbage (e.g. due to PREPARE_Response mis-parsing). It
+    /// should be the "base" flags; mysql-srv will OR in `SERVER_MORE_RESULTS_EXISTS` when
+    /// appropriate. It is only `None` on the cache refresh path, which has no client writer.
     ///
     /// `results_encoding` is the results charset of the session (or, on a refresh, of the entry
     /// being refreshed), which the upstream connection's `character_set_results` mirrors. Shallow
@@ -218,18 +222,26 @@ impl<'a> QueryResult<'a> {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         match self {
-            QueryResult::Command { status_flags } => {
+            QueryResult::Command {
+                status_flags,
+                warnings,
+            } => {
                 let Some(writer) = writer else {
                     return Ok(());
                 };
                 let flags = status_flags_override.unwrap_or(status_flags);
                 let rw = writer.start(&[]).await?;
-                rw.set_status_flags(flags).finish().await
+                rw.set_status_flags(flags)
+                    .set_warnings(warnings)
+                    .finish()
+                    .await
             }
             QueryResult::WriteResult {
                 num_rows_affected,
                 last_inserted_id,
                 status_flags,
+                warnings,
+                info,
             } => {
                 let Some(writer) = writer else {
                     return Ok(());
@@ -239,6 +251,8 @@ impl<'a> QueryResult<'a> {
                     Ok((num_rows_affected, last_inserted_id)),
                     writer,
                     Some(flags),
+                    warnings,
+                    &info,
                 )
                 .await
             }
@@ -273,9 +287,10 @@ impl<'a> QueryResult<'a> {
                     None
                 };
 
-                while let Some(row) = stream.next().await {
-                    let row = match row {
-                        Ok(row) => row,
+                loop {
+                    let row = match stream.next().await {
+                        Ok(Some(row)) => row,
+                        Ok(None) => break,
                         Err(err) => {
                             if let Some(rw) = rw {
                                 return handle_error!(Error::MySql(err), rw);
@@ -315,11 +330,10 @@ impl<'a> QueryResult<'a> {
                 }
 
                 if let Some(mut rw) = rw {
-                    let flags = status_flags_override.or_else(|| stream.status_flags());
-                    if let Some(flags) = flags {
+                    if let Some(flags) = status_flags_override {
                         rw = rw.set_status_flags(flags);
                     }
-                    rw.finish().await?;
+                    rw.set_warnings(stream.warnings()).finish().await?;
                 }
 
                 if let Some(ref mut cache) = cache {
@@ -369,25 +383,20 @@ pub struct StatementMeta {
     pub schema: Vec<Column>,
 }
 
-impl Stream for ReadResultStream<'_> {
-    type Item = Result<Row, mysql_async::Error>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        match self.project() {
-            ReadResultStreamProj::Text(s) => s.poll_next(cx),
-            ReadResultStreamProj::Binary(s) => s.poll_next(cx),
+impl ReadResultStream<'_> {
+    async fn next(&mut self) -> mysql_async::Result<Option<Row>> {
+        match self {
+            ReadResultStream::Text(r) => r.next().await,
+            ReadResultStream::Binary(r) => r.next().await,
         }
     }
-}
 
-impl ReadResultStream<'_> {
-    pub fn status_flags(&self) -> Option<StatusFlags> {
+    /// The warning count from the OK packet that terminates the rows, so meaningful once
+    /// [`next`](Self::next) has returned `None`.
+    fn warnings(&self) -> u16 {
         match self {
-            ReadResultStream::Text(s) => s.ok_packet().map(|o| o.status_flags()),
-            ReadResultStream::Binary(s) => s.ok_packet().map(|o| o.status_flags()),
+            ReadResultStream::Text(r) => r.warnings(),
+            ReadResultStream::Binary(r) => r.warnings(),
         }
     }
 }
@@ -400,15 +409,7 @@ macro_rules! handle_query_result {
 
         if columns.len() > 0 {
             Ok(QueryResult::ReadResult {
-                stream: $result
-                    .stream_and_drop()
-                    .await?
-                    .ok_or_else(|| {
-                        ReadySetError::Internal(
-                            "The mysql_async resultset was already consumed".to_string(),
-                        )
-                    })?
-                    .into(),
+                stream: $result.into(),
                 columns,
             })
         } else {
@@ -417,17 +418,15 @@ macro_rules! handle_query_result {
                 ReadySetError::Internal("The mysql_async result has no resultsets".to_string())
             })?;
 
+            let ok_packet = resultset.ok_packet().ok_or_else(|| {
+                ReadySetError::Internal("The mysql_async result has no ok packet".to_string())
+            })?;
             Ok(QueryResult::WriteResult {
-                num_rows_affected: resultset.affected_rows(),
-                last_inserted_id: resultset.last_insert_id().unwrap_or(0),
-                status_flags: resultset
-                    .ok_packet()
-                    .ok_or_else(|| {
-                        ReadySetError::Internal(
-                            "The mysql_async result has no ok packet".to_string(),
-                        )
-                    })?
-                    .status_flags(),
+                num_rows_affected: ok_packet.affected_rows(),
+                last_inserted_id: ok_packet.last_insert_id().unwrap_or(0),
+                status_flags: ok_packet.status_flags(),
+                warnings: ok_packet.warnings(),
+                info: ok_packet.info_ref().unwrap_or_default().into(),
             })
         }
     }};
@@ -869,6 +868,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
+            warnings: self.conn.get_warnings(),
         })
     }
 
@@ -878,6 +878,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
+            warnings: self.conn.get_warnings(),
         })
     }
 
@@ -887,6 +888,7 @@ impl UpstreamDatabase for MySqlUpstream {
 
         Ok(QueryResult::Command {
             status_flags: self.conn.status(),
+            warnings: self.conn.get_warnings(),
         })
     }
 

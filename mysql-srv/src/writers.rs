@@ -23,44 +23,60 @@ pub(crate) fn write_eof_packet_inline<S>(
     buf: &mut Vec<u8>,
     conn: &mut PacketConn<S>,
     s: StatusFlags,
+    warnings: u16,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let hdr = conn.packet_header_bytes(EOF_PACKET_LEN);
     buf.write_all(&hdr)?;
-    buf.extend([0xFE, 0x00, 0x00, s.bits() as u8, (s.bits() >> 8) as u8]);
+    buf.push(0xFE);
+    buf.extend(warnings.to_le_bytes());
+    buf.extend(s.bits().to_le_bytes());
     Ok(())
 }
 
 /// Write an EOF packet using its own buffer allocation.
 /// Prefer `write_eof_packet_inline` when you already have a buffer to avoid extra allocation.
-pub(crate) async fn write_eof_packet<S>(conn: &mut PacketConn<S>, s: StatusFlags) -> io::Result<()>
+pub(crate) async fn write_eof_packet<S>(
+    conn: &mut PacketConn<S>,
+    s: StatusFlags,
+    warnings: u16,
+) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
-    write_eof_packet_inline(&mut buf, conn, s)?;
+    write_eof_packet_inline(&mut buf, conn, s, warnings)?;
     conn.enqueue_plain(buf);
     Ok(())
 }
 
+/// Write an OK packet. `info` is the human readable trailer, such as the `Records: 3
+/// Duplicates: 2  Warnings: 2` summary of a multi-row INSERT, which is empty for most statements.
+/// MySQL sends it length encoded, which is what clients parse, even though the protocol
+/// documentation describes it as running to the end of the packet.
 pub(crate) async fn write_ok_packet<S>(
     conn: &mut PacketConn<S>,
     rows: u64,
     last_insert_id: u64,
     s: StatusFlags,
+    warnings: u16,
+    info: &[u8],
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     const MAX_OK_PACKET_LEN: usize = 1 + 9 + 9 + 2 + 2;
-    let mut buf = conn.get_buffer(MAX_OK_PACKET_LEN);
+    let mut buf = conn.get_buffer(MAX_OK_PACKET_LEN + lenc_str_len(info));
     buf.write_u8(0x00)?; // OK packet type
     buf.write_lenenc_int(rows)?;
     buf.write_lenenc_int(last_insert_id)?;
     buf.write_u16::<LittleEndian>(s.bits())?;
-    buf.write_all(&[0x00, 0x00])?; // no warnings
+    buf.write_u16::<LittleEndian>(warnings)?;
+    if !info.is_empty() {
+        buf.write_lenenc_str(info)?;
+    }
     conn.enqueue_packet(buf);
     Ok(())
 }
@@ -71,6 +87,7 @@ where
 pub(crate) async fn write_ok_eof_packet<S>(
     conn: &mut PacketConn<S>,
     s: StatusFlags,
+    warnings: u16,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -81,7 +98,7 @@ where
     buf.write_lenenc_int(0)?; // affected rows
     buf.write_lenenc_int(0)?; // last insert id
     buf.write_u16::<LittleEndian>(s.bits())?;
-    buf.write_all(&[0x00, 0x00])?; // no warnings
+    buf.write_u16::<LittleEndian>(warnings)?;
     conn.enqueue_packet(buf);
     Ok(())
 }
@@ -226,7 +243,7 @@ where
         return if only_eof_on_nonempty || !trailing_eof {
             Ok(())
         } else {
-            write_eof_packet(conn, StatusFlags::empty()).await
+            write_eof_packet(conn, StatusFlags::empty(), 0).await
         };
     }
 
@@ -253,7 +270,7 @@ where
     }
 
     if trailing_eof {
-        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty(), 0)?;
     }
 
     conn.enqueue_plain(buf);
@@ -291,7 +308,7 @@ where
     // an EOF packet.
     if !conn.deprecate_eof() {
         let mut buf = conn.get_buffer(EOF_PACKET_TOTAL_LEN);
-        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty())?;
+        write_eof_packet_inline(&mut buf, conn, StatusFlags::empty(), 0)?;
         conn.enqueue_plain(buf);
     }
     Ok(())

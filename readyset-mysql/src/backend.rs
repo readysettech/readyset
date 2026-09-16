@@ -198,11 +198,13 @@ pub(crate) async fn write_query_results<S: AsyncRead + AsyncWrite + Unpin>(
     r: Result<(u64, u64), Error>,
     results: QueryResultWriter<'_, S>,
     status_flags: Option<StatusFlags>,
+    warnings: u16,
+    info: &[u8],
 ) -> io::Result<()> {
     match r {
         Ok((row_count, last_insert)) => {
             results
-                .completed(row_count, last_insert, status_flags)
+                .completed(row_count, last_insert, status_flags, warnings, info)
                 .await
         }
         Err(e) => {
@@ -483,17 +485,35 @@ where
 {
     let flags = Some(status_flags);
     match result {
-        noria_connector::QueryResult::Empty => writer.completed(0, 0, flags).await,
+        noria_connector::QueryResult::Empty => writer.completed(0, 0, flags, 0, &[]).await,
         noria_connector::QueryResult::Insert {
             num_rows_inserted,
             first_inserted_id,
-        } => write_query_results(Ok((num_rows_inserted, first_inserted_id)), writer, flags).await,
+        } => {
+            write_query_results(
+                Ok((num_rows_inserted, first_inserted_id)),
+                writer,
+                flags,
+                0,
+                &[],
+            )
+            .await
+        }
         noria_connector::QueryResult::Update {
             num_rows_updated,
             last_inserted_id,
-        } => write_query_results(Ok((num_rows_updated, last_inserted_id)), writer, flags).await,
+        } => {
+            write_query_results(
+                Ok((num_rows_updated, last_inserted_id)),
+                writer,
+                flags,
+                0,
+                &[],
+            )
+            .await
+        }
         noria_connector::QueryResult::Delete { num_rows_deleted } => {
-            writer.completed(num_rows_deleted, 0, flags).await
+            writer.completed(num_rows_deleted, 0, flags, 0, &[]).await
         }
         noria_connector::QueryResult::Meta(vars) => {
             write_meta_table(vars, writer, status_flags).await

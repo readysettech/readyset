@@ -58,9 +58,12 @@ enum Finalizer {
         rows: u64,
         last_insert_id: u64,
         status_flags: Option<StatusFlags>,
+        warnings: u16,
+        info: Vec<u8>,
     },
     Eof {
         status_flags: Option<StatusFlags>,
+        warnings: u16,
     },
 }
 
@@ -100,19 +103,11 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, S> {
 
     async fn finalize(&mut self, more_exists: bool) -> io::Result<()> {
         let mut status = match self.last_end {
-            Some(Finalizer::Ok {
-                rows: _,
-                last_insert_id: _,
-                status_flags,
-            })
-            | Some(Finalizer::Eof { status_flags }) => {
-                if let Some(sf) = status_flags {
-                    sf
-                } else {
-                    StatusFlags::empty()
-                }
+            Some(Finalizer::Ok { status_flags, .. })
+            | Some(Finalizer::Eof { status_flags, .. }) => {
+                status_flags.unwrap_or_else(StatusFlags::empty)
             }
-            _ => StatusFlags::empty(),
+            None => StatusFlags::empty(),
         };
         if more_exists {
             status.set(StatusFlags::SERVER_MORE_RESULTS_EXISTS, true);
@@ -122,13 +117,18 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, S> {
             Some(Finalizer::Ok {
                 rows,
                 last_insert_id,
+                warnings,
+                info,
                 ..
-            }) => writers::write_ok_packet(self.conn, rows, last_insert_id, status).await,
-            Some(Finalizer::Eof { .. }) => {
+            }) => {
+                writers::write_ok_packet(self.conn, rows, last_insert_id, status, warnings, &info)
+                    .await
+            }
+            Some(Finalizer::Eof { warnings, .. }) => {
                 if self.conn.deprecate_eof() {
-                    writers::write_ok_eof_packet(self.conn, status).await
+                    writers::write_ok_eof_packet(self.conn, status, warnings).await
                 } else {
-                    writers::write_eof_packet(self.conn, status).await
+                    writers::write_eof_packet(self.conn, status, warnings).await
                 }
             }
         }
@@ -162,12 +162,15 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, S> {
 
     /// Send an empty resultset response to the client indicating that `rows` rows were affected by
     /// the query in this resultset. `last_insert_id` may be given to communiate an identifier for
-    /// a client's most recent insertion.
+    /// a client's most recent insertion. `warnings` is the number of warnings the statement
+    /// raised, and `info` is the OK packet's human readable trailer, empty for most statements.
     pub async fn complete_one(
         mut self,
         rows: u64,
         last_insert_id: u64,
         status_flags: Option<StatusFlags>,
+        warnings: u16,
+        info: &[u8],
         // return type not Self because https://github.com/rust-lang/rust/issues/61949
     ) -> io::Result<QueryResultWriter<'a, S>> {
         self.finalize(true).await?;
@@ -175,20 +178,23 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin> QueryResultWriter<'a, S> {
             rows,
             last_insert_id,
             status_flags,
+            warnings,
+            info: info.to_vec(),
         });
         Ok(self)
     }
 
     /// Send an empty resultset response to the client indicating that `rows` rows were affected by
-    /// the query. `last_insert_id` may be given to communiate an identifier for a client's most
-    /// recent insertion.
+    /// the query. See [`complete_one`](Self::complete_one) for the remaining parameters.
     pub async fn completed(
         self,
         rows: u64,
         last_insert_id: u64,
         status_flags: Option<StatusFlags>,
+        warnings: u16,
+        info: &[u8],
     ) -> io::Result<()> {
-        self.complete_one(rows, last_insert_id, status_flags)
+        self.complete_one(rows, last_insert_id, status_flags, warnings, info)
             .await?
             .no_more_results()
             .await
@@ -251,6 +257,8 @@ pub struct RowWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
     // Optionally holds the status flags from the last ok packet that we have
     // received from communicating with mysql over fallback.
     last_status_flags: Option<StatusFlags>,
+    /// The warning count to report in the terminating packet.
+    warnings: u16,
     /// A buffer to hold row data
     row_data: Option<Vec<u8>>,
 
@@ -280,6 +288,7 @@ where
 
             finished: false,
             last_status_flags: None,
+            warnings: 0,
 
             row_data: None,
             cur_row_header_idx: 0,
@@ -486,12 +495,15 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> RowWriter<'a, S> {
                 rows: self.col as u64,
                 last_insert_id: 0,
                 status_flags: self.last_status_flags.take(),
+                warnings: self.warnings,
+                info: Vec::new(),
             });
             Ok(())
         } else {
             // we wrote out at least one row
             self.result.last_end = Some(Finalizer::Eof {
                 status_flags: self.last_status_flags.take(),
+                warnings: self.warnings,
             });
             Ok(())
         }
@@ -500,6 +512,12 @@ impl<'a, S: AsyncRead + AsyncWrite + Unpin + 'a> RowWriter<'a, S> {
     /// Sets status flags to be eventually written out when finish() gets called.
     pub fn set_status_flags(mut self, status_flags: StatusFlags) -> Self {
         self.last_status_flags = Some(status_flags);
+        self
+    }
+
+    /// Sets the warning count to be written out when finish() gets called.
+    pub fn set_warnings(mut self, warnings: u16) -> Self {
+        self.warnings = warnings;
         self
     }
 
@@ -543,14 +561,35 @@ mod tests {
 
     use super::*;
 
-    /// Drive a one-column, one-row text result set through a fresh connection that negotiated the
-    /// given capabilities, and return each emitted packet's payload.
-    async fn collect_resultset(capabilities: CapabilityFlags) -> Vec<Vec<u8>> {
+    /// Run `respond` against a fresh connection that negotiated the given capabilities, and return
+    /// each emitted packet's payload.
+    async fn collect_packets<F>(capabilities: CapabilityFlags, respond: F) -> Vec<Vec<u8>>
+    where
+        F: for<'a> AsyncFnOnce(QueryResultWriter<'a, tokio::net::UnixStream>),
+    {
         let (server, client) = tokio::net::UnixStream::pair().unwrap();
 
-        tokio::spawn(async move {
+        let write = async move {
             let mut conn = PacketConn::new(server);
             conn.client_capabilities = capabilities;
+            respond(QueryResultWriter::new(&mut conn, false)).await;
+            conn.flush().await.unwrap();
+        };
+        let read = async move {
+            let mut reader = PacketConn::new(client);
+            let mut packets = Vec::new();
+            while let Some(packet) = reader.next().await.unwrap() {
+                packets.push(packet.to_vec());
+            }
+            packets
+        };
+        let ((), packets) = tokio::join!(write, read);
+        packets
+    }
+
+    /// Drive a one-column, one-row text result set that reports the given number of warnings.
+    async fn collect_resultset(capabilities: CapabilityFlags, warnings: u16) -> Vec<Vec<u8>> {
+        collect_packets(capabilities, async move |writer| {
             let cols = [Column {
                 schema: String::new(),
                 table: "t".to_string(),
@@ -563,19 +602,11 @@ mod tests {
                 colflags: ColumnFlags::empty(),
                 decimals: 0,
             }];
-            let writer = QueryResultWriter::new(&mut conn, false);
             let mut rw = writer.start(&cols).await.unwrap();
             rw.write_row(std::iter::once(42i32)).await.unwrap();
-            rw.finish().await.unwrap();
-            conn.flush().await.unwrap();
-        });
-
-        let mut reader = PacketConn::new(client);
-        let mut packets = Vec::new();
-        while let Some(packet) = reader.next().await.unwrap() {
-            packets.push(packet.to_vec());
-        }
-        packets
+            rw.set_warnings(warnings).finish().await.unwrap();
+        })
+        .await
     }
 
     /// An EOF or EOF-shaped OK terminator: leading byte 0xFE with a payload shorter than 9 bytes.
@@ -585,20 +616,20 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_framing_without_deprecate_eof() {
-        let packets = collect_resultset(CapabilityFlags::empty()).await;
+        let packets = collect_resultset(CapabilityFlags::empty(), 0x0102).await;
         // column count, column definition, post-column EOF, row, terminating EOF.
         assert_eq!(packets.len(), 5);
         assert_eq!(packets[0], [0x01]);
         assert!(is_terminator(&packets[2]), "expected post-column EOF");
         assert_eq!(packets[2].len(), 5);
         assert_eq!(packets[3], [0x02, b'4', b'2']);
-        assert!(is_terminator(&packets[4]), "expected terminating EOF");
-        assert_eq!(packets[4].len(), 5);
+        // header, warnings (2), status (2).
+        assert_eq!(packets[4], [0xFE, 0x02, 0x01, 0x00, 0x00]);
     }
 
     #[tokio::test]
     async fn deprecate_eof_framing() {
-        let packets = collect_resultset(CapabilityFlags::CLIENT_DEPRECATE_EOF).await;
+        let packets = collect_resultset(CapabilityFlags::CLIENT_DEPRECATE_EOF, 0x0102).await;
         // column count, column definition, row, OK-shaped terminator. No post-column EOF.
         assert_eq!(packets.len(), 4);
         assert_eq!(packets[0], [0x01]);
@@ -608,8 +639,20 @@ mod tests {
         );
         assert_eq!(packets[2], [0x02, b'4', b'2']);
         assert!(is_terminator(&packets[3]), "expected OK-shaped terminator");
-        assert_eq!(packets[3][0], 0xFE);
-        // affected_rows + last_insert_id (lenenc 0) + status (2) + warnings (2).
-        assert_eq!(packets[3].len(), 7);
+        // header, affected_rows and last_insert_id (lenenc 0), status (2), warnings (2).
+        assert_eq!(packets[3], [0xFE, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01]);
+    }
+
+    #[tokio::test]
+    async fn ok_packet_has_warnings_and_info() {
+        let info = b"Records: 3  Duplicates: 2  Warnings: 2";
+        let packets = collect_packets(CapabilityFlags::empty(), async move |writer| {
+            writer.completed(3, 7, None, 2, info).await.unwrap();
+        })
+        .await;
+        assert_eq!(packets.len(), 1);
+        let mut expected = vec![0x00, 0x03, 0x07, 0x00, 0x00, 0x02, 0x00, info.len() as u8];
+        expected.extend_from_slice(info);
+        assert_eq!(packets[0], expected);
     }
 }
