@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use database_utils::DatabaseURL;
+use itertools::Itertools;
 use readyset_client::consensus::mcp_tokens::McpTokenStore;
 use readyset_client::consensus::mcp_tokens::{McpToken, McpTokenScope as AuthorityMcpTokenScope};
 use readyset_client::consensus::{Authority, AuthorityControl, CacheDDLRequest, UserStore};
@@ -29,7 +30,6 @@ use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, uns
 use readyset_metrics::metrics_handle;
 use readyset_rls::InvalidationSink;
 use readyset_shallow::CacheInfo;
-use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
     self, AddUserStatement, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
     ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
@@ -39,6 +39,7 @@ use readyset_sql::ast::{
     ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShowStatement, SqlQuery,
     TrxCachePolicy,
 };
+use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::DetectBucketFunctions;
 use readyset_sql_passes::shallow::rewrite_shallow;
 use readyset_telemetry_reporter::TelemetryEvent;
@@ -2021,8 +2022,23 @@ where
                 .shallow
                 .list_caches(None, None)
                 .into_iter()
-                .map(CreateCacheStatement::from)
-                .map(|create| vec![DfValue::from(create.display(DB::SQL_DIALECT).to_string())]),
+                .map(|info| {
+                    let quote = |id| DB::SQL_DIALECT.quote_identifier(id).to_string();
+                    let prefix = match (DB::SQL_DIALECT, &info.request.schema_search_path[..]) {
+                        (_, []) => String::new(),
+                        (Dialect::MySQL, [db, ..]) => format!("USE {}; ", quote(db)),
+                        (Dialect::PostgreSQL, path) => format!(
+                            "SET search_path = {}; ",
+                            path.iter().map(quote).collect::<Vec<_>>().join(", ")
+                        ),
+                    };
+                    let create = CreateCacheStatement::from(info)
+                        .display(DB::SQL_DIALECT)
+                        .to_string();
+                    (prefix, create)
+                })
+                .sorted()
+                .map(|(prefix, create)| vec![DfValue::from(format!("{prefix}{create}"))]),
         );
 
         let select_schema = create_dummy_schema!("query");

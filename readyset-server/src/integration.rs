@@ -13,6 +13,14 @@ use std::time::Duration;
 use std::{iter, thread};
 
 use chrono::NaiveDate;
+use futures::{join, StreamExt};
+use itertools::Itertools;
+use rusty_fork::rusty_fork_test;
+use tempfile::TempDir;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use vec1::vec1;
+
 use common::Index;
 use dataflow::node::special::Base;
 use dataflow::ops::grouped::aggregate::Aggregation;
@@ -25,8 +33,6 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{
     BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
 };
-use futures::{join, StreamExt};
-use itertools::Itertools;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
 use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
@@ -41,12 +47,7 @@ use readyset_sql_parsing::{
 };
 use readyset_util::eventually;
 use readyset_util::shutdown::ShutdownSender;
-use rusty_fork::rusty_fork_test;
-use tempfile::TempDir;
 use test_utils::skip_with_flaky_finder;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use vec1::vec1;
 
 use crate::controller::sql::SqlIncorporator;
 use crate::integration_utils::*;

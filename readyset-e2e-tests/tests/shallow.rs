@@ -3475,7 +3475,9 @@ async fn explain_caches_renders_original_shallow_query() {
     let create: String = rows.first().unwrap().get(0).unwrap();
 
     readyset.query_drop("DROP ALL CACHES").await.unwrap();
-    readyset.query_drop(create).await.unwrap();
+    for stmt in create.split("; ") {
+        readyset.query_drop(stmt).await.unwrap();
+    }
 
     readyset
         .query_drop(query)
@@ -3488,6 +3490,71 @@ async fn explain_caches_renders_original_shallow_query() {
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(..)
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn explain_caches_prefixes_database_before_create() {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+
+    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+
+    readyset
+        .query_drop("CREATE SHALLOW CACHE FROM SELECT 1")
+        .await
+        .unwrap();
+
+    let rows: Vec<String> = readyset.query("EXPLAIN CACHES").await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].starts_with(&format!("USE `{test_name}`; CREATE SHALLOW CACHE")),
+        "unexpected EXPLAIN CACHES row: {}",
+        rows[0]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn explain_caches_prefixes_schema_before_create() {
+    init_test_logging();
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    let rs = psql_helpers::connect(rs_opts).await;
+
+    rs.simple_query("SET search_path = public")
+        .await
+        .unwrap();
+    rs.simple_query("CREATE SHALLOW CACHE FROM SELECT 1")
+        .await
+        .unwrap();
+
+    let rows = rs.simple_query("EXPLAIN CACHES").await.unwrap();
+    let row = first_row_col(&rows, 0);
+    assert!(
+        row.starts_with(r#"SET search_path = "public"; CREATE SHALLOW CACHE"#),
+        "unexpected EXPLAIN CACHES row: {row}"
     );
 
     shutdown_tx.shutdown().await;
